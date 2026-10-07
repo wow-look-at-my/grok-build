@@ -26,7 +26,11 @@ impl CircuitBreakerRegistry {
         if !self.config.enabled {
             return None;
         }
-        // The section is a `HashMap` get or insert.
+        // The section is a `HashMap` get or insert, so a poison can only come
+        // from elsewhere; recovering the map keeps a breaker registry usable
+        // rather than turning one unrelated panic into a process-wide outage.
+        // `parking_lot::Mutex` is the structural fix and is not a dependency of
+        // this crate.
         #[allow(clippy::disallowed_methods)]
         let mut breakers = self.breakers.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(cb) = breakers.get(key) {

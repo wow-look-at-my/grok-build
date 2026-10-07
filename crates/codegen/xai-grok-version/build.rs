@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Stamps the commit into this crate, which is where `version_with_commit()`
-/// reads it. Every crate that reports a version links this.
+/// reads it. Every crate that reports a version links this one.
 fn main() {
     if let Some(head) = git_head(Path::new(env!("CARGO_MANIFEST_DIR"))) {
         println!("cargo:rerun-if-changed={}", head.display());
@@ -32,7 +32,10 @@ fn git(args: &[&str]) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Walks up for `.git/HEAD`.
+/// Walks up for `.git/HEAD`. This crate sits several directories below the
+/// repository root, so a relative path from here breaks when the crate moves.
+/// A worktree's `.git` is a file and has no HEAD beside it, so `is_file` on
+/// HEAD itself is the test.
 fn git_head(from: &Path) -> Option<PathBuf> {
     from.ancestors()
         .map(|dir| dir.join(".git").join("HEAD"))

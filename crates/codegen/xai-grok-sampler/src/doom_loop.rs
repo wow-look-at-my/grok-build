@@ -33,6 +33,12 @@ struct CollectorState {
 
 impl DoomLoopSignalCollector {
     /// The accumulated state, whatever a prior holder was doing when it died.
+    ///
+    /// The signals are what the stream transform acts on and the policy is what
+    /// it judges them by, so either one going missing silently turns a reported
+    /// doom loop into a response read as clean. The state is a `Vec` and two
+    /// flags, which a panicked write leaves at least as usable as the empty
+    /// state a poison would report in its place.
     #[allow(clippy::disallowed_methods)] // takes the state back as the doc above says
     fn state(&self) -> std::sync::MutexGuard<'_, CollectorState> {
         self.inner
@@ -88,7 +94,8 @@ impl DoomLoopSignalCollector {
 
     /// Drain the recorded signals; empty when nothing was reported.
     pub(crate) fn take(&self) -> Vec<DoomLoopSignal> {
-        // The lock is taken through [`Self::state`].
+        // The lock is taken through [`Self::state`], so a signal the decoder
+        // recorded is never dropped for having been held when something panicked.
         std::mem::take(&mut self.state().signals)
     }
 
@@ -250,12 +257,13 @@ mod tests {
         assert_eq!(collector.take().len(), 2, "recording survives the disarm");
     }
 
-    /// A panic inside one collector step silences nothing afterwards. Every
-    /// step goes through [`DoomLoopSignalCollector::state`], which takes the
-    /// lock back whatever a prior holder was doing when it died. A poisoned
-    /// `std` lock instead leaves `disarm_abort` and `take` reporting the
-    /// empty answer. An empty report is read as a response with nothing
-    /// wrong with it.
+    /// A panic inside one collector step silences nothing afterwards.
+    ///
+    /// Every step goes through [`DoomLoopSignalCollector::state`], which takes
+    /// the lock back whatever a prior holder was doing when it died. A poisoned
+    /// `std` lock instead leaves `disarm_abort` and `take` reporting the empty
+    /// answer, and an empty report is read as a response with nothing wrong
+    /// with it.
     #[test]
     fn a_panicking_holder_leaves_the_collector_working() {
         let confident = r#"{"type":"response.doom_loop_check","doom_loop_check":{"triggers":["tail_repetition:8@thinking"]}}"#;

@@ -1283,7 +1283,9 @@ impl ToolRegistryBuilder {
                 blocked_expiries: Default::default(),
             };
             // The scheduler answers the create/list/delete tool calls over
-            // `cmd_rx`, so its death closes that channel, what a dropped.
+            // `cmd_rx`, so its death closes that channel; what a dropped
+            // JoinHandle adds to that is nothing anyone can read. Guarded so
+            // the panic itself, and which task it was, is on the record.
             #[allow(clippy::disallowed_methods)]
             tokio::spawn(crate::util::detached::fire_and_forget(
                 "scheduler actor",

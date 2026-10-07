@@ -174,7 +174,8 @@ pub enum SyntheticReason {
     /// Working-directory switch context appended after a session relocation.
     /// Carries a generation marker so recovery can detect an existing append.
     WorkingDirectorySwitch,
-    /// A tool result rewritten as user text by [`flatten_conversation`](crate::conversation::flatten_conversation).
+    /// A tool result rewritten as user text by
+    /// [`flatten_conversation`](crate::conversation::flatten_conversation).
     HistoryFlattened,
     /// Human-authored text relayed from a parent session. Stays a `User` item.
     /// Reserved ahead of its producer so shipped readers classify it before anything writes it; today it shares [`Self::AgentMessage`].
@@ -500,7 +501,9 @@ pub struct ToolCall {
     pub name: String,
     /// JSON-encoded arguments
     pub arguments: Arc<str>,
-    /// The provider's own fields on this call.
+    /// The provider's own fields on this call, relayed unread when it is
+    /// replayed; see [`crate::TOOL_CALL_VENDOR_KEYS`]. A history written before
+    /// this existed, and every provider that sends none, read as empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub vendor: BTreeMap<String, serde_json::Value>,
 }
@@ -575,11 +578,16 @@ impl From<ToolDefinition> for ToolSpec {
     }
 }
 
-/// Merge caller-supplied extra fields into a serialized request body. A
-/// dotted key addresses a nested object (`"options.num_ctx"` reaches
-/// `options: { num_ctx }`). This is because TOML cannot spell a nested table
-/// inline beside scalar siblings and an `[extra_body.options]` sub-table is a
-/// different shape. From the flat map the rest of the config uses.
+/// Merge caller-supplied extra fields into a serialized request body.
+///
+/// A dotted key addresses a nested object (`"options.num_ctx"` reaches
+/// `options: { num_ctx }`), because TOML cannot spell a nested table inline
+/// beside scalar siblings and an `[extra_body.options]` sub-table is a
+/// different shape from the flat map the rest of the config uses.
+///
+/// Objects merge key by key so an extra never wipes out a sibling the builder
+/// set; anything else replaces. `body` must be a JSON object — a body of any
+/// other shape is left alone rather than being overwritten with one.
 pub fn merge_extra_body(
     body: &mut serde_json::Value,
     extras: &serde_json::Map<String, serde_json::Value>,
@@ -620,7 +628,7 @@ fn insert_dotted(
         }
         _ => {
             match (target.get_mut(key), &value) {
-                // Objects merge rather than replace, so setting one
+                // Two objects merge rather than replace, so setting one
                 // `options` key keeps the ones the builder wrote.
                 (Some(existing @ serde_json::Value::Object(_)), serde_json::Value::Object(_)) => {
                     let Some(existing) = existing.as_object_mut() else {
@@ -755,15 +763,30 @@ pub struct ConversationRequest {
     pub traceparent: Option<String>,
     /// Reasoning effort level for reasoning models.
     pub reasoning_effort: Option<crate::ReasoningEffort>,
-    /// The routed model/endpoint **mandates** reasoning.
+    /// The routed model/endpoint **mandates** reasoning (e.g. an OpenRouter
+    /// endpoint that answers a disable/omit request with a 400
+    /// "Reasoning is mandatory for this endpoint and cannot be disabled.").
+    /// When set, the wire builders must never send a body that disables or
+    /// omits reasoning: an unset/`None`/`Minimal` requested effort is remapped
+    /// to the lowest supported non-disabled effort via
+    /// [`wire_reasoning_effort`](Self::wire_reasoning_effort). Set on retry
+    /// after the provider's mandatory-reasoning 400 tells us the target
+    /// demands it; the 400 is the reliable signal (model metadata alone
+    /// cannot tell which remote endpoints mandate reasoning).
     pub reasoning_mandatory: bool,
     /// JSON Schema for structured output (strict mode).
     pub json_schema: Option<serde_json::Value>,
     /// Sticky routing key for prompt-cache reuse; overrides `x_grok_conv_id` for routing.
     pub prompt_cache_key: Option<String>,
-    /// Which optional message properties the target's Chat Completions schema accepts.
+    /// Which optional message properties the target's Chat Completions schema
+    /// accepts. Defaults to [`ChatMessageProfile::PERMISSIVE`], so every
+    /// existing provider keeps the body it had. Set to
+    /// [`ChatMessageProfile::STRICT`] for a target that rejects unknown
+    /// message properties (the recovery path sets this after such a 400).
     pub chat_message_profile: ChatMessageProfile,
-    /// How far replayed thinking may go on the wire. Every backend builder reads it.
+    /// How far replayed thinking may go on the wire. Every backend builder
+    /// reads it. The sampler steps it down when the provider rejects a
+    /// replayed block, see [`ConversationRequest::degrade_thinking_replay`].
     pub thinking_replay: ThinkingReplay,
     /// Which form the tool schemas take on the wire.
     pub tool_schema_form: ToolSchemaForm,
@@ -776,8 +799,11 @@ pub struct ConversationRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageStripReason {
     /// The payload was rejected as too large, or one image was unreadable.
+    /// Another model, or a smaller image, would have carried it.
     PayloadRejected,
-    /// The routed model accepts no image input, so no retry of this conversation ever carries the image.
+    /// The routed model accepts no image input, so no retry of this
+    /// conversation ever carries the image. The placeholder says so: the model
+    /// is otherwise free to claim it looked and saw nothing.
     ModelLacksVision,
 }
 
@@ -802,6 +828,22 @@ impl ConversationRequest {
     /// Drop the message properties a strict-schema provider rejected from the
     /// **serialized** Chat Completions body, then report whether anything
     /// changed.
+    ///
+    /// The stored conversation is untouched: `items` still carries each
+    /// assistant's `model_id` and the `Reasoning` siblings, so the Messages
+    /// backend keeps resolving thinking signatures and a later turn on a
+    /// tolerant provider still sends reasoning. Only
+    /// [`Self::chat_message_profile`] is narrowed, and the wire conversion
+    /// consults it — so this is reversible by starting a new session, and it
+    /// cannot corrupt history.
+    ///
+    /// `names_model_id` / `names_reasoning_content` come from the provider's
+    /// error; when neither is named but the error is still an
+    /// unsupported-property error, both are dropped, since that error class
+    /// exists only for targets whose schema takes neither.
+    ///
+    /// Returns whether the profile changed — `false` means the strip would be
+    /// a no-op and the caller should stop retrying.
     pub fn strip_unsupported_message_properties(
         &mut self,
         names_model_id: bool,
@@ -873,13 +915,25 @@ fn strip_images_where(
 }
 
 /// The lowest effort a wire body can carry for a reasoning-mandatory target.
+/// `None` and `Minimal` are the disabled/omit signals (both are dropped by
+/// [`crate::ReasoningEffort::to_messages_api`] and `None` serializes as a
+/// disable on the chat-completions wire), so the lowest *enabled* tier is
+/// `Low`.
 pub const LOWEST_ENABLED_REASONING_EFFORT: crate::ReasoningEffort = crate::ReasoningEffort::Low;
 
-/// Resolve the reasoning effort a wire body must carry for a target. A
-/// reasoning-mandatory target must never be sent a body that disables or
-/// omits reasoning. An unset (`None`), `None`, or `Minimal` requested effort
+/// Resolve the reasoning effort a wire body must carry for a target.
+///
+/// A reasoning-mandatory target must never be sent a body that disables or
+/// omits reasoning: an unset (`None`), `None`, or `Minimal` requested effort
 /// is remapped to the lowest supported non-disabled effort
-/// ([`LOWEST_ENABLED_REASONING_EFFORT`]).
+/// ([`LOWEST_ENABLED_REASONING_EFFORT`]). Every other input — a supported
+/// effort, or any effort on a non-mandatory target — passes through
+/// unchanged.
+///
+/// Pure: no I/O, no knowledge of which remote models mandate reasoning —
+/// that decision (a provider's exact "reasoning is mandatory" 400, or an
+/// explicit flag) is the caller's. The wire builders consult this so the
+/// serialized request never disables/omits reasoning for a mandatory target.
 pub fn wire_reasoning_effort(
     reasoning_mandatory: bool,
     requested: Option<crate::ReasoningEffort>,
@@ -1035,21 +1089,30 @@ pub fn reported_cost_ticks(raw: Option<i64>) -> Option<i64> {
     raw.filter(|&t| t > 0)
 }
 
-/// Per-token USD pricing for a model. That model is used to **derive** cost
-/// from token counts when a backend reports usage but no `cost_in_usd_ticks`
-/// on the wire (e.g. OpenAI-compatible / third-party endpoints).
+/// Per-token USD pricing for a model, used to **derive** cost from token
+/// counts when a backend reports usage but no `cost_in_usd_ticks` on the wire
+/// (e.g. OpenAI-compatible / third-party endpoints). When **any** tier is
+/// unset (zero), that tier contributes nothing; when the whole struct is
+/// `None` (no pricing configured) the cost stays honestly absent — the view
+/// never fabricates a `$0.00`.
+///
+/// All fields are USD **per single token**. Integer ticks are produced with
+/// `round(usd * 1e10)` (1e10 ticks = $1) via [`compute_cost_ticks`].
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ModelPricing {
-    /// USD per uncached input token (the portion of `prompt_tokens` that is neither a cache read nor a cache write).
+    /// USD per uncached input token (the portion of `prompt_tokens` that is
+    /// neither a cache read nor a cache write).
     #[serde(default)]
     pub input_per_token_usd: f64,
     /// USD per output token (`completion_tokens`, which includes reasoning).
     #[serde(default)]
     pub output_per_token_usd: f64,
-    /// USD per cached-read input token (the `cached_prompt_tokens` subset of `prompt_tokens`).
+    /// USD per cached-read input token (the `cached_prompt_tokens` subset of
+    /// `prompt_tokens`). Typically far cheaper than `input_per_token_usd`.
     #[serde(default)]
     pub cached_read_per_token_usd: f64,
-    /// USD per cache-creation input token (the `cache_creation_prompt_tokens` subset of `prompt_tokens`).
+    /// USD per cache-creation input token (the `cache_creation_prompt_tokens`
+    /// subset of `prompt_tokens`). Typically ~1.25× `input_per_token_usd`.
     #[serde(default)]
     pub cache_creation_per_token_usd: f64,
 }
@@ -1066,11 +1129,21 @@ impl ModelPricing {
 }
 
 /// Derive cost in USD ticks (1e10 per USD) from reported token usage and a
-/// model's per-token pricing. Returns `None` when `pricing` is unusable (all
-/// tiers zero), `usage` is absent, or the derived tick count does not fit
-/// `i64`. The caller can fall back to the honest-absence behavior. Pure
+/// model's per-token pricing. Returns `None` when `pricing` is unusable
+/// (all tiers zero), `usage` is absent, or the derived tick count does not fit
+/// `i64`, so the caller can fall back to the honest-absence behavior. Pure
 /// integer-arithmetic-at-the-f64 level then rounded to the nearest tick;
 /// deterministic and exactly assertable.
+///
+/// Billing tiers (mirroring [`TokenUsage`]):
+/// - uncached input = `prompt_tokens − cached_prompt_tokens − cache_creation`
+///   × `input_per_token_usd`
+/// - cached reads = `cached_prompt_tokens` × `cached_read_per_token_usd`
+/// - cache writes = `cache_creation_prompt_tokens` × `cache_creation_per_token_usd`
+/// - output = `completion_tokens` × `output_per_token_usd`
+///
+/// `prompt_tokens` always includes cache reads + writes (see [`TokenUsage`]),
+/// so the uncached portion is computed by subtraction and never double-counted.
 pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) -> Option<i64> {
     let usage = usage?;
     if pricing.is_unusable() {
@@ -1079,15 +1152,16 @@ pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) ->
     let cached = f64::from(usage.cached_prompt_tokens);
     let cache_creation = f64::from(usage.cache_creation_prompt_tokens);
     let prompt = f64::from(usage.prompt_tokens);
-    // Saturate the uncached subset at a set value so a misreported cache split never produces a negative.
+    // Saturate the uncached subset at 0 so a misreported cache split never
+    // produces a negative (and thus discarded) cost.
     let uncached_input = (prompt - cached - cache_creation).max(0.0);
     let usd = uncached_input * pricing.input_per_token_usd
         + cached * pricing.cached_read_per_token_usd
         + cache_creation * pricing.cache_creation_per_token_usd
         + f64::from(usage.completion_tokens) * pricing.output_per_token_usd;
     // Pricing the catalog or config carries can be wrong by orders of
-    // magnitude, and a tick count outside `i64` has no representation at all.
-    // The turn is reported as unpriced rather than as a saturated price.
+    // magnitude, and a tick count outside `i64` has no representation at all:
+    // the turn is reported as unpriced rather than as a saturated price.
     let ticks = match crate::types::ticks_from_usd("computed cost (usage x pricing)", usd) {
         Ok(ticks) => ticks,
         Err(err) => {
@@ -1095,7 +1169,9 @@ pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) ->
             return None;
         }
     };
-    // A configured-but-zero-usage turn yields no ticks.
+    // A configured-but-zero-usage turn yields 0 ticks; the capture site
+    // normalizes non-positive to `None` via `reported_cost_ticks`, which is
+    // the correct honest-absence outcome for a turn that billed nothing.
     (ticks > 0).then_some(ticks)
 }
 
@@ -4147,8 +4223,8 @@ mod tests {
     }
 
     /// The placeholder is the only thing the model learns about the missing
-    /// image. It has to name the real cause: told "conversation too large" on
-    /// a vision-less model, the model retries or invents the contents.
+    /// image, so it has to name the real cause: told "conversation too large"
+    /// on a vision-less model, the model retries or invents the contents.
     #[test]
     fn test_strip_images_placeholder_names_the_reason() {
         let placeholder_for = |reason| {
@@ -5233,22 +5309,27 @@ mod tests {
         }
     }
 
+    /// Exact integer-tick computation for a representative input: 1k uncached
+    /// input + 200 output at $5/M input and $15/M output (a typical grok-scale
+    /// price) → the expected tick count via `round(usd * 1e10)`.
     #[test]
     fn compute_cost_ticks_exact_for_representative_input() {
-        // $5 per input tokens → $0.000005 per token. $15 per
-        // output tokens → $0.000015 per token.
+        // $5 per million input tokens → $0.000005 per token.
+        // $15 per million output tokens → $0.000015 per token.
         let pricing = ModelPricing {
             input_per_token_usd: 0.000005,
             output_per_token_usd: 0.000015,
             ..Default::default()
         };
         let usage = usage_with(1_000, 200, 0, 0);
+        // 1000 * 0.000005 + 200 * 0.000015 = 0.005 + 0.003 = 0.008 USD
+        // ticks = round(0.008 * 1e10) = 80_000_000
         assert_eq!(compute_cost_ticks(Some(&usage), &pricing), Some(80_000_000),);
     }
 
     /// Cache tiers: cached reads billed at a discount and cache writes at a
-    /// premium must each contribute their own tier. That Cache is with the
-    /// uncached portion correctly subtracted from `prompt_tokens`.
+    /// premium must each contribute their own tier, with the uncached portion
+    /// correctly subtracted from `prompt_tokens`.
     #[test]
     fn compute_cost_ticks_covers_cache_tiers() {
         // input $2/M, output $8/M, cached read $0.20/M, cache write $2.50/M
@@ -5258,7 +5339,14 @@ mod tests {
             cached_read_per_token_usd: 0.0000002,
             cache_creation_per_token_usd: 0.0000025,
         };
+        // prompt_tokens = 1000 = 700 uncached + 200 cached + 100 cache-write
         let usage = usage_with(1_000, 300, 200, 100);
+        // uncached: 700 * 0.000002 = 0.0014
+        // cached:   200 * 0.0000002 = 0.00004
+        // cache wr: 100 * 0.0000025 = 0.00025
+        // output:   300 * 0.000008 = 0.0024
+        // total = 0.0014 + 0.00004 + 0.00025 + 0.0024 = 0.00409
+        // ticks = round(0.00409 * 1e10) = 40_900_000
         assert_eq!(compute_cost_ticks(Some(&usage), &pricing), Some(40_900_000),);
     }
 
@@ -5302,7 +5390,12 @@ mod tests {
             output_per_token_usd: 0.0,
             ..Default::default()
         };
+        // cached (900) + cache_creation (200) > prompt (1000): uncached = -100
         let usage = usage_with(1_000, 0, 900, 200);
+        // uncached saturates to 0; only the cached-read and cache-write tiers count
+        // cached:   900 * 0.0 = 0 (cached_read_per_token_usd is 0/default)
+        // cache wr: 200 * 0.0 = 0
+        // → total 0 → ticks 0 → reported as None (honest absence for a zero bill)
         assert_eq!(compute_cost_ticks(Some(&usage), &pricing), None);
     }
 }

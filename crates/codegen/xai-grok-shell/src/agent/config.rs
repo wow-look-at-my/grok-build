@@ -3,7 +3,10 @@ use crate::agent::model_providers::{
     ModelProviderConfig, auth_config_issues, model_provider_auth_name, parse_model_providers,
 };
 use crate::remote::DEFAULT_CONTEXT_WINDOW;
-/// Config/`[model.*]`/bundled-JSON fallback context window applied when a model entry carries no explicit `context_window`.
+/// Config/`[model.*]`/bundled-JSON fallback context window applied when a model
+/// entry carries no explicit `context_window` (distinct from the remote
+/// `DEFAULT_CONTEXT_WINDOW` of 256k). A BYOK model left at this sentinel is a
+/// candidate for the per-model provider resolution (`resolve_context_window_from_provider`).
 pub(crate) const CONFIG_DEFAULT_CONTEXT_WINDOW: u64 = 200_000;
 use crate::{config::StorageMode, sampling::ApiBackend, tools::config::ShellToolsetConfig};
 use agent_client_protocol as acp;
@@ -140,10 +143,12 @@ pub struct EndpointsConfig {
     pub cli_chat_proxy_base_url: Option<String>,
     /// Base URL for the public xAI API. Blank unless configured.
     pub xai_api_base_url: String,
-    /// The only endpoints a model request may reach. Empty allows none. `GROK_ALLOWED_ENDPOINTS` adds to it.
+    /// The only endpoints a model request may reach. Empty allows none.
+    /// `GROK_ALLOWED_ENDPOINTS` adds to it. See `xai_grok_extra_ca::endpoint_allowlist`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allowed_endpoints: Vec<String>,
-    /// Optional extra access-header value.
+    /// Optional extra access-header value (applied only with the optional
+    /// non-production feature, and only for matching first-party hosts).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alpha_test_key: Option<String>,
     /// Env: `GROK_MODELS_BASE_URL`. Enables custom endpoint mode.
@@ -151,6 +156,8 @@ pub struct EndpointsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models_base_url: Option<String>,
     /// Env: `GROK_MODELS_LIST_URL`. Overrides the default `{base}/models` list URL.
+    /// Read under both spellings of [`EndpointsConfig::MODELS_LIST_URL_KEYS`];
+    /// written under this one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models_list_url: Option<String>,
     /// Env: `GROK_FEEDBACK_BASE_URL`. Where feedback submissions go.
@@ -226,13 +233,16 @@ pub struct EndpointsConfig {
 }
 impl EndpointsConfig {
     /// The keys [`models_list_url`](Self::models_list_url) is read under.
+    /// `models_endpoint` is the earlier spelling, still written by deployed
+    /// configs and by the managed-config layers that predate the rename.
     pub const MODELS_LIST_URL_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("models_list_url", &["models_endpoint"]);
 }
 
-/// `EndpointsConfig` with each list-URL key spelling as its own field. So a
+/// `EndpointsConfig` with each list-URL key spelling as its own field, so a
 /// table naming both folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`]
 /// rather than failing the whole `[endpoints]` table as a duplicate field.
+///
 /// Every field carries `#[serde(default)]` from the container, which is the
 /// same rule [`EndpointsConfig`] applies on its own: an absent key is unset,
 /// never an error. `external_otel_master_switch` is absent here because it is
@@ -303,6 +313,11 @@ impl TryFrom<EndpointsConfigWire> for EndpointsConfig {
 }
 
 /// Forwards through [`EndpointsConfigWire`] and the fold.
+///
+/// This is the body `#[serde(try_from = "EndpointsConfigWire")]` would generate,
+/// written out so the target keeps its own field attributes: the container
+/// would otherwise have to repeat `external_otel_master_switch`'s `skip` in the
+/// shadow, where a field that never reaches the wire has nothing to say.
 impl<'de> Deserialize<'de> for EndpointsConfig {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -324,7 +339,7 @@ mod endpoints_wire_alias_tests {
 
     /// A `[endpoints]` table naming the list URL under both keys is one URL
     /// stated twice. The table can arrive from a managed-config or campaign
-    /// layer, not only from the user's own file. And a duplicate-field
+    /// layer, not only from the user's own file, and a duplicate-field
     /// rejection here would take the whole config down with it.
     #[test]
     fn a_table_naming_the_list_url_under_both_keys_under_one_value_parses_once() {
@@ -353,7 +368,7 @@ mod endpoints_wire_alias_tests {
         );
     }
 
-    /// Different list URLs is a real disagreement about where models are
+    /// Two different list URLs is a real disagreement about where models are
     /// listed, so it fails and names the field rather than picking one.
     #[test]
     fn a_table_whose_list_url_spellings_disagree_is_an_error_naming_the_field() {
@@ -474,8 +489,9 @@ impl EndpointsConfig {
         resolved
     }
     /// The cli-chat-proxy base URL through which all auxiliary services (and
-    /// OAuth/session inference) resolve: explicit `cli_chat_proxy_base_url`,
-    /// else BLANK.
+    /// OAuth/session inference) resolve: explicit `cli_chat_proxy_base_url`, else
+    /// BLANK. There is no compiled default: an unset proxy is never sent to, and
+    /// a blank URL makes every request built on it fail before it leaves.
     pub fn proxy_url(&self) -> String {
         blank_as_unset(&self.cli_chat_proxy_base_url).unwrap_or_default()
     }
@@ -502,7 +518,7 @@ impl EndpointsConfig {
         blank_as_unset(&self.trace_upload_url).unwrap_or_else(|| self.proxy_url())
     }
     /// Managed deployment-config URL (`grok setup`): explicit `managed_config_url`, else `proxy_url` + `/deployment/config`.
-    /// `managed_config_url`, else `proxy_url` + `/deployment/config`.
+    /// Never `xai_api_base_url`, so the team token reaches the proxy, not the inference host.
     pub(crate) fn resolve_managed_config_url(&self) -> String {
         blank_as_unset(&self.managed_config_url)
             .unwrap_or_else(|| self.proxy_join("/deployment/config"))
@@ -740,7 +756,9 @@ pub(crate) enum GoalRoleModelChoice {
     InheritCurrent,
     /// Use this explicit pair (subject to auth/fail-open at spawn time).
     Explicit(crate::util::config::GoalRoleModel),
-    /// Use this model and keep the parent's agent type.
+    /// Use this model and keep the parent's agent type. This is what a
+    /// `[models] goal_*` slot resolves to: the slot names a model and says
+    /// nothing about the harness flavor.
     ModelOnly(String),
 }
 /// Fleet `allowed_models` pin. A list replaces the user/project allowlist;
@@ -1194,7 +1212,9 @@ pub struct ModelsConfig {
     /// When unset: the remote pin, then the client hint / built-in `grok-4.6` default with the catalog guard; see `ModelOverrideConfig::resolve`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt_suggestion: Option<String>,
-    /// Auto permission mode's tool-call classifier.
+    /// Auto permission mode's tool-call classifier. `[auto_mode]
+    /// classifier_model` is the older, narrower spelling and still wins
+    /// where it is set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission_classifier: Option<String>,
     /// Idle-turn laziness classifier.
@@ -1221,19 +1241,22 @@ pub struct ModelsConfig {
     /// Long-term memory flush turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_flush: Option<String>,
-    /// `/goal` planner role. `[goal] planner_model` carries a model plus an agent type and wins where it is set.
+    /// `/goal` planner role. `[goal] planner_model` carries a model plus an
+    /// agent type and wins where it is set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal_planner: Option<String>,
     /// `/goal` strategist role; `[goal] strategist_model` wins where set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal_strategist: Option<String>,
-    /// Every adversarial skeptic in the goal-verification panel; `[goal] skeptic_models` wins where set.
+    /// Every adversarial skeptic in the goal-verification panel;
+    /// `[goal] skeptic_models` wins where set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal_skeptic: Option<String>,
     /// `/goal` closing summary role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal_summarizer: Option<String>,
-    /// Model every subagent runs on unless `[subagents.models].<name>` or the agent definition pins one.
+    /// Model every subagent runs on unless `[subagents.models].<name>` or
+    /// the agent definition pins one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_default: Option<String>,
     /// Restricts which models are user-selectable for normal chat (picker, `/model`, `-m`).
@@ -1247,10 +1270,18 @@ pub struct ModelsConfig {
     /// Remove these model IDs from the catalog entirely. Wins over `hidden_models`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disabled_models: Option<Vec<String>>,
-    /// Globs that mark a model as a favorite, joined with every `[model_providers.<id>].favorite_models` list.
+    /// Globs that mark a model as a favorite, joined with every
+    /// `[model_providers.<id>].favorite_models` list. The picker opens on the
+    /// favorites when any model matches; typing searches the whole catalog.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub favorite_models: Option<Vec<String>>,
-    /// Force `supports_reasoning_effort = true` on these models.
+    /// Force `supports_reasoning_effort = true` on these models, so `/effort`
+    /// and the effort menu work on a model the catalog never flagged. Globs
+    /// match the catalog key or the model id, like the other model filters.
+    ///
+    /// This is the escape hatch for a server catalog that omits the flag: it
+    /// applies after the whole catalog is resolved, so it does not depend on a
+    /// `[model.<key>]` table name matching the catalog key.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub force_reasoning_effort_models: Option<Vec<String>>,
     /// Fallback `agent_type` for models without a per-model override.
@@ -1454,7 +1485,10 @@ pub struct Config {
     /// See [`crate::util::config::DoomLoopRecoverySettings`].
     #[serde(default)]
     pub doom_loop_recovery: crate::util::config::DoomLoopRecoverySettings,
-    /// `[output_rate_floor]` section: the session-wide output tokens/sec floor and its timing.
+    /// `[output_rate_floor]` section: the session-wide output tokens/sec
+    /// floor and its timing. See
+    /// [`crate::util::config::OutputRateFloorSettings`]; one model overrides
+    /// the floor with `[model.<id>].min_output_tokens_per_sec`.
     #[serde(default)]
     pub output_rate_floor: crate::util::config::OutputRateFloorSettings,
     /// One type serves this TOML table and the remote `long_reasoning_reminder` object.
@@ -1493,7 +1527,8 @@ pub struct Config {
     pub hints: Option<toml::Value>,
     #[serde(default)]
     pub ui: UiConfig,
-    /// `[pricing]` section: the catalog consulted for a model whose endpoint reports no cost. See [`PricingConfig`].
+    /// `[pricing]` section: the catalog consulted for a model whose endpoint
+    /// reports no cost. See [`PricingConfig`].
     #[serde(default)]
     pub pricing: PricingConfig,
     #[serde(default)]
@@ -1639,7 +1674,10 @@ pub struct Config {
     /// Not remotely gated.
     #[serde(skip)]
     pub subagents_enabled: bool,
-    /// How strongly system-prompt/tool wording nudges the model toward spawning subagents.
+    /// How strongly system-prompt/tool wording nudges the model toward
+    /// spawning subagents. Independent of `subagents_enabled` — wording only,
+    /// never a capability gate. See
+    /// [`crate::config::SubagentsConfig::resolve_usage_frequency`].
     #[serde(skip)]
     pub subagent_usage_frequency: xai_tool_types::AgentUsageFrequency,
     /// Resolved max subagent nesting depth (see [`crate::config::SubagentsConfig::resolve_max_depth`]).
@@ -2660,7 +2698,9 @@ impl Config {
         Resolved::new(TelemetryMode::Disabled, ConfigSource::Default)
     }
     pub(crate) fn resolve_trace_upload(&self) -> Resolved<bool> {
-        // Trace upload is hard-disabled in this build: no env var (GROK_TELEMETRY_TRACE_UPLOAD), config key, requirement pin.
+        // Trace upload is hard-disabled in this build: no env var
+        // (GROK_TELEMETRY_TRACE_UPLOAD), config key, requirement pin, or
+        // remote feature flag may re-enable it.
         return Resolved::new(false, ConfigSource::Default);
 
         #[allow(unreachable_code)]
@@ -2773,15 +2813,17 @@ impl Config {
         })
     }
     /// The output-rate floor and time-to-first-token limit for `model_id`, or
-    /// `None` when both are off. The floor resolves per-model first:
-    /// `[model.<id>].min_output_tokens_per _sec` is the endpoint's own
-    /// number. It is the only one that can differ between models in one
-    /// session. `[ui].min_output_tokens_per_sec` is the session-wide fallback
-    /// the settings modal writes. Zero at either layer is off, so a per-model
-    /// `0` turns the gate off for that model without touching the session
-    /// value. The timing is shared: `[ui].output_rate_sustained_secs` plus
-    /// the `[output_rate_floor]` window and budget, each raised to its
-    /// minimum.
+    /// `None` when both are off.
+    ///
+    /// The floor resolves per-model first: `[model.<id>].min_output_tokens_per
+    /// _sec` is the endpoint's own number, and it is the only one that can
+    /// differ between two models in one session. `[ui].min_output_tokens_per_sec`
+    /// is the session-wide fallback the settings modal writes. Zero at either
+    /// layer is off, so a per-model `0` turns the gate off for that model
+    /// without touching the session value.
+    ///
+    /// The timing is shared: `[ui].output_rate_sustained_secs` plus the
+    /// `[output_rate_floor]` window and budget, each raised to its minimum.
     pub(crate) fn resolve_output_rate_floor(
         &self,
         model_id: &str,
@@ -3120,8 +3162,11 @@ impl Config {
             .default(false)
             .resolve()
     }
-    /// When `true`, a remote-pushed role pair may pin a `/goal` role to a
-    /// model the user did not select.
+    /// When `true`, a remote-pushed role pair may pin a `/goal` role to a model
+    /// the user did not select. Default `false`: the session's own model is what
+    /// the user picked, and a server-side pin that silently replaces it reads as
+    /// the harness ignoring that choice. A pair written in local `[goal]` config
+    /// is the user's own instruction and is honored either way.
     pub(crate) fn resolve_goal_follow_remote_role_models(&self) -> Resolved<bool> {
         BoolFlag::env("GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS")
             .config(self.goal.follow_remote_role_models)
@@ -3162,12 +3207,12 @@ impl Config {
             },
         }
     }
-    /// Planner role model: `[goal]` config, then remote when the user opted
-    /// in. The pair itself has no env layer. Both switches around it do. An
-    /// `Explicit` pair is applied as `runtime_overrides.model`, resolved
-    /// before `resolve_subagent_sampling_config`, so it wins over a user
-    /// `[subagents.models]` pin; `InheritCurrent` hands precedence back to
-    /// that pin.
+    /// Planner role model: `[goal]` config, then remote when the user opted in.
+    /// The pair itself has no env layer. The two switches around it do.
+    ///
+    /// An `Explicit` pair is applied as `runtime_overrides.model`, resolved before
+    /// `resolve_subagent_sampling_config`, so it wins over a user
+    /// `[subagents.models]` pin; `InheritCurrent` hands precedence back to that pin.
     pub(crate) fn resolve_goal_planner_model(
         &self,
         use_current_only: bool,
@@ -3232,13 +3277,16 @@ impl Config {
             },
         }
     }
-    /// The model for one harness model slot, or `None` when the slot inherits
-    /// the session model. Precedence is the slot's environment variable, then
-    /// `[models] <slot>` in `config.toml`, then the slot's compiled default.
-    /// A slot whose `fallback` is `SessionModel` and which nothing sets
-    /// answers `None`, and the caller keeps the session model. The slot id
-    /// must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists. An unknown
-    /// id is a programming error and answers `None`.
+    /// The model for one harness model slot, or `None` when the slot
+    /// inherits the session model.
+    ///
+    /// Precedence is the slot's environment variable, then `[models]
+    /// <slot>` in `config.toml`, then the slot's compiled default. A slot
+    /// whose `fallback` is `SessionModel` and which nothing sets answers
+    /// `None`, and the caller keeps the session model.
+    ///
+    /// The slot id must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`]
+    /// lists. An unknown id is a programming error and answers `None`.
     pub(crate) fn resolve_harness_model(&self, slot_id: &str) -> Option<Resolved<String>> {
         let slot = xai_grok_models::slot_by_id(slot_id)?;
         if let Ok(v) = std::env::var(slot.env)
@@ -3762,6 +3810,7 @@ fn attach_trusted_auth_config(cfg: &Config, key: &str, entry: &mut ModelEntry) {
 }
 
 /// Build one catalog entry that inherits `[model_providers.<provider_id>]`.
+///
 /// This is the same merge a `[model.<id>] model_provider = "..."` block gets,
 /// reachable for an entry that has no config block at all — an autodetected
 /// model.
@@ -3795,7 +3844,7 @@ pub(crate) fn entry_for_unrouted_block(
 }
 
 /// The entry a `[model_providers.<id>]` block resolves to on its own, with no
-/// `[model.<id>]` behind it. The provider id stands in for the model id. It
+/// `[model.<id>]` behind it. The provider id stands in for the model id: it
 /// names no model, so nothing here asks the provider for a listing and nothing
 /// reaches the network.
 pub(crate) fn provider_probe_entry(
@@ -3811,7 +3860,17 @@ pub(crate) fn provider_probe_entry(
 }
 
 /// `true` when some configured `[model_providers.<id>]` stands on its own for
-/// authentication.
+/// authentication -- the same `has_own_credentials` question the catalog is
+/// asked, put to the provider block instead of to a model.
+///
+/// This is what makes a Grok sign-in OPTIONAL for a session pointed at another
+/// endpoint. It reads the PROVIDER blocks rather than the catalog because
+/// autodetection runs off the startup path
+/// (`model_provider_discovery::discover_provider_models`, spawned by
+/// `initialize` and never awaited): at the moment the auth methods are built
+/// the provider's models are not in the catalog yet. A user who declared a
+/// provider and wrote no `[model.<id>]` block of their own was therefore sent
+/// to the login screen for an endpoint that grok.com never sees.
 pub(crate) fn any_provider_has_own_credentials(cfg: &Config) -> bool {
     first_provider_with_own_credentials(cfg).is_some()
 }
@@ -3948,13 +4007,22 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        // Entries that carry a real (non-default) context window.
+        // Entries that carry a real (non-default) context window, treated as a
+        // per-slug `/v1/models` listing for backfilling entries that were left
+        // at the silent hardcoded default. Resolution is per exact routing
+        // slug (each model answers for its OWN window — never a max or
+        // first-match value), via the same `resolve_context_window` lookup the
+        // prefetch resolution path uses.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)
             .map(|(k, e)| (k.clone(), e.clone()))
             .collect();
-        // api_backend inherits from a sibling with the same routing slug.
+        // api_backend inherits from a sibling with the same routing slug. This
+        // is keyed by slug with last-inserted-wins so an explicitly-set
+        // `api_backend` (e.g. an explicit `chat_completions` that equals the
+        // default) on a config model is never overridden by a bundled sibling
+        // that shares its slug.
         let backend_donors: std::collections::HashMap<String, ApiBackend> = resolved
             .values()
             .filter(|e| e.info.context_window.get() != default_cw)
@@ -3996,8 +4064,22 @@ pub(crate) fn resolve_model_list(
                     entry.info.context_window = resolved_cw;
                 }
             }
-            // BYOK/custom-base gap: the sibling resolve above (and the generic /v1/models prefetch) only ever sees the xAI
-            // proxy listing.
+            // BYOK/custom-base gap: the sibling resolve above (and the generic
+            // /v1/models prefetch) only ever sees the xAI proxy listing, never a
+            // model that ships its OWN api_base_url + API key (e.g.
+            // `openrouter/deepseek/...` at `https://gateway.pazer.ai/v1`). When
+            // such a model is still at a hardcoded default (200k config or the
+            // 256k fallback), ask its own provider for the real window.
+            //
+            // Gated on `own_credential()` alone: an entry with its own API key
+            // is BYOK by definition, and bundled/xAI models never carry one, so
+            // they are never re-queried. Deliberately no xAI-host check here —
+            // `is_xai_api_url` treats loopback as cli-chat-proxy/xAI, which
+            // would also classify a local BYOK test/mock base as xAI and skip
+            // the real path we're exercising. Any unreachable provider leaves
+            // the default untouched (best-effort). `resolve_context_window_from_provider`
+            // runs its fetch on a dedicated OS thread, so this is safe even when
+            // `resolve_model_list` is reached from an async context.
             let still_default = entry.info.context_window.get() == default_cw
                 || entry.info.context_window.get() == CONFIG_DEFAULT_CONTEXT_WINDOW;
             if still_default && entry.own_credential().is_some() {
@@ -4061,7 +4143,11 @@ pub(crate) fn resolve_model_list(
     for entry in resolved.values_mut() {
         entry.info.derive_reasoning_effort_fields();
     }
-    // Say so once, here, where all of them are known. A provider whose
+    // An empty catalog is a dead end -- the model picker renders nothing and
+    // every turn has nothing to route to -- and each way of reaching it is
+    // silent on its own: a custom endpoint skips the built-in defaults, a
+    // discovery 404 is a warn nobody sees, and no [model.*] entries is not an
+    // error. Say so once, here, where all three are known. A provider whose
     // surface has no /models listing (several Anthropic-protocol ones do not)
     // lands here through no fault of the config.
     if resolved.is_empty() {
@@ -4304,9 +4390,10 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
         .collect()
 }
 impl ModelEntryConfig {
-    /// A listing entry with nothing set but the endpoint it is reached at. A
-    /// parser that knows only a model's name and window fills those in over
-    /// this, rather than restating fields it has no answer for.
+    /// A listing entry with nothing set but the endpoint it is reached at.
+    ///
+    /// A parser that knows only a model's name and window fills those in over
+    /// this, rather than restating thirty fields it has no answer for.
     pub(crate) fn minimal(base_url: &str) -> Self {
         Self {
             base_url: base_url.to_owned(),
@@ -4436,7 +4523,17 @@ pub struct ModelEntryConfig {
     /// Per-model opt-in: BYOK endpoints that don't understand the flag should leave this unset to avoid request errors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stream_tool_calls: Option<bool>,
-    /// When true, this model's Chat Completions schema is strict.
+    /// When true, this model's Chat Completions schema is strict: the request
+    /// body must carry no message-level property the provider does not define,
+    /// or it answers 400 (`wrong_api_format ... is unsupported`).
+    ///
+    /// Set it for providers such as Cerebras that validate message schemas
+    /// strictly. The wire conversion then omits `model_id` and
+    /// `reasoning_content` from replayed assistant messages. Defaults to
+    /// false — the body every tolerant OpenAI-compatible provider receives
+    /// (they ignore unknown message properties).
+    ///
+    /// Stored conversation history is never altered, only the serialized body.
     #[serde(default, skip_serializing_if = "is_false")]
     pub strict_message_schema: bool,
     /// Responses API `reasoning.summary` for this model; unset keeps the built-in `concise`.
@@ -4447,21 +4544,31 @@ pub struct ModelEntryConfig {
     /// Defaults to the all-disabled state via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "is_default_laziness_detector")]
     pub laziness_detector: LazinessDetectorPerModelConfig,
-    /// Per-token USD pricing used to derive.
+    /// Per-token USD pricing used to derive cost when the backend reports
+    /// token usage but no wire cost (no `cost_in_usd_ticks` and no `cost`
+    /// float). All four fields default to 0 (no pricing → no computation →
+    /// cost stays honestly absent).
     #[serde(default, skip_serializing_if = "is_default_model_pricing")]
     pub pricing: xai_grok_sampling_types::ModelPricing,
-    /// Floor on this model's output tokens/sec.
+    /// Floor on this model's output tokens/sec. A response that stays under
+    /// it for the configured sustained duration is abandoned and the request
+    /// is reissued. Absent or zero leaves the model ungated; the global
+    /// `[output_rate_floor]` value applies when this is absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<f64>,
-    /// Time-to-first-token limit in seconds for this model.
+    /// Time-to-first-token limit in seconds for this model. Zero turns it off;
+    /// absent falls through to `[ui].ttft_timeout_secs`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttft_timeout_secs: Option<u64>,
-    /// Whether this model is resident in VRAM, for a listing dialect that reports residency.
+    /// Whether this model is resident in VRAM, for a listing dialect that
+    /// reports residency. `None` where the listing does not say. Runtime
+    /// state, so it is never serialized into a persisted catalog.
     #[serde(skip, default)]
     pub loaded_in_vram: Option<bool>,
 }
 
 /// Convert a `[.*.extra_body]` TOML table into the JSON body fields it names.
+///
 /// A TOML value has no null, and every other scalar maps straight across, so
 /// nothing is lost. A value that cannot be represented is dropped with a
 /// warning rather than being sent as a guess.
@@ -4489,11 +4596,14 @@ fn is_default_model_pricing(p: &xai_grok_sampling_types::ModelPricing) -> bool {
     p.is_unusable()
 }
 
-/// `[pricing]` in config.toml.
+/// `[pricing]` in config.toml. The catalog is a fallback for a model that
+/// `[model.<id>].pricing` does not price, so a user-written price is never
+/// reached by anything here.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct PricingConfig {
-    /// Set false to keep the cost indicator off the network. A session then prices only the models config prices.
+    /// Set false to keep the cost indicator off the network. A session then
+    /// prices only the models config prices.
     pub lookup_enabled: bool,
     /// Base URL of the catalog. The per-model document is read from `<catalog_url>/v1/models/<model id>`.
     pub catalog_url: String,
@@ -4627,15 +4737,23 @@ pub struct ConfigModelOverride {
     pub compaction_at_tokens: Option<CompactionAtTokens>,
     pub show_model_fingerprint: Option<bool>,
     pub stream_tool_calls: Option<bool>,
-    /// Opt this model into strict message-schema handling: omit `model_id`/`reasoning_content` from replayed Chat Completions messages for providers that reject unknown message properties.
+    /// Opt this model into strict message-schema handling: omit
+    /// `model_id`/`reasoning_content` from replayed Chat Completions messages
+    /// for providers that reject unknown message properties (e.g. Cerebras).
+    /// Absent/false keeps today's permissive body.
     pub strict_message_schema: Option<bool>,
     pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
     pub min_output_tokens_per_sec: Option<f64>,
     pub ttft_timeout_secs: Option<u64>,
     /// Extra top-level fields merged into every request body for this model.
+    /// The typed request structs are closed, so a per-deployment setting only
+    /// one target understands (LM Studio's `ttl`, Ollama's `keep_alive` and
+    /// `options.num_ctx`) has nowhere else to go. A dotted key addresses a
+    /// nested object.
     #[serde(default)]
     pub extra_body: IndexMap<String, toml::Value>,
-    /// Suppress the modelinfo price.
+    /// Suppress the modelinfo price lookup for this model; set by a local
+    /// provider, whose models are free and are in no catalog.
     pub pricing_lookup_enabled: Option<bool>,
     pub reasoning_summary: Option<ReasoningSummary>,
 }
@@ -4861,10 +4979,12 @@ pub struct ModelInfo {
     /// Derived from `allowed_models` in `resolve_model_catalog`; never persisted.
     #[serde(skip_serializing, default = "default_true")]
     pub user_selectable: bool,
-    /// Matched a favorites glob. Derived in `resolve_model_catalog`; never persisted.
+    /// Matched a favorites glob. Derived in `resolve_model_catalog`; never
+    /// persisted. The picker opens on these entries and searches past them.
     #[serde(skip_serializing, default)]
     pub favorite: bool,
     /// The `[model_providers.<id>]` this entry inherits from, when it has one.
+    /// Names which provider's `favorite_models` globs apply to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_provider: Option<String>,
     /// When false, only OAuth users see this in the picker.
@@ -4890,7 +5010,10 @@ pub struct ModelInfo {
     pub show_model_fingerprint: bool,
     /// When `Some(true)`, the sampler injects `stream_tool_calls: true`
     pub stream_tool_calls: Option<bool>,
-    /// When true, this model's Chat Completions schema is strict: the wire body must omit message-level properties the provider does not define.
+    /// When true, this model's Chat Completions schema is strict: the wire body
+    /// must omit message-level properties the provider does not define (see
+    /// [`ModelEntryConfig::strict_message_schema`]). Resolved into a
+    /// [`xai_grok_sampling_types::ChatMessageProfile::STRICT`] profile.
     #[serde(default, skip_serializing_if = "is_false")]
     pub strict_message_schema: bool,
     /// Responses API `reasoning.summary` override; `None` keeps the request builder's default.
@@ -4901,22 +5024,36 @@ pub struct ModelInfo {
     /// See [`LazinessDetectorPerModelConfig`].
     #[serde(default)]
     pub laziness_detector: LazinessDetectorPerModelConfig,
-    /// Per-token USD pricing, which derives a cost for a backend that reports token usage and no wire cost.
+    /// Per-token USD pricing, which derives a cost for a backend that reports
+    /// token usage and no wire cost.
     #[serde(default)]
     pub pricing: xai_grok_sampling_types::ModelPricing,
-    /// Floor on this model's output tokens/sec; see [`Config::resolve_output_rate_floor`].
+    /// Floor on this model's output tokens/sec; see
+    /// [`Config::resolve_output_rate_floor`]. `None` falls through to the
+    /// session-wide `[ui].min_output_tokens_per_sec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<f64>,
-    /// Time-to-first-token limit in seconds; see [`Config::resolve_output_rate_floor`].
+    /// Time-to-first-token limit in seconds; see
+    /// [`Config::resolve_output_rate_floor`]. `None` falls through to
+    /// `[ui].ttft_timeout_secs`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttft_timeout_secs: Option<u64>,
-    /// Extra top-level fields merged into this model's request body. See [`ConfigModelOverride::extra_body`].
+    /// Extra top-level fields merged into this model's request body.
+    /// See [`ConfigModelOverride::extra_body`].
     #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
-    /// Whether the modelinfo price lookup may run for this model.
+    /// Whether the modelinfo price lookup may run for this model. A local
+    /// runtime's models are free and are in no catalog, so the lookup there is
+    /// a request that can only fail and then be re-tried on the next TTL.
     #[serde(default = "default_true")]
     pub pricing_lookup_enabled: bool,
-    /// Whether this model is resident in VRAM right now.
+    /// Whether this model is resident in VRAM right now, for a provider whose
+    /// listing reports residency (Ollama `/api/ps`, LM Studio
+    /// `loaded_instances`). `None` means nobody can say — every remote
+    /// provider, and a local one whose listing could not be reached.
+    ///
+    /// Derived at catalog build and never persisted: it describes the runtime
+    /// at one instant, and a replayed value would claim a load that ended.
     #[serde(skip, default)]
     pub loaded_in_vram: Option<bool>,
 }
@@ -5172,7 +5309,14 @@ impl ModelEntry {
         self.auth_provider.as_ref()
     }
     /// `true` when the model is self-contained for authentication: it has a
-    /// non-empty `api_key`, an `env_key` that resolves to a non-empty value.
+    /// non-empty `api_key`, an `env_key` that resolves to a non-empty value,
+    /// a named auth provider, or it explicitly opts out of authentication.
+    ///
+    /// Treating `AuthScheme::None` as self-contained prevents a signed-in
+    /// session credential (and its live resolver) from being inherited by a
+    /// local unauthenticated endpoint.
+    /// Probes `std::env::var` at call time: result is not stable across env
+    /// changes. Never executes a provider command.
     pub(crate) fn has_own_credentials(&self) -> bool {
         self.info.auth_scheme == AuthScheme::None
             || self.own_credential().is_some()
@@ -5284,7 +5428,8 @@ pub struct GoalConfig {
     pub summary_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub use_current_model_only: Option<bool>,
-    /// Opt in to remote-pushed role model pins.
+    /// Opt in to remote-pushed role model pins. Unset means the session's own
+    /// model runs every role that local config does not pin.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub follow_remote_role_models: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5671,7 +5816,9 @@ fn byok_from_lookup(lookup: &ModelLookup) -> ModelByok {
 /// What `crate::agent::model_pricing::resolve` needs from config: the model's
 /// own configured price, and where to look when that price is absent.
 pub(crate) struct ConfiguredPricing {
-    /// `[model.<id>].pricing`.
+    /// `[model.<id>].pricing`. All-zero (unusable) when the model is absent or
+    /// config is unavailable, so the caller's `compute_cost_ticks` fallback
+    /// yields `None` (honest absence) rather than fabricating a cost.
     pub(crate) model: xai_grok_sampling_types::ModelPricing,
     /// `[pricing].lookup_enabled`.
     pub(crate) lookup_enabled: bool,
@@ -5702,7 +5849,9 @@ pub(crate) fn resolve_configured_pricing(model_id: &str) -> ConfiguredPricing {
     let models = resolve_model_list(&cfg, None);
     let entry = find_model_by_id(&models, model_id);
     let model = entry.map(|e| e.info.pricing.clone()).unwrap_or_default();
-    // A model that says its price is not in any catalog is believed.
+    // A model that says its price is not in any catalog is believed: the
+    // global switch can only turn lookups OFF, never back on for one that
+    // opted out.
     let model_allows_lookup = entry.is_none_or(|e| e.info.pricing_lookup_enabled);
     ConfiguredPricing {
         model,
@@ -5996,7 +6145,8 @@ pub(crate) fn sampling_config_for_model(
         compactions_remaining: info.compactions_remaining,
         compaction_at_tokens: info.compaction_at_tokens,
         doom_loop_recovery: None,
-        // Resolved per session (and re-resolved on a model switch), not here.
+        // Resolved per session (and re-resolved on a model switch), not here:
+        // the floor reads config layers this builder does not have.
         output_rate_floor: None,
         header_injector: None,
     }
@@ -6160,8 +6310,8 @@ pub(crate) fn to_acp_model_info(
                         serde_json::Value::String(provider.to_owned()),
                     );
                 }
-                // The picker tells a couple of rows with one name apart by
-                // where they route.
+                // The picker tells two rows with one name apart by where they
+                // route.
                 if let Some(host) = endpoint_host(&info.base_url) {
                     map.insert(
                         ENDPOINT_META_KEY.to_string(),
@@ -6191,7 +6341,10 @@ pub(crate) fn to_acp_model_info(
                         reasoning_efforts_meta_value(&info.reasoning_efforts),
                     );
                 }
-                // Only a provider that REPORTS residency writes this key.
+                // Only a provider that REPORTS residency writes this key. The
+                // absent case and the not-loaded case are different answers —
+                // "nobody can say" must not render as a dot that claims the
+                // model is cold — so `None` writes nothing at all.
                 if let Some(loaded) = info.loaded_in_vram {
                     map.insert(
                         LOADED_IN_VRAM_META_KEY.to_string(),

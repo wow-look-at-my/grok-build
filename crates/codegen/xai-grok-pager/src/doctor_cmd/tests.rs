@@ -248,8 +248,9 @@ fn fake_standalone_facts_compose_through_shared_view() {
     let report = collect_report_with(snapshot);
 
     // Ignore the voice finding: `collect_report_with` also probes the host's
-    // real microphone, so on a machine. Without audio it contributes an
-    // issue these fake facts never described.
+    // real microphone, so on a machine without audio it contributes an issue
+    // these fake facts never described. `issue_count()` and finding order both
+    // see it; the ids these facts produce do not.
     let issue_ids: Vec<DiagnosticId> = report
         .findings
         .iter()

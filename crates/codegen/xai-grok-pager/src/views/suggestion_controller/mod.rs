@@ -695,7 +695,7 @@ impl SuggestionController {
 }
 
 /// Longest common prefix of two strings, trimmed to a char boundary.
-#[allow(clippy::string_slice)] // `n` ends at a set value or at an [allow(clippy::string_slice)] // `is_char_boundary` offset
+#[allow(clippy::string_slice)] // `n` ends at 0 or at an `is_char_boundary` offset
 fn common_str_prefix<'a>(a: &'a str, b: &str) -> &'a str {
     let mut n = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
     while n > 0 && !a.is_char_boundary(n) {

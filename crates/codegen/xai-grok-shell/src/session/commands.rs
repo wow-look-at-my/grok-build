@@ -428,17 +428,26 @@ pub enum SessionCommand {
     /// Triggered by `MvpAgent::set_session_model` when the new model's `agent_type` differs from the session's current one.
     RebuildAgentForDefinition {
         definition: xai_grok_agent::AgentDefinition,
-        /// True only when no turn has run yet.
+        /// True only when no turn has run yet. It gates conversation surgery
+        /// that assumes `conversation[1]` is the synthetic zero-turn prefix; a
+        /// mid-session switch passes false, or the rebuild writes over the
+        /// session's first real user message.
         zero_turn: bool,
         system_prompt_label: String,
         responds_to: oneshot::Sender<Result<(), acp::Error>>,
     },
     /// Rewrite the conversation to plain text so a model that cannot read the
     /// history's reasoning and tool calls can still be handed it.
+    ///
+    /// Sent by the model-switch orchestrator when the new model runs a
+    /// different harness than the turns already in this session. Reports what
+    /// it converted; an already-flat history reports nothing converted.
     FlattenHistory {
         responds_to: oneshot::Sender<xai_grok_sampling_types::conversation::FlattenReport>,
     },
-    /// Re-read the output-rate floor from config.toml for the session's current model.
+    /// Re-read the output-rate floor from config.toml for the session's
+    /// current model. Sent when a rate key changes on disk. The next model
+    /// call uses the new policy.
     ReloadOutputRateFloor,
     /// Signals then report the override model rather than the agent-level default.
     /// `SetSessionModel` does NOT update `primaryModelId` in signals; the resolved model is already tracked via inference responses.
@@ -824,7 +833,13 @@ pub enum SessionCommand {
         /// Edit and interject are one atomic op: a stale version no-ops the whole thing, edited text included.
         new_text: Option<String>,
     },
-    /// Deliver every deliverable queued prompt into the running turn NOW.
+    /// Deliver every deliverable queued prompt into the running turn NOW and
+    /// cancel the in-flight model stream so the turn loop drains them before
+    /// its next request instead of at its next natural safe point. The user
+    /// gesture behind it is "stop what you are saying and read this".
+    /// A benign no-op when no turn is running or nothing queued is
+    /// deliverable (see `SessionActor::deliverable_mid_turn`); those rows stay
+    /// queued and run as their own turns.
     DeliverQueuedPromptsNow,
     Cancel(CancelOptions),
     Shutdown(ShutdownKind),
@@ -876,11 +891,16 @@ pub enum SessionCommand {
         respond_to: oneshot::Sender<Result<String, SideQuestionError>>,
     },
     /// Capture a `/todo` request as items on the session's todo list.
+    /// The session snapshots the conversation and runs a short side agent
+    /// whose only permitted mutation is appending to that list; the running
+    /// turn is not interrupted.
     TodoCapture {
         request: String,
-        /// `/TODO` rather than `/todo`.
+        /// `/TODO` rather than `/todo`: the items go to the top of the list
+        /// and the notice to the main agent names them.
         urgent: bool,
-        /// Client-minted id for this capture. Names the task row the client opened, so progress updates reach it.
+        /// Client-minted id for this capture. Names the task row the client
+        /// opened, so progress updates reach it.
         capture_id: String,
         respond_to: oneshot::Sender<
             Result<super::acp_session::TodoCaptureOutcome, super::acp_session::TodoCaptureError>,
@@ -929,7 +949,8 @@ pub enum SessionCommand {
         images: Vec<acp::ImageContent>,
     },
     /// [`Self::Interject`] without cutting the running turn's in-flight model
-    /// stream: the text is read at the turn's next drain point.
+    /// stream: the text is read at the turn's next drain point. A session with
+    /// no turn running takes it as its own prompt turn, like `Interject`.
     InterjectWithoutCancel {
         text: String,
     },

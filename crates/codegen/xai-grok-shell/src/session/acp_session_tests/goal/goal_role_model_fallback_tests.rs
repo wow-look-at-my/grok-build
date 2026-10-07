@@ -1,4 +1,5 @@
-//! A `/goal` role's configured model, resolved on a real session actor.
+//! A `/goal` role's configured model, resolved on a real session actor: what
+//! it runs on, and what the user is told when it cannot run there.
 
 use super::support::*;
 use super::*;

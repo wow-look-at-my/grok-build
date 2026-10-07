@@ -33,7 +33,12 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 pub fn init(config: Config) -> ClientInitGuard {
     let config = CONFIG.get_or_init(|| config);
     let _ = &config;
-    // Telemetry is hard-disabled.
+    // Telemetry is hard-disabled. `ClientOptions::default()` alone is NOT
+    // enough: sentry's `apply_defaults()` reads `SENTRY_DSN` from the
+    // environment when `dsn.is_none()` and installs a real (reqwest) network
+    // transport, so an env var could re-arm crash-report egress. Pin an
+    // explicit no-op transport that drops every envelope, and disable the
+    // default integrations, so no network transport can ever exist here.
     return sentry::init(ClientOptions {
         dsn: None,
         transport: Some(Arc::new(NoopTransportFactory)),
@@ -90,7 +95,8 @@ pub fn flush_on_shutdown() {
 
 // ─── Internals ─────────────────────────────────────────────────────────────
 
-/// Transport factory that always yields [`NoopTransport`].
+/// Transport factory that always yields [`NoopTransport`]; guarantees no
+/// Sentry network egress even when a DSN is present in the environment.
 struct NoopTransportFactory;
 
 impl sentry::TransportFactory for NoopTransportFactory {

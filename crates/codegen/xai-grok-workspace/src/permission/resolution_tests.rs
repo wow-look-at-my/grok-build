@@ -8,8 +8,21 @@ use crate::ENV_TEST_LOCK as ENV_LOCK;
 use crate::TestEnvGuard as EnvVarGuard;
 
 /// An empty user tier for one test, isolated for this value's lifetime.
+///
+/// The resolvers below merge the user tier into every result — `~/.claude`
+/// settings via `dirs::home_dir()`, and `$GROK_HOME/config.toml` for the
+/// claude-import cutoff marker. A machine that actually uses Claude Code
+/// therefore contributes rules and a `defaultMode` the test never wrote, so
+/// a test asserting on what resolved passes on CI (which has no `~/.claude`)
+/// and fails for anyone who has one. Bind this in any test that resolves.
+///
+/// `GROK_HOME` isolation is best-effort under `cargo test --lib`:
+/// `xai_grok_config::grok_home()` caches in a process-wide `OnceLock`, so an
+/// earlier test in the same process may already have pinned it. Under
+/// nextest — one process per test, what CI runs — it always takes effect.
 struct IsolatedHome {
-    /// Declared first so it drops first: the env restore runs before the lock releases.
+    /// Declared first so it drops first: the env restore runs before the
+    /// lock releases, and both run before the temp dir is removed.
     _env: crate::LockedTestEnv,
     home: tempfile::TempDir,
 }
@@ -32,6 +45,10 @@ impl IsolatedHome {
     }
 
     /// Drive `fut` on a fresh current-thread runtime.
+    ///
+    /// The async resolvers run this way rather than under `#[tokio::test]`
+    /// so the env lock is never held across an `.await` (clippy
+    /// `await_holding_lock`).
     fn block_on<F: std::future::Future>(&self, fut: F) -> F::Output {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -366,7 +383,11 @@ fn discovery_with_no_settings_files() {
 
 #[test]
 fn project_claude_absent_when_home_is_git_repo() {
-    // Home-is-a-git-repo (dotfiles in $HOME): for a cwd under home.
+    // Home-is-a-git-repo (dotfiles in $HOME): for a cwd under home, the
+    // repo-root walk must NOT reach $HOME and treat `~/.claude` as
+    // project-tier (its env is injected into every spawned subprocess).
+    // Serialize + guard $HOME (find_repo_root reaches home via `.git`, and
+    // the guard reads dirs::home_dir()).
     let home = IsolatedHome::new();
     git2::Repository::init(home.path()).unwrap();
     let claude_dir = home.path().join(".claude");
@@ -1091,7 +1112,8 @@ fn default_mode_inherited_from_parent_when_not_set() {
 
 #[test]
 fn single_file_still_works() {
-    // Isolate HOME so host/CI `~/.claude` rules don't bleed into the count (paths merge global + project).
+    // Isolate HOME so host/CI `~/.claude` rules don't bleed into the count
+    // (paths merge global + project).
     let _home = IsolatedHome::new();
 
     let tmp = tempfile::tempdir().unwrap();
@@ -1175,13 +1197,13 @@ fn untrusted_project_claude_permissions_are_not_honored() {
     );
 }
 
-/// Untrusted clone must not contribute project `.grok/config.toml`
-/// [permission]. Does not assert exact global rule counts.
+/// Untrusted clone must not contribute project `.grok/config.toml` [permission].
+///
+/// Does not assert exact global rule counts:
 /// `xai_grok_config::grok_home()` is a process-wide `OnceLock`, so under
 /// single-process `cargo test` an earlier test may have already pinned
 /// `GROK_HOME`. Project-rule filtering is independent of that; global
-/// survival is checked only when our temp home is the live
-/// `user_grok_home()`.
+/// survival is checked only when our temp home is the live `user_grok_home()`.
 #[test]
 fn untrusted_project_config_toml_permissions_are_not_honored() {
     let home = IsolatedHome::new();

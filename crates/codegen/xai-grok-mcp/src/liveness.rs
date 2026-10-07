@@ -105,9 +105,9 @@ pub fn spawn_transport_liveness(
     let slot_for_task = Arc::clone(&liveness_slot);
     // The handle parked in `liveness_slot` stands for "a watcher is alive for
     // this client". A task that unwound is not alive, so it clears the slot the
-    // way every other exit does. `McpClient::arm_liveness_watcher` will not
-    // install a fresh handle over the one already there. A slot left held by a
-    // dead watcher means that client's transport is never again detected as
+    // way every other exit does: `McpClient::arm_liveness_watcher` will not
+    // install a fresh handle over the one already there, so a slot left held by
+    // a dead watcher means that client's transport is never again detected as
     // closed.
     #[allow(clippy::disallowed_methods)]
     tokio::spawn(async move {
@@ -155,7 +155,11 @@ async fn watch_transport(
     loop {
         tokio::select! {
             _ = token.cancelled() => {
-                // Cancelled by the handle's `DropGuard`.
+                // Cancelled by the handle's `DropGuard`. The
+                // caller dropped the handle (e.g. McpClient
+                // teardown), so the slot has already been
+                // mutated externally — do not race the dropper
+                // by clearing the slot here.
                 tracing::trace!(
                     server = %server_name_for_task,
                     "transport liveness watcher cancelled by handle drop",
@@ -170,13 +174,27 @@ async fn watch_transport(
                             server = %server_name_for_task,
                             "transport liveness watcher detected closed transport",
                         );
-                        // Clear our own slot before exiting so a subsequent `arm_liveness_watcher` can install a fresh handle.
+                        // Clear our own slot before exiting so a
+                        // subsequent `arm_liveness_watcher` can
+                        // install a fresh handle.
+                        //
+                        // Self-cancel-by-drop: clearing the slot
+                        // drops the taken `TransportLivenessHandle`,
+                        // whose `DropGuard` cancels the very
+                        // `CancellationToken` this task is
+                        // `select!`ing on. Benign because we
+                        // `return` immediately — but DO NOT add any
+                        // post-`return` work that re-enters the
+                        // `select!`; it would race this self-cancel.
                         clear_liveness_slot(&liveness_slot);
 
                         if on_event
                             .send(McpClientEvent::TransportClosed {
                                 server: server_name_for_task.clone(),
-                                // Bind the event to THIS client instance.
+                                // Bind the event to THIS client
+                                // instance so the dispatcher can
+                                // skip evicting a replacement
+                                // registered under the same name.
                                 client_id: client.client_id(),
                             })
                             .is_err()
@@ -189,7 +207,13 @@ async fn watch_transport(
                         return;
                     }
                     LivenessCheck::Transient => {
-                        // State moved out of `Ready` (re-handshake started, or the transport was reset externally).
+                        // State moved out of `Ready` (re-handshake
+                        // started, or the transport was reset
+                        // externally). The watcher detects
+                        // *transport closure*, not state changes,
+                        // so exit silently; the caller re-arms a
+                        // fresh watcher when the new handshake
+                        // completes.
                         tracing::debug!(
                             server = %server_name_for_task,
                             "transport liveness watcher: state drifted out of Ready, exiting silently",

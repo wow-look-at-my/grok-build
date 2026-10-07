@@ -1,4 +1,4 @@
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 3 hits predate the gate
 
 //! Benchmark for comparing git CLI vs git2 file listing.
 //!

@@ -39,7 +39,9 @@ impl SlashCommand for ModelCommand {
         if let Some(items) = sub_phase_items(ctx.models, args_query) {
             return Some(items);
         }
-        // The opening list is the favorites.
+        // The opening list is the favorites. A typed query lists every model,
+        // so a provider with hundreds of them still answers a search for one
+        // nobody marked. The caller ranks what it gets back.
         let favorites_only = args_query.trim().is_empty();
         Some(build_model_items(ctx.models, favorites_only))
     }
@@ -70,7 +72,10 @@ impl SlashCommand for ModelCommand {
             return CommandResult::Error("Usage: /model <name> [effort]".into());
         }
 
-        // Prefer an exact full-string catalog match first.
+        // Prefer an exact full-string catalog match first. Model display names
+        // often contain spaces ("Grok 4.5"); if we split on the last token
+        // first, a shorter catalog entry ("Grok") would steal the prefix and
+        // treat "4.5" as an effort level.
         if let Some(message) = ambiguous_name(ctx.models, trimmed) {
             return CommandResult::Error(message);
         }
@@ -79,7 +84,9 @@ impl SlashCommand for ModelCommand {
         }
 
         // Trailing effort token + reasoning model → session-scoped switch
-        // (not persisted as default).
+        // (not persisted as default). Resolve via the shared gate so a rejected
+        // level (e.g. `none` on grok-4.5) surfaces the effort error with the
+        // model's offered ids — not "Unknown model: … none".
         if let Some((prefix, _)) = trimmed.rsplit_once(char::is_whitespace)
             && let Some(message) = ambiguous_name(ctx.models, prefix.trim_end())
         {
@@ -124,15 +131,17 @@ fn matched_reasoning_prefix(
 /// Whether `query` is `token`, then whitespace, then anything.
 fn leads_with(query: &str, token: &str) -> bool {
     query.len() > token.len() && query.is_char_boundary(token.len()) && {
-        // The `is_char_boundary` clause above runs first and short-circuits.
+        // The `is_char_boundary` clause above runs first and short-circuits,
+        // so `split_at` here cannot land inside a character.
         let (head, tail) = query.split_at(token.len());
         head.eq_ignore_ascii_case(token) && tail.starts_with(char::is_whitespace)
     }
 }
 
-/// The effort or route rows `args_query` leads into, if any. The longer typed
-/// token wins. On a tie the route phase wins: a shared name can equal another
-/// model's id, and the group row inserts that name.
+/// The effort or route rows `args_query` leads into, if any.
+///
+/// The longer typed token wins. On a tie the route phase wins: a shared name
+/// can equal another model's id, and the group row inserts that name.
 fn sub_phase_items(models: &ModelState, args_query: &str) -> Option<Vec<ArgItem>> {
     let effort = detect_effort_phase(models, args_query);
     let route = detect_route_phase(models, args_query);
@@ -146,8 +155,9 @@ fn sub_phase_items(models: &ModelState, args_query: &str) -> Option<Vec<ArgItem>
     }
 }
 
-/// The model and the matched length when `args_query` is `"<reasoning-model>
-/// ..."`. Longest-name-first to disambiguate names that share a prefix.
+/// The model and the matched length when `args_query` is
+/// `"<reasoning-model> ..."`. Longest-name-first to disambiguate names that
+/// share a prefix.
 fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<(acp::ModelId, usize)> {
     // A model is typed by its id, or by its name when no other model has it. A
     // shared name leads to the route phase instead.
@@ -320,13 +330,15 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
 }
 
 /// One row per model name. Reasoning models get a trailing space in
-/// `insert_text` so the prompt widget chains into the effort sub-menu. A name
-/// that several models share is one row. It inserts the name and a space,
-/// which opens the route phase: one row per provider serving it.
-/// `favorites_only` narrows the list to the models the config marked, plus
-/// the current one. A picker that hides what the session is running reads as
-/// a model that went missing. A catalog with no favorite in it lists
-/// everything, so an unconfigured session sees the whole catalog as before.
+/// `insert_text` so the prompt widget chains into the effort sub-menu.
+///
+/// A name that several models share is one row. It inserts the name and a
+/// space, which opens the route phase: one row per provider serving it.
+///
+/// `favorites_only` narrows the list to the models the config marked, plus the
+/// current one — a picker that hides what the session is running reads as a
+/// model that went missing. A catalog with no favorite in it lists everything,
+/// so an unconfigured session sees the whole catalog as before.
 fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
     let narrow = favorites_only && models.available.values().any(is_favorite);
@@ -391,7 +403,8 @@ fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> 
             insert_text: chained_insert(&token, info),
             match_text: token,
             description: row_description(info),
-            // Only a provider that reports residency answers this, so the dot appears beside local models and nowhere else.
+            // Only a provider that reports residency answers this, so the dot
+            // appears beside local models and nowhere else.
             loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
         });
     }
@@ -468,7 +481,7 @@ mod tests {
         }
     }
 
-    /// Models, one of them marked, and the session is running an
+    /// Three models, one of them marked, and the session is running an
     /// unmarked one.
     fn state_with_a_favorite() -> ModelState {
         let mut state = ModelState::default();
@@ -493,7 +506,8 @@ mod tests {
     #[test]
     fn a_typed_query_searches_past_the_favorites() {
         let state = state_with_a_favorite();
-        // The caller ranks the rows, so the command's job is to offer every model the moment anything is typed.
+        // The caller ranks the rows, so the command's job is to offer every
+        // model the moment anything is typed.
         let items = ModelCommand.suggest_args(&ctx_for(&state), "cro").unwrap();
         let names: Vec<&str> = items.iter().map(|i| i.match_text.as_str()).collect();
         assert_eq!(names, vec!["Kept", "Running", "Crowd One"]);
@@ -502,7 +516,8 @@ mod tests {
     #[test]
     fn the_modal_picker_is_handed_every_model_to_search() {
         let state = state_with_a_favorite();
-        // The modal picker asks one time and filters its own copy.
+        // The modal picker asks one time and filters its own copy, so this is
+        // the only chance it gets to see a model that is not a favorite.
         let items = ModelCommand.search_args(&ctx_for(&state), "").unwrap();
         let names: Vec<&str> = items.iter().map(|i| i.match_text.as_str()).collect();
         assert_eq!(names, vec!["Kept", "Running", "Crowd One"]);
@@ -525,7 +540,7 @@ mod tests {
     }
 
     /// The catalog from the report: one built-in model and the same slug
-    /// listed by providers, with no description on the listed copies.
+    /// listed by two providers, with no description on the listed copies.
     fn state_with_a_shared_name() -> ModelState {
         let mut state = ModelState::default();
         for (id, info) in [
@@ -607,7 +622,8 @@ mod tests {
 
     #[test]
     fn an_id_that_is_also_a_shared_name_selects_the_id() {
-        // The report's catalog: `grok-4.7` is the built-in's id and the listed copies' shared name.
+        // The report's catalog: `grok-4.7` is the built-in's id and the
+        // listed copies' shared name. The id is exact, so it wins.
         let state = state_with_a_shared_name();
         let mut ctx = dummy_exec_ctx(&state);
         match ModelCommand.run(&mut ctx, "grok-4.7") {

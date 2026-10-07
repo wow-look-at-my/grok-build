@@ -1,4 +1,4 @@
-#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
 
 //! Filesystem-aware SQLite journal-mode selection.
 //!
@@ -280,7 +280,10 @@ fn hostname_raw() -> Option<String> {
         return None;
     }
     let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    // Lossy on purpose: `host_discriminator` maps every undecodable byte to `-`.
+    // Lossy on purpose: `host_discriminator` maps every undecodable byte to `-`,
+    // so a partly-undecodable name still separates two hosts on a shared volume.
+    // A strict decode would answer `None` and drop the discriminator entirely,
+    // which is the collision this field exists to prevent.
     Some(String::from_utf8_lossy(buf.get(..len)?).into_owned())
 }
 

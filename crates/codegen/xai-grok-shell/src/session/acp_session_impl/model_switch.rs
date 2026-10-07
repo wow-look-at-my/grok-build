@@ -65,7 +65,7 @@ impl SessionActor {
             .set(sampling_config.compactions_remaining);
         self.compaction_at_tokens
             .set(sampling_config.compaction_at_tokens);
-        // The floor is per-model. It is re-resolved here rather than read
+        // The floor is per-model, so it is re-resolved here rather than read
         // per turn: one config load per switch instead of one per message.
         self.output_rate_floor
             .set(crate::agent::config::resolve_output_rate_floor_from_disk(
@@ -273,10 +273,11 @@ impl SessionActor {
         self.emit_status_snapshot_detached();
         Ok(model_id)
     }
-    /// Handle [`SessionCommand::FlattenHistory`]. Rewrites the conversation
-    /// so nothing in it belongs to the model that produced it. A history
-    /// already free of reasoning and tool calls is untouched, and the report
-    /// says nothing was converted.
+    /// Handle [`SessionCommand::FlattenHistory`].
+    ///
+    /// Rewrites the conversation so nothing in it belongs to the model that
+    /// produced it. A history already free of reasoning and tool calls is
+    /// untouched, and the report says nothing was converted.
     pub(super) async fn handle_flatten_history(
         &self,
     ) -> xai_grok_sampling_types::conversation::FlattenReport {
@@ -310,10 +311,10 @@ impl SessionActor {
     ///
     /// `zero_turn` gates the zero-turn-only conversation surgery
     /// (`rewrite_zero_turn_prefix`, the project-instructions/skill-reminder
-    /// insertion). Those assume `conversation[1]` is the synthetic
+    /// insertion): those assume `conversation[1]` is the synthetic
     /// zero-turn user-info prefix slot, which is only true before any real
-    /// turn has run. Pass `true` only from the zero-turn model-switch path.
-    /// Every other caller (e.g. a live mid-session agent swap) must pass
+    /// turn has run. Pass `true` only from the zero-turn model-switch path;
+    /// every other caller (e.g. a live mid-session agent swap) must pass
     /// `false`, or it will silently overwrite the session's real first user
     /// message.
     pub(super) async fn handle_rebuild_agent_for_definition(
@@ -485,6 +486,8 @@ impl SessionActor {
             self.chat_state_handle.replace_conversation(conversation);
         } else {
             // Mid-session: only the system-message head is safe to touch.
+            // `conversation[1]` is a real turn by now, not the zero-turn
+            // prefix slot — leave every other conversation item alone.
             let mut conversation = self.chat_state_handle.get_conversation().await;
             let _ = replace_or_insert_system_head(&mut conversation, &new_system_prompt);
             self.chat_state_handle.replace_conversation(conversation);

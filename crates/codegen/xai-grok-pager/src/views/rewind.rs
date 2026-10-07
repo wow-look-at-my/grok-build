@@ -8,6 +8,10 @@ use crate::theme::Theme;
 use crate::views::prompt_widget::StashedPrompt;
 
 /// One rewindable prompt, as the agent's `x.ai/rewind/points` reply names it.
+///
+/// Every field reads under both the snake_case key this program names and the
+/// camelCase key the agent writes; a reply carrying both spellings of one field
+/// folds them rather than failing the whole reply on a duplicate field.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(try_from = "RewindPointInfoWire")]
 pub struct RewindPointInfo {
@@ -250,7 +254,8 @@ impl TryFrom<RewindConflictInfoWire> for RewindConflictInfo {
 #[derive(Debug)]
 enum RewindPayloadError {
     Alias(xai_tool_types::AliasConflict),
-    /// A field the view cannot render without.
+    /// A field the view cannot render without. It stayed required before the
+    /// shadows existed and stays required after them.
     MissingField(&'static str),
 }
 
@@ -1176,7 +1181,7 @@ mod payload_alias_tests {
             ("prompt_preview", "promptPreview", r#""a""#, r#""b""#),
             ("has_file_changes", "hasFileChanges", "true", "false"),
         ] {
-            // `prompt_index` stays present for the other cases: it is
+            // `prompt_index` stays present for the other four cases: it is
             // required, and its own absence must not be the error under test.
             let json = if canonical == "prompt_index" {
                 format!(r#"{{"{canonical}":{left},"{camel}":{right}}}"#)
@@ -1192,7 +1197,7 @@ mod payload_alias_tests {
     }
 
     /// A required field the payload omits entirely stays required: the shadow
-    /// must not turn a missing index into one index.
+    /// must not turn a missing index into index 0.
     #[test]
     fn a_rewind_point_with_no_prompt_index_at_all_is_still_an_error() {
         for json in [r#"{"createdAt":"x"}"#, r#"{"created_at":"x"}"#] {
@@ -1202,8 +1207,8 @@ mod payload_alias_tests {
         }
     }
 
-    /// These types read a reply and never write one. The key they never emit is
-    /// asserted from the wire side instead: nothing here round-trips.
+    /// These four types read a reply and never write one, so the key they never
+    /// emit is asserted from the wire side instead: nothing here round-trips.
     #[test]
     fn the_points_list_reads_from_either_key_spelling() {
         let camel: RewindPointsResponse = serde_json::from_str(r#"{"rewindPoints":[]}"#).unwrap();
@@ -1267,8 +1272,8 @@ mod payload_alias_tests {
             ("prompt_text", "promptText", r#""a""#, r#""b""#),
         ] {
             // `success` and `target_prompt_index` stay present for the other
-            // cases: both are required, and their absence must not be the error
-            // under test.
+            // three cases: both are required, and their absence must not be the
+            // error under test.
             let json = if canonical == "target_prompt_index" {
                 format!(r#"{{"success":true,"{canonical}":{left},"{camel}":{right}}}"#)
             } else {

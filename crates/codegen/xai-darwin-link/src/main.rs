@@ -1,4 +1,18 @@
-//! Stands in for the macOS linker during a Linux cross build. Compiling for `aarch64-apple-darwin` on Linux works.
+//! Stands in for the macOS linker during a Linux cross build.
+//!
+//! Compiling for `aarch64-apple-darwin` on Linux works. Linking does not: the
+//! Apple frameworks and `libSystem` come from an SDK, and every cross-linker
+//! that reads that SDK also rewrites the search paths rustc passes, which
+//! drops each build script's own static library out of the link.
+//!
+//! So this binary records the link instead of performing it. rustc calls it as
+//! the linker, and it copies every input the command names into one bundle and
+//! writes the argument list beside them. A macOS runner replays that list with
+//! its own `cc` (`ci/darwin-relink.sh`), which is a step of seconds against a
+//! full build of tens of minutes.
+//!
+//! Paths inside the bundle are written as `@BUNDLE@`, and the output as
+//! `@OUT@`, because the replay host mounts the bundle somewhere else.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -30,7 +44,8 @@ fn run() -> Result<(), String> {
     );
     let args = expand_response_files(std::env::args_os().skip(1).collect())?;
     let recorded = record(&args, &bundle)?;
-    // rustc reads the output file after the linker returns.
+    // rustc reads the output file after the linker returns. An empty file is
+    // enough: nothing on this host runs it, and the replay writes the real one.
     write_file(&recorded.output, b"")?;
     Ok(())
 }
@@ -42,9 +57,10 @@ struct Recorded {
     output: PathBuf,
 }
 
-/// Read `@file` arguments into the list they stand for. rustc falls back to a
-/// response file when a command line grows past what the system takes, and
-/// this link names hundreds of rlibs.
+/// Read `@file` arguments into the list they stand for.
+///
+/// rustc falls back to a response file when a command line grows past what the
+/// system takes, and this link names hundreds of rlibs.
 fn expand_response_files(args: Vec<OsString>) -> Result<Vec<String>, String> {
     let mut out = Vec::with_capacity(args.len());
     for arg in args {
@@ -104,7 +120,8 @@ fn record(args: &[String], bundle: &Path) -> Result<Recorded, String> {
             copy_libraries(&dir, &libs, &mut copied_libs)?;
             continue;
         }
-        // An input file: copy it, because rustc deletes its own temporaries as soon as this process returns.
+        // An input file: copy it, because rustc deletes its own temporaries as
+        // soon as this process returns.
         let path = Path::new(arg);
         if path.is_file() {
             seq += 1;
@@ -137,9 +154,10 @@ fn search_dir(arg: &str, next: Option<&String>) -> Option<PathBuf> {
     arg.strip_prefix("-L").map(PathBuf::from)
 }
 
-/// Copy the static and dynamic libraries out of one search directory. A name
-/// already copied is kept: the first `-L` wins, which is the order the linker
-/// itself searches.
+/// Copy the static and dynamic libraries out of one search directory.
+///
+/// A name already copied is kept: the first `-L` wins, which is the order the
+/// linker itself searches.
 fn copy_libraries(dir: &Path, libs: &Path, copied: &mut HashSet<String>) -> Result<(), String> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         // A search path that does not exist is one the real link also skips.
@@ -211,7 +229,7 @@ mod tests {
     }
 
     /// The whole contract in one link: inputs are copied, `-L` directories
-    /// collapse into the bundle's own. The output is a token, and every flag
+    /// collapse into the bundle's own, the output is a token, and every flag
     /// the linker needs survives untouched.
     #[test]
     fn a_recorded_link_is_replayable_from_the_bundle_alone() {
@@ -270,7 +288,7 @@ mod tests {
     }
 
     /// rustc deletes its temporary object directory the moment the linker
-    /// returns. A bundle that only referenced those paths would be empty by
+    /// returns, so a bundle that only referenced those paths would be empty by
     /// the time the macOS job read it.
     #[test]
     fn inputs_are_copied_rather_than_referenced() {

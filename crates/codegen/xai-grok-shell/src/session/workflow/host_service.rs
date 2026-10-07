@@ -24,7 +24,13 @@ pub(crate) const WORKFLOW_MAX_AGENT_RUNS: u32 =
 pub(crate) const DEFAULT_WORKFLOW_MAX_CONCURRENT_AGENTS: usize = 32;
 
 /// The configured cap clamped to the machine's parallelism, so small hosts
-/// run fewer agents at once.
+/// run fewer agents at once. This is the session's OVERALL workflow-agent
+/// concurrency: `WorkflowManager` sizes one shared semaphore from it and
+/// every active run in the session draws its slots from that same pool, so
+/// several concurrent runs never push total live agents past this cap. An
+/// operator in an environment where too many concurrent requests trip a hard
+/// rate limit sets this (or `GROK_WORKFLOW_MAX_CONCURRENT_AGENTS`) low enough
+/// to stay under it.
 pub(crate) fn workflow_max_concurrent_agents(configured: usize) -> usize {
     workflow_max_concurrent_agents_from(
         configured,
@@ -73,9 +79,13 @@ pub(crate) struct WorkflowAgentStats {
 
 pub(crate) struct WorkflowHostParams {
     pub run_id: String,
-    /// The configured cap, kept for logging/telemetry.
+    /// The configured cap, kept for logging/telemetry; the actual limit is
+    /// enforced by `agent_slots`, which this run's cap was sized into.
     pub max_concurrent_agents: usize,
-    /// Slots shared by every active run.
+    /// Slots shared by every active run in the session (owned by
+    /// `WorkflowManager`), so wider fan-outs queue in order across runs too —
+    /// not just within one. This is what caps a workflow's OVERALL
+    /// concurrency, as opposed to any single run's.
     pub agent_slots: Arc<tokio::sync::Semaphore>,
     pub cwd: PathBuf,
     pub scratch_dir: PathBuf,
@@ -175,8 +185,13 @@ struct HostService {
     params: WorkflowHostParams,
 }
 
-/// The run's roster row for one agent, and the totals that round charged to
-/// it. `finish` is called on every path that returns a value.
+/// The run's roster row for one agent, and the totals that round charged to it.
+///
+/// `finish` is called on every path that returns a value. Drop covers the one
+/// path that returns nothing: a round that unwound leaves no caller to record
+/// the row, so the guard records it. Without that, the row keeps the state
+/// "running" for the rest of the run's life -- and a row in that state is the
+/// one the capped roster refuses to evict.
 struct FinishOnce<'a> {
     host: &'a HostService,
     agent_id: String,
@@ -234,6 +249,10 @@ impl Drop for FinishOnce<'_> {
 }
 
 /// One live agent of a run, for as long as a single spawn round is in flight.
+///
+/// The count feeds the run's live-agent readout and its peak-concurrency
+/// stat, and it is what a reader distinguishes a running run from a stalled
+/// one. A round that unwinds has to hand the count back like any other.
 struct ActiveAgent<'a> {
     host: &'a HostService,
 }
@@ -312,7 +331,7 @@ impl HostService {
             WorkflowHostRequest::SpawnAgent { opts, reply } => {
                 let svc = self.clone();
                 tokio::spawn(async move {
-                    // The script parks on `reply` for this whole round. A
+                    // The script parks on `reply` for this whole round, so a
                     // panic has to be sent as the failure it is rather than
                     // close the channel.
                     let outcome = xai_grok_tools::util::detached::guarded(
@@ -1084,8 +1103,8 @@ mod tests {
     }
 
     /// Like [`test_host_params`], but the caller supplies the agent-slot
-    /// semaphore. Calls can share one pool the way multiple runs
-    /// launched from the same `WorkflowManager` do.
+    /// semaphore, so two calls can share one pool the way two runs launched
+    /// from the same `WorkflowManager` do.
     fn test_host_params_with_slots(
         run_id: &str,
         max_concurrent_agents: usize,
@@ -1349,9 +1368,9 @@ mod tests {
         let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
     }
 
-    /// Runs launched from the same `WorkflowManager` share its
+    /// Two runs launched from the same `WorkflowManager` share its
     /// `agent_slots` semaphore. This proves the cap is enforced OVERALL,
-    /// across both runs at once, not within each run separately.
+    /// across both runs at once, not just within each run separately.
     #[tokio::test]
     async fn two_runs_share_the_session_wide_agent_slots() {
         const CAP: usize = 1;
@@ -1476,9 +1495,9 @@ mod tests {
 
     /// A spawn round that unwinds returns no value, so nothing runs the
     /// `finish` call or the live-agent decrement that a returning round does.
-    /// Both are the run's only record that the agent existed. A roster row left
-    /// on "running" is the one the capped roster refuses to evict. A live count
-    /// that never came back reads as an agent still working.
+    /// Both are the run's only record that the agent existed: a roster row left
+    /// on "running" is the one the capped roster refuses to evict, and a live
+    /// count that never came back reads as an agent still working.
     #[tokio::test]
     async fn a_panicking_agent_round_frees_its_live_count_and_fails_its_row() {
         let run_id = "wf_panicking_round".to_string();

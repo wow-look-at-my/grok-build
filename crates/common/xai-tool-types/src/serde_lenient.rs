@@ -113,11 +113,11 @@ where
     })
 }
 
-/// The same leniency over `Option<Vec<String>>`. That leniency is for a shadow
-/// struct. That must tell a key the sender omitted from a key it sent as `null`
-/// or `[]` before folding one field's spellings together. An omitted key yields
-/// `None`. present `null` yields `Some(Vec::new())`, which is what the list
-/// form of the same key means.
+/// The same leniency over `Option<Vec<String>>`, for a shadow struct that must
+/// tell a key the sender omitted from a key it sent as `null` or `[]` before
+/// folding one field's spellings together. An omitted key yields `None`.
+/// present `null` yields `Some(Vec::new())`, which is what the list form of the
+/// same key means.
 pub fn deserialize_lenient_string_list_opt<'de, D>(
     deserializer: D,
 ) -> Result<Option<Vec<String>>, D::Error>

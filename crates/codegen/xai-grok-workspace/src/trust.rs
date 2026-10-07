@@ -1732,6 +1732,10 @@ trusted = true
 
     #[test]
     fn workspace_key_collapses_repo_local_grok_worktree_onto_main_checkout() {
+        // Criterion 5: a checkout under the REPOSITORY's own
+        // `.grok/worktrees/` is just as grok-managed as one under the grok home,
+        // so its trust key collapses onto the main checkout root. The dir is a
+        // plain directory, so only the registry can collapse it.
         let temp = tempfile::TempDir::new().unwrap();
         let root = dunce::canonicalize(temp.path()).unwrap();
         let main_repo = root.join("thing");
@@ -1781,7 +1785,12 @@ trusted = true
 
     #[test]
     fn workspace_key_does_not_collapse_an_unmanaged_dir_in_a_managed_repo() {
-        // Widening the predicate to the repository-local root must not turn.
+        // Widening the predicate to the repository-local root must not turn
+        // "somewhere under the repository" into "grok-managed". The registry IS
+        // populated, with a checkout under `<repo>/.grok/worktrees/` pointing at
+        // a different source repo, so a directory beside that root, in a path no
+        // longer managed, must resolve through git topology to its own repo root
+        // rather than through that record.
         let temp = tempfile::TempDir::new().unwrap();
         let root = dunce::canonicalize(temp.path()).unwrap();
         let main_repo = root.join("thing");

@@ -145,6 +145,9 @@ pub(crate) struct AgentRebuildSpec {
     pub tool_params_json: ResolvedToolParamsJson,
     pub subagent_event_tx: Option<UnboundedSender<SubagentEvent>>,
     /// Route from this session to the one that spawned it, for `send_message`.
+    /// Only a subagent session carries one; a top-level session has no parent.
+    /// It lives on the spec so a rebuild re-registers it — a mode switch must
+    /// not quietly take a child's way of answering its parent away.
     pub parent_messenger: Option<xai_grok_tools::implementations::grok_build::ParentMessenger>,
     pub subagent_coordinator_sender: Option<
         xai_grok_tools::implementations::grok_build::task::backend::SubagentCoordinatorSender,

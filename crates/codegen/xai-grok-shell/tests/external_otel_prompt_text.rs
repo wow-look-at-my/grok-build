@@ -2,7 +2,7 @@
 //! construction canary cannot live in the lib test suite.
 //!
 //! The external stream is hard-disabled in this build, so even a valid double
-//! opt-in leaves it inactive. The prompt text never rides the event.
+//! opt-in leaves it inactive and the prompt text never rides the event.
 
 use xai_grok_telemetry::external::{self, ExternalOtelConfig};
 

@@ -242,6 +242,8 @@ pub struct SubagentRuntimeOverrides {
     pub spawn_depth: Option<u32>,
     pub output_token_budget: Option<u64>,
     /// Optional per-spawn foreground await budget override in milliseconds.
+    /// Internal harnesses use this to give long-running roles a larger wait
+    /// window without changing the ordinary TaskTool budget.
     pub foreground_wait_budget_ms: Option<u64>,
     pub output_schema: Option<serde_json::Value>,
     pub loop_task_id: Option<String>,
@@ -470,6 +472,12 @@ pub struct SubagentResult {
     /// `success`. Task `run_in_background` start is a separate registration signal, not this flag on `spawn()`.
     pub backgrounded: bool,
     /// Item contents of the child's OWN todo list when it finished, in order.
+    ///
+    /// Read from the child's live `State<TodoState>` at completion, before its
+    /// session is torn down; empty for a child that kept no list. A `/goal`
+    /// planner builds its list with `todo_write` while it works, and this is
+    /// the channel that carries those items back to the session that spawned
+    /// it, so the parent can merge them into its own list.
     pub todos: Vec<String>,
 }
 
@@ -987,9 +995,12 @@ pub enum SubagentMessageOutcome {
     NotFound,
 }
 
-/// A message addressed to one subagent by the session that spawned it. Unlike
-/// [`SubagentEvent::Interject`], which the host sends on the user's behalf,
-/// this arrives from a model tool.
+/// A message addressed to one subagent by the session that spawned it.
+///
+/// Unlike [`SubagentEvent::Interject`], which the host sends on the user's
+/// behalf, this arrives from a model tool. It is therefore scoped: a child of
+/// another session answers `NotOwned`, and the sender gets a real outcome
+/// instead of a silent drop.
 #[derive(Educe)]
 #[educe(Debug)]
 pub struct SubagentMessageChildRequest {

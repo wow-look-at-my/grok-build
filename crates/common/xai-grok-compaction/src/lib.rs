@@ -1,7 +1,7 @@
-#![allow(clippy::cast_lossless)] // Hits predate the gate
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_precision_loss)]
-#![allow(clippy::cast_sign_loss)] // Hits predate the gate
+#![allow(clippy::cast_lossless)] // 14 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 26 hits predate the gate
+#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
+#![allow(clippy::cast_sign_loss)] // 3 hits predate the gate
 
 //! Shared, transport-agnostic compaction engine.
 //!

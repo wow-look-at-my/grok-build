@@ -96,7 +96,7 @@ impl ScreenTracker {
     }
 
     /// Scrollback history plus the visible screen, joined oldest to newest: everything a user could see by scrolling up.
-    /// everything a user could see by scrolling up.
+    /// Output may be in either region depending on how much has accumulated.
     pub fn full_text(&self) -> String {
         let sb = self.scrollback_text();
         let screen = self.contents();

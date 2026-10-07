@@ -1,4 +1,10 @@
 //! Actor-internal state.
+//!
+//! The actor's command-loop serialization gives us a "single-threaded with
+//! shared state" discipline matching the hunk-tracker pattern, so fields
+//! touched only from the actor task need no synchronization.
+//! [`ImageInputRejections`] is the exception: per-request tasks write it, so it
+//! carries its own lock.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -9,12 +15,22 @@ use xai_grok_sampling_types::{ConversationRequest, ImageStripReason, ToolSchemaF
 use crate::config::{RetryPolicy, SamplerConfig};
 use crate::types::RequestId;
 
-/// Models observed to reject image input outright, shared between the actor and its per-request tasks.
+/// Models observed to reject image input outright, shared between the actor
+/// and its per-request tasks (the tasks are what see the rejection).
+///
+/// Without this, only the failing request recovers: the images stay in
+/// conversation history, so every later turn re-uploads them and eats another
+/// rejection before stripping again.
 #[derive(Clone, Default)]
 pub(crate) struct ImageInputRejections(Arc<Mutex<HashSet<String>>>);
 
 impl ImageInputRejections {
     /// The set, taken back from a holder that died holding it.
+    ///
+    /// `expect`ing here would turn one request task's panic into a panic on
+    /// every later turn: the actor loop reads this set before each request, and
+    /// a `HashSet<String>` a panic walked out of is no less usable than one it
+    /// did not.
     #[allow(clippy::disallowed_methods)] // takes the set back as the doc above says
     fn rejections(&self) -> std::sync::MutexGuard<'_, HashSet<String>> {
         self.0
@@ -30,7 +46,8 @@ impl ImageInputRejections {
         self.rejections().contains(model)
     }
 
-    /// Strip images up front when `model` is known to reject them.
+    /// Strip images up front when `model` is known to reject them. Returns how
+    /// many were stripped (0 when the model is fine, or carries no images).
     pub(crate) fn strip_if_rejected(
         &self,
         model: &str,

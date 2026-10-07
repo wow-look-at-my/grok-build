@@ -43,7 +43,8 @@ pub enum ConfigUpdate {
     /// That method content-dedupes self-writes (`persist` / `renew_ttl`) before applying.
     /// The variant carries no payload: validation (TTL, version, auth method) requires `ModelsManager` state the reloader doesn't have.
     ModelsCacheChanged,
-    /// A key the output-rate floor resolves from changed. Every resident session re-reads its floor.
+    /// A key the output-rate floor resolves from changed. Every resident
+    /// session re-reads its floor.
     OutputRateFloorChanged,
     /// Updated UI settings; the agent broadcasts `x.ai/config_changed` to IPC clients.
     Ui { theme: Option<String>, yolo: bool },

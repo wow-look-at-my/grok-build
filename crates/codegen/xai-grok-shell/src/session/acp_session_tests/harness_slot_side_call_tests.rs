@@ -1,4 +1,10 @@
 //! A harness model slot brings its own sampler to a side call.
+//!
+//! `prepare_side_call` used to take the session's client and write the
+//! slot's model id onto it, which sends one model's id to another model's
+//! endpoint. The slot now resolves its own client from the catalog, and a
+//! slot that resolves to nothing keeps the session's client AND the session's
+//! model — never the pinned id on a client that cannot serve it.
 
 use super::support::*;
 use super::*;
@@ -45,10 +51,11 @@ async fn an_unset_slot_keeps_the_session_model_and_window() {
         .await;
 }
 
-/// A pin the session cannot reach falls back to the session model. This is
-/// the defect: the path paired the pinned id with the session's own client.
-/// An unreachable model reached the session model's endpoint under a name
-/// that endpoint does not serve.
+/// A pin the session cannot reach falls back to the session model.
+///
+/// This is the defect: the old path paired the pinned id with the session's
+/// own client, so an unreachable model reached the session model's endpoint
+/// under a name that endpoint does not serve.
 #[tokio::test(flavor = "current_thread")]
 async fn an_unreachable_pin_falls_back_to_the_session_model() {
     let local = tokio::task::LocalSet::new();

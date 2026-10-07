@@ -664,7 +664,11 @@ pub struct PagerArgs {
         value_parser = clap::value_parser!(u64).range(1..)
     )]
     pub background_wait_timeout_secs: u64,
-    /// Sandbox profile for filesystem and network access.
+    /// Sandbox profile for filesystem and network access. `pathbox` selects the
+    /// re-exec jail (bwrap on Linux, Seatbelt on macOS) that binds only
+    /// `~/.grok`, a dedicated tmpfs, a read-only system base, and whatever
+    /// `--ro`/`--rw`/`--rn` name; any other value is a built-in or custom
+    /// grok-build sandbox profile. A `--sandbox` with NO value is invalid.
     #[arg(
         long,
         env = "GROK_SANDBOX",
@@ -673,13 +677,17 @@ pub struct PagerArgs {
         default_missing_value = ""
     )]
     pub sandbox: Option<String>,
-    /// Bind PATH into the pathbox jail read-only. Repeatable.
+    /// Bind PATH into the pathbox jail read-only. Repeatable. A later
+    /// `--ro`/`--rw` overrides an earlier one for the same path or for a path
+    /// inside it. Implies `--sandbox=pathbox`.
     #[arg(long = "ro", value_name = "PATH")]
     pub sandbox_ro: Vec<PathBuf>,
     /// Bind PATH into the pathbox jail read-write. See `--ro` for precedence.
     #[arg(long = "rw", value_name = "PATH")]
     pub sandbox_rw: Vec<PathBuf>,
-    /// Hide PATH from the pathbox jail (acts as an active deny even when the path sits under a visible `--ro`/`--rw` mount or the working directory).
+    /// Hide PATH from the pathbox jail (acts as an active deny even when the
+    /// path sits under a visible `--ro`/`--rw` mount or the working directory).
+    /// Repeatable. Implies `--sandbox=pathbox`.
     #[arg(long = "rn", value_name = "PATH")]
     pub sandbox_rn: Vec<PathBuf>,
     /// Session storage mode: local or writeback.
@@ -1260,7 +1268,7 @@ mod tests {
         );
     }
     /// A bare `--sandbox` (no value) still *parses* at the clap layer (clap turns
-    /// it into an empty string) but is now an invalid request. It must be
+    /// it into an empty string) but is now an invalid request: it must be
     /// rejected by `validate_sandbox`, never silently treated as a jail.
     #[test]
     fn bare_sandbox_parses_but_is_rejected_by_validation() {

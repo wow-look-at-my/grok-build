@@ -345,9 +345,9 @@ required-features = ["test-support"]
 # The profile sandbox's CI hand-off is driven through the shipped startup path
 # (`config::apply_sandbox`), which starts the unsandboxed `gh` worker before the
 # confinement is installed. That needs the child to re-enter this binary and
-# dispatch the worker on the marker env var the way the pager's `main` does. A
-# libtest binary cannot. Its harness ignores the marker and would run the whole
-# suite instead of serving the protocol.
+# dispatch the worker on the marker env var the way the pager's `main` does, and
+# a libtest binary cannot: its harness ignores the marker and would run the
+# whole suite instead of serving the protocol.
 [[test]]
 name = "sandbox_ci_host_startup"
 path = "tests/sandbox_ci_host_startup/main.rs"

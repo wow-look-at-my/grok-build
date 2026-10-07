@@ -611,8 +611,13 @@ fn pid_alive(pid: u32) -> bool {
     kill(Pid::from_raw(pid as i32), None::<Signal>).is_ok()
 }
 
-/// The pid a spawned shell writes to `path`, waiting for the write to land. `>file` creates the file when the shell parses the redirect, before `echo` puts anything in it. A one-shot read can catch it empty — and a read that caught only the first digits would parse to some unrelated live process. This is a far worse way to fail. The trailing
-/// newline is `echo`'s own, so its presence is the proof that the write finished.
+/// The pid a spawned shell writes to `path`, waiting for the write to land.
+///
+/// `>file` creates the file when the shell parses the redirect, before `echo`
+/// puts anything in it, so a one-shot read can catch it empty — and a read
+/// that caught only the first digits would parse to some unrelated live
+/// process, which is a far worse way to fail. The trailing newline is `echo`'s
+/// own, so its presence is the proof that the write finished.
 #[cfg(unix)]
 fn read_pid_when_written(path: &Path) -> u32 {
     const DEADLINE: Duration = Duration::from_secs(5);
@@ -634,10 +639,20 @@ fn read_pid_when_written(path: &Path) -> u32 {
     }
 }
 
-/// Whether `pid` is gone, waiting up to [`REAP_DEADLINE`] for it. The kill is
-/// asynchronous. `killpg` marks SIGKILL pending on every member. Each dies
-/// when it is next scheduled, and only then becomes the zombie (or absence)
-/// that `pid_alive` reads as dead.
+/// Whether `pid` is gone, waiting up to [`REAP_DEADLINE`] for it.
+///
+/// The kill is asynchronous. `killpg` marks SIGKILL pending on every member;
+/// each one dies when it is next scheduled, and only then becomes the zombie
+/// (or absence) that `pid_alive` reads as dead. Measured on this tree with 8
+/// copies of the test running at once — the shape nextest gives it — the
+/// descendants were already gone on 199 of 200 runs and still read live 2ms
+/// later on the 200th. Sampling `/proc` once, the instant the fetch call
+/// returns, is a coin flip against that tail; CI lost it once in two runs of
+/// identical code.
+///
+/// The deadline is 2500x the largest margin seen, and it cannot mask a real
+/// leak: the processes here sleep for 30s, so anything that never got the
+/// signal is still sitting there when it expires.
 #[cfg(unix)]
 fn pid_gone_within_deadline(pid: u32) -> bool {
     const REAP_DEADLINE: Duration = Duration::from_secs(5);

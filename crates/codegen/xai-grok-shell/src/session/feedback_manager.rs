@@ -1560,9 +1560,10 @@ mod tests {
     }
 
     /// Reportable activity must not make shutdown wait on a hung endpoint.
+    ///
     /// `shutdown` caps the final force-sync at `SHUTDOWN_SIGNAL_SYNC_TIMEOUT`
     /// (2s), but that cap is now unreachable: the client refuses every report
-    /// before the wire. The sync fails instantly against an endpoint that
+    /// before the wire, so the sync fails instantly against an endpoint that
     /// never answers. The session below has a turn on it precisely so the
     /// force-sync is attempted rather than skipped.
     #[tokio::test]
@@ -1941,7 +1942,10 @@ mod author_identity_tests {
     use super::*;
     use crate::util::user_identity::ResolvedUserIdentity;
 
-    // No mock backend here: nothing this build produces reaches one.
+    // No mock backend here: nothing this build produces reaches one. The
+    // workflow's observable output is the local `feedback.jsonl` entry, which
+    // it writes before it ever consults a client, so identity resolution and
+    // metadata merging are asserted there.
 
     fn text_submission() -> FeedbackSubmission {
         let mut s = new_submission(
@@ -1955,7 +1959,7 @@ mod author_identity_tests {
 
     /// End-to-end: an env var (as a device-management launcher would inject)
     /// referenced by `[feedback.user]` with `$VAR` is expanded at config load,
-    /// resolved, carried onto the submission. It retained on the local entry.
+    /// resolved, carried onto the submission, and retained on the local entry.
     #[tokio::test]
     #[serial_test::serial]
     async fn env_var_identity_reaches_the_local_entry_end_to_end() {

@@ -8,6 +8,8 @@ use xai_grok_sampling_types::conversation::{
     AssistantItem, ConversationItem, ToolCall, ToolResultItem,
 };
 
+/// The 400 a provider answers with when the history carries an encrypted
+/// reasoning blob it cannot decrypt.
 fn encrypted_content_error() -> xai_grok_sampler::SamplingErrorInfo {
     xai_grok_sampler::SamplingErrorInfo {
         kind: xai_grok_sampler::SamplingErrorKind::Api,
@@ -111,7 +113,7 @@ async fn an_encrypted_content_rejection_flattens_and_resubmits() {
 
 /// A second rejection on an already-flat history has nothing left to convert.
 /// Resubmitting the same bytes forever is the failure this bound prevents, so
-/// the turn ends and reports what the model said.
+/// the turn ends and reports what the model actually said.
 #[tokio::test(flavor = "current_thread")]
 async fn a_rejection_with_nothing_left_to_convert_is_terminal() {
     let local = tokio::task::LocalSet::new();

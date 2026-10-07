@@ -1,4 +1,4 @@
-#![allow(clippy::cast_lossless)]
+#![allow(clippy::cast_lossless)] // 1 hit predates the gate
 #![allow(
     unused_imports,
     unused_variables,
@@ -75,7 +75,9 @@ pub struct DoomLoopRecoverySettings {
     /// `Some(false)` is a kill-switch; absent uses the client default (on).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    /// Highest `tail_repetition` threshold considered confident.
+    /// Highest `tail_repetition` threshold considered confident. A CLIENT-side
+    /// filter over the trigger labels the server returns. The server emits
+    /// every fired threshold, and this is never sent as a request parameter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_threshold: Option<u32>,
     /// Resample budget per turn. `-1` or `"unlimited"` never runs out.
@@ -100,8 +102,13 @@ pub struct LongReasoningReminderSettings {
     pub delay: Option<u32>,
 }
 /// Advanced knobs for the output-rate floor: the `[output_rate_floor]` TOML
-/// table. Every field is `Option` so a partial table never fails the parse
-/// and each key falls through to the client default on its own.
+/// table. Every field is `Option` so a partial table never fails the parse and
+/// each key falls through to the client default on its own.
+///
+/// The floor itself and how long a breach must last are NOT here. Those live
+/// in the `[ui]` table, where the settings modal writes them, and one model
+/// overrides the floor with `[model.<id>].min_output_tokens_per_sec`. One key,
+/// one home.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct OutputRateFloorSettings {
@@ -341,6 +348,7 @@ pub struct ConsentGate {
 /// - Missing fields from old servers are ignored
 /// - New fields added in the future don't break existing clients
 /// - Callers can distinguish "server said false" from "server didn't say"
+///
 /// `remote = "Self"` makes the derives inherent functions. The trait impls
 /// below call them, and `Deserialize` folds `nfs_worktree` first.
 /// trait method, never the inherent `RemoteSettings::deserialize`.
@@ -736,6 +744,8 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub worktree_type: Option<String>,
     /// Grove-projected worktree strategy (`true` means grove-fuse or grove-nfs, `false` means copy).
+    /// `Some(false)` is the remote kill switch. `nfs_worktree` folds in through
+    /// [`RemoteSettings::GROVE_WORKTREE_KEYS`].
     #[serde(default)]
     pub grove_worktree: Option<bool>,
     /// Server-recommended default for `restore_code` in worktree resume.
@@ -1172,8 +1182,8 @@ mod tests {
         );
     }
 
-    /// Different ids in one entry decide which campaign applies, so neither key
-    /// may win in silence.
+    /// Two different ids in one entry decide which campaign applies, so neither
+    /// key may win in silence.
     #[test]
     fn a_remote_campaign_whose_id_spellings_disagree_is_an_error_naming_the_field() {
         let err = serde_json::from_str::<CampaignOverride>(r#"{"id":"a","campaign_id":"b"}"#)
@@ -1183,8 +1193,8 @@ mod tests {
         assert!(message.contains("campaign_id"), "{message}");
     }
 
-    /// The patch is what a campaign carries, so `campaign_id` must not be
-    /// left behind in it as another key.
+    /// The patch is what a campaign carries, so `campaign_id` must not be left
+    /// behind in it as just another key.
     #[test]
     fn a_remote_campaign_writes_the_canonical_id_and_never_the_alias() {
         let json = serde_json::to_value(CampaignOverride {

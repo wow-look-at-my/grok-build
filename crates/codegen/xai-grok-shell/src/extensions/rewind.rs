@@ -36,7 +36,8 @@ struct RewindSessionRequest {
 }
 
 impl RewindSessionRequest {
-    /// The keys [`session_id`](Self::session_id) is read under.
+    /// The keys [`session_id`](Self::session_id) is read under. ACP params are
+    /// camelCase; the snake_case spelling is what the older callers sent.
     const SESSION_ID_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("session_id", &["sessionId"]);
     /// The keys [`target_prompt_index`](Self::target_prompt_index) is read under.
@@ -61,10 +62,10 @@ impl RewindSessionRequest {
         Err(acp::Error::invalid_params().data("targetPromptIndex or targetResponseId is required"))
     }
 }
-/// `RewindSessionRequest` as an ACP client sends it. That
-/// `RewindSessionRequest` is with each key spelling its own field, so a request
-/// naming both folds them rather than tripping serde's duplicate-field check.
-/// See the `*_KEYS` consts on [`RewindSessionRequest`].
+/// `RewindSessionRequest` as an ACP client sends it, with each key spelling its
+/// own field, so a request naming both folds them rather than tripping serde's
+/// duplicate-field check. See the `*_KEYS` consts on
+/// [`RewindSessionRequest`].
 #[derive(Deserialize)]
 struct RewindSessionRequestWire {
     #[serde(default)]
@@ -110,7 +111,8 @@ impl TryFrom<RewindSessionRequestWire> for RewindSessionRequest {
 #[derive(Debug)]
 enum RewindParamsError {
     Alias(xai_tool_types::AliasConflict),
-    /// `session_id` stays required: it was required before the shadow existed.
+    /// `session_id` stays required: it was required before the shadow existed,
+    /// and a rewind with no session to rewind is not a thing to guess at.
     MissingSessionId,
 }
 
@@ -138,7 +140,8 @@ struct RewindPointsRequest {
 }
 
 impl RewindPointsRequest {
-    /// The keys [`session_id`](Self::session_id) is read under.
+    /// The keys [`session_id`](Self::session_id) is read under; the same pair
+    /// [`RewindSessionRequest::SESSION_ID_KEYS`] folds.
     const SESSION_ID_KEYS: xai_tool_types::Aliases = RewindSessionRequest::SESSION_ID_KEYS;
 }
 
@@ -235,6 +238,8 @@ mod wire_alias_tests {
         }
     }
 
+    /// A client that names the same id twice — which a proxy that rewrites key
+    /// casing on the way through produces — says one thing, not two.
     #[test]
     fn rewind_params_naming_both_spellings_under_one_value_parse_once() {
         let request: RewindSessionRequest = serde_json::from_str(

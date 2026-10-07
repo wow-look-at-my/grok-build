@@ -35,8 +35,8 @@ fn test_conversation_item_roundtrip() {
     assert_eq!(chat_msg.tool_call_id, Some("call_123".to_string()));
 }
 
-/// `reasoning_content` is unverified text, so `Native` and `TextOnly` send
-/// the same body. `Scrubbed` is the level that changes it: the fold has
+/// `reasoning_content` is unverified text, so `Native` and `TextOnly` send the
+/// same body. `Scrubbed` is the one level that changes it: the fold has
 /// nothing to fold.
 #[test]
 fn the_replay_level_only_scrubs_a_chat_completions_request() {
@@ -541,9 +541,9 @@ fn wire_reasoning_effort_remaps_only_mandatory_disabled_tiers() {
 }
 
 /// A reasoning-mandatory target must never be sent a chat-completions body
-/// that disables reasoning. Any requested effort resolving to `None` (or to a
+/// that disables reasoning: any requested effort resolving to `None` (or to a
 /// `None`/`Minimal`/unset request) is remapped to the lowest enabled tier
-/// (`low`) on the wire. The disabled `none` signal is never present.
+/// (`low`) on the wire, and the disabled `none` signal is never present.
 #[test]
 fn mandatory_target_never_disables_reasoning_on_chat_completions_wire() {
     // These requests all resolve to a disabled/omitted effort and must be
@@ -569,9 +569,9 @@ fn mandatory_target_never_disables_reasoning_on_chat_completions_wire() {
     }
 }
 
-/// A non-mandatory target is unchanged: requesting `None` serializes `none`.
-/// An unset effort stays absent — no behavior change for models that do not
-/// mandate reasoning.
+/// A non-mandatory target is unchanged: requesting `None` serializes `none`,
+/// and an unset effort stays absent — no behavior change for models that do
+/// not mandate reasoning.
 #[test]
 fn non_mandatory_target_is_unchanged_on_chat_completions_wire() {
     let req = ConversationRequest {
@@ -790,7 +790,7 @@ fn upgrade_then_fold_through_conversation_to_chat_messages() {
 }
 
 /// Chat Completions is the widest provider surface (every OpenAI-compatible
-/// gateway). The loop's hand-built turn has to land as an assistant message
+/// gateway), so the loop's hand-built turn has to land as an assistant message
 /// carrying the call plus a matching `tool` message.
 #[test]
 fn todo_capture_loop_maps_to_assistant_call_and_tool_message() {
@@ -819,8 +819,8 @@ fn todo_capture_loop_maps_to_assistant_call_and_tool_message() {
     );
 }
 
-/// A later gemini rejects a replayed function call whose thought signature is
-/// missing. The signature only ever reaches an OpenAI-shaped client on the
+/// Gemini 3 rejects a replayed function call whose thought signature is
+/// missing, and the signature only ever reaches an OpenAI-shaped client on the
 /// call itself. Whatever spelling it arrived in has to go back out unchanged.
 #[test]
 fn a_tool_calls_provider_fields_survive_the_round_trip() {
@@ -848,8 +848,8 @@ fn a_tool_calls_provider_fields_survive_the_round_trip() {
 }
 
 /// The passthrough is only for the keys a provider reads back. Response-shaped
-/// bookkeeping is not one of them. A call that arrived with nothing extra must
-/// serialize exactly as it did before any of this existed.
+/// bookkeeping is not one of them, and a call that arrived with nothing extra
+/// must serialize exactly as it did before any of this existed.
 #[test]
 fn a_tool_call_without_provider_fields_replays_unchanged() {
     let wire = serde_json::json!({
@@ -877,11 +877,21 @@ fn a_tool_call_without_provider_fields_replays_unchanged() {
     );
 }
 
+// ============================================================================
 // Strict-schema message profiles (Cerebras `wrong_api_format`)
+// ============================================================================
+//
+// Cerebras validates its Chat Completions message schema strictly: an
+// unrecognized property on any message is a hard 400, so a replayed
+// assistant message carrying `model_id` (which this crate writes into stored
+// history) bricks the conversation from turn 2 onward. These tests drive the
+// real serialized body — the observable the provider actually sees — and
+// assert that a strict target receives no unsupported property while a
+// tolerant target's body is byte-for-byte unchanged.
 
 /// A two-turn conversation whose assistant items carry both a recorded
-/// `model_id` and a replayed reasoning sibling — exactly. The history
-/// shape that produced a later cerebras on `messages.6.assistant`.
+/// `model_id` and a replayed reasoning sibling — exactly the history shape
+/// that produced the Cerebras 400 on `messages.6.assistant`.
 fn history_with_model_id_and_reasoning() -> Vec<ConversationItem> {
     vec![
         ConversationItem::system("You are helpful."),
@@ -908,11 +918,12 @@ fn wire_body(items: Vec<ConversationItem>, profile: ChatMessageProfile) -> serde
 }
 
 /// The decisive check: for a strict-schema target, the serialized assistant
-/// messages carry neither `model_id` nor `reasoning_content`. This drives the
-/// real `From<ConversationRequest> for ChatCompletionRequest` conversion (the
-/// same one `SamplingClient::conversation_stream` uses), then inspects the
-/// JSON the provider would receive. Both properties are absent, not null or
-/// empty — a strict schema rejects on presence.
+/// messages carry neither `model_id` nor `reasoning_content`.
+///
+/// This drives the real `From<ConversationRequest> for ChatCompletionRequest`
+/// conversion (the same one `SamplingClient::conversation_stream` uses), then
+/// inspects the JSON the provider would receive. Both properties are absent,
+/// not null or empty — a strict schema rejects on presence.
 #[test]
 fn strict_profile_omits_model_id_and_reasoning_content_from_wire_body() {
     let body = wire_body(
@@ -946,7 +957,10 @@ fn strict_profile_omits_model_id_and_reasoning_content_from_wire_body() {
         );
     }
 
-    // The conversation itself must survive: dropping both properties must not drop content or structure.
+    // The conversation itself must survive: dropping the two properties must
+    // not drop content or structure. The `Reasoning` sibling folds into the
+    // assistant, so it contributes no message of its own: system, user,
+    // assistant, user.
     assert_eq!(assistant["content"], serde_json::json!("a1"));
     assert_eq!(messages.len(), 4, "structure preserved: {messages:#?}");
     assert_eq!(messages[0]["role"], "system");
@@ -1063,7 +1077,7 @@ fn strict_profile_preserves_tool_calls_and_results() {
 
 /// Only the *serialized body* is narrowed. The stored conversation keeps both
 /// values, which is what lets the Messages backend resolve thinking
-/// signatures. It lets a later turn on a tolerant provider still send
+/// signatures and lets a later turn on a tolerant provider still send
 /// reasoning.
 #[test]
 fn strict_profile_leaves_stored_history_untouched() {
@@ -1074,7 +1088,8 @@ fn strict_profile_leaves_stored_history_untouched() {
     req.chat_message_profile = ChatMessageProfile::STRICT;
     let _wire: crate::types::ChatCompletionRequest = req.into();
 
-    // `req.items` is moved by the conversion; assert on a freshly built request instead, so the check is on stored state.
+    // `req.items` is moved by the conversion; assert on a freshly built
+    // request instead, so the check is on stored state, not the wire.
     let mut stored = ConversationRequest::from_items(before);
     stored.chat_message_profile = ChatMessageProfile::STRICT;
 
@@ -1101,7 +1116,7 @@ fn strict_profile_leaves_stored_history_untouched() {
 }
 
 /// `narrowed_by` can only narrow: a caller cannot re-widen a strict model,
-/// and permissive sides stay permissive.
+/// and two permissive sides stay permissive.
 #[test]
 fn profile_narrowing_is_monotonic() {
     let p = ChatMessageProfile::PERMISSIVE;
@@ -1156,7 +1171,7 @@ fn partial_profiles_suppress_independently() {
 }
 
 /// `strip_unsupported_message_properties` drops exactly what the provider
-/// named. Reports whether it changed anything so the retry loop can tell a
+/// named, and reports whether it changed anything so the retry loop can tell a
 /// productive strip from a no-op.
 #[test]
 fn strip_unsupported_message_properties_narrows_named_fields_only() {
@@ -1191,9 +1206,9 @@ fn strip_with_no_named_property_narrows_both() {
     assert_eq!(req.chat_message_profile, ChatMessageProfile::STRICT);
 }
 
-/// The recovery must reach the wire. The serialized body for the same stored
-/// history carries no unsupported property — which is what un-bricks a
-/// session whose history predates the fix. This applies after a strip.
+/// The recovery must reach the wire: after a strip, the serialized body for
+/// the same stored history carries no unsupported property — which is what
+/// un-bricks a session whose history predates the fix.
 #[test]
 fn strip_then_serialize_omits_unsupported_properties() {
     let mut req = ConversationRequest::from_items(history_with_model_id_and_reasoning());
@@ -1204,7 +1219,7 @@ fn strip_then_serialize_omits_unsupported_properties() {
     let before = serde_json::to_value(&before).unwrap();
     assert!(before["messages"][2].get("model_id").is_some());
 
-    // The provider's names both; strip, then serialize again.
+    // The provider's 400 names both; strip, then serialize again.
     assert!(req.strip_unsupported_message_properties(true, true));
     let after: crate::types::ChatCompletionRequest = req.into();
     let after = serde_json::to_value(&after).unwrap();

@@ -11,9 +11,13 @@ use std::sync::atomic::Ordering;
 
 /// Auto-compaction is gated whenever `auto_compact_suppressed` is not [`SUPPRESS_NONE`].
 pub(crate) const SUPPRESS_NONE: u8 = 0;
-/// Resolvable failure (`other`, `schema`).
+/// Resolvable failure (`other`, `schema`): suppressed for the current turn,
+/// then cleared at the next turn start so compaction self-heals once the cause
+/// clears.
 pub(crate) const SUPPRESS_TURN: u8 = 1;
-/// Fatal failure (size) retrying can never fix: survives turn boundaries, cleared only when the context budget changes — a successful compaction, a rewind (context shrank).
+/// Fatal failure (size) retrying can never fix: survives turn boundaries,
+/// cleared only when the context budget changes — a successful compaction, a
+/// rewind (context shrank), or a model switch (a larger window may now fit).
 pub(crate) const SUPPRESS_STICKY: u8 = 2;
 /// Credit block: suppress until a model `200` (credits aren't client-observable).
 /// Survives turns; context changes can't fix it.
@@ -23,18 +27,23 @@ pub(crate) const SUPPRESS_UNTIL_SUCCESS: u8 = 3;
 /// Waiting for a sample deadlocks when context is already over the window.
 pub(crate) const SUPPRESS_AUTH: u8 = 4;
 
+/// A `/compact` the user asked for while a turn was running.
+///
 /// Compaction REPLACES the conversation wholesale
 /// (`replace_conversation_for_compaction`), so running it beside a live turn
-/// destroys every tool call and response that turn appends after the
-/// snapshot.
+/// destroys every tool call and response that turn appends after the snapshot.
+/// The turn instead runs this at its next pre-sampling boundary, where no model
+/// call is in flight, and at turn end if it reaches no further boundary.
 pub(crate) struct PendingManualCompact {
     /// The command's argument, from `/compact <instructions>`.
     pub instructions: Option<String>,
-    /// The waiting `x.ai/compact_conversation` caller.
+    /// The waiting `x.ai/compact_conversation` caller. Held until the
+    /// compaction actually runs, so the client reports the real outcome
+    /// instead of a success for work that has not happened.
     pub respond_to: tokio::sync::oneshot::Sender<Result<(), agent_client_protocol::Error>>,
 }
 
-/// Model slug and context window from the turn.
+/// Model slug and context window from the previous turn.
 #[derive(Clone, Debug)]
 pub(crate) struct PreviousModelInfo {
     pub model_slug: String,
@@ -168,7 +177,12 @@ impl PrefireState {
 
 /// Which recovery action `handle_sampling_failure` last took for a
 /// context-window-exceeded sampling error, reset to [`Self::None`] on the
-/// next successful sample.
+/// next successful sample. Read/set only from `handle_sampling_failure`;
+/// exists so two consecutive overflow failures never both attempt
+/// compaction — compaction cannot help a second time when the same content
+/// (e.g. one item alone at the window size) is still there after the first
+/// attempt, so the second attempt must deterministically shrink the sent
+/// conversation instead, and a third must give up rather than retry forever.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ContextOverflowRecovery {
     /// No overflow recovery attempted since the last successful sample.
@@ -176,7 +190,9 @@ pub(crate) enum ContextOverflowRecovery {
     None,
     /// The last attempt ran LLM-based compaction.
     Compacted,
-    /// The last attempt deterministically shrank the conversation (`fit_conversation_to_budget`).
+    /// The last attempt deterministically shrank the conversation
+    /// (`fit_conversation_to_budget`) because compaction already ran once
+    /// for this overflow and did not fit.
     Reduced,
 }
 
@@ -187,8 +203,10 @@ pub(crate) struct CompactionConfig {
     /// Debug: when set, next auto-compact check triggers unconditionally.
     pub force_compact: Arc<AtomicBool>,
     /// See [`PendingManualCompact`]. `Cell` because `SessionActor` is `!Send`.
+    /// Default `None`: nothing is pending until a `/compact` lands mid-turn.
     pub pending_manual_compact: Cell<Option<PendingManualCompact>>,
-    /// Auto-compaction suppression state (`SUPPRESS_*`) after a deterministic failure; the gates early-return unless `SUPPRESS_NONE`.
+    /// Auto-compaction suppression state (`SUPPRESS_*`) after a deterministic
+    /// failure; the gates early-return unless `SUPPRESS_NONE`. Manual `/compact` ignores it.
     pub auto_compact_suppressed: AtomicU8,
     /// Locks the context window when `GROK_DEBUG_CONTEXT_WINDOW` is set.
     pub context_window_override: Option<std::num::NonZeroU64>,

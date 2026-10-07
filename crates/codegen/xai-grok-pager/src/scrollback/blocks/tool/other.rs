@@ -19,7 +19,9 @@ pub struct OtherToolCallBlock {
     pub started_at: Option<std::time::Instant>,
     /// Elapsed time in ms after completion.
     pub elapsed_ms: Option<i64>,
-    /// The tail of the arguments the model is writing right now, decoded and split into lines.
+    /// The tail of the arguments the model is writing right now, decoded and
+    /// split into lines. Only a call still being streamed has any: the real
+    /// `ToolCall` replaces this block outright once the call is whole.
     pub streaming_preview: Vec<String>,
     /// Image references detected in the tool output.
     image_refs: Vec<crate::prompt_images::ScrollbackImageRef>,
@@ -165,10 +167,11 @@ impl OtherToolCallBlock {
         }
     }
 
-    /// The arguments arriving right now, one dim line each. Indented under
-    /// the header and truncated rather than wrapped: the tail is redrawn on
-    /// every fragment. A wrapped line changes the block's height as the
-    /// model types, which makes the whole transcript jump.
+    /// The arguments arriving right now, one dim line each.
+    ///
+    /// Indented under the header and truncated rather than wrapped: the tail
+    /// is redrawn on every fragment, and a wrapped line changes the block's
+    /// height as the model types, which makes the whole transcript jump.
     fn streaming_preview_lines(&self, theme: &Theme, width: usize) -> Vec<BlockLine> {
         const INDENT: &str = "  ";
         let body_width = width.saturating_sub(INDENT.len()).max(8);
@@ -261,7 +264,8 @@ impl BlockContent for OtherToolCallBlock {
         match ctx.mode {
             DisplayMode::Collapsed => {
                 // Collapsed is the default mode, so a call being streamed is
-                // collapsed the whole time it is written.
+                // collapsed the whole time it is written. Its live tail has to
+                // render here or it is never seen at all.
                 let mut lines: Vec<BlockLine> = vec![
                     self.collapsed_line(&theme, muted_collapsed, Some(ctx.content_width()))
                         .into(),

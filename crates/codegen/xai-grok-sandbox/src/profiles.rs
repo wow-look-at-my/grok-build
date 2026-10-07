@@ -73,7 +73,10 @@ pub enum ProfileName {
     Devbox,
     ReadOnly,
     Strict,
-    /// The reserved re-exec **jail** (path mounts via `--ro`/`--rw`/`--rn`), not a nono/Landlock/Seatbelt profile.
+    /// The reserved re-exec **jail** (path mounts via `--ro`/`--rw`/`--rn`), not
+    /// a nono/Landlock/Seatbelt profile. Magic and un-overridable: a project or
+    /// custom `sandbox.toml` profile cannot redefine it, and it never builds a
+    /// `SandboxProfile`/`SandboxManager`.
     Pathbox,
     Off,
     Custom(String),
@@ -413,8 +416,9 @@ impl ProfileName {
             ),
 
             // The pathbox jail is not a nono/Landlock/Seatbelt profile: it is
-            // applied by the re-exec jail (jail.rs) and `apply_sandbox`
-            // returns before reaching resolve.
+            // applied by the re-exec jail (jail.rs) and `apply_sandbox` returns
+            // before reaching resolve. Reaching here means a call site skipped
+            // that interception — fail closed rather than build a hollow profile.
             Self::Pathbox => anyhow::bail!(
                 "sandbox profile 'pathbox' is the path-mount jail, not a resolvable \
                  deny profile; it is applied by the re-exec jail, not SandboxManager"
@@ -582,13 +586,14 @@ mod tests {
     use super::*;
     use crate::test_util::{network_inheritance_config, skip_if_host_hook_write_deny_unresolvable};
 
-    /// No built-in profile grants a keychain database. This is the condition
-    /// nono's macOS generator reads to decide whether to emit its keychain
-    /// mach-lookup denials. A profile that granted a keychain DB path would
-    /// skip them. Every item in the login keychain, `gh`'s OAuth token among
-    /// them, would be readable from inside the confinement. The CI query
-    /// being answered by an unsandboxed host worker is the fix for that;
-    /// widening the profile is not.
+    /// No built-in profile grants a keychain database.
+    ///
+    /// This is the condition nono's macOS generator reads to decide whether to
+    /// emit its keychain mach-lookup denials. A profile that granted a keychain
+    /// DB path would skip them, and every item in the login keychain, `gh`'s
+    /// OAuth token among them, would be readable from inside the confinement.
+    /// The CI query being answered by an unsandboxed host worker is the fix for
+    /// that; widening the profile is not.
     #[test]
     #[cfg(all(feature = "enforce", unix))]
     fn no_built_in_profile_grants_the_login_keychain() {

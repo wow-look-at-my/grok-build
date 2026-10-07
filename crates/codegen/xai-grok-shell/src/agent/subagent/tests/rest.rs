@@ -2619,8 +2619,9 @@ async fn subagent_default_slot_applies_when_nothing_else_pins() {
     assert_eq!(model_id.0.as_ref(), "slot-model");
 }
 
-/// The slot is the LAST resort. A `[subagents.models]` pin is more specific,
-/// so it wins, and the slot never overrides what.
+/// The slot is the LAST resort. A `[subagents.models]` pin is more
+/// specific, so it wins, and the slot never overrides what the user
+/// asked for by agent name.
 #[tokio::test]
 async fn a_per_agent_pin_wins_over_the_subagent_default_slot() {
     use xai_grok_agent::config::ModelOverride;
@@ -2639,9 +2640,9 @@ async fn a_per_agent_pin_wins_over_the_subagent_default_slot() {
     assert_eq!(config.model, "pinned-model");
 }
 
-/// A slot naming a model the catalog does not carry falls through to the
-/// parent model rather than sending a request to a model. That model is not
-/// there.
+/// A slot naming a model the catalog does not carry falls through to
+/// the parent model rather than sending a request to a model that is
+/// not there.
 #[tokio::test]
 async fn an_unknown_subagent_default_slot_model_falls_through_to_inherit() {
     use xai_grok_agent::config::ModelOverride;

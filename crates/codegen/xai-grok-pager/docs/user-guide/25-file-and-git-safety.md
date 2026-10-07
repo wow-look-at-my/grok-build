@@ -2,7 +2,7 @@
 
 Rules Grok Build enforces so relocating or deleting code cannot silently destroy history.
 
-These rules are also loaded into the agent system prompt. The tools refuse the banned actions. Do not work around them.
+These rules are also loaded into the agent system prompt. The tools refuse the banned actions; do not work around them.
 
 ## Relocating code is `cp` / `git mv`, never a rewrite
 
@@ -35,7 +35,7 @@ Do not hide a deletion with:
 - `git filter-branch` / `git filter-repo`
 - force-push of rewritten history
 
-`filter-branch` is not a feature we implement. It is refused.
+`filter-branch` is not a feature we implement; it is refused.
 
 ## Enforcement seams
 

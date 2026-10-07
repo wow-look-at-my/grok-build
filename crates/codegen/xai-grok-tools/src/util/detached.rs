@@ -1,4 +1,13 @@
 //! Making a detached task's panic reach whoever is waiting on its work.
+//!
+//! A `tokio::spawn` whose `JoinHandle` is dropped loses the task's panic. The
+//! task is simply gone, and a caller parked on the thing it was meant to
+//! finish -- a startup flag, a slot in a set, an acknowledgement on a channel
+//! -- waits on work that already died.
+//!
+//! [`guarded`] replaces the bare await, so the panic arrives as an `Err`
+//! naming what the panic carried, at a point where the bookkeeping that
+//! unblocks the caller still runs.
 
 use std::any::Any;
 use std::future::Future;
@@ -6,10 +15,11 @@ use std::panic::AssertUnwindSafe;
 
 use futures_util::FutureExt;
 
-/// Text describing what a panic carried. Both payloads `panic!` itself
-/// produces are a `&'static str` (a literal) and a `String` (a formatted
-/// one). Anything else still has to be reportable, so it is named as a
-/// non-message rather than reported as nothing.
+/// Text describing what a panic carried.
+///
+/// The two payloads `panic!` itself produces are a `&'static str` (a literal)
+/// and a `String` (a formatted one). Anything else still has to be reportable,
+/// so it is named as a non-message rather than reported as nothing.
 pub fn panic_payload(panic: &(dyn Any + Send)) -> String {
     if let Some(text) = panic.downcast_ref::<&'static str>() {
         return (*text).to_string();
@@ -20,10 +30,11 @@ pub fn panic_payload(panic: &(dyn Any + Send)) -> String {
     "panicked with a payload that is not a message".to_string()
 }
 
-/// Run `task` where a panic is a value rather than a lost task. `what` names
-/// the work in the log line, so a panic in detached work is attributable
-/// without a backtrace. The panic hook still runs; this adds the caller's
-/// view of the same failure.
+/// Run `task` where a panic is a value rather than a lost task.
+///
+/// `what` names the work in the log line, so a panic in detached work is
+/// attributable without a backtrace. The panic hook still runs; this adds the
+/// caller's view of the same failure.
 pub async fn guarded<F: Future>(what: &'static str, task: F) -> Result<F::Output, String> {
     match AssertUnwindSafe(task).catch_unwind().await {
         Ok(output) => Ok(output),
@@ -35,8 +46,13 @@ pub async fn guarded<F: Future>(what: &'static str, task: F) -> Result<F::Output
     }
 }
 
-/// Run work that nobody awaits, so its panic is named instead of lost. A
-/// [`guarded`] caller can still act on the `Err`.
+/// Run work that nobody awaits, so its panic is named instead of lost.
+///
+/// A [`guarded`] caller can still act on the `Err`. A detached task with no
+/// waiting caller cannot: nothing reads a value it could return, and the
+/// alternative is a task that simply stops being there. The future ends after
+/// the error is logged under the task's own name, and whoever spawned it is
+/// answered normally rather than with a join failure.
 pub async fn fire_and_forget(what: &'static str, task: impl Future) {
     let _ = guarded(what, task).await;
 }
@@ -69,7 +85,8 @@ mod tests {
                 panic!("the detached work died")
             })
             .await;
-            // What the shipped sites do with the `Err`: answer the caller with it.
+            // What the shipped sites do with the `Err`: answer the caller with
+            // it, so the step that unblocks the caller still runs.
             let _ = done_tx.send(outcome.map(|()| unreachable!("a panicking round finishes")));
         });
 
@@ -83,7 +100,7 @@ mod tests {
     }
 
     /// A formatted payload arrives verbatim, so the caller can tell the
-    /// difference between ways the same task can die.
+    /// difference between two ways the same task can die.
     #[tokio::test]
     async fn a_formatted_payload_reaches_the_caller_verbatim() {
         let outcome = guarded("test detached work", async {
@@ -122,7 +139,7 @@ mod tests {
         assert_eq!(outcome.map(str::to_string), Ok("finished".to_string()));
     }
 
-    /// The point of [`fire_and_forget`] is that the panic stops at the task. A
+    /// The point of [`fire_and_forget`] is that the panic stops at the task: a
     /// bare `tokio::spawn` of the same work answers its spawner with a join
     /// failure, which is the loss this whole file exists to prevent.
     #[tokio::test]

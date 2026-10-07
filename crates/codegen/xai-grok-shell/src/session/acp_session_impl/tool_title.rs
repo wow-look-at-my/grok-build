@@ -1,17 +1,32 @@
 //! The human-readable title of a tool call, from its parsed input alone.
+//!
+//! One function serves both the finished call and the one the model is still
+//! writing. A streaming call re-reads its half-written arguments on each
+//! fragment (`partial_json`), so a second copy of this match would let the row
+//! rename itself the moment the call completed.
 use super::tool_calls::{ci_tool_title, execute_tool_call_parts};
 use super::*;
 use xai_grok_tools::types::tool::ToolKind;
 /// How much of a call's arguments is kept to read a title out of.
+///
+/// What names a call sits at the head of its arguments: a path, a command, a
+/// query. The rest is the body being written — a file's contents, a patch. Once
+/// the head is full the tail is DROPPED, not just left unparsed: a session that
+/// kept it would hold a second copy of every file the model writes, for as long
+/// as the write takes.
 pub(crate) const STREAMING_TITLE_ARG_CAP: usize = 4096;
-/// The head of what the model has written of one tool call. Held per
-/// `tool_index` for the life of a stream.
+/// The head of what the model has written of one tool call.
+///
+/// Held per `tool_index` for the life of a stream. The name arrives once, on
+/// the opening fragment, and the arguments accumulate under it up to the cap.
 pub(crate) struct StreamingToolArgs {
     /// The wire name the opening fragment carried.
     pub(crate) name: String,
     /// The head of the arguments, bounded by [`STREAMING_TITLE_ARG_CAP`].
     pub(crate) args: String,
-    /// Set once a fragment has been cut.
+    /// Set once a fragment has been cut. What is held is then a prefix of a
+    /// longer document, and completing a prefix that stops mid-body can name
+    /// the call something the whole document would not.
     pub(crate) capped: bool,
     /// The last title this call resolved to. Only a change is worth sending.
     pub(crate) title: Option<String>,
@@ -29,7 +44,8 @@ impl StreamingToolArgs {
     pub(crate) fn push(&mut self, delta: &str) {
         let room = STREAMING_TITLE_ARG_CAP.saturating_sub(self.args.len());
         if room == 0 {
-            // Sticky.
+            // Sticky: a call that has lost bytes never becomes whole again, so
+            // a later empty fragment must not read as "nothing was cut".
             self.capped |= !delta.is_empty();
             return;
         }
@@ -42,19 +58,34 @@ impl StreamingToolArgs {
         self.capped |= end < delta.len();
     }
     /// Whether the bytes held are still worth re-reading for a title.
+    ///
+    /// Every fragment is re-read until the head fills, including a
+    /// one-character one. A cheaper rule that waited for a few bytes would skip
+    /// the LAST fragment of a call, which is usually two characters and is
+    /// exactly the one that completes the argument the title is read from.
     pub(crate) fn wants_parse(&self) -> bool {
         !self.capped
     }
 }
-/// What the UI calls this tool call. Pure: `cwd` is only read to shorten a
-/// command for display. Every arm takes what has arrived.
+/// What the UI calls this tool call.
+///
+/// Pure: `cwd` is only read to shorten a command for display. Every arm takes
+/// what has arrived. A field the model has not written yet is absent from the
+/// parsed input, and the arm falls back the same way it does for a call that
+/// omits it.
+///
+/// The match has no catch-all arm. A new `ToolInput` variant then fails to
+/// compile here until it gets a title, instead of reading as a generic label.
+/// `kind` is the registry's kind for `wire_name`. It names the tools whose
+/// input arrives as `Dynamic`, and it survives a `name_override`.
 pub(crate) fn tool_input_title(
     input: &ToolInput,
     wire_name: &str,
     kind: Option<ToolKind>,
     cwd: &std::path::Path,
 ) -> String {
-    // The pager shows an empty title as the ACP kind, which is "Other" for most tools.
+    // The pager shows an empty title as the ACP kind, which is "Other" for
+    // most tools. The wire name at least says which tool ran.
     let title = input_title(input, wire_name, kind, cwd);
     if title.is_empty() {
         wire_name.to_string()
@@ -239,10 +270,11 @@ fn lsp_tool_title(lsp: &xai_grok_tools::implementations::lsp::LspToolInput) -> S
         (None, _) => op.to_string(),
     }
 }
-/// The title of a tool whose input the bridge hands over as raw JSON. The
-/// opencode harness registers its built-ins this way. So the title comes from
-/// the tool's kind and the argument that kind names. A tool the kinds do not
-/// cover shows its wire name, which is the name the model called it by.
+/// The title of a tool whose input the bridge hands over as raw JSON.
+///
+/// The opencode harness registers its built-ins this way. So the title comes
+/// from the tool's kind and the argument that kind names. A tool the kinds do
+/// not cover shows its wire name, which is the name the model called it by.
 fn dynamic_tool_title(
     wire_name: &str,
     kind: Option<ToolKind>,
@@ -394,7 +426,7 @@ mod title_tests {
 mod tests {
     use super::{STREAMING_TITLE_ARG_CAP, StreamingToolArgs};
     /// A write streams the whole file. Holding all of it to name the call would
-    /// put a second copy of every file. The model writes in this session's
+    /// put a second copy of every file the model writes in this session's
     /// memory, for as long as the write takes.
     #[test]
     fn a_large_body_is_dropped_rather_than_held() {

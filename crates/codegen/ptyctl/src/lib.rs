@@ -1,8 +1,8 @@
-#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
-#![allow(clippy::cast_sign_loss)]
-#![allow(clippy::string_slice)]
-#![allow(clippy::unwrap_used)] // Hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // 8 hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // 3 hits predate the gate
+#![allow(clippy::cast_sign_loss)] // 1 hit predates the gate
+#![allow(clippy::string_slice)] // 1 hit predates the gate
+#![allow(clippy::unwrap_used)] // 6 hits predate the gate
 
 //! ptyctl — Headless PTY controller built on alacritty_terminal.
 //!

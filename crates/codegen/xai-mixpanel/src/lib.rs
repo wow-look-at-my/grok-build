@@ -173,10 +173,10 @@ mod tests {
         Mixpanel::with_client("test-token", client)
     }
 
-    /// Drive `fut` with a no-op waker and require it to complete on the first
-    /// poll. The disabled stubs return before touching the network, so they
-    /// resolve synchronously; a reverted stub would return `Pending` (or fail
-    /// on the unroutable proxy), failing the test either way.
+    /// Drive `fut` with a no-op waker and require it to complete on the very
+    /// first poll. The disabled stubs return before touching the network, so
+    /// they resolve synchronously; a reverted stub would return `Pending`
+    /// (or fail on the unroutable proxy), failing the test either way.
     fn poll_once<F: std::future::Future>(fut: F) -> F::Output {
         let mut fut = std::pin::pin!(fut);
         let waker = std::task::Waker::noop();

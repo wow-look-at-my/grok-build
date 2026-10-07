@@ -854,7 +854,11 @@ pub(crate) async fn spawn_session_actor(
         ),
         two_pass_enabled,
     };
-    // The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON, written by the pager's settings modal) is the master switch for the built-in todo-stop gate.
+    // The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON,
+    // written by the pager's settings modal) is the master switch for the
+    // built-in todo-stop gate: it participates in the turn-end stop gate and
+    // consumes the same continuation budget the stop hooks use. The CLI
+    // `--todo-gate` flag stays a session-scoped opt-in on top.
     let mut reminder_policy = resolve_reminder_policy(remote_settings.as_ref(), todo_gate);
     reminder_policy.stop_gate_unfinished_todos = effective_cfg
         .as_ref()
@@ -1754,7 +1758,9 @@ pub(crate) async fn spawn_session_actor(
             .into_iter()
             .filter_map(|c| match c {
                 crate::agent::config::GoalRoleModelChoice::Explicit(p) => Some(p),
-                // A `[models] goal_skeptic` slot names a model only.
+                // A `[models] goal_skeptic` slot names a model only. An
+                // empty agent type is what carries "keep the parent's
+                // harness" through the pool and its persisted assignment.
                 crate::agent::config::GoalRoleModelChoice::ModelOnly(model) => {
                     Some(crate::util::config::GoalRoleModel {
                         model,

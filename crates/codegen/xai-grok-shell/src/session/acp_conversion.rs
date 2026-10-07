@@ -685,7 +685,7 @@ mod tests {
     }
 
     /// The `ci` tool's result must reach the client: before this arm it hit the
-    /// catch-all. The row stayed pending with no result at all.
+    /// catch-all, so the row stayed pending with no result at all.
     #[test]
     fn test_acp_tool_update_ci_returns_the_result() {
         use xai_grok_tools::implementations::grok_build::ci::{CiOutput, CiRunSummary};
@@ -705,7 +705,8 @@ mod tests {
         });
         let update = acp_tool_update(&output, "call-ci", None, None)
             .expect("a CI output must produce an update, not be dropped");
-        // A red branch is a completed query: the tool ran, and it is the branch that is failing.
+        // A red branch is a completed query: the tool ran, and it is the branch
+        // that is failing.
         assert_eq!(update.fields.status, Some(acp::ToolCallStatus::Completed));
         let content = update.fields.content.expect("the result must be shown");
         let rendered = format!("{content:?}");

@@ -39,7 +39,10 @@ pub struct InferenceLatencyStats {
     pub chunk_count: u32,
     /// Inter-token latency intervals (raw data for session aggregation)
     pub itl_intervals_ms: Vec<u64>,
-    /// Arrival offset of each content chunk from `stream_start`, in MICROseconds.
+    /// Arrival offset of each content chunk from `stream_start`, in
+    /// MICROseconds. `itl_intervals_ms` truncates to whole milliseconds, so a
+    /// stream faster than ~1000 chunks/s reads as a run of zeros and its
+    /// jitter is unrecoverable. This keeps the raw arrival curve.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunk_offsets_us: Vec<u64>,
     pub itl_p50_ms: Option<u64>,
@@ -202,7 +205,9 @@ mod tests {
 
         let stats = InferenceLatencyStats::from_timestamps(start, &chunks, end);
 
-        // The millisecond intervals report the fast gaps as zero.
+        // The millisecond intervals report the two fast gaps as zero, so the
+        // stall is the only thing left and every statistic agrees it is
+        // typical. This is what makes an uneven stream unreadable.
         assert_eq!(stats.itl_intervals_ms, vec![0, 0, 4]);
         assert_eq!(stats.itl_p50_ms, Some(0));
 

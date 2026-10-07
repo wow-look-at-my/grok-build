@@ -1,4 +1,11 @@
 //! `ci` — read GitHub CI state for the branch this session is working on.
+//!
+//! The pipeline this tool exists for is commit → push → wait for CI → read the
+//! failing logs → fix → push again. Under `--sandbox` a `gh` spawned from the
+//! session reaches neither the host credentials nor the network, so every
+//! query here rides the same unsandboxed host worker the status dot polls
+//! ([`xai_grok_sandbox::ci_host`]). The worker's allowlist is what keeps this
+//! read-only: no rerun, no cancel, no merge.
 
 use crate::types::requirements::{Expr, ToolRequirement};
 use crate::types::tool::{ToolKind, ToolNamespace};
@@ -9,23 +16,28 @@ pub const CI_TOOL_NAME: &str = "ci";
 /// How long one `wait` call may block before reporting what it last saw.
 const DEFAULT_WAIT_SECS: u64 = 300;
 const MAX_WAIT_SECS: u64 = 1800;
-/// Gap between polls while waiting.
+/// Gap between polls while waiting. `gh run list` is one API call, and a
+/// workflow's state does not move faster than this.
 const WAIT_POLL_SECS: u64 = 15;
 
-/// How much of a failing log one call returns.
+/// How much of a failing log one call returns. The log's tail is what carries
+/// the error, so an oversized body is cut from the front.
 const LOG_TAIL_BYTES: usize = 24_000;
 
 const DEFAULT_RUN_LIMIT: u32 = 10;
 const MAX_RUN_LIMIT: u32 = 50;
 
+// ---------------------------------------------------------------------------
 // Input schema
+// ---------------------------------------------------------------------------
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum CiAction {
-    /// Fold the branch's runs into one state: passing, failing, in_progress, or none.
+    /// Fold the branch's runs into one state: passing, failing, in_progress,
+    /// or none.
     Status,
     /// List the branch's recent runs with their ids, workflows and states.
     Runs,
@@ -73,7 +85,9 @@ pub struct CiInput {
     pub timeout_secs: Option<u64>,
 }
 
+// ---------------------------------------------------------------------------
 // Output
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiRunSummary {
@@ -85,7 +99,8 @@ pub struct CiRunSummary {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiOutput {
-    /// `passing`, `failing`, `in_progress`, or `none`.
+    /// `passing`, `failing`, `in_progress`, or `none`. `none` means the branch
+    /// has no runs at all, which is not the same as passing.
     pub state: String,
     pub branch: String,
     /// Whether anything on this branch can still change on its own.
@@ -125,17 +140,22 @@ pub fn run_list_args<'a>(branch: &'a str, limit: &'a str, repo: Option<&'a str>)
     args
 }
 
-/// Name the repository on the command line rather than letting `gh` discover
-/// it.
+/// Name the repository on the command line rather than letting `gh` discover it.
+///
+/// Discovery matches the remote's host against `GH_HOST`, so a session whose
+/// `GH_HOST` names another host gets "none of the git remotes ... correspond to
+/// GH_HOST" out of a repository that is sitting right there. A `--repo` value
+/// starting with `-` would be read back as a flag, which is why callers pass
+/// only tokens [`valid_repo_token`] accepted.
 fn push_repo<'a>(args: &mut Vec<&'a str>, repo: Option<&'a str>) {
     if let Some(repo) = repo {
         args.extend(["--repo", repo]);
     }
 }
 
-/// The `owner/name` of the repository at `cwd`, read from its `origin`
-/// remote. One local `git` call, so naming the repository costs no API
-/// request.
+/// The `owner/name` of the repository at `cwd`, read from its `origin` remote.
+///
+/// One local `git` call, so naming the repository costs no API request.
 pub fn remote_repo(cwd: &std::path::Path) -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["remote", "get-url", "origin"])
@@ -151,7 +171,7 @@ pub fn remote_repo(cwd: &std::path::Path) -> Option<String> {
 
 /// `owner/name` out of the remote forms git accepts: `https://host/o/r`,
 /// `ssh://git@host/o/r`, `git@host:o/r`, each with an optional trailing `.git`
-/// or `/`. `None` when what is left does not end in usable segments.
+/// or `/`. `None` when what is left does not end in two usable segments.
 fn repo_from_remote_url(url: &str) -> Option<String> {
     let url = url.trim().trim_end_matches('/');
     let url = url.strip_suffix(".git").unwrap_or(url);
@@ -161,8 +181,8 @@ fn repo_from_remote_url(url: &str) -> Option<String> {
         .or_else(|| url.strip_prefix("ssh://"))
         .unwrap_or(url);
     let url = url.strip_prefix("git@").unwrap_or(url);
-    // A scp-style remote separates host from path with a colon and a
-    // URL-style one with a slash.
+    // A scp-style remote separates host from path with a colon and a URL-style
+    // one with a slash; past either, the repository is the tail of the path.
     let path = match url.split_once(['/', ':']) {
         Some((_, path)) => path,
         None => url,
@@ -177,6 +197,8 @@ fn repo_from_remote_url(url: &str) -> Option<String> {
     valid_repo_token(&repo).then_some(repo)
 }
 
+/// Whether `token` is safe to hand to `gh` as a repository name: two
+/// non-empty segments of git-safe characters, no `/` inside either segment.
 fn valid_repo_token(token: &str) -> bool {
     let Some((owner, name)) = token.split_once('/') else {
         return false;
@@ -194,6 +216,7 @@ fn valid_repo_token(token: &str) -> bool {
 }
 
 /// The repository to query: the caller's, named by the git remote at `cwd`.
+///
 /// An explicitly requested name that is not a valid `owner/name` is refused
 /// rather than quietly replaced by the session's own repository.
 fn query_repo(cwd: &std::path::Path, requested: Option<&str>) -> Result<Option<String>, String> {
@@ -239,10 +262,11 @@ impl std::fmt::Display for CiQueryError {
 }
 
 /// Read a branch's runs through whichever `gh` path this process can reach.
+///
 /// `repo` must be a name [`valid_repo_token`] accepted, or `None` to ask the
-/// repository the git remote at `cwd` points at. An empty `Ok` means the
-/// branch has no runs. Every failure to ask is an `Err` that says what `gh`
-/// said, so a dead token never reads as "nothing pushed".
+/// repository the git remote at `cwd` points at.
+///
+/// An empty `Ok` means the branch has no runs. Every failure to ask is an `Err` that says what `gh` said, so a dead token never reads as "nothing pushed".
 pub fn fetch_runs(
     cwd: &std::path::Path,
     branch: &str,
@@ -268,7 +292,8 @@ pub fn fetch_runs(
             stdout: response.stdout,
         });
     };
-    // `--branch` filters server-side; this is the belt to those suspenders.
+    // `--branch` filters server-side; this is the belt to those suspenders,
+    // because one cancelled run from another branch is enough to report red.
     runs.retain(|run| run.head_branch.as_deref().is_none_or(|head| head == branch));
     Ok(runs)
 }
@@ -320,9 +345,10 @@ fn tail(text: &str, max: usize) -> (String, bool) {
     (text[start..].to_string(), true)
 }
 
-/// The sentence a model reads off a state, phrased as what to do next. `repo`
-/// names the repository the query went to, so an empty answer says where it
-/// was empty rather than guessing what the repository has.
+/// The sentence a model reads off a state, phrased as what to do next.
+///
+/// `repo` names the repository the query went to, so an empty answer says
+/// where it was empty rather than guessing what the repository has.
 fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
     match state {
         CiStatus::Green => format!("CI is passing on {branch}."),
@@ -343,7 +369,9 @@ fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
 // Tool implementation
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
 pub struct CiTool;
@@ -471,9 +499,10 @@ fn status_output(
     })
 }
 
-/// Poll until the branch's runs settle or the budget runs out. A timeout is
-/// not a failure: it answers with the state it last saw. The caller learns
-/// the branch is still moving rather than that the tool broke.
+/// Poll until the branch's runs settle or the budget runs out.
+///
+/// A timeout is not a failure: it answers with the state it last saw, so the
+/// caller learns the branch is still moving rather than that the tool broke.
 fn wait_output(
     cwd: &std::path::Path,
     branch: &str,
@@ -535,8 +564,9 @@ fn logs_output(
                 "Could not reach `gh`. In a sandboxed session the host worker answers these queries; outside one, `gh` must be installed and authenticated.",
             )
         })?;
-    // A run whose failure is a startup failure has no job log at all, and
-    // `gh` says so on stderr.
+    // A run whose failure is a startup failure has no job log at all, and `gh`
+    // says so on stderr. Reporting an empty body instead would read as "the
+    // job printed nothing", which sends the reader looking in the wrong place.
     let body = if response.stdout.trim().is_empty() {
         response.stderr.clone()
     } else {
@@ -555,7 +585,8 @@ fn logs_output(
 }
 
 fn checks_output(cwd: &std::path::Path, branch: &str, repo: Option<&str>) -> CiOutput {
-    // `gh pr checks` exits non-zero when a check is failing.
+    // `gh pr checks` exits non-zero when a check is failing, so its exit code
+    // carries meaning and is not an error to report as one.
     let mut args = vec!["pr", "checks", branch];
     push_repo(&mut args, repo);
     let response = xai_grok_sandbox::ci_host::run_gh(cwd, &args).unwrap_or_else(|| {
@@ -626,7 +657,8 @@ mod tests {
         let args = run_list_args("feat/x", "10", None);
         assert!(args.contains(&ci_state::RUN_JSON_FIELDS));
         assert!(args.contains(&"feat/x"));
-        // The worker refuses anything outside its allowlist.
+        // The worker refuses anything outside its allowlist, so a query shape
+        // this tool cannot send is a query it must not build.
         let owned: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
         assert!(xai_grok_sandbox::ci_host::gh_args_allowed(&owned));
     }
@@ -692,7 +724,7 @@ mod tests {
     }
 
     /// A `repo` the model passes is either a repository name or a rejected
-    /// request. A half-name must never turn into a query of some other repo.
+    /// request; a half-name must never turn into a query of some other repo.
     #[test]
     fn a_repository_token_is_checked_before_it_reaches_gh() {
         for good in ["o/r", "Wow-Look.at/my_repo", "a/b"] {
@@ -751,7 +783,7 @@ mod tests {
     #[test]
     fn a_superseded_failure_does_not_become_the_log_target() {
         // The newest CI run is live. The failure behind it belongs to a push
-        // that this replaced, so there is nothing to read yet.
+        // that this one replaced, so there is nothing to read yet.
         let runs = vec![
             run("CI", "in_progress", "", 5),
             run("CI", "completed", "failure", 4),
@@ -772,8 +804,8 @@ mod tests {
 
     /// An empty answer has to say which repository it came out of. A branch
     /// that lives elsewhere is empty here for exactly the same reason an
-    /// unpushed branch is. The reader cannot tell both apart without being
-    /// told where was asked.
+    /// unpushed branch is, and the reader cannot tell the two apart without
+    /// being told where was asked.
     #[test]
     fn an_empty_answer_names_the_repository_it_asked() {
         let asked = state_summary(CiStatus::Off, "feat/x", Some("o/r"));

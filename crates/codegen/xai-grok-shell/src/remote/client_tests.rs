@@ -1041,7 +1041,8 @@ async fn auth_headers_do_not_collide_with_json() {
 fn parse_anthropic_style_listing_max_input_tokens_resolves_context_window() {
     // Anthropic's official `/v1/models` ModelInfo shape (`id`, `created_at`,
     // `display_name`, `type`) carries the input-context-window as
-    // `max_input_tokens`, not `contextWindow`/`context_window`.
+    // `max_input_tokens`, not `contextWindow`/`context_window`. This drives
+    // the real shipped parse path and asserts the value lands in `context_window`.
     let value = serde_json::json!({
         "id": "claude-sonnet-4-5",
         "type": "model",
@@ -1354,7 +1355,7 @@ async fn resolve_context_window_from_provider_reads_openrouter_context_length() 
     .await;
     let api_base = format!("{base}/v1");
 
-    // Run the shipped resolver exactly as the request path does. It spawns a
+    // Run the shipped resolver exactly as the request path does: it spawns a
     // dedicated OS thread and does a blocking reqwest fetch against the model's
     // own base, then matches the requested slug.
     let resolved = {

@@ -793,7 +793,10 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn project_scope_allowed_allows_inert_local_build() {
-        // On a local/dev build the whole feature is inert (auto-trust).
+        // On a local/dev build the whole feature is inert (auto-trust): a folder
+        // with repo-local configs and an empty store is still ALLOWED. A test
+        // binary is never stamped, and GROK_TEST_VERSION is unset here, so
+        // `is_local_build()` is genuinely true.
         let _unset_ver = EnvGuard::unset(xai_grok_version::TEST_VERSION_ENV);
         assert!(!xai_grok_version::is_release_stamped());
         let home = tempfile::tempdir().unwrap();
@@ -1422,7 +1425,12 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn local_build_is_inert_launch_trust_auto_trusts() {
-        // On a local/dev build the whole folder-trust system is inert.
+        // On a local/dev build the whole folder-trust system is inert: an
+        // untrusted repo that HAS repo-local configs (here an `.envrc`) with an
+        // EMPTY store still resolves trusted, `resolve_launch_dir_trust` returns
+        // true, and the `.envrc` loads without any grant. A test binary is never
+        // stamped, and GROK_TEST_VERSION is unset here, so `is_local_build()` is
+        // genuinely true. GROK_HOME-isolated so the real store is never touched.
         let _sim = EnvGuard::unset(xai_grok_version::TEST_VERSION_ENV);
         assert!(!xai_grok_version::is_release_stamped());
         let home = tempfile::tempdir().unwrap();

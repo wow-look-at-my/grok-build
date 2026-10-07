@@ -13,7 +13,7 @@ pub fn ctrl_dot_unreliable() -> bool {
     terminal_context().ctrl_dot_unreliable() || cfg!(target_os = "windows") || crate::host::is_wsl()
 }
 
-/// Build the default action definitions. `mouse_reporting_toggle_enabled`
+/// Build the default action definitions.
 ///
 /// `mouse_reporting_toggle_enabled` gates the opt-in `ToggleMouseCapture` shortcut (see below); pass `false` for the standard set.
 pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<ActionDef> {

@@ -131,6 +131,8 @@ Version 2.0** — see [`LICENSE`](LICENSE).
 
 Third-party and vendored code remains under its original licenses. See:
 
-- [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES) — crates.io / git dependencies, bundled UI themes, and **in-tree source ports** (including the sst/opencode tool implementations)
+- [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES) — crates.io / git dependencies,
+  bundled UI themes, and **in-tree source ports** (including the sst/opencode
+  tool implementations)
 - [`crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md`](crates/codegen/xai-grok-tools/THIRD_PARTY_NOTICES.md) — crate-local notice for the opencode ports and bundled tool binaries
 - [`third_party/NOTICE`](third_party/NOTICE) — vendored Mermaid-stack index

@@ -1,20 +1,64 @@
 //! Realtime GitHub CI status for the current branch, driven by the `gh` CLI.
+//!
+//! Issue #40: show a red/yellow/green dot next to the branch whose color
+//! reflects the branch's live CI/check status. We deliberately source this
+//! from the `gh` binary (`gh run list`) rather than reimplementing a GitHub
+//! REST/OAuth client. The [`gh` CLI][gh] discovers the owning repo from the
+//! git remote at the process cwd, in a thread-safe, pure, dependency-free
+//! unit that the TUI's render path and the unit tests share.
+//!
+//! The module keeps two pieces cleanly separated:
+//!   1. [`map_ci_status`] / [`ci_from_runs`] — pure, dependency-free state →
+//!      color mapping (failing/errored → red, in-progress/pending → yellow,
+//!      success → green, nothing → off). These have no terminal or process
+//!      dependencies and are exercised directly by the unit tests (and the
+//!      headless load check).
+//!   2. [`gh_ci_status_runs`] — the thin subprocess that runs the real `gh`
+//!      command and returns the raw JSON plus the parsed [`CiStatus`], so the
+//!      renderer's refresh path drives the *same* command shape a user gets
+//!      from their terminal (`gh run list --branch <branch>`).
+//!
+//! "Realtime" is preserved via a per-(repo-root, branch) cache that mirrors
+//! [`crate::git_info`]'s throttled refresh: reads return the last polled
+//! value immediately and kick off an off-thread `gh` poll on a TTL, so the dot
+//! tracks fresh CI state instead of a value captured once at startup.
+//!
+//! Renders alone cannot carry that promise, because the session watching its
+//! own CI is precisely the one drawing no frames: the event loop parks until
+//! something asks it to move. Three pieces close that gap, and all of them
+//! must stay wired or the dot silently freezes at whatever it last showed:
+//!   - [`CI_POLL_INTERVAL`] — the loop's own poll timer keeps calling
+//!     [`refresh_ci_status`] with no frames in sight;
+//!   - [`set_change_notifier`] — a poll that lands on a *different* color asks
+//!     the loop for one repaint, so red/green arrives without a keypress;
+//!   - [`ci_dot_animating`] — the app demands animation ticks while a run is
+//!     in flight, which is what actually moves the yellow pulse.
+//!
+//! [gh]: https://cli.github.com/
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-// The pure run→state reduction is shared with the agent's `ci` tool.
+// The pure run→state reduction is shared with the agent's `ci` tool, so the
+// dot and the tool can never disagree about what red means.
 pub use xai_grok_sandbox::ci_state::{CiStatus, GhRun, ci_from_runs, map_ci_status, parse_gh_runs};
 
-/// Minimum interval between off-thread `gh` refreshes for the same target.
+/// Minimum interval between off-thread `gh` refreshes for the same target, so
+/// a per-frame caller can't spawn a storm of `gh` subprocesses.
 const CI_REFRESH_TTL: Duration = Duration::from_secs(30);
 
 /// How often the event loop re-arms its CI poll while an agent view is up.
+/// The render path only refreshes the dot on frames it actually draws, and an
+/// idle session draws none, so the poll timer is what keeps the color true
+/// while the user sits and watches a run.
 pub const CI_POLL_INTERVAL: Duration = CI_REFRESH_TTL;
 
-/// How long after its last refresh a cache entry still counts as describing the branch on screen.
+/// How long after its last refresh a cache entry still counts as describing
+/// the branch on screen. Entries for branches nobody renders any more stop
+/// being refreshed and age out of [`ci_dot_animating`], so a checked-out-and-
+/// abandoned branch can't keep an idle session animating.
 const CI_ENTRY_FRESH_FOR: Duration = Duration::from_secs(90);
 
 /// Only the `headBranch` the user cares about is ever fed into the cache.
@@ -28,43 +72,61 @@ type CiCacheEntry = (Option<CiStatus>, Instant);
 static CI_CACHE: LazyLock<Mutex<HashMap<CiCacheKey, CiCacheEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Nudged by an off-thread poll that lands on a *different* color.
+/// Nudged by an off-thread poll that lands on a *different* color, so a
+/// session with no input and no animation still repaints the moment CI goes
+/// red or green. Registered once by the event loop; `None` in tests and in
+/// any headless caller, where the send is simply skipped.
 static CI_CHANGE_TX: LazyLock<Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>> =
     LazyLock::new(|| Mutex::new(None));
 
-/// How long one full breath of the "in progress" pulse takes, measured on the wall clock.
+/// How long one full breath of the "in progress" pulse takes, measured on the
+/// wall clock. Slow enough that the Slow tick cadence (~83 ms,
+/// `app_view::SLOW_TICK_INTERVAL`) still samples the curve smoothly, and long
+/// enough to read as breathing rather than blinking.
 pub const CI_PULSE_PERIOD: Duration = Duration::from_secs(4);
 
-/// The pulse's HSV value bounds: the dot dims to [`CI_PULSE_MIN_VALUE`] and brightens to [`CI_PULSE_MAX_VALUE`].
+/// The pulse's HSV value bounds: the dot dims to [`CI_PULSE_MIN_VALUE`] and
+/// brightens to [`CI_PULSE_MAX_VALUE`], with hue and saturation untouched.
 pub const CI_PULSE_MIN_VALUE: f32 = 0.25;
 pub const CI_PULSE_MAX_VALUE: f32 = 0.80;
 
 /// The pulse's factor in `[min, max]` (each in `0..=1`) after `elapsed` of
 /// wall-clock time, `min` + `(max-min)·(1+sin)/2`.
+///
+/// A pure function of ELAPSED TIME, deliberately not of a frame or tick
+/// counter: the loop's tick cadence follows what the UI is doing (Slow while
+/// idle, ~30 fps while streaming) and a tick only advances on a frame that was
+/// actually drawn, so a tick-counted pulse breathes faster the busier the
+/// screen is. Sampling elapsed time instead makes the period the same four
+/// seconds at any cadence, and makes the value a function a test can pin
+/// without a terminal.
 pub fn pulse_value(elapsed: Duration, min: f32, max: f32) -> f32 {
     let phase = elapsed.as_secs_f32() * std::f32::consts::TAU / CI_PULSE_PERIOD.as_secs_f32();
-    let unit = (phase.sin() + 1.0) / 2.0;
+    let unit = (phase.sin() + 1.0) / 2.0; // 0..=1
     min + unit * (max - min)
 }
 
-/// The process's pulse epoch.
+/// The process's pulse epoch. One shared origin means every render of the dot
+/// reads the same phase, and a poll landing between two frames cannot jump it.
 static PULSE_EPOCH: LazyLock<Instant> = LazyLock::new(Instant::now);
 
 /// Wall-clock time since the pulse epoch, which is what the render path feeds
-/// [`animate_value_at`].
+/// [`animate_value_at`]. An `Instant`-derived duration rather than a tick
+/// count — see [`pulse_value`].
 pub fn pulse_elapsed() -> Duration {
     PULSE_EPOCH.elapsed()
 }
 
 /// The color the dot takes after `elapsed` of wall-clock time: `base`'s hue and
-/// saturation with its HSV value pulsed across both bounds.
+/// saturation with its HSV value pulsed across the two bounds.
 pub fn animate_value_at(elapsed: Duration, base: (u8, u8, u8), min: f32, max: f32) -> (u8, u8, u8) {
     let (h, s, _v) = rgb_to_hsv(base);
     hsv_to_rgb((h, s, pulse_value(elapsed, min, max)))
 }
 
 /// The in-progress dot's color right now: [`animate_value_at`] sampled at
-/// [`pulse_elapsed`], at the shipped bounds.
+/// [`pulse_elapsed`], at the shipped bounds. This is the exact call the status
+/// bar's dot makes while a run is in flight.
 pub fn in_progress_dot_color(base: (u8, u8, u8)) -> (u8, u8, u8) {
     animate_value_at(
         pulse_elapsed(),
@@ -121,6 +183,10 @@ pub fn hsv_to_rgb((h, s, v): (f32, f32, f32)) -> (u8, u8, u8) {
 /// Run the real `gh` CI-status command for `branch` in `repo_root` and return
 /// the parsed runs + tri-state color. Thin shell-out wrapper; all parsing is
 /// delegated to the pure [`parse_gh_runs`] / [`ci_from_runs`].
+///
+/// Returns `(Vec<GhRun>, CiStatus)`. When `gh` is missing, unauthenticated, or
+/// there are no runs for the branch, the run list is empty and the status is
+/// [`CiStatus::Off`] — never a panic.
 pub fn gh_ci_status(repo_root: &Path, branch: &str) -> (Vec<GhRun>, CiStatus) {
     let runs = gh_run_list(repo_root, branch).unwrap_or_default();
     let status = ci_from_runs(runs.iter().cloned());
@@ -146,7 +212,9 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
         ],
     )?;
     let mut runs = parse_gh_runs(&output.stdout)?;
-    // `--branch` filters server-side; this is the belt to that suspenders.
+    // `--branch` filters server-side; this is the belt to that suspenders,
+    // because a run from another branch would not just be noise — one
+    // cancelled run is enough to paint this branch's dot red.
     runs.retain(|run| match run.head_branch.as_deref() {
         Some(reported) => reported == branch,
         None => true,
@@ -155,11 +223,12 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
 }
 
 /// Talk to the unsandboxed CI-status host worker for a sandboxed session,
-/// returning an [`Output`] shaped like a `gh` run's stdout. It is
-/// authoritative. We hand the caller an `Output` whose body attenuates to
-/// "no ru. The dot degrades to the "off" state rather than falling through
-/// to an in-jail `gh` spawn. This happens when the worker replies with the
-/// nothing-usable sentinel. Only a genuinely absent/unusable worker
+/// returning an [`Output`] shaped like a `gh` run's stdout.
+///
+/// It is authoritative: when the worker replies with the nothing-usable
+/// sentinel, we hand the caller an `Output` whose body attenuates to "no
+/// runs", so the dot degrades to the "off" state rather than falling through
+/// to an in-jail `gh` spawn. Only a genuinely absent/unusable worker
 /// connection returns `None`.
 fn run_gh_via_ci_host(repo_root: &Path, args: &[&str], fd: i32) -> Option<std::process::Output> {
     #[cfg(unix)]
@@ -188,6 +257,8 @@ fn run_gh_via_ci_host(repo_root: &Path, args: &[&str], fd: i32) -> Option<std::p
     }
 }
 
+/// A successful [`std::process::ExitStatus`] to wrap a host-worker answer so
+/// it reads like a real `gh` run that returned 0.
 fn success_exit_status() -> std::process::ExitStatus {
     #[cfg(unix)]
     {
@@ -200,10 +271,16 @@ fn success_exit_status() -> std::process::ExitStatus {
     }
 }
 
-/// Run the real `gh` CI-status command.
+/// Run the real `gh` CI-status command. Inside a `--sandbox` session this is
+/// answered by the unsandboxed host worker (see [`run_gh_via_ci_host`]) and is
+/// authoritative — a worker that reports nothing usable degrades to "off".
+/// In a normal session it spawns `gh` directly, exactly as before.
 fn run_gh(repo_root: &Path, args: &[&str]) -> Option<std::process::Output> {
     if let Some(fd) = ci_host_fd() {
-        // Sandboxed: the host worker is the only way to reach `gh`.
+        // Sandboxed: the host worker is the only way to reach `gh`. A result
+        // it reports (or its nothing-usable sentinel) is the answer; never
+        // fall back to spawning `gh` inside the jail, where it may be
+        // confined or reach the wrong environment.
         return run_gh_via_ci_host(repo_root, args, fd);
     }
     run_gh_direct(repo_root, args)
@@ -222,7 +299,10 @@ fn run_gh_direct(repo_root: &Path, args: &[&str]) -> Option<std::process::Output
         .stderr(std::process::Stdio::piped());
     xai_grok_tools::util::detach_std_command(&mut cmd);
     cmd.envs(xai_grok_tools::util::pager_env());
-    // `gh` colourises even piped `--json` output under CLICOLOR_FORCE or GH_FORCE_TTY (inherited from terminal-launched dev environments) and forcing beats NO_COLOR in gh's precedence.
+    // `gh` colourises even piped `--json` output under CLICOLOR_FORCE or
+    // GH_FORCE_TTY (inherited from terminal-launched dev environments) and
+    // forcing beats NO_COLOR in gh's precedence; CLICOLOR_FORCE=0 is gh's
+    // documented off-switch.
     cmd.env("NO_COLOR", "1");
     cmd.env("CLICOLOR_FORCE", "0");
     cmd.env_remove("GH_FORCE_TTY");
@@ -242,7 +322,11 @@ fn run_gh_direct(repo_root: &Path, args: &[&str]) -> Option<std::process::Output
     Some(output)
 }
 
-/// Read the cached CI status for `(repo_root, branch)`.
+/// Read the cached CI status for `(repo_root, branch)`, scheduling a
+/// throttled off-thread `gh` refresh when the entry is missing or stale, so
+/// the dot reflects fresh CI state rather than a startup capture. Never
+/// blocks and never spawns `gh` synchronously on the render path — call this
+/// from render code.
 pub fn ci_status_lazy(repo_root: &Path, branch: &str) -> Option<CiStatus> {
     let cached = ci_status_peek(repo_root, branch);
     refresh_ci_status(repo_root, branch);
@@ -250,7 +334,9 @@ pub fn ci_status_lazy(repo_root: &Path, branch: &str) -> Option<CiStatus> {
 }
 
 /// Read the cached CI status for `(repo_root, branch)` without scheduling
-/// anything.
+/// anything. Free of subprocesses, I/O, and cache mutation, so callers that
+/// run outside the render path — [`ci_dot_animating`], the tick-demand check —
+/// can ask what the dot currently shows without driving a poll.
 pub fn ci_status_peek(repo_root: &Path, branch: &str) -> Option<CiStatus> {
     let key = CiCacheKey {
         repo_root: repo_root.to_path_buf(),
@@ -260,8 +346,12 @@ pub fn ci_status_peek(repo_root: &Path, branch: &str) -> Option<CiStatus> {
     cache.get(&key).and_then(|(status, _)| *status)
 }
 
-/// Whether a recently-polled branch under `repo_root` is mid-run, i.e. the
-/// dot is in the state that animates ([`CiStatus::Yellow`] pulses).
+/// Whether a recently-polled branch under `repo_root` is mid-run, i.e. the dot
+/// is in the one state that animates ([`CiStatus::Yellow`] pulses).
+///
+/// Drives the app's animation-tick demand: without it the pulse only moves
+/// while something *else* is already redrawing the screen, which is never the
+/// case for the session sitting idle watching its own CI.
 pub fn ci_dot_animating(repo_root: &Path) -> bool {
     let Ok(cache) = CI_CACHE.lock() else {
         return false;
@@ -291,14 +381,17 @@ pub fn refresh_ci_status(repo_root: &Path, branch: &str) {
     if !needs_refresh {
         return;
     }
-    // Reserve the slot with a fresh timestamp BEFORE spawning so this frame's other reads (and the next few frames) don't spawn duplicate refreshes until this lands.
+    // Reserve the slot with a fresh timestamp BEFORE spawning so this frame's
+    // other reads (and the next few frames) don't spawn duplicate refreshes
+    // until this one lands or the TTL elapses.
     cache.insert(key.clone(), (cached, Instant::now()));
     drop(cache);
     spawn_ci_refresh(key, cached);
 }
 
 /// Register the channel an off-thread poll nudges when a branch's color
-/// changes.
+/// changes. The event loop repaints on it; replacing an existing sender is
+/// harmless (one loop owns the terminal).
 pub fn set_change_notifier(tx: tokio::sync::mpsc::UnboundedSender<()>) {
     if let Ok(mut slot) = CI_CHANGE_TX.lock() {
         *slot = Some(tx);
@@ -318,7 +411,10 @@ fn spawn_ci_refresh(key: CiCacheKey, previous: Option<CiStatus>) {
     });
 }
 
-/// Ask the event loop for one repaint when this poll moved the dot.
+/// Ask the event loop for one repaint when this poll moved the dot. Silent
+/// when the color is unchanged (an idle loop must stay parked), when no loop
+/// registered a sender (unit tests, headless callers), and when the loop has
+/// already exited.
 fn notify_if_changed(previous: Option<CiStatus>, now: CiStatus) {
     if previous == Some(now) {
         return;
@@ -363,7 +459,8 @@ mod tests {
             conclusion: conclusion.to_string(),
             head_branch: Some("feature/x".into()),
             workflow_name: workflow.to_string(),
-            // The dot folds runs to a colour and never addresses one, so it asks `gh` for no id.
+            // The dot folds runs to a colour and never addresses one, so it
+            // asks `gh` for no id. The `ci` tool does, to read a run's logs.
             database_id: None,
         }
     }
@@ -436,7 +533,10 @@ mod tests {
 
     #[test]
     fn ci_from_runs_ignores_a_run_a_newer_push_superseded() {
-        // gh lists newest first.
+        // gh lists newest first. Pushing cancels the run in flight, so the
+        // list a branch reports after two pushes is [live, cancelled] for the
+        // SAME workflow — and the cancelled one must not color the dot, or a
+        // branch stays red forever after its second push.
         let runs = vec![
             run_in("CI", "in_progress", ""),
             run_in("CI", "completed", "cancelled"),
@@ -476,11 +576,13 @@ mod tests {
 
     #[test]
     fn parse_gh_runs_real_json() {
-        // Exactly the shape `gh run list --json status,conclusion,headBranch, workflowName` emits: camelCase keys, newest run first.
+        // Exactly the shape `gh run list --json status,conclusion,headBranch,
+        // workflowName` emits: camelCase keys, newest run first.
         let json = br#"[{"conclusion":"","status":"in_progress","headBranch":"master","workflowName":"CI"},{"conclusion":"failure","status":"completed","headBranch":"master","workflowName":"Release"}]"#;
         let runs = parse_gh_runs(json).expect("parseable");
         assert_eq!(runs.len(), 2);
-        // The camelCase keys must reach their snake_case fields.
+        // The camelCase keys must reach their snake_case fields — defaulting
+        // them away is invisible until something reads them.
         assert_eq!(runs[0].head_branch.as_deref(), Some("master"));
         assert_eq!(runs[0].workflow_name, "CI");
         assert_eq!(runs[1].workflow_name, "Release");
@@ -506,7 +608,10 @@ mod tests {
     #[test]
     fn ci_cache_lazy_read_without_runtime_returns_none() {
         // With no tokio runtime (plain unit test) `ci_status_lazy` cannot
-        // spawn a background poll.
+        // spawn a background poll, so a cache miss reads back `None` and the
+        // cache is left in a well-defined state — no panic, graceful "no CI".
+        // The path is this test's own: the cache is process-global, and
+        // clearing it wholesale would race every other test that seeds one.
         assert_eq!(
             ci_status_lazy(std::path::Path::new("/lazy/no-runtime"), "master"),
             None
@@ -517,7 +622,9 @@ mod tests {
         seed_for_test(Path::new(repo_root), branch, status, age);
     }
 
-    /// Whether the cache holds an entry for this exact target.
+    /// Whether the cache holds an entry for this exact target. Tests key off
+    /// their own unique repo paths rather than clearing the shared cache, so
+    /// they stay correct when the suite runs threaded in one process.
     fn cache_has(repo_root: &str, branch: &str) -> bool {
         CI_CACHE.lock().expect("cache").contains_key(&CiCacheKey {
             repo_root: PathBuf::from(repo_root),
@@ -529,7 +636,9 @@ mod tests {
     fn peek_reads_the_cache_without_scheduling_a_poll() {
         let repo = "/peek/repo";
         assert_eq!(ci_status_peek(Path::new(repo), "master"), None);
-        // A miss must not leave a reservation behind: peek is for callers off the render path.
+        // A miss must not leave a reservation behind: peek is for callers off
+        // the render path, and reserving here would suppress the next real
+        // refresh for a whole TTL.
         assert!(!cache_has(repo, "master"));
         cache_seed(repo, "master", CiStatus::Green, Duration::ZERO);
         assert_eq!(
@@ -556,10 +665,11 @@ mod tests {
 
         cache_seed(repo, "master", CiStatus::Yellow, Duration::ZERO);
         assert!(ci_dot_animating(Path::new(repo)), "a live run pulses");
-        // Another repo's run must not animate this.
+        // Another repo's run must not animate this one.
         assert!(!ci_dot_animating(Path::new("/anim/other")));
 
-        // An entry nobody refreshes any more ages out.
+        // An entry nobody refreshes any more ages out, so an abandoned branch
+        // cannot keep an idle session redrawing forever.
         cache_seed(repo, "master", CiStatus::Yellow, CI_ENTRY_FRESH_FOR);
         assert!(
             !ci_dot_animating(Path::new(repo)),
@@ -571,7 +681,8 @@ mod tests {
     fn change_notifier_fires_only_when_the_color_actually_changes() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         set_change_notifier(tx);
-        // The poll landed on the same color the dot already shows.
+        // The poll landed on the same color the dot already shows: repainting
+        // would be pure churn on an otherwise-parked loop.
         notify_if_changed(Some(CiStatus::Green), CiStatus::Green);
         assert!(rx.try_recv().is_err());
         notify_if_changed(Some(CiStatus::Green), CiStatus::Red);
@@ -584,7 +695,9 @@ mod tests {
         }
     }
 
-    /// Serialises the tests that publish a host-worker fd through the process environment.
+    /// Serialises the tests that publish a host-worker fd through the process
+    /// environment. That variable is process-global, so two such tests running
+    /// at once would each read the other's fd — or find it already removed.
     static CI_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn ci_env_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -592,11 +705,12 @@ mod tests {
     }
 
     /// Publish an in-process peer speaking the worker's protocol over
-    /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to
-    /// the jailed pager. Answer one `gh-status <branch>` request with `json`.
-    /// The peer asserts the request shape, so a caller that reached `gh`.
-    /// Some other way, or asked for the wrong thing, fails here rather than
-    /// silently reading whatever the peer felt like sending. Callers hold
+    /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to the
+    /// jailed pager, and answer one `gh-status <branch>` request with `json`.
+    ///
+    /// The peer asserts the request shape, so a caller that reached `gh` some
+    /// other way, or asked for the wrong thing, fails here rather than silently
+    /// reading whatever the peer felt like sending. Callers hold
     /// [`ci_env_lock`] for as long as the variable must stay set.
     #[cfg(unix)]
     fn publish_ci_host_peer(json: &'static [u8]) -> i32 {
@@ -621,16 +735,19 @@ mod tests {
         unsafe {
             std::env::set_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV, raw.to_string());
         }
-        // Leak `ours` so the fd stays open and unique for this process.
+        // Leak `ours` so the fd stays open and unique for this process; see the
+        // sibling helper below for why the transport's per-fd cache needs that.
         std::mem::forget(ours);
         raw
     }
 
-    /// Drive the SHIPPED CI-status path exactly as a `--sandbox` session
-    /// does. `gh_ci_status` → `run_gh` → the `GROK_CI_HOST_FD` env read
-    /// → the host worker, with no fd passed by hand. `repo_root` does not
-    /// exist. A real in-jail `gh` spawn could only fail: reading a color back
-    /// at all proves the answer came over the inherited worker connection.
+    /// Drive the SHIPPED CI-status path exactly as a `--sandbox` session does:
+    /// `gh_ci_status` → `run_gh` → the `GROK_CI_HOST_FD` env read → the host
+    /// worker, with no fd passed by hand.
+    ///
+    /// `repo_root` does not exist, so a real in-jail `gh` spawn could only fail:
+    /// reading a color back at all proves the answer came over the inherited
+    /// worker connection.
     #[test]
     #[cfg(unix)]
     fn the_shipped_ci_status_reads_the_host_worker_the_jail_hands_it() {
@@ -666,7 +783,8 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn the_shipped_ci_status_degrades_to_off_on_the_worker_sentinel() {
-        // The worker's nothing-usable sentinel (`gh` failed, or the branch has no runs).
+        // The worker's nothing-usable sentinel (`gh` failed, or the branch has
+        // no runs): the dot goes dark rather than inventing a color.
         let _env = ci_env_lock();
         let _fd = publish_ci_host_peer(b".");
         let (runs, status) = gh_ci_status(Path::new("/no/such/repo"), "master");
@@ -688,8 +806,9 @@ mod tests {
             let mut buf = [0u8; 8192];
             let n = peer.read(&mut buf).unwrap();
             let req = String::from_utf8_lossy(&buf[..n]).to_string();
-            // The request must be the fixed `gh-status <branch>` shape —
-            // the confined worker never accepts anything else.
+            // The request must be the fixed `gh-status <branch>` shape — the
+            // confined worker never accepts anything else. Assert the branch
+            // arrived intact so a mangled token would fail the test.
             let branch = req
                 .strip_prefix("gh-status ")
                 .expect("request must use the gh-status prefix")
@@ -700,7 +819,8 @@ mod tests {
             peer.flush().unwrap();
         });
         // Present the fd to the transport exactly the way the jail boundary
-        // does.
+        // does. `run_gh_via_ci_host` reads it, roots the (real) transport,
+        // and clones one handle per call.
         unsafe {
             std::env::set_var(
                 xai_grok_sandbox::ci_host::CI_HOST_FD_ENV,
@@ -717,6 +837,10 @@ mod tests {
             std::env::remove_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV);
         }
         // Leak `ours` so its fd stays open and unique for this test process.
+        // The transport's per-fd cache keys on the fd number; if the fd were
+        // freed here and the OS reused the number for a later test's socket,
+        // the cache would serve the stale stream. Production never reuses a
+        // session's single worker fd, so leaking the test's is exact.
         std::mem::forget(ours);
         output
     }
@@ -724,10 +848,13 @@ mod tests {
     #[test]
     fn sandboxed_query_reduces_a_host_result_to_a_real_status() {
         let _env = ci_env_lock();
-        // A host worker answering exactly what `gh run list --json` emits: the shipped `gh_ci_status` reduction must read it and produce Green.
+        // A host worker answering exactly what `gh run list --json` emits: the
+        // shipped `gh_ci_status` reduction must read it and produce Green, not
+        // Off — proving the dot works through the sandbox transport.
         let json = br#"[{"status":"completed","conclusion":"success","headBranch":"master","workflowName":"CI"}]"#;
         let output = host_peer_reply(json);
-        // The transport produced a synthetic success `Output` shaped like a real `gh` run.
+        // The transport produced a synthetic success `Output` shaped like a
+        // real `gh` run; feed it through the same pure parser the TUI uses.
         let runs = parse_gh_runs(&output.stdout).expect("parse host JSON");
         assert_eq!(ci_from_runs(runs.iter().cloned()), CiStatus::Green);
         assert!(output.status.success(), "host result must read as success");
@@ -745,7 +872,10 @@ mod tests {
     #[test]
     fn sandboxed_query_degrades_to_off_on_a_malformed_host_answer() {
         let _env = ci_env_lock();
-        // A worker replying with the "." sentinel (its `gh` failed / the branch had no runs) must read back as no status at all — the transport reports `None`.
+        // A worker replying with the "." sentinel (its `gh` failed / the
+        // branch had no runs) must read back as no status at all — the
+        // transport reports `None`, so the dot degrades to "off". It must
+        // never panic nor fall through to an in-jail `gh` spawn.
         use std::os::unix::net::UnixStream;
         let (ours, theirs) = UnixStream::pair().expect("pair");
         let ours_raw = std::os::unix::io::AsRawFd::as_raw_fd(&ours);
@@ -777,7 +907,8 @@ mod tests {
     #[test]
     fn repeated_polls_reuse_one_host_connection_and_stay_correct() {
         let _env = ci_env_lock();
-        // The session must poll more than once (continuous refresh), and each poll must get a fresh.
+        // The session must poll more than once (continuous refresh), and each
+        // poll must get a fresh, correct answer over the same connection.
         use std::os::unix::net::UnixStream;
         let (ours, theirs) = UnixStream::pair().expect("pair");
         let ours_raw = std::os::unix::io::AsRawFd::as_raw_fd(&ours);
@@ -801,7 +932,9 @@ mod tests {
                 ours_raw.to_string(),
             );
         }
-        // Successive polls over the single inherited connection.
+        // Three successive polls over the single inherited connection. The
+        // first poll's success transitions to the in-progress yellow the dot
+        // animates, then settles green — a mini session lifecycle.
         let first = run_gh_via_ci_host(
             Path::new("/repo"),
             &["run", "list", "--branch", "feat/x"],
@@ -823,7 +956,8 @@ mod tests {
         unsafe {
             std::env::remove_var(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV);
         }
-        // Keep this test's worker fd unique across the process; see the sibling `host_peer_reply` for why.
+        // Keep this test's worker fd unique across the process; see the
+        // sibling `host_peer_reply` for why.
         std::mem::forget(ours);
 
         let s1 = ci_from_runs(parse_gh_runs(&first.stdout).expect("a").iter().cloned());
@@ -846,7 +980,9 @@ mod tests {
 
     #[test]
     fn refresh_without_runtime_leaves_a_reservation_and_never_panics() {
-        // No tokio runtime here, so nothing can poll `gh`.
+        // No tokio runtime here, so nothing can poll `gh`; the call must still
+        // be infallible, and it must reserve the slot so the render path does
+        // not re-spawn on every frame.
         let repo = "/refresh/no-runtime";
         refresh_ci_status(Path::new(repo), "master");
         assert!(cache_has(repo, "master"));
@@ -854,9 +990,13 @@ mod tests {
     }
 
     /// Walk one render cadence over `span` of wall-clock time, sampling the
-    /// SHIPPED pulse once per frame the way the render loop does. Report the
-    /// wall-clock duration of one full breath. The elapsed time between the
-    /// first peak samples.
+    /// SHIPPED pulse once per frame the way the render loop does, and report
+    /// the wall-clock duration of one full breath: the elapsed time between the
+    /// first two peak samples.
+    ///
+    /// This is the measurement the tick-counted pulse failed: the same code
+    /// sampled on the Slow cadence and on the ~30 fps cadence reported two
+    /// different periods, because the period was a frame count.
     fn measured_period(step: Duration, span: Duration) -> Duration {
         let mut samples: Vec<(Duration, f32)> = Vec::new();
         let mut elapsed = Duration::ZERO;
@@ -881,7 +1021,8 @@ mod tests {
 
     #[test]
     fn the_pulse_period_is_wall_clock_time_not_a_frame_count() {
-        // Both cadences the event loop uses: Slow on an idle screen.
+        // The two cadences the event loop actually uses: Slow on an idle screen
+        // (app_view::SLOW_TICK_INTERVAL) and ~30 fps while streaming.
         let slow_step = Duration::from_millis(83);
         let fast_step = Duration::from_millis(33);
         let span = CI_PULSE_PERIOD * 3;
@@ -899,7 +1040,7 @@ mod tests {
                  measured {measured:?}"
             );
         }
-        // And both cadences agree with each other: a frame-counted pulse
+        // And the two cadences agree with each other: a frame-counted pulse
         // cannot do this, because its period scales with the frame rate.
         assert!(
             slow.abs_diff(fast) <= slow_step * 2,
@@ -910,6 +1051,7 @@ mod tests {
 
     #[test]
     fn pulse_value_stays_between_min_and_max_and_is_periodic() {
+        // The yellow pulse must never leave [0.25, 0.80].
         for ms in 0..(CI_PULSE_PERIOD.as_millis() as u64 * 2) {
             let v = pulse_value(
                 Duration::from_millis(ms),
@@ -921,7 +1063,8 @@ mod tests {
                 "{ms}ms -> {v}"
             );
         }
-        // Phase extremes: sin peaks a quarter period in (max) and bottoms out at quarters (min).
+        // Phase extremes: sin peaks a quarter period in (max) and bottoms out at
+        // three quarters (min).
         let quarter = CI_PULSE_PERIOD / 4;
         assert!(
             (pulse_value(quarter, CI_PULSE_MIN_VALUE, CI_PULSE_MAX_VALUE) - CI_PULSE_MAX_VALUE)
@@ -944,6 +1087,7 @@ mod tests {
 
     #[test]
     fn animated_value_preserves_hue_and_oscillates_brightness() {
+        // A mid-yellow base: hue ~60°, saturation ~1, value ~0.5.
         let base = (224, 175, 104); // theme.warning-ish
         let (h, s, _) = rgb_to_hsv(base);
         assert!(h > 30.0 && h < 90.0, "expected a yellow hue, got {h}");
@@ -964,12 +1108,13 @@ mod tests {
         assert!(lum(bright) > lum(dim), "brighter frame must be lighter");
     }
 
-    /// The shipped status-bar call site must feed the pulse ELAPSED WALL
-    /// TIME. The pulse math above is only half the fix. A render path that
-    /// still passes `scrollback.animation_tick()` would keep the
-    /// frame-counted behavior with a `Duration`-shaped cast. Structural,
-    /// because the call site lives inside a ratatui render pass that no unit
-    /// test can run. It reads the real file and asserts the CI dot's
+    /// The shipped status-bar call site must feed the pulse ELAPSED WALL TIME.
+    /// The pulse math above is only half the fix: a render path that still
+    /// passes `scrollback.animation_tick()` would keep the old frame-counted
+    /// behavior with a `Duration`-shaped cast.
+    ///
+    /// Structural, because the call site lives inside a ratatui render pass that
+    /// no unit test can run. It reads the real file and asserts the CI dot's
     /// in-progress arm goes through `in_progress_dot_color` (the wall-clock
     /// entry point) and never through the tick counter.
     #[test]

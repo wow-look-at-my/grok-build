@@ -177,11 +177,13 @@ pub(super) async fn watch_for_exit(
 }
 
 /// Watch a background terminal for its exit, and release the task even if the
-/// watch itself dies. `complete_and_release` is the only path that marks the
-/// task completed and hands the client terminal back. A watcher that unwound
-/// left `get_task` reporting a task that never finishes, so
-/// `wait_for_completion` callers sat out their whole deadline for a process.
-/// That process had already stopped. The terminal was never released.
+/// watch itself dies.
+///
+/// `complete_and_release` is the only path that marks the task completed and
+/// hands the client terminal back. A watcher that unwound left `get_task`
+/// reporting a task that never finishes, so `wait_for_completion` callers sat
+/// out their whole deadline for a process that had already stopped, and the
+/// terminal was never released.
 pub(super) async fn watch_for_exit_releasing_task(
     gateway: GatewaySender,
     session_id: acp::SessionId,
@@ -206,8 +208,8 @@ pub(super) async fn watch_for_exit_releasing_task(
         return;
     };
     // Skipped once the task reads completed, because a second release would
-    // overwrite the exit status the real completion recorded with this. A
-    // poisoned map says nothing either way, so the release is attempted.
+    // overwrite the exit status the real completion recorded with this one.
+    // A poisoned map says nothing either way, so the release is attempted.
     let released_already = match tasks.lock() {
         Ok(tracked) => tracked
             .get(task_id.as_str())
@@ -225,7 +227,7 @@ pub(super) async fn watch_for_exit_releasing_task(
         return;
     }
     // Guarded in turn: a release that unwinds would be lost exactly like the
-    // round this is recovering from.
+    // round this one is recovering from.
     let _ = xai_grok_tools::util::detached::guarded(
         "terminal exit watcher release",
         complete_and_release(

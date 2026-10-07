@@ -5557,7 +5557,13 @@ mod tests {
                     )
                     .await
                 });
-                // Deadline in wall-clock time, not in yield iterations.
+                // Deadline in wall-clock time, not in yield iterations: A can't
+                // reach its prompt until a `tokio::fs` read of the permission
+                // state completes on the blocking pool, and a yield-only loop
+                // spends no wall clock waiting for it (measured: 1000 yields
+                // burn ~2.6ms total, while the read alone takes ~0.5ms and the
+                // prompt has arrived as late as 4ms in). The bound still fails
+                // cleanly on a regression that never prompts.
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
                 while seen.load(Ordering::Relaxed) == 0 {
                     assert!(
@@ -5580,8 +5586,10 @@ mod tests {
                     )
                     .await
                 });
-                // Wait for B to register in flight before releasing A, so A's
-                // emit-time snapshot sees both.
+                // Wait for B to actually register in flight before releasing A,
+                // so A's emit-time snapshot sees both. The counter the actor
+                // reads is the condition itself — a fixed number of yields only
+                // guesses at when B's task gets its turn.
                 let in_flight = match &mgr {
                     PermissionHandle::Actor { in_flight, .. } => in_flight.clone(),
                     PermissionHandle::AllowAll => panic!("spawned manager must be an actor handle"),

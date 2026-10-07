@@ -83,12 +83,29 @@ pub struct ScrollbackEntry {
     /// When this entry finished running (monotonic). Used by the renderer to flash the accent briefly after completion.
     pub finished_at: Option<std::time::Instant>,
 
-    /// The API-reported cost of this response, in USD ticks.
+    /// The API-reported cost of this response, in USD ticks (1e10 per USD),
+    /// as reported by `ConversationResponse.cost_usd_ticks`. `None` when the
+    /// API did not report a cost (or the value was non-positive) — never
+    /// `Some(0)`. Stored on the entry so the renderer can show it in the
+    /// timestamp gutter without re-deriving it from token estimates.
     pub cost_usd_ticks: Option<i64>,
 
+    /// This response's prompt cache-read hit rate (0-100), rounded, derived
+    /// from `ResponseUsage.cache_read_input_tokens` over the total prompt
+    /// tokens (`input_tokens + cache_read_input_tokens +
+    /// cache_creation_input_tokens`). `None` when the response reported no
+    /// usage, or the total prompt token count was zero.
     pub cache_hit_percent: Option<u8>,
 
     /// Cached output and its render key.
+    /// Interior-mutable so EntryRenderer (which holds `&self`) can populate and
+    /// read the cache without &mut self.
+    ///
+    /// The `is_selected` key is only meaningful for blocks whose output varies
+    /// by selection state (currently only `UserPrompt`). For all other blocks
+    /// the stored value is always `false` regardless of actual selection,
+    /// preventing unnecessary cache misses on selection changes. `cwd` is
+    /// keyed so Expanded tool path paint (relative vs absolute) invalidates.
     cached_output: RefCell<Option<CachedOutput>>,
 
     /// Cached truncated-mode height. See [`CachedTruncatedHeight`] for why this needs its own cache separate from `cached_output`.
@@ -210,6 +227,11 @@ impl ScrollbackEntry {
 
     /// Attach the API-reported cost (in USD ticks, 1e10 per USD) for this
     /// entry's response, alongside `created_at`.
+    ///
+    /// Mirrors `reported_cost_ticks` normalization: a missing or non-positive
+    /// value (the wire often backfills `0`) is stored as `None` — an
+    /// unreported cost is never recorded as a free `0`, and the renderer
+    /// shows no fabricated `$0.00`.
     pub fn with_cost_usd_ticks(mut self, cost_usd_ticks: Option<i64>) -> Self {
         self.cost_usd_ticks = cost_usd_ticks.filter(|&t| t > 0);
         self

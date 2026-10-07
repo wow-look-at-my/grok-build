@@ -1,4 +1,9 @@
 //! Integration test for `_x.ai/session/update` notifications.
+//!
+//! This test verifies that:
+//! 1. xAI session notifications (e.g., diff_review) can be sent via ext_notification
+//! 2. The notifications are persisted to storage
+//! 3. When a session is loaded, the notifications are replayed with `isReplay: true`
 
 use agent_client_protocol as acp;
 use serde_json::json;
@@ -116,7 +121,7 @@ async fn test_xai_session_notification_storage_roundtrip() {
     }
 }
 
-/// Test that a `TurnCompleted` terminal round-trips through storage. The
+/// Test that a `TurnCompleted` terminal round-trips through storage — the
 /// persistence half of the "stuck on Waiting…" fix, where the durable terminal
 /// must survive `updates.jsonl` and reload as a replayable `_x.ai/session/update`.
 #[tokio::test]
@@ -155,7 +160,8 @@ async fn test_turn_completed_round_trips_through_storage() {
         .await
         .unwrap();
 
-    // Reload the session (the replay path) and confirm the terminal survives with its fields intact.
+    // Reload the session (the replay path) and confirm the terminal survives
+    // with its fields intact.
     let loaded = adapter.load_session(&info).await.unwrap();
     assert_eq!(
         loaded.updates.len(),

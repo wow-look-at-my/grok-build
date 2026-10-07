@@ -200,14 +200,16 @@ pub enum ContentBlock {
 }
 
 impl ContentBlock {
-    /// The keys `mime_type` is read under, on both the `Image` and `Resource` blocks.
+    /// The keys `mime_type` is read under, on both the `Image` and `Resource`
+    /// blocks. `mimeType` is the MCP/A spelling an upstream server writes; a
+    /// block that names both under one value is one statement, not a duplicate.
     pub const MIME_TYPE_KEYS: Aliases = Aliases::new("mime_type", &["mimeType"]);
 }
 
-/// `ContentBlock` as it arrives on the wire. That `ContentBlock` is with each
-/// MIME key spelling its own field. A block naming both folds them under
-/// [`ContentBlock::MIME_TYPE_KEYS`] instead of tripping serde's duplicate-field
-/// check.
+/// `ContentBlock` as it arrives on the wire, with each MIME key spelling its own
+/// field, so a block naming both folds them under
+/// [`ContentBlock::MIME_TYPE_KEYS`] instead of tripping serde's
+/// duplicate-field check.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ContentBlockWire {
@@ -244,7 +246,9 @@ enum ContentBlockWire {
 #[derive(Debug)]
 enum ContentBlockWireError {
     Alias(xai_tool_types::AliasConflict),
-    /// `mime_type` stays required on the `Image` block: an image with no MIME type cannot be rendered.
+    /// `mime_type` stays required on the `Image` block: an image with no MIME
+    /// type cannot be rendered, so its absence is still a rejection rather than
+    /// an empty string the renderer would have to guess at.
     MissingImageMimeType,
 }
 
@@ -601,9 +605,9 @@ mod content_block_alias_tests {
         assert!(message.contains("mimeType"), "{message}");
     }
 
-    /// `mime_type` stays required on an image. The derived impl rejected its
-    /// absence, and a shadow that defaults it would silently ship an image
-    /// the renderer cannot decode.
+    /// `mime_type` stays required on an image: the old derived impl rejected its
+    /// absence, and a shadow that defaults it would silently ship an image the
+    /// renderer cannot decode.
     #[test]
     fn an_image_with_no_mime_key_at_all_is_still_an_error() {
         let err = serde_json::from_str::<ContentBlock>(r#"{"type":"image","data":"abc"}"#)

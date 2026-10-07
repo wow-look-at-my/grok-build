@@ -570,7 +570,9 @@ impl SessionActor {
 
         let result = async {
             // `[memory] flush_model` is the older, narrower spelling and
-            // stays ahead of the `[models] memory_flush` slot.
+            // stays ahead of the `[models] memory_flush` slot. Either one
+            // brings the model's OWN sampler: its id on the session's client
+            // would reach the session model's endpoint instead.
             let flush_model = self
                 .memory
                 .flush_config
@@ -878,7 +880,8 @@ impl SessionActor {
             ));
         }
 
-        // A pinned slot brings its own client.
+        // A pinned slot brings its own client; its id on the session's client
+        // would reach the session model's endpoint instead.
         let slot_sampler = self.resolve_slot_sampler("memory_flush").await;
         let sampling_client = match &slot_sampler {
             Some((client, _)) => client.clone(),

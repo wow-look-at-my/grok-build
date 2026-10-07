@@ -1,4 +1,4 @@
-//! `/version` -- which build this session is running.
+//! `/version` -- which build this session is actually running.
 
 use super::debug_context::{BinaryFreshness, BinaryIdentity, binary_identity};
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
@@ -43,7 +43,8 @@ fn version_report(
 ) -> String {
     let mut out = format!("grok {version}");
     if commit_short == "unknown" {
-        // A build from outside a git worktree; say so rather than printing a word that reads like a commit.
+        // A build from outside a git worktree; say so rather than printing a
+        // word that reads like a commit.
         out.push_str(" (built outside a git worktree — no commit stamped)");
     } else {
         out.push_str(&format!(" (commit {commit_short})"));
@@ -101,7 +102,7 @@ mod tests {
         assert!(!cmd.takes_args());
     }
 
-    /// The commit is the whole point of the command. It is what tells someone
+    /// The commit is the whole point of the command: it is what tells someone
     /// whether the fix they are waiting on is in the binary they are running.
     #[test]
     fn report_carries_version_commit_and_binary() {

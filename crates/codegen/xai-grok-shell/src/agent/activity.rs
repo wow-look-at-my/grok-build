@@ -1,4 +1,5 @@
-//! Send-safe view of the agent's in-flight work, shared with the leader's `tokio::spawn` tasks. Those tasks cannot read the `!Send` `MvpAgent` state on the `LocalSet`.
+//! Send-safe view of the agent's in-flight work, shared with the leader's `tokio::spawn` tasks.
+//! Those tasks cannot read the `!Send` `MvpAgent` state on the `LocalSet`.
 //!
 //! The leader's `agent_busy` flag only counts IPC (Unix-socket) requests.
 //! Relay (grok.com WebSocket) traffic is bridged straight into the agent's ACP stdin and never sets it.

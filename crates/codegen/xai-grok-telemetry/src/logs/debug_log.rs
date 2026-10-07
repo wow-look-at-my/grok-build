@@ -220,8 +220,12 @@ fn update_latest_symlink(dir: &Path, target: &Path) {
 #[cfg(not(unix))]
 fn update_latest_symlink(_dir: &Path, _target: &Path) {}
 
-/// Default per-file cap on a firehose sink (session or fallback file).
-const DEFAULT_MAX_SINK_BYTES: u64 = 100 * 1024 * 1024;
+/// Default per-file cap on a firehose sink (session or fallback file). A
+/// session with `GROK_DEBUG_LOG` on for a long time and a tool call that dumps
+/// a huge result (e.g. `grep` over a multi-GB file) has no other bound on this
+/// file's growth otherwise. Env-overridable via [`debug_log_max_bytes`], same
+/// convention as `GROK_MAX_FOREGROUND_BLOCK_MS`.
+const DEFAULT_MAX_SINK_BYTES: u64 = 100 * 1024 * 1024; // 100 MiB
 
 /// Resolve the per-file cap: `GROK_DEBUG_LOG_MAX_BYTES` env override, or
 /// [`DEFAULT_MAX_SINK_BYTES`].
@@ -238,7 +242,9 @@ fn debug_log_max_bytes() -> u64 {
 struct Sink {
     writer: NonBlocking,
     bytes_written: u64,
-    /// Set once [`RoutingLayer::max_bytes`] is hit.
+    /// Set once [`RoutingLayer::max_bytes`] is hit, so the one-line notice is
+    /// written exactly once and every later line is a silent no-op rather than
+    /// growing the file further.
     capped: bool,
 }
 
@@ -252,8 +258,14 @@ impl Sink {
     }
 }
 
-/// Per-session sinks plus a single fallback sink, all behind the routing
-/// layer's mutex.
+/// Per-session sinks plus a single fallback sink, all behind the routing layer's
+/// mutex. There is no cap on the NUMBER of sinks: each distinct session id opens
+/// one file + non-blocking worker + parked guard that persist for the process
+/// lifetime (reclaimed only when the process/leader restarts). That is
+/// acceptable for an opt-in, debug-only firehose; a long-lived `--debug` leader
+/// holds one fd per session it logs. The central guard parking (`appender`) is
+/// what lets `flush()` drain these at exit, so we do not reclaim per session.
+/// Each sink's own BYTE size is bounded — see [`RoutingLayer::max_bytes`].
 #[derive(Default)]
 struct SinkMap {
     sessions: HashMap<String, Sink>,
@@ -267,7 +279,14 @@ struct RoutingLayer {
     pid: u32,
     /// Hard per-file byte cap (see [`Sink`]); resolved once at construction.
     max_bytes: u64,
-    // The lock is scoped to map access ONLY — file opens (fs + a worker-thread spawn + the appender's own mutex) run OUTSIDE it.
+    // The lock is scoped to map access ONLY — file opens (fs + a worker-thread
+    // spawn + the appender's own mutex) run OUTSIDE it, so a tracing event
+    // emitted on the open path can't re-enter and deadlock this non-reentrant
+    // Mutex. Lock-on-write is otherwise fine: the firehose is opt-in/debug-only.
+    //
+    // This layer's `on_event` runs for every subscriber callback, so the lock is
+    // one that cannot poison: a panic inside one write must not turn every later
+    // log line into a panic too.
     sinks: parking_lot::Mutex<SinkMap>,
 }
 
@@ -294,8 +313,8 @@ impl RoutingLayer {
         self.sinks.lock()
     }
 
-    // Write `line` to `sink`, enforcing `max_bytes`. Once the cap is reached,
-    // write a one-time notice instead. Mark the sink capped so every later
+    // Write `line` to `sink`, enforcing `max_bytes`: once the cap is reached,
+    // write a one-time notice instead and mark the sink capped so every later
     // line is silently dropped rather than growing the file further.
     fn write_capped(&self, sink: &mut Sink, line: &[u8]) {
         if sink.capped {
@@ -336,7 +355,8 @@ impl RoutingLayer {
         let mut sink = Sink::new(writer);
         self.write_capped(&mut sink, line);
         let mut map = self.lock();
-        // If a concurrent event opened it first, keep that one and drop ours.
+        // If a concurrent event opened it first, keep that one and drop ours (the
+        // line we wrote already reached the file via our worker).
         map.sessions.entry(key.to_owned()).or_insert(sink);
     }
 
@@ -694,9 +714,9 @@ fn prune_old_logs(dir: &Path, max_age: std::time::Duration) {
 mod tests {
     use super::*;
 
-    /// The sink map is taken on every subscriber callback. What the lock does
+    /// The sink map is taken on every subscriber callback, so what the lock does
     /// after somebody else panicked while holding it is the difference between a
-    /// dropped line and a process. That can no longer log at all.
+    /// dropped line and a process that can no longer log at all.
     #[test]
     fn a_panic_while_the_sink_map_is_held_leaves_it_acquirable() {
         let layer = std::sync::Arc::new(RoutingLayer::new(
@@ -715,7 +735,8 @@ mod tests {
             writer.join().is_err(),
             "the writer thread is expected to panic while holding the sink map"
         );
-        // A later acquisition succeeds and sees the map as it was: no half-applied insert.
+        // A later acquisition succeeds and sees the map as it was: no half-applied
+        // insert, and no panic carrying over from the thread that died holding it.
         let map = layer.lock();
         assert!(
             map.sessions.is_empty(),
@@ -1054,14 +1075,19 @@ mod tests {
 
     #[test]
     fn write_session_caps_file_size_and_stops_growing() {
-        // Regression.
+        // Regression: a session's firehose file used to have no size bound at
+        // all (only age-based pruning), so a long `GROK_DEBUG_LOG` session with
+        // one huge tool result could grow a single file to gigabytes. With a
+        // small cap, writing far more than the cap must land a file only
+        // moderately larger than the cap (one notice line over), never
+        // unboundedly larger.
         let _lock = flush_test_lock();
         let dir = tempfile::tempdir().unwrap();
         let layer = RoutingLayer::new(dir.path().to_path_buf(), "agent".to_owned(), 1)
             .with_max_bytes(1_000);
 
         let line = "x".repeat(100) + "\n";
-        // Several lines of many bytes each = 2020 bytes, well past the 1000-byte cap.
+        // 20 lines of 101 bytes each = 2020 bytes, well past the 1000-byte cap.
         for _ in 0..20 {
             layer.write_session("capped-session", line.as_bytes());
         }
@@ -1077,7 +1103,8 @@ mod tests {
             contents.contains("debug log capped at 1000 bytes"),
             "expected the one-time capped notice: {contents:?}"
         );
-        // The notice must appear exactly once — later writes are silent no-ops.
+        // The notice must appear exactly once — later writes are silent no-ops,
+        // not repeated notices that would themselves grow the file.
         assert_eq!(contents.matches("debug log capped").count(), 1);
     }
 

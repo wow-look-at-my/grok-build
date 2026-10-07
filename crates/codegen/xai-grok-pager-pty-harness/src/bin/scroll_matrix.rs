@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::expect_used)] // 2 hits predate the gate
 //! Runs matrix cells (`scroll_matrix::CELLS`) against a real pager binary in a PTY and prints the per-cell verdict table.
 //! Writes `report.json` into the artifacts dir, next to each cell's recorder capture.
 //! Exits nonzero iff any cell failed or an xfail cell passed.

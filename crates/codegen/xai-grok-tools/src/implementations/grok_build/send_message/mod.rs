@@ -1,4 +1,10 @@
 //! `send_message` — text between a session and the subagents it owns.
+//!
+//! Both directions ride the same tool. A parent addresses one of its children
+//! by the subagent id `task` returned. A child addresses the session that
+//! spawned it with the literal `parent`. A message arrives as a mid-turn user
+//! message, so the recipient reads it at its next drain point and keeps the
+//! work it is streaming.
 
 use std::sync::Arc;
 
@@ -22,11 +28,17 @@ pub fn addresses_parent(to: &str) -> bool {
     PARENT_ALIASES.contains(&normalized.as_str())
 }
 
+// ---------------------------------------------------------------------------
 // Parent delivery handle
+// ---------------------------------------------------------------------------
 
 type ParentDeliverFn = dyn Fn(&str) -> Result<(), String> + Send + Sync;
 
-/// Host-injected route from a subagent to the session that spawned it. Only a child session carries this resource.
+/// Host-injected route from a subagent to the session that spawned it.
+///
+/// Only a child session carries this resource. The host owns the provenance
+/// text, because the host knows which subagent this session is and the tool
+/// does not.
 #[derive(Clone)]
 pub struct ParentMessenger(Arc<ParentDeliverFn>);
 
@@ -49,9 +61,10 @@ impl std::fmt::Debug for ParentMessenger {
 
 register_resource!("grok_build", "ParentMessenger", ParentMessenger);
 
-/// Wrap a subagent's message in the block the parent session reads. The
-/// parent takes this as a user message. Without the attribution it reads as
-/// the user's own words, from an agent the user never addressed. Every
+/// Wrap a subagent's message in the block the parent session reads.
+///
+/// The parent takes this as a user message. Without the attribution it reads
+/// as the user's own words, from an agent the user never addressed. Every
 /// attribute is quoted, so a task description carrying a `"` cannot end the
 /// tag early and forge the rest of the block.
 pub fn render_subagent_message(
@@ -99,7 +112,9 @@ pub struct SendMessageOutput {
 
 impl xai_tool_runtime::ToolOutput for SendMessageOutput {}
 
+// ---------------------------------------------------------------------------
 // Tool
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Default)]
 pub struct SendMessageTool;
@@ -332,7 +347,8 @@ mod tests {
             rendered.contains("task=\"check &quot;quoted&quot; &lt;thing&gt;\""),
             "attribute must be escaped: {rendered}"
         );
-        // The body is the subagent's own words. It is data, not markup, so it is delivered as written.
+        // The body is the subagent's own words. It is data, not markup, so it
+        // is delivered as written.
         assert!(rendered.contains("\n body stays raw\n".trim_start()));
     }
 

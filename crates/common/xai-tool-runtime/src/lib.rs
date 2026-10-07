@@ -1,7 +1,7 @@
-#![allow(clippy::cast_lossless)]
-#![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::expect_used)]
-#![allow(clippy::unwrap_used)] // Hits predate the gate
+#![allow(clippy::cast_lossless)] // 1 hit predates the gate
+#![allow(clippy::cast_possible_truncation)] // 1 hit predates the gate
+#![allow(clippy::expect_used)] // 1 hit predates the gate
+#![allow(clippy::unwrap_used)] // 7 hits predate the gate
 
 //! xAI Computer Hub — unified runtime contract.
 //!

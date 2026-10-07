@@ -15,10 +15,12 @@ pub(crate) fn approved_plan_objective(plan: &str) -> String {
 }
 
 impl SessionActor {
-    /// Make a goal from the plan the user approved. Returns the goal-start
-    /// reminder, or `None` when no goal was made. A subagent and a session
-    /// without the goal harness get no goal. A goal that is already active
-    /// stays in place: approving a plan never replaces it.
+    /// Make a goal from the plan the user just approved. Returns the
+    /// goal-start reminder, or `None` when no goal was made.
+    ///
+    /// A subagent and a session without the goal harness get no goal. A goal
+    /// that is already active stays in place: approving a plan never replaces
+    /// it.
     pub(super) async fn setup_goal_from_approved_plan(&self, plan_content: &str) -> Option<String> {
         use crate::session::goal_tracker::{GoalPauseReason, GoalStatus};
         if self.startup_hints.is_subagent || !self.goal_harness_enabled() {

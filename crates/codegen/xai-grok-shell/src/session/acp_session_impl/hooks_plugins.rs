@@ -1,9 +1,15 @@
 use super::*;
 
-/// Fraction of the remaining context-window budget a single tool call's output may consume, in [`SessionActor::reseed_context_budget_output_cap`].
+/// Fraction of the remaining context-window budget a single tool call's
+/// output may consume, in [`SessionActor::reseed_context_budget_output_cap`].
+/// Leaves headroom for the system prompt, tool schemas, and the model's own
+/// next turn rather than handing 100% of what's left to one tool result.
 const CONTEXT_BUDGET_OUTPUT_FRACTION: f64 = 0.8;
 
-/// Floor for the budget-derived output cap.
+/// Floor for the budget-derived output cap so a nearly-full context window
+/// doesn't shrink every tool's cap to a handful of bytes and fail every tool
+/// call outright; a caller this close to the window should already be
+/// hitting auto-compact separately.
 const MIN_CONTEXT_BUDGET_OUTPUT_BYTES: usize = 4_000;
 
 pub(super) const MANAGED_HOOKS_ONLY_REFUSAL: &str =
@@ -91,17 +97,21 @@ impl SessionActor {
 
     /// Re-resolve the live per-tool-call output cap from this session's
     /// remaining context-window budget and update the toolset's
-    /// `TruncationCfg` resource to match. A tool's byte cap is otherwise a
-    /// fixed config value with no relation to how full the context window
-    /// already is. A single large result (e.g. a `run_terminal_cmd`
-    /// `grep`/`cat` over a multi-GB file) can be appended to the transcript
-    /// at its full configured size even when there is nowhere near enough.
-    /// Context left for the *next* model request to include it —
-    /// overflowing the window outright. Auto-compact does not catch this. It
+    /// `TruncationCfg` resource to match.
+    ///
+    /// A tool's byte cap is otherwise a fixed config value with no relation to
+    /// how full the context window already is: a single large result (e.g. a
+    /// `run_terminal_cmd` `grep`/`cat` over a multi-GB file) can be appended to
+    /// the transcript at its full configured size even when there is nowhere
+    /// near enough context left for the *next* model request to include it —
+    /// overflowing the window outright. Auto-compact does not catch this: it
     /// compacts *prior* history, and cannot shrink the tool result the model
-    /// is about to receive in the current step. Called before each
-    /// tool-dispatch step (`turn.rs`), mirroring
+    /// is about to receive in the current step.
+    ///
+    /// Called before each tool-dispatch step (`turn.rs`), mirroring
     /// [`Self::reseed_mcp_output_cap`]'s field-level `TruncationCfg` update.
+    /// A missing sampling config (no model resolved yet) leaves the existing
+    /// cap untouched rather than clearing it.
     pub(crate) async fn reseed_context_budget_output_cap(&self) {
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
         let Some(sampling_cfg) = self.chat_state_handle.get_sampling_config().await else {

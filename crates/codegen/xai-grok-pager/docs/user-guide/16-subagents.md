@@ -46,7 +46,7 @@ Only an explicit `enabled = false` turns subagents off. A `[subagents]` table th
 
 ## Usage Frequency
 
-`usage_frequency` does not enable or disable subagents -- it tunes how strongly the system prompt and the `spawn_subagent` tool description nudge the model toward using them. Six levels, from most to least eager to delegate:
+`usage_frequency` doesn't enable or disable subagents -- it tunes how strongly the system prompt and the `spawn_subagent` tool description nudge the model toward using them. Six levels, from most to least eager to delegate:
 
 | Level | Effect |
 | ----- | ------ |

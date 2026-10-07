@@ -83,18 +83,27 @@ impl SessionActor {
     }
 
     /// Move eligible queued follow-ups into the interjection buffer so the
-    /// running turn picks them up at its next safe point. Without this a
-    /// follow-up typed mid-turn sits in `pending_inputs` until the whole turn
-    /// ends. A message aimed at work in flight arrives after that work is
-    /// finished. The turn loop calls this immediately before
+    /// running turn picks them up at its next safe point.
+    ///
+    /// Without this a follow-up typed mid-turn sits in `pending_inputs` until
+    /// the whole turn ends, so a message aimed at work in flight arrives after
+    /// that work is finished. The turn loop calls this immediately before
     /// `drain_pending_interjections`, which is immediately before each model
-    /// request. The earliest point the model can see the text without
-    /// cancelling anything. Rows listed in
-    /// [`SessionActor::queued_at_turn_start`] were next in line before this
-    /// turn existed — each is its own task, not a note about this turn's
-    /// work. So the turn loop's own harvest (`include_queued_at_turn_start =
-    /// false`) leaves them to run as their own turns. The explicit "deliver
-    /// the queue now" gesture passes `true`. Returns whether anything moved.
+    /// request — the earliest point the model can see the text without
+    /// cancelling anything.
+    ///
+    /// Rows listed in [`SessionActor::queued_at_turn_start`] were next in line
+    /// before this turn existed — each is its own task, not a note about this
+    /// turn's work — so the turn loop's own harvest
+    /// (`include_queued_at_turn_start = false`) leaves them to run as their own
+    /// turns. The explicit "deliver the queue now" gesture passes `true`: the
+    /// user asked for everything they can see, and waiting for a row's own turn
+    /// is exactly what they are cutting short.
+    ///
+    /// Returns whether anything moved. A harvested row never runs as its own
+    /// turn: its RPC resolves [`PromptCompletionKind::RemovedFromQueue`], the
+    /// same completion an explicit dequeue produces, and the drain injects its
+    /// text as a standalone user message.
     pub(super) async fn harvest_queued_prompts_into_interjections(
         &self,
         include_queued_at_turn_start: bool,
@@ -103,7 +112,8 @@ impl SessionActor {
             let mut state = self.state.lock().await;
             let queued_at_turn_start = self.queued_at_turn_start.borrow();
             // `sweep_pending_inputs` exempts the running slot only when
-            // `running_task` is armed.
+            // `running_task` is armed; with no turn running every row is
+            // eligible and the front would be stolen from the promoter.
             let Some(running) = state.running_prompt_id().map(str::to_string) else {
                 return false;
             };
@@ -172,17 +182,19 @@ impl SessionActor {
                     image_count: entry.attachments.len() as u32,
                     redirect_kind: crate::session::events::RedirectKind::Interjection,
                 });
-            // Every attached pane renders the user block from this broadcast: the submitting client painted only a queue row.
+            // Every attached pane renders the user block from this broadcast:
+            // the submitting client painted only a queue row, which the
+            // rebroadcast above just removed.
             self.broadcast_interjection(&entry.text, None);
             self.pending_interjections.push(entry);
         }
         true
     }
 
-    /// Cancel the in-flight model stream. Do this so the turn loop iterates now,
-    /// drains `pending_interjections`, and resubmits — instead of waiting out a
-    /// stream that can run for minutes. A no-op between requests (inside a tool
-    /// call), where the drain happens at the next loop boundary anyway.
+    /// Cancel the in-flight model stream so the turn loop iterates now, drains
+    /// `pending_interjections`, and resubmits — instead of waiting out a stream
+    /// that can run for minutes. A no-op between requests (inside a tool call),
+    /// where the drain happens at the next loop boundary anyway.
     pub(super) fn cancel_in_flight_stream_for_interjection(&self) {
         let Some(req_id) = self.in_flight_sampler_request_id.lock().take() else {
             return;
@@ -194,6 +206,7 @@ impl SessionActor {
     }
 
     /// Whether a queued row can be folded into another turn as user text.
+    ///
     /// Everything excluded here keeps today's behaviour (it runs as its own
     /// turn once the current one ends).
     fn deliverable_mid_turn(item: &InputItem, holds: &std::collections::HashSet<String>) -> bool {
@@ -207,7 +220,9 @@ impl SessionActor {
             return false;
         }
         // A bash row's command is executed from its block meta, never sent to
-        // the model.
+        // the model; a verbatim row is defined by skipping the envelope this
+        // path adds; the rest bind a turn (schema, tool overrides, trace
+        // export) or hand a caller a turn-scoped channel.
         let Some(meta) = &item.queue_meta else {
             return false;
         };
@@ -226,8 +241,12 @@ impl SessionActor {
             return false;
         }
         // A slash invocation is a command, not a note: `resolve` runs it when
-        // the prompt's OWN turn starts, while this path's drain expands
-        // skills alone.
+        // the prompt's OWN turn starts, while this path's drain expands skills
+        // alone — folding it in would hand the model the literal `/cmd args`
+        // (and `/plan <description>` would swallow the prompt of the turn the
+        // mode switch was requested for). It stays queued and runs as its own
+        // turn instead. Same rule the pager consults:
+        // `xai_prompt_queue::is_slash_invocation`.
         if Self::row_text_is_command(&meta.text) {
             return false;
         }

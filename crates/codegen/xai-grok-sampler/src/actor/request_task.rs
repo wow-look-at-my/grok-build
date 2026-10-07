@@ -45,10 +45,15 @@ use crate::types::RequestId;
 /// That is long enough for cold-start reasoning and short enough to detect dead streams before the user gives up.
 const DEFAULT_IDLE_TIMEOUT_SECS: u64 = 300;
 
-/// How often the output-rate meter is read: it judges the floor and publishes the rate a client renders.
+/// How often the output-rate meter is read: it judges the floor and publishes
+/// the rate a client renders. Silence between chunks only lowers the rate when
+/// something reads the meter, so this is also what makes a stream that stops
+/// dead reachable by the gate.
 const RATE_TICK: Duration = Duration::from_millis(250);
 
-/// Smallest change in tokens/sec worth a [`SamplingEvent::OutputRate`].
+/// Smallest change in tokens/sec worth a [`SamplingEvent::OutputRate`]. The
+/// event exists to move a number on screen; a client cannot see less than this
+/// and every event costs a repaint.
 const RATE_EVENT_EPSILON: f64 = 0.5;
 
 /// Public result returned by `SamplerHandle::submit_and_collect`.
@@ -139,7 +144,9 @@ pub(crate) async fn run_request_task(
     let doom_max_retries = doom_policy.map_or(0, |p| p.max_retries);
     let mut doom_retry_count: u32 = 0;
     // The output-rate floor keeps a third budget, for the same reason the
-    // doom-loop one is separate.
+    // doom-loop one is separate: a collapsed engine is not a transport
+    // failure, and spending the transport budget on it leaves nothing for the
+    // 5xx that follows.
     let rate_policy = (max_retries > 0)
         .then(|| config.output_rate_floor.map(OutputRateFloorPolicy::clamped))
         .flatten()
@@ -147,7 +154,9 @@ pub(crate) async fn run_request_task(
     let rate_max_retries = rate_policy.map_or(0, |p| p.max_retries);
     // Atomic because a backup generation spends it from inside an attempt.
     let rate_retry_count = AtomicU32::new(0);
-    // A fourth budget, for a stream that died mid-body.
+    // A fourth budget, for a stream that died mid-body. Same reasoning as the
+    // two above: a dropped connection is not a server fault, and it must not
+    // spend what the next 5xx needs.
     let mut stream_retry_count: u32 = 0;
     let output_observed = Arc::new(AtomicBool::new(false));
 
@@ -161,9 +170,12 @@ pub(crate) async fn run_request_task(
             return request_id;
         }
 
-        // Once the resample budget is spent, the attempt runs with the abort disarmed.
+        // Once the resample budget is spent, the attempt runs with the abort
+        // disarmed so it can complete and be accepted as-is.
         let doom_check = doom_policy.filter(|p| p.has_retries_left(doom_retry_count));
-        // Same disarm as the doom check.
+        // Same disarm as the doom check: once the resample budget is spent the
+        // attempt runs ungated, so a persistently slow engine still answers
+        // instead of the turn dying.
         let rate_check =
             rate_policy.filter(|p| p.has_retries_left(rate_retry_count.load(Ordering::Relaxed)));
         // A backup replaces output the caller has already seen, which is
@@ -568,7 +580,9 @@ async fn apply_retry_decision(
         }
         RetryDecision::RetryWithImageStrip => {
             let reason = if err.is_image_input_unsupported_error() {
-                // Remember the model, not this request: the images live on in conversation history.
+                // Remember the model, not just this request: the images live on
+                // in conversation history, and every later turn would re-upload
+                // them for the same rejection.
                 rejections.images.mark(&config.model);
                 tracing::warn!(
                     model = %config.model,
@@ -601,7 +615,8 @@ async fn apply_retry_decision(
         }
         RetryDecision::RetryWithReasoningStrip => {
             if !request.degrade_thinking_replay() {
-                // The ladder is spent, or there was no reasoning to begin with.
+                // The ladder is spent, or there was no reasoning to begin
+                // with. The session reads the error and flattens or reports.
                 let terminal_event_queued = emit_failed(event_tx, request_id, err);
                 send_completion(completion, Err(clone_error(err)), terminal_event_queued);
                 return false;
@@ -642,13 +657,17 @@ async fn apply_retry_decision(
         }
         RetryDecision::RetryWithMessagePropertyStrip => {
             // The provider's message schema rejected a property it does not
-            // define.
+            // define. Narrow the request's profile so the wire conversion
+            // omits exactly what the provider named; that value lives in
+            // conversation history, so this is the only way past it short of
+            // a new session.
             let stripped = request.strip_unsupported_message_properties(
                 err.names_unsupported_model_id(),
                 err.names_unsupported_reasoning_content(),
             );
             if !stripped {
-                // Already as narrow as this recovery can make it.
+                // Already as narrow as this recovery can make it; the property
+                // must be something else, so re-sending would fail identically.
                 let terminal_event_queued = emit_failed(event_tx, request_id, err);
                 send_completion(completion, Err(clone_error(err)), terminal_event_queued);
                 return false;
@@ -664,7 +683,10 @@ async fn apply_retry_decision(
             true
         }
         RetryDecision::RetryWithReasoningEffortRemap => {
-            // The provider mandates reasoning for this target.
+            // The provider mandates reasoning for this target. Mark it on the
+            // request so the wire builders remap a disabled/omitted requested
+            // effort (unset/None/Minimal) to the lowest non-disabled tier on
+            // the retry — never re-sending a disabling body.
             request.reasoning_mandatory = true;
             tracing::warn!(
                 model = %config.model,
@@ -767,13 +789,15 @@ async fn sleep_or_cancel(
     }
 }
 
-/// Run a single attempt: build the raw stream, drive it through the matching
-/// L2 transform, and forward all non-terminal events to `event_tx`. The rich
-/// `SamplingError` of the raw stream is kept for the retry loop. A `None` for
-/// `doom_check` disarms the doom checks, so the response is kept. The
-/// `backup` launcher starts another generation on a rate-floor breach. The
-/// attempt waits for a slot in `slots` first. Its clocks start after that, so
-/// the wait never counts toward the first-token limit.
+/// Run a single attempt: build the raw stream, drive it through the
+/// matching L2 transform, and forward all non-terminal events to `event_tx`.
+/// The rich `SamplingError` of the raw stream is kept for the retry loop.
+///
+/// A `None` for `doom_check` disarms the doom checks, so the response is kept.
+/// The `backup` launcher starts another generation on a rate-floor breach.
+///
+/// The attempt waits for a slot in `slots` first. Its clocks start after
+/// that, so the wait never counts toward the first-token limit.
 #[allow(clippy::too_many_arguments)]
 async fn run_one_attempt(
     slots: &Arc<RequestSlots>,
@@ -941,7 +965,8 @@ async fn run_one_attempt(
 }
 
 /// The time-to-first-token limit for one attempt, measured from the moment
-/// the request is sent.
+/// the request is sent. It covers the wait for response headers as well as
+/// the wait for the first chunk after them.
 #[derive(Clone, Copy)]
 struct FirstTokenDeadline {
     sent_at: tokio::time::Instant,
@@ -1026,15 +1051,18 @@ fn tee_errors<'a, T: Send + 'a>(
 
 /// Drive an L2 event stream: forward non-terminal events to `event_tx` and watch `cancel_token`.
 /// `doom_check`, when set, turns a completed response carrying confident doom-loop signals into a retryable failure.
+///
 /// The output-rate meter runs here rather than inside a backend transform:
-/// every backend's tokens and tool-call arguments pass through this loop.
-/// One meter covers all of them and the gate and the published rate are the
-/// same measurement. `rate_check`, when set, turns a full window under its
-/// floor into a slow response. With a `backup` launcher the slow response
-/// keeps streaming and another generation starts beside it, hidden. The
-/// earliest of these to happen decides the race:
+/// every backend's tokens and tool-call arguments pass through this loop, so
+/// one meter covers all three and the gate and the published rate are the same
+/// measurement. `rate_check`, when set, turns a full window under its floor
+/// into a slow response. With a `backup` launcher the slow response keeps
+/// streaming and another generation starts beside it, hidden. The earliest
+/// of these to happen decides the race:
+///
 /// - The original recovers above the floor or finishes: the backup stops.
 /// - The backup overtakes or finishes, or the original fails: it takes over.
+///
 /// Dropping this future drops the L2 stream, which cancels the HTTP request.
 /// The `ttft` deadline fails an attempt with no output, on the same tick.
 #[allow(clippy::too_many_arguments)]
@@ -1056,9 +1084,12 @@ async fn drive_l2(
     // Per attempt: `output_observed` spans every attempt of the request.
     let mut first_output_seen = false;
     let mut hedge: Option<Backup<'_>> = None;
-    // Output bytes this attempt has sent.
+    // Output bytes this attempt has sent. A backup that passes it has
+    // overtaken, and nothing on screen is lost by the swap.
     let mut generated_total: u64 = 0;
-    // The gate measures whether a floor is armed: the rate it publishes is what the client renders.
+    // The gate measures whether or not a floor is armed: the rate it
+    // publishes is what the client renders, and a session with no floor still
+    // wants the number.
     let mut gate = OutputRateGate::new(rate_check);
     let mut rate_ticker = tokio::time::interval(RATE_TICK);
     rate_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1077,7 +1108,9 @@ async fn drive_l2(
                     return ttft.breach(tokio_now);
                 }
                 let now = std::time::Instant::now();
-                // Both slowdown edges are logged, not the breach.
+                // Both slowdown edges are logged, not just the breach: a dip
+                // that recovers on its own is never reissued over and would
+                // otherwise leave no trace of the seconds it cost.
                 match gate.tick(now) {
                     RateTick::Quiet => {}
                     RateTick::SlowdownStarted { tokens_per_sec } => {
@@ -1185,7 +1218,8 @@ async fn drive_l2(
                         event = "output_rate_backup_failed",
                         "output-rate floor: the backup generation failed; the slow one keeps streaming"
                     );
-                    // Another sustained duration under the floor may start another backup, while budget remains.
+                    // Another sustained duration under the floor may start
+                    // another backup, while budget remains.
                     gate.rearm(std::time::Instant::now());
                 }
             },
@@ -1229,7 +1263,9 @@ async fn drive_l2(
                             .adopt(&request_id, event_tx, cancel_token, "the original failed", None)
                             .await;
                     }
-                    // The captured error is the only record of why the attempt failed.
+                    // The captured error is the only record of why the attempt
+                    // failed, so it is taken back from a holder that died rather
+                    // than being replaced by a synthesized reason.
                     #[allow(clippy::disallowed_methods)]
                     let raw = captured
                         .lock()
@@ -1267,7 +1303,10 @@ async fn drive_l2(
                         first_output_seen = true;
                         await_first_output_span.take();
                     }
-                    // A backend-hosted tool call is the server's time, not the stream's. The model generates nothing from the start of a web search to its result.
+                    // A backend-hosted tool call is the server's time, not the
+                    // stream's: the model generates nothing from the start of
+                    // a web search to its result, so counting that span reads
+                    // a healthy response as a collapsing one.
                     match &other {
                         SamplingEvent::BackendToolCallStarted { .. } => {
                             gate.pause(std::time::Instant::now());
@@ -1275,7 +1314,14 @@ async fn drive_l2(
                         SamplingEvent::BackendToolCallCompleted { .. } => {
                             gate.resume(std::time::Instant::now());
                         }
-                        // A tool call that opens carrying no arguments is one whose body this loop will never see: `stream_tool_calls` is off by default.
+                        // A tool call that opens carrying no arguments is one
+                        // whose body this loop will never see:
+                        // `stream_tool_calls` is off by default, and the
+                        // upstream then writes the whole call before it says
+                        // anything. Providers spell "no bytes yet" several ways
+                        // (none, the empty string, a bare continuation), and
+                        // generation nobody streamed is not silence, so the
+                        // gate holds until output resumes.
                         SamplingEvent::ToolCallDelta { arguments_delta, .. } => {
                             gate.tool_call_fragment(
                                 std::time::Instant::now(),
@@ -1286,7 +1332,10 @@ async fn drive_l2(
                         }
                         _ => {}
                     }
-                    // Tool-call arguments are generation like any other.
+                    // Tool-call arguments are generation like any other: a
+                    // response that collapses while writing a large edit is
+                    // the case the floor exists for, and counting only text
+                    // would read it as total silence.
                     let generated = generated_bytes(&other);
                     if generated > 0 {
                         gate.record(std::time::Instant::now(), generated);
@@ -1300,7 +1349,10 @@ async fn drive_l2(
                             .adopt(&request_id, event_tx, cancel_token, "the original failed", None)
                             .await;
                     }
-                    // L2 streams always terminate with Completed or Failed.
+                    // L2 streams always terminate with Completed or
+                    // Failed; reaching None means the producer was
+                    // dropped without termination -- treat as a
+                    // synthetic transport error.
                     return AttemptOutcome::Failed {
                         error: SamplingError::EventStreamError(
                             "stream dropped without terminal event".to_string(),
@@ -1402,11 +1454,11 @@ pub(crate) struct BackupLauncher<'a> {
 }
 
 impl<'a> BackupLauncher<'a> {
-    /// Start a backup, or `None` when the rate budget is spent. `cause` is
-    /// the breach, reported to the caller if the backup replaces the
-    /// original. The backup starts no backup of its own. After it replaces
-    /// the original, a breach of its floor ends the attempt, and the retry
-    /// loop reissues.
+    /// Start a backup, or `None` when the rate budget is spent. `cause` is the
+    /// breach, reported to the caller if the backup replaces the original.
+    ///
+    /// The backup starts no backup of its own. After it replaces the original,
+    /// a breach of its floor ends the attempt, and the retry loop reissues.
     fn launch(&self, parent: &CancellationToken, cause: SamplingError) -> Option<Backup<'a>> {
         let attempt = self
             .spent
@@ -1582,9 +1634,9 @@ impl Backup<'_> {
 }
 
 /// Publish the gate's current rate. The event's whole job is to change what a
-/// client renders. An unchanged reading is not sent — with a single exception.
-/// The event also carries how long that has lasted, and that number moves even when
-/// the rate does not. This happens while the rate is under the floor.
+/// client renders, so an unchanged reading is not sent — with a single exception:
+/// while the rate is under the floor the event also carries how long that has
+/// lasted, and that number moves even when the rate does not.
 fn publish_rate(
     gate: &OutputRateGate,
     now: std::time::Instant,
@@ -2408,7 +2460,7 @@ mod tests {
 
         assert!(!should_continue);
         // The event carries the wait it is about to take and the error that
-        // caused it. A client can say both instead of showing a bare
+        // caused it, so a client can say both instead of showing a bare
         // "Retrying" for however long the backoff runs.
         match event_rx.recv().await {
             Some(SamplingEvent::Retrying {

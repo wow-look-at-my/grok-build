@@ -83,8 +83,9 @@ fn a_null_cache_tier_reads_as_zero_and_leaves_the_rest_priced() {
     assert_eq!(pricing.output_per_token_usd, 0.000015);
 }
 
-/// A document that prices nothing must not be recorded as an all-zero price: `compute_cost_ticks` reads that as unusable anyway. It storing it as an answer claims a
-/// price the catalog never gave.
+/// A document that prices nothing must not be recorded as an all-zero price:
+/// `compute_cost_ticks` reads that as unusable anyway, and storing it as an
+/// answer claims a price the catalog never gave.
 #[test]
 fn a_document_that_prices_nothing_is_not_an_answer() {
     let document: ModelinfoDocument = serde_json::from_str("{}").expect("parse");
@@ -100,8 +101,8 @@ fn a_priced_model_comes_back_from_the_catalog() {
     assert_eq!(pricing.input_per_token_usd, 0.000005);
 }
 
-/// The caller caches it, so a turn on an unpriced model does not re-fetch
-/// every time.
+/// A 404 is an ANSWER: the catalog does not know this model. The caller
+/// caches it, so a turn on an unpriced model does not re-fetch every time.
 #[test]
 fn an_unknown_model_answers_with_no_price_rather_than_an_error() {
     let base = serve_once("HTTP/1.1 404 Not Found", r#"{"error":"no model"}"#);

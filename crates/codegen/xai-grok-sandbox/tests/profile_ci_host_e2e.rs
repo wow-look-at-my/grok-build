@@ -1,4 +1,38 @@
-//! End-to-end proof that a session confined by the PROFILE sandbox can still answer its CI queries, on macOS.
+//! End-to-end proof that a session confined by the PROFILE sandbox can still
+//! answer its CI queries, on macOS, with the real sandbox installed.
+//!
+//! The profile sandbox is applied to the running process by `sandbox_init`, and
+//! the Seatbelt rules it installs deny the keychain mach services. `gh` keeps
+//! its OAuth token in the login keychain, so a `gh` running under those rules
+//! sends no `Authorization` header and every CI query answers `401`. This test
+//! drives the fix: a session starts the unsandboxed worker BEFORE it is
+//! confined, and its queries ride that worker instead of an in-jail `gh`.
+//!
+//! It is run as the shipped arrangement, not a model of it:
+//!
+//!   * the parent (unconfined at that moment) starts the worker through the
+//!     shipped `ci_host::start_ci_host_for_session` and finds it again through
+//!     the shipped `ci_host::ci_host_fd`;
+//!   * a child re-enters this same binary, applies the real
+//!     `ProfileName::Workspace` profile with the shipped `SandboxManager`, and
+//!     drives the shipped query path (`ci_host::run_gh`) exactly as the `ci`
+//!     tool and the CI dot do;
+//!   * the same child, with NO worker handed in, drives the same query and gets
+//!     the in-jail `gh` - the behaviour the fix replaces.
+//!
+//! The two children are told apart by where their `gh` ran: the worker queries
+//! from its own working directory (the session workspace), while the unassisted
+//! child's own `gh` runs from the directory the query names.
+//!
+//! That only tells them apart where the host's `gh` gets far enough to look at
+//! its working directory. An unauthenticated one does not: it asks for
+//! `GH_TOKEN` and stops, so both sides answer identically whatever directory
+//! they ran in. The parent measures that first, from the two directories, and
+//! says so rather than asserting a difference the host cannot produce.
+//!
+//! `harness = false` (see Cargo.toml): the worker child is this binary
+//! re-entered with the marker env var set and nothing else, which is how the
+//! shipped spawn starts it, and only a hand-written `main` can dispatch that.
 
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
@@ -6,10 +40,12 @@ use std::path::{Path, PathBuf};
 /// The mode a spawned child runs in. Absent means "the parent".
 #[cfg(target_os = "macos")]
 const MODE_ENV: &str = "GROK_PROFILE_CI_HOST_MODE";
-/// The session workspace: what the worker runs `gh` in, and what the child confines itself to.
+/// The session workspace: what the worker runs `gh` in, and what the child
+/// confines itself to.
 #[cfg(target_os = "macos")]
 const WORKSPACE_ENV: &str = "GROK_PROFILE_CI_HOST_WORKSPACE";
-/// The directory the child names as the query's cwd, instead of the session workspace, so the answer says which side ran `gh`.
+/// The directory the child names as the query's cwd, instead of the session
+/// workspace, so the answer says which side ran `gh`.
 #[cfg(target_os = "macos")]
 const QUERY_CWD_ENV: &str = "GROK_PROFILE_CI_HOST_QUERY_CWD";
 /// The branch every query asks about.
@@ -24,7 +60,7 @@ const MODE_JAILED_NO_WORKER: &str = "jailed-no-worker";
 /// Every line a child reports so the parent can read it back.
 const REPORT: &str = "profile-ci-host: ";
 
-/// The case this binary runs, under the name a test runner lists it by.
+/// The one case this binary runs, under the name a test runner lists it by.
 const TEST_NAME: &str = "a_profile_confined_session_answers_its_ci_query_through_the_worker";
 
 fn main() {
@@ -49,6 +85,11 @@ fn main() {
 
 /// Answer the listing a test runner asks for before it runs anything, and say
 /// whether that is all this run was.
+///
+/// `harness = false` leaves the protocol to this binary. nextest lists with
+/// `--list --format terse` and refuses a binary that answers with anything but
+/// `<name>: test` lines. `cargo test` never lists, which is why a binary that
+/// ignores the argument passes there and fails under nextest.
 fn serve_list_protocol(name: &str) -> bool {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.iter().any(|arg| arg == "--list") {
@@ -62,7 +103,8 @@ fn serve_list_protocol(name: &str) -> bool {
 }
 
 /// Hex, because a report line carries one value on one line and `gh`'s own
-/// error text is several.
+/// error text is several. Splitting the child's stdout into lines kept the
+/// first line of a multi-line answer and compared it against the whole one.
 #[cfg(target_os = "macos")]
 fn encode(text: &str) -> String {
     text.bytes().map(|b| format!("{b:02x}")).collect()
@@ -103,13 +145,20 @@ fn parent() {
     let query_cwd = fixture_dir("query-cwd");
     println!("{REPORT}branch={branch} workspace={}", workspace.display());
 
-    // What the same query answers with no sandbox anywhere in the picture, from the session workspace.
+    // What the same query answers with no sandbox anywhere in the picture,
+    // from the session workspace. This is the reference the confined answer
+    // has to match.
     let baseline = xai_grok_sandbox::ci_host::ci_host_fd();
     assert_eq!(baseline, None, "the parent must start with no worker");
     let direct = query(&workspace, &branch);
     println!("{REPORT}unsandboxed={}", direct.summary());
 
-    // The same query from the directory the child names, still with no worker anywhere.
+    // The same query from the directory the child names, still with no worker
+    // anywhere: this is what a `gh` INSIDE the confinement answers. Where it
+    // differs from the workspace answer, the child's own answer says which side
+    // ran `gh`. Where it does not, this host's `gh` refuses before it ever looks
+    // at its working directory - an unauthenticated one asks for `GH_TOKEN` and
+    // stops - and no answer can tell the two sides apart here.
     let direct_from_query_cwd = query(&query_cwd, &branch);
     let cwd_tells_the_sides_apart = direct_from_query_cwd.answer != direct.answer;
     println!(
@@ -129,11 +178,14 @@ fn parent() {
     );
     println!("{REPORT}fd={fd}");
 
-    // The parent's own query now rides the worker, and must agree with the unsandboxed answer: the worker is a transport.
+    // The parent's own query now rides the worker, and must agree with the
+    // unsandboxed answer: the worker is a transport, not a different answer.
     let via_worker = query(&query_cwd, &branch);
     println!("{REPORT}unconfined_via_worker={}", via_worker.summary());
 
-    // The child that has a worker.
+    // The child that has a worker. `inherit_across_exec` is how the fd reaches
+    // a process the confinement is installed in rather than one it is exec'd
+    // into, and it is the shipped half of that contract.
     xai_grok_sandbox::ci_host::inherit_across_exec(fd).expect("clear close-on-exec");
     let with_worker = run_child(MODE_JAILED, &workspace, &query_cwd, &branch, Some(fd));
     println!("{REPORT}{}", with_worker.summary());
@@ -142,7 +194,11 @@ fn parent() {
     let without_worker = run_child(MODE_JAILED_NO_WORKER, &workspace, &query_cwd, &branch, None);
     println!("{REPORT}{}", without_worker.summary());
 
-    // The child normally confines itself with the workspace profile.
+    // The child normally confines itself with the workspace profile. A host
+    // that is ALREADY confined cannot nest another profile (`sandbox_init`
+    // refuses), and there the child is confined by the profile it inherited;
+    // `keychain_before` is how it says so. Either way the query below runs
+    // under a real confinement, and the keychain stays out of reach.
     let confined_here = with_worker.applied == "1";
     let confined_by_inheritance =
         with_worker.applied == "0" && with_worker.keychain_before == "denied";
@@ -173,8 +229,11 @@ fn parent() {
         "the control child must have no worker to find: {without_worker}"
     );
 
-    // Where the child's `gh` ran is what tells the paths apart: the worker
-    // answers from the session workspace.
+    // Where the child's `gh` ran is what tells the two paths apart: the worker
+    // answers from the session workspace, and a `gh` spawned inside the
+    // confinement answers from the directory the query named. The child's
+    // answer must therefore be the worker's own answer to the same query,
+    // whatever that answer is on this host.
     assert_eq!(
         with_worker.answer, via_worker.answer,
         "the confined child's query must be answered by the worker, exactly as \
@@ -261,7 +320,10 @@ fn jailed_child(worker: bool) {
     println!("{REPORT}child_done");
 }
 
-/// Whether the login keychain is reachable from inside this process.
+/// Whether the login keychain is reachable from inside this process. `security`
+/// answers a bare "valid parameters" error rather than a search list when the
+/// keychain mach services are denied, which is exactly what the confinement
+/// does to `gh`.
 #[cfg(target_os = "macos")]
 fn keychain_state() -> &'static str {
     match std::process::Command::new("/usr/bin/security")
@@ -356,7 +418,9 @@ struct ChildReport {
     runs: String,
     /// The exit code of the child's answer, or `-1` when no `gh` ran at all.
     answer_code: String,
-    /// Whether the keychain was already unreachable BEFORE the child applied anything.
+    /// Whether the keychain was already unreachable BEFORE the child applied
+    /// anything: a host that is confined already cannot nest a second profile,
+    /// and that is how this child says it inherited one.
     keychain_before: String,
     /// Whatever the child printed on stderr, so a refused confinement says why.
     stderr: String,
@@ -382,7 +446,7 @@ impl ChildReport {
         self.runs == "yes"
     }
 
-    /// Whether a `gh` ran for this child, or there was none to run.
+    /// Whether a `gh` actually ran for this child, or there was none to run.
     fn gh_ran(&self) -> bool {
         self.answer_code != "-1"
     }
@@ -395,8 +459,8 @@ impl std::fmt::Display for ChildReport {
     }
 }
 
-/// Re-enter this binary in `mode`, with the workspace, the query's directory.
-/// The branch, and (when `fd` is given) the worker's fd named in the env var
+/// Re-enter this binary in `mode`, with the workspace, the query's directory,
+/// the branch, and (when `fd` is given) the worker's fd named in the env var
 /// the jail boundary uses.
 #[cfg(target_os = "macos")]
 fn run_child(
@@ -411,7 +475,9 @@ fn run_child(
         .env(WORKSPACE_ENV, workspace)
         .env(QUERY_CWD_ENV, query_cwd)
         .env(BRANCH_ENV, branch)
-        // The confinement grants writes to this process's `$GROK_HOME`, and the hook write-deny step materializes directories under it.
+        // The confinement grants writes to this process's `$GROK_HOME`, and the
+        // hook write-deny step materializes directories under it: a fixture
+        // keeps the session's own home out of a test run.
         .env("GROK_HOME", fixture_dir("grok-home"));
     match fd {
         Some(fd) => cmd.env(xai_grok_sandbox::ci_host::CI_HOST_FD_ENV, fd.to_string()),

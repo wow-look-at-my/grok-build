@@ -42,7 +42,11 @@ pub enum McpServerTransportConfig {
         cwd: Option<String>,
     },
     StreamableHttp {
-        /// The server's URL.
+        /// The server's URL. Read under the three spellings in
+        /// [`McpServerTransportConfig::URL_KEYS`]: `url` is what this type
+        /// writes, `urlTemplate` is the VS Code `.mcp.json` spelling and
+        /// `url_template` the snake_case one, both of which arrive from files
+        /// this program did not author.
         url: String,
         #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
         transport_type: Option<String>,
@@ -64,15 +68,19 @@ pub enum McpServerTransportConfig {
 }
 
 impl McpServerTransportConfig {
-    /// The keys the streamable-HTTP transport reads its URL under.
+    /// The keys the streamable-HTTP transport reads its URL under. The first is
+    /// what this type writes; a config file that names two of them with one URL
+    /// — which `.mcp.json` written for more than one editor does — says one
+    /// thing twice, and a bare `#[serde(alias)]` would fail the whole entry on
+    /// the duplicate.
     pub const URL_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("url", &["urlTemplate", "url_template"]);
 }
 
 /// `McpServerTransportConfig` with each URL spelling as its own field. It stays
 /// `untagged`, and the fold happens in the outer `TryFrom` rather than inside a
-/// variant. This is because an untagged variant that fails contributes only
-/// "data did not match any variant". The conflict text would be lost.
+/// variant, because an untagged variant that fails contributes only "data did
+/// not match any variant" — the conflict text would be lost.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum McpServerTransportConfigWire {
@@ -111,7 +119,8 @@ enum McpServerTransportConfigWire {
 #[derive(Debug)]
 pub enum McpTransportConfigError {
     Alias(xai_tool_types::AliasConflict),
-    /// `url` is required, exactly as it was before the shadow: an HTTP server with no address is not a server.
+    /// `url` is required, exactly as it was before the shadow: an HTTP server
+    /// with no address is not a server.
     MissingUrl,
     /// `command` is required for the stdio arm.
     MissingCommand,
@@ -162,8 +171,8 @@ impl TryFrom<McpServerTransportConfigWire> for McpServerTransportConfig {
                 oauth_client_secret_env_var,
                 oauth_scopes,
             } => Self::StreamableHttp {
-                // Not a silent default: an HTTP entry naming none of the keys
-                // has no address. Which is what the required `url` field
+                // Not a silent default: an HTTP entry naming none of the three
+                // keys has no address, which is what the required `url` field
                 // rejected before the shadow existed.
                 url: McpServerTransportConfig::URL_KEYS
                     .fold(vec![url, url_template_camel, url_template_snake])?
@@ -244,7 +253,9 @@ pub struct McpJsonOAuthBlock {
 pub struct McpSetupConfig {
     #[serde(default)]
     pub fields: Vec<McpSetupField>,
-    /// The recorded answers.
+    /// The recorded answers. Read under both keys folded by
+    /// [`McpSetupConfig::VARIABLES_KEYS`]: `variables` is what this type writes,
+    /// `values` is the spelling a server's own manifest uses.
     #[serde(default)]
     pub variables: HashMap<String, McpSetupDerivedValue>,
 }
@@ -402,7 +413,8 @@ fn render_setup_template(
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
     while let Some(start) = rest.find("{{") {
-        // Every offset below is a `{{` or `}}` needle offset, or such an offset plus that two-byte ASCII literal's width.
+        // Every offset below is a `{{` or `}}` needle offset, or such an offset
+        // plus that two-byte ASCII literal's width, so each is a char boundary.
         let (prefix, after_start) = rest.split_at(start);
         out.push_str(prefix);
         let Some(after_start) = after_start.strip_prefix("{{") else {
@@ -1008,7 +1020,7 @@ mod wire_alias_tests {
         );
     }
 
-    /// Addresses in one entry decide where the server's traffic goes.
+    /// Two addresses in one entry decide where the server's traffic goes.
     #[test]
     fn an_http_server_whose_url_spellings_disagree_is_an_error_naming_the_field() {
         let err = serde_json::from_str::<McpServerTransportConfig>(

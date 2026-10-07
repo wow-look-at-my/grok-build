@@ -1002,10 +1002,10 @@ async fn test_compact_on_error_no_trigger_when_tokens_within_new_window() {
         })
         .await;
 }
-/// The server's tokenizer is the one that counts. Our own estimate saying
-/// the prompt fits is not a reason to hand the turn back to the user. The
-/// overflow ladder takes it, and that ladder is what bounds the retries.
-/// This applies when it says the context length is the problem.
+/// The server's tokenizer is the one that counts. When it says the context
+/// length is the problem, our own estimate saying the prompt fits is not a
+/// reason to hand the turn back to the user: the overflow ladder takes it,
+/// and that ladder is what bounds the retries.
 #[tokio::test(flavor = "current_thread")]
 async fn a_context_length_rejection_compacts_even_when_our_own_count_fits() {
     let local = tokio::task::LocalSet::new();
@@ -1038,9 +1038,9 @@ async fn a_prompt_that_leaves_no_room_for_an_answer_compacts() {
         })
         .await;
 }
-/// A context-overflow error hitting immediately after a compaction (the next
-/// resubmit overflows again) must NOT compact a second time in a row. It
-/// must deterministically shrink the sent conversation instead. Setting
+/// A context-overflow error hitting immediately after a compaction (the very
+/// next resubmit overflows again) must NOT compact a second time in a row —
+/// it must deterministically shrink the sent conversation instead. Setting
 /// `context_overflow_recovery` to `Compacted` up front skips straight to the
 /// second-attempt branch, so this never needs a real compaction/LLM call.
 #[tokio::test(flavor = "current_thread")]
@@ -1083,9 +1083,9 @@ async fn second_consecutive_overflow_reduces_instead_of_compacting_again() {
 }
 /// A THIRD consecutive overflow (compaction, then a deterministic reduction,
 /// and the resubmit overflows yet again) must give up rather than retry
-/// forever. This is the loop-safety guarantee itself: reducing a second time
-/// could not converge any better than the first. The turn must fail loudly
-/// instead of looping.
+/// forever — this is the loop-safety guarantee itself: reducing a second
+/// time could not converge any better than the first, so the turn must fail
+/// loudly instead of looping.
 #[tokio::test(flavor = "current_thread")]
 async fn third_consecutive_overflow_gives_up_instead_of_looping() {
     use crate::session::compaction_config::ContextOverflowRecovery;
@@ -1119,7 +1119,7 @@ async fn third_consecutive_overflow_gives_up_instead_of_looping() {
         .await;
 }
 /// A successful sample must clear `context_overflow_recovery` back to
-/// `None` so a later. Unrelated overflow gets its own fresh compaction
+/// `None` so a later, unrelated overflow gets its own fresh compaction
 /// attempt rather than skipping straight to the reduce fallback.
 #[tokio::test(flavor = "current_thread")]
 async fn successful_sample_resets_context_overflow_recovery() {
@@ -1326,9 +1326,9 @@ async fn compaction_at_tokens_fixed_and_disabled() {
         .await;
 }
 /// `reseed_context_budget_output_cap` must derive the tool-output cap from
-/// what's left of the context window, not a static config value. Regression
-/// for the reported failure where a single ~372K-token tool result overflowed
-/// a 524K window that had 365K tokens already in use.
+/// what's actually left of the context window, not a static config value:
+/// regression for the reported failure where a single ~372K-token tool result
+/// overflowed a 524K window that had 365K tokens already in use.
 #[tokio::test(flavor = "current_thread")]
 async fn reseed_context_budget_output_cap_derives_from_remaining_window() {
     let local = tokio::task::LocalSet::new();
@@ -1336,6 +1336,7 @@ async fn reseed_context_budget_output_cap_derives_from_remaining_window() {
         .run_until(async {
             let (gateway_tx, _g) = mpsc::unbounded_channel();
             let (persistence_tx, _p) = mpsc::unbounded_channel();
+            // 90_000 of a 100_000 window used -> 10_000 tokens remaining.
             let actor = create_test_actor(90_000, 100_000, 85, gateway_tx, persistence_tx).await;
             actor.reseed_context_budget_output_cap().await;
 
@@ -1347,12 +1348,13 @@ async fn reseed_context_budget_output_cap_derives_from_remaining_window() {
                 .expect("cap should have been seeded")
                 .0
                 .clone();
+            // 10_000 remaining * 0.8 headroom = 8_000 tokens * 4 bytes/token = 32_000 bytes.
             assert_eq!(cfg.context_budget_max_output_bytes, Some(32_000));
         })
         .await;
 }
 /// A near-full window must not shrink the cap to nothing: the floor keeps
-/// tool calls usable rather than failing every outright.
+/// tool calls usable rather than failing every one outright.
 #[tokio::test(flavor = "current_thread")]
 async fn reseed_context_budget_output_cap_floors_near_a_full_window() {
     let local = tokio::task::LocalSet::new();
@@ -1360,6 +1362,7 @@ async fn reseed_context_budget_output_cap_floors_near_a_full_window() {
         .run_until(async {
             let (gateway_tx, _g) = mpsc::unbounded_channel();
             let (persistence_tx, _p) = mpsc::unbounded_channel();
+            // Only 100 tokens left of a 100_000 window.
             let actor = create_test_actor(99_900, 100_000, 85, gateway_tx, persistence_tx).await;
             actor.reseed_context_budget_output_cap().await;
 
@@ -1406,7 +1409,8 @@ async fn a_mid_turn_compact_is_armed_rather_than_run() {
                 rx.try_recv().is_err(),
                 "answering the caller now reports a compaction that has not run"
             );
-            // A second request neither displaces the armed one nor reports a success it will not get.
+            // A second request neither displaces the armed one nor reports a
+            // success it will not get: its instructions would be dropped.
             let (tx2, mut rx2) = tokio::sync::oneshot::channel();
             actor.compact_on_request(None, tx2).await;
             assert!(

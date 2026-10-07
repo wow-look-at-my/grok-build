@@ -85,10 +85,10 @@ fn replay_plan(req: &ConversationRequest) -> ThinkingReplayPlan {
 /// Whether the conversation ends mid-tool-loop on a turn whose thinking block
 /// the plan leaves behind. A provider validates the thinking of a tool-calling
 /// turn it is being asked to continue ("thinking blocks cannot be modified",
-/// and thinking-on requires that turn to lead with one). The block is exactly
-/// what a model switch takes away. Neither half is recoverable, so the whole
-/// request goes out with thinking off; the next turn is this model's own and
-/// pairs normally.
+/// and thinking-on requires that turn to lead with one), and the block is
+/// exactly what a model switch takes away. Neither half is recoverable, so the
+/// whole request goes out with thinking off; the next turn is this model's own
+/// and pairs normally.
 fn open_tool_loop_lost_its_thinking(req: &ConversationRequest, plan: &ThinkingReplayPlan) -> bool {
     if req.model.is_none() {
         return false;
@@ -146,13 +146,20 @@ fn claude_version(model: &str) -> Option<(u32, u32)> {
     Some((major, minor))
 }
 
-/// Which `thinking` dialect a model speaks.
+/// Which `thinking` dialect a model speaks. Claude 4.6 replaced
+/// `{"type":"enabled","budget_tokens":N}` with `{"type":"adaptive"}` plus
+/// `output_config.effort`, and each generation rejects the other's spelling
+/// outright ("Input tag 'adaptive' ... does not match any of the expected
+/// tags"). A name that is not a Claude at all is a gateway's own model, which
+/// this cannot speak for: it keeps the request it has always been sent.
 fn speaks_adaptive_thinking(model: &str) -> bool {
     claude_version(model).is_none_or(|version| version >= (4, 6))
 }
 
 /// The `budget_tokens` a pre-4.6 Claude sizes its thinking with, standing in
-/// for the effort word its dialect has no room for.
+/// for the effort word its dialect has no room for. The API's floor is 1024 and
+/// the budget must leave the answer room under `max_tokens`, so a ceiling that
+/// cannot house the floor yields no thinking rather than a 400.
 fn thinking_budget(effort: crate::ReasoningEffort, max_tokens: u32) -> Option<u32> {
     use crate::ReasoningEffort as Effort;
 
@@ -263,7 +270,8 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     let mut dropped_foreign_thinking = 0usize;
     let mut converted_foreign_thinking = 0usize;
     let plan = replay_plan(req);
-    // Thinking off for this request takes its blocks with it.
+    // Thinking off for this request takes its blocks with it: a block sent
+    // without the top-level config is rejected in turn.
     let thinking_off = open_tool_loop_lost_its_thinking(req, &plan);
 
     for (idx, item) in req.items.iter().enumerate() {
@@ -448,7 +456,11 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         ConversationToolChoice::None => ToolChoiceParam::Auto, // ToolChoiceParam has no none variant, so fall back to the default
     });
 
-    // The mandatory-reasoning remap happens BEFORE the Messages mapping: for a reasoning-mandatory target, `None`/`Minimal` must not be omitted from the wire.
+    // The mandatory-reasoning remap happens BEFORE the Messages mapping: for
+    // a reasoning-mandatory target, `None`/`Minimal` must not be omitted from
+    // the wire, so they are lifted to the lowest supported non-disabled
+    // effort first. A request for such a target always carries
+    // `output_config.effort` (and its auto-paired `thinking`).
     let effective_effort = wire_reasoning_effort(req.reasoning_mandatory, req.reasoning_effort);
     let effort = effective_effort
         .map(|e| e.to_messages_api())
@@ -489,7 +501,8 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         budget.map(|budget_tokens| crate::messages::ThinkingConfig::Enabled { budget_tokens })
     };
 
-    // `output_config.effort` is 4.6-and-later too.
+    // `output_config.effort` is 4.6-and-later too; an older Claude 400s on it,
+    // and its `thinking` budget already carries the same intent.
     let effort = effort.filter(|_| adaptive);
 
     let output_config = if effort.is_some() || format.is_some() {

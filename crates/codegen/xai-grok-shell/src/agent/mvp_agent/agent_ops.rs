@@ -43,19 +43,22 @@ fn should_warn_missing_session(ctx: MissingSessionCtx) -> bool {
     }
 }
 /// Resolve a BYOK / custom-provider model's context window from its OWN
-/// `/v1/models` endpoint on the request path. That window is returning a
-/// model whose window has been backfilled when resolution succeeds. This is
-/// the per-request counterpart to the catalog-build resolution in
-/// `resolve_model_list`. A model carrying its own credential and a non-xAI,
-/// non-cli-chat-proxy base_url is never in the xAI proxy listing. Its window
-/// stays at the hardcoded sentinel (`CONFIG_DEFAULT_CONTEXT_WINDOW` = 200k
-/// from config, or `DEFAULT_CONTEXT_WINDOW` = 256k). Ask the provider the
-/// request is going to — not a sibling, not config — for the exact slug's
-/// window. Returns `Cow::Owned(model_with_resolved_window)` on success, or
+/// `/v1/models` endpoint on the request path, returning a model whose window
+/// has been backfilled when resolution succeeds.
+///
+/// This is the per-request counterpart to the catalog-build resolution in
+/// `resolve_model_list`: a model carrying its own credential and a non-xAI,
+/// non-cli-chat-proxy base_url is never in the xAI proxy listing, so its
+/// window stays at the hardcoded sentinel (`CONFIG_DEFAULT_CONTEXT_WINDOW` =
+/// 200k from config, or `DEFAULT_CONTEXT_WINDOW` = 256k). Ask the provider the
+/// request is actually going to — not a sibling, not config — for the exact
+/// slug's window.
+///
+/// Returns `Cow::Owned(model_with_resolved_window)` on success, or
 /// `Cow::Borrowed(model)` when the window is already real, the model is not
 /// BYOK, the base is xAI/proxy (already resolved elsewhere), or the provider
-/// listing yields nothing (cold/unreachable provider: best-effort, sentinel
-/// is kept).
+/// listing yields nothing (cold/unreachable provider: best-effort, sentinel is
+/// kept).
 fn resolve_byok_context_window_on_request_path<'a>(
     model: &'a ModelEntry,
     credentials: &crate::agent::config::ResolvedCredentials,
@@ -69,7 +72,14 @@ fn resolve_byok_context_window_on_request_path<'a>(
         return std::borrow::Cow::Borrowed(model);
     }
     // The resolution is driven by the model's OWN credential, mirroring the
-    // catalog-build gate in `resolve_model_list`.
+    // catalog-build gate in `resolve_model_list`: a model with its own
+    // api_key/env_key is BYOK by definition, and bundled/xAI models never carry
+    // one, so only BYOK models are re-queried. `credentials.api_key` may be a
+    // session JWT (session-based auth), which must not be used to query the
+    // model's own provider; gate on `own_credential()` (static api_key/env_key)
+    // instead. Deliberately no xAI-host check here — `is_xai_api_url` treats
+    // loopback as cli-chat-proxy/xAI, which would wrongly skip a local BYOK
+    // test/mock base (see the same note in `resolve_model_list`).
     let Some(own_key) = model.own_credential() else {
         return std::borrow::Cow::Borrowed(model);
     };
@@ -147,7 +157,8 @@ impl MvpAgent {
         primary: &SamplingConfig,
     ) -> Result<(Option<OaiCompatClient>, String), acp::Error> {
         let slug = self.resolve_session_summary_model();
-        // Config resolution fills the compiled default in, so only another model counts as a choice.
+        // Config resolution fills the compiled default in, so only another
+        // model counts as a choice.
         let pinned = slug != crate::models::default_session_summary_model();
         let session_key = self.auth_manager.current_or_expired().map(|a| a.key.clone());
         let models = self.models_manager.models();
@@ -711,7 +722,12 @@ impl MvpAgent {
     pub(super) fn build_registry_config(
         &self,
     ) -> Option<crate::session::RegistryConfig> {
-        // Local opt-in only.
+        // Local opt-in only. Session replicas push the session summary, first
+        // prompt and repo head to cli-chat-proxy, and upstream lets
+        // `remote_settings.session_registry_enabled` turn that on from the
+        // server when no local setting is present — the operator would never
+        // see the switch flip. The env var and `[cli] session_registry` still
+        // work for anyone who wants it.
         if !self.session_registry_local.unwrap_or(false) {
             return None;
         }
@@ -2173,7 +2189,14 @@ impl MvpAgent {
             .current_or_expired()
             .filter(|a| a.is_xai_auth())
             .map(|a| a.user_id);
-        // Per-request own-provider context-window resolution.
+        // Per-request own-provider context-window resolution. A BYOK / custom
+        // provider model (its own api_key/env_key + a non-xAI, non-proxy
+        // base_url) may still carry the hardcoded sentinel window because it is
+        // never present in the xAI proxy listing. Resolve the real window from
+        // the model's OWN `/v1/models` endpoint right here, on the request
+        // path, so the very provider we are about to call answers for the
+        // exact slug being requested. Resolution is best-effort: an
+        // unreachable/unlisted provider leaves the sentinel untouched.
         let effective_model: std::borrow::Cow<'_, ModelEntry> =
             resolve_byok_context_window_on_request_path(model, &credentials);
         let mut config = crate::agent::config::sampling_config_for_model(
@@ -5278,7 +5301,7 @@ mod tests {
 
     /// A sentinel-window BYOK model served by a non-xAI base. Drives the real
     /// request-path helper `resolve_byok_context_window_on_request_path` against
-    /// a loopback OpenRouter-style `/v1/models` server. It asserts the returned
+    /// a loopback OpenRouter-style `/v1/models` server and asserts the returned
     /// model's window is backfilled from the provider's `context_length`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn request_path_backfills_sentinel_window_from_own_provider() {

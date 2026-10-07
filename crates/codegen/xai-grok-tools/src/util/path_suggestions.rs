@@ -74,7 +74,9 @@ pub async fn path_not_found_hint(path: &Path, cwd: &Path, display_cwd: &Path) ->
     let (suggestion, similar) = match result {
         Ok(Ok(val)) => val,
         // Both arms leave the caller with no hint, which is what a hint is
-        // allowed to do.
+        // allowed to do. They are not the same event though: a probe that ran
+        // out of time is a slow disk, and a probe that unwound is a bug in the
+        // probe, so only the second one is reported.
         Ok(Err(join)) => {
             tracing::warn!(
                 task = "path not found hint",

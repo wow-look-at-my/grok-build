@@ -1009,12 +1009,12 @@ mod tests {
             );
         }
     }
-    /// `parse_list_req` never rewrites the client's facets in this build. The
-    /// `kind` force-rewrite is reachable only under process chat mode, and
-    /// [`crate::agent::chat_modes::process_chat_mode_enabled`] returns
-    /// `false` unconditionally here -- setting `GROK_CHAT_MODE` does not turn
-    /// it back on. So every request passes through byte-for-byte, whatever
-    /// `kind` says.
+    /// `parse_list_req` never rewrites the client's facets in this build.
+    ///
+    /// The `kind` force-rewrite is reachable only under process chat mode, and
+    /// [`crate::agent::chat_modes::process_chat_mode_enabled`] returns `false`
+    /// unconditionally here -- setting `GROK_CHAT_MODE` does not turn it back
+    /// on. So every request passes through byte-for-byte, whatever `kind` says.
     #[test]
     #[serial_test::serial]
     fn parse_list_req_passes_every_kind_through_untouched() {

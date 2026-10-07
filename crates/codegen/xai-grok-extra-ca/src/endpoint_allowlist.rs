@@ -1,11 +1,19 @@
 //!
+//! An entry is a host (`api.example.com`), a host and port (`localhost:11434`),
+//! every subdomain of a host (`*.example.com`), or a URL
+//! (`https://gateway.example.com/v1`). A URL entry also pins the scheme, the
+//! port and a path prefix.
 
 use std::sync::RwLock;
 
 /// Comma-separated entries, added to what the config lists.
 pub const ENV_GROK_ALLOWED_ENDPOINTS: &str = "GROK_ALLOWED_ENDPOINTS";
 
-/// The lists are `static`s that a `const` initialiser gives an empty `Vec`, and each section is one `Vec` assignment or clone.
+/// The lists are `static`s that a `const` initialiser gives an empty `Vec`, and
+/// each section is one `Vec` assignment or clone, so a poison can only come from
+/// elsewhere. `into_inner` keeps the allowlist enforcing after that panic: an
+/// allowlist that stops answering would fail every model request closed.
+/// `parking_lot::RwLock` is the structural fix and is not a dependency here.
 static CONFIGURED: RwLock<Vec<String>> = RwLock::new(Vec::new());
 
 /// Replace the entries that came from config. The environment adds to them.

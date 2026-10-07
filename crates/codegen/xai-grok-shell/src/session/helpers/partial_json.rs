@@ -1,4 +1,13 @@
 //! Close a JSON document the model is still writing.
+//!
+//! A tool call's arguments arrive as fragments, and a fragment parses as
+//! nothing. This turns the bytes seen so far into the largest valid document
+//! they can stand for, so the fields that HAVE arrived can be read while the
+//! rest is still on the wire.
+//!
+//! The completion never guesses at a value. It keeps what is complete, drops
+//! the half-written tail, and appends the closers the open containers need.
+/// An open container, and for an object whether the next string is a key.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Frame {
     Array,
@@ -16,24 +25,30 @@ enum Tail {
     /// Inside a bare word (`true`, `false`, `null`) that opened here.
     Literal(usize),
 }
-/// The most complete valid JSON the fragment can stand for. Returns `None`
-/// when nothing complete has arrived yet — an empty fragment, or one that
-/// is only whitespace. A caller reads that as "no fields yet", which is what
-/// `{}` would say anyway but without claiming a document exists. The input is
-/// never required to be a prefix of valid JSON. Garbage in the tail is
-/// dropped along with the rest of the half-written token.
+/// The most complete valid JSON the fragment can stand for.
+///
+/// Returns `None` when nothing complete has arrived yet — an empty fragment, or
+/// one that is only whitespace. A caller reads that as "no fields yet", which is
+/// what `{}` would say anyway but without claiming a document exists.
+///
+/// The input is never required to be a prefix of valid JSON. Garbage in the tail
+/// is dropped along with the rest of the half-written token.
 pub fn complete_partial_json(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     let mut stack: Vec<Frame> = Vec::new();
-    // The longest prefix that closing turns into a valid document, and the containers open at its end.
+    // The longest prefix that closing turns into a valid document, and the
+    // containers open at its end. Both are only ever set together.
     let mut safe_len = 0usize;
     let mut safe_stack: Vec<Frame> = Vec::new();
-    // Set when the scanner is inside a string: the last index at which the string can be cut and closed.
+    // Set when the scanner is inside a string: the last index at which the
+    // string can be cut and closed. An escape in flight moves it forward only
+    // once the escape is whole, so `"\u00` cuts back to before the backslash.
     let mut str_cut = 0usize;
     let mut str_is_key = false;
     let mut escaped = false;
     let mut unicode_left = 0u8;
-    // Objects take a key next after `{` and after a `,`.
+    // Objects take a key next after `{` and after a `,`. Tracked apart from the
+    // frame so a nested value can restore it on the way out.
     let mut expect_key = false;
     let mut tail = Tail::Between;
     let mut i = 0usize;
@@ -47,7 +62,8 @@ pub fn complete_partial_json(input: &str) -> Option<String> {
                             str_cut = i + 1;
                         }
                     } else {
-                        // Not an escape the format allows.
+                        // Not an escape the format allows. The string cannot be
+                        // repaired past here, so stop growing the cut point.
                         unicode_left = 0;
                     }
                 } else if escaped {
@@ -62,6 +78,8 @@ pub fn complete_partial_json(input: &str) -> Option<String> {
                 } else if b == b'"' {
                     tail = Tail::Between;
                     if str_is_key {
+                        // A key alone cannot be closed over: `{"a"` is not a
+                        // document. The safe point stays where the key started.
                     } else {
                         close_value(&mut stack, &mut expect_key);
                         mark_safe(i + 1, &stack, &mut safe_len, &mut safe_stack);
@@ -72,6 +90,7 @@ pub fn complete_partial_json(input: &str) -> Option<String> {
             }
             Tail::Number(start) => {
                 if is_number_byte(b) {
+                    // Still in the number.
                 } else {
                     if number_is_complete(&input[start..i]) {
                         close_value(&mut stack, &mut expect_key);
@@ -83,6 +102,7 @@ pub fn complete_partial_json(input: &str) -> Option<String> {
             }
             Tail::Literal(start) => {
                 if b.is_ascii_alphabetic() {
+                    // Still in the word.
                 } else {
                     if matches!(&input[start..i], "true" | "false" | "null") {
                         close_value(&mut stack, &mut expect_key);
@@ -143,7 +163,8 @@ pub fn complete_partial_json(input: &str) -> Option<String> {
             mark_safe(input.len(), &ended, &mut safe_len, &mut safe_stack);
         }
         Tail::Str if !str_is_key => {
-            // The string closes where it was last whole. Everything after that is half an escape.
+            // The string closes where it was last whole. Everything after that
+            // is half an escape.
             let mut ended = stack.clone();
             let mut ek = expect_key;
             close_value(&mut ended, &mut ek);
@@ -169,7 +190,7 @@ fn mark_safe(len: usize, stack: &[Frame], safe_len: &mut usize, safe_stack: &mut
     safe_stack.clear();
     safe_stack.extend_from_slice(stack);
 }
-/// A value ended: an object is back to wanting a key.
+/// A value just ended: an object is back to wanting a key.
 fn close_value(stack: &[Frame], expect_key: &mut bool) {
     *expect_key = matches!(stack.last(), Some(Frame::Object));
 }
@@ -184,7 +205,8 @@ fn push_closers(out: &mut String, stack: &[Frame]) {
 fn is_number_byte(b: u8) -> bool {
     b.is_ascii_digit() || matches!(b, b'-' | b'+' | b'.' | b'e' | b'E')
 }
-/// Whether the bytes so far are a whole JSON number. `12` is.
+/// Whether the bytes so far are a whole JSON number. `12` is. `12.` and `1e` are
+/// not, and closing over one of them writes a document no parser accepts.
 fn number_is_complete(text: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(text).is_ok()
 }

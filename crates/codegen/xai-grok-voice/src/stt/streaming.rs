@@ -78,7 +78,7 @@ impl StreamingSttSession {
         let (event_tx, event_rx) = mpsc::channel::<StreamingSttEvent>(64);
 
         // Both handles are stored on the session (`_writer_task`, `_reader_task`)
-        // and aborted by `teardown`. Each task's death closes the channel its
+        // and aborted by `teardown`, and each task's death closes the channel its
         // consumer is reading, so neither panic nor loss goes unreported.
         #[allow(clippy::disallowed_methods)]
         let writer_task = tokio::spawn(async move {

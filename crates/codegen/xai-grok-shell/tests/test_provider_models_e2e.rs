@@ -1,4 +1,9 @@
-//! Runs the built binary against one `[model_providers.<id>]` setup: the provider lists its models.
+//! Runs the built binary against one `[model_providers.<id>]` setup: the
+//! provider lists its models, and `[model.<id>]` blocks tune some of them.
+//! Every prompt must reach the provider's URL and nothing else.
+//!
+//! Not `#[ignore]`d: CI builds the binary before the workspace run, so this
+//! runs on every push.
 
 use xai_grok_test_support::mock_server::LogEntry;
 use xai_grok_test_support::*;
@@ -93,9 +98,9 @@ fn inference_slugs(server: &MockInferenceServer) -> Vec<String> {
         .collect()
 }
 
-/// The first-party URLs point at a trap server, the way the default pointed
-/// them at cli-chat-proxy. A model the user took from the provider must never
-/// send its prompt there.
+/// The first-party URLs point at a trap server, the way the old default
+/// pointed them at cli-chat-proxy. A model the user took from the provider
+/// must never send its prompt there.
 #[tokio::test]
 async fn provider_listed_and_configured_models_send_only_to_the_provider() {
     let provider = MockInferenceServer::start_with_models(listed_models())

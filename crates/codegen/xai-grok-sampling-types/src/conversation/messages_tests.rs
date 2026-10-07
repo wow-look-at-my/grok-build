@@ -79,7 +79,7 @@ fn test_messages_request_omits_output_config_when_no_supported_effort() {
 }
 
 /// A reasoning-mandatory messages-backend target must never be sent a body
-/// that omits `output_config.effort` (and its auto-paired `thinking`). A
+/// that omits `output_config.effort` (and its auto-paired `thinking`): a
 /// `None`/`Minimal`/unset request is lifted to the lowest supported
 /// non-disabled effort (`low`) so a supported effort is always carried.
 #[test]
@@ -575,9 +575,11 @@ fn request_text(req: &ConversationRequest) -> String {
         .join("\n")
 }
 
-/// The signature cannot be re-minted, so the BLOCK gives. Its words do not:
-/// they ride as ordinary assistant text, and the rest of the turn is
-/// untouched.
+/// Replaying another model's thinking block is a 400 the Messages API answers
+/// with "Invalid `signature` in `thinking` block", on every later turn, since
+/// the block stays in history. The signature cannot be re-minted, so the BLOCK
+/// gives. Its words do not: they ride as ordinary assistant text, and the rest
+/// of the turn is untouched.
 #[test]
 fn thinking_minted_by_another_model_rides_as_text() {
     let req = ConversationRequest::from_items(switched_model_conversation(Some("grok-4-fast")))
@@ -635,8 +637,10 @@ fn thinking_from_a_sibling_model_is_left_off_the_wire() {
     );
 }
 
-/// History that never recorded which model produced a turn (`model_id`
-/// absent) is replayed as before.
+/// History that never recorded which model produced a turn (`model_id` absent)
+/// is replayed as before. Dropping it would strip thinking from every
+/// same-model session whose items were synthesized rather than streamed; the
+/// sampler's strip-and-retry is what covers a server that rejects it.
 #[test]
 fn thinking_without_a_recorded_origin_is_replayed() {
     let req = ConversationRequest::from_items(switched_model_conversation(None))
@@ -644,7 +648,7 @@ fn thinking_without_a_recorded_origin_is_replayed() {
     assert_eq!(thinking_blocks(&req).len(), 1);
 }
 
-/// The recovery the sampler applies when the server rejects a signature. The
+/// The recovery the sampler applies when the server rejects a signature the
 /// table let through: the level steps to `TextOnly`, and the block that was
 /// the model's own stops being thinking. Its words stay as assistant text. One
 /// more step and nothing of it reaches the wire.
@@ -677,8 +681,10 @@ fn a_rejected_signature_steps_the_replay_level_down() {
 }
 
 /// Switching models mid-tool-loop: the turn the provider is being asked to
-/// continue made tool calls, and its thinking went with the switch. The tool loop
-/// itself survives.
+/// continue made tool calls, and its thinking went with the switch. A provider
+/// validates that turn's thinking — thinking-on requires it to lead with one —
+/// and it cannot be re-minted, so the request goes out with thinking off
+/// rather than trading one 400 for another. The tool loop itself survives.
 #[test]
 fn a_tool_loop_that_lost_its_thinking_turns_thinking_off() {
     let mut req = ConversationRequest::from_items(vec![
@@ -764,9 +770,9 @@ fn a_tool_loop_that_kept_its_thinking_keeps_thinking_on() {
     assert_eq!(thinking_blocks(&req).len(), 1);
 }
 
-/// A closed loop — its results answered and the user back with a follow-up. It
-/// is not the turn the model is being asked to continue. The foreign thinking
-/// stops being a thinking block, thinking stays on for the new turn.
+/// A closed loop — its results answered and the user back with a follow-up —
+/// is not the turn the model is being asked to continue, so the foreign
+/// thinking stops being a thinking block; thinking stays on for the new turn.
 #[test]
 fn a_closed_tool_loop_leaves_thinking_on() {
     let mut req = ConversationRequest::from_items(vec![
@@ -799,7 +805,7 @@ fn a_closed_tool_loop_leaves_thinking_on() {
 }
 
 /// A signature-only block (a `tco_*` backend blob) carries no words, so there
-/// is nothing to send as text and it is the thing that genuinely goes.
+/// is nothing to send as text and it is the one thing that genuinely goes.
 #[test]
 fn a_signature_only_block_has_nothing_to_send_as_text() {
     let mut req = ConversationRequest::from_items(vec![
@@ -824,9 +830,9 @@ fn a_signature_only_block_has_nothing_to_send_as_text() {
     );
 }
 
-/// The Messages API is the backend that rejects thinking blocks it was not
-/// configured for. The capture loop strips reasoning from its own turns there
-/// too — and the tool_use / tool_result pair it built by hand still maps.
+/// The Messages API is the one backend that rejects thinking blocks it was not
+/// configured for, so the capture loop strips reasoning from its own turns
+/// there too — and the tool_use / tool_result pair it built by hand still maps.
 #[test]
 fn todo_capture_loop_strips_reasoning_and_keeps_the_tool_pair() {
     let request = build_messages_request(
@@ -862,9 +868,9 @@ fn todo_capture_loop_strips_reasoning_and_keeps_the_tool_pair() {
     );
 }
 
-/// A switch between models that reason in plain text keeps the thinking. Only
-/// a signature is model-bound, and there is none on either side here.
-/// Dropping the block would throw away context nothing was going to reject.
+/// A switch between two models that reason in plain text keeps the thinking.
+/// Only a signature is model-bound, and there is none on either side here, so
+/// dropping the block would throw away context nothing was going to reject.
 #[test]
 fn unsigned_thinking_rides_a_switch_between_two_models_that_do_not_sign() {
     let req = ConversationRequest::from_items(vec![
@@ -888,10 +894,10 @@ fn unsigned_thinking_rides_a_switch_between_two_models_that_do_not_sign() {
     );
 }
 
-/// The other unsigned case. The model being called does sign its thinking.
-/// It rejects a block that arrives without a signature as hard as one signed
-/// by somebody else. What says so is the conversation itself — this model
-/// already signed a block earlier in it.
+/// The other unsigned case: the model being called does sign its thinking, and
+/// it rejects a block that arrives without a signature just as hard as one
+/// signed by somebody else. What says so is the conversation itself — this
+/// model already signed a block earlier in it.
 #[test]
 fn unsigned_thinking_is_dropped_at_a_model_that_signs_its_own() {
     let req = ConversationRequest::from_items(vec![
@@ -927,9 +933,10 @@ fn unsigned_thinking_is_dropped_at_a_model_that_signs_its_own() {
     );
 }
 
-/// Mid-tool-loop, the same way round. The turn being continued kept its
+/// Mid-tool-loop, the same way round: the turn being continued kept its
 /// thinking across the switch, so there is a block to lead with and thinking
-/// stays on.
+/// stays on. Turning it off here would cost the loop its reasoning for no 400
+/// that was ever going to happen.
 #[test]
 fn a_tool_loop_that_kept_its_unsigned_thinking_keeps_thinking_on() {
     let mut req = ConversationRequest::from_items(vec![
@@ -971,8 +978,9 @@ fn legacy_dialect_request(model: &str) -> ConversationRequest {
     req
 }
 
-/// A pre-4.6 Claude sizes its thinking in tokens, and rejects the effort word
-/// alongside it.
+/// The 400 this rule exists for: "Input tag 'adaptive' found using 'type' does
+/// not match any of the expected tags: 'disabled', 'enabled'". A pre-4.6 Claude
+/// sizes its thinking in tokens, and rejects the effort word alongside it.
 #[test]
 fn a_pre_4_6_claude_gets_a_token_budget_instead_of_adaptive_thinking() {
     let msgs = build_messages_request(&legacy_dialect_request("claude-haiku-4-5"));
@@ -1015,6 +1023,8 @@ fn a_4_6_model_keeps_adaptive_thinking_and_the_effort_word() {
     }
 }
 
+/// Structured outputs are not what 4.6 changed, so the legacy dialect keeps
+/// `output_config.format` while losing only the effort beside it.
 #[test]
 fn structured_output_survives_the_legacy_thinking_dialect() {
     let schema = serde_json::json!({ "type": "object" });
@@ -1027,6 +1037,7 @@ fn structured_output_survives_the_legacy_thinking_dialect() {
     assert_eq!(oc.effort, None);
 }
 
+/// The budget has to clear the API's 1024 floor and stay under `max_tokens`.
 /// A ceiling that cannot house both leaves thinking off rather than sending a
 /// budget the API rejects.
 #[test]
@@ -1062,7 +1073,8 @@ fn the_thinking_dialect_is_read_off_every_spelling_of_a_model_id() {
         "anthropic/claude-sonnet-5",
         "claude-fable-5",
         "claude-opus-4-8",
-        // Not a Claude at all: a gateway's own model keeps the request it has always been sent.
+        // Not a Claude at all: a gateway's own model keeps the request it has
+        // always been sent.
         "grok-4-fast",
         "gemini-3-pro",
     ] {
@@ -1083,15 +1095,16 @@ fn the_thinking_dialect_is_read_off_every_spelling_of_a_model_id() {
     }
 }
 
-/// Regression guard for the strict-schema work. The Messages backend reads an
-/// assistant item's `model_id` to decide whether a replayed thinking
-/// signature belongs to the target model. `model_id` must stay load-bearing
-/// on that path. The Chat Completions suppression is scoped to the serialized
-/// body and must not have removed the stored value. Conversations differ only
-/// in the assistant's recorded `model_id`; the signed-thinking decision must
-/// differ accordingly. If the suppression had been applied globally (or the
-/// field dropped from history), both would take the same branch and this test
-/// would fail.
+/// Regression guard for the strict-schema work: the Messages backend reads an
+/// assistant item's `model_id` to decide whether a replayed thinking signature
+/// belongs to the target model, so `model_id` must stay load-bearing on that
+/// path. The Chat Completions suppression is scoped to the serialized body and
+/// must not have removed the stored value.
+///
+/// Two conversations differ only in the assistant's recorded `model_id`; the
+/// signed-thinking decision must differ accordingly. If the suppression had
+/// been applied globally (or the field dropped from history), both would take
+/// the same branch and this test would fail.
 #[test]
 fn messages_backend_still_reads_assistant_model_id_for_signature_handling() {
     fn conversation_with_origin(origin: &str) -> Vec<ConversationItem> {
