@@ -768,13 +768,15 @@ async fn sleep_or_cancel(
     }
 }
 
-/// Run a single attempt: build the raw stream, drive it through the matching
-/// L2 transform, and forward all non-terminal events to `event_tx`. The rich
-/// `SamplingError` of the raw stream is kept for the retry loop. A `None` for
-/// `doom_check` disarms the doom checks, so the response is kept. The
-/// `backup` launcher starts another generation on a rate-floor breach. The
-/// attempt waits for a slot in `slots` first. Its clocks start after that, so
-/// the wait never counts toward the first-token limit.
+/// Run a single attempt: build the raw stream, drive it through the
+/// matching L2 transform, and forward all non-terminal events to `event_tx`.
+/// The rich `SamplingError` of the raw stream is kept for the retry loop.
+///
+/// A `None` for `doom_check` disarms the doom checks, so the response is kept.
+/// The `backup` launcher starts another generation on a rate-floor breach.
+///
+/// The attempt waits for a slot in `slots` first. Its clocks start after
+/// that, so the wait never counts toward the first-token limit.
 #[allow(clippy::too_many_arguments)]
 async fn run_one_attempt(
     slots: &Arc<RequestSlots>,
@@ -1269,7 +1271,7 @@ async fn drive_l2(
                         first_output_seen = true;
                         await_first_output_span.take();
                     }
-                    // A backend-hosted tool call is the server's time, not the stream's. The model generates nothing from the start of a web search to its result.
+                    // A backend-hosted tool call is the server's time, not the stream's: the model generates nothing from the start of a web search to its result.
                     match &other {
                         SamplingEvent::BackendToolCallStarted { .. } => {
                             gate.pause(std::time::Instant::now());
@@ -1404,11 +1406,11 @@ pub(crate) struct BackupLauncher<'a> {
 }
 
 impl<'a> BackupLauncher<'a> {
-    /// Start a backup, or `None` when the rate budget is spent. `cause` is
-    /// the breach, reported to the caller if the backup replaces the
-    /// original. The backup starts no backup of its own. After it replaces
-    /// the original, a breach of its floor ends the attempt, and the retry
-    /// loop reissues.
+    /// Start a backup, or `None` when the rate budget is spent. `cause` is the
+    /// breach, reported to the caller if the backup replaces the original.
+    ///
+    /// The backup starts no backup of its own. After it replaces the original,
+    /// a breach of its floor ends the attempt, and the retry loop reissues.
     fn launch(&self, parent: &CancellationToken, cause: SamplingError) -> Option<Backup<'a>> {
         let attempt = self
             .spent
@@ -1523,8 +1525,8 @@ impl Backup<'_> {
         );
     }
 
-    /// Replace the with this backup: tell the caller, replay what the backup
-    /// has produced, then follow it live to its end.
+    /// Replace the original with this backup: tell the caller, replay what
+    /// the backup has produced, then follow it live to its end.
     async fn adopt(
         mut self,
         request_id: &RequestId,
@@ -1584,7 +1586,7 @@ impl Backup<'_> {
 }
 
 /// Publish the gate's current rate. The event's whole job is to change what a
-/// client renders. An unchanged reading is not sent — with a single exception:
+/// client renders, so an unchanged reading is not sent — with a single exception:
 /// while the rate is under the floor the event also carries how long that has
 /// lasted, and that number moves even when the rate does not.
 fn publish_rate(
@@ -2410,7 +2412,7 @@ mod tests {
 
         assert!(!should_continue);
         // The event carries the wait it is about to take and the error that
-        // caused it. A client can say both instead of showing a bare
+        // caused it, so a client can say both instead of showing a bare
         // "Retrying" for however long the backoff runs.
         match event_rx.recv().await {
             Some(SamplingEvent::Retrying {

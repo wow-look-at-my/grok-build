@@ -82,8 +82,7 @@ impl SessionActor {
         tracing::info!("Converted stranded interjection into a queued prompt turn");
     }
 
-    /// Move eligible queued follow-ups into the interjection buffer so the running turn picks them up at its next safe point. Without this a follow-up typed mid-turn sits in `pending_inputs` until the whole turn ends, so a message aimed at work in flight arrives after that work is finished. The turn loop calls this immediately before `drain_pending_interjections`, which is immediately. This happens before each model request — the earliest point the model can see the text without cancelling anything. Rows listed in [`SessionActor::queued_at_turn_start`] were next in line before this turn existed — each is its own task, not a note about this turn's work — so the turn loop's own harvest (`include_queued_at_turn_start = false`) leaves them to run as their own turns. The explicit "deliver the queue now" gesture passes `true`:. Returns whether anything moved. A harvested row never runs as its own turn. Its RPC resolves [`PromptCompletionKind::RemovedFromQueue`], the same completion an explicit dequeue produces, and the drain injects its text as a standalone
-    /// user message.
+    /// Move eligible queued follow-ups into the interjection buffer so the running turn picks them up at its next safe point. Without this a follow-up typed mid-turn sits in `pending_inputs` until the whole turn ends, so a message aimed at work in flight arrives after that work is finished. The turn loop calls this immediately before `drain_pending_interjections`, which is immediately before each model request — the earliest point the model can see the text without cancelling anything. Rows listed in [`SessionActor::queued_at_turn_start`] were next in line before this turn existed — each is its own task, not a note about this turn's work — so the turn loop's own harvest (`include_queued_at_turn_start = false`) leaves them to run as their own turns. The explicit "deliver the queue now" gesture passes `true`:. Returns whether anything moved. A harvested row never runs as its own turn: its RPC resolves [`PromptCompletionKind::RemovedFromQueue`], the same completion an explicit dequeue produces, and the drain injects its text as a standalone user message.
     pub(super) async fn harvest_queued_prompts_into_interjections(
         &self,
         include_queued_at_turn_start: bool,
@@ -168,10 +167,10 @@ impl SessionActor {
         true
     }
 
-    /// Cancel the in-flight model stream. Do this so the turn loop iterates now,
-    /// drains `pending_interjections`, and resubmits — instead of waiting out a
-    /// stream that can run for minutes. A no-op between requests (inside a tool
-    /// call), where the drain happens at the next loop boundary anyway.
+    /// Cancel the in-flight model stream so the turn loop iterates now, drains
+    /// `pending_interjections`, and resubmits — instead of waiting out a stream
+    /// that can run for minutes. A no-op between requests (inside a tool call),
+    /// where the drain happens at the next loop boundary anyway.
     pub(super) fn cancel_in_flight_stream_for_interjection(&self) {
         let Some(req_id) = self.in_flight_sampler_request_id.lock().take() else {
             return;
@@ -183,6 +182,7 @@ impl SessionActor {
     }
 
     /// Whether a queued row can be folded into another turn as user text.
+    ///
     /// Everything excluded here keeps today's behaviour (it runs as its own
     /// turn once the current one ends).
     fn deliverable_mid_turn(item: &InputItem, holds: &std::collections::HashSet<String>) -> bool {

@@ -2,10 +2,10 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Mid-turn: queue a follow-up with Enter, then bare Enter on the empty composer
-/// interrupts — the in-flight model stream is cancelled. The row is handed to
-/// the SAME turn as an interjection (the wire carries the mid-turn preamble),
-/// rather than waiting for the turn or running as its own.
+/// Mid-turn: queue a follow-up with Enter, then bare Enter on the empty
+/// composer interrupts — the in-flight model stream is cancelled and the row is
+/// handed to the SAME turn as an interjection (the wire carries the mid-turn
+/// preamble), rather than waiting for the turn or running as its own.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn empty_enter_interrupts_with_queued() {

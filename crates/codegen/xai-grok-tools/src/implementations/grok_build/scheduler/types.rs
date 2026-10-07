@@ -247,7 +247,7 @@ pub(crate) fn interval_duration(interval_secs: u64) -> Option<chrono::Duration> 
 }
 
 /// `interval_secs` read back from persisted state. A stored value with no
-/// duration is refused with the number it read. No task loads with a cadence
+/// duration is refused with the number it read, so no task loads with a cadence
 /// that cannot become a fire time.
 fn deserialize_interval_secs<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
@@ -533,7 +533,7 @@ mod tests {
         );
     }
 
-    /// A cadence with no second count never becomes a duration. One with a
+    /// A cadence with no second count never becomes a duration, and one with a
     /// second count round-trips and adds to the anchor in the right direction.
     #[test]
     fn an_interval_with_no_second_count_is_not_a_negative_duration() {

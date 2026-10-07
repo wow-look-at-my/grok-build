@@ -3016,18 +3016,20 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
     );
 }
 
-/// BYOK / custom-provider gap, driven through the SHIPPED
-/// `resolve_model_list` choke point. A model that carries its OWN `base_url`
-/// + API key (e.g. `openrouter/deepseek/deepseek-v4-flash-0731` at
-/// `https://gateway.pazer.ai/v1`) is never present in the xAI-proxy
-/// `/v1/models` prefetch listing. The sibling-based backfill has no
-/// non-default source to copy from and the model stays at a hardcoded default
-/// (200k/256k). The backfill must instead ask the model's OWN provider
-/// `/v1/models` for the real window. Here the "own provider" is a loopback
-/// axum mock serving `/v1/models` with a 1M window for the byok slug. The
-/// catalog entry starts at the 256k DEFAULT sentinel with its own key.
-/// `resolve_model_list` must raise it to 1M by fetching from the model's own
-/// base.
+/// BYOK / custom-provider gap, driven through the SHIPPED `resolve_model_list`
+/// choke point.
+///
+/// A model that carries its OWN `base_url` + API key (e.g.
+/// `openrouter/deepseek/deepseek-v4-flash-0731` at `https://gateway.pazer.ai/v1`)
+/// is never present in the xAI-proxy `/v1/models` prefetch listing, so the
+/// sibling-based backfill has no non-default source to copy from and the model
+/// stays at a hardcoded default (200k/256k). The backfill must instead ask the
+/// model's OWN provider `/v1/models` for the real window.
+///
+/// Here the "own provider" is a loopback axum mock serving `/v1/models` with a
+/// 1M window for the byok slug; the catalog entry starts at the 256k DEFAULT
+/// sentinel with its own key, and `resolve_model_list` must raise it to 1M by
+/// fetching from the model's own base.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resolve_model_list_backfills_byok_window_from_models_own_provider_base() {
     use axum::routing::get;
@@ -3077,9 +3079,10 @@ async fn resolve_model_list_backfills_byok_window_from_models_own_provider_base(
 }
 
 /// A config-declared model must show up in the picker with a visible label.
+///
 /// The wire `name` is what every row renders, and it is the only thing that
 /// distinguishes one row from another. Nothing in config.toml is required to
-/// set it. It has to fall back to something non-empty -- otherwise the
+/// set it, so it has to fall back to something non-empty -- otherwise the
 /// picker draws blank rows that each select a different model.
 #[test]
 fn config_declared_models_reach_the_picker_with_a_visible_label() {

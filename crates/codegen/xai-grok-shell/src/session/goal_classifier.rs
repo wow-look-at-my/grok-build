@@ -1885,7 +1885,7 @@ pub(crate) async fn run_verification_stage(
         prior_gaps: inputs.prior_gaps,
     };
 
-    // When N > 1, run the first skeptic alone: any refute it backs with a verdict is decisive and can never yield Achieved. A non-blocking decisive
+    // When N > 1, run the first skeptic alone: any refute it backs with a verdict is decisive and can never yield Achieved.
     // A non-blocking decisive refute skips the rest of the panel; a blocking refute fans out so the panel can distinguish Blocked from NotAchieved.
     // N == 1 never resumes skeptic 0 (a resumed sole judge would be the biased approver), so it stays cold and returns None.
     let (results, decisive_refute, skeptic0_session_id): (

@@ -628,7 +628,7 @@ mod tests {
     }
 
     /// A configured server keeps the adapter out of the "nothing to do" shape
-    /// without any process being spawned. The fix under test decides whether the
+    /// without any process being spawned: the fix under test decides whether the
     /// bootstrap task is created at all.
     fn adapter_with_one_configured_server() -> LspBackendAdapter {
         adapter(std::collections::BTreeMap::from([(
@@ -638,11 +638,12 @@ mod tests {
     }
 
     /// A bootstrap that ends in failure still answers whoever is waiting.
+    ///
     /// `ensure_ready` parks on the coordinator's `notify` for as long as the
     /// state reads `Starting`, so a bootstrap that stopped without moving the
     /// state leaves every later LSP tool call waiting on a task that already
-    /// ended. A manager with no servers configured is that ending, with
-    /// nothing injected.
+    /// ended. A manager with no servers configured is that ending, with nothing
+    /// injected.
     #[tokio::test]
     async fn a_failed_bootstrap_answers_the_waiter_instead_of_stranding_it() {
         let manager = Arc::new(TokioMutex::new(LspManager::default()));

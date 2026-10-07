@@ -1115,7 +1115,7 @@ mod label_column_width_tests {
     /// `/model` on a gateway: every row is a long `provider/vendor:family:size`
     /// id, and the selected one carries " (current)" as well. Deriving the
     /// column by discarding long labels discards all of them here, and the
-    /// zero-width column that follows truncates every label to nothing. Rows
+    /// zero-width column that follows truncates every label to nothing -- rows
     /// that draw, highlight and switch models while showing nothing at all.
     #[test]
     fn a_list_where_every_label_is_long_still_shows_its_labels() {

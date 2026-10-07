@@ -497,8 +497,8 @@ fn format_workflow_completion_reminder(
     }
     buf
 }
-/// Whether a todo gate fits THIS agent and goal state, independent of any enable switch: the prompt must carry `<task_completion_discipline>` (`{DISCIPLINE_BLOCK}`). The goal loop must not be active — the continuation directive drives the loop there. Applicability is kept separate from [`todo_stop_gate_enabled`] so the enable switch can
-/// change without touching what the gate applies to.
+/// Whether a todo gate fits THIS agent and goal state, independent of any enable switch: the prompt must carry `<task_completion_discipline>` (`{DISCIPLINE_BLOCK}`), and the goal loop must not be active — the continuation directive drives the loop there. Applicability is kept separate from [`todo_stop_gate_enabled`] so the enable switch
+/// can change without touching what the gate applies to.
 pub(super) fn todo_gate_applicable(
     audience: xai_grok_agent::prompt::context::PromptAudience,
     definition: &AgentDefinition,
@@ -991,13 +991,14 @@ impl SessionActor {
                 self.reminder_wrapper_tag(),
             ));
     }
-    /// Whether the built-in todo-stop gate runs for this session. The switch
-    /// is the persisted `[ui].stop_gate_unfinished_todos` toggle, which ships
-    /// ON — so the gate must NOT be ANDed with the opt-in
-    /// `todo_gate.enabled` flag, or the shipped default never fires. That
-    /// flag (remote `todo_gate_enabled`, or the `--todo-gate` CLI
-    /// force-enable) stays an opt-in ON TOP: it turns the gate back on for a
-    /// session whose persisted toggle is off.
+    /// Whether the built-in todo-stop gate runs for this session.
+    ///
+    /// The switch is the persisted `[ui].stop_gate_unfinished_todos` toggle,
+    /// which ships ON — so the gate must NOT be ANDed with the opt-in
+    /// `todo_gate.enabled` flag, or the shipped default never fires. That flag
+    /// (remote `todo_gate_enabled`, or the `--todo-gate` CLI force-enable)
+    /// stays an opt-in ON TOP: it turns the gate back on for a session whose
+    /// persisted toggle is off.
     pub(super) fn todo_stop_gate_active(&self) -> bool {
         let goal_status = self.goal_tracker.lock().status();
         let agent = self.agent.borrow();

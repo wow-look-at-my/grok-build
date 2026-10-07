@@ -958,7 +958,7 @@ impl Renderable for EntryRenderer<'_> {
             }
         }
 
-        // Cache-hit-percent line. Painted on its OWN reserved row directly
+        // Cache-hit-percent line: painted on its OWN reserved row directly
         // below the content (`cache_hit_reserved_rows`) rather than sharing
         // the first line's already-narrowed gutter with the cost/timestamp,
         // so wrapped content never loses more width to fit a second label.

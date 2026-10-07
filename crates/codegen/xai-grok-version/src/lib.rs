@@ -36,10 +36,11 @@ const fn build_stamp_slot() -> [u8; STAMP_SLOT_LEN] {
     slot
 }
 
-/// The stamped release number, or `None` on an unstamped binary. The read is
-/// volatile because the slot is an immutable `static` whose contents the
-/// compiler otherwise knows. It would fold the zero length in at compile time
-/// and never look at the bytes the stamper wrote.
+/// The stamped release number, or `None` on an unstamped binary.
+///
+/// The read is volatile because the slot is an immutable `static` whose contents
+/// the compiler otherwise knows: it would fold the zero length in at compile
+/// time and never look at the bytes the stamper wrote.
 fn stamped() -> Option<&'static str> {
     static STAMPED: OnceLock<Option<String>> = OnceLock::new();
     STAMPED

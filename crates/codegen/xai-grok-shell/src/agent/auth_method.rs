@@ -406,7 +406,7 @@ mod tests {
     use serial_test::serial;
 
     /// A configured `[model_providers.<id>]` is BYOK on its own: with no model
-    /// of its own in the catalog and the first-party env key ruled out. The
+    /// of its own in the catalog and the first-party env key ruled out, the
     /// api-key method is still advertised, which is what keeps the grok.com
     /// sign-in optional. The kill switch stays above it.
     #[test]

@@ -762,8 +762,8 @@ mod tests {
         assert!(msg.contains("\"true\""), "must quote what was there: {msg}");
     }
 
-    /// A menu with no gate flag is the catalog contradicting itself. That is the
-    /// case a user debugging a wrong refusal most needs pointed out.
+    /// A menu with no gate flag is the catalog contradicting itself, and that is
+    /// the case a user debugging a wrong refusal most needs pointed out.
     #[test]
     fn unsupported_message_reports_a_menu_present_without_the_flag() {
         let state = state_with_meta(Some(serde_json::json!({

@@ -14,6 +14,7 @@ use crate::sampling::ApiBackend;
 /// endpoint shares. A `[model.<id>]` that names the provider with
 /// `model_provider = "<id>"` inherits each field it leaves unset, so an
 /// endpoint, a credential, a wire format or a header set is written once.
+///
 /// Every field here is also a `[model.<id>]` field, and the model's own value
 /// always wins. What is NOT here is what identifies one model: `model`,
 /// `name`, `description`.
@@ -141,12 +142,12 @@ impl ModelProviderConfig {
     }
 }
 
-/// The defaults a well-known provider id carries, so
-/// `[model_providers.ollama]` with nothing in it is a complete configuration.
+/// The defaults a well-known provider id carries, so `[model_providers.ollama]`
+/// with nothing in it is a complete configuration.
+///
 /// Only fields the user LEFT UNSET are filled. Someone who runs Ollama on
-/// another port writes `base_url` and keeps the dialect; someone who wants
-/// the OpenAI listing writes `models_list_dialect = "openai"` and keeps the
-/// URL.
+/// another port writes `base_url` and keeps the dialect; someone who wants the
+/// OpenAI listing writes `models_list_dialect = "openai"` and keeps the URL.
 pub(crate) fn apply_builtin_preset(id: &str, provider: &mut ModelProviderConfig) {
     let (default_base, dialect) = match id {
         "ollama" => ("http://localhost:11434/v1", ModelsListDialect::Ollama),
@@ -470,8 +471,8 @@ mod tests {
     };
 
     /// The whole point of the provider-side credential probe: a session that
-    /// declared another endpoint must not be sent to the grok.com sign-in. The
-    /// catalog cannot say so here because autodetection has not run yet.
+    /// declared another endpoint must not be sent to the grok.com sign-in, and
+    /// the catalog cannot say so here because autodetection has not run yet.
     #[test]
     fn a_declared_provider_is_byok_before_any_of_its_models_are_known() {
         let raw_config: toml::Value = toml::from_str(

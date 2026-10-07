@@ -85,10 +85,11 @@ pub(super) fn send_ack(
 
 pub(super) const GOAL_CLASSIFIER_PENDING_QUEUE_CAP: usize = 4;
 
-/// Contents of a session's live todo list, in order. A missing `TodoState`
-/// resource reads as an empty list. Seeding appends onto whatever is there,
-/// and "nothing tracked yet" is the state a fresh goal starts in (and the
-/// state a session with no todo tool stays in).
+/// Contents of a session's live todo list, in order.
+///
+/// A missing `TodoState` resource reads as an empty list: seeding appends onto
+/// whatever is there, and "nothing tracked yet" is the state a fresh goal
+/// starts in (and the state a session with no todo tool stays in).
 async fn live_todo_contents(bridge: &xai_grok_tools::bridge::ToolBridge) -> Vec<String> {
     use crate::tools::todo::TodoState;
     use xai_grok_tools::types::resources::State;
@@ -200,13 +201,14 @@ pub(super) fn render_goal_task_discipline(names: &GoalToolNames) -> String {
     GOAL_TASK_DISCIPLINE_TEMPLATE.replace("{TODO_TOOL}", &names.todo)
 }
 
-/// Render the plan-aware reminder block. `Plan: <abs path>` renders on its
-/// own column-0 line. A single line-delimited pointer the model and any
-/// downstream consumer (debug log scraper, support tooling) can extract
-/// reliably, so keep the format stable. The todo list is the only checklist;
-/// the plan file carries no boxes. `plan_todos_seeded` says whether the
-/// planner's steps are already on it, or whether the implementer must put
-/// them there.
+/// Render the plan-aware reminder block. `Plan: <abs path>` renders
+/// on its own column-0 line — a single line-delimited pointer the
+/// model and any downstream consumer (debug log scraper, support
+/// tooling) can extract reliably, so keep the format stable.
+///
+/// The todo list is the only checklist; the plan file carries no boxes.
+/// `plan_todos_seeded` says whether the planner's steps are already on it, or
+/// whether the implementer must put them there.
 pub(super) fn render_goal_plan_block(
     plan_path: &std::path::Path,
     names: &GoalToolNames,
@@ -645,10 +647,11 @@ pub(super) const GOAL_NEXT_STEP_MAX_CHARS: usize = 400;
 /// The next step for the continuation nudge. The todo list is the only
 /// checklist, so the nudge reads it: the first `in_progress` item, else the
 /// first `pending` one. It names the id, so the model can update the item
-/// without a read first. The item text is capped and its reminder-frame tags
-/// are broken, so it cannot close the `<system-reminder>` it is inlined into.
-/// Verifier gaps are NOT consulted here: [`render_verifier_gaps_block`]
-/// carries them.
+/// without a read first.
+///
+/// The item text is capped and its reminder-frame tags are broken, so it
+/// cannot close the `<system-reminder>` it is inlined into. Verifier gaps are
+/// NOT consulted here: [`render_verifier_gaps_block`] carries them.
 pub(super) fn next_step_from_todos<'a>(
     todos: impl IntoIterator<Item = (&'a str, &'a str, crate::tools::todo::TodoStatus)>,
     todo_tool: &str,
@@ -1228,8 +1231,8 @@ impl SessionActor {
             tracker: &self.goal_tracker,
         };
         // One planner attempt per call. Send Now steers the live planner rather
-        // than starting a second one. A cancel is terminal, so nothing here
-        // loops. The block is a label so every early exit still reaches the
+        // than starting a second one, and a cancel is terminal, so nothing here
+        // loops; the block is a label so every early exit still reaches the
         // catch-all latch reset below.
         'planner_attempt: {
             let attempt = 1u32;
@@ -1432,7 +1435,7 @@ impl SessionActor {
         cleared
     }
 
-    /// Put the goal planner child's OWN todo list on the session's todo list. The planner is told to add the plan's work items to its own list with the session's todo tool as it plans. A child session keeps its own `State<TodoState>`, so `run_shell_child` reads that list back into `SubagentResult.todos` and it arrives here. These are the items the planner itself wrote, which is what makes the session's list the result of the planner's own `todo_write` rather than the harness reading the plan. A planner that named nothing seeds nothing. The plan prose is never mined for items, so an unfollowed instruction degrades to "the main agent keeps its own list" instead of the harness inventing work. Runs once per goal. `plan_todos_seeded` is claimed under the tracker lock before any I/O. The append is additionally deduped by content, so a retry, a resume, or a re-entry cannot add a second copy of an item. Existing items are never touched: this appends, it does not replace. Best-effort by design. `pub(super)` so the goal e2e suite can drive it a second time directly; the publish path itself calls it exactly once.
+    /// Put the goal planner child's OWN todo list on the session's todo list. The planner is told to add the plan's work items to its own list with the session's todo tool as it plans. A child session keeps its own `State<TodoState>`, so `run_shell_child` reads that list back into `SubagentResult.todos` and it arrives here: these are the items the planner itself wrote, which is what makes the session's list the result of the planner's own `todo_write` rather than the harness reading the plan. A planner that named nothing seeds nothing. The plan prose is never mined for items, so an unfollowed instruction degrades to "the main agent keeps its own list" instead of the harness inventing work. Runs once per goal. `plan_todos_seeded` is claimed under the tracker lock before any I/O, and the append is additionally deduped by content, so a retry, a resume, or a re-entry cannot add a second copy of an item. Existing items are never touched: this appends, it does not replace. Best-effort by design. `pub(super)` so the goal e2e suite can drive it a second time directly; the publish path itself calls it exactly once.
     pub(super) async fn apply_planner_todos(
         &self,
         goal_id: &str,

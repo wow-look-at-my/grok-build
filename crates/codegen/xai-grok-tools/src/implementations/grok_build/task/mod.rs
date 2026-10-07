@@ -595,7 +595,7 @@ impl xai_tool_runtime::Tool for TaskTool {
                 tool_cancellation.map(|tool_cancellation| {
                     let child_cancellation = child_cancellation.clone();
                     // The handle is kept to abort the forwarder once the
-                    // child is no longer foreground. The only thing that
+                    // child is no longer foreground, so the only thing that
                     // can come back from it is a panic.
                     #[allow(clippy::disallowed_methods)]
                     tokio::spawn(crate::util::detached::fire_and_forget(

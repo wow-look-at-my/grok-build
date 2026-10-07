@@ -156,9 +156,9 @@ const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
 
 /// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
 /// Reports whether anything changed, so a caller can skip a retry that cannot
-/// differ. Consider a gateway written in Go. That gateway marshals an unset
-/// slice as `null`, so `response.created` -- whose output list is empty by
-/// definition -- arrives as `"output": null` and fails the parse.
+/// differ. A gateway written in Go marshals an unset slice as `null`, so
+/// `response.created` -- whose output list is empty by definition -- arrives
+/// as `"output": null` and fails the parse.
 fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
     match value {
         serde_json::Value::Object(map) => {
@@ -222,8 +222,8 @@ fn null_key_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>
 /// whole error a user gets, and there is nothing in it to act on.
 /// `serde_path_to_error` supplies the field path on a derived struct
 /// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]`
-/// event, because serde buffers the content before the variant is known. The
-/// tracker never sees those keys — measured, not assumed.
+/// event, because serde buffers the content before the variant is known and
+/// the tracker never sees those keys — measured, not assumed.
 fn from_sse_payload<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
     let deserializer = &mut serde_json::Deserializer::from_str(data);
     serde_path_to_error::deserialize(deserializer).map_err(|err| {
@@ -248,7 +248,8 @@ fn from_sse_payload<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
 }
 
 /// Strict parse, then one retry with the payload's null lists read as empty.
-/// The retry only runs when the strict parse failed. There was something to
+///
+/// The retry only runs when the strict parse failed and there was something to
 /// rewrite, and a retry that also fails reports the STRICT error — so a
 /// malformed payload is never described in terms of the rewrite.
 fn parse_sse_event<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
@@ -377,10 +378,11 @@ fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
 }
 
 /// Seconds from a rate-limit reset header, which is written as a bare number
-/// or with a unit (`1.5`, `1.5s`, `30s`). A value with no `u64` second count
-/// is `None`: the same unusable answer the parser already gives for a
-/// non-finite or negative one. The caller uses its own backoff rather than a
-/// wait this header did not state.
+/// or with a unit (`1.5`, `1.5s`, `30s`).
+///
+/// A value with no `u64` second count is `None`: the same unusable answer the
+/// parser already gives for a non-finite or negative one, so the caller uses
+/// its own backoff rather than a wait this header did not state.
 fn parse_reset_seconds(raw: &str) -> Option<u64> {
     let raw = raw.trim();
     let digits = raw.strip_suffix('s').unwrap_or(raw).trim();
@@ -2430,9 +2432,10 @@ impl SamplingClient {
         self.create_message_stream(wrapper).await
     }
 
-    /// Stream a conversation through Ollama's native `/api/chat`. The
-    /// response is NDJSON: one whole JSON object per line, no SSE framing and
-    /// no `[DONE]` sentinel. Lines are reassembled here because a chunk
+    /// Stream a conversation through Ollama's native `/api/chat`.
+    ///
+    /// The response is NDJSON: one whole JSON object per line, no SSE framing
+    /// and no `[DONE]` sentinel. Lines are reassembled here because a chunk
     /// boundary lands at an arbitrary byte, so a line can straddle some of
     /// them.
     pub async fn conversation_stream_ollama(
@@ -2620,10 +2623,11 @@ fn hold_slot<T: Send + 'static>(
     }
 }
 
-/// The host root Ollama's native API lives under. A provider names ONE base
-/// URL and it points at the OpenAI-compatible endpoint, because that is what
-/// every other client wants. `/api/chat` is a sibling of that endpoint rather
-/// than a child, so the suffix comes off.
+/// The host root Ollama's native API lives under.
+///
+/// A provider names ONE base URL and it points at the OpenAI-compatible
+/// endpoint, because that is what every other client wants. `/api/chat` is a
+/// sibling of that endpoint rather than a child, so the suffix comes off.
 fn native_host_root(base_url: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
     for suffix in ["/api/v1", "/api/v0", "/v1", "/api"] {
@@ -2642,8 +2646,9 @@ fn sse_error_text(error: &eventsource_stream::EventStreamError<reqwest::Error>) 
     }
 }
 
-/// Parse an NDJSON byte stream into a single object for each line. A
-/// transport chunk boundary lands at an arbitrary byte, so a line can
+/// Parse an NDJSON byte stream into a single object for each line.
+///
+/// A transport chunk boundary lands at an arbitrary byte, so a line can
 /// straddle some of them and the tail has to be carried across. The final
 /// line often arrives without a trailing newline, so what is left in the
 /// buffer at end of stream is a line too.
@@ -2845,9 +2850,9 @@ mod tests {
     }
 
     /// The sampler's own default output budget is what a caller that sets none
-    /// sends. The default is where an impossible request is born: the provider
-    /// adds it to the prompt and rejects the sum. Nothing downstream can fix
-    /// that, so the sum is held inside the window here.
+    /// sends, so the default is where an impossible request is born: the
+    /// provider adds it to the prompt and rejects the sum. Nothing downstream
+    /// can fix that, so the sum is held inside the window here.
     #[test]
     fn the_default_output_budget_cannot_carry_a_request_past_the_window() {
         let mut cfg = minimal_config();
@@ -2892,10 +2897,10 @@ mod tests {
         assert_eq!(request.max_output_tokens, Some(262_144));
     }
 
-    /// The banner a user reads is this message, so a rejected payload has to
-    /// say WHICH field it rejected. Both wire surfaces are covered: a chunk
-    /// (derived struct, positioned error) and a Responses event (internally
-    /// tagged, so serde buffers it and drops the position).
+    /// The banner a user actually reads is this message, so a rejected payload
+    /// has to say WHICH field it rejected. Both wire surfaces are covered: a
+    /// chunk (derived struct, positioned error) and a Responses event
+    /// (internally tagged, so serde buffers it and drops the position).
     #[test]
     fn a_rejected_payload_names_the_field_that_failed() {
         let chunk = from_sse_payload::<ChatCompletionChunk>(
@@ -2908,7 +2913,7 @@ mod tests {
             "chunk error must name the field: {chunk}"
         );
 
-        // An internally tagged event gets no path from serde. The message
+        // An internally tagged event gets no path from serde, so the message
         // falls back to where the payload's nulls are — the thing that
         // makes a bare "expected a sequence" actionable.
         let event = from_sse_payload::<rs::ResponseStreamEvent>(

@@ -2297,7 +2297,7 @@ impl LocalTerminalActor {
                         .unwrap_or(0);
                     let pipeline_owner = Some(new_owner_session_id.to_string());
                     // Guarded: this is the only thing emitting this monitor's
-                    // events after the hand-off. A round that died mid-flight
+                    // events after the hand-off, so a round that died mid-flight
                     // would leave the subscriber waiting on a notification that
                     // never comes. The log names the pipeline so the gap is
                     // attributable without a backtrace.

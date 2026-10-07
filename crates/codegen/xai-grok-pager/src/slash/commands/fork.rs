@@ -23,8 +23,8 @@ pub struct ForkArgs {
 /// Parse the raw argument string after `/fork`. Recognised flags appear at
 /// the start; everything after the last flag is the directive. Unknown flags
 /// are deliberately treated as the start of the directive (so `/fork --foo
-/// bar` becomes a directive `--foo bar`) -- the parser is conservative. This
-/// is because the args are user-typed text and we do not want to reject
+/// bar` becomes a directive `--foo bar`) -- the parser is conservative
+/// because the args are user-typed text and we do not want to reject
 /// directives that happen to begin with `--`. Errors: - `--worktree` and
 /// `--no-worktree` cannot both appear. - a flag cannot be repeated. - `--at
 /// <turn>` returns a friendly "not supported in this version"

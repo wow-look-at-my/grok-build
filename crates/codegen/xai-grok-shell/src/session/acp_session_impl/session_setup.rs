@@ -342,6 +342,7 @@ impl SessionActor {
     }
     /// Put `text` in front of the main agent: now when it is idle, at the
     /// running turn's next safe point otherwise. Never interrupts the turn.
+    ///
     /// Rides the buffer `flush_pending_skill_reminders` drains, which is what
     /// makes a mid-turn notice land without a second flush site to keep in
     /// sync with the turn loop's safe points.
@@ -411,9 +412,9 @@ impl SessionActor {
         };
         let current_model = &current_config.model;
         let base_url = &current_config.base_url;
-        // BYOK / custom-provider base (e.g. `https://gateway.pazer.ai/v1`).
-        // The cli-chat-proxy `/models-v2` listing below will never contain it.
-        // Refresh the model metadata from the model's OWN `/v1/models`
+        // BYOK / custom-provider base (e.g. `https://gateway.pazer.ai/v1`):
+        // the cli-chat-proxy `/models-v2` listing below will never contain it,
+        // so refresh the model metadata from the model's OWN `/v1/models`
         // listing, authenticated with the model's own key. Without this a BYOK
         // model (e.g. deepseek-v4-flash with a 1M window) stays at a hardcoded
         // default forever, because the generic prefetch only ever queries the

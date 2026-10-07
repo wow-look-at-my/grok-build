@@ -2594,7 +2594,7 @@ fn a_failed_capture_reports_instead_of_vanishing() {
     assert!(text.contains("the capture agent added no todo"), "{text}");
 }
 
-/// `/TODO` is the urgent spelling. The flag is what puts its items at the
+/// `/TODO` is the urgent spelling, and the flag is what puts its items at the
 /// front of the list — it has to survive the trip to the shell.
 #[test]
 fn an_urgent_capture_carries_the_flag_to_the_shell() {

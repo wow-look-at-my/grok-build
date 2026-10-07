@@ -85,10 +85,10 @@ fn replay_plan(req: &ConversationRequest) -> ThinkingReplayPlan {
 /// Whether the conversation ends mid-tool-loop on a turn whose thinking block
 /// the plan leaves behind. A provider validates the thinking of a tool-calling
 /// turn it is being asked to continue ("thinking blocks cannot be modified",
-/// and thinking-on requires that turn to lead with one). The block is exactly
-/// what a model switch takes away. Neither half is recoverable, so the whole
-/// request goes out with thinking off; the next turn is this model's own and
-/// pairs normally.
+/// and thinking-on requires that turn to lead with one), and the block is
+/// exactly what a model switch takes away. Neither half is recoverable, so the
+/// whole request goes out with thinking off; the next turn is this model's own
+/// and pairs normally.
 fn open_tool_loop_lost_its_thinking(req: &ConversationRequest, plan: &ThinkingReplayPlan) -> bool {
     if req.model.is_none() {
         return false;

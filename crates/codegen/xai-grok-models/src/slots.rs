@@ -239,9 +239,10 @@ pub const HARNESS_MODEL_SLOTS: &[ModelSlot] = &[
     },
 ];
 
-/// The settings-modal key for each slot, as `(slot id, setting key)`. The
-/// settings registry stores `&'static str` keys, so each is spelled out here
-/// rather than built at run time.
+/// The settings-modal key for each slot, as `(slot id, setting key)`.
+///
+/// The settings registry stores `&'static str` keys, so each one is spelled
+/// out here rather than built at run time.
 pub fn slot_setting_keys() -> &'static [(&'static str, &'static str)] {
     &[
         ("web_search", "models.web_search"),

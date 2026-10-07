@@ -45,10 +45,9 @@ impl TruncationConfig {
 
     /// Resolve the max output bytes for a specific tool.
     ///
-    /// Precedence. Per-tool override > default override > built-in fallback,
-    /// then clamped to [`Self::context_budget_max_output_bytes`]. This happens
-    /// when set (see its docs) so the live budget always wins over a static
-    /// config value.
+    /// Precedence: per-tool override > default override > built-in fallback,
+    /// then clamped to [`Self::context_budget_max_output_bytes`] when set (see
+    /// its docs) so the live budget always wins over a static config value.
     pub fn max_output_bytes_for(&self, tool_name: &str, builtin_default: usize) -> usize {
         let resolved = if let Some(&per_tool) = self.per_tool_max_output_bytes.get(tool_name) {
             per_tool

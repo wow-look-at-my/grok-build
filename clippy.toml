@@ -1,7 +1,7 @@
 # Clippy config for the whole workspace.
 #
-# clippy reads the NEAREST clippy.toml and merges nothing. This file has to
-# stand alone. One file at the repository root reaches every crate in the
+# clippy reads the NEAREST clippy.toml and merges nothing, so this file has to
+# stand alone: one file at the repository root reaches every crate in the
 # workspace, and a second one anywhere under `crates/` would silently take over
 # for every crate beneath it.
 

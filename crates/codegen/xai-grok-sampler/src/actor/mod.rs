@@ -34,12 +34,13 @@ pub struct SamplerActor {
     tasks: JoinSet<RequestId>,
 }
 
-/// Spawn one request round onto the actor's set, reporting its id even when
-/// the round unwinds. The actor clears `active_requests` from the id a
-/// finished round returns, and a `JoinError` carries none. Spawned bare, a
-/// round that panicked would leave `IsActive` answering true and
-/// `ActiveCount` counting a request that stopped existing, for the rest of
-/// the sampler's life.
+/// Spawn one request round onto the actor's set, reporting its id even when the
+/// round unwinds.
+///
+/// The actor clears `active_requests` from the id a finished round returns, and
+/// a `JoinError` carries none. Spawned bare, a round that panicked would leave
+/// `IsActive` answering true and `ActiveCount` counting a request that stopped
+/// existing, for the rest of the sampler's life.
 fn spawn_tracked_round(
     tasks: &mut JoinSet<RequestId>,
     tracked_id: RequestId,
@@ -60,10 +61,11 @@ fn spawn_tracked_round(
     });
 }
 
-/// Text describing what a panic carried, for a log line. Both payloads
-/// `panic!` itself produces are a `&'static str` (a literal) and a `String`
-/// (a formatted one). Anything else is named as a non-message rather than
-/// reported as nothing.
+/// Text describing what a panic carried, for a log line.
+///
+/// Both payloads `panic!` itself produces are a `&'static str` (a literal)
+/// and a `String` (a formatted one). Anything else is named as a non-message
+/// rather than reported as nothing.
 fn panic_payload(panic: &(dyn Any + Send)) -> String {
     if let Some(text) = panic.downcast_ref::<&'static str>() {
         return (*text).to_string();

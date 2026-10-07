@@ -153,7 +153,7 @@ pub fn spawn_ci_host(repo_root: &Path) -> Option<i32> {
     spawn_ci_host_with(repo_root, true)
 }
 
-/// [`spawn_ci_host`] with the exec rule made explicit. `survives_exec` clears
+/// [`spawn_ci_host`] with the exec rule made explicit: `survives_exec` clears
 /// `FD_CLOEXEC` on the fd this process keeps, and passes the fd number on to the
 /// image it execs into.
 fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
@@ -347,6 +347,7 @@ fn tail_lossy(bytes: &[u8], max: usize) -> String {
 }
 
 /// Whether an argv is a read-only `gh` invocation this worker will run.
+///
 /// Gates, all of which must hold: the shape is bounded, every flag is in
 /// [`ALLOWED_FLAGS`], and the leading command is in [`ALLOWED_COMMANDS`] or
 /// [`ALLOWED_BARE_COMMANDS`].
@@ -421,10 +422,11 @@ fn query_branch(branch: &str) -> Option<Vec<u8>> {
     bounded_json(stdout)
 }
 
-/// Run the fixed PR/checks query for `branch`. The branch's pull request (`gh
-/// pr view`) and its check runs (`gh pr checks`), combined into a single JSON
-/// object on one line:
+/// Run the fixed PR/checks query for `branch`: the branch's pull request
+/// (`gh pr view`) and its check runs (`gh pr checks`), combined into a single
+/// JSON object on one line:
 ///   `{"state":"OPEN","merged":false,"isDraft":false,"url":..,"number":..,"title":..,"checks":[...]}`
+///
 /// Returns `None` when `gh` is unavailable, the branch has no pull request
 /// (`gh pr view` exits non-zero), or the combined document overflows the cap.
 /// The caller maps `None` to the `.` nothing-usable sentinel, and the jailed
@@ -626,12 +628,12 @@ pub fn query_gh_host(fd: i32, args: &[&str]) -> Option<GhHostResponse> {
     serde_json::from_slice(&response).ok()
 }
 
-/// Run a read-only `gh` command wherever this process can reach `gh`: through
-/// the host worker when sandboxed, by spawning it directly otherwise. The
-/// host worker is authoritative once it exists. A sandboxed session never
-/// falls back to an in-jail spawn. This applies where `gh` reaches neither
-/// the host credentials nor the network and would answer with a misleading
-/// failure.
+/// Run a read-only `gh` command wherever this process can actually reach `gh`:
+/// through the host worker when sandboxed, by spawning it directly otherwise.
+///
+/// The host worker is authoritative once it exists. A sandboxed session never
+/// falls back to an in-jail spawn, where `gh` reaches neither the host
+/// credentials nor the network and would answer with a misleading failure.
 pub fn run_gh(cwd: &Path, args: &[&str]) -> Option<GhHostResponse> {
     #[cfg(unix)]
     if let Some(fd) = ci_host_fd() {
@@ -784,8 +786,7 @@ mod tests {
         );
     }
 
-    /// The jailed pager is a process this execs into, so the worker fd must
-    /// survive an exec.
+    /// The jailed pager is a process this one execs into, so the worker fd must survive an exec.
     #[test]
     fn worker_fd_survives_an_exec() {
         use std::io::Read as _;
@@ -981,8 +982,8 @@ mod tests {
 
     #[test]
     fn a_stray_blank_line_does_not_shift_later_answers() {
-        // The reader skips a blank line instead of reporting it as an answer.
-        // One stray newline on the wire cannot put every later caller a
+        // The reader skips a blank line instead of reporting it as an answer,
+        // so one stray newline on the wire cannot put every later caller a
         // request behind.
         let fd = peer(vec![
             "\n{\"code\":0,\"stdout\":\"first\",\"stderr\":\"\",\"truncated\":false}",

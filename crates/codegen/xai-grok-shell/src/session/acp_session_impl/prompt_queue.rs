@@ -625,7 +625,7 @@ impl SessionActor {
 
     /// Send Now during an active goal turn: hand the text to the planner that
     /// is ALREADY running as mid-turn context. Nothing is cancelled or
-    /// restarted. A planner respawn would throw away the work in flight and
+    /// restarted — a planner respawn would throw away the work in flight and
     /// make the user's message arrive as a fresh objective instead of an
     /// addition to the plan being written. With no planner in flight (none
     /// registered yet, or already finished) there is nothing to steer, and the
@@ -871,7 +871,7 @@ impl SessionActor {
             if let Some(new_text) = new_text.filter(|t| !t.trim().is_empty()) {
                 Self::apply_queued_prompt_edit(&mut item, new_text.to_string(), owner);
             }
-            // A command row is promoted instead of steered. `resolve` reads only
+            // A command row is promoted instead of steered: `resolve` reads only
             // a prompt's leading token, so a `/cmd args` folded into the goal
             // turn would reach the model as literal prose.
             let merge_into_goal = turn_running

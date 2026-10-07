@@ -685,7 +685,7 @@ mod tests {
     }
 
     /// A caller that sends the ACP spelling and the schema spelling with the
-    /// same answer is saying one thing twice. It reads as one question.
+    /// same answer is saying one thing twice, so it reads as one question.
     #[test]
     fn a_question_naming_both_multi_select_keys_under_one_value_parses_once() {
         let json = serde_json::json!({
@@ -718,8 +718,8 @@ mod tests {
     }
 
     /// Both spellings carrying different answers is a real contradiction -- it
-    /// decides whether the user may pick more than one option -- so it fails.
-    /// It names both keys rather than taking one in silence.
+    /// decides whether the user may pick more than one option -- so it fails
+    /// and names both keys rather than taking one in silence.
     #[test]
     fn a_question_whose_multi_select_spellings_disagree_is_an_error_naming_the_field() {
         let json = serde_json::json!({

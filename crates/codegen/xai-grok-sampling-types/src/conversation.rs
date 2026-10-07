@@ -577,8 +577,8 @@ impl From<ToolDefinition> for ToolSpec {
 
 /// Merge caller-supplied extra fields into a serialized request body. A
 /// dotted key addresses a nested object (`"options.num_ctx"` reaches
-/// `options: { num_ctx }`). This is because TOML cannot spell a nested table
-/// inline beside scalar siblings and an `[extra_body.options]` sub-table is a
+/// `options: { num_ctx }`), because TOML cannot spell a nested table inline
+/// beside scalar siblings and an `[extra_body.options]` sub-table is a
 /// different shape from the flat map the rest of the config uses.
 pub fn merge_extra_body(
     body: &mut serde_json::Value,
@@ -877,7 +877,7 @@ pub const LOWEST_ENABLED_REASONING_EFFORT: crate::ReasoningEffort = crate::Reaso
 
 /// Resolve the reasoning effort a wire body must carry for a target. A
 /// reasoning-mandatory target must never be sent a body that disables or
-/// omits reasoning. An unset (`None`), `None`, or `Minimal` requested effort
+/// omits reasoning: an unset (`None`), `None`, or `Minimal` requested effort
 /// is remapped to the lowest supported non-disabled effort
 /// ([`LOWEST_ENABLED_REASONING_EFFORT`]).
 pub fn wire_reasoning_effort(
@@ -1068,7 +1068,7 @@ impl ModelPricing {
 /// Derive cost in USD ticks (1e10 per USD) from reported token usage and a
 /// model's per-token pricing. Returns `None` when `pricing` is unusable (all
 /// tiers zero), `usage` is absent, or the derived tick count does not fit
-/// `i64`. The caller can fall back to the honest-absence behavior. Pure
+/// `i64`, so the caller can fall back to the honest-absence behavior. Pure
 /// integer-arithmetic-at-the-f64 level then rounded to the nearest tick;
 /// deterministic and exactly assertable. Billing tiers (mirroring
 /// [`TokenUsage`]): - uncached input = `prompt_tokens −
@@ -1091,8 +1091,8 @@ pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) ->
         + cache_creation * pricing.cache_creation_per_token_usd
         + f64::from(usage.completion_tokens) * pricing.output_per_token_usd;
     // Pricing the catalog or config carries can be wrong by orders of
-    // magnitude, and a tick count outside `i64` has no representation at all.
-    // The turn is reported as unpriced rather than as a saturated price.
+    // magnitude, and a tick count outside `i64` has no representation at all:
+    // the turn is reported as unpriced rather than as a saturated price.
     let ticks = match crate::types::ticks_from_usd("computed cost (usage x pricing)", usd) {
         Ok(ticks) => ticks,
         Err(err) => {
@@ -4152,8 +4152,8 @@ mod tests {
     }
 
     /// The placeholder is the only thing the model learns about the missing
-    /// image. It has to name the real cause: told "conversation too large" on
-    /// a vision-less model, the model retries or invents the contents.
+    /// image, so it has to name the real cause: told "conversation too large"
+    /// on a vision-less model, the model retries or invents the contents.
     #[test]
     fn test_strip_images_placeholder_names_the_reason() {
         let placeholder_for = |reason| {
@@ -5251,7 +5251,7 @@ mod tests {
         assert_eq!(compute_cost_ticks(Some(&usage), &pricing), Some(80_000_000),);
     }
 
-    /// Cache tiers. Cached reads billed at a discount and cache writes at a
+    /// Cache tiers: cached reads billed at a discount and cache writes at a
     /// premium must each contribute their own tier, with the uncached portion
     /// correctly subtracted from `prompt_tokens`.
     #[test]

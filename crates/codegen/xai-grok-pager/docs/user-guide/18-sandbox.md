@@ -23,7 +23,7 @@ grok --sandbox strict
 
 ## The pathbox jail (`--sandbox=pathbox` or a path flag)
 
-The **pathbox** jail puts the whole session inside an OS jail. Grok replaces itself with `bwrap` on Linux, or `sandbox-exec` on macOS, before it starts any work. The agent runs in the jail, and so does every command it spawns. It is a reserved profile name: `--sandbox=pathbox` selects it. It cannot be redefined by a custom `sandbox.toml` profile.
+The **pathbox** jail puts the whole session inside an OS jail. Grok replaces itself with `bwrap` on Linux, or `sandbox-exec` on macOS, before it starts any work. The agent runs in the jail, and so does every command it spawns. It is a reserved profile name: `--sandbox=pathbox` selects it, and it cannot be redefined by a custom `sandbox.toml` profile.
 
 ```bash
 # Nothing but ~/.grok, a tmpfs, and a read-only system base

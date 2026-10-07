@@ -56,7 +56,7 @@ pub fn binary_identity() -> BinaryIdentity {
     }
 }
 
-/// A config file the model may want to read, and whether it is there.
+/// A config file the model may want to read, and whether it is actually there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileFact {
     pub path: PathBuf,
@@ -138,8 +138,9 @@ pub fn is_secret_name(name: &str) -> bool {
 /// Longest value printed verbatim.
 const MAX_ENV_VALUE: usize = 200;
 
-/// Select and redact the grok-relevant variables from an environment. Pure
-/// over the iterator so the redaction is testable without touching the
+/// Select and redact the grok-relevant variables from an environment.
+///
+/// Pure over the iterator so the redaction is testable without touching the
 /// process environment. Sorted by name for a stable, diffable block.
 pub fn grok_env_facts<I>(vars: I) -> Vec<EnvFact>
 where
@@ -412,8 +413,8 @@ impl DebugContext {
     }
 }
 
-/// Every config layer grok loads, in apply order. Named whether they exist:
-/// "the file you would edit is missing" is an answer too.
+/// Every config layer grok loads, in apply order. Named whether or not they
+/// exist: "the file you would edit is missing" is an answer too.
 fn config_file_paths(grok_home: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(system) = xai_grok_config::system_config_dir() {

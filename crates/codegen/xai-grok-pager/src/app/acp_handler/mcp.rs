@@ -128,7 +128,7 @@ pub(super) fn handle_mcp_server_status(notif: &acp::ExtNotification, app: &mut A
     use xai_grok_shell::extensions::mcp::{McpServerStatus, McpServerStatusPayload, McpToolEntry};
 
     let Ok(payload) = serde_json::from_str::<McpServerStatusPayload>(notif.params.get()) else {
-        // floor_char_boundary returns an offset it snapped to a boundary.
+        // floor_char_boundary returns an offset it just snapped to a boundary.
         #[allow(clippy::string_slice)] // floor_char_boundary's own output
         let preview = &notif.params.get()
             [..crate::render::line_utils::floor_char_boundary(notif.params.get(), 100)];

@@ -684,7 +684,7 @@ mod tests {
         assert!(update.fields.content.is_some());
     }
 
-    /// The `ci` tool's result must reach the client. Before this arm it hit the
+    /// The `ci` tool's result must reach the client: before this arm it hit the
     /// catch-all, so the row stayed pending with no result at all.
     #[test]
     fn test_acp_tool_update_ci_returns_the_result() {

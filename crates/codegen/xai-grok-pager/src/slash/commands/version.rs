@@ -100,7 +100,7 @@ mod tests {
         assert!(!cmd.takes_args());
     }
 
-    /// The commit is the whole point of the command. It is what tells someone
+    /// The commit is the whole point of the command: it is what tells someone
     /// whether the fix they are waiting on is in the binary they are running.
     #[test]
     fn report_carries_version_commit_and_binary() {

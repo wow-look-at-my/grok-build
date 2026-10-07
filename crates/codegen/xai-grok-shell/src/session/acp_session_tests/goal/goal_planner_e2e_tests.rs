@@ -375,9 +375,10 @@ fn create_test_goal(actor: &SessionActor) {
     );
 }
 
-/// Every todo on the session's LIVE list, as `(id, content, status)`. Read
-/// through the session's own tool bridge, which is where `todo_write` keeps
-/// it — the same state the model and the pager see.
+/// Every todo on the session's LIVE list, as `(id, content, status)`.
+///
+/// Read through the session's own tool bridge, which is where `todo_write`
+/// keeps it — the same state the model and the pager see.
 async fn live_todos(actor: &SessionActor) -> Vec<(String, String, crate::tools::todo::TodoStatus)> {
     use crate::tools::todo::TodoState;
     use xai_grok_tools::types::resources::State;
@@ -397,7 +398,7 @@ async fn live_todos(actor: &SessionActor) -> Vec<(String, String, crate::tools::
         .unwrap_or_default()
 }
 
-/// The contents of the live list, in order.
+/// Just the contents of the live list, in order.
 async fn live_todo_contents(actor: &SessionActor) -> Vec<String> {
     live_todos(actor)
         .await
@@ -406,9 +407,9 @@ async fn live_todo_contents(actor: &SessionActor) -> Vec<String> {
         .collect()
 }
 
-/// Register the real grok-build `todo_write` tool. Bind this session's toolset
-/// into the workspace, so a seeded append dispatches onto the session's live
-/// `State<TodoState>` exactly as it does in a real session.
+/// Register the real grok-build `todo_write` tool and bind this session's
+/// toolset into the workspace, so a seeded append dispatches onto the session's
+/// live `State<TodoState>` exactly as it does in a real session.
 async fn arm_todo_writes(actor: &SessionActor) {
     *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
     actor
@@ -514,7 +515,7 @@ fn plan_updates(
     plans
 }
 
-/// A seeded item is a todo like any other. The seed dispatches through the
+/// A seeded item is a todo like any other: the seed dispatches through the
 /// session's own `todo_write`, so the same `Plan` session update a
 /// model-written list produces is enqueued for the client, carrying the items
 /// the planner listed.
@@ -588,8 +589,8 @@ async fn a_lite_goal_never_spawns_the_planner() {
 }
 
 /// path hands the planner a prompt that tells it to list the plan's work with
-/// the session's own todo tool — the instruction the whole feature rests
-/// on, asserted on the prompt the coordinator was given rather than on a
+/// the session's own todo tool — the instruction the whole feature rests on,
+/// asserted on the prompt the coordinator was actually given rather than on a
 /// template rendered in isolation.
 #[tokio::test(flavor = "current_thread")]
 async fn the_planner_is_spawned_with_the_todo_instruction() {
@@ -730,7 +731,7 @@ async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
 }
 
 /// The items come from the planner's own `todo_write`, not from the harness
-/// reading the plan. The plan body names a different step, and only the child's
+/// reading the plan: the plan body names a different step, and only the child's
 /// items land.
 #[tokio::test(flavor = "current_thread")]
 async fn the_planner_childs_own_items_are_the_source_not_the_plan_prose() {
@@ -800,7 +801,7 @@ async fn a_planner_that_named_no_items_leaves_the_list_untouched() {
         .await;
 }
 
-/// Seeding is append-only and once per goal. A pre-existing item keeps its id,
+/// Seeding is append-only and once per goal: a pre-existing item keeps its id,
 /// text and status, and re-running the seed over the same items adds nothing.
 #[tokio::test(flavor = "current_thread")]
 async fn goal_seeding_is_append_only_and_idempotent() {
@@ -1471,7 +1472,7 @@ async fn planner_runtime_failure_pauses_goal_with_canonical_message() {
         .await;
 }
 
-/// Regression. After a user Stop (ESC / Ctrl-C) the real coordinator latches
+/// Regression: after a user Stop (ESC / Ctrl-C) the real coordinator latches
 /// the session in `spawn_blocked_sessions`, and every Task spawn — the goal
 /// planner included — is rejected as cancelled until an `OpenSpawnAdmission`
 /// arrives. The only reopen site runs after the goal-slash dispatch, and the
@@ -2146,11 +2147,12 @@ async fn stop_then_slash_goal_resume_reopens_spawn_admission_before_planner_retr
         .await;
 }
 
-/// End-to-end gate (enabled side). When the planner is on and writes a plan,
-/// `setup_goal`'s reminder folds in the plan-aware block carrying the actual
-/// Deviations` instruction, and the discipline intact. This planner lists no
-/// todo items, so nothing is seeded. The reminder must tell the implementer
-/// to put the steps on the list, and must never claim they are already there.
+/// End-to-end gate (enabled side): when the planner is on and writes a
+/// plan, `setup_goal`'s reminder folds in the plan-aware block carrying
+/// the actual `plan_path()` pointer, the `## Deviations` instruction, and the
+/// legacy discipline intact. This planner lists no todo items, so nothing is
+/// seeded: the reminder must tell the implementer to put the steps on the
+/// list, and must never claim they are already there.
 #[tokio::test(flavor = "current_thread")]
 async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
     let local = tokio::task::LocalSet::new();
@@ -2442,7 +2444,7 @@ async fn resume_with_planner_disabled_keeps_infra_recap() {
 
 /// The [X]/Stop shape: the plan writer is cancelled mid-stream with nothing
 /// steering the replan. Spawning another planner is doing the opposite of what
-/// was asked, and every one after the first is dead on arrival anyway. The
+/// was asked, and every one after the first is dead on arrival anyway — the
 /// same Stop latched the session's spawns shut.
 #[tokio::test(flavor = "current_thread")]
 async fn a_cancelled_planner_pauses_instead_of_respawning() {

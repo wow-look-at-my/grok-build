@@ -1200,8 +1200,8 @@ mod payload_alias_tests {
         }
     }
 
-    /// These types read a reply and never write one. The key they never emit is
-    /// asserted from the wire side instead: nothing here round-trips.
+    /// These types read a reply and never write one, so the key they never emit
+    /// is asserted from the wire side instead: nothing here round-trips.
     #[test]
     fn the_points_list_reads_from_either_key_spelling() {
         let camel: RewindPointsResponse = serde_json::from_str(r#"{"rewindPoints":[]}"#).unwrap();

@@ -32,8 +32,7 @@ fn response_carrying_thinking(thinking: &str) -> ConversationResponse {
 }
 
 /// Point the actor's sampler at `server`, the same way the turn-summary test
-/// does. Do this so the side call is a real HTTP request rather than a stubbed
-/// client.
+/// does, so the side call is a real HTTP request rather than a stubbed client.
 async fn aim_at(actor: &SessionActor, server: &MockInferenceServer) {
     let mut cfg = actor
         .chat_state_handle

@@ -79,9 +79,10 @@ fi
 # Every file counts, not only *.rs: `include_str!` reads a sibling of any name. A build script's
 # generated code is reached by `include!` under $OUT_DIR, which is a directory outside the crate, so
 # it is hashed as well. A key that misses either one serves an artifact of the older source. `target`
-# and `.git` are pruned. A build script's crate directory is the package root. A package that holds
-# its own target directory otherwise hashes the output of the build it is part of. Memoised on the
-# directory. Sources cannot change while a build runs, so the memo is safe for the life of the store.
+# and `.git` are pruned. A build script's crate directory is the package root, and a package that
+# holds its own target directory otherwise hashes the output of the build it is part of. Memoised on
+# the directory. Sources cannot change while a build runs, so the memo is safe for the life of the
+# store.
 MEMO="$STORE/../pkg-hashes"
 [ -d "$MEMO" ] || mkdir -p "$MEMO" 2>/dev/null
 #
@@ -213,24 +214,24 @@ read -r code < "$STATUS" || true
 if [ "$code" = 0 ]; then
 	tally compiled
 	tmp="$entry.$$"
-	# Storing an empty directory is what makes a later run restore nothing and call it a hit. A
+	# Storing an empty directory is what makes a later run restore nothing and call it a hit, so a
 	# set that matched no output is thrown away instead.
 	mine=("$out_dir"/*"$suffix"*)
 	if [ -e "${mine[0]}" ] && mkdir -p "$tmp" &&
 		cp -al "${mine[@]}" "$tmp"/ 2>/dev/null &&
 		mv -T "$tmp" "$entry" 2>/dev/null; then
 		# The upload is detached, because cargo holds this call's job slot until the wrapper exits.
-		# An inline upload therefore spends a compile thread on the network. The entry is already
-		# on disk for this build: nothing here waits on the answer.
+		# An inline upload therefore spends a compile thread on the network, and the entry is
+		# already on disk for this build: nothing here waits on the answer.
 		#
 		# It holds a SHARED lock for its lifetime. `pkg-cache.sh drain` takes the exclusive one,
 		# which is what lets the job wait for every upload without counting them.
 		if [ -n "$REMOTE" ] && [ -x "$REMOTE" ]; then
 			# The shared lock is taken HERE, before the fork, and the upload inherits it. Taking it
-			# inside the child left a window between this process exiting and the child locking. A
-			# drain that arrived in that window returned while the upload had not started. The entry
-			# then reached no service and the next run recompiled it, which a warm leg reported as a
-			# hit it never got.
+			# inside the child left a window between this process exiting and the child locking, and
+			# a drain that arrived in that window returned while the upload had not started: the
+			# entry then reached no service and the next run recompiled it, which a warm leg reported
+			# as a hit it never got.
 			exec {ufd}< "$SLOTDIR/uploads"
 			flock -s "$ufd"
 			{
@@ -239,8 +240,7 @@ if [ "$code" = 0 ]; then
 				"$REMOTE" put "$key" "$entry"
 				put=$?
 				# Counted apart, because a cache service nobody wired up looks exactly like one
-				# rejecting every upload, and only one of those is a bug. That bug is in this
-				# script.
+				# rejecting every upload, and only one of those is a bug in this script.
 				if [ "$put" = 9 ]; then
 					tally remote-429
 				elif [ "$put" = 3 ]; then

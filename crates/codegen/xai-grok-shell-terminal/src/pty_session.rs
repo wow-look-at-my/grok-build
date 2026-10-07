@@ -405,9 +405,10 @@ async fn run_pty_output_loop(
 
     let (data_tx, mut data_rx) = mpsc::channel::<Vec<u8>>(64);
 
-    // A dedicated thread, not the runtime's blocking pool. This `read` only
+    // A dedicated thread, not the runtime's blocking pool: this `read` only
     // returns once every slave fd is closed, which a job that outlives the
-    // shell keeps open indefinitely. The pool is joined at runtime shutdown.
+    // shell keeps open indefinitely, and the pool is joined at runtime
+    // shutdown.
     std::thread::spawn(move || {
         let mut reader = reader;
         let mut buf = [0u8; 4096];
@@ -1000,12 +1001,12 @@ mod tests {
     }
 
     /// A job that ignores the hangup is entitled to outlive the terminal — that
-    /// is what `nohup` is for. It keeps its inherited slave fd open, so the
+    /// is what `nohup` is for — and it keeps its inherited slave fd open, so the
     /// reader's `read` never returns. Off the runtime's blocking pool that costs
-    /// one leaked thread; on it, the pool join at runtime shutdown never finishes
-    /// and the whole process wedges. This test reaching its own last line is the
-    /// assertion: a regression hangs here rather than failing. A timeout on this
-    /// name means shutdown is blocked on a pty read.
+    /// one leaked thread; on it, the pool join at runtime shutdown never
+    /// finishes and the whole process wedges. This test reaching its own last
+    /// line is the assertion: a regression hangs here rather than failing, so a
+    /// timeout on this name means shutdown is blocked on a pty read.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_job_that_ignores_the_hangup_does_not_wedge_runtime_shutdown() {

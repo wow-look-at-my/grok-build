@@ -24,7 +24,7 @@ const MODE_JAILED_NO_WORKER: &str = "jailed-no-worker";
 /// Every line a child reports so the parent can read it back.
 const REPORT: &str = "profile-ci-host: ";
 
-/// The case this binary runs, under the name a test runner lists it by.
+/// The one case this binary runs, under the name a test runner lists it by.
 const TEST_NAME: &str = "a_profile_confined_session_answers_its_ci_query_through_the_worker";
 
 fn main() {
@@ -382,7 +382,7 @@ impl ChildReport {
         self.runs == "yes"
     }
 
-    /// Whether a `gh` ran for this child, or there was none to run.
+    /// Whether a `gh` actually ran for this child, or there was none to run.
     fn gh_ran(&self) -> bool {
         self.answer_code != "-1"
     }

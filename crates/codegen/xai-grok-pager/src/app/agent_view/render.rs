@@ -1431,8 +1431,8 @@ impl AgentView {
             .or_else(|| lazy_git.as_ref().and_then(|i| i.branch.clone()));
         // Realtime CI-status dot: a colored dot beside the branch whose state
         // is polled from the `gh` CLI. The poll is throttled and off-thread
-        // (see `ci_status::ci_status_lazy`). This render call is cheap.
-        // Absent a real branch (detached/empty) or any CI signal, no dot is
+        // (see `ci_status::ci_status_lazy`), so this render call is cheap;
+        // absent a real branch (detached/empty) or any CI signal, no dot is
         // drawn — a graceful "no CI status" state.
         if let Some(b) = branch.as_deref()
             && !b.is_empty()
@@ -2356,8 +2356,8 @@ impl AgentView {
         let mut flags: Vec<PromptFlag> =
             mode_flags(plan_label, self.session.permission_label(), &theme);
         // Shift+Tab agent-identity ring stop (Orchestrator/Explore): the
-        // mode-switch banner only shows for a few seconds. The flag row is
-        // what persists to remind the user they're off the base agent.
+        // mode-switch banner only shows for a few seconds, so the flag row
+        // is what persists to remind the user they're off the base agent.
         if let Some(idx) = self.shift_tab_ring_agent_index {
             use xai_grok_agent::config::BuiltinAgentName;
             let text = match BuiltinAgentName::shift_tab_variants().get(idx as usize) {

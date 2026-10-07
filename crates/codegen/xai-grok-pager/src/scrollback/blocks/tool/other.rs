@@ -165,10 +165,11 @@ impl OtherToolCallBlock {
         }
     }
 
-    /// The arguments arriving right now, one dim line each. Indented under
-    /// the header and truncated rather than wrapped: the tail is redrawn on
-    /// every fragment. A wrapped line changes the block's height as the
-    /// model types, which makes the whole transcript jump.
+    /// The arguments arriving right now, one dim line each.
+    ///
+    /// Indented under the header and truncated rather than wrapped: the tail
+    /// is redrawn on every fragment, and a wrapped line changes the block's
+    /// height as the model types, which makes the whole transcript jump.
     fn streaming_preview_lines(&self, theme: &Theme, width: usize) -> Vec<BlockLine> {
         const INDENT: &str = "  ";
         let body_width = width.saturating_sub(INDENT.len()).max(8);

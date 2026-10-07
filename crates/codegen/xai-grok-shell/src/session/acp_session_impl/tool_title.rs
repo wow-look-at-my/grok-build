@@ -239,10 +239,11 @@ fn lsp_tool_title(lsp: &xai_grok_tools::implementations::lsp::LspToolInput) -> S
         (None, _) => op.to_string(),
     }
 }
-/// The title of a tool whose input the bridge hands over as raw JSON. The
-/// opencode harness registers its built-ins this way. So the title comes from
-/// the tool's kind and the argument that kind names. A tool the kinds do not
-/// cover shows its wire name, which is the name the model called it by.
+/// The title of a tool whose input the bridge hands over as raw JSON.
+///
+/// The opencode harness registers its built-ins this way. So the title comes
+/// from the tool's kind and the argument that kind names. A tool the kinds do
+/// not cover shows its wire name, which is the name the model called it by.
 fn dynamic_tool_title(
     wire_name: &str,
     kind: Option<ToolKind>,

@@ -2824,11 +2824,12 @@ fn after_task_complete_dispatch(
 }
 
 /// The `(repo cwd, branch)` whose CI dot the status bar is showing, or `None`
-/// when no dot is drawn. Another view is up, or the cwd has no branch (not a
-/// repo, or detached HEAD, which renders as `detached` with no dot). Resolved
-/// exactly as the renderer resolves it — the agent's own branch first, then
-/// the cwd's cached git info — so the timer can never poll a branch the dot
-/// isn't reporting.
+/// when no dot is drawn: another view is up, or the cwd has no branch (not a
+/// repo, or detached HEAD, which renders as `detached` with no dot).
+///
+/// Resolved exactly as the renderer resolves it — the agent's own branch
+/// first, then the cwd's cached git info — so the timer can never poll a
+/// branch the dot isn't reporting.
 fn ci_dot_target(app: &AppView) -> Option<(std::path::PathBuf, String)> {
     let ActiveView::Agent(id) = app.active_view else {
         return None;

@@ -362,7 +362,7 @@ impl OutputRate {
 /// A model request that waits for a slot under `[ui].max_parallel_requests`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RequestQueued {
-    /// Requests queued ahead of this.
+    /// Requests queued ahead of this one.
     pub ahead: u64,
     /// The cap the queue is behind.
     pub limit: u32,
@@ -1202,7 +1202,7 @@ impl AcpUpdateTracker {
         self.orphan_updates.clear();
         self.skip_next_skill_body = false;
     }
-    /// Attach the API-reported per-turn cost (USD ticks) to the agent-message block that rendered this turn. The ACP text chunk rail does not carry cost. The *durable* `TurnCompleted` notification carries it in an adjacent `PromptUsage`, so the turn-completion handler calls this once per `TurnCompleted`, keyed by the turn's prompt. Attribution is order-independent across both ways a turn ends: - **Driver** (`attached_as_viewer=false`) finishes on `PromptResponse`
+    /// Attach the API-reported per-turn cost (USD ticks) to the agent-message block that rendered this turn. The ACP text chunk rail does not carry cost; the *durable* `TurnCompleted` notification carries it in an adjacent `PromptUsage`, so the turn-completion handler calls this once per `TurnCompleted`, keyed by the turn's prompt. Attribution is order-independent across both ways a turn ends: - **Driver** (`attached_as_viewer=false`) finishes on `PromptResponse`
     ///   (`prompt.rs`), which is usually *after* `TurnCompleted` arrives. At
     ///   that moment the agent message is still streaming (`current_agent_msg`),
     ///   so the cost attaches to the running turn — but only when the
@@ -1262,8 +1262,8 @@ impl AcpUpdateTracker {
     /// Attach one model call's cost to the message block that call produced,
     /// from the `ResponseCompleted` that closes it. A turn is a tool loop of
     /// several model calls, each rendering its own agent-message block, and
-    /// each is priced here as it lands. This is what puts a cost beside every
-    /// message's timestamp instead of only the turn's last one.
+    /// each is priced here as it lands — this is what puts a cost beside
+    /// every message's timestamp instead of only the turn's last one.
     /// `TurnCompleted` cannot do this job: it reports the turn's total as one
     /// number, with no way to split it back apart. `prompt_id` is the
     /// client's own in-flight prompt (the buffered chunk rail carries no
@@ -1304,13 +1304,14 @@ impl AcpUpdateTracker {
     /// Attach one model call's prompt cache-read hit rate to the message
     /// block that call produced, from the same `ResponseCompleted` that
     /// closes it — see [`Self::set_response_cost`]'s doc comment for why
-    /// per-response attribution (not a turn total) is what puts a rate beside
-    /// every message instead of only the turn's last one. The rate is
-    /// `cache_read_input_tokens / (input_tokens + cache_read_input_tokens +
-    /// cache_creation_input_tokens)`, rounded to the nearest percent. `false`
-    /// when the response reported no usage, or its total prompt tokens were
-    /// zero. A response with nothing to cache has no rate to report, not a
-    /// `0%`.
+    /// per-response attribution (not a turn total) is what puts a rate
+    /// beside every message instead of only the turn's last one.
+    ///
+    /// The rate is `cache_read_input_tokens / (input_tokens +
+    /// cache_read_input_tokens + cache_creation_input_tokens)`, rounded to
+    /// the nearest percent. `false` when the response reported no usage, or
+    /// its total prompt tokens were zero — a response with nothing to cache
+    /// has no rate to report, not a `0%`.
     pub fn set_response_cache_hit(
         &mut self,
         scrollback: &mut ScrollbackState,
@@ -1455,7 +1456,11 @@ impl AcpUpdateTracker {
     /// Attach a summary to the thinking block whose model call carried
     /// `stream_start_ms`. Returns whether the screen changed, so the caller
     /// repaints the row that gained a line rather than the whole transcript.
-    /// A key naming no drawn block (the call streamed no thinking, its block.
+    ///
+    /// A key naming no drawn block (the call streamed no thinking, its block
+    /// was removed by a rewind, or the transcript predates the key) changes
+    /// nothing: the summary has no block to describe, and attaching it to a
+    /// neighbouring one would put words under the wrong reasoning.
     pub fn set_thinking_summary(
         &mut self,
         scrollback: &mut ScrollbackState,
@@ -1649,8 +1654,9 @@ impl AcpUpdateTracker {
         }
     }
     /// Show a tool call while the model is still writing its arguments.
-    /// Returns whether the screen changed. The first chunk for an index
-    /// pushes the entry; later chunks extend the preview in place.
+    ///
+    /// Returns whether the screen changed. The first chunk for an index pushes
+    /// the entry; later chunks extend the preview in place.
     pub fn handle_tool_call_delta(
         &mut self,
         tool_call_id: Option<&str>,
@@ -1858,8 +1864,9 @@ impl AcpUpdateTracker {
         }
         true
     }
-    /// Complete a tool call into the entry its arguments streamed into. The
-    /// completed block replaces the preview in place, so a finished call
+    /// Complete a tool call into the entry its arguments streamed into.
+    ///
+    /// The completed block replaces the preview in place, so a finished call
     /// keeps the position it occupied while it was being written. Parallel
     /// calls therefore stay in the order the model opened them.
     fn finish_adopted_tool(

@@ -49,9 +49,10 @@ impl std::fmt::Debug for ParentMessenger {
 
 register_resource!("grok_build", "ParentMessenger", ParentMessenger);
 
-/// Wrap a subagent's message in the block the parent session reads. The
-/// parent takes this as a user message. Without the attribution it reads as
-/// the user's own words, from an agent the user never addressed. Every
+/// Wrap a subagent's message in the block the parent session reads.
+///
+/// The parent takes this as a user message. Without the attribution it reads
+/// as the user's own words, from an agent the user never addressed. Every
 /// attribute is quoted, so a task description carrying a `"` cannot end the
 /// tag early and forge the rest of the block.
 pub fn render_subagent_message(

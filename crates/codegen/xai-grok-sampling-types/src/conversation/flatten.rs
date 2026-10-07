@@ -38,6 +38,7 @@ impl FlattenReport {
 }
 
 /// Whether `items` holds anything a different model can refuse to ingest.
+///
 /// True for reasoning siblings, tool calls, tool results and server-side tool
 /// calls. A conversation of plain user and assistant messages is portable as
 /// it stands, and flattening one buys nothing.
@@ -50,14 +51,16 @@ pub fn needs_flattening(items: &[ConversationItem]) -> bool {
     })
 }
 
-/// Rewrite `items` so every part of it is plain text. Reasoning becomes a
-/// `<thinking>` assistant message and loses its encrypted blob. An assistant
-/// message's tool calls become `<tool_call>` blocks in its own text. A tool
-/// result becomes a `<tool_result>` user message, because no call is left to
-/// pair it with. A server-side call becomes assistant text. System and user
-/// messages pass through: neither carries provider state. Every assistant
-/// message this touches loses its `model_id`. That origin is what the
-/// thinking-signature rules read, and nothing here came from it.
+/// Rewrite `items` so every part of it is plain text.
+///
+/// Reasoning becomes a `<thinking>` assistant message and loses its encrypted
+/// blob. An assistant message's tool calls become `<tool_call>` blocks in its
+/// own text. A tool result becomes a `<tool_result>` user message, because no
+/// call is left to pair it with. A server-side call becomes assistant text.
+/// System and user messages pass through: neither carries provider state.
+///
+/// Every assistant message this touches loses its `model_id`. That origin is
+/// what the thinking-signature rules read, and nothing here came from it.
 pub fn flatten_conversation(
     items: Vec<ConversationItem>,
 ) -> (Vec<ConversationItem>, FlattenReport) {
@@ -129,7 +132,7 @@ pub fn flatten_conversation(
 
 /// An assistant message carrying text and nothing else. No tool calls, and no
 /// origin model: a flattened record is not attributable to the model that
-/// produced it. Claiming otherwise re-arms the signature rules.
+/// produced it, and claiming otherwise re-arms the signature rules.
 fn assistant_text(content: String) -> ConversationItem {
     ConversationItem::Assistant(AssistantItem {
         content: Arc::<str>::from(content),

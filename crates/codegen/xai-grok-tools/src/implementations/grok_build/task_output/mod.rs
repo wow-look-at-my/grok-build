@@ -1708,9 +1708,9 @@ mod tests {
     }
 
     /// The caller of a multi-task wait is parked on one `Notify` that only
-    /// these spawned rounds can wake. A round that died has to wake it anyway.
-    /// Otherwise the tool sits out the whole wait budget on a wait that no
-    /// longer exists, with the turn stopped in front of it.
+    /// these spawned rounds can wake, so a round that died has to wake it
+    /// anyway: otherwise the tool sits out the whole wait budget on a wait that
+    /// no longer exists, with the turn stopped in front of it.
     #[tokio::test(start_paused = true)]
     async fn a_panicking_bash_wait_still_releases_the_waiter() {
         let terminal: Arc<dyn TerminalBackend> = Arc::new(PanickingWaitTerminal);
@@ -1730,8 +1730,8 @@ mod tests {
     }
 
     /// `CompletedEarly` from the wait-all path claims every task finished. A
-    /// round that died proves nothing. The claim is withheld and the caller is
-    /// left with the deadline hint rather than an early-return one.
+    /// round that died proves nothing, so the claim is withheld and the caller
+    /// is left with the deadline hint rather than an early-return one.
     #[tokio::test(start_paused = true)]
     async fn a_panicking_wait_all_round_is_not_reported_as_all_complete() {
         let terminal: Arc<dyn TerminalBackend> = Arc::new(PanickingWaitTerminal);

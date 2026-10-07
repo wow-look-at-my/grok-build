@@ -51,7 +51,7 @@ fn external_stream_grpc_over_tls_end_to_end() {
         "external OTLP stream is hard-disabled in the build baseline (gRPC over TLS)"
     );
 
-    // `SessionNew` maps to the `session.count` metric. `SessionHarness` maps
+    // `SessionNew` maps to the `session.count` metric; `SessionHarness` maps
     // to the `session_start` log record — emit both so neither signal's TLS
     // export path can be the one that leaks.
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionNew {

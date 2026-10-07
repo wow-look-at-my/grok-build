@@ -17,7 +17,7 @@ pub(super) const DEFAULT_CHAR_BUDGET: usize =
 
 const USIZE_CEILING: f64 = 18_446_744_073_709_551_616.0;
 
-/// Character budget for a listing of a context window of `tokens`, taking `percent` of it at chars per token. `None` when the window states no char count a `usize` can hold. A window read from config or a model catalog is not bounded by anything this crate checks. A
+/// Character budget for a listing of a context window of `tokens`, taking `percent` of it at chars per token. `None` when the window states no char count a `usize` can hold. A window read from config or a model catalog is not bounded by anything this crate checks, and a
 /// saturated budget would truncate nothing at all.
 pub(super) fn listing_budget_chars(tokens: u64, percent: f64) -> Option<usize> {
     #[allow(clippy::cast_precision_loss)]

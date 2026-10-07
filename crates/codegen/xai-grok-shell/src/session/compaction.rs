@@ -466,7 +466,7 @@ pub(crate) enum SuppressReason {
     Other,
 }
 impl SuppressReason {
-    /// `size` gets [`SUPPRESS_STICKY`]: cleared only on a context-budget change. / `schema` and `other` get [`SUPPRESS_TURN`]. The next turn sends a different request, so it retries then.
+    /// `size` gets [`SUPPRESS_STICKY`]: cleared only on a context-budget change. / `schema` and `other` get [`SUPPRESS_TURN`]: the next turn sends a different request, so it retries then.
     /// `credit_block` gets [`SUPPRESS_UNTIL_SUCCESS`]: wait for a model `200`.
     /// `auth` gets [`SUPPRESS_AUTH`]: cleared on login/token refresh, not on a `200` (an over-window session never gets one).
     fn suppress_state(self) -> u8 {
@@ -678,12 +678,13 @@ impl SessionActor {
         self.emit_status_snapshot_detached();
         Ok(())
     }
-    /// Answer a `/compact` request, whether a turn is running. Idle: compact
-    /// now. Mid-turn: arm [`PendingManualCompact`]. Let the turn run it at
-    /// its next pre-sampling boundary, because a compaction beside a live
-    /// turn replaces the conversation out from under it. The caller keeps
-    /// waiting either way, so the client reports the real outcome rather than
-    /// a success for work that has not started.
+    /// Answer a `/compact` request, whether or not a turn is running.
+    ///
+    /// Idle: compact now. Mid-turn: arm [`PendingManualCompact`] and let the
+    /// turn run it at its next pre-sampling boundary, because a compaction
+    /// beside a live turn replaces the conversation out from under it.
+    /// The caller keeps waiting either way, so the client reports the real
+    /// outcome rather than a success for work that has not started.
     pub(crate) async fn compact_on_request(
         self: &Arc<Self>,
         user_context: Option<String>,
@@ -725,9 +726,9 @@ impl SessionActor {
         armed
     }
     /// Run a `/compact` armed by [`Self::compact_on_request`], if one is.
-    /// Called at each pre-sampling boundary and once more after the turn
-    /// ends, so a turn that reaches no further boundary still honors the
-    /// request.
+    ///
+    /// Called at each pre-sampling boundary and once more after the turn ends,
+    /// so a turn that reaches no further boundary still honors the request.
     pub(crate) async fn run_pending_manual_compact(self: &Arc<Self>) {
         let Some(pending) = self.compaction.pending_manual_compact.take() else {
             return;

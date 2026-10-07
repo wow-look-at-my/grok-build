@@ -74,7 +74,7 @@ fn contextual_hints_group_sub_sheet_flow() {
 }
 
 /// The "Slow output" sub-screen owns every rate-floor row. Enter on the max
-/// retries child opens its stepper. The commit dispatches the typed action,
+/// retries child opens its stepper, the commit dispatches the typed action,
 /// and the modal comes back to the sheet on that same child.
 #[test]
 fn slow_output_sub_screen_edits_max_retries_and_returns_to_the_sheet() {

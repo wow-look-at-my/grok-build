@@ -1399,8 +1399,8 @@ impl SessionActor {
                     .await
                 {
                     StopGateDecision::AllowStop => {
-                        // The built-in todo-stop gate is another stop hook.
-                        // It fires after the user hooks allowed the stop,
+                        // The built-in todo-stop gate is another stop hook:
+                        // it fires after the user hooks allowed the stop,
                         // consumes the SAME continuation budget (a model that
                         // never engages its todos still stops after
                         // MAX_STOP_HOOK_CONTINUATIONS_PER_TURN

@@ -1350,7 +1350,7 @@ async fn resolve_context_window_from_provider_reads_openrouter_context_length() 
     .await;
     let api_base = format!("{base}/v1");
 
-    // Run the shipped resolver exactly as the request path does. It spawns a
+    // Run the shipped resolver exactly as the request path does: it spawns a
     // dedicated OS thread and does a blocking reqwest fetch against the model's
     // own base, then matches the requested slug.
     let resolved = {

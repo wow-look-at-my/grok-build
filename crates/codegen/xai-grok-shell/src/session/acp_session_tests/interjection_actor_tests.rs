@@ -54,7 +54,7 @@ async fn queue_send_now_keeps_prompt_block_images_on_promoted_row() {
 }
 
 /// Send Now during an active goal turn merges into the turn and steers the
-/// planner that is ALREADY running. The planner run is neither cancelled nor
+/// planner that is ALREADY running: the planner run is neither cancelled nor
 /// replaced, and the text (with its images) still reaches the parent turn as an
 /// interjection.
 #[tokio::test]
@@ -744,7 +744,7 @@ async fn harvest_delivers_queued_follow_up_into_the_running_turn() {
 }
 
 /// With no turn running there is nothing to deliver into: the front row is the
-/// one `maybe_start_running_task` is about to promote. Harvesting it would
+/// one `maybe_start_running_task` is about to promote, and harvesting it would
 /// strand the user's message in a buffer only the turn loop drains.
 #[tokio::test]
 async fn harvest_is_a_noop_while_idle() {
@@ -774,7 +774,7 @@ async fn harvest_is_a_noop_while_idle() {
 }
 
 /// Rows that own their turn stay queued: a bash row is executed from its block
-/// meta rather than sent to the model. A send-now row is cancel-and-send. A
+/// meta rather than sent to the model, a send-now row is cancel-and-send, a
 /// synthetic wake is the system talking to itself, and a row under composer
 /// edit must not vanish mid-edit.
 #[tokio::test]
@@ -831,7 +831,7 @@ async fn harvest_leaves_rows_that_own_their_turn_queued() {
 }
 
 /// A row already queued when the turn started was next in line before that
-/// turn existed, so it stays queued. It runs as its own turn — only a
+/// turn existed, so it stays queued and runs as its own turn — only a
 /// follow-up that arrives mid-turn is delivered into it.
 #[tokio::test]
 async fn harvest_leaves_rows_queued_before_the_turn_started() {
@@ -966,11 +966,10 @@ async fn a_row_arriving_mid_turn_reaches_the_asap_buffer_unprompted() {
 }
 
 /// A queued slash command is NOT folded into the running turn: the drain
-/// expands skills. However, the drain resolves no builtin, so `/cmd args` would
-/// reach the model as literal user text (and `/plan <description>` would
-/// swallow the prompt of the turn its mode switch was requested for). It stays
-/// queued and runs as its own turn, where `resolve` executes it. Rows behind it
-/// are unaffected.
+/// expands skills but resolves no builtin, so `/cmd args` would reach the model
+/// as literal user text (and `/plan <description>` would swallow the prompt of
+/// the turn its mode switch was requested for). It stays queued and runs as its
+/// own turn, where `resolve` executes it. Rows behind it are unaffected.
 #[tokio::test]
 async fn harvest_leaves_a_queued_slash_command_to_its_own_turn() {
     let local = tokio::task::LocalSet::new();
@@ -1018,8 +1017,8 @@ async fn harvest_leaves_a_queued_slash_command_to_its_own_turn() {
 }
 
 /// The same rule under the forced ("deliver everything now") harvest: with only
-/// a command queued there is nothing to deliver. The caller must not cancel the
-/// in-flight stream for it.
+/// a command queued there is nothing to deliver, so the caller must not cancel
+/// the in-flight stream for it.
 #[tokio::test]
 async fn forced_harvest_delivers_nothing_for_a_queued_slash_command() {
     let local = tokio::task::LocalSet::new();

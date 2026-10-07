@@ -12,7 +12,7 @@
 //! - <path>
 //! ...
 //!
-//! RUN_LOG: <run-log path or `(unavailable)`>! PLAN_FILE: <plan path or
+//! RUN_LOG: <run-log path or `(unavailable)`> !
 //! PLAN_FILE: <plan path or `(unavailable)`>
 //!
 //! PLAN_CHANGES: <unified diff of plan edits, or `(none)`>
@@ -24,8 +24,12 @@
 //! `PLAN_CHANGES` is the diff from the plan baseline to the current plan (the agent may edit `plan.md` mid-run).
 //! It renders `(none)` when there is no baseline, no edits, or the diff could not be captured.
 //!
-//! `CHANGES_FILE` is a unified-diff *changelog* (a scope pointer, and the anchor for the claim↔diff honesty check) — it may be truncated. `CHANGED_FILES` is the *complete* list of touched paths the skeptic reads in their current state. Verification rests on the live files and on the run log, not on the diff alone. `RUN_LOG` is the harness-written record of every tool call the implementer made and ! what
-//! it returned (see `run_log.rs`); it is the runtime evidence, so the ! implementer never has to write proof files. The section names ! are consumed verbatim by `templates/goal_verifier_prompt.md`, so the ! format constants here are load-bearing and must not change without ! updating the template (and bumping any prompt-eval baselines).
+//! `CHANGES_FILE` is a unified-diff *changelog* (a scope pointer, and
+//! the anchor for the claim↔diff honesty check) — it may be truncated.
+//! `CHANGED_FILES` is the *complete* list of touched paths the skeptic
+//! reads in their current state; verification rests on the live files
+//! and on the run log, not on the diff alone. `RUN_LOG` is the
+//! harness-written record of every tool call the implementer made and ! what it returned (see `run_log.rs`); it is the runtime evidence, so the ! implementer never has to write proof files. The section names ! are consumed verbatim by `templates/goal_verifier_prompt.md`, so the ! format constants here are load-bearing and must not change without ! updating the template (and bumping any prompt-eval baselines).
 
 use super::GOAL_CLASSIFIER_DIFF_MAX_BYTES;
 use std::borrow::Cow;

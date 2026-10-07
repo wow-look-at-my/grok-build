@@ -457,11 +457,13 @@ mod label_column_tests {
     }
 
     /// A catalog of uniformly long labels must still render, and on a wide
-    /// terminal it must render in full. Gateway-style ids
-    /// (`provider/vendor:family:size`) run past many columns on their own,
-    /// and the selected row adds " (current)" on top. Deriving the column by
-    /// discarding long labels discards all of them here, leaving a zero-width
-    /// column: rows that draw, highlight and select while showing nothing.
+    /// terminal it must render in full.
+    ///
+    /// Gateway-style ids (`provider/vendor:family:size`) run past many columns
+    /// on their own, and the selected row adds " (current)" on top. Deriving
+    /// the column by discarding long labels discards all of them here, leaving
+    /// a zero-width column: rows that draw, highlight and select while showing
+    /// nothing.
     #[test]
     fn a_catalog_of_long_labels_renders_in_full_on_a_wide_terminal() {
         let items = [

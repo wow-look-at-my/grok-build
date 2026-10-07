@@ -1847,7 +1847,7 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
         "ttft_timeout_secs" => {
             let _ = dispatch(Action::SetTtftTimeoutSecs(45), app);
         }
-        // Every harness model slot moves the same way. Pin it to a model the
+        // Every harness model slot moves the same way: pin it to a model the
         // active agent's catalog carries, since the setter refuses an id the
         // catalog does not list.
         key if xai_grok_models::slot_for_setting_key(key).is_some() => {

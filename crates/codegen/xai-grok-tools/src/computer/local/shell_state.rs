@@ -1164,12 +1164,14 @@ mod tests {
     }
 
     /// Regression test: `set -a` must not break the commands that follow it.
-    /// Under allexport every assignment is exported, which caught both the
-    /// dump function's own locals (env_vars is a copy of the environment) and
-    /// the snapshot's grok_snap_* carriers (FUNCTIONS_B64 is every function
-    /// in the shell). Runs several commands after `set -a`, since the
-    /// environment grew with each snapshot round-trip rather than all at
-    /// once.
+    ///
+    /// Under allexport every assignment is exported, which caught both the dump
+    /// function's own locals (env_vars is a copy of the environment) and the
+    /// snapshot's grok_snap_* carriers (FUNCTIONS_B64 is every function in the
+    /// shell).
+    ///
+    /// Runs several commands after `set -a`, since the environment grew with
+    /// each snapshot round-trip rather than all at once.
     #[tokio::test]
     async fn test_allexport_does_not_break_later_commands_bash() {
         if !bash_available() {

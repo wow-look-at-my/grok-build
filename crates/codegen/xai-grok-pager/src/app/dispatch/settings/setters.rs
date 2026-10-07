@@ -512,10 +512,10 @@ pub(super) fn set_thinking_summaries_inner(app: &mut AppView, new: bool) {
 }
 
 /// SHARED: `[ui].thinking_summaries` via `Effect::PersistSetting`.
-/// Restart-relevant: a session resolves the switch once when it is spawned,
-/// so this changes what the next session does. Summaries already drawn stay
-/// where they are: they are part of the transcript, not a live view of the
-/// setting.
+///
+/// Restart-relevant: a session resolves the switch once when it is spawned, so
+/// this changes what the next session does. Summaries already drawn stay where
+/// they are: they are part of the transcript, not a live view of the setting.
 pub(in crate::app::dispatch) fn set_thinking_summaries(
     app: &mut AppView,
     new: bool,
@@ -1930,11 +1930,12 @@ pub(super) fn set_harness_model_inner(app: &mut AppView, slot_id: &str, model_id
     }
 }
 
-/// Outer dispatcher for `Action::SetHarnessModel`. Mirror, persist, toast. An
-/// empty `model_id` clears the slot. Idempotent. A non-empty id must be in
-/// the active agent's catalog. The modal's picker only offers catalog
-/// entries, so anything else is validator skew and is refused rather than
-/// written.
+/// Outer dispatcher for `Action::SetHarnessModel`. Mirror, persist,
+/// toast. An empty `model_id` clears the slot. Idempotent.
+///
+/// A non-empty id must be in the active agent's catalog; the modal's
+/// picker only offers catalog entries, so anything else is validator
+/// skew and is refused rather than written.
 pub(in crate::app::dispatch) fn set_harness_model(
     app: &mut AppView,
     slot_id: &'static str,

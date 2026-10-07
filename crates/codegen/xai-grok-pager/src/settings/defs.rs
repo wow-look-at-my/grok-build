@@ -1748,12 +1748,15 @@ pub fn default_settings() -> Vec<SettingMeta> {
     .collect()
 }
 
-/// One picker per harness model slot, under Models. The rows are built from
-/// `xai_grok_models::HARNESS_MODEL_SLOTS` rather than written out here, so a
-/// slot added to the harness cannot ship without a settings row. Each row is
-/// SHELL-owned and writes its slot into the `[models]` table. A restart is
-/// required, because a slot is resolved when a session actor is built and a
-/// running session keeps the model it started with.
+/// One picker per harness model slot, under Models.
+///
+/// The rows are built from `xai_grok_models::HARNESS_MODEL_SLOTS` rather
+/// than written out here, so a slot added to the harness cannot ship
+/// without a settings row.
+///
+/// Each row is SHELL-owned and writes its slot into the `[models]` table.
+/// A restart is required, because a slot is resolved when a session actor
+/// is built and a running session keeps the model it started with.
 fn harness_model_settings() -> Vec<SettingMeta> {
     xai_grok_models::HARNESS_MODEL_SLOTS
         .iter()

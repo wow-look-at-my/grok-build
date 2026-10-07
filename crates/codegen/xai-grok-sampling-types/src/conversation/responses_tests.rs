@@ -907,7 +907,7 @@ fn test_responses_request_omits_effort_when_unset() {
     );
 }
 
-/// The Responses backend is subject to the same invariant. A reasoning-
+/// The Responses backend is subject to the same invariant: a reasoning-
 /// mandatory target must carry a non-disabled `reasoning.effort`, so
 /// None/Minimal/unset are remapped to the lowest enabled tier.
 #[test]
@@ -1684,7 +1684,7 @@ fn serialized_body_contains_no_placeholder_strings() {
 }
 
 /// A `/todo` capture continues a tool call it made itself, so the reasoning
-/// that came with that call has to ride along. The Responses API rejects a
+/// that came with that call has to ride along: the Responses API rejects a
 /// continuation whose reasoning items are missing. Synthesizing the assistant
 /// message instead of echoing the response dropped them.
 #[test]

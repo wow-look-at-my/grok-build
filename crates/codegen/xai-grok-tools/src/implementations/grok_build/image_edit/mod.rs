@@ -179,7 +179,7 @@ fn parse_attachment_token(value: &str) -> Option<usize> {
     // Strip an optional leading `image` label (case-insensitive). The
     // 5-byte prefix is ASCII, so slicing at byte multiple stays on a
     // boundary — `get(..5)` above is what proves it, since it returns
-    // `None`. This holds for an offset that splits a character.
+    // `None` for an offset that splits a character.
     let rest = match inner.get(..5).map(str::to_ascii_lowercase).as_deref() {
         Some("image") => {
             let rest = inner.get(5..)?;

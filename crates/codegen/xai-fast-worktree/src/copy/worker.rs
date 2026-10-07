@@ -48,11 +48,12 @@ pub(crate) fn run_worker(rx: crossbeam::channel::Receiver<CopyEntry>, ctx: Worke
     }
 }
 
-/// Copy one entry, recording every failure in `issues`. `issues` is taken
-/// back from a poisoned lock rather than unwrapped. A worker that panicked
-/// mid-copy is dead, but the copy continues on other workers. An unwrap would
-/// drop the failures they go on to report — a run that says it copied
-/// cleanly while files are missing. `parking_lot::Mutex` is the structural
+/// Copy one entry, recording every failure in `issues`.
+///
+/// `issues` is taken back from a poisoned lock rather than unwrapped: a worker
+/// that panicked mid-copy is dead, but the copy continues on other workers, and
+/// an unwrap would drop the failures they go on to report — a run that says it
+/// copied cleanly while files are missing. `parking_lot::Mutex` is the structural
 /// fix and is not a dependency of this crate.
 #[allow(clippy::disallowed_methods)]
 fn process_entry(

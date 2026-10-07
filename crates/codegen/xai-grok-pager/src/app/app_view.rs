@@ -805,7 +805,7 @@ pub struct AppView {
     pub dispatch_depth: u32,
     /// Image notices raised while one dispatch or ACP message runs (unbound placeholder, unreadable
     /// attachment, dropped by a command). App-owned so a command that removes its own session
-    /// cannot take the notice down with it. The `unified_log` event is written against the
+    /// cannot take the notice down with it; the `unified_log` event is
     /// written against the originating session when the notice is raised.
     pub pending_image_notices: Vec<String>,
     /// Sticky hover flag for the privacy banner buttons (redraw on enter/leave).

@@ -61,9 +61,9 @@ impl RewindSessionRequest {
         Err(acp::Error::invalid_params().data("targetPromptIndex or targetResponseId is required"))
     }
 }
-/// `RewindSessionRequest` as an ACP client sends it. This happens with each key
-/// spelling its own field, so a request naming both folds them rather than
-/// tripping serde's duplicate-field check. See the `*_KEYS` consts on
+/// `RewindSessionRequest` as an ACP client sends it, with each key spelling its
+/// own field, so a request naming both folds them rather than tripping serde's
+/// duplicate-field check. See the `*_KEYS` consts on
 /// [`RewindSessionRequest`].
 #[derive(Deserialize)]
 struct RewindSessionRequestWire {

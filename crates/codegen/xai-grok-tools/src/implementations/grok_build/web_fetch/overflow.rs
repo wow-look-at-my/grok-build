@@ -738,10 +738,9 @@ mod tests {
         assert_eq!(tokio::fs::read_to_string(second_path).await.unwrap(), full);
     }
 
-    /// Consider a context window whose share. That window has no byte count
-    /// for the `usize` preview field is capped at the artifact limit rather
-    /// than narrowed into a wrong number. A window inside the range keeps its
-    /// computed share.
+    /// A context window whose share has no byte count for the `usize` preview
+    /// field is capped at the artifact limit rather than narrowed into a wrong
+    /// number, and a window inside the range keeps its computed share.
     #[test]
     fn a_window_with_no_byte_count_caps_the_preview_at_the_artifact_limit() {
         let budget = inline_budget(u64::MAX, 100_000);

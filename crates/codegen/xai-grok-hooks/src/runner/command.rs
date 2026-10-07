@@ -1932,9 +1932,8 @@ mod tests {
     }
 
     /// The same bytes arriving from a real child process: the decodable part of
-    /// a gate hook's stderr reaches the model. This is because that text IS the
-    /// reason the hook blocked and the model is the only thing that can act on
-    /// it.
+    /// a gate hook's stderr reaches the model, because that text IS the reason
+    /// the hook blocked and the model is the only thing that can act on it.
     #[tokio::test]
     #[cfg(unix)]
     async fn a_gate_hooks_stderr_survives_undecodable_bytes() {

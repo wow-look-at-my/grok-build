@@ -197,10 +197,10 @@ impl RetryableSpawnError for SpawnError {
 
 /// Inherit override ⇒ exactly one attempt on the current model + session
 /// harness (the `prompt` is moved, never cloned). Explicit override ⇒ one
-/// attempt with the configured `{model, harness}` pair. If it returns a
+/// attempt with the configured `{model, harness}` pair; if it returns a
 /// retryable `Err` ([`RetryableSpawnError`]), emits `GoalRoleModelFailOpen {
 /// reason: spawn_failed }` and retries ONCE with `model = None` + harness
-/// `None` (the current-model + session-harness fallback). Only a SECOND
+/// `None` (the current-model + session-harness fallback); only a SECOND
 /// failure propagates. A cancellation propagates as-is (no retry), so a bad
 /// configured pair can never change today's failure semantics (e.g. it can
 /// never regress the fail-CLOSED planner into a goal-pause).
@@ -369,7 +369,7 @@ impl GoalPlannerSpawner for ChannelSpawner {
         id: &str,
         prompt: RoleRenderedPrompt,
     ) -> Result<PlannerSpawnOutput, SpawnError> {
-        // Publish the coordinator id BEFORE awaiting the child. A Send Now that
+        // Publish the coordinator id BEFORE awaiting the child: a Send Now that
         // lands at any point during the run has to be able to address it.
         if let Some(slot) = &self.subagent_id_slot
             && let Ok(mut published) = slot.lock()
@@ -719,9 +719,9 @@ mod tests {
     }
 
     /// The planner is told to build its OWN todo list with the session's todo
-    /// tool, and the prompt names the tool the harness exposes. That list is
-    /// what the parent merges into the session's list, so a prompt that drops
-    /// the instruction silently loses every step.
+    /// tool, and the prompt names the tool the harness actually exposes. That
+    /// list is what the parent merges into the session's list, so a prompt that
+    /// drops the instruction silently loses every step.
     #[test]
     fn planner_prompt_requires_the_todo_list_and_names_the_real_tool() {
         let template = GOAL_PLANNER_PROMPT_TEMPLATE;
@@ -738,8 +738,8 @@ mod tests {
         assert_no_tool_placeholders(&rendered);
     }
 
-    /// The planner's harness must expose the todo tool: the prompt's
-    /// instruction to list the plan's work is inert. The session's list
+    /// The planner's harness must actually expose the todo tool: the prompt's
+    /// instruction to list the plan's work is inert, and the session's list
     /// stays empty, if the toolset the planner runs on has no such tool.
     #[test]
     fn planner_harness_toolset_exposes_the_todo_tool() {

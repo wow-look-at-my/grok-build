@@ -45,9 +45,9 @@ fn should_warn_missing_session(ctx: MissingSessionCtx) -> bool {
 /// Resolve a BYOK / custom-provider model's context window from its OWN
 /// `/v1/models` endpoint on the request path, returning a model whose window
 /// has been backfilled when resolution succeeds. This is the per-request
-/// counterpart to the catalog-build resolution in `resolve_model_list`. A
+/// counterpart to the catalog-build resolution in `resolve_model_list`: a
 /// model carrying its own credential and a non-xAI, non-cli-chat-proxy
-/// base_url is never in the xAI proxy listing. Its window stays at the
+/// base_url is never in the xAI proxy listing, so its window stays at the
 /// hardcoded sentinel (`CONFIG_DEFAULT_CONTEXT_WINDOW` = 200k from config, or
 /// `DEFAULT_CONTEXT_WINDOW` = 256k). Ask the provider the request is going to
 /// — not a sibling, not config — for the exact slug's window. Returns

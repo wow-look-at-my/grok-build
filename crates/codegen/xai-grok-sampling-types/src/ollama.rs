@@ -78,10 +78,12 @@ pub struct OllamaToolFunction {
     pub parameters: serde_json::Value,
 }
 
-/// One NDJSON line of a `/api/chat` response. Every line carries `done`. The
-/// final one carries the metrics, which is the only place `load_duration`
-/// appears — the compat endpoint's `usage` cannot express it. It is what
-/// separates a cold model load from a stalled engine.
+/// One NDJSON line of a `/api/chat` response.
+///
+/// Every line carries `done`. The final one carries the metrics, which is the
+/// only place `load_duration` appears — the compat endpoint's `usage` cannot
+/// express it, and it is what separates a cold model load from a stalled
+/// engine.
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
 pub struct OllamaChatChunk {
     #[serde(default)]
@@ -175,7 +177,7 @@ impl OllamaShowResponse {
     }
 }
 
-/// One entry of `GET /api/ps` (models resident).
+/// One entry of `GET /api/ps` (models currently resident).
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct OllamaRunningModel {
     #[serde(default)]

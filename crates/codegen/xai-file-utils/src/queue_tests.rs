@@ -4505,10 +4505,9 @@ fn cleanup_orphans_uses_sidecar_age_for_pairs() {
 }
 
 /// Every temp here is expired by its sidecar and fresh by its own mtime, so
-/// any pair the sweep reaches sidecar-earliest survives. This happens if
-/// the sweep re-reads sidecars as it deletes. A single pair makes that a
-/// coin flip on readdir order; a spread of names makes it near-certain some
-/// pair loses.
+/// any pair the sweep reaches sidecar-earliest survives if the sweep
+/// re-reads sidecars as it deletes. A single pair makes that a coin flip on
+/// readdir order; a spread of names makes it near-certain some pair loses.
 #[test]
 fn cleanup_orphans_removes_expired_pairs_whatever_the_readdir_order() {
     let temp = tempfile::TempDir::new().unwrap();

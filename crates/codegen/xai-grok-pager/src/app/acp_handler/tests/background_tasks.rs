@@ -859,8 +859,8 @@
     }
 
     /// The capture agent's conversation reaches the client only as
-    /// `TodoCaptureProgress`. The row the capture opened is empty without it
-    /// — which is the blank window the user reported.
+    /// `TodoCaptureProgress`, so the row the capture opened is empty without
+    /// it — which is the blank window the user reported.
     #[test]
     fn todo_capture_progress_fills_the_capture_s_task_row() {
         use crate::app::actions::Action;

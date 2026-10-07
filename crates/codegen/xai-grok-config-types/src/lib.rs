@@ -1184,8 +1184,8 @@ mod tests {
         assert!(message.contains("campaign_id"), "{message}");
     }
 
-    /// The patch is what a campaign carries, so `campaign_id` must not be
-    /// left behind in it as another key.
+    /// The patch is what a campaign carries, so `campaign_id` must not be left
+    /// behind in it as just another key.
     #[test]
     fn a_remote_campaign_writes_the_canonical_id_and_never_the_alias() {
         let json = serde_json::to_value(CampaignOverride {

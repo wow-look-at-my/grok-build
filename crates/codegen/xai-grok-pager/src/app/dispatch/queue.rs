@@ -38,13 +38,13 @@ fn combine_queued_prompts_enabled() -> bool {
 /// **FIFO guard (`pending_prompts.is_empty()`):** a prompt may only jump onto the server queue when the local drip-feed queue is empty.
 ///
 /// **No leader gate:** the shell's queue is what makes a mid-turn prompt arrive
-/// at the next gap between tool calls / model requests. The turn loop harvests
-/// it into the running turn there
+/// at the next gap between tool calls / model requests — the turn loop
+/// harvests it into the running turn there
 /// (`harvest_queued_prompts_into_interjections`). A prompt held in the local
-/// drip-feed queue instead reaches the model only once the whole turn ends.
-/// Gating this on leader mode meant single-client sessions never got ASAP
+/// drip-feed queue instead reaches the model only once the whole turn ends, so
+/// gating this on leader mode meant single-client sessions never got ASAP
 /// delivery at all. Multi-client ordering is a separate concern the shared
-/// queue also solves. With one client both queues still merge as *server rows
+/// queue also solves; with one client both queues still merge as *server rows
 /// first, then local rows*, so a local row (slash command, scheduled prompt)
 /// can never move above them.
 pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
@@ -69,7 +69,7 @@ fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
 }
 
 /// The effect that puts a prompt on the shell's queue. The shell harvests a
-/// row's image blocks into the running turn with its text. An image prompt
+/// row's image blocks into the running turn with its text, so an image prompt
 /// takes this route too, and never waits in the local queue for the turn end.
 pub(super) fn server_queue_send_effect(
     agent_id: AgentId,
@@ -104,8 +104,7 @@ fn row_may_be_migrated(prompt: &crate::app::agent::QueuedPrompt) -> bool {
     row_is_plain_text(prompt) && !prompt.owns_its_turn()
 }
 
-/// Hand the local queue's leading plain-text rows to the shell while a turn is running, so ASAP delivery cannot latch off. [`maybe_drain_queue`] only drains local rows once the session is idle. [`immediate_server_send_eligible`] only lets a prompt onto the shell's queue while the local queue is empty. Together those rules trap each other. A single row parked locally during a turn, such as a prompt typed during the startup race, keeps every later prompt local as well, and a local row is never harvested into the running turn (`harvest_queued_prompts_into_interjections` reads the shell's queue). A session that never idles — one driving a goal — never reaches the recovery in [`maybe_drain_queue`], so this function is the only rescue. It also runs on every inbound `session/update` (see `acp_handler::handle`), not only when the user submits a new prompt. Only a leading run of plain rows moves, and it stops at the first row that cannot. The merged view renders server rows ahead of local ones, so migrating a prefix keeps the user's order. This happens while migrating past a stuck row would hoist a newer prompt above an older one. A slash-invocation row is one that cannot move (see [`row_may_be_migrated`]): the shell resolves a command only when its own
-/// turn starts.
+/// Hand the local queue's leading plain-text rows to the shell while a turn is running, so ASAP delivery cannot latch off. [`maybe_drain_queue`] only drains local rows once the session is idle, and [`immediate_server_send_eligible`] only lets a prompt onto the shell's queue while the local queue is empty. Together those rules trap each other: a single row parked locally during a turn, such as a prompt typed during the startup race, keeps every later prompt local as well, and a local row is never harvested into the running turn (`harvest_queued_prompts_into_interjections` reads the shell's queue). A session that never idles — one driving a goal — never reaches the recovery in [`maybe_drain_queue`], so this function is the only rescue: it also runs on every inbound `session/update` (see `acp_handler::handle`), not only when the user submits a new prompt. Only a leading run of plain rows moves, and it stops at the first row that cannot: the merged view renders server rows ahead of local ones, so migrating a prefix keeps the user's order, while migrating past a stuck row would hoist a newer prompt above an older one. A slash-invocation row is one that cannot move (see [`row_may_be_migrated`]): the shell resolves a command only when its own turn starts.
 pub(crate) fn migrate_local_rows_to_server_queue(app: &mut AppView) -> Vec<Effect> {
     let mut effects = Vec::new();
     let crate::app::app_view::ActiveView::Agent(agent_id) = app.active_view else {

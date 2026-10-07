@@ -40,7 +40,7 @@ pub(crate) fn summarizable_thinking(thinking: &str) -> Option<String> {
     ))
 }
 
-/// The user message sent to the summary model.
+/// The single user message sent to the summary model.
 pub(crate) fn thinking_summary_instruction(thinking: &str) -> String {
     format!(
         "Below is the private reasoning a coding assistant wrote before it acted. \

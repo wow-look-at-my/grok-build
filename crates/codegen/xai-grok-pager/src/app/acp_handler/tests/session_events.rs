@@ -1207,7 +1207,7 @@
     }
 
     /// A rate describes the stream that published it. When one model call
-    /// closes, its reading closes with it. Carrying it into the next call's
+    /// closes, its reading closes with it: carrying it into the next call's
     /// pre-first-token wait puts a stale number, and after a slow call a
     /// yellow or red one, under a row that says it is waiting for a response.
     #[test]
@@ -1260,9 +1260,9 @@
         assert!(active_row_text(&app).contains("88 tok/s"));
     }
 
-    /// A retried attempt has no stream either, and the backoff that follows
-    /// is a wait rather than a slow response. Both root and subagent sessions
-    /// reach the rate through this arm.
+    /// A retried attempt has no stream either, and the backoff that follows is
+    /// a wait rather than a slow response. Both root and subagent sessions
+    /// reach the rate through this one arm.
     #[test]
     fn output_rate_ends_with_a_retried_attempt() {
         let mut session = make_session(Some("s1"));

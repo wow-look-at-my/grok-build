@@ -45,10 +45,11 @@ async fn an_unset_slot_keeps_the_session_model_and_window() {
         .await;
 }
 
-/// A pin the session cannot reach falls back to the session model. This is
-/// the defect: the path paired the pinned id with the session's own client.
-/// An unreachable model reached the session model's endpoint under a name
-/// that endpoint does not serve.
+/// A pin the session cannot reach falls back to the session model.
+///
+/// This is the defect: the old path paired the pinned id with the session's
+/// own client, so an unreachable model reached the session model's endpoint
+/// under a name that endpoint does not serve.
 #[tokio::test(flavor = "current_thread")]
 async fn an_unreachable_pin_falls_back_to_the_session_model() {
     let local = tokio::task::LocalSet::new();

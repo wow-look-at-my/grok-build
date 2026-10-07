@@ -341,11 +341,14 @@ pub(super) fn write_feature_override(
     })
 }
 
-/// Persist one harness model slot into `[models]` via `update_config`. An
-/// empty `value` clears the slot, and the slot goes back to what it falls
-/// back to. `slot_id` must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`]
-/// lists; any other id is an error rather than a silently ignored write. The
-/// caller validates the model against the catalog.
+/// Persist one harness model slot into `[models]` via `update_config`.
+///
+/// An empty `value` clears the slot, and the slot goes back to what it
+/// falls back to. `slot_id` must be one
+/// [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists; any other id is an
+/// error rather than a silently ignored write.
+///
+/// The caller validates the model against the catalog.
 pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
     if value.len() > MAX_DEFAULT_MODEL_LEN {
         anyhow::bail!(
@@ -371,10 +374,11 @@ pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
     .await
 }
 
-/// Write one slot's model into `[models]`. `None` clears the field. Split out
-/// of [`set_harness_model`] so the writer is exercised without the disk. A
-/// test walks the slot table through this and reads the result back with
-/// `Config::resolve_harness_model`.
+/// Write one slot's model into `[models]`. `None` clears the field.
+///
+/// Split out of [`set_harness_model`] so the writer is exercised without
+/// the disk: a test walks the slot table through this and reads the result
+/// back with `Config::resolve_harness_model`.
 pub(crate) fn apply_harness_model(
     m: &mut crate::agent::config::ModelsConfig,
     slot_id: &str,

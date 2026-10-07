@@ -1175,13 +1175,13 @@ fn untrusted_project_claude_permissions_are_not_honored() {
     );
 }
 
-/// Untrusted clone must not contribute project `.grok/config.toml`
-/// [permission]. Does not assert exact global rule counts:
+/// Untrusted clone must not contribute project `.grok/config.toml` [permission].
+///
+/// Does not assert exact global rule counts:
 /// `xai_grok_config::grok_home()` is a process-wide `OnceLock`, so under
 /// single-process `cargo test` an earlier test may have already pinned
 /// `GROK_HOME`. Project-rule filtering is independent of that; global
-/// survival is checked only when our temp home is the live
-/// `user_grok_home()`.
+/// survival is checked only when our temp home is the live `user_grok_home()`.
 #[test]
 fn untrusted_project_config_toml_permissions_are_not_honored() {
     let home = IsolatedHome::new();
