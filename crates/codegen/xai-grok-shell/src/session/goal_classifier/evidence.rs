@@ -25,17 +25,7 @@
 //! `PLAN_CHANGES` is the diff from the plan baseline to the current plan (the agent may edit `plan.md` mid-run).
 //! It renders `(none)` when there is no baseline, no edits, or the diff could not be captured.
 //!
-//! `CHANGES_FILE` is a unified-diff *changelog* (a scope pointer, and
-//! the anchor for the claim↔diff honesty check) — it may be truncated.
-//! `CHANGED_FILES` is the *complete* list of touched paths the skeptic
-//! reads in their current state; verification rests on the live files
-//! and on the run log, not on the diff alone. `RUN_LOG` is the
-//! harness-written record of every tool call the implementer made and
-//! what it returned (see `run_log.rs`); it is the runtime evidence, so the
-//! implementer never has to write proof files. The section names
-//! are consumed verbatim by `templates/goal_verifier_prompt.md`, so the
-//! format constants here are load-bearing and must not change without
-//! updating the template (and bumping any prompt-eval baselines).
+//! `CHANGES_FILE` is a unified-diff *changelog* (a scope pointer, and the anchor for the claim↔diff honesty check) — it may be truncated. `CHANGED_FILES` is the *complete* list of touched paths the skeptic reads in their current state. Verification rests on the live files and on the run log, not on the diff alone. `RUN_LOG` is the harness-written record of every tool call the implementer made and what it returned (see `run_log.rs`). It is the runtime evidence. The implementer never has to write proof files. The section names are consumed verbatim by `templates/goal_verifier_prompt.md`, so the format constants here are load-bearing and must not change without updating the template (and bumping any prompt-eval baselines).
 
 use super::GOAL_CLASSIFIER_DIFF_MAX_BYTES;
 use std::borrow::Cow;
@@ -916,27 +906,23 @@ pub(crate) fn extract_final_response(items: &[ConversationItem]) -> Option<Strin
 const FIRST_FINAL_RESPONSE_MAX_CHARS: usize = 4096;
 
 /// Heads the round-1 anchor on a re-verification round. The verifier
-/// prompt names this header, so the two must change together.
+/// prompt names this header, so both must change together.
 pub(crate) const EARLIER_SUMMARY_HEADER: &str = "## Earlier summary (round 1, superseded)\n\
      This is the agent's first-round text, kept to show the full scope. \
      The message above replaces it wherever the two disagree.\n";
 
-/// Output of [`compose_verifier_final_response`]. `to_send` is the
-/// `FINAL_RESPONSE` for this round's panel; `to_persist` is `Some` only
-/// on the first round, carrying the (capped) value to freeze as the
-/// goal's breadth anchor.
+/// Output of [`compose_verifier_final_response`].
 pub(crate) struct ComposedFinalResponse {
     pub to_send: String,
     pub to_persist: Option<String>,
 }
 
-/// Compose the verifier `FINAL_RESPONSE` for one verification round.
-///
-/// `first` is the persisted breadth anchor (`None` on the first round,
-/// where `current` IS the full deliverable: sent, and returned capped to
-/// persist). On re-verification `current` leads, and the anchor follows
-/// under [`EARLIER_SUMMARY_HEADER`]. The implementer cannot edit the
-/// anchor, so a claim it later corrects must never read as its current word.
+/// Compose the verifier `FINAL_RESPONSE` for one verification round. `first`
+/// is the persisted breadth anchor (`None` on the first round, where
+/// `current` IS the full deliverable: sent, and returned capped to persist).
+/// On re-verification `current` leads, and the anchor follows under
+/// [`EARLIER_SUMMARY_HEADER`]. The implementer cannot edit the anchor, so a
+/// claim it later corrects must never read as its current word.
 pub(crate) fn compose_verifier_final_response(
     first: Option<&str>,
     current: String,
@@ -960,8 +946,7 @@ pub(crate) fn compose_verifier_final_response(
             }
         }
         Some(anchor) => {
-            // A blank current message, or one that repeats the anchor, has
-            // nothing to supersede it with: send the anchor alone.
+            // A blank current message.
             let latest = current.trim();
             let to_send = if latest.is_empty() || latest == anchor.trim() {
                 anchor.to_string()
@@ -1359,9 +1344,7 @@ mod tests {
 
     #[test]
     fn compose_verifier_final_response_reverify_leads_with_latest_message() {
-        // The implementer cannot edit the anchor. So the latest message
-        // must come first, and the anchor must follow under a header that
-        // marks it superseded.
+        // The implementer cannot edit the anchor.
         let composed = compose_verifier_final_response(
             Some("round 1: no correction needed"),
             "corrected: nine hits, two wgets".to_string(),

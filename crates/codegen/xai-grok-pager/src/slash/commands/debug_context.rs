@@ -1,25 +1,13 @@
 //! The execution-context snapshot `/debug` hands the model.
-//!
-//! `/debug` is a skill whose subject is grok itself, so the injected prompt has
-//! to answer "what am I, where do I live, and what did I write down" without a
-//! round trip. Everything here is either a pure resolver or a thin `fs`/`env`
-//! read, kept out of [`super::debug`] so the text is unit-testable with explicit
-//! inputs.
 
 use std::path::{Path, PathBuf};
 
 /// Where the running process stands relative to the installed binary.
-///
-/// `current_exe()` resolves through the `$GROK_HOME/bin/grok` symlink to the
-/// versioned target it pointed at *at exec time*, so an update that re-points
-/// the symlink leaves the two disagreeing — the one observable difference
-/// between "the code you are reading" and "the code that is running".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryFreshness {
     /// The process is running the installed binary.
     Current,
-    /// The installed binary is a different file — an update swapped the symlink
-    /// after exec, or this process came from another install.
+    /// The installed binary is a different file — an update swapped the symlink after exec.
     Stale { installed: PathBuf },
     /// No binary at `$GROK_HOME/bin/grok` — a dev build or a vendored install.
     Unmanaged,
@@ -68,7 +56,7 @@ pub fn binary_identity() -> BinaryIdentity {
     }
 }
 
-/// A config file the model may want to read, and whether it is actually there.
+/// A config file the model may want to read, and whether it is there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileFact {
     pub path: PathBuf,
@@ -147,13 +135,11 @@ pub fn is_secret_name(name: &str) -> bool {
     MARKERS.iter().any(|m| upper.contains(m))
 }
 
-/// Longest value printed verbatim; anything longer is truncated with a marker
-/// so one huge variable cannot swamp the block.
+/// Longest value printed verbatim.
 const MAX_ENV_VALUE: usize = 200;
 
-/// Select and redact the grok-relevant variables from an environment.
-///
-/// Pure over the iterator so the redaction is testable without touching the
+/// Select and redact the grok-relevant variables from an environment. Pure
+/// over the iterator so the redaction is testable without touching the
 /// process environment. Sorted by name for a stable, diffable block.
 pub fn grok_env_facts<I>(vars: I) -> Vec<EnvFact>
 where
@@ -426,8 +412,8 @@ impl DebugContext {
     }
 }
 
-/// Every config layer grok loads, in apply order. Named whether or not they
-/// exist: "the file you would edit is missing" is an answer too.
+/// Every config layer grok loads, in apply order. Named whether they exist:
+/// "the file you would edit is missing" is an answer too.
 fn config_file_paths(grok_home: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(system) = xai_grok_config::system_config_dir() {
@@ -571,7 +557,7 @@ mod tests {
             "/h/.grok/debug/sid.txt", // the log to read
             "/h/.grok/config.toml",   // the config to read
             "262144",                 // the number the user is asking about
-            "grok-4.5",               // the model it belongs to
+            "grok-4.5",
             "GROK_DEBUG_LOG=1",       // how this process was launched
             "0.2.7",                  // what is running
         ] {

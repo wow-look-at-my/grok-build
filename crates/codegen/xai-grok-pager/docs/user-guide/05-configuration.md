@@ -309,7 +309,7 @@ permission_classifier = "grok-4.5-fast"
 | `goal_summarizer` | The closing summary of a goal | Session model |
 | `subagent_default` | Any subagent with no pin of its own | Session model |
 
-Each slot takes an environment variable too, which wins over the config file. The name is the slot in upper case under `GROK_MODEL_`, so `goal_skeptic` reads `GROK_MODEL_GOAL_SKEPTIC`. The one exception is `prompt_suggestion`, whose variable keeps its older name `GROK_PROMPT_SUGGESTIONS_MODEL`.
+Each slot takes an environment variable too, which wins over the config file. The name is the slot in upper case under `GROK_MODEL_`, so `goal_skeptic` reads `GROK_MODEL_GOAL_SKEPTIC`. The exception is `prompt_suggestion`, whose variable keeps its older name `GROK_PROMPT_SUGGESTIONS_MODEL`.
 
 Two older, narrower keys still win over their slot where you set them: `[auto_mode] classifier_model` over `permission_classifier`, and `[memory] flush_model` over `memory_flush`. A `[subagents.models]` entry and an agent definition's own `model` both win over `subagent_default`.
 
@@ -317,10 +317,7 @@ A slot naming a model your account cannot reach logs a warning and falls back to
 
 ### Custom models
 
-Add custom model endpoints to use alternative providers or self-hosted models.
-Each endpoint is a `[model.<id>]` entry. The base URL must include any
-provider-specific prefix such as `/v1`; Grok appends `/chat/completions` or
-`/responses`.
+Add custom model endpoints to use alternative providers or self-hosted models. Each endpoint is a `[model.<id>]` entry. The base URL must include any provider-specific prefix such as `/v1`. Grok appends `/chat/completions` or `/responses`.
 
 ```toml
 [model.my-model]
@@ -353,7 +350,7 @@ model = "acme-fast-1"
 model_provider = "acme"
 ```
 
-A model's own field always wins; the provider fills in the rest. See [Provider Defaults](11-custom-models.md#provider-defaults).
+A model's own field always wins. The provider fills in the rest. See [Provider Defaults](11-custom-models.md#provider-defaults).
 
 To override a built-in model, use its name as the section key and set only the fields you need:
 
@@ -439,7 +436,7 @@ plan = false
 explore = "grok-4.6"               # route to different models
 ```
 
-To pin the model a subagent uses, set its entry under `[subagents.models]`. `usage_frequency` doesn't gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating; see [Subagents and Personas](16-subagents.md#usage-frequency).
+To pin the model a subagent uses, set its entry under `[subagents.models]`. `usage_frequency` does not gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating. See [Subagents and Personas](16-subagents.md#usage-frequency).
 
 ### Goal mode and background workflows
 

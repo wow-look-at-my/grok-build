@@ -4,12 +4,11 @@ use super::common::*;
 
 // ── Interactive flow e2e tests ──────────────────────────────────────────
 
-/// 15. **In-session Shift+Tab cycles permission mode.**
-/// Routes BackTab through the agent view's `resolve_action`, the path that
-/// previously dropped `CycleMode`; test 2b only covers the welcome screen.
-/// With the auto gate on (client default): Normal → Plan → Auto →
-/// Always-Approve → Orchestrator → Explore → Plan (the ring never lands
-/// back on bare Normal once cycling has started).
+/// ** Routes BackTab through the agent view's `resolve_action`, the path that
+/// dropped `CycleMode`; test 2b only covers the welcome screen. With the auto
+/// gate on (client default): Normal → Plan → Auto → Always-Approve →
+/// Orchestrator → Explore → Plan (the ring never lands back on bare
+/// Normal once cycling has started).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn shift_tab_in_session_cycles_mode() {
@@ -72,10 +71,6 @@ async fn shift_tab_in_session_cycles_mode() {
 }
 
 /// Whether the prompt's flag row carries `flag`.
-///
-/// The row renders each flag behind a middle-dot separator, and matching on
-/// that separator keeps the probe off the word where it appears anywhere else
-/// on screen.
 fn mode_flag(harness: &PtyHarness, flag: &str) -> bool {
     let needle = format!("\u{B7} {flag}");
     harness
@@ -85,12 +80,11 @@ fn mode_flag(harness: &PtyHarness, flag: &str) -> bool {
         .any(|line| line.contains(&needle))
 }
 
-/// 15b. **Two rapid Shift+Tab presses land on the LAST stop and stay there.**
-///
-/// Both presses go out before the shell has confirmed the first one, so the
+/// 15b. **Rapid Shift+Tab presses land on the LAST stop and stay there.**
+/// Both presses go out before the shell has confirmed the first one. The
 /// confirmation for the first stop (Plan) arrives after the ring already
 /// advanced to Auto. The burst must settle on Auto and keep it: the prompt's
-/// `auto` flag stays up and the `plan` flag the earlier press asked for never
+/// `auto` flag stays up. The `plan` flag the earlier press asked for never
 /// appears.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]

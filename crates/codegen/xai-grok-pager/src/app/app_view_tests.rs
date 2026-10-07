@@ -630,8 +630,7 @@ fn needs_animation_gates_prompt_history_tick_delivery() {
         app.needs_animation(),
         "an open prompt history overlay must request animation ticks"
     );
-    // Drive `tick()` and check the count separately, on a wall-clock
-    // deadline.
+    // Drive `tick()` and check the count separately, on a wall-clock deadline.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut delivered = false;
     while std::time::Instant::now() < deadline {
@@ -735,8 +734,8 @@ fn needs_animation_gates_scrollback_search_tick_delivery() {
         "closing the search stops the animation ticks"
     );
 }
-/// The session watching its own CI is idle by definition.
-/// tick must actually report a repaint, or the frames would draw nothing.
+/// The session watching its own CI is idle by definition. tick must report a
+/// repaint, or the frames would draw nothing.
 #[test]
 fn tick_demand_slow_while_the_ci_dot_is_mid_run() {
     use crate::ci_status::{CiStatus, seed_for_test};
@@ -3495,7 +3494,7 @@ fn ctrl_c_running_prompt_with_text_clears_text_and_preserves_turn() {
     );
 }
 /// Mid-turn Esc is swallowed at the app level too: no `CancelTurn`, no armed double-press, no trigger stamp, draft intact, and a toast naming Ctrl+C.
-/// Covers both panes, vim on and off.
+/// toast naming Ctrl+C. Covers both panes, vim on and off.
 #[test]
 fn esc_mid_turn_hints_ctrl_c_instead_of_cancelling() {
     for (vim_mode, pane) in [

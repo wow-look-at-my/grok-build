@@ -862,38 +862,30 @@ fn grok_home() -> std::path::PathBuf {
 
 /// Returns `<main checkout root>/.grok/worktrees`, the directory a repository
 /// keeps its own grok-managed checkouts in.
-///
-/// The destination is per repository rather than per machine.
-/// a sibling of the checkout it was made from and travels with the repository.
 pub fn worktree_base_dir(git_root: &Path) -> std::path::PathBuf {
     xai_fast_worktree::repo_worktrees_root(git_root)
 }
 
 /// The legacy `<grok home>/worktrees` root, where checkouts lived before they
-/// moved into their repository. Read-only: worktrees already there keep working
-/// and nothing new is created under it.
+/// moved into their repository.
 fn legacy_worktrees_root_in(grok_home: &Path) -> std::path::PathBuf {
     grok_home.join(xai_fast_worktree::WORKTREES_DIR)
 }
 
 /// The managed worktrees boundary containing `path`, if it is under one.
-///
-/// The single answer to "is this a path grok manages?", shared by label lookup,
-/// the gc liveness touch.
-/// folder-trust collapse, so those cannot drift apart on which locations count.
 fn managed_worktrees_boundary_in(grok_home: &Path, path: &Path) -> Option<std::path::PathBuf> {
     xai_fast_worktree::managed_worktrees_boundary(path, &legacy_worktrees_root_in(grok_home))
 }
 
-/// Resolves the worktree base directory (`<main checkout root>/.grok/worktrees`)
-/// for a given source path.
-/// managed root that holds it, so a worktree made from a worktree is a sibling.
-/// Other paths fall back to `find_main_repo_root_from_path` + `worktree_base_dir`.
+/// Resolves the worktree base directory (`<main checkout
+/// root>/.grok/worktrees`) for a given source path. managed root that holds
+/// it.
 pub fn worktree_base_dir_for_source(source_path: &Path) -> Result<std::path::PathBuf> {
     worktree_base_dir_for_source_in(&grok_home(), source_path)
 }
 
-/// [`worktree_base_dir_for_source`] with the legacy root under an explicit grok home.
+/// [`worktree_base_dir_for_source`] with the root under an explicit grok
+/// home.
 pub fn worktree_base_dir_for_source_in(
     grok_home: &Path,
     source_path: &Path,
@@ -914,16 +906,12 @@ fn managed_base_dir_for_source_in(
     let legacy_dir = legacy_worktrees_root_in(grok_home);
     if let Ok(suffix) = source_path.strip_prefix(&legacy_dir) {
         let Some(first) = suffix.components().next() else {
-            // The legacy root itself.
+            // The root itself.
             return Some(legacy_dir.join("repo"));
         };
         let first = legacy_dir.join(first);
         // `<legacy>/<checkout>...` is the shape an unforked grok build left
-        // behind: the first component is the checkout itself, so its siblings
-        // go directly under the legacy root. The `.git` entry decides it, not
-        // the component count, because `source_path` is often a cwd somewhere
-        // inside the checkout. Otherwise the first component is a
-        // per-repository bucket, and the new checkout joins it there.
+        // behind: the first component is the checkout itself.
         if xai_fast_worktree::is_worktree_dir(&first) {
             return Some(legacy_dir);
         }
@@ -950,8 +938,8 @@ fn resolve_worktree_path(grok_home: &Path, req: &CreateWorktreeRequest, git_root
         return path.clone();
     }
 
-    // Resolve off the source path, not just the git root: a session already in
-    // a managed checkout must get a sibling, never a tree nested inside it.
+    // Resolve off the source path, not the git root. A session already in a
+    // managed checkout must get a sibling, never a tree nested inside it.
     let base = managed_base_dir_for_source_in(grok_home, Path::new(&req.source_path))
         .unwrap_or_else(|| worktree_base_dir(git_root));
     let label = derive_worktree_label(req.label.as_deref());
@@ -1004,7 +992,8 @@ fn worktree_record_for_cwd_in(grok_home: &Path, cwd: &str) -> Option<(WorktreeDb
     None
 }
 
-/// The recorded source repo of the grok-managed worktree containing `cwd`, if any. Thin wrapper over [`worktree_record_for_cwd`] that drops the DB handle; returns `None` (without DB I/O) for paths under neither managed root.
+/// The recorded source repo of the grok-managed worktree containing `cwd`, if
+/// any.
 pub(crate) fn source_repo_for_cwd(cwd: &str) -> Option<std::path::PathBuf> {
     worktree_record_for_cwd(cwd).map(|(_db, rec)| rec.source_repo)
 }
@@ -1785,7 +1774,8 @@ impl From<CreateWorktreeFromWorktreeRequestWire> for CreateWorktreeFromWorktreeR
     }
 }
 
-/// Resolve the target worktree path for a fork operation. When the source path is already a managed checkout, the destination is a sibling in the same managed root rather than a tree nested inside it; see [`worktree_base_dir_for_source`].
+/// Resolve the target worktree path for a fork operation. When the source path is already a managed checkout, the destination is a sibling in the same managed root rather than a tree. That tree is nested inside it. See
+/// [`worktree_base_dir_for_source`].
 fn resolve_fork_worktree_path(
     source_worktree_path: &Path,
     git_root: &Path,
@@ -2822,8 +2812,7 @@ pub struct ResumeSessionInWorktreeRequest {
     /// When set, the worktree is a clean checkout of this ref (dirty overlay is ignored).
     #[serde(default)]
     pub git_ref: Option<String>,
-    /// Carry the source session's still-running subagents into the forked
-    /// session (`/fork --worktree --agents`). Default `false`.
+    /// Carry the source session's still-running subagents into the forked session (`/fork --worktree --agents`).
     #[serde(default)]
     pub include_agents: bool,
 }
@@ -3193,7 +3182,7 @@ fn scan_worktree_dirs_on_disk(main_repo_root: &std::path::Path) -> Vec<String> {
     let mut paths: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        // The same test the scanner over the old location asks.
+        // The same test the scanner over the location asks.
         .filter(|e| xai_fast_worktree::is_worktree_dir(&e.path()))
         .filter_map(|e| {
             dunce::canonicalize(e.path())
@@ -3524,8 +3513,8 @@ mod tests {
     }
 
     /// [`worktree_db_fixture`] with the checkout's location under
-    /// `<home>/worktrees` chosen by the caller.
-    /// either depth the old managed location has been written at.
+    /// `<home>/worktrees` chosen by the caller. either depth the managed
+    /// location has been written at.
     fn worktree_db_fixture_under(
         temp: &tempfile::TempDir,
         under_worktrees: &[&str],
@@ -3717,9 +3706,9 @@ mod tests {
     }
 
     /// Every resolver that asks "is this cwd grok-managed?" walks up to the
-    /// managed boundary and consults the registry, so a checkout sitting
-    /// directly under the legacy root (the shape an unforked grok build left
-    /// behind) must resolve exactly like one inside a per-repository bucket.
+    /// managed boundary. It consults the registry, so a checkout sitting
+    /// directly under the root (the shape an unforked grok build left behind)
+    /// must resolve exactly like one inside a per-repository bucket.
     #[test]
     fn resolvers_answer_for_a_checkout_at_either_depth_of_the_old_location() {
         for under in [
@@ -3755,9 +3744,9 @@ mod tests {
                     "the gc liveness touch must resolve over {under:?}"
                 );
 
-                // A fork of a managed checkout lands in the root holding it, so
-                // it is a sibling of the checkout rather than a tree nested
-                // inside it.
+                // A fork of a managed checkout lands in the root holding it. It
+                // is a sibling of the checkout rather than a tree nested inside
+                // it.
                 assert_eq!(
                     worktree_base_dir_for_source(&wt).unwrap(),
                     wt.parent().unwrap(),
@@ -3925,17 +3914,13 @@ mod tests {
             "the gc liveness touch must reach a repo-local worktree"
         );
 
-        // Nothing about widening the predicate makes an ordinary checkout look
-        // managed: a directory outside both roots still resolves to no label.
+        // Nothing about widening the predicate makes an ordinary checkout look managed.
         let plain = root.join("somewhere-else");
         std::fs::create_dir_all(&plain).unwrap();
         assert_eq!(lookup_worktree_label(&plain.to_string_lossy()), None);
         drop(env);
     }
 
-    /// Criterion 6: worktrees already living under the legacy
-    /// `<grok home>/worktrees/<repo>/<label>` layout keep resolving: the base
-    /// directory stays the one they are in, so a fork lands beside them.
     #[test]
     fn legacy_grok_home_worktree_still_resolves() {
         let temp = tempfile::TempDir::new().unwrap();
