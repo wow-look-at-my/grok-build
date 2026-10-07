@@ -1656,7 +1656,7 @@ mod tests {
             Some(xai_grok_tools::types::tool::ToolKind::Execute)
         );
     }
-    /// The registry is read on every preset resolution. What the lock does
+    /// The registry is read on every preset resolution, so what the lock does
     /// after a caller panicked while holding it decides whether one bad
     /// registration ends preset resolution for the rest of the process.
     #[test]

@@ -694,7 +694,7 @@ fn prune_old_logs(dir: &Path, max_age: std::time::Duration) {
 mod tests {
     use super::*;
 
-    /// The sink map is taken on every subscriber callback. What the lock does
+    /// The sink map is taken on every subscriber callback, so what the lock does
     /// after somebody else panicked while holding it is the difference between a
     /// dropped line and a process that can no longer log at all.
     #[test]

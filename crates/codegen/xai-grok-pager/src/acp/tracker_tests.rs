@@ -5437,8 +5437,8 @@ fn a_streaming_title_renames_the_row_in_place() {
     assert_eq!(sb.len(), 1, "renaming never pushes a second entry");
 }
 /// A chunk with no title keeps the one the row already has. The shell sends
-/// a title only when it CHANGED. Treating an absent one as "unnamed" flips
-/// the row back to raw JSON on the next fragment.
+/// a title only when it CHANGED, so treating an absent one as "unnamed"
+/// flips the row back to raw JSON on the next fragment.
 #[test]
 fn a_titleless_chunk_leaves_the_name_alone() {
     let mut sb = ScrollbackState::new();

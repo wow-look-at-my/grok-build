@@ -1305,10 +1305,10 @@ async fn test_doom_loop_check_enabled_sends_header_and_absorbs_check_event() {
     assert_eq!(window, "1024");
 }
 
-/// With the check disabled no header goes on the wire. Check frames from a
-/// misbehaving server (rollout skew) are dropped instead of failing the typed
-/// stream — a named frame even with a garbage payload, and an unnamed frame
-/// identified only by its payload `type` tag.
+/// With the check disabled no header goes on the wire, and check frames from
+/// a misbehaving server (rollout skew) are dropped instead of failing the
+/// typed stream — a named frame even with a garbage payload, and an unnamed
+/// frame identified only by its payload `type` tag.
 #[tokio::test]
 async fn test_doom_loop_check_disabled_sends_no_header_and_drops_check_frames() {
     use xai_grok_sampling_types::doom_loop::{DOOM_LOOP_CHECK_EVENT_TYPE, SAMPLE_CHECK_EVENT_DATA};

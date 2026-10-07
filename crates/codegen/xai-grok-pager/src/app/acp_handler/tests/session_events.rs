@@ -1208,8 +1208,8 @@
 
     /// A rate describes the stream that published it. When one model call
     /// closes, its reading closes with it. Carrying it into the next call's
-    /// pre-first-token wait puts a stale number. After a slow call a yellow
-    /// or red one, under a row that says it is waiting for a response.
+    /// pre-first-token wait puts a stale number, and after a slow call a
+    /// yellow or red one, under a row that says it is waiting for a response.
     #[test]
     fn output_rate_ends_with_the_model_call_that_published_it() {
         let mut app = make_app_with_agent("sess-rate-close");

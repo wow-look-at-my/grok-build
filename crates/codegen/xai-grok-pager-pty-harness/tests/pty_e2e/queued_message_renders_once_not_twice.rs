@@ -4,7 +4,7 @@ use super::common::*;
 
 /// User messages in the most recent request body that contain `needle`.
 /// Counted per-request, not across all of them: every later request replays
-/// the same history. A cross-request tally cannot tell a duplicate from a
+/// the same history, so a cross-request tally cannot tell a duplicate from a
 /// resend.
 #[cfg(unix)]
 fn user_hits_in_last_request(content: &ContentController, needle: &str) -> usize {

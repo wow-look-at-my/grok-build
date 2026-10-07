@@ -319,7 +319,7 @@ pub(crate) fn uncached_input_tokens(full_input: u64, cached_read: u64) -> u64 {
 }
 
 /// Project usage onto a headless result object. `usage.input_tokens` is uncached (`full − cache_read − cache_creation`), so the three prompt buckets are disjoint.
-/// cache_creation + output = total_tokens`. Omits cost floats only when incomplete; a partial cost is shown beside `cost_is_partial`. Incomplete with Incomplete with Incomplete
+/// cache_read + cache_creation + output = total_tokens`. Omits cost floats only when incomplete; a partial cost is shown beside `cost_is_partial`. Incomplete with Incomplete with
 /// Incomplete with no tokens emits only `usage_is_incomplete` (no zero usage object). `modelUsage` rows are a reduced external-compat schema (camelCase; no reasoning/duration).
 pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &PromptUsage) {
     let Some(result) = result.as_object_mut() else {

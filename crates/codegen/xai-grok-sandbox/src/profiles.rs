@@ -585,10 +585,10 @@ mod tests {
     /// No built-in profile grants a keychain database. This is the condition
     /// nono's macOS generator reads to decide whether to emit its keychain
     /// mach-lookup denials. A profile that granted a keychain DB path would
-    /// skip them. Every item in the login keychain, `gh`'s OAuth token among
-    /// them, would be readable from inside the confinement. The CI query
-    /// being answered by an unsandboxed host worker is the fix for that;
-    /// widening the profile is not.
+    /// skip them, and every item in the login keychain, `gh`'s OAuth token
+    /// among them, would be readable from inside the confinement. The CI
+    /// query being answered by an unsandboxed host worker is the fix for
+    /// that; widening the profile is not.
     #[test]
     #[cfg(all(feature = "enforce", unix))]
     fn no_built_in_profile_grants_the_login_keychain() {
