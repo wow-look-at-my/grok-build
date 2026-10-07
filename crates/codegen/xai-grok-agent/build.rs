@@ -23,13 +23,23 @@ fn main() {
     for (name, file, seed) in TEMPLATES {
         let path = Path::new(&manifest).join("templates").join(file);
         println!("cargo:rerun-if-changed={}", path.display());
-        let data = std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-        let bytes: Vec<String> = xor_encrypt(&data, *seed).iter().map(u8::to_string).collect();
-        writeln!(out, "pub(crate) const {name}: &[u8] = &[{}];", bytes.join(", "))
-            .expect("write to a String");
+        let data =
+            std::fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let bytes: Vec<String> = xor_encrypt(&data, *seed)
+            .iter()
+            .map(u8::to_string)
+            .collect();
+        writeln!(
+            out,
+            "pub(crate) const {name}: &[u8] = &[{}];",
+            bytes.join(", ")
+        )
+        .expect("write to a String");
     }
-    let seeds: Vec<String> = TEMPLATES.iter().map(|(_, _, s)| format!("0x{s:02X}")).collect();
+    let seeds: Vec<String> = TEMPLATES
+        .iter()
+        .map(|(_, _, s)| format!("0x{s:02X}"))
+        .collect();
     writeln!(
         out,
         "pub(crate) const PROMPT_SEEDS: [u8; {}] = [{}];",

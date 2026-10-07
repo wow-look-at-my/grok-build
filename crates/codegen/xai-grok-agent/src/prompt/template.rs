@@ -18,9 +18,7 @@ fn decrypt(data: &[u8], seed: u8) -> Zeroizing<String> {
         .enumerate()
         .map(|(i, &b)| b ^ seed.wrapping_add(i as u8))
         .collect();
-    Zeroizing::new(
-        String::from_utf8(bytes).expect("build.rs encrypts the UTF-8 template sources"),
-    )
+    Zeroizing::new(String::from_utf8(bytes).expect("build.rs encrypts the UTF-8 template sources"))
 }
 
 /// The base prompt template (decrypted fresh; zeroed on drop).
