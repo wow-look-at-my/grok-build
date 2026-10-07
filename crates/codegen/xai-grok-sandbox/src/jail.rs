@@ -727,8 +727,8 @@ pub fn seatbelt_command(plan: &JailPlan) -> std::process::Command {
     cmd.arg(&plan.self_exe).args(&plan.args);
     cmd.env(JAIL_ENV_VAR, "1");
     cmd.env("TMPDIR", &plan.temp_dir);
-    // Seatbelt inherits the environment, so the host-worker fd is delivered
-    // as a command env setting — never as an argument.
+    // Seatbelt inherits the environment, so the host-worker fd is delivered as
+    // a command env setting — never as an argument of the jailed program.
     if let Some(fd) = plan.ci_host_fd {
         cmd.env(crate::ci_host::CI_HOST_FD_ENV, fd.to_string());
     }

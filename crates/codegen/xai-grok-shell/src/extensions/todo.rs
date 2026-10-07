@@ -55,7 +55,9 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         Err(TodoCaptureError::Sampling(e)) => {
             Err(crate::sampling::error::map_sampling_err_to_acp(e))
         }
-        // Everything else is already a readable sentence.
+        // Everything else is already a readable sentence; `message` alone
+        // keeps it out of the `Internal error: "…"` rendering that `data`
+        // produces.
         Err(e) => Err(acp::Error::new(
             acp::ErrorCode::InternalError.into(),
             e.to_string(),

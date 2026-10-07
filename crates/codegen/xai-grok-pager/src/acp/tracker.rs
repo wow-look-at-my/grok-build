@@ -487,6 +487,7 @@ pub struct AcpUpdateTracker {
     last_prompt_tokens: Option<u64>,
     /// When the last live model call missed the cache the call before it wrote.
     cache_invalidated_at: Option<std::time::Instant>,
+    /// The label text the last tick saw, so a tick redraws only on a change.
     cache_label_seen: Option<String>,
 
     /// Pending agent toolset from the most recent `AvailableCommandsUpdate.meta`.

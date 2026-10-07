@@ -308,7 +308,7 @@ impl SessionActor {
         attempted(PrefireOutcome::Cached, Some(note1_chars))
     }
     /// Runs only when a valid cached NOTE₁ exists for the current conversation.
-    /// if pass-1 is still in flight we do add that await into `ttft_ms` (first token of the final summary), because the user is blocked on it.
+    /// if pass-1 is still in flight we do add that await into `ttft_ms` (first token of the final summary), because the user is blocked on it;.
     /// `stream_ms` / `delta_count` / `itl_max_ms` are always pass-2 only (the only sample that streams the successor-visible summary).
     async fn try_two_pass_pass2_apply(
         &self,

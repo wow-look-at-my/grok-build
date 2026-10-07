@@ -1590,7 +1590,8 @@ impl SessionActor {
         };
         let cancel_token = tokio_util::sync::CancellationToken::new();
         // The cell the spawn publishes the planner's coordinator id into: a
-        // Send Now landing mid-run addresses its context there.
+        // Send Now landing mid-run addresses its context there rather than
+        // restarting the planner.
         let planner_subagent_id = self
             .goal_tracker
             .lock()

@@ -103,7 +103,7 @@ impl sentry::TransportFactory for NoopTransportFactory {
 struct NoopTransport;
 
 /// Counts envelopes swallowed by [`NoopTransport`], so tests can prove that
-/// captured events reach the no-op transport.
+/// captured events reach the no-op transport (and therefore nothing else).
 #[cfg(test)]
 static NOOP_ENVELOPES_DROPPED: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);

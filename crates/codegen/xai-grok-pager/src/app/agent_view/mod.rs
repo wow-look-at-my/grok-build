@@ -1303,6 +1303,7 @@ pub struct AgentView {
     pub(crate) deferred_session_mode: Option<xai_grok_tools::types::SessionMode>,
     /// Session-mode changes this pager has requested for this session, oldest first.
     pub(crate) mode_requests: VecDeque<ModeRequest>,
+    /// Sequence for the next entry appended to [`Self::mode_requests`].
     pub(crate) next_mode_request_seq: u64,
     /// Permission mode chosen on Welcome before the ACP session exists.
     /// `PersistPermissionMode` with no session id cannot notify the shell, so `SessionCreated` replays this against the bound id.

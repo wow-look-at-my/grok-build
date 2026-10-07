@@ -326,7 +326,8 @@ fn a_reloaded_transcript_puts_each_summary_back_under_its_row() {
         "the replay must re-attach the summary: {rows:?}"
     );
 
-    // The replay flag is what admits this update.
+    // The replay flag is what admits this update: with no load in flight the
+    // same payload is dropped rather than appended under the live transcript.
     {
         let agent = app.agents.get_mut(&AgentId(0)).unwrap();
         agent.session.loading_replay = false;

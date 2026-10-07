@@ -63,7 +63,7 @@ impl LspBackendAdapter {
     ) {
         #[allow(clippy::disallowed_methods)]
         tokio::spawn(async move {
-            // Guarded, because the state below is what a waiter is waiting on.
+            // Guarded, because the state below is what a waiter is waiting on:
             // `ensure_ready` parks on `notify` for as long as the state reads
             // `Starting`. So a bootstrap that dies mid-flight has to move the
             // state anyway and say why.

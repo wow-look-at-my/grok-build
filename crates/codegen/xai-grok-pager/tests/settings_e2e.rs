@@ -6125,6 +6125,7 @@ fn pr13_mouse_click_on_show_tips_indicator_toggles_in_one_click() {
     assert_set_bool_action(outcome, "show_tips", false);
 }
 
+/// Two-stage select-then-toggle on `show_tips`.
 #[test]
 fn pr13_mouse_click_on_show_tips_two_stage_select_then_toggle() {
     let mut s = make_state();

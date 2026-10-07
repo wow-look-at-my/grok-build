@@ -1258,7 +1258,7 @@ async fn test_responses_api_request_format() {
     assert!(input.len() >= 2);
 }
 
-/// The sampler owns the doom-loop opt-in. Setting
+/// The sampler owns the doom-loop opt-in: setting
 /// `SamplerConfig::doom_loop_recovery` puts `x-grok-doom-loop-check` on the
 /// wire AND arms the collector. The server's named check event is absorbed
 /// mid-stream without disturbing the typed event flow.

@@ -126,7 +126,9 @@ fn open_tool_loop_lost_its_thinking(req: &ConversationRequest, plan: &ThinkingRe
 
 /// The Claude generation a model id names, as `(major, minor)`. Both spellings
 /// the family has used are read: `claude-haiku-4-5` and `claude-3-7-sonnet`,
-/// each optionally behind a gateway prefix and ahead of a dated snapshot.
+/// each optionally behind a gateway prefix and ahead of a dated snapshot. The
+/// first one- or two-digit component is the major, which is what keeps a
+/// snapshot stamp from being read as a version.
 fn claude_version(model: &str) -> Option<(u32, u32)> {
     let tail = model.to_ascii_lowercase();
     let tail = tail.split("claude").nth(1)?;

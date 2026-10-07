@@ -497,7 +497,8 @@ pub(crate) fn test_rebuild_spec_default() -> Arc<AgentRebuildSpec> {
         fs_backend: Arc::new(xai_grok_tools::computer::local::LocalFs),
         tools_notification_handle: ToolNotificationHandle::noop(),
         // Own directory per spec: `resources_state.json` is persisted beside
-        // this path and loaded on rebuild.
+        // this path and loaded on rebuild, so a shared parent leaks state
+        // between test processes.
         bridge_state_path: tempfile::tempdir()
             .expect("temp dir for tool state")
             .keep()

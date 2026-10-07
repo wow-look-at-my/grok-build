@@ -101,7 +101,8 @@ fn todo_gate_reminder_renders_plan_tool_name() {
 fn todo_gate_has_its_own_vocabulary() {
     let gate = build_todo_gate_reminder(&[("t1", "only-pending")], &[]);
     // Gate's signature phrase — distinguishes it from the periodic
-    // TodoNudge ("hasn't been used recently") in dashboards.
+    // TodoNudge ("hasn't been used recently") in dashboards and
+    // model-side debugging.
     assert!(
         gate.contains("ended your turn"),
         "gate reminder must use its own signature phrase, got:\n{gate}"

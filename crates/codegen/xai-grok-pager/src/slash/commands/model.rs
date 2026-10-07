@@ -257,8 +257,9 @@ fn detect_route_phase<'a>(
         .map(|name| (models_named(models, name), name.len()))
 }
 
-/// Trailing space on reasoning models: it signals "more input expected" to the prompt widget, so Enter advances to the effort phase
-/// instead of submitting.
+/// Trailing space on reasoning models: it signals "more input expected" to
+/// the prompt widget, so Enter advances to the effort phase instead of
+/// submitting.
 fn chained_insert(token: &str, info: &acp::ModelInfo) -> String {
     if supports_reasoning_effort(info) {
         format!("{token} ")

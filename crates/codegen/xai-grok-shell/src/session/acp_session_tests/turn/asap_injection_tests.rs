@@ -56,8 +56,8 @@ async fn actor_with_mock_sampler(
     use xai_grok_tools::implementations::grok_build::TaskOutputTool;
     use xai_grok_tools::registry::types::ToolConfig;
 
-    // The bash tool's background support requires the task-output and
-    // kill-task tools to be co-registered.
+    // The bash tool's background support requires the task-output and kill-task
+    // tools to be co-registered so background tasks can be observed/cancelled.
     let bash_cfg = ToolConfig::from(&BashTool)
         .with_name("run_terminal_command")
         .with_param_rename("is_background", "background");

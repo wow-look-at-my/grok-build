@@ -1485,7 +1485,8 @@ impl ChatMessageProfile {
 
 impl Default for ChatMessageProfile {
     /// Permissive, deliberately: `ConversationRequest` and `SamplingConfig`
-    /// both derive/lean on `Default`.
+    /// both derive/lean on `Default`, so a strict default would silently
+    /// reshape every existing provider's request body.
     fn default() -> Self {
         Self::PERMISSIVE
     }

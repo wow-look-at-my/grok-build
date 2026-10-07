@@ -341,13 +341,15 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// The per-message cache-hit-percent indicator shares the cost/timestamp
-    /// gating (message blocks only).
+    /// gating (message blocks only): it decorates the same blocks and never
+    /// thinking/tool/system rows.
     fn should_show_cache_hit(&self) -> bool {
         self.should_show_timestamp() && self.entry.cache_hit_percent.is_some()
     }
 
     /// The cache-hit string (if one is present), painted on its own row below
-    /// the content rather than sharing the first line's gutter.
+    /// the content rather than sharing the first line's gutter — see
+    /// `cache_hit_reserved_rows`.
     fn cache_hit_display(&self) -> Option<String> {
         if !self.should_show_cache_hit() {
             return None;

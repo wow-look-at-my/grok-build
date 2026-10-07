@@ -486,7 +486,8 @@ pub(super) fn handle_session_notification_with_origin(
                 false
             };
             // Attribute this turn's reported cost to the agent block it
-            // rendered.
+            // rendered, keyed by prompt so out-of-order notifications land on
+            // the correct turn (and a stale one never corrupts a newer turn).
             agent.session.tracker.set_last_turn_cost(
                 &mut agent.scrollback,
                 Some(&prompt_id),
@@ -1639,8 +1640,9 @@ pub(super) fn handle_child_session_notification(
             session_cost_usd_ticks,
             ..
         } => {
-            // A subagent's transcript is read the same way as the parent's,
-            // so its messages carry their own costs.
+            // A subagent's transcript is read the same way as the parent's, so
+            // its messages carry their own costs, priced off the child's own
+            // session ledger.
             let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
                 return false;
             };

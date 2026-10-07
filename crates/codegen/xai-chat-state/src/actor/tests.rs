@@ -4930,8 +4930,8 @@ async fn reasoning_roundtrip_through_actor_reaches_next_messages_wire() {
         .push_assistant_response(ConversationItem::assistant("The answer."));
     h.handle.push_user_message(ConversationItem::user("q2"));
 
-    // `build_request` runs `ensure_conversation_integrity`
-    // (dangling-tool-call repair) then the prune/memory pass.
+    // `build_request` runs `ensure_conversation_integrity` (dangling-tool-call
+    // repair) then the prune/memory pass, then returns the request.
     let request = h
         .handle
         .build_request(vec![], None, false, None, "c".into(), "r".into())
