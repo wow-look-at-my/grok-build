@@ -150,7 +150,8 @@ pub struct McpInitProgress {
     pub total: u32,
     pub connected: u32,
 }
-/// Current voice record-dot pulse: `(filled, brightness)`. A smooth sine "breathing" on a fixed ~0.7s wall-clock period (not the animation tick), so the dot animates like a studio recording light and never speeds up or syncs with streaming-text redraws.
+/// Current voice record-dot pulse: `(filled, brightness)`. A smooth sine "breathing" on a fixed ~0.7s wall-clock period (not the animation tick), so the dot animates like a studio recording light. The dot never speeds up or syncs with streaming-text
+/// redraws.
 fn record_dot_pulse() -> (bool, f32) {
     use std::sync::OnceLock;
     use std::time::Instant;
@@ -2721,9 +2722,9 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-1");
     }
-    /// None-fallback (older shells / no promptId): with no turn identity on
+    /// None-fallback (older shells / no promptId). With no turn identity on
     /// the notification AND a newer turn active, a late first-time arrival
-    /// cannot be distinguished from the new turn's first follow_ups, so it
+    /// cannot be distinguished from the new turn's first follow_ups. It
     /// follows the newest-wins (renders).
     #[test]
     fn apply_follow_ups_none_prompt_first_time_follows_legacy_newest_wins() {

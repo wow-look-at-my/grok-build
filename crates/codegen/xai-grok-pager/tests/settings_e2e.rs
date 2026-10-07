@@ -6398,12 +6398,11 @@ fn mouse_click_on_a_harness_model_slot_row_opens_the_picker() {
 
 // vim_mode (scrollback navigation) — PAGER-owned, paired with simple_mode
 
-/// Keyboard Space on the vim_mode row dispatches the typed setter
-/// with the inverted snapshot value (default false → true). Same
-/// shape as the `multiline_mode` test above; both rows are
-/// PAGER-owned Bool settings.
-// The pair (`simple_mode`, `vim_mode`) controls vim behaviour in two different parts of the UI
-// The labels name which part each row controls so neither is ambiguous when both are shown
+/// Keyboard Space on the vim_mode row dispatches the typed setter with the inverted snapshot
+/// value (default false → true). Same shape as the `multiline_mode` test above; both rows
+/// are PAGER-owned Bool settings. The pair (`simple_mode`, `vim_mode`) controls vim behaviour
+/// in different parts of the UI The labels name which part each row controls so neither is
+/// ambiguous. This happens when both are shown
 #[test]
 fn keep_text_selection_renders_under_mouse_shell_owned() {
     let reg = SettingsRegistry::defaults();

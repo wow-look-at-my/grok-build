@@ -3489,7 +3489,7 @@ fn ctrl_c_running_prompt_with_text_clears_text_and_preserves_turn() {
     );
 }
 /// Mid-turn Esc is swallowed at the app level too: no `CancelTurn`, no armed double-press, no trigger stamp, draft intact, and a toast naming Ctrl+C.
-/// toast naming Ctrl+C. Covers both panes, vim on and off.
+/// toast naming Ctrl+C. toast naming Ctrl+C. Covers both panes, vim on and off.
 #[test]
 fn esc_mid_turn_cancels_the_turn() {
     for pane in [
@@ -7386,8 +7386,8 @@ fn handle_input_scroll_inside_popup_forwards_to_agent() {
 /// outcome path, the popup is closed but the agent stays in `app.agents`.
 /// This test pins only the synchronous-outcome branch. We can't easily
 /// synthesize an `ExitSession` from `agent.handle_input` without a real
-/// prompt event sequence, so the test exercises the popup-close intercept by
-/// feeding a key that lands in the agent's prompt and observing the popup
+/// prompt event sequence. The test exercises the popup-close intercept by
+/// feeding a key that lands in the agent's prompt. It observing the popup
 /// state after the intercept runs. Concretely: we drive an Esc key (which the
 /// popup-close fast-path catches BEFORE the agent intercept).
 #[test]

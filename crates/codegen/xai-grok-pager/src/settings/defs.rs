@@ -816,12 +816,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
             },
             restart_required: false,
         },
-            // Persisted key stays `simple_mode`; the user-facing label
-            // distinguishes the PROMPT vim-mode (this setting) from the
-            // scrollback `vim_mode` keybindings below.
-        // SHELL-owned, persisted to `[ui].vim_mode` in config.toml.
-        // Defaults to the same value main's `appearance::persist::VIM_MODE_DEFAULT` shipped with
-        // Bundled next to `simple_mode` because they pair up: simple_mode controls the input editor's vim behaviour, vim_mode controls the scrollback's
         SettingMeta {
             key: "theme",
             category: SettingCategory::Appearance,
