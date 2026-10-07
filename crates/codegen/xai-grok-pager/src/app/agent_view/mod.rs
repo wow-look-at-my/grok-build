@@ -2722,10 +2722,7 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-1");
     }
-    /// None-fallback (older shells / no promptId). With no turn identity on
-    /// the notification AND a newer turn active, a late first-time arrival
-    /// cannot be distinguished from the new turn's first follow_ups. It
-    /// follows the newest-wins (renders).
+    /// None-fallback (older shells / no promptId): with no turn identity on the notification AND a newer turn active, a late first-time arrival cannot be distinguished from the new turn's first follow_ups, so it follows the legacy newest-wins (renders). This path is not reachable for current shells (which always stamp `promptId`) or for buffer-replays (suppressed upstream by the `_meta["x.ai/replayed"]` gate); it is pinned here so the stamped-path fix above is understood to be the deterministic guard.
     #[test]
     fn apply_follow_ups_none_prompt_first_time_follows_legacy_newest_wins() {
         let mut agent = make_agent();
