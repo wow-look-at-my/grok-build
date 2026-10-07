@@ -365,7 +365,7 @@ fn run_session_child(profile: &str, workspace: &Path) -> SessionReport {
 
 /// Wait for a child, and kill it once `limit` is up. A hang here is otherwise
 /// the test runner's per-test timeout, which reports the whole case as timed
-/// out. And none of what the session managed to say. Killing it keeps the
+/// out and none of what the session managed to say. Killing it keeps the
 /// report, and the assertions then name what is missing.
 #[cfg(unix)]
 fn wait_with_deadline(

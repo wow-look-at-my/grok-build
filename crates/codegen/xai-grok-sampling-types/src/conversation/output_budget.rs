@@ -73,9 +73,9 @@ impl ConversationRequest {
 
     /// Cut `max_output_tokens` down to what `context_window` has left after
     /// `prompt_tokens`, and report the cut. Returns `None` when the request
-    /// already fits. When the window is unknown (`0`), or when the request
+    /// already fits, when the window is unknown (`0`), or when the request
     /// names no output budget — the sampler's own default is applied before
-    /// this runs. `None` there means nothing bounds the output at all. A
+    /// this runs, so `None` there means nothing bounds the output at all. A
     /// fitted budget outside the `u32` the request field carries is logged
     /// and left unapplied. The request keeps what it asked for rather than a
     /// count this arithmetic did not produce.

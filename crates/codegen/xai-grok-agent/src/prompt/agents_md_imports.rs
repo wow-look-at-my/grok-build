@@ -125,8 +125,8 @@ fn canonical(path: &Path) -> PathBuf {
 
 /// Collect what `content` imports, depth-first, in the order the refs appear.
 /// `seen` carries every path already delivered by this discovery pass —
-/// including the files discovery found on its own — so an import of a file.
-/// That is already in the prompt adds nothing. A cycle terminates. A
+/// including the files discovery found on its own — so an import of a file
+/// that is already in the prompt adds nothing. A cycle terminates. A
 /// gitignored file IS imported. The ref is a deliberate instruction to read
 /// it, which is what makes an ignored local-override file importable at all.
 pub fn collect_imports(

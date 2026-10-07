@@ -905,8 +905,8 @@ fn merge_section_cli_only_updates_set_fields_preserves_unmodeled() {
 /// file is re-read, and the session's own resolver answers with the model
 /// that was picked. Both halves are written independently — one match on
 /// the slot id in `settings_writes`, another in
-/// `Config::harness_model_from_config` — so nothing else catches a pair.
-/// That names different fields.
+/// `Config::harness_model_from_config` — so nothing else catches a pair
+/// that names different fields.
 #[test]
 fn every_harness_model_slot_round_trips_from_the_settings_write_to_the_resolver() {
     for slot in xai_grok_models::HARNESS_MODEL_SLOTS {

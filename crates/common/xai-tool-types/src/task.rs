@@ -858,7 +858,7 @@ pub struct TaskOutputToolInput {
     /// Models frequently mirror `kill_task`'s singular `task_id` here (in
     /// soak rollouts 3 of 4 organic calls did) and previously hard-failed
     /// with "Provide a non-empty task_ids list", after which they abandoned
-    /// the background-task workflow. For shell polling. A call naming both
+    /// the background-task workflow for shell polling. A call naming both
     /// keys folds them through [`TaskOutputToolInput::TASK_IDS_KEYS`], so the
     /// frequent case of one list spelled twice parses.
     #[schemars(

@@ -396,7 +396,7 @@ impl std::fmt::Display for ChildReport {
 }
 
 /// Re-enter this binary in `mode`, with the workspace, the query's directory,
-/// the branch. And (when `fd` is given) the worker's fd named in the env var
+/// the branch, and (when `fd` is given) the worker's fd named in the env var
 /// the jail boundary uses.
 #[cfg(target_os = "macos")]
 fn run_child(

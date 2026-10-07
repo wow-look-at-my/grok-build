@@ -501,7 +501,7 @@ useless_format = "allow"
 #
 # A crate that still carries hits names the lint in an inner attribute at the top
 # of its crate root (`src/lib.rs`, `src/main.rs`, each `src/bin/*.rs`, `build.rs`,
-# which are separate roots and inherit nothing). With the count it is carrying:
+# which are separate roots and inherit nothing), with the count it is carrying:
 # `#![allow(clippy::string_slice)] // 4 hits predate the gate`. That set of lines
 # is the whole exception surface, and deleting one is the whole work item. A
 # cleared crate cannot keep its exemption quietly, because the deny bites its next

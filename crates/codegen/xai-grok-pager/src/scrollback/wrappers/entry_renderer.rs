@@ -573,9 +573,8 @@ impl<'a> EntryRenderer<'a> {
 }
 
 /// Convert an API-reported server cost (in USD ticks, 1e10 per USD) to a
-/// readable display string such. As `$0.12` or `$3.42`. # Honesty guarantees
-/// - A missing (`None`) or non-positive cost returns `None`, so a caller
-/// never
+/// readable display string such as `$0.12` or `$3.42`. # Honesty guarantees -
+/// A missing (`None`) or non-positive cost returns `None`, so a caller never
 ///   renders a fabricated `$0.00` when the API reported no cost.
 /// - Arithmetic is exact **integer** math (no floats).
 ///   never mis-rounded into `$0` the way a `f64` at 4 decimals could.
@@ -961,8 +960,8 @@ impl Renderable for EntryRenderer<'_> {
 
         // Cache-hit-percent line. Painted on its OWN reserved row directly
         // below the content (`cache_hit_reserved_rows`) rather than sharing
-        // the first line's already-narrowed gutter with the cost/timestamp.
-        // So wrapped content never loses more width to fit a second label.
+        // the first line's already-narrowed gutter with the cost/timestamp,
+        // so wrapped content never loses more width to fit a second label.
         if content_skip == 0
             && let Some(cache_str) = self.cache_hit_display()
         {

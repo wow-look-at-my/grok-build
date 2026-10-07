@@ -1302,15 +1302,15 @@ impl AcpUpdateTracker {
         true
     }
     /// Attach one model call's prompt cache-read hit rate to the message
-    /// block that call produced, from the same `ResponseCompleted`. That
-    /// closes it. See [`Self::set_response_cost`]'s doc comment for why
-    /// per-response attribution (not a turn total) is what puts a rate. That
-    /// rate is beside every message instead of only the turn's last one. The
-    /// rate is `cache_read_input_tokens / (input_tokens +
-    /// cache_read_input_tokens + cache_creation_input_tokens)`, rounded to
-    /// the nearest percent. `false` when the response reported no usage, or
-    /// its total prompt tokens were zero. A response with nothing to cache
-    /// has no rate to report, not a `0%`.
+    /// block that call produced, from the same `ResponseCompleted` that
+    /// closes it — see [`Self::set_response_cost`]'s doc comment for why
+    /// per-response attribution (not a turn total) is what puts a rate beside
+    /// every message instead of only the turn's last one. The rate is
+    /// `cache_read_input_tokens / (input_tokens + cache_read_input_tokens +
+    /// cache_creation_input_tokens)`, rounded to the nearest percent. `false`
+    /// when the response reported no usage, or its total prompt tokens were
+    /// zero. A response with nothing to cache has no rate to report, not a
+    /// `0%`.
     pub fn set_response_cache_hit(
         &mut self,
         scrollback: &mut ScrollbackState,

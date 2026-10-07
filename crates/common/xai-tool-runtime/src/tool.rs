@@ -205,7 +205,7 @@ impl ContentBlock {
 }
 
 /// `ContentBlock` as it arrives on the wire. This happens with each MIME key
-/// spelling its own field, so a block naming both folds them. Under
+/// spelling its own field, so a block naming both folds them under
 /// [`ContentBlock::MIME_TYPE_KEYS`] instead of tripping serde's duplicate-field
 /// check.
 #[derive(Debug, Deserialize)]

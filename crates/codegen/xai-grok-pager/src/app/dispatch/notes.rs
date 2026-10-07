@@ -927,7 +927,7 @@ fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
 
 /// Send a `/todo` capture. Bypasses the prompt queue — works even while the
 /// agent is mid-turn. Fires an ACP ext method and leaves a running tool in the
-/// transcript plus a tasks-pane row. Which [`handle_todo_captured`] replaces
+/// transcript plus a tasks-pane row, which [`handle_todo_captured`] replaces
 /// with what landed on the list.
 pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: bool) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {

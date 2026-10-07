@@ -163,7 +163,7 @@ impl TryFrom<McpServerTransportConfigWire> for McpServerTransportConfig {
                 oauth_scopes,
             } => Self::StreamableHttp {
                 // Not a silent default: an HTTP entry naming none of the keys
-                // has no address. Which is what the required `url` field
+                // has no address, which is what the required `url` field
                 // rejected before the shadow existed.
                 url: McpServerTransportConfig::URL_KEYS
                     .fold(vec![url, url_template_camel, url_template_snake])?

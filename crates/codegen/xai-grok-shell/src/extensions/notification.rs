@@ -3132,10 +3132,10 @@ mod tests {
     /// (cost_is_partial = true) must still produce a `PromptUsage` with
     /// `cost_usd_ticks = Some(...)` after `project_from_ledger` calls
     /// `scrub_untrustworthy_costs`. This is the exact path that was broken —
-    /// OpenRouter reports `usage.cost` on most but not all streaming chunks, so
-    /// multi-call turns had `cost_missing_calls > 0`, which caused the scrub to
-    /// drop ALL cost. From the `TurnCompleted` notification, hiding it from the
-    /// TUI. The fix: `scrub_untrustworthy_costs` only clears on
+    /// OpenRouter reports `usage.cost` on most but not all streaming chunks,
+    /// so multi-call turns had `cost_missing_calls > 0`, which caused the scrub
+    /// to drop ALL cost from the `TurnCompleted` notification, hiding it from
+    /// the TUI. The fix: `scrub_untrustworthy_costs` only clears on
     /// `usage_is_incomplete`, not `cost_is_partial`.
     #[test]
     fn project_from_ledger_preserves_partial_cost_through_scrub() {

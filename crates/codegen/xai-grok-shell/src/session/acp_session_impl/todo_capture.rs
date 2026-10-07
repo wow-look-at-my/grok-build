@@ -52,7 +52,7 @@ pub enum TodoCaptureError {
 
 /// Tool kinds the capture agent may run. Narrower than the main turn's
 /// read-only set (`prepare_tool_call`): `EnterPlan`/`ExitPlan` change session
-/// mode and `AskUser` blocks on a human. Neither of which a side agent nobody
+/// mode and `AskUser` blocks on a human, neither of which a side agent nobody
 /// is watching may do.
 fn is_capture_readable(kind: ToolKind) -> bool {
     matches!(
@@ -133,7 +133,7 @@ pub(super) const PLAN_SEED_ID_PREFIX: &str = "plan";
 
 /// [`add_only_todo_args`] with an explicit id prefix, so callers that append
 /// their own kind of item (a `/todo` capture, the goal planner's seed) keep
-/// their provenance. While sharing one append-only argument shape.
+/// their provenance while sharing one append-only argument shape.
 pub(super) fn add_only_todo_args_with_prefix(
     contents: &[String],
     urgent: bool,
@@ -254,7 +254,7 @@ impl CaptureToolOutcome {
 /// written to steer the next turn toward the write, because a refusal the
 /// model cannot act on burns the turn budget. `todo_tool` is the name the
 /// todo tool is advertised under in THIS session, which is the name the model
-/// calls it. By — not the canonical `todo_write`, which a `name_override`
+/// calls it by — not the canonical `todo_write`, which a `name_override`
 /// can rename out from under both.
 fn capture_action(
     name: &str,
@@ -412,7 +412,7 @@ impl SessionActor {
         let conversation = self.chat_state_handle.get_conversation().await;
         // Fit the snapshot to THIS model's window rather than sending the
         // conversation whole: a small-window model would otherwise fail the
-        // capture. With a context-length error. This is deterministic and
+        // capture with a context-length error. This is deterministic and
         // never retried.
         let mut items = crate::session::helpers::session_recap::budget_instruction_items(
             conversation,
@@ -693,10 +693,10 @@ impl SessionActor {
     }
 
     /// The item contents in a todo-tool call, whatever the model spelled
-    /// them. Parses through the bridge first. Which reverse-maps
+    /// them. Parses through the bridge first, which reverse-maps
     /// client-facing parameter names to canonical ones — a harness may
-    /// rename `todos` the same way it renames the tool. Yields the typed
-    /// input the tool itself would see. Falls back to reading the JSON
+    /// rename `todos` the same way it renames the tool — and yields the
+    /// typed input the tool itself would see. Falls back to reading the JSON
     /// directly, so a call the strict parser rejects (an extra field, a
     /// status the schema does not know) still contributes its content instead
     /// of being dropped.
@@ -729,7 +729,7 @@ impl SessionActor {
     }
 
     /// Run the sanitized append through the session's own todo tool. Do this
-    /// so the list, its persisted state. And the client's plan view all move
+    /// so the list, its persisted state, and the client's plan view all move
     /// the way they do when the main agent writes a todo. Dispatch is by the
     /// session's advertised name with canonical parameter names. The registry
     /// reverse-maps client names onto canonical ones and leaves everything
@@ -775,7 +775,7 @@ mod tests {
 
     /// `/TODO` differs from `/todo` in exactly one argument. Everything that
     /// holds the one-mutation rule — minted ids, forced pending, merge on —
-    /// is the same at the front of the list. As at the back.
+    /// is the same at the front of the list as at the back.
     #[test]
     fn urgent_args_prepend_and_change_nothing_else() {
         let args = add_only_todo_args(&["ship the fix".to_owned()], true);

@@ -539,7 +539,7 @@ impl ModelsManager {
 
     /// Update which provider-discovered models are resident in VRAM. Writes
     /// through `provider_models` so a later catalog rebuild keeps the answer,
-    /// and pushes to the client ONLY. When a dot changed: the poll runs every
+    /// and pushes to the client ONLY when a dot changed: the poll runs every
     /// few seconds. A models-updated push per tick would redraw the picker of
     /// every connected client for nothing.
     pub(crate) fn apply_local_residency(&self, residency: &IndexMap<String, bool>) {

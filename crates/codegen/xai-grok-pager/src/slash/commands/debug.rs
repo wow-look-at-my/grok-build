@@ -170,9 +170,8 @@ fn inject(ctx: &mut CommandExecCtx, request: &str) -> CommandResult {
     }
 }
 
-/// The model rows of the execution context, read from the pager's own state.
-/// So they match what this session is acting on rather than the catalog
-/// default.
+/// The model rows of the execution context, read from the pager's own state so
+/// they match what this session is acting on rather than the catalog default.
 fn model_facts(ctx: &CommandExecCtx) -> ModelFacts {
     ModelFacts {
         name: ctx.models.current_model_name(),

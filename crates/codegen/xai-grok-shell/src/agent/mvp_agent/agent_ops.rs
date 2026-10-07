@@ -43,7 +43,7 @@ fn should_warn_missing_session(ctx: MissingSessionCtx) -> bool {
     }
 }
 /// Resolve a BYOK / custom-provider model's context window from its OWN
-/// `/v1/models` endpoint. On the request path, returning a model whose window
+/// `/v1/models` endpoint on the request path, returning a model whose window
 /// has been backfilled when resolution succeeds. This is the per-request
 /// counterpart to the catalog-build resolution in `resolve_model_list`. A
 /// model carrying its own credential and a non-xAI, non-cli-chat-proxy
@@ -5278,7 +5278,7 @@ mod tests {
 
     /// A sentinel-window BYOK model served by a non-xAI base. Drives the real
     /// request-path helper `resolve_byok_context_window_on_request_path` against
-    /// a loopback OpenRouter-style `/v1/models` server. And asserts the returned
+    /// a loopback OpenRouter-style `/v1/models` server and asserts the returned
     /// model's window is backfilled from the provider's `context_length`.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn request_path_backfills_sentinel_window_from_own_provider() {

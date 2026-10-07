@@ -218,8 +218,8 @@ fn null_key_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>
 /// Deserialize an SSE payload, naming the field that failed. serde_json alone
 /// renders a rejected payload as "invalid type: null, expected a sequence"
 /// — and for a buffered (internally tagged) event it carries no line/column
-/// either, so the message names. Neither the field nor the offset. That is
-/// the whole error a user gets, and there is nothing in it to act on.
+/// either, so the message names neither the field nor the offset. That is the
+/// whole error a user gets, and there is nothing in it to act on.
 /// `serde_path_to_error` supplies the field path on a derived struct
 /// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]`
 /// event, because serde buffers the content before the variant is known. The
@@ -2799,7 +2799,7 @@ mod tests {
     use xai_grok_sampling_types::types::ChatRequestMessage;
 
     /// A reset header naming seconds that no `u64` can hold states no wait the
-    /// client can honour. So it parses as absent rather than as a saturated
+    /// client can honour, so it parses as absent rather than as a saturated
     /// wait of `u64::MAX` seconds.
     #[test]
     fn a_reset_header_beyond_the_u64_second_range_is_not_a_wait() {

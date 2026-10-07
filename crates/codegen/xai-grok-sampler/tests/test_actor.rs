@@ -1610,7 +1610,7 @@ async fn responses_doom_loop_does_not_resample_after_output_when_retry_only_befo
 
 /// The output-rate floor's coverage, in one module so `cargo test --test
 /// test_actor output_rate` runs the whole of it, the new cases and the
-/// existing ones together. Since what a widened hold must not do is break the
+/// existing ones together, since what a widened hold must not do is break the
 /// detection the floor exists for.
 mod output_rate {
     use super::*;
@@ -2167,9 +2167,9 @@ mod output_rate {
     /// The same failure on the wire that most providers serve. It reaches the
     /// gate ways. An opener with no `arguments` field, an opener whose
     /// `arguments` is the empty string, and a continuation that repeats
-    /// neither an id nor a name. And each holds the call open for longer than
-    /// the sustained duration, so a span the gate reads as silence breaches
-    /// over a response. That response was busy writing.
+    /// neither an id nor a name — and each holds the call open for longer
+    /// than the sustained duration, so a span the gate reads as silence
+    /// breaches over a response that was busy writing.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_unstreamed_chat_completions_tool_call_is_not_a_collapsed_stream() {
         let arguments = json!({ "path": "a.rs" }).to_string();

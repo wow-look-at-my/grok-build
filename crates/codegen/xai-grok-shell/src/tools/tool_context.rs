@@ -442,7 +442,7 @@ mod tests {
     }
 }
 /// The depth counter is released from a `Drop`, where a panic has nowhere to
-/// go. So what the lock does after somebody else panicked while holding it is
+/// go, so what the lock does after somebody else panicked while holding it is
 /// load-bearing rather than academic.
 #[cfg(test)]
 mod blocking_wait_lock_tests {

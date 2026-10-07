@@ -461,7 +461,7 @@ mod label_column_tests {
     /// (`provider/vendor:family:size`) run past many columns on their own,
     /// and the selected row adds " (current)" on top. Deriving the column by
     /// discarding long labels discards all of them here, leaving a zero-width
-    /// column: rows that draw, highlight and select. While showing nothing.
+    /// column: rows that draw, highlight and select while showing nothing.
     #[test]
     fn a_catalog_of_long_labels_renders_in_full_on_a_wide_terminal() {
         let items = [

@@ -54,7 +54,7 @@ const ALLOWED_BARE_COMMANDS: &[&str] = &["api"];
 
 /// Every flag a request may carry. An allowlist rather than a deny-list
 /// because the flags that matter are the ones that turn a read into a write:
-/// `-X POST`. `--method`, `--field`, `--input`.
+/// `-X POST`, `--method`, `--field`, `--input`.
 const ALLOWED_FLAGS: &[&str] = &[
     "--json",
     "--jq",
@@ -718,9 +718,9 @@ mod tests {
     }
 
     /// The hand-off starts a worker only where one is this process's to start.
-    /// Each of these is a process that must NOT fork another: the worker itself
-    /// re-entering `main`, a session a jail already handed a worker. And a
-    /// process already inside the pathbox jail.
+    /// Each of these is a process that must NOT fork another: the worker
+    /// itself re-entering `main`, a session a jail already handed a worker, and
+    /// a process already inside the pathbox jail.
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn the_hand_off_starts_no_worker_where_one_is_not_this_processes_to_start() {

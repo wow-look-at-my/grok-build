@@ -626,7 +626,7 @@ impl SessionActor {
     /// Send Now during an active goal turn: hand the text to the planner that
     /// is ALREADY running as mid-turn context. Nothing is cancelled or
     /// restarted. A planner respawn would throw away the work in flight and
-    /// make the user's message arrive. As a fresh objective instead of an
+    /// make the user's message arrive as a fresh objective instead of an
     /// addition to the plan being written. With no planner in flight (none
     /// registered yet, or already finished) there is nothing to steer, and the
     /// text still reaches the parent agent through the turn interjection.

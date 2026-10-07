@@ -1611,7 +1611,7 @@ mod tests {
     }
 
     /// The edit-interject chord classifies the STORED row. However, the EDITED
-    /// text is what would go out — so a row that was steering text. When it was
+    /// text is what would go out — so a row that was steering text when it was
     /// queued can be edited into a command. Interjecting that reaches the running
     /// turn as ordinary user text (only a prompt's LEADING token is ever resolved
     /// as a command), so the model reads the literal `/cmd args` and the command
