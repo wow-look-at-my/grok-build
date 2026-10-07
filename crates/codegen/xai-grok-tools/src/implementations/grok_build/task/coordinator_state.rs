@@ -73,10 +73,7 @@ pub trait ChildControl: 'static {
 
     fn cancel(&self);
 
-    /// Deliver `text` into the running child as a mid-turn user message
-    /// (the coordinator's `SubagentEvent::Interject`). A runtime whose child
-    /// cannot take input mid-turn states so here rather than silently
-    /// swallowing the text.
+    /// Deliver `text` into the running child as a mid-turn user message (the coordinator's `SubagentEvent::Interject`).
     fn interject(&self, text: &str);
 }
 

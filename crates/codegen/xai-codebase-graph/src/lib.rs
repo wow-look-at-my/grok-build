@@ -1,8 +1,8 @@
-#![allow(clippy::cast_possible_truncation)] // 30 hits predate the gate
-#![allow(clippy::cast_possible_wrap)] // 4 hits predate the gate
-#![allow(clippy::cast_precision_loss)] // 1 hit predates the gate
-#![allow(clippy::expect_used)] // 17 hits predate the gate
-#![allow(clippy::unwrap_used)] // 4 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_possible_wrap)] // Hits predate the gate
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::expect_used)] // Hits predate the gate
+#![allow(clippy::unwrap_used)] // Hits predate the gate
 
 //! # xai-codebase-graph
 //!

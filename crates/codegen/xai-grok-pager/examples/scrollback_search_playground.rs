@@ -1,4 +1,4 @@
-#![allow(clippy::cast_possible_truncation)] // 2 hits predate the gate
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
 
 //! Interactive playground for the scrollback search render layer.
 //!

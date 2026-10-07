@@ -23,9 +23,7 @@ pub(crate) fn allow_endpoint(url: &str, tool: &str) -> Result<(), xai_tool_runti
 pub mod app_builder;
 pub mod ask_user_question;
 pub mod bash;
-/// One tail truncation in this module walks to a char boundary by hand instead
-/// of calling `util::tail_bytes`, so the byte slice it feeds that walk is left
-/// permitted. The allowance is scoped to this module, not the crate.
+/// One tail truncation in this module walks to a char boundary by hand instead of calling `util::tail_bytes`.
 #[allow(clippy::string_slice)]
 pub mod ci;
 pub mod copy_move;

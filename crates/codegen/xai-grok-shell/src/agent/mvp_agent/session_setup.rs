@@ -398,8 +398,7 @@ impl MvpAgent {
         self.report_setup_phase(SessionSetupPhase::Auth);
         self.seed_client_config_auth_if_available();
         self.spawn_settings_reapply();
-        // The session copies its model's URL now. A model not yet listed would
-        // fall back to another model and keep that model's URL.
+        // The session copies its model's URL now.
         self.models_manager.wait_for_provider_discovery().await;
         self.report_setup_phase(SessionSetupPhase::ResolveWorkspace);
         let SessionWorkspace {

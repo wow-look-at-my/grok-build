@@ -18,10 +18,10 @@ ${%- if tools.by_kind.read == "hashline_read" and tools.by_kind.edit and tools.b
 - `${{ tools.by_kind.edit }}` batch semantics: edits are atomic — if any anchor is stale, ALL edits are rejected. Retry the full batch. Never fabricate or modify anchors.
 ${%- endif %}
 ${%- if tools.by_kind.edit or tools.by_kind.move %}
-- Relocate with git mv/cp, never a write rewrite.
+- Relocate with git mv/cp, not a write rewrite.
 ${%- endif %}
 ${%- if tools.by_kind.execute %}
-- Never `rm` a non-ignored git file; commit then `git rm`. No history-hiding amend/reset/filter-branch.
+- Never `rm` a non-ignored git file. Commit then `git rm`. No history-hiding amend/reset/filter-branch.
 ${%- endif %}
 - `<system-reminder>` tags in tool results are automated context.
 </tool_calling>

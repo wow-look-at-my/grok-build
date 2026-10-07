@@ -852,8 +852,7 @@ impl SessionActor {
         use xai_grok_tools::implementations::grok_build::task::types::SubagentDescribeOutcome;
 
         // An empty agent type is the pool's spelling of "keep the parent's
-        // harness" — what a `[models] goal_skeptic` slot resolves to. There
-        // is no toolset to probe, so it takes the model-only path.
+        // harness" — what a `[models] goal_skeptic` slot resolves to.
         if pair.agent_type.is_empty() {
             return self
                 .resolve_goal_role_model_only(role, skeptic_idx, &pair.model)
@@ -958,8 +957,7 @@ impl SessionActor {
             bridge.tool_for_kind(ToolKind::WebSearch).await,
             bridge.tool_for_kind(ToolKind::WebFetch).await,
         )
-        // The planner builds its own todo list with the parent's `Plan` tool, so
-        // its prompt names THAT tool rather than the literal `todo_write`.
+        // The planner builds its own todo list with the parent's `Plan` tool.
         .with_todo(bridge.tool_for_kind(ToolKind::Plan).await)
     }
 

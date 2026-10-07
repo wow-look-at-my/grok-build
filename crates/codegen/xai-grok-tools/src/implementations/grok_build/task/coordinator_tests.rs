@@ -21,8 +21,7 @@ struct AdmissionGate {
 #[derive(Clone)]
 struct TestControl {
     cancellation: CancellationToken,
-    /// Every mid-turn message the coordinator delivered to this child, in
-    /// order (`SubagentEvent::Interject`).
+    /// Every mid-turn message the coordinator delivered to this child, in order (`SubagentEvent::Interject`).
     interjections: mpsc::UnboundedSender<String>,
     admission_gate: Option<AdmissionGate>,
     admitted_messages: Option<mpsc::UnboundedSender<(ActiveAgentMessageOperation, String)>>,
@@ -748,7 +747,7 @@ async fn outstanding(backend: &ChannelBackend, prompt_id: &str) -> SubagentOutst
 }
 
 /// A mid-turn interjection (`SubagentEvent::Interject`) is delivered to the
-/// active child its id names, and an id with no active child is dropped rather
+/// active child its id names. An id with no active child is dropped rather
 /// than handed to whoever happens to be live.
 #[tokio::test]
 async fn interject_reaches_the_active_child_named_by_id() {
@@ -770,8 +769,7 @@ async fn interject_reaches_the_active_child_named_by_id() {
             text: CONTEXT.to_owned(),
         })
         .expect("actor command channel open");
-    // Commands are handled in channel order, so a round trip on the same
-    // channel is the barrier that proves the interjection was handled.
+    // Commands are handled in channel order.
     let _ = loop_unit_active(&harness.backend, "unrelated").await;
     assert_eq!(
         harness
@@ -4861,12 +4859,11 @@ async fn workflow_spawns_bypass_the_session_concurrent_limit() {
 /// A prompt that makes [`TestRunner`]'s run future unwind.
 const PANICKING_PROMPT: &str = "panic mid-run";
 
-/// A child that dies mid-run has to leave a finished record behind.
-///
-/// The unwinding is caught where the run is pushed, so what the coordinator
-/// still owes whoever holds the task id is an answer naming the failure: a bare
-/// "panicked" cannot be told apart from any other way a child can die, and the
-/// caller is the one that has to decide what to do about it.
+/// A child that dies mid-run has to leave a finished record behind. The
+/// unwinding is caught where the run is pushed, so what the coordinator still
+/// owes whoever holds the task id is an answer. That answer is naming the
+/// failure. A bare "panicked" cannot be told apart from any other way a child
+/// can die. The caller is the one that has to decide what to do about it.
 #[tokio::test]
 async fn a_panicking_child_reports_what_it_died_of() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));

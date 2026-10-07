@@ -140,9 +140,7 @@ pub struct TelemetryConfig {
     pub otel_logs_exporter: Option<String>,
     /// External OTLP base endpoint (`/v1/logs`, `/v1/metrics` appended for HTTP).
     pub otel_endpoint: Option<String>,
-    /// External OTLP transport: `http/protobuf` | `grpc`. Read under both
-    /// spellings through [`TelemetryConfig::OTEL_PROTOCOL_KEYS`]; written under
-    /// this one.
+    /// External OTLP transport: `http/protobuf` | `grpc`.
     pub otel_protocol: Option<String>,
     pub otel_certificate: Option<String>,
     pub otel_client_certificate: Option<String>,
@@ -175,9 +173,7 @@ pub struct TelemetryConfig {
 }
 
 impl TelemetryConfig {
-    /// The keys [`otel_protocol`](Self::otel_protocol) is read under. The
-    /// transport's own name is the canonical one; `otel_transport` is the
-    /// earlier spelling still present in deployed config.
+    /// The keys [`otel_protocol`](Self::otel_protocol) is read under.
     pub const OTEL_PROTOCOL_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("otel_protocol", &["otel_transport"]);
 }
@@ -185,7 +181,7 @@ impl TelemetryConfig {
 /// `TelemetryConfig` with each transport-key spelling as its own field, so a
 /// table naming both folds under [`TelemetryConfig::OTEL_PROTOCOL_KEYS`]
 /// instead of tripping serde's duplicate-field check. This table can arrive
-/// from a remote campaign patch, which is merged into the same value the config
+/// from a remote campaign patch. This is merged into the same value the config
 /// is read from and is not limited to any field set.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -467,10 +463,8 @@ mod wire_alias_tests {
         serde_json::from_str(&format!("{{{table}}}"))
     }
 
-    /// A `[telemetry]` table naming the transport under both spellings is one
-    /// setting stated twice. This table can arrive from a remote campaign patch,
-    /// which merges into the same value the whole `Config` is read from, so a
-    /// duplicate-field rejection here would fail the entire config parse.
+    /// A `[telemetry]` table naming the transport under both spellings is one setting stated twice. This table can arrive from a remote campaign patch, which merges into the same value the whole `Config` is read from. A duplicate-field
+    /// rejection here would fail the entire config parse.
     #[test]
     fn a_table_naming_the_transport_under_both_keys_under_one_value_parses_once() {
         let cfg = parse(r#""otel_protocol":"grpc","otel_transport":"grpc""#)
@@ -487,8 +481,8 @@ mod wire_alias_tests {
         assert_eq!(legacy.otel_protocol.as_deref(), Some("grpc"));
     }
 
-    /// Two different transports is a genuine conflict about where OTLP goes, so
-    /// it fails and names the field rather than exporting to one of them.
+    /// Different transports is a genuine conflict about where OTLP goes, so it
+    /// fails and names the field rather than exporting to one of them.
     #[test]
     fn a_table_whose_transport_spellings_disagree_is_an_error_naming_the_field() {
         let err = parse(r#""otel_protocol":"grpc","otel_transport":"http/protobuf""#)
@@ -498,8 +492,8 @@ mod wire_alias_tests {
         assert!(text.contains("otel_transport"), "{err}");
     }
 
-    /// The outgoing shape keeps the canonical key, so a config written back to
-    /// disk does not grow the legacy spelling.
+    /// The outgoing shape keeps the canonical key, so a config written back
+    /// to disk does not grow the spelling.
     #[test]
     fn the_transport_serializes_under_the_canonical_key_only() {
         let mut cfg = TelemetryConfig::default();

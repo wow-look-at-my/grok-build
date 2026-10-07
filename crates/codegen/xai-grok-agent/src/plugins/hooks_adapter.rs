@@ -47,9 +47,6 @@ pub fn parse_plugin_hooks_from_value(
     plugin_data: &str,
 ) -> (Vec<HookSpec>, Vec<String>) {
     // Normalize the inline value into the wrapped shape the parser requires.
-    // Claude Code plugins declare hooks inline without a top-level `hooks` key;
-    // without this they parse to zero specs and the hooks silently never run.
-    // Grok's native wrapped shape is returned unchanged (idempotent).
     let normalized = super::manifest::normalize_inline_hooks(value);
     let content = serde_json::to_string(&normalized).unwrap_or_default();
     // Use a synthetic path for parse_hook_file's source_dir (resolves relative commands).
@@ -337,8 +334,7 @@ mod tests {
     #[test]
     fn parse_inline_hooks_from_claude_code_shape() {
         // Claude Code declares hooks inline WITHOUT a top-level `hooks` key.
-        // This is the shape that previously parsed to zero specs and silently
-        // never ran; normalization must rescue it.
+        // This is the shape.
         let value = serde_json::json!({
             "PreToolUse": [
                 {

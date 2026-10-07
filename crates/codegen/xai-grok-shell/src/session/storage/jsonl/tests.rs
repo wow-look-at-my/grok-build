@@ -2379,7 +2379,7 @@ async fn append_chat_message_no_spurious_newlines_on_clean_tail() {
 /// Persistence round-trip for a current-format `Reasoning` sibling with real
 /// thinking text and NO encrypted signature (the Anthropic-compatible
 /// third-party case, e.g. Kimi). The item must be written to JSONL, reloaded
-/// through the real `read_chat_history_sync`, and come back with the thinking
+/// through the real `read_chat_history_sync`. It come back with the thinking
 /// text verbatim — so a reloaded session resends the thinking, not a stub.
 #[tokio::test]
 async fn reasoning_sibling_without_signature_roundtrips_through_jsonl() {
@@ -2435,8 +2435,7 @@ async fn reasoning_sibling_without_signature_roundtrips_through_jsonl() {
         "thinking text must survive JSONL write + reload; got: {reloaded_thinking:?}"
     );
 
-    // And the reloaded reasoning must resend to a Chat Completions wire as
-    // reasoning_content on the follower assistant (the token-resend path).
+    // And the reloaded reasoning must resend to a Chat Completions wire as reasoning_content on the follower assistant.
     let mut with_followup = items.clone();
     with_followup.push(ConversationItem::user("q2"));
     let msgs = conversation_to_chat_messages(with_followup);

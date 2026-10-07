@@ -919,14 +919,7 @@ pub struct CopySessionOptions {
     /// The workspace directory a worktree session was spawned from.
     /// Propagated to the forked session's `Summary::source_workspace_dir`.
     pub source_workspace_dir: Option<String>,
-    /// Whether to carry the records of subagents that were still RUNNING at
-    /// the copy point. Defaults to `false`: a fork takes the main thread's
-    /// conversation, and an agent the parent is still running keeps
-    /// reporting to the parent, so its spawn record in the child is a row
-    /// that can never resolve. `/fork --agents` sets it.
-    ///
-    /// A subagent that already finished is history the conversation refers
-    /// to; its records are copied either way.
+    /// Whether to carry the records of subagents that were still RUNNING at the copy point.
     pub carry_running_subagents: bool,
 }
 

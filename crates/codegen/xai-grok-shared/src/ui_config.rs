@@ -9,14 +9,7 @@ pub struct UiConfig {
     pub max_thoughts_width: u16,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
-    /// The `[models]` harness model slots the user set, keyed by slot id
-    /// (`xai_grok_models::HARNESS_MODEL_SLOTS`). A slot the user left alone
-    /// is absent, and the settings modal shows it as "(no override)".
-    ///
-    /// This is a READ-ONLY projection of the `[models]` table for the
-    /// settings modal, not a `[ui]` key: `[models]` stays the one place a
-    /// slot is written. Hence `serde(skip)` — serializing it would put a
-    /// second copy under `[ui]` for the next reader to disagree with.
+    /// The `[models]` harness model slots the user set, keyed by slot id (`xai_grok_models::HARNESS_MODEL_SLOTS`).
     #[serde(skip)]
     pub harness_models: std::collections::BTreeMap<String, String>,
     /// YOLO mode. Read by `util::config`, declared here for `serde_ignored`.
@@ -60,52 +53,29 @@ pub struct UiConfig {
     /// Written by the pager's settings modal / rewind "Yes, and don't ask again".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm_before_rewind: Option<bool>,
-    /// Gate the model's turn end on unfinished todos: like a stop hook, the
-    /// model is sent back to finish or close them, and only after the stop-hook
-    /// continuation budget is exhausted can it stop anyway. `None` = on
-    /// (default). Written by the pager's settings modal
-    /// (`[ui].stop_gate_unfinished_todos`).
+    /// Gate the model's turn end on unfinished todos.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_gate_unfinished_todos: Option<bool>,
-    /// Gate the model's turn end on red CI for the branch it pushed: the model
-    /// is sent back to read the failing logs and fix them, and only after the
-    /// stop-hook continuation budget is exhausted can it stop anyway. A branch
-    /// with no runs, or with runs still in flight, never blocks a stop.
-    /// `None` = on (default). (`[ui].stop_gate_ci_failing`.)
+    /// Gate the model's turn end on red CI for the branch it pushed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_gate_ci_failing: Option<bool>,
-    /// Reissue a model call whose output rate stays under this many tokens per
-    /// second for [`Self::output_rate_sustained_secs`]. `None` or `0` = off,
-    /// which is the default: a floor belongs to an endpoint that collapses,
-    /// and a session-wide guess would reissue against a model that is merely
-    /// slow. `[model.<id>].min_output_tokens_per_sec` overrides it for one
-    /// model. (`[ui].min_output_tokens_per_sec`.)
+    /// Reissue a model call whose output rate stays under this many tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<u32>,
-    /// How long the rate must stay under the floor before the request is
-    /// reissued. `None` = 10 seconds. A dip shorter than this is a pause, not
-    /// a collapsed engine. (`[ui].output_rate_sustained_secs`.)
+    /// How long the rate must stay under the floor before the request is reissued. `None` = 10 seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate_sustained_secs: Option<u32>,
     /// Trailing window the output rate is averaged over. `None` = 10 seconds.
-    /// A legacy `[output_rate_floor].window_secs` applies when this is unset.
-    /// (`[ui].output_rate_window_secs`.)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate_window_secs: Option<u32>,
-    /// How many times one model call is reissued for slow output before the
-    /// response is accepted at whatever rate it runs. `None` = 2. A legacy
-    /// `[output_rate_floor].max_retries` applies when this is unset.
-    /// (`[ui].output_rate_max_retries`.) `-1` or `"unlimited"` never runs out.
+    /// How many times one model.
     #[serde(
         default,
         with = "xai_grok_config_types::retry_budget",
         skip_serializing_if = "Option::is_none"
     )]
     pub output_rate_max_retries: Option<u32>,
-    /// Reissue a model call that has produced no output this many seconds
-    /// after the request was sent. `None` = 120 seconds, `0` = off. It shares
-    /// the output-rate reissue budget. `[model_providers.<id>]` and
-    /// `[model.<id>]` override it. (`[ui].ttft_timeout_secs`.)
+    /// Reissue a model call that has produced no output this many seconds after the request was sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttft_timeout_secs: Option<u32>,
     /// The most model requests this process sends at once.
@@ -413,9 +383,7 @@ impl UiConfig {
             .unwrap_or(Self::STOP_GATE_CI_FAILING_DEFAULT)
     }
 
-    /// Default for [`Self::thinking_summaries`] when unset. This is the one home
-    /// for it: a session resolves the switch through
-    /// [`Self::thinking_summaries_enabled`], never by reading the table by hand.
+    /// Default for [`Self::thinking_summaries`] when unset.
     pub const THINKING_SUMMARIES_DEFAULT: bool = true;
 
     pub fn thinking_summaries_enabled(&self) -> bool {
@@ -423,10 +391,7 @@ impl UiConfig {
             .unwrap_or(Self::THINKING_SUMMARIES_DEFAULT)
     }
 
-    /// Default for [`Self::min_output_tokens_per_sec`] when unset. Well under
-    /// what any endpoint here reaches in health, so an ordinary stream never
-    /// approaches it and a collapsed engine is still caught. A zero here ships
-    /// the gate dead, which is the same as not having it.
+    /// Default for [`Self::min_output_tokens_per_sec`] when unset.
     pub const MIN_OUTPUT_TOKENS_PER_SEC_DEFAULT: u32 = 15;
 
     /// Default for [`Self::output_rate_sustained_secs`] when unset.
@@ -458,9 +423,7 @@ impl UiConfig {
             .unwrap_or(Self::OUTPUT_RATE_MAX_RETRIES_DEFAULT)
     }
 
-    /// Default for [`Self::ttft_timeout_secs`] when unset. A reasoning model
-    /// can prefill for minutes, so this stays well above an ordinary first
-    /// token and under the 300 s stream idle timeout.
+    /// Default for [`Self::ttft_timeout_secs`] when unset.
     pub const TTFT_TIMEOUT_SECS_DEFAULT: u32 = 120;
 
     pub fn ttft_timeout_secs_value(&self) -> u32 {
