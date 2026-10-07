@@ -9,7 +9,7 @@ use xai_grok_sampling_types::{ConversationRequest, ImageStripReason, ToolSchemaF
 use crate::config::{RetryPolicy, SamplerConfig};
 use crate::types::RequestId;
 
-/// Models observed to reject image input outright.
+/// Models observed to reject image input outright, shared between the actor and its per-request tasks.
 #[derive(Clone, Default)]
 pub(crate) struct ImageInputRejections(Arc<Mutex<HashSet<String>>>);
 

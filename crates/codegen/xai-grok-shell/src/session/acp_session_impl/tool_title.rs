@@ -29,7 +29,7 @@ impl StreamingToolArgs {
     pub(crate) fn push(&mut self, delta: &str) {
         let room = STREAMING_TITLE_ARG_CAP.saturating_sub(self.args.len());
         if room == 0 {
-            // Sticky: a call that has lost bytes never becomes whole again.
+            // Sticky.
             self.capped |= !delta.is_empty();
             return;
         }
@@ -239,11 +239,10 @@ fn lsp_tool_title(lsp: &xai_grok_tools::implementations::lsp::LspToolInput) -> S
         (None, _) => op.to_string(),
     }
 }
-/// The title of a tool whose input the bridge hands over as raw JSON.
-///
-/// The opencode harness registers its built-ins this way. So the title comes
-/// from the tool's kind and the argument that kind names. A tool the kinds do
-/// not cover shows its wire name, which is the name the model called it by.
+/// The title of a tool whose input the bridge hands over as raw JSON. The
+/// opencode harness registers its built-ins this way. So the title comes from
+/// the tool's kind and the argument that kind names. A tool the kinds do not
+/// cover shows its wire name, which is the name the model called it by.
 fn dynamic_tool_title(
     wire_name: &str,
     kind: Option<ToolKind>,
@@ -394,9 +393,9 @@ mod title_tests {
 #[cfg(test)]
 mod tests {
     use super::{STREAMING_TITLE_ARG_CAP, StreamingToolArgs};
-    /// A write streams the whole file. Holding all of it to name the call puts
-    /// a second copy of every file the model writes in this session's memory.
-    /// That copy stays for as long as the write takes.
+    /// A write streams the whole file. Holding all of it to name the call would
+    /// put a second copy of every file. The model writes in this session's
+    /// memory, for as long as the write takes.
     #[test]
     fn a_large_body_is_dropped_rather_than_held() {
         let mut call = StreamingToolArgs::new("write_file".to_string());

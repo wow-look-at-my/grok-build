@@ -3219,14 +3219,12 @@ fn resolve_sampling(model: &ModelEntry, session_key: Option<&str>) -> SamplerCon
     sampling_config_for_model(model, credentials, None, None, None)
 }
 
-/// A Cerebras-slugged entry must resolve through the real `config.toml`
-/// parse, model resolution, and `sampling_config_for_model`. The result must
-/// be a client config whose message profile is STRICT. Its endpoint/backend
-/// must be what the entry specifies.
-///
-/// This is the config half of the fix: the wire suppression only takes
-/// effect if a `strict_message_schema = true` entry actually reaches
-/// `SamplerConfig::chat_message_profile`. A tolerant entry must stay
+/// A Cerebras-slugged entry must resolve — through the real `config.toml`
+/// parse, model resolution, and `sampling_config_for_model`. To a client
+/// config whose message profile is STRICT and whose endpoint/backend are what
+/// the entry specifies. This is the config half of the fix: the wire
+/// suppression only takes effect if a `strict_message_schema = true` entry
+/// reaches `SamplerConfig::chat_message_profile`. A tolerant entry must stay
 /// permissive with the same shape.
 #[test]
 #[serial]
@@ -4363,9 +4361,9 @@ fn resolve_long_reasoning_reminder_precedence() {
         "env JSON enables over a TOML false and its tokens win; delay falls through"
     );
 }
-/// The output-rate floor is off by default. It takes the session-wide `[ui]`
-/// value when one is set. It lets a model override it, including with a
-/// zero. This turns the gate off for that model alone.
+/// The output-rate floor is off by default, takes the session-wide `[ui]`
+/// value when one is set, and lets a model override it. It is including
+/// with a zero. This turns the gate off for that model alone.
 #[test]
 fn resolve_output_rate_floor_prefers_the_model_over_the_session() {
     let shipped = Config::default()
@@ -8688,7 +8686,7 @@ fn resolve_model_list_inherits_context_window_from_default_when_prefetched_has_f
 }
 #[test]
 fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
-    // A `[model.*]` config entry that shares a routing slug with a `/v1/models` listing entry.
+    // A `[model.*]` config entry that shares.
     let mut cfg = Config::default();
     cfg.config_models.insert(
         "synthetic".to_owned(),
@@ -8699,6 +8697,7 @@ fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
             ..Default::default()
         },
     );
+    // The prefetched `/v1/models` entry for the model carries the real context.
     let mut prefetched = IndexMap::new();
     prefetched.insert(
         "syn:large:text".to_owned(),

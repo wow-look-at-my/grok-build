@@ -163,8 +163,8 @@ impl TryFrom<McpServerTransportConfigWire> for McpServerTransportConfig {
                 oauth_scopes,
             } => Self::StreamableHttp {
                 // Not a silent default: an HTTP entry naming none of the keys
-                // has no address. The required `url` field rejected that
-                // entry before the shadow existed.
+                // has no address. Which is what the required `url` field
+                // rejected before the shadow existed.
                 url: McpServerTransportConfig::URL_KEYS
                     .fold(vec![url, url_template_camel, url_template_snake])?
                     .ok_or(McpTransportConfigError::MissingUrl)?,
@@ -402,6 +402,7 @@ fn render_setup_template(
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
     while let Some(start) = rest.find("{{") {
+        // Every offset below is a `{{` or `}}` needle offset, or such an offset plus that two-byte ASCII literal's width.
         let (prefix, after_start) = rest.split_at(start);
         out.push_str(prefix);
         let Some(after_start) = after_start.strip_prefix("{{") else {

@@ -476,14 +476,12 @@ impl SamplingError {
 
     /// The API rejected the request because the routed model or endpoint
     /// accepts no image input at all. Distinct from
-    /// [`Self::is_image_processing_error`], which is one unreadable image on a
-    /// model that does support them. Here every image in the conversation is
-    /// unroutable. The recovery is the same strip but the cause is the model
-    /// choice.
-    ///
-    /// image_url is only supported by certain models" — so this matches a
-    /// phrase set case-insensitively across the statuses providers actually use
-    /// for it.
+    /// [`Self::is_image_processing_error`], which is one unreadable image on
+    /// a model that does support them. Here every image in the conversation
+    /// is unroutable. The recovery is the same strip but the cause is the
+    /// model choice. image_url is only supported by certain models" — so
+    /// this matches a phrase set case-insensitively across the statuses
+    /// providers use for it.
     pub fn is_image_input_unsupported_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -518,7 +516,7 @@ impl SamplingError {
     /// The provider's schema rejected a message-level property it does not
     /// define, e.g. Cerebras's `wrong_api_format:
     /// messages.6.assistant.model_id: property
-    ///  'messages.6.assistant.model_id' is unsupported`.
+    /// 'messages.6.assistant.model_id' is unsupported`.
     pub fn is_unsupported_message_property_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -547,13 +545,11 @@ impl SamplingError {
     }
 
     /// The distinct property names an unsupported-property error names.
-    /// `None` when this is not such an error.
-    ///
-    /// The provider packs several failures into one newline-separated string,
-    /// e.g.
+    /// `None` when this is not such an error. The provider packs several
+    /// failures into one newline-separated string, e.g.
     /// `messages.6.assistant.model_id: property '...' is unsupported\n
-    ///  messages.6.assistant.reasoning_content: property '...' is unsupported`,
-    /// so this reads every line, not just the first.
+    /// messages.6.assistant.reasoning_content: property '...' is
+    /// unsupported`, so this reads every line, not the first.
     fn unsupported_property_names(&self) -> Option<Vec<String>> {
         if !self.is_unsupported_message_property_error() {
             return None;
@@ -582,7 +578,7 @@ impl SamplingError {
                 names.push(name.to_owned());
             }
         }
-        // An unsupported-property error that names nothing is still this error class (caller strips what it knows how to strip).
+        // An unsupported-property error that names nothing is still this error class (caller strips what it knows how to strip); return an empty list rather than `None`.
         Some(names)
     }
 
@@ -933,10 +929,9 @@ fn plain_text_error_message(bytes: &[u8]) -> Option<String> {
     Some(truncate_user_error(text))
 }
 
-/// User-facing message for a failed API call.
-///
-/// A structured JSON error envelope keeps its message. A plain-text body is
-/// shown after the status. Markup and an empty body map to a status phrase.
+/// User-facing message for a failed API call. A structured JSON error
+/// envelope keeps its message. A plain-text body is shown after the status.
+/// Markup and an empty body map to a status phrase.
 pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String {
     if let Some(message) = structured_error_message(bytes) {
         return message;
@@ -947,7 +942,6 @@ pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String
     }
 }
 
-///
 /// Servers answer it with an empty or contentless body, which leaves the bare
 /// message ("Request failed (HTTP 404).") describing nothing a user can act
 /// on. Other statuses are about the request, not the address, and keep their
@@ -1639,6 +1633,8 @@ mod tests {
             "a 404 must name the endpoint that does not exist: {not_found}"
         );
 
+        // An empty body is a later common shape, and the status text alone
+        // carries no address.
         assert!(
             !user_facing_api_error_message(StatusCode::NOT_FOUND, b"").contains(url),
             "precondition: the plain message has no URL to begin with"

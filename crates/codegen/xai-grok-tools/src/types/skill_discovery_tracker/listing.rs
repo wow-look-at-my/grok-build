@@ -15,6 +15,7 @@ pub(super) const SKILL_BUDGET_CONTEXT_PERCENT: f64 = 0.5;
 pub(super) const DEFAULT_CHAR_BUDGET: usize =
     (200_000.0 * 4.0 * SKILL_BUDGET_CONTEXT_PERCENT) as usize;
 
+/// First whole `f64` above the largest `usize` any supported target has.
 const USIZE_CEILING: f64 = 18_446_744_073_709_551_616.0;
 
 /// Character budget for a listing of a context window of `tokens`, taking `percent` of it at chars per token. `None` when the window states no char count a `usize` can hold. A window read from config or a model catalog is not bounded by anything this crate checks. A

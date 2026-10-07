@@ -264,7 +264,7 @@ mod tests {
     #[cfg(unix)]
     async fn test_timeout_kills_grandchildren_and_returns_promptly() {
         let mut request = make_request("sleep 5 & echo bgpid=$!; sleep 5");
-        // Long enough that spawning the shell and reading its first line wins the race on a loaded runner.
+        // Long enough that spawning the shell.
         request.timeout = std::time::Duration::from_millis(1500);
 
         let started = std::time::Instant::now();

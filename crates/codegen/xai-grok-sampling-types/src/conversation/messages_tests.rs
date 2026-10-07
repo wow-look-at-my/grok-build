@@ -644,9 +644,9 @@ fn thinking_without_a_recorded_origin_is_replayed() {
     assert_eq!(thinking_blocks(&req).len(), 1);
 }
 
-/// The recovery the sampler applies when the server rejects a signature the
-/// table let through. The level steps to `TextOnly`. The block that was the
-/// model's own stops being thinking. Its words stay as assistant text. One
+/// The recovery the sampler applies when the server rejects a signature. The
+/// table let through: the level steps to `TextOnly`, and the block that was
+/// the model's own stops being thinking. Its words stay as assistant text. One
 /// more step and nothing of it reaches the wire.
 #[test]
 fn a_rejected_signature_steps_the_replay_level_down() {
@@ -764,10 +764,9 @@ fn a_tool_loop_that_kept_its_thinking_keeps_thinking_on() {
     assert_eq!(thinking_blocks(&req).len(), 1);
 }
 
-/// Consider a closed loop — its results answered and the user back with a
-/// follow-up —. That loop is not the turn the model is being asked to
-/// continue. The foreign thinking stops being a thinking block, thinking stays
-/// on for the new turn.
+/// A closed loop — its results answered and the user back with a follow-up. It
+/// is not the turn the model is being asked to continue. The foreign thinking
+/// stops being a thinking block, thinking stays on for the new turn.
 #[test]
 fn a_closed_tool_loop_leaves_thinking_on() {
     let mut req = ConversationRequest::from_items(vec![
@@ -800,7 +799,7 @@ fn a_closed_tool_loop_leaves_thinking_on() {
 }
 
 /// A signature-only block (a `tco_*` backend blob) carries no words, so there
-/// is nothing to send as text and it is the one thing that genuinely goes.
+/// is nothing to send as text and it is the thing that genuinely goes.
 #[test]
 fn a_signature_only_block_has_nothing_to_send_as_text() {
     let mut req = ConversationRequest::from_items(vec![
@@ -825,9 +824,9 @@ fn a_signature_only_block_has_nothing_to_send_as_text() {
     );
 }
 
-/// The Messages API is the one backend that rejects thinking blocks it was not
-/// configured for. The capture loop strips reasoning from its own turns there too
-/// — and the tool_use / tool_result pair it built by hand still maps.
+/// The Messages API is the backend that rejects thinking blocks it was not
+/// configured for. The capture loop strips reasoning from its own turns there
+/// too — and the tool_use / tool_result pair it built by hand still maps.
 #[test]
 fn todo_capture_loop_strips_reasoning_and_keeps_the_tool_pair() {
     let request = build_messages_request(
@@ -889,8 +888,8 @@ fn unsigned_thinking_rides_a_switch_between_two_models_that_do_not_sign() {
     );
 }
 
-/// The other unsigned case. The model being called does sign its thinking. It
-/// rejects a block that arrives without a signature just as hard as one signed
+/// The other unsigned case. The model being called does sign its thinking.
+/// It rejects a block that arrives without a signature as hard as one signed
 /// by somebody else. What says so is the conversation itself — this model
 /// already signed a block earlier in it.
 #[test]
@@ -1085,15 +1084,14 @@ fn the_thinking_dialect_is_read_off_every_spelling_of_a_model_id() {
 }
 
 /// Regression guard for the strict-schema work. The Messages backend reads an
-/// assistant item's `model_id` to decide whether a replayed thinking signature
-/// belongs to the target model. `model_id` must stay load-bearing on that
-/// path. The Chat Completions suppression is scoped to the serialized body and
-/// must not have removed the stored value.
-///
-/// Conversations differ only in the assistant's recorded `model_id`; the
-/// signed-thinking decision must differ accordingly. If the suppression had
-/// been applied globally (or the field dropped from history), both would take
-/// the same branch and this test would fail.
+/// assistant item's `model_id` to decide whether a replayed thinking
+/// signature belongs to the target model. `model_id` must stay load-bearing
+/// on that path. The Chat Completions suppression is scoped to the serialized
+/// body and must not have removed the stored value. Conversations differ only
+/// in the assistant's recorded `model_id`; the signed-thinking decision must
+/// differ accordingly. If the suppression had been applied globally (or the
+/// field dropped from history), both would take the same branch and this test
+/// would fail.
 #[test]
 fn messages_backend_still_reads_assistant_model_id_for_signature_handling() {
     fn conversation_with_origin(origin: &str) -> Vec<ConversationItem> {

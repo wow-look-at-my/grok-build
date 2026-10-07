@@ -535,12 +535,11 @@ async fn available_commands_update_is_forwarded_but_not_persisted() {
         .await;
 }
 
-/// A call is named from the arguments it has so far, not from the arguments it
-/// ends with. Before this the row wore the wire name (`read_file`) for the
-/// whole stream and only became `Read ...` once the call had finished parsing.
-///
-/// Drives the real handler: the real partial-JSON completion, the real tool
-/// registry, and the real title match.
+/// A call is named from the arguments it has so far, not from the arguments
+/// it ends with. Before this the row wore the wire name (`read_file`) for the
+/// whole stream and only became `Read ...` once the call had finished
+/// parsing. Drives the real handler: the real partial-JSON completion, the
+/// real tool registry, and the real title match.
 #[tokio::test(flavor = "current_thread")]
 async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
     use xai_grok_sampler::{RequestId, SamplingEvent};
@@ -591,6 +590,7 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
                 streaming_title(&actor, 0).as_deref(),
                 Some("Read `src/main.rs`")
             );
+            // A new stream reuses one index, so the abandoned attempt's arguments have to be gone by the time it opens.
             let retry = RequestId::random();
             own_request(&actor, &retry);
             actor
@@ -603,9 +603,8 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
         })
         .await;
 }
-/// The inputs are a tool the registry does not know, a key with no value yet,
-/// and bytes that are not JSON at all. Each leaves the call unnamed rather than
-/// guess or die.
+/// A tool the registry does not know. A key with no value yet, and bytes that
+/// are not JSON at all each leave the call unnamed rather than guess or die.
 #[tokio::test(flavor = "current_thread")]
 async fn an_unreadable_streaming_call_is_left_unnamed() {
     use xai_grok_sampler::{RequestId, SamplingEvent};
@@ -638,8 +637,8 @@ async fn an_unreadable_streaming_call_is_left_unnamed() {
         })
         .await;
 }
-/// A fixture whose registry knows `read_file`, so a streaming call can actually
-/// be parsed into a typed input and named. The whole fixture comes back: its
+/// A fixture whose registry knows `read_file`, so a streaming call can be
+/// parsed into a typed input and named. The whole fixture comes back: its
 /// gateway and persistence ends have to outlive the actor that sends to them.
 async fn read_file_streaming_fixture() -> ReplaySendUpdateFixture {
     use xai_grok_tools::implementations::grok_build::read_file::ReadFileTool;

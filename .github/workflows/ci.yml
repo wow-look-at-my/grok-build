@@ -33,6 +33,16 @@ env:
     {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc", "darwin": false}]
 
 jobs:
+  # Runs first and gates every build job, so a prose, YAML or workflow finding fails the run. That run is in a minute instead of after the cold compile.
+  slopfix:
+    name: Slopfix
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: wow-look-at-my/slopfix@master
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-22.04
@@ -50,6 +60,7 @@ jobs:
 
   build-test:
     name: Build & test
+    needs: slopfix
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ubuntu-22.04
     # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s. A job past this is broken, not slow.
@@ -123,7 +134,7 @@ jobs:
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
-      # The check that turns a banned pattern into a red branch. An entry set to `deny` in `[workspace.lints.clippy]` is a compile error here, so the lint names the file that reintroduced it; `clippy.toml`'s `disallowed-methods` list covers the calls no lint of clippy's covers, and is denied through the same table. A deny lands only with the per-crate exceptions for the hits that predate it, so the tree is green the moment the entry is added. Warnings that are not denied stay warnings: `-D warnings` over a workspace this size buries the one line that matters, and this repo has never gated on clippy style before. `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process, and a test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build, so the deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here. `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally. The lint tables differ between versions. So one crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
+      # The check that turns a banned pattern into a red branch. An entry set to `deny` in `[workspace.lints.clippy]` is a compile error here. The lint names the file that reintroduced it. `clippy.toml`'s `disallowed-methods` list covers the calls no lint of clippy's covers, and is denied through the same table. A deny lands only with the per-crate exceptions for the hits that predate it. The tree is green the moment the entry is added. Warnings that are not denied stay warnings. `-D warnings` over a workspace this size buries the one line that matters, and this repo has never gated on clippy style before. `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process. A test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build. The deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here. `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally, and the lint tables differ between versions. One crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
       - name: Lint (workspace)
         run: cargo clippy --locked --workspace --lib --bins --keep-going
 
@@ -140,6 +151,7 @@ jobs:
 
   build-release:
     name: Build release (${{ matrix.name }})
+    needs: slopfix
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
     strategy:
@@ -345,6 +357,7 @@ jobs:
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
+    needs: slopfix
     runs-on: macos-14
     timeout-minutes: 25
     steps:

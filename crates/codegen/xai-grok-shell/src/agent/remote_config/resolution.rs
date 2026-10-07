@@ -311,16 +311,13 @@ impl ModelGlobSet {
     }
 }
 
-/// Mark every entry that matches a favorites glob, and clear the mark on every
-/// entry that does not.
-///
-/// Lists feed this: `[models].favorite_models` covers the whole catalog, and
-/// `[model_providers.<id>].favorite_models` covers the models of that provider.
-/// A model is a favorite when either list matches it.
-///
-/// An invalid pattern fails OPEN — the mark is cosmetic, and dropping every
-/// favorite would empty the picker's opening list. `allowed_models` fails closed
-/// because it decides what may be used at all.
+/// Mark every entry that matches a favorites glob, and clear the mark on
+/// every entry that does not. Lists feed this: `[models].favorite_models`
+/// covers the whole catalog, and `[model_providers.<id>].favorite_models`
+/// covers the models of that provider. A model is a favorite when either list
+/// matches it. An invalid pattern fails OPEN — the mark is cosmetic, and
+/// dropping every favorite would empty the picker's opening list.
+/// `allowed_models` fails closed because it decides what may be used at all.
 pub(crate) fn apply_favorites(cfg: &config::Config, catalog: &mut IndexMap<String, ModelEntry>) {
     let global = match ModelGlobSet::compile(cfg.models.favorite_models.as_deref()) {
         Ok(set) => set,
@@ -592,13 +589,13 @@ pub(crate) fn resolve_model_catalog(
     catalog
 }
 
-/// Force the effort gate on for every model `[models].force_reasoning_effort_models`
-/// matches. This runs on the FINISHED catalog. It is the one knob that does not need
-/// a `[model.<key>]` table name to equal the catalog key. That is what makes it
-/// usable against a server catalog that omits `supports_reasoning_effort`.
-///
-/// A forced model with no menu of its own falls back to the built-in low..xhigh
-/// menu. Any flagged model with no server list gets the same menu.
+/// Force the effort gate on for every model
+/// `[models].force_reasoning_effort_models` matches. This runs on the
+/// FINISHED catalog. It is the knob that does not need a `[model.<key>]`
+/// table name to equal the catalog key. Which is what makes it usable
+/// against a server catalog that omits `supports_reasoning_effort`. A forced
+/// model with no menu of its own falls back to the built-in low..xhigh menu.
+/// The same one any flagged model with no server list gets.
 pub(crate) fn force_reasoning_effort_support(
     cfg: &config::Config,
     catalog: &mut IndexMap<String, ModelEntry>,
@@ -622,12 +619,11 @@ pub(crate) fn force_reasoning_effort_support(
 }
 
 /// Add a provider-qualified catalog (an autodetected
-/// `[model_providers.<id>]`) to the resolved xAI/custom catalog.
-///
-/// Provider entries are deliberately kept outside `prefetched`: xAI auth
-/// refreshes and cache reloads may replace that catalog wholesale.
-/// provider's own listing must remain available.
-/// User model filters still apply uniformly to every provider.
+/// `[model_providers.<id>]`) to the resolved xAI/custom catalog. Provider
+/// entries are deliberately kept outside `prefetched`: xAI auth refreshes and
+/// cache reloads may replace that catalog wholesale. provider's own listing
+/// must remain available. User model filters still apply uniformly to every
+/// provider.
 pub(crate) fn merge_additive_catalog(
     cfg: &config::Config,
     mut catalog: IndexMap<String, ModelEntry>,

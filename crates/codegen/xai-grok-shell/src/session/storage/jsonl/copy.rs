@@ -57,12 +57,11 @@ fn subagent_id_of(update: &SessionUpdate) -> Option<&str> {
 /// Subagents that are spawned and never finished across `reader`. A `spawn`
 /// with no `finish` is an agent the source session is still running. The copy
 /// drops its records unless the caller asked to carry them. The child does
-/// not open with a row for work that reports to its parent.
-///
-/// `survivors` restricts the walk to the lines the write pass keeps, in the
-/// same non-empty-line index space. A prompt cut cannot leave a spawn whose
-/// finish was cut away. The substring pre-filter keeps every other line off
-/// the JSON path.
+/// not open with a row for work that reports to its parent. `survivors`
+/// restricts the walk to the lines the write pass keeps, in the same
+/// non-empty-line index space. A prompt cut cannot leave a spawn whose finish
+/// was cut away. The substring pre-filter keeps every other line off the JSON
+/// path.
 fn running_subagent_ids<R: BufRead>(
     reader: R,
     survivors: Option<&[usize]>,

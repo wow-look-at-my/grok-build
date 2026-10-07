@@ -12,9 +12,8 @@ use crate::sampling::ApiBackend;
 
 /// A `[model_providers.<id>]` block: the settings every model behind one
 /// endpoint shares. A `[model.<id>]` that names the provider with
-/// `model_provider = "<id>"` inherits each field it leaves unset. As a result,
-/// an endpoint, a credential, a wire format or a header set is written once.
-///
+/// `model_provider = "<id>"` inherits each field it leaves unset, so an
+/// endpoint, a credential. A wire format or a header set is written once.
 /// Every field here is also a `[model.<id>]` field, and the model's own value
 /// always wins. What is NOT here is what identifies one model: `model`,
 /// `name`, `description`.
@@ -26,7 +25,7 @@ pub struct ModelProviderConfig {
     pub env_key: Option<EnvKeys>,
     pub api_key: Option<String>,
     pub api_backend: Option<ApiBackend>,
-    /// Static request headers; inherited per key, so a model that sets one header of its own still gets the rest.
+    /// Static request headers.
     pub extra_headers: IndexMap<String, String>,
     /// Query parameters folded into every request URL; inherited per key.
     pub query_params: IndexMap<String, String>,
@@ -81,7 +80,7 @@ pub enum ModelsListDialect {
     /// `GET <base>/models` answering `{ "data": [...] }`.
     #[default]
     Openai,
-    /// `GET <host>/api/tags`, with `POST <host>/api/show` per model for the window and capabilities and `GET <host>/api/ps`.
+    /// `GET <host>/api/tags`, with `POST <host>/api/show` per model for the window and capabilities and `GET <host>/api/ps` for residency.
     Ollama,
     /// `GET <host>/api/v1/models`, which carries all of them in one answer.
     Lmstudio,
@@ -142,12 +141,12 @@ impl ModelProviderConfig {
     }
 }
 
-/// The defaults a well-known provider id carries, so `[model_providers.ollama]`
-/// with nothing in it is a complete configuration.
-///
+/// The defaults a well-known provider id carries, so
+/// `[model_providers.ollama]` with nothing in it is a complete configuration.
 /// Only fields the user LEFT UNSET are filled. Someone who runs Ollama on
-/// another port writes `base_url` and keeps the dialect; someone who wants the
-/// OpenAI listing writes `models_list_dialect = "openai"` and keeps the URL.
+/// another port writes `base_url` and keeps the dialect; someone who wants
+/// the OpenAI listing writes `models_list_dialect = "openai"` and keeps the
+/// URL.
 pub(crate) fn apply_builtin_preset(id: &str, provider: &mut ModelProviderConfig) {
     let (default_base, dialect) = match id {
         "ollama" => ("http://localhost:11434/v1", ModelsListDialect::Ollama),
@@ -422,7 +421,7 @@ impl ConfigModelOverride {
         if merged.reasoning_efforts.is_empty() {
             merged.reasoning_efforts = reasoning_efforts.clone();
         }
-        // Per KEY, not wholesale: a model that sets one header of its own must not have to restate the provider's others.
+        // Per KEY, not wholesale.
         inherit_headers(&mut merged.extra_headers, extra_headers);
         inherit_headers(&mut merged.env_http_headers, env_http_headers);
         for (k, v) in query_params {

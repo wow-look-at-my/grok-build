@@ -103,14 +103,13 @@ fn plan_stdio_spawn_non_windows_never_resolves() {
 }
 
 /// The spawn path must map a package runner's caches onto the session's
-/// writable temp storage. This happens whenever the session is write-confined.
-/// The runner's default caches (`~/.cache/uv`, `~/.npm`) sit under a `$HOME`
-/// no confining profile grants. That is the EPERM that made `uvx kagimcp` and
-/// `npx tampermonkey-mcp` fail their MCP handshake with "Broken pipe".
-///
-/// Drives the shipped `apply_runner_cache_env` (the core the spawn site
-/// calls) against a real `tokio::process::Command`, and asserts on what the
-/// child would actually receive.
+/// writable temp storage whenever the session is write-confined. This is
+/// because the runner's default caches (`~/.cache/uv`, `~/.npm`) sit under a
+/// `$HOME` no confining profile grants — which is the EPERM that made `uvx
+/// kagimcp`. And `npx tampermonkey-mcp` fail their MCP handshake with
+/// "Broken pipe". Drives the shipped `apply_runner_cache_env` (the core the
+/// spawn site calls) against a real `tokio::process::Command`, and asserts
+/// on what the child would receive.
 #[tokio::test]
 async fn sandboxed_package_runner_gets_tmp_cache_env() {
     let scratch = std::env::temp_dir().join(format!(
@@ -166,7 +165,7 @@ async fn sandboxed_package_runner_gets_tmp_cache_env() {
             dir.starts_with(&scratch),
             "{name} must be mapped onto the injected scratch root, got {value}"
         );
-        // The whole point of the redirect: never back into the session's own state directory.
+        // The whole point of the redirect.
         let grok_home = xai_grok_tools::util::grok_home();
         assert!(
             !dir.starts_with(&grok_home),
@@ -263,16 +262,14 @@ fn stdio_path_override_matches_path_case_insensitively() {
     assert_eq!(stdio_path_override(&env_none), None);
 }
 
-/// End-to-end: the environment the shipped function installs must make a
-/// REAL package runner initialize its cache where the sandbox cannot write
-/// `$HOME`.
-///
-/// The condition under test is exactly the one a sandboxed session creates:
-/// the runner's default cache root is unreachable. Here that is enforced
-/// portably by pointing `HOME` at a directory with no write permission. The
-/// same test is meaningful on CI and on a developer machine. `uv tool list`
-/// is used because it is offline, deterministic and finishes in
-/// milliseconds, and because it refuses to start when it cannot read its
+/// End-to-end: the environment the shipped function installs must make a REAL
+/// package runner initialize its cache where the sandbox cannot write
+/// `$HOME`. The condition under test is exactly the one a sandboxed session
+/// creates: the runner's default cache root is unreachable. Here that is
+/// enforced portably by pointing `HOME` at a directory with no write
+/// permission. The same test is meaningful on CI and on a developer machine.
+/// `uv tool list` is used because it is offline, deterministic and finishes
+/// in milliseconds, and because it refuses to start when it cannot read its
 /// cache. The same startup path `uvx kagimcp` failed on.
 #[cfg(unix)]
 #[tokio::test]

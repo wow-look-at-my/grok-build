@@ -148,7 +148,7 @@ fn ack_prompt_from_update(view: &mut AgentView, meta: &NotificationMeta) {
 }
 pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
     let state_changed = handle_inner(msg, app);
-    // Rescues a row stuck in the local queue on every inbound message.
+    // Rescues a row stuck in the local queue.
     let migrate_effects = super::dispatch::migrate_local_rows_to_server_queue(app);
     app.pending_effects.extend(migrate_effects);
     let flushed = app.flush_image_notices_if_root();

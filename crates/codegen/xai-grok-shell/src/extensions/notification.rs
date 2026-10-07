@@ -319,7 +319,7 @@ pub(crate) fn uncached_input_tokens(full_input: u64, cached_read: u64) -> u64 {
 }
 
 /// Project usage onto a headless result object. `usage.input_tokens` is uncached (`full − cache_read − cache_creation`), so the three prompt buckets are disjoint.
-/// cache_read + cache_creation + output = total_tokens`. Omits cost floats only when incomplete; a partial cost is shown beside `cost_is_partial`. Incomplete with Incomplete with
+/// `input_tokens + cache_read + cache_creation + output = total_tokens`. Omits cost floats only when incomplete; a partial cost is shown beside `cost_is_partial`. Incomplete with
 /// Incomplete with no tokens emits only `usage_is_incomplete` (no zero usage object). `modelUsage` rows are a reduced external-compat schema (camelCase; no reasoning/duration).
 pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &PromptUsage) {
     let Some(result) = result.as_object_mut() else {
@@ -1215,10 +1215,10 @@ pub enum SessionUpdate {
         /// Headless `streaming-messages-json` stamps it onto the assistant frame.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stop_sequence: Option<String>,
-        /// THIS response's cost in USD ticks (1e10 = $1) — server-reported when the gateway priced the call.
+        /// THIS response's cost in USD ticks.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cost_usd_ticks: Option<i64>,
-        /// Session-cumulative reported cost in USD ticks after folding this call.
+        /// Session-cumulative reported cost in USD ticks after folding this call, from the session ledger.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_cost_usd_ticks: Option<i64>,
     },
@@ -3133,9 +3133,9 @@ mod tests {
     /// `cost_usd_ticks = Some(...)` after `project_from_ledger` calls
     /// `scrub_untrustworthy_costs`. This is the exact path that was broken —
     /// OpenRouter reports `usage.cost` on most but not all streaming chunks.
-    /// So multi-call turns had `cost_missing_calls > 0`. That caused the scrub
-    /// to drop ALL cost from the `TurnCompleted` notification and hide it from
-    /// the TUI. The fix: `scrub_untrustworthy_costs` only clears on
+    /// Multi-call turns had `cost_missing_calls > 0`, which caused the scrub to
+    /// drop ALL cost from the `TurnCompleted` notification, hiding it from the
+    /// TUI. The fix: `scrub_untrustworthy_costs` only clears on
     /// `usage_is_incomplete`, not `cost_is_partial`.
     #[test]
     fn project_from_ledger_preserves_partial_cost_through_scrub() {

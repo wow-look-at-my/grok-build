@@ -84,15 +84,14 @@ fn text_block(text: &str) -> acp::ContentBlock {
 
 // ── the classification ────────────────────────────────────────────────────
 
-/// Which rows own their turn, and which may travel as steering text.
-///
-/// The line shape itself (`xai_prompt_queue::is_slash_invocation`) is table-
-/// tested in the shared crate both ends read; what matters here is that these
-/// row predicates consult it. `wire_blocks` excluded because a client-expanded
-/// payload has already replaced the command text with what the model must see.
-/// Images make no difference, because a `/gboom stats` row can carry a pasted
-/// image and is still a command. `own_turn` covers the `/plan <description>`
-/// description.
+/// Which rows own their turn, and which may travel as steering text. The line
+/// shape itself (`xai_prompt_queue::is_slash_invocation`) is table- tested in
+/// the shared crate both ends read; what matters here is that these row
+/// predicates consult it. `wire_blocks` excluded because a client-expanded
+/// payload has already replaced the command text with what the model must
+/// see. Images make no difference, because a `/gboom stats` row can carry a
+/// pasted image and is still a command. `own_turn` covers the `/plan
+/// <description>` description.
 #[test]
 fn only_payload_free_slash_rows_own_their_turn() {
     let slash = QueuedPrompt::plain(1, "/plan implement it", QueueEntryKind::Prompt);
@@ -393,7 +392,7 @@ fn send_now_of_a_queued_pager_command_runs_the_command() {
     );
 }
 
-/// Gating (3c), bare Enter on the empty composer with a command queued. The
+/// Gating (3c), bare Enter on the empty composer with a command queued: the
 /// interrupt delivers the rows it can fold into the turn. It leaves the command
 /// queued. Sending the command as an interjection is what put `/pr-cleanup …`
 /// in the model's context as user text.

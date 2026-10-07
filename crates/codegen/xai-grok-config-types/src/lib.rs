@@ -341,7 +341,6 @@ pub struct ConsentGate {
 /// - Missing fields from old servers are ignored
 /// - New fields added in the future don't break existing clients
 /// - Callers can distinguish "server said false" from "server didn't say"
-///
 /// `remote = "Self"` makes the derives inherent functions. The trait impls
 /// below call them, and `Deserialize` folds `nfs_worktree` first.
 /// trait method, never the inherent `RemoteSettings::deserialize`.
@@ -1184,8 +1183,8 @@ mod tests {
         assert!(message.contains("campaign_id"), "{message}");
     }
 
-    /// The patch is what a campaign carries, so `campaign_id` must not be left
-    /// behind in it as just another key.
+    /// The patch is what a campaign carries, so `campaign_id` must not be
+    /// left behind in it as another key.
     #[test]
     fn a_remote_campaign_writes_the_canonical_id_and_never_the_alias() {
         let json = serde_json::to_value(CampaignOverride {

@@ -130,10 +130,9 @@ fn leads_with(query: &str, token: &str) -> bool {
     }
 }
 
-/// The effort or route rows `args_query` leads into, if any.
-///
-/// The longer typed token wins. On a tie the route phase wins: a shared name
-/// can equal another model's id, and the group row inserts that name.
+/// The effort or route rows `args_query` leads into, if any. The longer typed
+/// token wins. On a tie the route phase wins: a shared name can equal another
+/// model's id, and the group row inserts that name.
 fn sub_phase_items(models: &ModelState, args_query: &str) -> Option<Vec<ArgItem>> {
     let effort = detect_effort_phase(models, args_query);
     let route = detect_route_phase(models, args_query);
@@ -147,9 +146,8 @@ fn sub_phase_items(models: &ModelState, args_query: &str) -> Option<Vec<ArgItem>
     }
 }
 
-/// The model and the matched length when `args_query` is
-/// `"<reasoning-model> ..."`. Longest-name-first to disambiguate names that
-/// share a prefix.
+/// The model and the matched length when `args_query` is `"<reasoning-model>
+/// ..."`. Longest-name-first to disambiguate names that share a prefix.
 fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<(acp::ModelId, usize)> {
     // A model is typed by its id, or by its name when no other model has it. A
     // shared name leads to the route phase instead.
@@ -321,15 +319,13 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
 }
 
 /// One row per model name. Reasoning models get a trailing space in
-/// `insert_text` so the prompt widget chains into the effort sub-menu.
-///
-/// A name that several models share is one row. It inserts the name and a
-/// space, which opens the route phase: one row per provider serving it.
-///
-/// `favorites_only` narrows the list to the models the config marked, plus the
-/// current one. A picker that hides what the session is running reads as a
-/// model that went missing. A catalog with no favorite in it lists everything,
-/// so an unconfigured session sees the whole catalog as before.
+/// `insert_text` so the prompt widget chains into the effort sub-menu. A name
+/// that several models share is one row. It inserts the name and a space,
+/// which opens the route phase: one row per provider serving it.
+/// `favorites_only` narrows the list to the models the config marked, plus
+/// the current one. A picker that hides what the session is running reads as
+/// a model that went missing. A catalog with no favorite in it lists
+/// everything, so an unconfigured session sees the whole catalog as before.
 fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
     let narrow = favorites_only && models.available.values().any(is_favorite);
@@ -394,7 +390,7 @@ fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> 
             insert_text: chained_insert(&token, info),
             match_text: token,
             description: row_description(info),
-            // Only a provider that reports residency answers this.
+            // Only a provider that reports residency answers this, so the dot appears beside local models and nowhere else.
             loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
         });
     }

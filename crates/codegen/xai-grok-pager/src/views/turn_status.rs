@@ -651,13 +651,11 @@ impl<'a> GoalHarnessActivity<'a> {
 /// Longest retry reason the status bar carries.
 const RETRY_REASON_MAX: usize = 80;
 
-/// Label for a retry in progress.
-///
-/// `waiting_secs` is how much of the backoff is left, `Some(0)` or `None`
-/// once the retried request is in flight. Both halves matter: the reason says
-/// WHY the turn stalled, and the countdown says the wait is bounded. Without
-/// them the bar read `Retrying (attempt 1)…` for a whole minute and named
-/// neither.
+/// Label for a retry in progress. `waiting_secs` is how much of the backoff
+/// is left, `Some(0)` or `None` once the retried request is in flight. Both
+/// halves matter: the reason says WHY the turn stalled, and the countdown
+/// says the wait is bounded. Without them the bar read `Retrying (attempt
+/// 1)…` for a whole minute and named neither.
 fn retry_label(attempt: u32, max_retries: u32, reason: &str, waiting_secs: Option<u64>) -> String {
     let reason = reason.trim();
     let budget = if max_retries == u32::MAX {
@@ -850,10 +848,9 @@ pub fn should_show(
 /// Re-exports [`crate::util::format_duration`] under the old name for backwards compatibility within this module.
 pub use crate::util::format_duration as format_turn_timer;
 
-/// The output-rate segment of the status row: ` 42 tok/s`, or
-/// ` 3.4 tok/s (slow 41s)` once the rate is under the floor.
-///
-/// A rate a bounded number of keeps one decimal.
+/// The output-rate segment of the status row: ` 42 tok/s`, or ` 3.4 tok/s
+/// (slow 41s)` once the rate is under the floor. A rate a bounded number of
+/// keeps one decimal.
 fn format_output_rate(rate: crate::acp::tracker::OutputRate) -> String {
     let tps = rate.tokens_per_sec;
     let value = if tps < 10.0 {
@@ -870,7 +867,6 @@ fn format_output_rate(rate: crate::acp::tracker::OutputRate) -> String {
     }
 }
 
-/// Format a token count for compact display.
 fn format_tokens_short(tokens: u64) -> String {
     if tokens < 1000 {
         format!("{tokens}")
@@ -1160,7 +1156,7 @@ mod tests {
     #[test]
     fn bash_turn_still_renders_running_not_waiting() {
         let theme = Theme::current();
-        // A bash (non-inference) turn with no activity keeps its own "Running…" label — the view leaves it as `None`.
+        // A bash (non-inference) turn.
         let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, true, None);
         assert_eq!(label, "Running…");
     }
@@ -1438,10 +1434,10 @@ mod tests {
         assert_eq!(fg, Some(theme.accent_error), "under the floor is red");
     }
 
-    /// A row whose activity is "Waiting for response" has no stream to measure.
-    /// A reading left over from the call that just ended does not belong on it.
-    /// Least of all one that had gone yellow or red, which reads as the wait
-    /// itself being slow.
+    /// A row whose activity is "Waiting for response" has no stream to
+    /// measure. A reading left over from the call that ended does not
+    /// belong on it. Least of all one that had gone yellow or red, which
+    /// reads as the wait itself being slow.
     #[test]
     fn a_waiting_row_shows_no_output_rate_segment() {
         let slow = crate::acp::tracker::OutputRate {

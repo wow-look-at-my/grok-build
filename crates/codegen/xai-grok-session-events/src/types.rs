@@ -330,7 +330,7 @@ impl ToolCompletedSource {
 #[serde(rename_all = "snake_case")]
 pub enum InterjectionSource {
     Direct,
-    /// A queued (not-yet-running) prompt delivered into the running turn at its next safe point instead of waiting for the turn.
+    /// A queued (not-yet-running) prompt.
     Queue,
 }
 

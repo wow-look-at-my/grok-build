@@ -847,13 +847,12 @@ mod tests {
     use crate::implementations::grok_build::task::{completion_summary, terminal_snapshot};
     use crate::implementations::grok_build::task_output::terminal_subagent_result;
     use crate::types::output::TextOutput;
-    /// A reservation made by a caller that panics still reserves nothing.
-    ///
-    /// The guard type is spelled out rather than inferred: `parking_lot`'s
-    /// guard is the one that cannot report a poisoned lock. The next tool call
+    /// A reservation made by a caller that panics still reserves nothing. The
+    /// guard type is spelled out rather than inferred: `parking_lot`'s guard
+    /// is the one that cannot report a poisoned lock. The next tool call
     /// acquires the map and sees the reservation the panicked caller had
-    /// already recorded. A lock that poisoned would make every later tool call
-    /// on the session fail on a map of counters.
+    /// already recorded. A lock that poisoned would make every later tool
+    /// call on the session fail on a map of counters.
     #[test]
     fn a_panicking_reserver_leaves_the_map_open_to_the_next_tool_call() {
         let reservations = TaskCompletionReservations::default();
@@ -1978,7 +1977,7 @@ mod tests {
         let shared = res.into_shared();
         let reminder = TaskCompletionReminder;
         let output = ToolOutput::Dynamic(serde_json::Value::Null.into());
-        // First post-completion tool round, goal loop STILL ACTIVE: the bash completion surfaces (it rides a tool result — it interrupts nothing).
+        // First post-completion tool round, goal loop STILL ACTIVE: the bash completion surfaces (it rides a tool result — it interrupts nothing), while the subagent completion stays suppressed.
         let first = reminder.collect_reminders(shared.clone(), &output).await;
         assert_eq!(
             first.len(),

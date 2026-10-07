@@ -22,7 +22,7 @@ pub(crate) const MAX_THOUGHTS_WIDTH_MAX: i64 = 500;
 /// Registry key for `max_thoughts_width`; it is shared between the registry definition and the live-wrap-preview gate in the int stepper.
 pub(crate) const MAX_THOUGHTS_WIDTH_KEY: &str = "max_thoughts_width";
 
-// --------------------------------------------------------------------------- Int bounds for the output-rate floor.
+// Int bounds for the output-rate floor.
 const U32_FIELD_MAX: i64 = u32::MAX as i64;
 pub(crate) const OUTPUT_RATE_MAX_RETRIES_MIN: i64 = -1;
 pub(crate) const MIN_OUTPUT_TOKENS_PER_SEC_MIN: i64 = 0;
@@ -817,7 +817,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
         },
         SettingMeta {
-            // Persisted key stays `simple_mode`; the user-facing label distinguishes the PROMPT vim-mode (this setting).
+            // Persisted key stays `simple_mode`.
             key: "simple_mode",
             category: SettingCategory::Appearance,
             owner: SettingOwner::Shared,
@@ -1748,15 +1748,12 @@ pub fn default_settings() -> Vec<SettingMeta> {
     .collect()
 }
 
-/// One picker per harness model slot, under Models.
-///
-/// The rows are built from `xai_grok_models::HARNESS_MODEL_SLOTS` rather
-/// than written out here, so a slot added to the harness cannot ship
-/// without a settings row.
-///
-/// Each row is SHELL-owned and writes its slot into the `[models]` table.
-/// A restart is required, because a slot is resolved when a session actor
-/// is built and a running session keeps the model it started with.
+/// One picker per harness model slot, under Models. The rows are built from
+/// `xai_grok_models::HARNESS_MODEL_SLOTS` rather than written out here, so a
+/// slot added to the harness cannot ship without a settings row. Each row is
+/// SHELL-owned and writes its slot into the `[models]` table. A restart is
+/// required, because a slot is resolved when a session actor is built and a
+/// running session keeps the model it started with.
 fn harness_model_settings() -> Vec<SettingMeta> {
     xai_grok_models::HARNESS_MODEL_SLOTS
         .iter()

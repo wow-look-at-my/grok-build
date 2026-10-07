@@ -195,7 +195,7 @@
 
     #[test]
     fn turn_completed_reported_cost_attaches_to_agent_entry_and_session_total() {
-        // The durable `TurnCompleted` carries the per-turn `PromptUsage` cost (`cost_usd_ticks`).
+        // The durable `TurnCompleted` carries the per-turn `PromptUsage` cost.
         let mut app = make_app_with_agent("sess-cost");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
 
@@ -359,7 +359,7 @@
 
     #[test]
     fn reloaded_transcript_keeps_message_costs_without_resurrecting_an_old_total() {
-        // `ResponseCompleted` is persisted, so a reload replays it after its own message's chunks.
+        // `ResponseCompleted` is persisted.
         let mut app = make_app_with_agent("sess-reload");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();

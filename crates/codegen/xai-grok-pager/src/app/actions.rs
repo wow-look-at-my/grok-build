@@ -239,7 +239,7 @@ pub enum Action {
         /// Atomicity is documented on [`Effect::QueueInterject`].
         new_text: Option<String>,
     },
-    /// Interrupt the running turn with everything the user has queued.
+    /// Interrupt the running turn with everything the user has queued: bare.
     InterruptWithQueuedPrompts,
     /// A queued-row edit whose saved text is a complete pager builtin invocation: drop the row and run the command through the normal slash dispatch.
     /// The view only classifies; dispatch stays the sole execution owner.
@@ -515,7 +515,9 @@ pub enum Action {
     SetPageFlipOnSend(bool),
     /// Set `[ui].confirm_before_rewind` (default ON). Persists via `Effect::PersistSetting`.
     SetConfirmBeforeRewind(bool),
+    /// Set `[ui].stop_gate_unfinished_todos` (default ON). Persists via `Effect::PersistSetting`.
     SetStopGateUnfinishedTodos(bool),
+    /// Set `[ui].stop_gate_ci_failing` (default ON). Persists via `Effect::PersistSetting`.
     SetStopGateCiFailing(bool),
     /// Set whether the drain call site merges the run of leading queued `Prompt` entries into one turn instead of sending them one by one.
     /// SHARED-owned: updates the process-wide cache mirror (read by the drain site).
@@ -556,7 +558,7 @@ pub enum Action {
     SetMaxThoughtsWidth(i64),
     /// Set `[ui].min_output_tokens_per_sec`: the floor under which a model call is reissued. `0` turns the gate off.
     SetMinOutputTokensPerSec(i64),
-    /// Set `[ui].output_rate_sustained_secs`: how long the rate must stay under that floor.
+    /// Set `[ui].output_rate_sustained_secs`.
     SetOutputRateSustainedSecs(i64),
     /// Set `[ui].output_rate_window_secs`: the window the rate is averaged over.
     SetOutputRateWindowSecs(i64),
@@ -622,7 +624,7 @@ pub enum Action {
     SwitchAccount,
     /// User pressed login on the welcome screen.
     Login,
-    /// Abandon a mid-session login and return to the previous view, without quitting.
+    /// Abandon a mid-session login and return to the view, without quitting.
     CancelLogin,
     /// User submitted a manually-pasted auth token (loopback mode).
     SubmitAuthCode(String),

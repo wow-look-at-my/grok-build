@@ -991,12 +991,11 @@ impl SessionActor {
                 self.reminder_wrapper_tag(),
             ));
     }
-    /// Whether the built-in todo-stop gate runs for this session.
-    ///
-    /// The switch is the persisted `[ui].stop_gate_unfinished_todos` toggle,
-    /// which ships ON — so the gate must NOT be ANDed. This holds with the
-    /// opt-in `todo_gate.enabled` flag, or the shipped default never fires.
-    /// That flag (remote `todo_gate_enabled`, or the `--todo-gate` CLI
+    /// Whether the built-in todo-stop gate runs for this session. The switch
+    /// is the persisted `[ui].stop_gate_unfinished_todos` toggle, which ships
+    /// ON — so the gate must NOT be ANDed with the opt-in
+    /// `todo_gate.enabled` flag, or the shipped default never fires. That
+    /// flag (remote `todo_gate_enabled`, or the `--todo-gate` CLI
     /// force-enable) stays an opt-in ON TOP: it turns the gate back on for a
     /// session whose persisted toggle is off.
     pub(super) fn todo_stop_gate_active(&self) -> bool {

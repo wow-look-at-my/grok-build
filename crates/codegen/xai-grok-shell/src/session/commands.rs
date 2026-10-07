@@ -824,7 +824,7 @@ pub enum SessionCommand {
         /// Edit and interject are one atomic op: a stale version no-ops the whole thing, edited text included.
         new_text: Option<String>,
     },
-    /// Deliver every deliverable queued prompt into the running turn NOW and cancel the in-flight model stream so the turn loop drains them.
+    /// Deliver every deliverable queued prompt into the running turn NOW.
     DeliverQueuedPromptsNow,
     Cancel(CancelOptions),
     Shutdown(ShutdownKind),
@@ -878,7 +878,7 @@ pub enum SessionCommand {
     /// Capture a `/todo` request as items on the session's todo list.
     TodoCapture {
         request: String,
-        /// `/TODO` rather than `/todo`: the items go to the top of the list and the notice.
+        /// `/TODO` rather than `/todo`.
         urgent: bool,
         /// Client-minted id for this capture. Names the task row the client opened, so progress updates reach it.
         capture_id: String,

@@ -1191,6 +1191,8 @@ mod payload_alias_tests {
         }
     }
 
+    /// A required field the payload omits entirely stays required: the shadow
+    /// must not turn a missing index into one index.
     #[test]
     fn a_rewind_point_with_no_prompt_index_at_all_is_still_an_error() {
         for json in [r#"{"createdAt":"x"}"#, r#"{"created_at":"x"}"#] {

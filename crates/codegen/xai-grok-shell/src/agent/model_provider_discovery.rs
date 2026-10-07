@@ -53,13 +53,11 @@ impl DiscoveredModel {
     }
 }
 
-/// Build the catalog entries for what discovery found.
-///
-/// A `[model.<id>]` block that routes to a listed model is merged with it,
-/// under the block's own key. Every field the block sets wins. The listing
-/// fills only the fields the block left unset, so a block that only renames a
-/// model still gets the window. The listing capabilities the runtime
-/// reported.
+/// Build the catalog entries for what discovery found. A `[model.<id>]` block
+/// that routes to a listed model is merged with it, under the block's own
+/// key. Every field the block sets wins. The listing fills only the fields
+/// the block left unset. A block that only renames a model still gets the
+/// window and capabilities the runtime reported.
 pub(crate) fn resolve_discovered_models(
     cfg: &config::Config,
     discovered: &IndexMap<String, DiscoveredModel>,
@@ -271,11 +269,10 @@ impl ConfigModelOverride {
     }
 }
 
-/// Ask every autodetecting provider for its models.
-///
-/// Returns what every listing named, keyed `<provider>/<slug>`. A provider that
-/// declares no endpoint, that cannot be reached, or that answers with an empty
-/// listing contributes nothing and never fails the others.
+/// Ask every autodetecting provider for its models. Returns what every
+/// listing named, keyed `<provider>/<slug>`. A provider that declares no
+/// endpoint, that cannot be reached, or that answers with an empty listing
+/// contributes nothing and never fails the others.
 pub(crate) async fn discover_provider_models(
     cfg: &config::Config,
 ) -> IndexMap<String, DiscoveredModel> {
@@ -418,10 +415,9 @@ pub(crate) fn has_local_runtime(cfg: &config::Config) -> bool {
 }
 
 /// Re-read which of every local provider's models are resident, keyed by the
-/// catalog key discovery gave them.
-///
-/// Only residency: the window, the capabilities and the price do not change
-/// while the runtime is up. Re-reading them costs an `/api/show` per model.
+/// catalog key discovery gave them. Only residency: the window, the
+/// capabilities and the price do not change while the runtime is up.
+/// Re-reading them costs an `/api/show` per model.
 pub(crate) async fn refresh_local_residency(cfg: &config::Config) -> IndexMap<String, bool> {
     let mut out = IndexMap::new();
     for (id, provider) in &cfg.model_providers {
@@ -467,12 +463,11 @@ struct Claim<'a> {
     routes_to_provider: bool,
 }
 
-/// The `[model.<id>]` block that owns a listed model. The model id decides.
-///
-/// A block that names another provider does not claim. A block that names no
-/// provider claims the listing of the provider on its URL.
-/// its URL, it claims the first listing of its model id. The caller lets one
-/// block claim one listing only.
+/// The `[model.<id>]` block that owns a listed model. The model id decides. A
+/// block that names another provider does not claim. A block that names no
+/// provider claims the listing of the provider on its URL. its URL, it claims
+/// the first listing of its model id. The caller lets one block claim one
+/// listing only.
 fn claiming_block<'a>(cfg: &'a config::Config, provider_id: &str, slug: &str) -> Option<Claim<'a>> {
     let provider = cfg.model_providers.get(provider_id)?;
     cfg.config_models
@@ -520,12 +515,10 @@ fn normalize_url(url: &str) -> String {
     url.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
-/// Fetch and parse a listing off the async path.
-///
-/// `reqwest::blocking` builds its own runtime, which panics when it is
-/// constructed inside an async context, so the request runs on a dedicated OS
-/// thread. That is the same reason `resolve_context_window_from_provider`
-/// spawns one.
+/// Fetch and parse a listing off the async path. `reqwest::blocking` builds
+/// its own runtime, which panics when it is constructed inside an async
+/// context, so the request runs on a dedicated OS thread. That is the same
+/// reason `resolve_context_window_from_provider` spawns one.
 async fn fetch_listing(
     dialect: ModelsListDialect,
     url: &str,

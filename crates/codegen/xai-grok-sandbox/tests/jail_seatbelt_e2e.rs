@@ -130,12 +130,11 @@ fn the_seatbelt_jail_hands_the_host_worker_fd_and_its_env_to_the_jailed_process(
 }
 
 /// The whole point of the fd contract, end to end on macOS. A process inside
-/// the real Seatbelt jail holds only the fd number the jail handed it. It
-/// reaches the real host worker and gets a framed answer back. That worker is
-/// the shipped worker loop, running as a real unsandboxed child.
-///
-/// The answer is checked for SHAPE, not content. A runner with no `gh` (and no
-/// credentials) is answered by the worker's nothing-usable sentinel. That
+/// the real Seatbelt jail, holding only the fd number the jail handed it,
+/// reaches the real host worker. The shipped worker loop running as a real
+/// unsandboxed child. It gets a framed answer back. The answer is checked for
+/// SHAPE, not content: a runner with no `gh` (and no credentials) is answered
+/// by the worker's nothing-usable sentinel. The answer is also checked that
 /// still proves the jail carried the connection. This is the claim here.
 #[test]
 fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
@@ -147,7 +146,7 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     let grok_home = fixture_dir("worker-home");
     std::fs::create_dir_all(grok_home.join("sandbox-tmp")).unwrap();
 
-    // The host side: the shipped worker loop in a real child of this binary, its socket end dup2'd onto a known fd. What `spawn_ci_host` does.
+    // The host side.
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
     let theirs_fd = theirs.into_raw_fd();
     const WORKER_FD: i32 = 3;
@@ -181,7 +180,7 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     xai_grok_sandbox::ci_host::inherit_across_exec(client_fd).expect("clear close-on-exec");
     std::mem::forget(ours); // the jailed child owns it from here.
 
-    // The jailed side: this test binary, in the jail, resolving the worker the way the shipped pager does —.
+    // The jailed side.
     let answer_path = work.join("jail-answer.txt");
     let mut jailed = plan("", &grok_home, &work);
     jailed.self_exe = std::env::current_exe().expect("current test binary");
@@ -259,7 +258,7 @@ fn seatbelt_worker_self_entry() {
     xai_grok_sandbox::ci_host::run_ci_host_worker_on(stream);
 }
 
-/// Delegate the parent jails: find the worker the way the shipped pager does,
+/// Delegate the parent jails. Find the worker the way the shipped pager does,
 /// ask it one fixed-shape question. Write what came back where the parent can
 /// read it (the jailed cwd is a granted mount).
 #[test]

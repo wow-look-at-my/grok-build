@@ -147,7 +147,7 @@ fn budget_permits_exactly_max_blocks_then_releases() {
 #[test]
 fn toggle_off_blocks_nothing_at_any_budget_state() {
     // The persisted `[ui].stop_gate_unfinished_todos` toggle is the master
-    // switch.
+    // switch: with it off, the todo gate must never block.
     let nudge = TodoGateDecision::Nudge {
         reminder: String::new(),
         reason: TodoGateReason::InFlight,
@@ -290,7 +290,7 @@ fn as_input_completed_and_cancelled_are_dropped() {
     );
     let input = c.as_input();
     assert!(input.pending.is_empty());
-    // Insertion-order partition is computed AFTER completed / cancelled are filtered out.
+    // Insertion-order partition is computed AFTER completed / cancelled are filtered out: `first-ip`.
     assert_eq!(contents(&input.in_progress_backed), vec!["first-ip"]);
     assert_eq!(contents(&input.in_progress_unbacked), vec!["second-ip"]);
 }

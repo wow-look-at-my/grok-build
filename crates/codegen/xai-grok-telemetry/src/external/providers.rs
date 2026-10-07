@@ -63,7 +63,7 @@ impl DedicatedRuntime {
             };
             rt.block_on(async move {
                 while let Some(future) = rx.recv().await {
-                    // This is `opentelemetry_sdk::runtime::Runtime::spawn`: the trait hands over a future whose Output is `()` and gives back no handle.
+                    // This is `opentelemetry_sdk::runtime::Runtime::spawn`: the trait hands over a future whose Output is `()` and gives back no handle to anybody.
                     #[allow(clippy::disallowed_methods)]
                     tokio::spawn(future);
                 }

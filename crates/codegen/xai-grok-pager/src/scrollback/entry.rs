@@ -83,7 +83,7 @@ pub struct ScrollbackEntry {
     /// When this entry finished running (monotonic). Used by the renderer to flash the accent briefly after completion.
     pub finished_at: Option<std::time::Instant>,
 
-    /// The API-reported cost of this response, in USD ticks (1e10 per USD).
+    /// The API-reported cost of this response, in USD ticks.
     pub cost_usd_ticks: Option<i64>,
 
     pub cache_hit_percent: Option<u8>,

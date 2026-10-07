@@ -218,6 +218,7 @@ impl AgentView {
                         self.prompt.slash_close();
                         slash_accepted_send = true;
                     } else {
+                        // Whether to wait for an argument is the registry's two-bit contract, not the trailing space.
                         let had_selection = snap.selection().is_some();
                         self.prompt.slash_commit_preview();
                         self.prompt.accept_slash_completion(&self.session.models);

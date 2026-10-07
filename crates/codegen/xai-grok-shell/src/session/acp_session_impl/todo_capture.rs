@@ -13,7 +13,7 @@ const MAX_MODEL_CALLS: usize = 4;
 const MAX_TOOL_CALLS: usize = 8;
 /// Bytes of a read-only tool's output it sees. Its job is to name the work, not to read a file into a todo item.
 const TOOL_RESULT_BUDGET: usize = 4_000;
-/// Room the loop's own turns need on top of the conversation snapshot.
+/// Room the loop's own turns need on top of the conversation snapshot: up to [`MAX_TOOL_CALLS`] results of [`TOOL_RESULT_BUDGET`] bytes each.
 const LOOP_GROWTH_RESERVE_TOKENS: u64 = 16_000;
 
 /// The canonical name of the append-capable task-list tool.
@@ -51,9 +51,9 @@ pub enum TodoCaptureError {
 }
 
 /// Tool kinds the capture agent may run. Narrower than the main turn's
-/// read-only set (`prepare_tool_call`). `EnterPlan`/`ExitPlan` change session
-/// mode, and `AskUser` blocks on a human. A side agent that nobody watches
-/// must do neither.
+/// read-only set (`prepare_tool_call`): `EnterPlan`/`ExitPlan` change session
+/// mode and `AskUser` blocks on a human, neither of which a side. Agent
+/// nobody is watching may do.
 fn is_capture_readable(kind: ToolKind) -> bool {
     matches!(
         kind,
@@ -69,14 +69,13 @@ fn is_capture_readable(kind: ToolKind) -> bool {
     )
 }
 
-/// Item contents from a `todo_write` call, in order. Everything else the model
-/// asked for is dropped: ids, statuses, and `merge`.
-///
-/// This is the gate that holds the one-mutation rule. The capture agent is
-/// handed the session's real todo tool (so the request stays byte-identical to
-/// the main turn's and keeps its prompt cache). This means a `merge: false`
-/// replace, a status flip, or a reworded existing item are all one argument
-/// away — until they come through here.
+/// Item contents from a `todo_write` call, in order. Everything else the
+/// model asked for is dropped: ids, statuses, and `merge`. This is the gate
+/// that holds the one-mutation rule. The capture agent is handed the
+/// session's real todo tool (so the request stays byte-identical to the main
+/// turn's and keeps its prompt cache). This means a `merge: false` replace,
+/// a status flip, or a reworded existing item are all one argument away —
+/// until they come through here.
 fn contents_from_todo_write_args(args: &serde_json::Value) -> Vec<String> {
     args.get("todos")
         .and_then(serde_json::Value::as_array)
@@ -99,13 +98,12 @@ fn contents_from_todo_write_args(args: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Tool-call arguments as JSON, tolerating what models actually emit.
-///
-/// Mirrors the main turn's `prepare_tool_call`: empty arguments mean `{}`, and
-/// a run of concatenated objects (`{...}{...}`, which several models produce
-/// under load) yields the first one rather than nothing. Anything still
-/// unparseable becomes `{"raw": ...}`. The same shape the main turn hands a
-/// tool, so the failure is the tool's to report, not a silent drop here.
+/// Tool-call arguments as JSON, tolerating what models emit. Mirrors the main
+/// turn's `prepare_tool_call`: empty arguments mean `{}`, and a run of
+/// concatenated objects (`{...}{...}`, which several models produce under
+/// load) yields the first one rather than nothing. Anything still unparseable
+/// becomes `{"raw": ...}`. The same shape the main turn hands a tool, so the
+/// failure is the tool's to report, not a silent drop here.
 fn parse_tool_arguments(arguments: &str) -> serde_json::Value {
     use crate::session::helpers::tool_input_parsing::{
         normalize_empty_arguments, try_extract_concatenated_json_objects,
@@ -133,9 +131,9 @@ const CAPTURE_ID_PREFIX: &str = "capture";
 /// Item id prefix the goal harness mints for the items it copies off the planner's own list.
 pub(super) const PLAN_SEED_ID_PREFIX: &str = "plan";
 
-/// [`add_only_todo_args`] with an explicit id prefix. Callers that append
-/// their own kind of item (a `/todo` capture, the goal planner's seed) thus
-/// keep their provenance. They still share one append-only argument shape.
+/// [`add_only_todo_args`] with an explicit id prefix. So callers that append
+/// their own kind of item (a `/todo` capture, the goal planner's seed) keep
+/// their provenance while sharing one append-only argument shape.
 pub(super) fn add_only_todo_args_with_prefix(
     contents: &[String],
     urgent: bool,
@@ -154,18 +152,15 @@ pub(super) fn add_only_todo_args_with_prefix(
     serde_json::json!({ "merge": true, "prepend": urgent, "todos": todos })
 }
 
-/// What the main agent is told after a capture lands.
-///
-/// The model treats an item it did not write as somebody else's idea, and
-/// cancels it as out of scope. Nothing on the list carries who put it there.
-/// The correction has to arrive as its own message: the user assigned this,
-/// which makes it in scope by definition.
-///
-/// Both variants differ in what they carry, not just in tone. `/todo` is
-/// explicitly not-now, so naming the items would pull attention onto work the
-/// user deferred. It reports the count and points at the list. `/TODO` is
-/// "next", so the items ride along and the agent needs no second call to know
-/// what it is about to do.
+/// What the main agent is told after a capture lands. The model treats an
+/// item it did not write as somebody else's idea, and cancels it as out of
+/// scope. Nothing on the list carries who put it there. The correction has to
+/// arrive as its own message: the user assigned this, which makes it in scope
+/// by definition. Both variants differ in what they carry, not in tone.
+/// `/todo` is explicitly not-now, so naming the items would pull attention
+/// onto work the user deferred. It reports the count and points at the list.
+/// `/TODO` is "next", so the items ride along and the agent needs no second
+/// call to know what it is about to do.
 fn captured_todos_reminder(urgent: bool, todo_tool: &str, added: &[String]) -> String {
     let one = added.len() == 1;
     if urgent {
@@ -234,7 +229,7 @@ enum CaptureAction {
 struct CaptureToolOutcome {
     /// The tool result text the capture agent sees next turn.
     result_text: String,
-    /// Contents that actually landed on the todo list.
+    /// Contents that landed on the todo list.
     appended: Vec<String>,
     /// Whether this call came out of the read-only budget.
     spent_a_read: bool,
@@ -254,14 +249,13 @@ impl CaptureToolOutcome {
     }
 }
 
-/// Classify one tool call. This is the enforcement: a call that is neither the
-/// todo tool nor a readable one never reaches dispatch. The refusals are
-/// written to steer the next turn toward the write, because a refusal the model
-/// cannot act on just burns the turn budget.
-///
-/// `todo_tool` is the name the todo tool is advertised under in THIS session.
-/// The model calls it by that name. It is not the canonical `todo_write`,
-/// which a `name_override` can rename out from under both.
+/// Classify one tool call. This is the enforcement: a call that is neither
+/// the todo tool nor a readable one never reaches dispatch. The refusals are
+/// written to steer the next turn toward the write, because a refusal the
+/// model cannot act on burns the turn budget. `todo_tool` is the name the
+/// todo tool is advertised under in THIS session, which is the name. The
+/// model calls it by — not the canonical `todo_write`, which a
+/// `name_override` can rename out from under both.
 fn capture_action(
     name: &str,
     kind: Option<ToolKind>,
@@ -301,7 +295,7 @@ fn echoed_response_items(
     }
 }
 
-/// The one nudge a run spends when the model answers with prose instead of
+/// The nudge a run spends when the model answers with prose instead of
 /// calling the todo tool. Cheaper models do this; a second empty answer is
 /// taken as "this model will not call it" rather than nudged again.
 fn no_tool_call_nudge(tag: &str, todo_tool: &str) -> ConversationItem {
@@ -417,7 +411,7 @@ impl SessionActor {
         let tag = self.reminder_wrapper_tag();
         let conversation = self.chat_state_handle.get_conversation().await;
         // Fit the snapshot to THIS model's window rather than sending the
-        // conversation whole. Otherwise a small-window model fails the
+        // conversation whole. A small-window model would otherwise fail the
         // capture with a context-length error. This is deterministic and
         // never retried.
         let mut items = crate::session::helpers::session_recap::budget_instruction_items(
@@ -433,7 +427,7 @@ impl SessionActor {
                 "todo capture: no conversation fit this model's window; capturing from the request alone"
             );
         }
-        // Same tools as the main turn: they serialize into the cached prefix.
+        // Same tools as the main turn.
         let tool_specs = self.turn_base_tool_specs(&self.prepare_tool_definitions().await);
         let hosted_tools = self.hosted_tools_for_turn();
         // The client minted this id and named its task row after it.
@@ -454,7 +448,7 @@ impl SessionActor {
         loop {
             if turns_done >= MAX_MODEL_CALLS {
                 if added.is_empty() && append_error.is_none() && !refuse_reads {
-                    // Budget spent (prose, refusals, or reads) without a write: one last turn.
+                    // Budget spent (prose, refusals, or reads) without a write.
                     items.push(write_only_retry_nudge(tag, &todo_tool, request));
                     refuse_reads = true;
                     no_write_reason =
@@ -615,8 +609,7 @@ impl SessionActor {
     /// The name this session advertises the append-capable todo tool under,
     /// or why `/todo` cannot run here. Kind alone is not enough: opencode's
     /// `todowrite` is also [`ToolKind::Plan`] and replaces the whole list
-    /// instead of merging into it. An append cannot be expressed through
-    /// it.
+    /// instead of merging into it. An append cannot be expressed through it.
     pub(super) async fn resolve_capture_todo_tool(
         &self,
         bridge: &xai_grok_tools::bridge::ToolBridge,
@@ -699,14 +692,13 @@ impl SessionActor {
         }
     }
 
-    /// The item contents in a todo-tool call, whatever the model spelled them.
-    ///
-    /// Parses through the bridge first, which reverse-maps client-facing
-    /// parameter names to canonical ones. A harness can rename `todos` the
-    /// same way it renames the tool. The bridge yields the typed input that
-    /// the tool itself sees. Falls back to reading the JSON directly, so a call
-    /// the strict parser rejects (an extra field, a status the schema does not
-    /// know) still contributes its content instead of being dropped.
+    /// The item contents in a todo-tool call, whatever the model spelled
+    /// them. Parses through the bridge first, which reverse-maps
+    /// client-facing parameter names to canonical ones. A harness may rename
+    /// `todos` the same way it renames the tool. It yields the typed input
+    /// the tool itself would see. Falls back to reading the JSON directly, so
+    /// a call the strict parser rejects (an extra field, a status the schema
+    /// does not know) still contributes its content instead of being dropped.
     async fn capture_todo_contents(
         &self,
         todo_tool: &str,
@@ -735,9 +727,9 @@ impl SessionActor {
         contents_from_todo_write_args(args)
     }
 
-    /// Run the sanitized append through the session's own todo tool. Then the
-    /// list, its persisted state, and the client's plan view all move as they
-    /// do when the main agent writes a todo. Dispatch is by the
+    /// Run the sanitized append through the session's own todo tool. Do this
+    /// so the list, its persisted state. And the client's plan view all move
+    /// the way they do when the main agent writes a todo. Dispatch is by the
     /// session's advertised name with canonical parameter names. The registry
     /// reverse-maps client names onto canonical ones and leaves everything
     /// else alone, so canonical keys arrive as themselves under any rename.
@@ -780,9 +772,9 @@ mod tests {
         assert_ne!(id, other["todos"][0]["id"].as_str().unwrap());
     }
 
-    /// `/TODO` differs from `/todo` in exactly one argument. Minted ids, forced
-    /// pending and merge on hold the one-mutation rule. Each of them is the
-    /// same at the front of the list as at the back.
+    /// `/TODO` differs from `/todo` in exactly one argument. Everything that
+    /// holds the one-mutation rule — minted ids, forced pending, merge on. It
+    /// is the same at the front of the list as at the back.
     #[test]
     fn urgent_args_prepend_and_change_nothing_else() {
         let args = add_only_todo_args(&["ship the fix".to_owned()], true);
@@ -840,8 +832,8 @@ mod tests {
 
     /// A harness that renames the todo tool renames it for the model too, so
     /// the append is recognized by the session's advertised name. Comparing
-    /// against the canonical `todo_write` instead would refuse the one call
-    /// the run exists to make.
+    /// against the canonical `todo_write` instead would refuse the call the
+    /// run exists to make.
     #[test]
     fn the_append_is_recognized_under_a_renamed_todo_tool() {
         assert_eq!(
@@ -894,7 +886,7 @@ mod tests {
         );
     }
 
-    /// What models actually emit for arguments: nothing, a run of concatenated
+    /// What models emit for arguments: nothing, a run of concatenated
     /// objects, or something that is not JSON at all. The main turn tolerates
     /// all of them; a capture that dropped them would silently lose the write.
     #[test]
@@ -983,8 +975,8 @@ mod tests {
         ] {
             assert!(is_capture_readable(kind), "{kind:?} must be runnable");
         }
-        // Mutations, and both the main turn counts as read-only but a side
-        // agent must not have: plan-mode switches and asking a human.
+        // Mutations, and those the main turn counts as read-only but a
+        // side agent must not have: plan-mode switches and asking a human.
         for kind in [
             ToolKind::Edit,
             ToolKind::Write,
@@ -1092,7 +1084,7 @@ mod tests {
     /// The items ride along on `/TODO` (it is the next thing the agent does,
     /// so it needs no second call to find out what) and are deliberately left
     /// off `/todo`, where naming them would pull attention onto work the user
-    /// just deferred.
+    /// deferred.
     #[test]
     fn only_the_urgent_reminder_carries_the_items() {
         let added = ["add a second remote".to_owned()];

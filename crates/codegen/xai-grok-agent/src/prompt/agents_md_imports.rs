@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-/// How many hops an import chain may take.
+/// How many hops an import chain may take. A imports B imports C is a later depth. Claude Code stops at `MAX_IMPORT_DEPTH` and so does this.
 pub const MAX_IMPORT_DEPTH: usize = 5;
 
 /// A resolved import: the file an `@ref` named, and the text it holds.
@@ -124,12 +124,10 @@ fn canonical(path: &Path) -> PathBuf {
 }
 
 /// Collect what `content` imports, depth-first, in the order the refs appear.
-///
-/// `seen` carries every path already delivered by this discovery pass. This
-/// includes the files discovery found on its own. So an import of a file
-/// that is already in the prompt adds nothing. A cycle terminates.
-///
-/// A gitignored file IS imported. The ref is a deliberate instruction to read
+/// `seen` carries every path already delivered by this discovery pass —
+/// including the files discovery found on its own — so an import of a file.
+/// That is already in the prompt adds nothing. A cycle terminates. A
+/// gitignored file IS imported. The ref is a deliberate instruction to read
 /// it, which is what makes an ignored local-override file importable at all.
 pub fn collect_imports(
     importer: &Path,
@@ -274,6 +272,7 @@ mod tests {
             .iter()
             .map(|file| file.content.lines().next().unwrap())
             .collect();
+        // One depth is the importer itself, so more hops are taken.
         assert_eq!(bodies, vec!["body-2", "body-3", "body-4", "body-5"]);
     }
 

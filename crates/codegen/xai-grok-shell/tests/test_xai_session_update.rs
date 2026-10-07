@@ -116,9 +116,9 @@ async fn test_xai_session_notification_storage_roundtrip() {
     }
 }
 
-/// Test that a `TurnCompleted` terminal round-trips through storage. This is the
-/// persistence half of the "stuck on Waiting…" fix. The durable terminal must
-/// survive `updates.jsonl` and reload as a replayable `_x.ai/session/update`.
+/// Test that a `TurnCompleted` terminal round-trips through storage. The
+/// persistence half of the "stuck on Waiting…" fix, where the durable terminal
+/// must survive `updates.jsonl` and reload as a replayable `_x.ai/session/update`.
 #[tokio::test]
 async fn test_turn_completed_round_trips_through_storage() {
     let temp_dir = TempDir::new().unwrap();

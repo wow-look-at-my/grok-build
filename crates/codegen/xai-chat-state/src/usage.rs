@@ -206,7 +206,7 @@ mod tests {
         // The top-right session-cost indicator is the cumulative sum of every API-reported cost in the per-session ledger — not the last call.
         let mut ledger = UsageLedger::default();
 
-        ledger.record_main_loop_call("m", &tu(1, 1), None, Some(0));
+        ledger.record_main_loop_call("m", &tu(1, 1), None, Some(0)); // One wire → unreported
         assert_eq!(ledger.totals.cost_usd_ticks, None);
         assert_eq!(ledger.totals.cost_missing_calls, 1);
 

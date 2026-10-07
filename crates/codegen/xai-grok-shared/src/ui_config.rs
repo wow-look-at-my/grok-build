@@ -59,7 +59,7 @@ pub struct UiConfig {
     /// Gate the model's turn end on red CI for the branch it pushed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_gate_ci_failing: Option<bool>,
-    /// Reissue a model call whose output rate stays under this many tokens per second.
+    /// Reissue a model call whose output rate stays under this many tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<u32>,
     /// How long the rate must stay under the floor before the request is reissued. `None` = 10 seconds.
@@ -68,7 +68,7 @@ pub struct UiConfig {
     /// Trailing window the output rate is averaged over. `None` = 10 seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate_window_secs: Option<u32>,
-    /// How many times one model call is reissued for slow output before the response is accepted.
+    /// How many times one model.
     #[serde(
         default,
         with = "xai_grok_config_types::retry_budget",

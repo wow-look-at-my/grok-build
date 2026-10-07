@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Stamps the commit into this crate, which is where `version_with_commit()`
-/// reads it. Every crate that reports a version links this one.
+/// reads it. Every crate that reports a version links this.
 fn main() {
     if let Some(head) = git_head(Path::new(env!("CARGO_MANIFEST_DIR"))) {
         println!("cargo:rerun-if-changed={}", head.display());

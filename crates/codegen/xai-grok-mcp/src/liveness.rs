@@ -170,13 +170,13 @@ async fn watch_transport(
                             server = %server_name_for_task,
                             "transport liveness watcher detected closed transport",
                         );
-                        // Clear our own slot before exiting so a subsequent `arm_liveness_watcher` can install a fresh handle. Self-cancel-by-drop.
+                        // Clear our own slot before exiting so a subsequent `arm_liveness_watcher` can install a fresh handle.
                         clear_liveness_slot(&liveness_slot);
 
                         if on_event
                             .send(McpClientEvent::TransportClosed {
                                 server: server_name_for_task.clone(),
-                                // Bind the event to THIS client instance so the dispatcher can skip evicting a replacement registered.
+                                // Bind the event to THIS client instance.
                                 client_id: client.client_id(),
                             })
                             .is_err()

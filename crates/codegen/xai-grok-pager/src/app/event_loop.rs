@@ -2212,7 +2212,7 @@ pub(crate) async fn run(
 
             Some(()) = ci_change_rx.recv() => {
                 presenter.request(false);
-                // A run that started pulses.
+                // A run that started pulses, `tick_demand`.
                 schedule_tick(&mut animation_tick_at, &app, tick_interval);
             }
 
@@ -2825,11 +2825,10 @@ fn after_task_complete_dispatch(
 
 /// The `(repo cwd, branch)` whose CI dot the status bar is showing, or `None`
 /// when no dot is drawn. Another view is up, or the cwd has no branch (not a
-/// repo, or detached HEAD, which renders as `detached` with no dot).
-///
-/// Resolved exactly as the renderer resolves it: the agent's own branch
-/// first, then the cwd's cached git info. Thus the timer can never poll a
-/// branch the dot is not reporting.
+/// repo, or detached HEAD, which renders as `detached` with no dot). Resolved
+/// exactly as the renderer resolves it — the agent's own branch first, then
+/// the cwd's cached git info. So the timer can never poll a branch the dot
+/// isn't reporting.
 fn ci_dot_target(app: &AppView) -> Option<(std::path::PathBuf, String)> {
     let ActiveView::Agent(id) = app.active_view else {
         return None;

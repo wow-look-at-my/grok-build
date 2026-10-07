@@ -74,7 +74,6 @@ pub(crate) enum McpInitWait {
 }
 
 /// Poll `mcp_state` until initialization settles, giving up after `budget`.
-///
 /// The budget is the point of this function. A server that keeps failing gets
 /// re-initialized, which puts the state back in flight. A poll with no
 /// deadline never returns — and its caller is a prompt waiting to run.

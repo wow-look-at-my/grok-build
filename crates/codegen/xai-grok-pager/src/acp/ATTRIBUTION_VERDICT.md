@@ -3,7 +3,7 @@
 Status: VERIFIED (true with caveats) for the shipped `set_last_turn_cost`, with residual eviction risk reduced by a code change.
 
 ## Claim
-"Attribution logic is order-independent but relies on prompt IDs being present and stable. When no prompt key is available it falls back to the most-recently-finished entry, which is unambiguous only when a single turn is in flight. The bounded prompt→entry map (max 8 entries) means a very late TurnCompleted beyond that window will not attach its cost. This is an acceptable trade-off to bound memory."
+"Attribution logic is order-independent but relies on prompt IDs being present and stable; when no prompt key is available it falls back to the most-recently-finished entry, which is unambiguous only when a single turn is in flight. The bounded prompt→entry map (max 8 entries) means a very late TurnCompleted beyond that window would not attach its cost; this is an acceptable trade-off to bound memory."
 
 ## Analysis (grounded in shipped code)
 
@@ -13,17 +13,17 @@ Status: VERIFIED (true with caveats) for the shipped `set_last_turn_cost`, with 
 - branch (2) the prompt→entry map `finished_prompt_costs` recorded by `finish_turn`.
 - branch (3) the keyless fallback `last_finished_agent_entry`.
 
-For a KEYED notification the order of `TurnCompleted` vs. `finish_turn` does not matter. Before the driver's `PromptResponse` finish it reaches the same streaming entry via branch (1) (prompt == running turn). After finish it reaches the same finished entry via branch (2) (prompt in map). So the keyed path is order-independent — CONTINGENT on prompt IDs being present and stable.
+For a KEYED notification the order of `TurnCompleted` vs. `finish_turn` does not matter. Before the driver's `PromptResponse` finish it reaches the same streaming entry via branch (1) (prompt == running turn). This also covers after finish it reaches the same finished entry via branch (2) (prompt in map). So the keyed path is order-independent — CONTINGENT on prompt IDs being present and stable.
 
-Key caveat: the shipped call site always passes `Some(&prompt_id)` from the wire (previously session_notification.rs:347). As a result, the keyless path is defensively dead today. If a key is ever absent, order-independence degrades.
+Key caveat: the shipped call site always passes `Some(&prompt_id)` from the wire (previously session_notification.rs:347). The keyless path is defensively dead today. If a key is ever absent, order-independence degrades.
 
 ### 2. Keyless fallback (branch 3) ambiguity
-Branch (3) is reached only when branches (1) and (2) miss. Branch (1) requires a streaming block to attach. So in the idle state (nothing streaming) with a map miss, branch (3) is the only path. `last_finished_agent_entry` is cleared whenever a new agent message starts streaming (`handle_agent_chunk`). As a result, branch (3) is unambiguous iff exactly one turn has finished since the last clear. With multiple finished turns its attribution to the older turn is wrong.
+Branch (3) is reached only when branches (1) and (2) miss. Branch (1) requires a streaming block to attach. So in the idle state (nothing streaming) with a map miss, branch (3) is the only path. `last_finished_agent_entry` is cleared whenever a new agent message starts streaming (`handle_agent_chunk`). Branch (3) is unambiguous iff exactly one turn has finished since the last clear. With multiple finished turns its attribution to the older turn is wrong.
 
 ### 3. Eviction: the claim UNDERSTATES it (corrected)
 A prompt-keyed notification whose key is older than the 8-entry bounded map (evicted via `len() > 8 → remove(0)` in `finish_turn`):
-- during a newer stream → dropped (branch prompt-mismatch rejects, branch multiple sees `last_finished_agent_entry` already cleared).
-- IDLE → mis-attributed to the most-recently-finished entry via branch (3) — an ACTIVE corruption, not a benign "will not attach its cost."
+- during a newer stream → dropped (the still-streaming `current_agent_msg` prompt-mismatch rejects, the keyless fallback sees `last_finished_agent_entry` already cleared).
+- IDLE → mis-attributed to the most-recently-finished entry via branch (3) — an ACTIVE corruption, not a benign "would not attach its cost."
 
 The claim's "acceptable trade-off" phrasing understates this idle-time mis-attribution.
 

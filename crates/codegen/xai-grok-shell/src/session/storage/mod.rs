@@ -918,6 +918,7 @@ pub struct CopySessionOptions {
     pub strip_reasoning: bool,
     /// Propagated to the forked session's `Summary::source_workspace_dir`.
     pub source_workspace_dir: Option<String>,
+    /// Whether to carry the records of subagents that were still RUNNING at the copy point.
     pub carry_running_subagents: bool,
 }
 

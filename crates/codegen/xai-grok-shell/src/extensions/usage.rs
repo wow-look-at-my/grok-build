@@ -105,7 +105,6 @@ mod tests {
 
     #[test]
     fn response_preserves_partial_cost_with_flag() {
-        // Main-loop calls: one reports cost (ticks), the other lacks cost entirely.
         let mut ledger = UsageLedger::default();
         ledger.record_main_loop_call("a", &usage(100, 10), None, Some(70));
         ledger.record_main_loop_call("a", &usage(50, 5), None, None);

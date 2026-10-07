@@ -828,12 +828,12 @@ impl ProcessGroup {
     /// at the end of [`HANGUP_GRACE`] gets killed. Killing it destroys the
     /// only process that can reach jobs sitting in groups of their own.
     /// Delivering the hangup here first keeps the policy identical to the
-    /// shell's. A job that ignores SIGHUP still survives, which is the
-    /// point of `nohup`. The alternative is leaking every job
-    /// whenever the shell is late. Only the leader's own session is touched,
-    /// so a group whose leader never called `setsid` (anything but a terminal
-    /// shell) finds nothing to signal. Linux reads the session out of
-    /// `/proc`; elsewhere there is no cheap way to enumerate one, and the
+    /// shell's — a job that ignores SIGHUP still survives, which is the
+    /// point of `nohup`. This happens where the alternative is leaking every
+    /// job whenever the shell is late. Only the leader's own session is
+    /// touched, so a group whose leader never called `setsid` (anything but a
+    /// terminal shell) finds nothing to signal. Linux reads the session out
+    /// of `/proc`; elsewhere there is no cheap way to enumerate one, and the
     /// shell's own forwarding is all there is.
     pub fn hangup_session_jobs(&self) -> io::Result<()> {
         #[cfg(target_os = "linux")]
@@ -1568,11 +1568,10 @@ mod tests {
 
     /// Both questions a killed group gets asked, and why they differ. A
     /// zombie is a process for `has_live_members` (so another kill is still
-    /// worth sending). It is NOT a leak for `has_running_members` (so a teardown
-    /// that worked does not report that it failed).
-    ///
-    /// Deterministic, with no waiting on a kill to land: the zombie here is
-    /// this test's own child. It stays a zombie until this test reaps it.
+    /// worth sending) and NOT a leak for `has_running_members` (so a teardown
+    /// that worked does not report that it failed). Deterministic, with no
+    /// waiting on a kill to land: the zombie here is this test's own child.
+    /// It stays a zombie until this test reaps it.
     #[cfg(target_os = "linux")]
     #[test]
     fn has_running_members_ignores_a_zombie_that_has_already_died() {
@@ -1630,9 +1629,9 @@ mod tests {
         zombie.wait().expect("reap zombie");
     }
 
-    /// The escalation path's guarantee covers a job parked in a process group of
-    /// its own, where the shell's `killpg` cannot reach it. That job still gets
-    /// the hangup when the shell is killed before it can forward one. A sleeper outside
+    /// The escalation path's guarantee. A job parked in a process group of its
+    /// own, where the shell's `killpg` cannot reach. It, still gets the hangup
+    /// when the shell is killed before it can forward one. A sleeper outside
     /// the session holds the scan to the session rather than the machine, and
     /// the shell itself is left running. This is because its group is the
     /// caller's to kill.

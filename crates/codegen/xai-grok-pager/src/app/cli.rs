@@ -679,7 +679,7 @@ pub struct PagerArgs {
     /// Bind PATH into the pathbox jail read-write. See `--ro` for precedence.
     #[arg(long = "rw", value_name = "PATH")]
     pub sandbox_rw: Vec<PathBuf>,
-    /// Hide PATH from the pathbox jail.
+    /// Hide PATH from the pathbox jail (acts as an active deny even when the path sits under a visible `--ro`/`--rw` mount or the working directory).
     #[arg(long = "rn", value_name = "PATH")]
     pub sandbox_rn: Vec<PathBuf>,
     /// Session storage mode: local or writeback.

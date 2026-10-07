@@ -9,7 +9,7 @@ const MODE_ENV: &str = "GROK_PROFILE_CI_HOST_MODE";
 /// The session workspace: what the worker runs `gh` in, and what the child confines itself to.
 #[cfg(target_os = "macos")]
 const WORKSPACE_ENV: &str = "GROK_PROFILE_CI_HOST_WORKSPACE";
-/// The directory the child names as the query's cwd, instead of the session workspace, so the answer says.
+/// The directory the child names as the query's cwd, instead of the session workspace, so the answer says which side ran `gh`.
 #[cfg(target_os = "macos")]
 const QUERY_CWD_ENV: &str = "GROK_PROFILE_CI_HOST_QUERY_CWD";
 /// The branch every query asks about.
@@ -24,7 +24,7 @@ const MODE_JAILED_NO_WORKER: &str = "jailed-no-worker";
 /// Every line a child reports so the parent can read it back.
 const REPORT: &str = "profile-ci-host: ";
 
-/// The one case this binary runs, under the name a test runner lists it by.
+/// The case this binary runs, under the name a test runner lists it by.
 const TEST_NAME: &str = "a_profile_confined_session_answers_its_ci_query_through_the_worker";
 
 fn main() {
@@ -382,7 +382,7 @@ impl ChildReport {
         self.runs == "yes"
     }
 
-    /// Whether a `gh` actually ran for this child, or there was none to run.
+    /// Whether a `gh` ran for this child, or there was none to run.
     fn gh_ran(&self) -> bool {
         self.answer_code != "-1"
     }
@@ -395,8 +395,8 @@ impl std::fmt::Display for ChildReport {
     }
 }
 
-/// Re-enter this binary in `mode`, with the workspace, the query's directory
-/// and the branch. When `fd` is given, the worker's fd is named in the env var
+/// Re-enter this binary in `mode`, with the workspace, the query's directory.
+/// The branch, and (when `fd` is given) the worker's fd named in the env var
 /// the jail boundary uses.
 #[cfg(target_os = "macos")]
 fn run_child(

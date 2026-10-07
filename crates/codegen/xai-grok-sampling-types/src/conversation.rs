@@ -500,7 +500,7 @@ pub struct ToolCall {
     pub name: String,
     /// JSON-encoded arguments
     pub arguments: Arc<str>,
-    /// The provider's own fields on this call, relayed unread when it is replayed.
+    /// The provider's own fields on this call.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub vendor: BTreeMap<String, serde_json::Value>,
 }
@@ -577,9 +577,9 @@ impl From<ToolDefinition> for ToolSpec {
 
 /// Merge caller-supplied extra fields into a serialized request body. A
 /// dotted key addresses a nested object (`"options.num_ctx"` reaches
-/// `options: { num_ctx }`). TOML cannot spell a nested table inline beside
-/// scalar siblings. An `[extra_body.options]` sub-table is a different shape
-/// from the flat map the rest of the config uses.
+/// `options: { num_ctx }`). This is because TOML cannot spell a nested table
+/// inline beside scalar siblings and an `[extra_body.options]` sub-table is a
+/// different shape. From the flat map the rest of the config uses.
 pub fn merge_extra_body(
     body: &mut serde_json::Value,
     extras: &serde_json::Map<String, serde_json::Value>,
@@ -1035,10 +1035,9 @@ pub fn reported_cost_ticks(raw: Option<i64>) -> Option<i64> {
     raw.filter(|&t| t > 0)
 }
 
-/// Per-token USD pricing for a model. It is used to **derive** cost from token
-/// counts. That applies when a backend reports usage but no
-/// `cost_in_usd_ticks` on the wire (e.g. OpenAI-compatible / third-party
-/// endpoints).
+/// Per-token USD pricing for a model. That model is used to **derive** cost
+/// from token counts when a backend reports usage but no `cost_in_usd_ticks`
+/// on the wire (e.g. OpenAI-compatible / third-party endpoints).
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ModelPricing {
     /// USD per uncached input token (the portion of `prompt_tokens` that is neither a cache read nor a cache write).
@@ -1071,13 +1070,7 @@ impl ModelPricing {
 /// tiers zero), `usage` is absent, or the derived tick count does not fit
 /// `i64`. The caller can fall back to the honest-absence behavior. Pure
 /// integer-arithmetic-at-the-f64 level then rounded to the nearest tick;
-/// deterministic and exactly assertable. Billing tiers (mirroring
-/// [`TokenUsage`]): - uncached input = `prompt_tokens −
-/// cached_prompt_tokens − cache_creation` × `input_per_token_usd` - cached
-/// reads = `cached_prompt_tokens` × `cached_read_per_token_usd` - cache
-/// writes = `cache_creation_prompt_tokens` × `cache_creation_per_token_usd`
-/// - output = `completion_tokens` × `output_per_token_usd` `prompt_tokens`
-/// always includes cache reads + writes (see [`TokenUsage`]).
+/// deterministic and exactly assertable.
 pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) -> Option<i64> {
     let usage = usage?;
     if pricing.is_unusable() {
@@ -1086,6 +1079,7 @@ pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) ->
     let cached = f64::from(usage.cached_prompt_tokens);
     let cache_creation = f64::from(usage.cache_creation_prompt_tokens);
     let prompt = f64::from(usage.prompt_tokens);
+    // Saturate the uncached subset at a set value so a misreported cache split never produces a negative.
     let uncached_input = (prompt - cached - cache_creation).max(0.0);
     let usd = uncached_input * pricing.input_per_token_usd
         + cached * pricing.cached_read_per_token_usd
@@ -1101,7 +1095,7 @@ pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) ->
             return None;
         }
     };
-    // A configured-but-zero-usage turn yields ticks.
+    // A configured-but-zero-usage turn yields no ticks.
     (ticks > 0).then_some(ticks)
 }
 
@@ -5252,9 +5246,9 @@ mod tests {
         assert_eq!(compute_cost_ticks(Some(&usage), &pricing), Some(80_000_000),);
     }
 
-    /// Cache tiers. Cached reads billed at a discount and cache writes at a
-    /// premium must each contribute their own tier. The uncached portion is
-    /// correctly subtracted from `prompt_tokens`.
+    /// Cache tiers: cached reads billed at a discount and cache writes at a
+    /// premium must each contribute their own tier. That Cache is with the
+    /// uncached portion correctly subtracted from `prompt_tokens`.
     #[test]
     fn compute_cost_ticks_covers_cache_tiers() {
         // input $2/M, output $8/M, cached read $0.20/M, cache write $2.50/M

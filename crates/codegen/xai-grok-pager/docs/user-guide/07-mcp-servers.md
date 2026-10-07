@@ -16,7 +16,7 @@ See the [MCP specification](https://modelcontextprotocol.io) for protocol detail
 
 ## MCP servers under a sandbox profile
 
-A stdio MCP server is often launched through a **package runner** — `uvx kagimcp`, `npx -y some-server`, `bunx`. The runner downloads the package into a cache of its own before the server starts. This is every one of those caches defaults under your home directory (`~/.cache/uv`, `~/.npm`, `~/.bun/install`).
+A stdio MCP server is often launched through a **package runner** — `uvx kagimcp`, `npx -y some-server`, `bunx`. The runner downloads the package into a cache of its own. This happens before the server starts, and every one of those caches defaults under your home directory (`~/.cache/uv`, `~/.npm`, `~/.bun/install`).
 
 No write-confining sandbox profile grants your home directory. `workspace`, `read-only` and `strict` allow writes only to the working directory, `~/.grok/` and the temp dirs. So under any of them the runner cannot create its cache, exits during startup, and the MCP client reports only a closed pipe:
 
@@ -31,7 +31,7 @@ MCP server 'kagi' handshake failed: ... Broken pipe (os error 32),
 when send initialize request
 ```
 
-Grok handles this for you: when a session is write-confined and a stdio MCP server is launched by a known package runner. Those cache locations are mapped onto the session's writable temp storage before the child starts. Caches are scratch state, so they live on scratch storage and are discarded with it. Nothing is written to your home directory, and the profile's write set does not widen.
+Grok handles this for you. Suppose a session is write-confined and a stdio MCP server is launched by a known package runner. Then those cache locations are mapped onto the session's writable temp storage before the child starts. Caches are scratch state, so they live on scratch storage and are discarded with it. Nothing is written to your home directory, and the profile's write set does not widen.
 
 Details worth knowing:
 

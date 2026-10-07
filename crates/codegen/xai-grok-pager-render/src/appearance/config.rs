@@ -1799,8 +1799,7 @@ pub fn persist_respect_manual_folds(enabled: bool) -> std::io::Result<()> {
              that startup would never read",
         ));
     }
-    // The lock serialises writes of `pager.toml`; a poison is taken back
-    // rather than failed on, because the file on disk is the state.
+    // The lock serialises writes of `pager.toml`.
     #[allow(clippy::disallowed_methods)]
     let _guard = PAGER_TOML_SAVE_LOCK
         .lock()

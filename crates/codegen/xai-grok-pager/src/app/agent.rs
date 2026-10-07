@@ -983,12 +983,11 @@ impl AgentSession {
     ) -> u64 {
         self.enqueue_entry_at(text, QueueEntryKind::Prompt, false, skill_token_ranges)
     }
-    /// Push a plain prompt that must run as its own turn — never folded into
-    /// another turn as mid-turn steering text.
-    ///
-    /// Used for the `/plan <description>` description: the mode switch the same
-    /// submit requested applies to the FOLLOWING turn. The description must
-    /// survive the running one intact instead of being absorbed by it.
+    /// Push a plain prompt that must run as its own turn — never folded
+    /// into another turn as mid-turn steering text. Used for the `/plan
+    /// <description>` description: the mode switch the same submit requested
+    /// applies to the FOLLOWING turn. The description must survive the
+    /// running one intact instead of being absorbed by it.
     pub fn enqueue_own_turn_prompt(
         &mut self,
         text: String,

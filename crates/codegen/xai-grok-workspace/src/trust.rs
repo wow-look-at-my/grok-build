@@ -1781,7 +1781,7 @@ trusted = true
 
     #[test]
     fn workspace_key_does_not_collapse_an_unmanaged_dir_in_a_managed_repo() {
-        // Widening the predicate to the repository-local root must not turn "somewhere under the repository".
+        // Widening the predicate to the repository-local root must not turn.
         let temp = tempfile::TempDir::new().unwrap();
         let root = dunce::canonicalize(temp.path()).unwrap();
         let main_repo = root.join("thing");

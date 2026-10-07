@@ -1317,7 +1317,7 @@ impl SessionActor {
             let mut round_trace = trace_gcs_config;
             let mut round_artifact = artifact_tracker;
             let mut stop_continuations_this_turn: u32 = 0;
-            // Each goal round and auto-recovery retry calls `process_conversation_turn_with_recovery` fresh.
+            // Each goal round and auto-recovery retry calls `process_conversation_turn_with_recovery` fresh, so its own opening-pass skip.
             let mut first_round = true;
             let mut salvage =
                 super::length_salvage::LengthSalvage::new(self.length_salvage_budget());
@@ -2858,8 +2858,7 @@ impl SessionActor {
                 .await;
                 return Ok(TurnOutcome::StationarityEnded);
             }
-            // Ahead of the drain, and so ahead of a model request: a
-            // follow-up queued mid-turn reaches the model.
+            // Ahead of the drain, and so ahead of a model request.
             if should_harvest_before_request(loop_index, first_round) {
                 self.harvest_queued_prompts_into_interjections(false).await;
             }
@@ -3256,7 +3255,8 @@ impl SessionActor {
                 }
                 Ok(SamplerTurnOutcome::CancelledForInterjection { partial }) => {
                     // ASAP injection: the in-flight stream was cancelled so
-                    // the turn loop can drain the pending interjection NOW.
+                    // the turn loop can drain the pending interjection NOW
+                    // and resubmit.
                     if let Some(partial) = partial {
                         self.record_assistant_response(partial, false).await;
                     }

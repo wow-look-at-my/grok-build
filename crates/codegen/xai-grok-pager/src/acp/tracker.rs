@@ -362,7 +362,7 @@ impl OutputRate {
 /// A model request that waits for a slot under `[ui].max_parallel_requests`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RequestQueued {
-    /// Requests queued ahead of this one.
+    /// Requests queued ahead of this.
     pub ahead: u64,
     /// The cap the queue is behind.
     pub limit: u32,
@@ -469,7 +469,7 @@ pub struct AcpUpdateTracker {
     /// Consumed by the caller via `take_pending_acp_commands()`.
     /// The caller is responsible for copying to `AgentSession.available_commands` and bumping `available_commands_generation`.
     pending_acp_commands: Option<Vec<acp::AvailableCommand>>,
-    /// The scrollback entry of the most recently finished agent message.
+    /// The scrollback entry of the most recently finished agent message (the one `finish_turn` finalized from `current_agent_msg`).
     last_finished_agent_entry: Option<EntryId>,
     /// Bounded prompt→entry attribution map for finished turns.
     finished_prompt_costs: Vec<(String, EntryId)>,
@@ -1157,7 +1157,7 @@ impl AcpUpdateTracker {
         scrollback.note_pin_reserve_turn_finished();
         if let Some(agent_id) = self.current_agent_msg.take() {
             scrollback.finish_running(agent_id);
-            // Remember the just-finished agent-message entry so the turn-completion path can attach the API-reported cost.
+            // Remember the just-finished agent-message entry.
             self.last_finished_agent_entry = Some(agent_id);
             // Key the finished entry by prompt (when known) so an out-of-order
             // `TurnCompleted` can still attribute its cost to this exact turn.
@@ -1202,15 +1202,14 @@ impl AcpUpdateTracker {
         self.orphan_updates.clear();
         self.skip_next_skill_body = false;
     }
-    /// Attach the API-reported per-turn cost (USD ticks) to the agent-message block that rendered this turn. The ACP text chunk rail does not carry cost. The *durable* `TurnCompleted` notification carries it in an adjacent `PromptUsage`, so the turn-completion handler calls this once per `TurnCompleted`, keyed by the turn's prompt. Attribution is order-independent across both ways a turn ends: - **Driver** (`attached_as_viewer=false`) finishes on `PromptResponse`
-    ///   (`prompt.rs`), which is usually *after* `TurnCompleted` arrives. At
-    ///   that moment the agent message is still streaming (`current_agent_msg`),
-    ///   so the cost attaches to the running turn — but only when the
-    ///   `TurnCompleted`'s prompt matches the running turn, so a stale
-    ///   notification for a previous prompt is never stamped onto a newer turn.
-    /// - **Viewer and other pre-finish paths** finish on `TurnCompleted` itself
-    ///   (`finalize_turn_from_terminal` → `finish_turn`), so the finished entry
-    ///   is found via the prompt→entry map recorded by `finish_turn`.
+    /// Attach the API-reported per-turn cost (USD ticks) to the agent-message
+    /// block that rendered this turn. The ACP text chunk rail does not carry
+    /// cost. The *durable* `TurnCompleted` notification carries it in an
+    /// adjacent `PromptUsage`, so the turn-completion handler calls this once
+    /// per `TurnCompleted`, keyed by the turn's prompt. Attribution is
+    /// order-independent across both ways a turn ends: - **Driver**
+    /// (`attached_as_viewer=false`) finishes on `PromptResponse`
+    /// (`prompt.rs`), which is usually *after* `TurnCompleted` arrives.
     pub fn set_last_turn_cost(
         &mut self,
         scrollback: &mut ScrollbackState,
@@ -1302,13 +1301,11 @@ impl AcpUpdateTracker {
         true
     }
     /// Attach one model call's prompt cache-read hit rate to the message
-    /// block that call produced. The rate comes from the same
-    /// `ResponseCompleted` that closes the block. Per-response attribution
-    /// (not a turn total) puts a rate beside every message instead of only
-    /// the turn's last one. See [`Self::set_response_cost`]'s doc comment
-    /// for why.
-    ///
-    /// The rate is `cache_read_input_tokens / (input_tokens +
+    /// block that call produced, from the same `ResponseCompleted` that
+    /// closes it. It see [`Self::set_response_cost`]'s doc comment for why
+    /// per-response attribution (not a turn total) is what puts a rate. That
+    /// rate is beside every message instead of only the turn's last one. The
+    /// rate is `cache_read_input_tokens / (input_tokens +
     /// cache_read_input_tokens + cache_creation_input_tokens)`, rounded to
     /// the nearest percent. `false` when the response reported no usage, or
     /// its total prompt tokens were zero. A response with nothing to cache
@@ -1457,11 +1454,7 @@ impl AcpUpdateTracker {
     /// Attach a summary to the thinking block whose model call carried
     /// `stream_start_ms`. Returns whether the screen changed, so the caller
     /// repaints the row that gained a line rather than the whole transcript.
-    ///
-    /// A key naming no drawn block (the call streamed no thinking, its block
-    /// was removed by a rewind, or the transcript predates the key) changes
-    /// nothing. The summary has no block to describe, and attaching it to a
-    /// neighbouring one would put words under the wrong reasoning.
+    /// A key naming no drawn block (the call streamed no thinking, its block.
     pub fn set_thinking_summary(
         &mut self,
         scrollback: &mut ScrollbackState,
@@ -1490,7 +1483,7 @@ impl AcpUpdateTracker {
         if let Some(entry) = scrollback.get_by_id_mut(id) {
             entry.invalidate_cache();
         }
-        // The summary adds rows under the header, so this is a height change and not merely a repaint of the same number.
+        // The summary adds rows under the header.
         scrollback.mark_structurally_dirty(id);
         true
     }
@@ -1524,7 +1517,7 @@ impl AcpUpdateTracker {
     }
 
     /// The agent-reported session total (USD ticks), or `None` if the agent
-    /// has never reported one — an agent too old to send it, or a session.
+    /// has never reported one.
     pub fn reported_session_cost_usd_ticks(&self) -> Option<i64> {
         self.reported_session_cost_usd_ticks
     }
@@ -1655,9 +1648,8 @@ impl AcpUpdateTracker {
         }
     }
     /// Show a tool call while the model is still writing its arguments.
-    ///
-    /// Returns whether the screen changed. The first chunk for an index pushes
-    /// the entry; later chunks extend the preview in place.
+    /// Returns whether the screen changed. The first chunk for an index
+    /// pushes the entry; later chunks extend the preview in place.
     pub fn handle_tool_call_delta(
         &mut self,
         tool_call_id: Option<&str>,
@@ -1865,9 +1857,8 @@ impl AcpUpdateTracker {
         }
         true
     }
-    /// Complete a tool call into the entry its arguments streamed into.
-    ///
-    /// The completed block replaces the preview in place, so a finished call
+    /// Complete a tool call into the entry its arguments streamed into. The
+    /// completed block replaces the preview in place, so a finished call
     /// keeps the position it occupied while it was being written. Parallel
     /// calls therefore stay in the order the model opened them.
     fn finish_adopted_tool(

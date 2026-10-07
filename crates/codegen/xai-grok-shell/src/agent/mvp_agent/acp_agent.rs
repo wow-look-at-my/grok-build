@@ -335,8 +335,7 @@ impl acp::Agent for MvpAgent {
                     tracing::info!(count, "autodetected models from configured model providers");
                 }
                 drop(discovery_guard);
-                // A local runtime loads a model on its first request and
-                // unloads it on an idle TTL.
+                // A local runtime loads a model on its first request.
                 if !discovery::has_local_runtime(&cfg) {
                     return;
                 }
@@ -371,8 +370,8 @@ impl acp::Agent for MvpAgent {
         }
         let preferred_method_early = self.cfg.borrow().grok_com_config.preferred_method;
         let xai_api_base_url = self.cfg.borrow().endpoints.xai_api_base_url.clone();
-        // A declared provider counts even before its models are discovered:
-        // autodetection runs off this path.
+        // A declared provider counts even before its models are discovered: autodetection runs off this path, so the
+        // catalog is still without them here.
         let has_provider_credentials =
             crate::agent::config::any_provider_has_own_credentials(&self.cfg.borrow());
         let has_byok = has_provider_credentials

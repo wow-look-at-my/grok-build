@@ -235,11 +235,11 @@ async fn submit_and_collect_returns_response() {
     assert_eq!(a.content.as_ref(), "collected response");
 }
 
-/// A stream shaped the way Bifrost shapes one: the trailing usage chunk has no
-/// choices, and the gateway writes an unset slice as `"choices": null`. Failing
-/// that parse turned every turn on every model behind the gateway into
-/// "Couldn't read the response". This drives the whole SSE path, not just the
-/// chunk type.
+/// A stream shaped the way Bifrost shapes one: the trailing usage chunk has
+/// no choices, and the gateway writes an unset slice as `"choices": null`.
+/// Failing that parse turned every turn on every model behind the gateway
+/// into "Couldn't read the response", so this drives the whole SSE path, not
+/// the chunk type.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn null_choices_usage_chunk_completes_the_turn() {
     let app = Router::new().route(
@@ -1360,10 +1360,11 @@ fn responses_config(base_url: String, doom_loop: Option<DoomLoopRecoveryPolicy>)
     cfg
 }
 
-/// The Responses-surface twin of `null_choices_usage_chunk_completes_the_turn`:
-/// `response.created` carries an empty output list, which a Go gateway writes
-/// as `"output": null`, and `tools` arrives the same way. This happens when the
-/// request sent none. Both land on the very first event of every turn.
+/// The Responses-surface twin of
+/// `null_choices_usage_chunk_completes_the_turn`: `response.created` carries
+/// an empty output list, which a Go gateway writes as `"output": null`, and
+/// `tools` arrives the same way. This happens when the request sent none.
+/// Both land on the first event of every turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_null_lists_on_created_complete_the_turn() {
     let app = Router::new().route(
@@ -1607,10 +1608,10 @@ async fn responses_doom_loop_does_not_resample_after_output_when_retry_only_befo
 // Output-rate floor
 // ---------------------------------------------------------------------------
 
-/// The output-rate floor's coverage, in one module. Thus `cargo test --test
-/// test_actor output_rate` runs the whole of it, the new cases and the
-/// existing ones together. What a widened hold must not do is break the
-/// detection the floor exists for.
+/// The output-rate floor's coverage. That coverage is in one module so `cargo
+/// test --test test_actor output_rate` runs the whole of it. The new cases
+/// and the existing ones together, since what a widened hold must not do is
+/// break the detection the floor exists for.
 mod output_rate {
     use super::*;
 
@@ -1627,6 +1628,8 @@ mod output_rate {
                 async move {
                     let attempt = counter.fetch_add(1, Ordering::SeqCst);
                     if attempt == 0 {
+                        // Chunks at a set value ms outlasts the breach by
+                        // far; the client drops the stream partway through.
                         let events: Vec<Event> =
                             (0..60).map(|_| text_chunk_event("x", false)).collect();
                         let slow = stream::iter(events).then(|event| async move {
@@ -1938,10 +1941,11 @@ mod output_rate {
                 let counter = Arc::clone(&counter_handler);
                 async move {
                     counter.fetch_add(1, Ordering::SeqCst);
+                    // One 39-byte word plus its space is many bytes, and many bytes every 100 ms is tok/s: a few times the floor below.
                     let word = "0".repeat(39);
                     let fast = vec![word; 20].join(" ");
                     let mut script = sse::responses_api_script_exact(&fast, "test-model");
-                    // `response.created` first, then the healthy burst, then the search.
+                    // `response.created` first, then the healthy burst.
                     let created = script.remove(0);
                     let completed = script.pop().expect("the terminal event");
                     let mut events = vec![Delayed::now(created)];
@@ -2162,12 +2166,12 @@ mod output_rate {
         Event::default().data(chunk.to_string())
     }
 
-    /// The same failure on the wire that most providers serve. It reaches the gate
-    /// ways. An opener with no `arguments` field, an opener whose `arguments` is
-    /// the empty string, and a continuation that repeats neither an id nor a name.
-    /// Each one holds the call open for longer than the sustained duration.
-    /// Thus a span the gate reads as silence breaches over a response that
-    /// was busy writing.
+    /// The same failure on the wire that most providers serve. It reaches the
+    /// gate ways. An opener with no `arguments` field, an opener whose
+    /// `arguments` is the empty string, and a continuation that repeats
+    /// neither an id nor a name. And each holds the call open for longer than
+    /// the sustained duration, so a span the gate reads as silence breaches
+    /// over a response. That response was busy writing.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_unstreamed_chat_completions_tool_call_is_not_a_collapsed_stream() {
         let arguments = json!({ "path": "a.rs" }).to_string();
@@ -2203,6 +2207,7 @@ mod output_rate {
                     let arguments = arguments.clone();
                     async move {
                         counter.fetch_add(1, Ordering::SeqCst);
+                        // Many bytes every 100 ms is tok/s.
                         let word = "0".repeat(39);
                         let mut events: Vec<(u64, Event)> = (0..20)
                             .map(|_| (100, text_chunk_event(&word, false)))
@@ -2309,7 +2314,7 @@ mod output_rate {
                         .collect();
                     events.push((0, tool_call_chunk(Some("call_1"), Some("read_file"), None)));
                     events.push((500, tool_call_chunk(None, None, Some(r#"{"path":"a.rs"}"#))));
-                    // The call landed and the engine did not come back: one byte a chunk.
+                    // The call landed and the engine did not come back: one byte a chunk, chunks still arriving.
                     events.extend((0..200).map(|_| (200, text_chunk_event("x", false))));
                     let paced = stream::iter(events).then(|(delay, event)| async move {
                         tokio::time::sleep(Duration::from_millis(delay)).await;
@@ -2360,8 +2365,7 @@ mod output_rate {
     }
 }
 
-// --------------------------------------------------------------------------- Time-to-first-token limit
-// ---------------------------------------------------------------------------
+// Time-to-first-token limit
 
 /// A policy with only the time-to-first-token limit armed.
 fn ttft_only_policy(limit_secs: u64) -> OutputRateFloorPolicy {
@@ -2524,7 +2528,7 @@ impl Delayed {
     }
 }
 
-/// Serve `events`, waiting each one's delay before it goes out.
+/// Serve `events`, waiting each's delay before it goes out.
 fn delayed_stream(
     events: Vec<Delayed>,
 ) -> futures_util::stream::BoxStream<'static, Result<Event, std::convert::Infallible>> {
@@ -2549,6 +2553,8 @@ fn delayed_stream(
 // conversation history. These tests drive the real `SamplerActor` retry loop
 // and assert on the bodies the server received.
 
+/// History whose assistant item carries a recorded `model_id` plus a replayed
+/// reasoning sibling — the shape that produced the live a later cerebras.
 fn poisoned_request(text: &str) -> ConversationRequest {
     ConversationRequest {
         items: vec![
@@ -2594,9 +2600,11 @@ fn cerebras_400_body() -> serde_json::Value {
     })
 }
 
-///
-/// Asserts on the recorded request bodies — what the provider actually
-/// received — using the shared mock server's `request_bodies()`.
+/// History predating the fix must recover, not dead-end: the first attempt is
+/// answered with a later cerebras. The retried body must omit exactly the
+/// properties the provider named. Asserts on the recorded request bodies —
+/// what the provider received — using the shared mock server's
+/// `request_bodies()`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unsupported_message_property_400_strips_and_recovers() {
     let server = xai_grok_test_support::MockInferenceServer::start()
@@ -2636,7 +2644,7 @@ async fn unsupported_message_property_400_strips_and_recovers() {
         "the recovery is a retry and must be observable as one"
     );
 
-    // Exactly requests: the rejected attempt, then the recovered retry.
+    // Requests: the rejected attempt, then the recovered retry.
     let bodies = server.request_bodies();
     assert_eq!(
         bodies.len(),
@@ -2894,11 +2902,9 @@ fn user_request_with_image(text: &str) -> ConversationRequest {
 
 /// The images live in conversation history, so a fatal there bricks every
 /// following turn — including `/goal resume` — with no way out but a new
-/// session.
-///
-/// Proves both halves of the recovery: this request completes after a strip.
-/// The *next* request never ships the image at all, so a session that pasted
-/// a screenshot does not pay a rejected upload on every turn.
+/// session. Proves both halves of the recovery: this request completes after
+/// a strip. The *next* request never ships the image at all, so a session
+/// that pasted a screenshot does not pay a rejected upload on every turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn image_input_rejection_strips_and_then_stops_resending() {
     let bodies = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));

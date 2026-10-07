@@ -60,8 +60,8 @@ pub(crate) struct ModelinfoDocument {
 
 impl ModelinfoDocument {
     /// The tiers `ModelPricing` bills on. A document that prices nothing
-    /// gives `None`. That is recorded as a negative answer. It is not recorded
-    /// as an all-zero price, which the cost path will read as configured.
+    /// gives `None`. Which is recorded as a negative answer rather than as an
+    /// all-zero price the cost path would read as configured.
     pub(crate) fn to_pricing(&self) -> Option<ModelPricing> {
         let pricing = ModelPricing {
             input_per_token_usd: self.input_cost_per_token.unwrap_or(0.0),
@@ -104,7 +104,7 @@ fn read_cache_file(path: &std::path::Path) -> PricingCacheFile {
 }
 
 /// Merge one model's answer into the file and rewrite it. Read-modify-write
-/// under a fresh read so a sibling process's entries survive this one.
+/// under a fresh read so a sibling process's entries survive this.
 fn persist_entry(path: &std::path::Path, model_id: &str, entry: &PricingCacheEntry) {
     let mut file = read_cache_file(path);
     file.entries.insert(model_id.to_string(), entry.clone());
@@ -124,11 +124,10 @@ fn persist_entry(path: &std::path::Path, model_id: &str, entry: &PricingCacheEnt
     }
 }
 
-/// Resolve `model_id`'s per-token pricing.
-///
-/// Config first. Then the cache. A miss starts a background fetch and answers
-/// with unusable pricing. This keeps the cost honestly absent for this call
-/// rather than stalling the turn on the network.
+/// Resolve `model_id`'s per-token pricing. Config first. Then the cache. A
+/// miss starts a background fetch and answers with unusable pricing. This
+/// keeps the cost honestly absent for this call rather than stalling the turn
+/// on the network.
 pub(crate) fn resolve(model_id: &str) -> ModelPricing {
     let configured = crate::agent::config::resolve_configured_pricing(model_id);
     if !configured.model.is_unusable() {

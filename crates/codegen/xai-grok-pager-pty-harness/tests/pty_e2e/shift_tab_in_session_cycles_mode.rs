@@ -4,12 +4,11 @@ use super::common::*;
 
 // ── Interactive flow e2e tests ──────────────────────────────────────────
 
-/// 15. **In-session Shift+Tab cycles permission mode.**
-/// Routes BackTab through the agent view's `resolve_action`, the path that
-/// previously dropped `CycleMode`; test 2b only covers the welcome screen.
-/// With the auto gate on (client default): Normal → Plan → Auto →
-/// Always-Approve → Orchestrator → Explore → Plan (the ring never lands
-/// back on bare Normal once cycling has started).
+/// ** Routes BackTab through the agent view's `resolve_action`, the path that
+/// dropped `CycleMode`; test 2b only covers the welcome screen. With the auto
+/// gate on (client default): Normal → Plan → Auto → Always-Approve →
+/// Orchestrator → Explore → Plan (the ring never lands back on bare
+/// Normal once cycling has started).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn shift_tab_in_session_cycles_mode() {
@@ -82,7 +81,6 @@ fn mode_flag(harness: &PtyHarness, flag: &str) -> bool {
 }
 
 /// 15b. **Rapid Shift+Tab presses land on the LAST stop and stay there.**
-///
 /// Both presses go out before the shell has confirmed the first one. The
 /// confirmation for the first stop (Plan) arrives after the ring already
 /// advanced to Auto. The burst must settle on Auto and keep it: the prompt's

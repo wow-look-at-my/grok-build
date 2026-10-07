@@ -1063,13 +1063,22 @@ mod tests {
         }
     }
 
-    /// Drift guard across both user-facing model structs. A `[model.<id>]` table in `config.toml` is parsed into [`ConfigModelOverride`], not into `ModelEntryConfig`. The key parses as an **unknown field** and is silently discarded: the setting appears to work. This happens when a field exists on `ModelEntryConfig` but not on `ConfigModelOverride`. However, the setting has no effect. That is exactly how `strict_message_schema` shipped broken — a Cerebras entry could set it. The resolved profile still came out permissive, so the provider rejected every replayed message. The field list is read from the `ModelEntryConfig` declaration in the source itself. It cannot drift from the struct the way a hand-kept list would. Each name is then fed through the real parser — the same `parse_model_overrides` the config loader calls — and must not come back as an unknown field. It deliberately does NOT compare serialized JSON: most of these fields carry `skip_serializing_if`. A `false`/`None` value vanishes from a serialized comparison and hides the gap being
-    /// checked. (An earlier draft of this test did exactly that and passed against a struct with the field removed.) Driving the parser cannot be fooled that way.
+    /// Drift guard across both user-facing model structs. A `[model.<id>]`
+    /// table in `config.toml` is parsed into [`ConfigModelOverride`], not
+    /// into `ModelEntryConfig`. When a field exists on `ModelEntryConfig` but
+    /// not on `ConfigModelOverride`, the key parses as an **unknown field**.
+    /// It is silently discarded: the setting appears to work. However, the
+    /// setting has no effect. That is exactly how `strict_message_schema`
+    /// shipped broken — a Cerebras entry could set it. The resolved profile
+    /// still came out permissive, so the provider rejected every replayed
+    /// message. The field list is read from the `ModelEntryConfig`
+    /// declaration in the source itself. It cannot drift from the struct the
+    /// way a hand-kept list would. Each name is then fed through the real
+    /// parser — the same `parse_model_overrides` the config loader calls
+    /// — and must not come back as an unknown field.
     #[test]
     fn every_user_settable_model_entry_field_is_accepted_by_the_override() {
-        // `loaded_in_vram` is runtime state, not config: the local-runtime
-        // discovery fills it from `/api/ps` (or LM Studio's listing) at
-        // catalog build.
+        // `loaded_in_vram` is runtime state, not config.
         const NOT_USER_CONFIG: &[&str] = &[
             "id",
             "auth_scheme",
@@ -1093,7 +1102,7 @@ mod tests {
         let mut unknown: Vec<String> = Vec::new();
         for field in &candidates {
             let mut entry_table = toml::map::Map::new();
-            // Any TOML value will do: the parser reports unknown *names* before it judges values.
+            // Any TOML value will do: the parser reports unknown *names* before it judges values, and a value that fails to parse is pruned separately (see `prune_invalid_fields`).
             entry_table.insert(field.clone(), toml::Value::Boolean(true));
             let (_, warnings) = parse_single_entry(entry_table);
             if warnings

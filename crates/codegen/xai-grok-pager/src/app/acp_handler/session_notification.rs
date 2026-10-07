@@ -323,8 +323,8 @@ pub(super) fn handle_session_notification_with_origin(
             // A replayed transcript already carries the finished `ToolCall`
             // for every one of these. Replaying the chunks would build a
             // preview of a call that is already on screen. A delta carries no
-            // prompt id. So while a wake turn runs, a delta cannot be told
-            // apart from the wake turn's own output. It is dropped whole.
+            // prompt id, so while a wake turn runs it cannot be told apart
+            // from the wake turn's own output. It is dropped whole.
             if meta.is_replay || agent.session.loading_replay || agent.running_wake_turn.is_some() {
                 false
             } else {
@@ -368,7 +368,7 @@ pub(super) fn handle_session_notification_with_origin(
                     .tracker
                     .set_reported_session_cost(session_cost_usd_ticks);
             }
-            // Snapshot the run in flight *before* any turn-finish path clears it.
+            // Snapshot the run in flight *before* any turn-finish path clears it, so cost attribution can decide whether this `TurnCompleted`.
             let running_prompt_id = agent.session.current_prompt_id.clone();
             let result: bool = if agent.session.loading_replay {
                 let first = agent.replayed_terminal_prompts.insert(prompt_id.clone());
@@ -1481,9 +1481,7 @@ pub(super) fn handle_session_notification_with_origin(
             stream_start_ms,
             summary,
         } => {
-            // Written by a side call that starts when its model call ends, so
-            // this arrives after the thinking block it describes has stopped
-            // running.
+            // Written by a side call that starts when its model call ends.
             agent.session.tracker.set_thinking_summary(
                 &mut agent.scrollback,
                 stream_start_ms,

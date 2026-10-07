@@ -573,7 +573,8 @@ impl AgentBuilder {
         self
     }
     /// Set how strongly system-prompt/tool wording nudges the model toward
-    /// spawning subagents via the `task` tool.
+    /// spawning subagents via the `task` tool (default:
+    /// `AgentUsageFrequency::Default`, i.e. no added nudge).
     pub fn with_subagent_usage_frequency(
         mut self,
         frequency: xai_tool_types::AgentUsageFrequency,
@@ -1845,11 +1846,10 @@ mod tests {
         assert!(desc.contains("## Usage frequency"));
         assert!(desc.contains("Default to delegating"));
     }
-    /// Consider the bridge's full-discovery snapshot. That snapshot must
-    /// record every discovered skill name. This includes `paths:`-gated and
-    /// preloaded skills that the listing baseline (`slash_skills`) holds
-    /// back. Session-start telemetry can then reuse it instead of
-    /// re-walking the disk.
+    /// The bridge's full-discovery snapshot must record every discovered
+    /// skill name — including `paths:`-gated and preloaded skills that the
+    /// listing baseline (`slash_skills`) holds back. Session-start telemetry
+    /// can reuse it instead of re-walking the disk.
     #[tokio::test]
     async fn discovery_snapshot_records_gated_and_preloaded_skills() {
         use xai_grok_tools::computer::local::LocalTerminalBackend;

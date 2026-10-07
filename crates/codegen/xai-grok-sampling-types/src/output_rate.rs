@@ -143,7 +143,7 @@ impl ToolCallFragment<'_> {
 pub enum OutputRateHealth {
     /// No floor configured, or the rate is comfortably above it.
     Healthy,
-    /// Above the floor but inside [`NEAR_FLOOR_FACTOR`] of it — the reading a collapse passes through.
+    /// Above the floor but inside [`NEAR_FLOOR_FACTOR`] of it — the reading a collapse passes through on its way down.
     Near,
     /// Under the floor. Sustained for a whole window, this is what the gate reissues the request over.
     Slow,
@@ -212,9 +212,9 @@ impl OutputRateMeter {
         }
     }
 
-    /// The span the current window covers at `now`. It is the whole window
-    /// once the response has run that long. Before then, it is the time since
-    /// its first chunk.
+    /// The span the current window covers at `now`. The whole window once the
+    /// response has run that long, and the time since its first chunk before
+    /// then.
     pub fn observed_span(&self, now: Instant) -> Duration {
         let Some(first) = self.first_chunk_at else {
             return Duration::ZERO;
@@ -283,7 +283,7 @@ impl Default for OutputRateMeter {
 pub enum RateTick {
     /// Nothing changed worth reporting.
     Quiet,
-    /// The rate just fell under the floor.
+    /// The rate fell under the floor.
     SlowdownStarted { tokens_per_sec: f64 },
     /// The rate came back above the floor on its own, after `slow_for`.
     SlowdownEnded {
@@ -317,7 +317,7 @@ pub struct OutputRateGate {
 impl OutputRateGate {
     /// A gate measuring over `policy`'s window and judging against its floor.
     /// An absent or unarmed policy still measures — the rate is rendered
-    /// whether or not anything gates it — and never breaches.
+    /// whether anything gates it — and never breaches.
     pub fn new(policy: Option<OutputRateFloorPolicy>) -> Self {
         let window = policy.unwrap_or_default().window();
         let armed = policy.filter(OutputRateFloorPolicy::floor_armed);
@@ -381,7 +381,7 @@ impl OutputRateGate {
     }
 
     /// The instant the meter is read at: frozen at the start of an open
-    /// pause, so a hosted tool call.
+    /// pause.
     fn measured_at(&self, now: Instant) -> Instant {
         match self.paused_since {
             Some(since) if since < now => since,
@@ -463,6 +463,7 @@ impl OutputRateGate {
 mod tests {
     use super::*;
 
+    /// 4 bytes is one estimated token, so many bytes per 100 ms is tok/s.
     #[test]
     fn rate_reads_a_healthy_stream() {
         let start = Instant::now();
@@ -626,6 +627,8 @@ mod tests {
         };
         let start = Instant::now();
         let mut gate = OutputRateGate::new(Some(policy));
+        // A couple of seconds of healthy output, a sixteen-second collapse to
+        // one byte a tick, then healthy output again.
         let seen = drive(&mut gate, start, 40 * 4, |i| match i {
             0..=7 => 400,
             8..=71 => 1,
@@ -775,10 +778,10 @@ mod tests {
     }
 
     /// A tool call whose arguments the provider does not stream is the model
-    /// generating, just invisibly. Every fragment shape that says "this call is
-    /// open and no argument bytes have arrived" holds the measurement. This
-    /// holds for as long as the call takes to write. The arguments arriving in
-    /// one burst afterwards are credited rather than averaged in as silence.
+    /// generating, invisibly. Every fragment shape that says "this call is
+    /// open and no argument bytes have arrived" holds the measurement for as
+    /// long as the call takes to write. The arguments arriving in one burst
+    /// afterwards are credited rather than averaged in as silence.
     #[test]
     fn an_unstreamed_tool_call_holds_the_measurement() {
         let policy = collapsed_policy();

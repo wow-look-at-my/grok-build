@@ -738,8 +738,8 @@ mod tests {
     }
 
     /// What goes back out is the canonical key only. The notification the tool
-    /// sends to the client is a serialized `Question`. A stray `multi_select`
-    /// on the way out is thus a second spelling a client has to learn.
+    /// sends to the client is a serialized `Question`. A stray `multi_select` on
+    /// the way out is a second spelling a client has to learn.
     #[test]
     fn a_question_serializes_the_canonical_multi_select_key_and_never_the_alias() {
         let mut question = make_question("Pick DB?", &["Postgres", "SQLite"]);

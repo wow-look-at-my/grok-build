@@ -161,10 +161,9 @@ pub(crate) async fn run_request_task(
             return request_id;
         }
 
-        // Once the resample budget is spent.
+        // Once the resample budget is spent, the attempt runs with the abort disarmed.
         let doom_check = doom_policy.filter(|p| p.has_retries_left(doom_retry_count));
-        // Same disarm as the doom check: once the resample budget is spent
-        // the attempt runs ungated, so a persistently.
+        // Same disarm as the doom check.
         let rate_check =
             rate_policy.filter(|p| p.has_retries_left(rate_retry_count.load(Ordering::Relaxed)));
         // A backup replaces output the caller has already seen, which is
@@ -768,15 +767,13 @@ async fn sleep_or_cancel(
     }
 }
 
-/// Run a single attempt: build the raw stream, drive it through the
-/// matching L2 transform, and forward all non-terminal events to `event_tx`.
-/// The rich `SamplingError` of the raw stream is kept for the retry loop.
-///
-/// A `None` for `doom_check` disarms the doom checks, so the response is kept.
-/// The `backup` launcher starts another generation on a rate-floor breach.
-///
-/// The attempt waits for a slot in `slots` first. Its clocks start after
-/// that, so the wait never counts toward the first-token limit.
+/// Run a single attempt: build the raw stream, drive it through the matching
+/// L2 transform, and forward all non-terminal events to `event_tx`. The rich
+/// `SamplingError` of the raw stream is kept for the retry loop. A `None` for
+/// `doom_check` disarms the doom checks, so the response is kept. The
+/// `backup` launcher starts another generation on a rate-floor breach. The
+/// attempt waits for a slot in `slots` first. Its clocks start after that, so
+/// the wait never counts toward the first-token limit.
 #[allow(clippy::too_many_arguments)]
 async fn run_one_attempt(
     slots: &Arc<RequestSlots>,
@@ -1029,18 +1026,17 @@ fn tee_errors<'a, T: Send + 'a>(
 
 /// Drive an L2 event stream: forward non-terminal events to `event_tx` and watch `cancel_token`.
 /// `doom_check`, when set, turns a completed response carrying confident doom-loop signals into a retryable failure.
-///
 /// The output-rate meter runs here rather than inside a backend transform:
-/// every backend's tokens and tool-call arguments pass through this loop. One
-/// meter covers all of them and the gate and the published rate are the same
-/// measurement. `rate_check`, when set, turns a full window under its floor
-/// into a slow response. With a `backup` launcher the slow response keeps
-/// streaming and another generation starts beside it, hidden. The earliest of
-/// these to happen decides the race: - The recovers above the floor or
-/// finishes: the backup stops. The backup overtakes or finishes, or the fails.
-/// It takes over. Dropping this future drops the L2 stream, which cancels the
-/// HTTP request. The `ttft` deadline fails an attempt with no output, on the
-/// same tick.
+/// every backend's tokens and tool-call arguments pass through this loop.
+/// One meter covers all of them and the gate and the published rate are the
+/// same measurement. `rate_check`, when set, turns a full window under its
+/// floor into a slow response. With a `backup` launcher the slow response
+/// keeps streaming and another generation starts beside it, hidden. The
+/// earliest of these to happen decides the race:
+/// - The original recovers above the floor or finishes: the backup stops.
+/// - The backup overtakes or finishes, or the original fails: it takes over.
+/// Dropping this future drops the L2 stream, which cancels the HTTP request.
+/// The `ttft` deadline fails an attempt with no output, on the same tick.
 #[allow(clippy::too_many_arguments)]
 async fn drive_l2(
     l2: impl futures_util::Stream<Item = SamplingEvent>,
@@ -1081,7 +1077,7 @@ async fn drive_l2(
                     return ttft.breach(tokio_now);
                 }
                 let now = std::time::Instant::now();
-                // Both slowdown edges are logged, not the breach: a dip that recovers on its own is never reissued over and would otherwise leave no trace.
+                // Both slowdown edges are logged, not the breach.
                 match gate.tick(now) {
                     RateTick::Quiet => {}
                     RateTick::SlowdownStarted { tokens_per_sec } => {
@@ -1406,11 +1402,11 @@ pub(crate) struct BackupLauncher<'a> {
 }
 
 impl<'a> BackupLauncher<'a> {
-    /// Start a backup, or `None` when the rate budget is spent. `cause` is the
-    /// breach, reported to the caller if the backup replaces the original.
-    ///
-    /// The backup starts no backup of its own. After it replaces the original,
-    /// a breach of its floor ends the attempt, and the retry loop reissues.
+    /// Start a backup, or `None` when the rate budget is spent. `cause` is
+    /// the breach, reported to the caller if the backup replaces the
+    /// original. The backup starts no backup of its own. After it replaces
+    /// the original, a breach of its floor ends the attempt, and the retry
+    /// loop reissues.
     fn launch(&self, parent: &CancellationToken, cause: SamplingError) -> Option<Backup<'a>> {
         let attempt = self
             .spent
@@ -1586,9 +1582,9 @@ impl Backup<'_> {
 }
 
 /// Publish the gate's current rate. The event's whole job is to change what a
-/// client renders. An unchanged reading is not sent, with a single exception.
-/// While the rate is under the floor, the event also carries how long that has
-/// lasted. That number moves even when the rate does not.
+/// client renders. An unchanged reading is not sent — with a single exception.
+/// The event also carries how long that has lasted, and that number moves even when
+/// the rate does not. This happens while the rate is under the floor.
 fn publish_rate(
     gate: &OutputRateGate,
     now: std::time::Instant,

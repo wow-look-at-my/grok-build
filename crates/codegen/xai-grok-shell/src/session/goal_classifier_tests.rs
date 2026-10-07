@@ -1778,8 +1778,8 @@ fn empty_pool_inherits_all() {
     assert!(assign_skeptic_models(&[], 3).is_empty());
 }
 
-/// A model changed mid-goal is used at the next verification. The
-/// previous assignment plays no part.
+/// A model changed mid-goal is used at the next verification. The assignment
+/// plays no part.
 #[test]
 fn a_changed_pool_takes_effect_at_once() {
     let before = assign_skeptic_models(&[pair("grok-4.7")], 3);
@@ -2276,8 +2276,8 @@ async fn verification_stage_skeptic_transport_failure_counts_as_refute() {
 
 #[tokio::test]
 async fn verification_stage_retries_a_skeptic_that_gave_no_verdict() {
-    // Skeptic fails, and its retry clears. Only the retry's vote may
-    // count; the failure must never reach the implementer as a gap.
+    // Skeptic no fails, and its retry clears. Only the retry's vote
+    // may count; the failure must never reach the implementer as a gap.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::transport_error(),
         MockResponse::not_refuted(),
@@ -2516,9 +2516,8 @@ async fn verification_stage_panel_refutes_returns_not_achieved() {
 }
 
 #[tokio::test]
-async fn verification_stage_skeptic0_medium_refute_does_not_short_circuit() {
-    // A medium-confidence refute is NOT decisive: the full panel runs and the 1-of-3 minority refute is overruled
-    // Approval still requires the not-refuted quorum, never one skeptic
+async fn verification_stage_skeptic0_medium_refute_short_circuits() {
+    // A medium-confidence refute is decisive. The cold skeptics would clear it, but they must never run.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::refuted_with("medium", None),
         MockResponse::not_refuted(),
@@ -2536,19 +2535,19 @@ async fn verification_stage_skeptic0_medium_refute_does_not_short_circuit() {
     )
     .await
     .outcome;
-    let GoalClassifierOutcome::Achieved { details_path } = outcome else {
-        panic!("expected Achieved on 1-of-3 minority refute after full panel");
+    let GoalClassifierOutcome::NotAchieved { details_path, .. } = outcome else {
+        panic!("a medium-confidence skeptic-0 refute must go back to the implementer");
     };
     let _ = tokio::fs::remove_file(&details_path).await;
     assert_eq!(
         observed
             .spawn_count
             .load(std::sync::atomic::Ordering::SeqCst),
-        3,
-        "medium-confidence refute must NOT short-circuit the panel",
+        1,
+        "a medium-confidence refute must short-circuit the panel",
     );
     let log = log.lock().unwrap();
-    assert!(log.iter().any(|t| t == "agg:1/3:true"));
+    assert!(log.iter().any(|t| t == "agg:1/1:false"), "{log:?}");
 }
 
 #[tokio::test]
@@ -2584,8 +2583,8 @@ async fn verification_stage_all_blocking_refuters_returns_blocked() {
 
 #[tokio::test]
 async fn verification_stage_mixed_blocking_and_fixable_stays_not_achieved() {
-    // Skeptic 0 refutes medium (so the panel runs) with a contradiction; skeptic 1 refutes with an ordinary fixable gap
-    // A model-fixable gap remains, so the verdict is NotAchieved, NOT Blocked
+    // Skeptic refutes with a contradiction, which is blocking, so the panel still runs. Skeptic
+    // refutes with an ordinary fixable gap, so the verdict is NotAchieved, not Blocked.
     let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
         MockResponse::refuted_with("medium", Some("contradiction")),
         MockResponse::refuted_with("high", None),
@@ -2694,7 +2693,7 @@ async fn verification_stage_multi_refuter_all_blocking_returns_blocked() {
             .spawn_count
             .load(std::sync::atomic::Ordering::SeqCst),
         2,
-        "medium skeptic 0 must fan out the full panel",
+        "a blocking skeptic 0 must fan out the full panel",
     );
     assert!(
         result.skeptic0_session_id.is_some(),
@@ -2717,9 +2716,8 @@ async fn verification_stage_multi_refuter_all_blocking_returns_blocked() {
 
 #[tokio::test]
 async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
-    // A synthetic refute (transport failure, confidence Unknown) is NOT a
-    // high-confidence refute, so it must fan out the full panel rather than
-    // short-circuit. Its retry fails too.
+    // A synthetic refute (transport failure) carries no verdict, so it is not
+    // decisive and the full panel runs. Its retry fails too. 1-of-3 refute → Achieved.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::transport_error(),
         MockResponse::transport_error(),
@@ -2753,8 +2751,8 @@ async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
 }
 
 #[tokio::test]
-async fn verification_stage_skeptic0_low_refute_does_not_short_circuit() {
-    // A LOW-confidence refute is not decisive, so the panel fans out
+async fn verification_stage_skeptic0_low_refute_short_circuits() {
+    // A LOW-confidence refute is decisive too. The cold skeptic must never run.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::refuted_with("low", None),
         MockResponse::not_refuted(),
@@ -2775,10 +2773,13 @@ async fn verification_stage_skeptic0_low_refute_does_not_short_circuit() {
         observed
             .spawn_count
             .load(std::sync::atomic::Ordering::SeqCst),
-        2,
-        "a low-confidence refute must NOT short-circuit the panel",
+        1,
+        "a low-confidence refute must short-circuit the panel",
     );
-    assert!(matches!(outcome, GoalClassifierOutcome::Achieved { .. }));
+    let GoalClassifierOutcome::NotAchieved { details_path, .. } = outcome else {
+        panic!("a low-confidence skeptic-0 refute must go back to the implementer");
+    };
+    let _ = tokio::fs::remove_file(&details_path).await;
 }
 
 #[tokio::test]

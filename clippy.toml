@@ -2,7 +2,7 @@
 #
 # clippy reads the NEAREST clippy.toml and merges nothing. This file has to
 # stand alone. One file at the repository root reaches every crate in the
-# workspace. A second one anywhere under `crates/` silently takes over for
+# workspace. A second one anywhere under `crates/` would silently take over for
 # every crate beneath it.
 
 # TODO: remove after https://github.com/hyperium/tonic/issues/2253 fixed.

@@ -316,7 +316,8 @@ impl<'a> EntryRenderer<'a> {
     }
 
     /// The per-message cost indicator shares the timestamp's message-block
-    /// gating — it decorates the same message blocks.
+    /// gating — it decorates the same message blocks, never thinking/tool/
+    /// system rows.
     fn should_show_cost(&self) -> bool {
         self.should_show_timestamp() && self.entry.cost_usd_ticks.is_some_and(|t| t > 0)
     }
@@ -360,11 +361,10 @@ impl<'a> EntryRenderer<'a> {
         if self.should_show_cache_hit() { 1 } else { 0 }
     }
 
-    /// Width reserved on the right side of content lines for the timestamp and
-    /// (when present) the per-message cost indicator.
-    ///
-    /// When > 0, content is wrapped at `content_width - reserved` so text
-    /// never collides with the overlay.
+    /// Width reserved on the right side of content lines for the timestamp
+    /// and (when present) the per-message cost indicator. When > 0, content
+    /// is wrapped at `content_width - reserved` so text never collides with
+    /// the overlay.
     fn timestamp_reserved(&self) -> u16 {
         let cost = self.cost_reserved();
         if self.appearance().show_timestamps && self.should_show_timestamp() {
@@ -377,7 +377,7 @@ impl<'a> EntryRenderer<'a> {
                 ts
             }
         } else {
-            // When the timestamp is hidden, a reported cost still reserves its own right-aligned gutter so it does not collide.
+            // When the timestamp is hidden, a reported cost still reserves its own right-aligned gutter.
             cost
         }
     }
@@ -573,14 +573,8 @@ impl<'a> EntryRenderer<'a> {
 }
 
 /// Convert an API-reported server cost (in USD ticks, 1e10 per USD) to a
-/// readable display string such as `$0.12` or `$3.42`.
-///
-/// # Honesty guarantees
-///
-/// - A missing (`None`) or non-positive cost returns `None`. Thus a caller never
-///   renders a fabricated `$0.00` when the API reported no cost.
-/// - Arithmetic is exact **integer** math (no floats). A tiny cost is thus
-///   never mis-rounded into `$0` the way a `f64` at 4 decimals could.
+/// readable display string such as `$0.12` or `$3.42`. # Honesty guarantees -
+/// A missing.
 pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<String> {
     let ticks = cost_usd_ticks?;
     if ticks <= 0 {
@@ -612,7 +606,8 @@ pub(crate) fn cache_hit_to_display(cache_hit_percent: Option<u8>) -> Option<Stri
 }
 
 /// Diamond chrome prefix every group header draws before its text —
-/// verb-run labels, truncation labels, and plain counts alike.
+/// verb-run labels, truncation labels, and plain counts alike, in both fold
+/// states.
 pub(crate) fn group_header_chrome_prefix() -> String {
     format!("{} ", crate::glyphs::diamond_dotted())
 }
@@ -962,9 +957,9 @@ impl Renderable for EntryRenderer<'_> {
         }
 
         // Cache-hit-percent line. Painted on its OWN reserved row directly
-        // below the content (`cache_hit_reserved_rows`). It does not share
+        // below the content (`cache_hit_reserved_rows`) rather than sharing
         // the first line's already-narrowed gutter with the cost/timestamp.
-        // Thus wrapped content never loses more width to fit a second label.
+        // Wrapped content never loses more width to fit a second label.
         if content_skip == 0
             && let Some(cache_str) = self.cache_hit_display()
         {
@@ -1588,7 +1583,7 @@ mod tests {
 
     #[test]
     fn cost_indicator_renders_next_to_timestamp_for_reported_cost() {
-        // A message with a reported cost draws the cost token immediately to the LEFT of the timestamp.
+        // A message with a reported cost draws the cost.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
             .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12345

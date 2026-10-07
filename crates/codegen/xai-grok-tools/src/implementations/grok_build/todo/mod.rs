@@ -35,13 +35,13 @@ pub(crate) fn validate_no_duplicate_ids(updates: &[TodoUpdate]) -> Result<(), To
 }
 
 /// Every write is a merge: updates are folded into the existing state. -
-/// **Existing items**: `content` is optional — if omitted the previous
-///   value is kept. This lets the model mark an item from `in_progress` →
-///   `completed` without echoing the content back.
-/// - **New items** (id not yet in state): if `content` is omitted the `id`
-///   is used as a fallback so the tool never errors on a merge call. This
-///   makes the tool resilient to state being lost between calls.
-/// `prepend` puts new items at the FRONT of the list, in the order given.
+/// **Existing items**: `content` is optional — if omitted the value is
+/// kept. This lets the model mark an item from `in_progress` → `completed`
+/// without echoing the content back. **New items** (id not yet in state): if
+/// `content` is omitted the `id` is used as a fallback so the tool never
+/// errors on a merge call. This makes the tool resilient to state being lost
+/// between calls. `prepend` puts new items at the FRONT of the list, in the
+/// order given.
 pub(crate) fn apply_merge(
     state: &mut TodoState,
     updates: &[TodoUpdate],
@@ -207,10 +207,9 @@ impl TodoState {
         true
     }
 
-    /// The id of the first item whose text is exactly `content`.
-    ///
-    /// For a caller whose items carry no id of their own, the text is the only
-    /// identity they have.
+    /// The id of the first item whose text is exactly `content`. For a caller
+    /// whose items carry no id of their own, the text is the only identity
+    /// they have.
     pub fn id_with_content(&self, content: &str) -> Option<TodoId> {
         self.todos
             .iter()
@@ -276,7 +275,7 @@ const fn default_merge() -> bool {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TodoWriteInput {
-    /// When true (the default), merge the provided todos into the existing list by id.
+    /// When true (the default), merge the provided todos.
     #[serde(
         default = "default_merge",
         deserialize_with = "crate::types::schema::deserialize_lenient_bool"
@@ -827,9 +826,8 @@ mod tests {
         assert_eq!(get_item(&state, "2").status, TodoStatus::InProgress);
     }
 
-    /// The write that used to be a replace. Sending one brand-new item is not
-    /// a statement that everything else is finished. The item the call does
-    /// not mention has to survive it.
+    /// Sending one brand-new item is not a statement that everything else is
+    /// finished. The item the call does not mention has to survive it.
     #[test]
     fn a_write_that_omits_an_item_keeps_it() {
         let mut state = seed_state(&[("old", "Old task", TodoStatus::InProgress)]);
@@ -966,9 +964,7 @@ mod tests {
         assert_eq!(get_item(&state, "1").content, "Fresh task");
     }
 
-    /// `/TODO` puts what the user just asked for where they will see it
-    /// first, in the order they asked for it. It does not disturb the work the
-    /// agent is already tracking.
+    /// `/TODO` puts what.
     #[test]
     fn prepend_puts_new_items_first_in_order_and_leaves_existing_ones_alone() {
         let mut state = seed_state(&[

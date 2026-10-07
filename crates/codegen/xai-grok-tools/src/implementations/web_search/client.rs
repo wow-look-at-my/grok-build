@@ -397,10 +397,9 @@ impl WebSearchClient {
 
     // ── Kagi backend ────────────────────────────────────────────────────
 
-    /// Fetch Kagi's ranked results and render them as `(content, (title, url))`.
-    ///
-    /// Nothing is synthesized: Kagi returns these already ranked, filtered, and
-    /// snippet-ed, so the payload is the results themselves.
+    /// Fetch Kagi's ranked results and render them as `(content, (title,
+    /// url))`. Nothing is synthesized: Kagi returns these already ranked,
+    /// filtered, and snippet-ed, so the payload is the results themselves.
     async fn kagi_results(
         &self,
         query: &str,
@@ -492,11 +491,10 @@ struct KagiItem {
     list: Vec<String>,
 }
 
-/// Render Kagi's results as the text the model reads, plus the citation pairs.
-///
-/// Each result becomes its title, URL, and snippet, so the model sees what Kagi
-/// returned without a synthesis pass. Related searches carry no URL, so they
-/// ride the text and never a citation.
+/// Render Kagi's results as the text the model reads, plus the citation
+/// pairs. Each result becomes its title, URL, and snippet, so the model sees
+/// what Kagi returned without a synthesis pass. Related searches carry no
+/// URL, so they ride the text and never a citation.
 fn format_kagi_results(results: &[&KagiItem], related: &[&str]) -> (String, Vec<(String, String)>) {
     let mut blocks = Vec::with_capacity(results.len() + 1);
     let mut pairs = Vec::with_capacity(results.len());
@@ -525,11 +523,10 @@ fn format_kagi_results(results: &[&KagiItem], related: &[&str]) -> (String, Vec<
 }
 
 /// Whether `url`'s host falls under any of the caller's `allowed_domains`.
-///
 /// Kagi's Search API takes no per-request domain filter, so the tool's
 /// `allowed_domains` argument is applied here rather than silently dropped.
-/// `None` (or an empty list) is unrestricted; a subdomain of an allowed domain
-/// matches, as the Responses-API filter does.
+/// `None` (or an empty list) is unrestricted; a subdomain of an allowed
+/// domain matches, as the Responses-API filter does.
 fn kagi_domain_allowed(url: &str, allowed: Option<&[String]>) -> bool {
     let Some(allowed) = allowed.filter(|list| !list.is_empty()) else {
         return true;

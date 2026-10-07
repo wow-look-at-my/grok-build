@@ -1,4 +1,4 @@
-//! ASAP interjection: a mid-turn user message buffered while a tool is running reaches the model on the *next* request in the same turn.
+//! ASAP interjection.
 
 use super::support::*;
 use super::*;
@@ -130,10 +130,10 @@ async fn actor_with_mock_sampler(
     actor
 }
 
-/// Consider a mid-turn interjection buffered while a tool call is in flight.
-/// That interjection reaches the model on the turn's *next* request, between
-/// AI messages and after the tool result. It does not wait for the turn to
-/// end.
+/// Consider a mid-turn interjection buffered while a tool call. That
+/// interjection is in flight reaches the model on the turn's *next* request
+/// — between AI messages, after the tool result. Rather than waiting for
+/// the turn to end.
 #[tokio::test]
 async fn interjection_buffered_during_tool_call_reaches_next_request() {
     let local = tokio::task::LocalSet::new();
@@ -141,8 +141,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
         .run_until(async {
             let server = MockInferenceServer::start().await.expect("mock inference server");
 
-            // A flag-gated foreground command: blocks until the test writes
-            // the release flag.
+            // A flag-gated foreground command.
             let tmp = std::env::temp_dir().join(format!(
                 "asap-inject-{}",
                 uuid::Uuid::now_v7().simple()
@@ -183,7 +182,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
 
             let actor = actor_with_mock_sampler(&server, persistence_tx, gateway_tx).await;
 
-            // Drive the turn on a background local task so we can buffer the interjection.
+            // Drive the turn on a background local task.
             let turn_actor = actor.clone();
             let turn_task = tokio::task::spawn_local(async move {
                 let prompt_blocks = vec![acp::ContentBlock::Text(acp::TextContent::new(
@@ -293,16 +292,14 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
         .await;
 }
 
-/// Consider an interjection buffered while the model is *streaming*. No tool
-/// call is in flight, and the turn loop is blocked on `submit_and_collect`.
-/// That interjection must still reach the model on the next request in the
-/// same turn. It must not wait for a separate prompt turn or get silently
-/// dropped.
-///
-/// This is the "don't wait for stream idle" case: the stream holds open at its
-/// terminal event via `expect_response_blocked`. The interjection is buffered
-/// mid-stream. Then the stream is released. The turn loop iterates, drains the
-/// interjection, and the second request carries it.
+/// Consider an interjection buffered while the model. That interjection is
+/// *streaming* (no tool call in flight — the turn loop is blocked on
+/// `submit_and_collect`) must still reach the model on the next request in
+/// the same turn, not wait for a separate prompt turn. It get silently
+/// dropped. This is the "don't wait for stream idle" case: the stream holds
+/// open at its terminal event via `expect_response_blocked`. The interjection
+/// is buffered mid-stream. Then the stream is released. The turn loop
+/// iterates, drains the interjection, and the second request carries it.
 #[tokio::test]
 async fn interjection_buffered_during_stream_reaches_next_request() {
     let local = tokio::task::LocalSet::new();
@@ -363,7 +360,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                 .expect("turn must finish within timeout")
             });
 
-            // Wait until the first stream is actively streaming and parked at its terminal-event barrier.
+            // Wait until the first stream is actively streaming.
             first.wait_blocked().await;
 
             // Buffer the interjection mid-stream — the user "sends" a message
@@ -424,13 +421,12 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
 /// interjection) is harvested into the running turn. It reaches the model on
 /// the next request — the "claude code style" asap delivery the harvest
 /// feature (commit `2c973e5`) provides. The follow-up must NOT wait for the
-/// whole turn to end and run as its own turn.
-///
-/// This drives the REAL turn-promotion path (`maybe_start_running_task`), which
-/// sets `running_task` and `queued_at_turn_start` — the state the harvest
+/// whole turn to end and run as its own turn. This drives the REAL
+/// turn-promotion path (`maybe_start_running_task`), which sets
+/// `running_task` and `queued_at_turn_start` — the state the harvest
 /// consults. Direct `handle_prompt` calls bypass the promoter and leave that
-/// state empty, so the harvest would no-op. This test goes through the promoter
-/// so it exercises the exact path production takes.
+/// state empty, so the harvest would no-op. This test goes through the
+/// promoter so it exercises the exact path production takes.
 #[tokio::test]
 async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
     let local = tokio::task::LocalSet::new();
@@ -571,18 +567,17 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
         .await;
 }
 
-/// ASAP injection during a model stream. The in-flight stream is CANCELLED so
-/// the turn loop iterates immediately, drains the interjection, and resubmits.
-/// It does not wait for the (potentially many-minutes-long) stream to
-/// finish. This holds when an interjection arrives while the model is actively
-/// streaming (the turn loop is blocked on `submit_and_collect`). The partial
-/// text the model had already streamed is preserved as an assistant message so
-/// the resubmitted request sees `partial + interjection`.
-///
-/// This is the "don't wait for stream idle" path. It mirrors what the
-/// `SessionCommand::Interject` handler does (buffer + cancel the in-flight
-/// request), driven here directly so the test does not need the full
-/// `run_session` actor loop.
+/// ASAP injection during a model stream. The in-flight stream is CANCELLED
+/// so the turn loop iterates immediately, drains the interjection, and
+/// resubmits. Instead of waiting for the (potentially many-minutes-long)
+/// stream to finish. This holds when an interjection arrives while the model
+/// is actively streaming (the turn loop is blocked on `submit_and_collect`).
+/// The partial text the model had already streamed is preserved as an
+/// assistant message so the resubmitted request sees `partial +
+/// interjection`. This is the "don't wait for stream idle" path. It mirrors
+/// what the `SessionCommand::Interject` handler does (buffer + cancel the
+/// in-flight request), driven here directly so the test does not need the
+/// full `run_session` actor loop.
 #[tokio::test]
 async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved() {
     let local = tokio::task::LocalSet::new();
@@ -616,7 +611,7 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
 
             let actor = actor_with_mock_sampler(&server, persistence_tx, gateway_tx).await;
 
-            // Queue the initial prompt and promote it.
+            // Queue the initial prompt.
             let initial = user_item("asap-cancel", "test-owner");
             {
                 let mut state = actor.state.lock().await;
@@ -626,14 +621,15 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
                 tokio::sync::mpsc::unbounded_channel::<TurnCompletionMsg>();
             actor.clone().maybe_start_running_task(completion_tx).await;
 
-            // Wait until the first stream is parked at its terminal-event barrier — the model is mid-stream.
+            // Wait until the first stream is parked.
             first.wait_blocked().await;
 
             // Give the sampler-event drainer task a beat to process the text deltas that arrived before the terminal barrier.
             tokio::time::sleep(Duration::from_millis(200)).await;
 
-            // Simulate the `SessionCommand::Interject` handler: buffer the interjection, set the cancel flag, and
-            // cancel the in-flight request id.
+            // Simulate the `SessionCommand::Interject` handler: buffer the
+            // interjection, set the cancel flag, and cancel the in-flight
+            // request id.
             actor.pending_interjections.push(PendingInterjection {
                 text: INTERJECTION_NEEDLE.to_string(),
                 attachments: vec![],

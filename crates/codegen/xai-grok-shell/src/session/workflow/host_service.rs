@@ -75,7 +75,7 @@ pub(crate) struct WorkflowHostParams {
     pub run_id: String,
     /// The configured cap, kept for logging/telemetry.
     pub max_concurrent_agents: usize,
-    /// Slots shared by every active run in the session (owned by `WorkflowManager`), so wider fan-outs queue in order across runs too.
+    /// Slots shared by every active run.
     pub agent_slots: Arc<tokio::sync::Semaphore>,
     pub cwd: PathBuf,
     pub scratch_dir: PathBuf,
@@ -1084,7 +1084,7 @@ mod tests {
     }
 
     /// Like [`test_host_params`], but the caller supplies the agent-slot
-    /// semaphore. Calls can then share one pool, the way multiple runs
+    /// semaphore. Calls can share one pool the way multiple runs
     /// launched from the same `WorkflowManager` do.
     fn test_host_params_with_slots(
         run_id: &str,
@@ -1351,7 +1351,7 @@ mod tests {
 
     /// Runs launched from the same `WorkflowManager` share its
     /// `agent_slots` semaphore. This proves the cap is enforced OVERALL,
-    /// across both runs at once, not just within each run separately.
+    /// across both runs at once, not within each run separately.
     #[tokio::test]
     async fn two_runs_share_the_session_wide_agent_slots() {
         const CAP: usize = 1;

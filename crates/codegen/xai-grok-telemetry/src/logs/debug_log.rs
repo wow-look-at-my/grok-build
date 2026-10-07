@@ -238,7 +238,7 @@ fn debug_log_max_bytes() -> u64 {
 struct Sink {
     writer: NonBlocking,
     bytes_written: u64,
-    /// Set once [`RoutingLayer::max_bytes`] is hit, so the one-line notice is written exactly once and every later line is a silent no-op.
+    /// Set once [`RoutingLayer::max_bytes`] is hit.
     capped: bool,
 }
 
@@ -267,7 +267,7 @@ struct RoutingLayer {
     pid: u32,
     /// Hard per-file byte cap (see [`Sink`]); resolved once at construction.
     max_bytes: u64,
-    // The lock is scoped to map access ONLY.
+    // The lock is scoped to map access ONLY — file opens (fs + a worker-thread spawn + the appender's own mutex) run OUTSIDE it.
     sinks: parking_lot::Mutex<SinkMap>,
 }
 
@@ -336,7 +336,7 @@ impl RoutingLayer {
         let mut sink = Sink::new(writer);
         self.write_capped(&mut sink, line);
         let mut map = self.lock();
-        // If a concurrent event opened it first.
+        // If a concurrent event opened it first, keep that one and drop ours.
         map.sessions.entry(key.to_owned()).or_insert(sink);
     }
 
@@ -694,10 +694,9 @@ fn prune_old_logs(dir: &Path, max_age: std::time::Duration) {
 mod tests {
     use super::*;
 
-    /// The sink map is taken on every subscriber callback. Another holder can
-    /// panic while it holds the lock. What the lock does after that is the
-    /// difference between a dropped line and a process that can no longer log
-    /// at all.
+    /// The sink map is taken on every subscriber callback. What the lock does
+    /// after somebody else panicked while holding it is the difference between a
+    /// dropped line and a process. That can no longer log at all.
     #[test]
     fn a_panic_while_the_sink_map_is_held_leaves_it_acquirable() {
         let layer = std::sync::Arc::new(RoutingLayer::new(
@@ -1055,7 +1054,7 @@ mod tests {
 
     #[test]
     fn write_session_caps_file_size_and_stops_growing() {
-        // Regression: a session's firehose file used to have no size bound at all (only age-based pruning), so a long `GROK_DEBUG_LOG` session.
+        // Regression.
         let _lock = flush_test_lock();
         let dir = tempfile::tempdir().unwrap();
         let layer = RoutingLayer::new(dir.path().to_path_buf(), "agent".to_owned(), 1)

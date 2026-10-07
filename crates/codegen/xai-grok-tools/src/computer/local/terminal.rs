@@ -781,6 +781,10 @@ impl LocalTerminalActor {
         }
 
         let snapshot = static_shell.snapshot.clone();
+        // The write end of the snapshot pipe is owned by this task alone, so
+        // a failure to drain it has to be reported. The child blocks on a
+        // later fd either way and the caller cannot tell a slow write from a
+        // dead task.
         #[allow(clippy::disallowed_methods)]
         tokio::spawn(crate::util::detached::fire_and_forget(
             "static shell snapshot writer",

@@ -165,7 +165,7 @@ pub struct ToolParam {
     pub eager_input_streaming: True,
 }
 
-/// The one value `ToolParam::eager_input_streaming` can hold.
+/// The value `ToolParam::eager_input_streaming` can hold.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct True;
 
@@ -288,9 +288,10 @@ impl MessagesUsage {
     pub const COST_KEYS: Aliases = Aliases::new("cost_in_usd_ticks", &["cost_usd_ticks"]);
 }
 
-/// `MessagesUsage` as it arrives on the wire. This happens with each cost-key
-/// spelling its own field, so a gateway naming both folds them instead of
-/// tripping serde's duplicate-field check. See [`MessagesUsage::COST_KEYS`].
+/// `MessagesUsage` as it arrives on the wire. That `MessagesUsage` is with
+/// each cost-key spelling its own field, so a gateway naming both folds them
+/// instead of tripping serde's duplicate-field check. See
+/// [`MessagesUsage::COST_KEYS`].
 #[derive(Debug, Default, Deserialize)]
 struct MessagesUsageWire {
     input_tokens: u32,
@@ -460,7 +461,7 @@ pub struct StreamError {
 mod tests {
     use super::*;
 
-    /// `message_start` opens every stream with an empty content list, so a
+    /// `message_start` opens every stream with an empty content list. A
     /// gateway that writes an unset slice as `null` puts this shape on the
     /// wire. This happens for every turn it relays. The event is internally
     /// tagged, so serde buffers it and the failure arrives without a
@@ -637,9 +638,9 @@ mod tests {
         assert_eq!(json.get("data"), Some(&serde_json::json!("abc")));
     }
 
-    /// Every wire shape a gateway prices a call with has to parse. An
-    /// Anthropic response that prices nothing has to stay priceless rather
-    /// than read as free.
+    /// Every wire shape a gateway prices a call with has to parse, and an
+    /// Anthropic response. That prices nothing has to stay priceless
+    /// rather than read as free.
     #[test]
     fn usage_parses_every_cost_shape_a_gateway_sends() {
         let cases = [
@@ -726,10 +727,11 @@ mod tests {
         );
     }
 
-    /// Every cost-spelling assertion, run against both usage shapes. A gateway
-    /// prices the call on `message_start` and settles it on `message_delta`, so
-    /// either one can carry both keys. Both JSON bodies name `input_tokens` and
-    /// `output_tokens`, both keys the stricter of both structs requires.
+    /// Every cost-spelling assertion, run against both usage shapes. A
+    /// gateway prices the call on `message_start` and settles it on
+    /// `message_delta`, so either can carry both keys. Both JSON bodies name
+    /// `input_tokens` and `output_tokens`, both keys the stricter of the
+    /// structs requires.
     fn assert_cost_key_folding<T>(
         read: impl Fn(&T) -> Option<i64>,
         build: impl Fn(Option<i64>) -> T,

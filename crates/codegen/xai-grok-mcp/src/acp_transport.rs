@@ -297,12 +297,11 @@ mod tests {
         }
     }
 
-    /// A request whose round panics is answered, and the bridge keeps serving.
-    ///
-    /// The invoke task is the only thing that can ever write the response for
-    /// its id. An unwound round has to produce that response itself. The
-    /// reader above is the test's stand-in for rmcp, which waits on the
-    /// response and has no way to see that the task died.
+    /// A request whose round panics is answered, and the bridge keeps
+    /// serving. The invoke task is the only thing that can ever write the
+    /// response for its id. An unwound round has to produce that response
+    /// itself. The reader above is the test's stand-in for rmcp, which waits
+    /// on the response and has no way to see that the task died.
     #[tokio::test]
     async fn a_panicking_reverse_invoke_answers_its_request_and_the_bridge_keeps_serving() {
         let (test_write, pump_read) = tokio::io::duplex(BRIDGE_BUF);

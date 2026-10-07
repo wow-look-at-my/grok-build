@@ -876,7 +876,7 @@ pub(crate) struct SessionActor {
     /// `run_turn_via_sampler` and cleared on completion.
     pub(crate) in_flight_sampler_request_id:
         parking_lot::Mutex<Option<xai_grok_sampler::RequestId>>,
-    /// Set by the `SessionCommand::Interject` handler to tell `run_turn_via_sampler`.
+    /// Set by the `SessionCommand::Interject`.
     pub(crate) interjection_cancel_requested: std::sync::atomic::AtomicBool,
     /// Prompt ids queued when the running turn was promoted.
     pub(crate) queued_at_turn_start: std::cell::RefCell<std::collections::HashSet<String>>,

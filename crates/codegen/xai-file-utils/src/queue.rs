@@ -2174,7 +2174,7 @@ fn cleanup_queue_dir(queue_dir: &Path, max_age: Duration, stats: Option<&UploadQ
     };
     let all_names: HashSet<std::ffi::OsString> = entries.iter().map(|e| e.file_name()).collect();
     // Age every entry before removing any of them: pair_age reads the
-    // companion sidecar off disk, so sweeping a pair's sidecar first.
+    // companion sidecar off disk.
     let ages: Vec<Option<Duration>> = entries
         .iter()
         .map(|e| pair_age(&e.path(), &e.file_name(), &all_names))

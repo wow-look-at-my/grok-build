@@ -1041,7 +1041,7 @@ async fn auth_headers_do_not_collide_with_json() {
 fn parse_anthropic_style_listing_max_input_tokens_resolves_context_window() {
     // Anthropic's official `/v1/models` ModelInfo shape (`id`, `created_at`,
     // `display_name`, `type`) carries the input-context-window as
-    // `max_input_tokens`.
+    // `max_input_tokens`, not `contextWindow`/`context_window`.
     let value = serde_json::json!({
         "id": "claude-sonnet-4-5",
         "type": "model",

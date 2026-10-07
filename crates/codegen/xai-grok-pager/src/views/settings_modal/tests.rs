@@ -681,8 +681,8 @@ fn render_setting_row_shows_full_label_when_one_line_fits() {
     );
 }
 
-/// `default_reasoning_effort` and `auto_compact_threshold_percent`
-/// are not exposed in the modal.
+/// `default_reasoning_effort` and `auto_compact_threshold_percent` are not
+/// exposed in the modal.
 #[test]
 fn rows_contain_categories_and_settings_through_pr_14() {
     let prev_voice = crate::app::voice_mode_enabled();
@@ -725,10 +725,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             }
         })
         .collect();
-    // The harness model slots are spliced in from their own table below.
-    // What this pins is WHERE they sit: under Models, after
-    // `subagent_model_inheritance`. A literal list of them goes stale the
-    // moment a slot is added.
+    // The harness model slots are spliced in from their own table below. What this
+    // pins is WHERE they sit — under Models, after `subagent_model_inheritance`.
+    // And a literal list of them would go stale the moment a slot is added.
     let mut expected: Vec<SettingKey> = vec![
         // Booleans.
         "compact_mode",
@@ -756,7 +755,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "group_tool_verbs",
         // SHELL-owned collapsed_edit_blocks (Appearance; live cache, default OFF rollout flag).
         "collapsed_edit_blocks",
-        // SHARED-owned thinking_summaries (Appearance.
+        // SHARED-owned thinking_summaries (Appearance; below collapsed_edit_blocks, because those rows above it are pinned into one adjacency chain).
         "thinking_summaries",
         // SHELL-owned display_refresh_auto_cadence (Appearance).
         "display_refresh_auto_cadence",
@@ -1963,14 +1962,14 @@ fn int_stepper_buffer(s: &SettingsModalState) -> String {
 fn int_step_sizes_table_pins_range_policy() {
     // (min, max, expected_small, expected_large)
     let cases = [
-        (1, 10, 1, 1),
-        (1, 100, 1, 5),
-        (40, 500, 5, 10),
-        (0, 0, 1, 1), // degenerate span
-        (1, 21, 1, 4),
-        (1, 22, 1, 5),
-        (1, 101, 1, 5),
-        (1, 102, 5, 10),
+        (1, 10, 1, 1),    // scroll_lines (a later span)
+        (1, 100, 1, 5),   // scroll_speed (a later span)
+        (40, 500, 5, 10), // max_thoughts_width (a later span)
+        (0, 0, 1, 1),     // degenerate span
+        (1, 21, 1, 4),    // A later span still narrow: large = span/5
+        (1, 22, 1, 5),    // A later span → mid band
+        (1, 101, 1, 5),   // A later span still mid
+        (1, 102, 5, 10),  // A later span → wide band
         (1, 1_000_001, 5, 10),
         (-1, i64::from(u32::MAX) - 1, 1, 5), // an uncapped field keeps unit steps
     ];
@@ -2173,6 +2172,7 @@ fn int_editing_value_ignores_other_text_input_keys() {
 fn int_editing_value_typed_commit_dispatches_clamped_value() {
     use crossterm::event::KeyModifiers;
     let mut s = int_stepper_fixture_for("scroll_lines", 3);
+    // Clear the seeded value, then a later type.
     let _ = handle_settings_key(
         &mut s,
         &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
@@ -2197,6 +2197,7 @@ fn int_editing_value_typed_commit_dispatches_clamped_value() {
 #[test]
 fn int_editing_value_typed_out_of_range_clamps_on_commit() {
     use crossterm::event::KeyModifiers;
+    // Type "0" then commit → clamps to a set limit.
     let mut s = int_stepper_fixture_for("scroll_lines", 3);
     let _ = handle_settings_key(
         &mut s,

@@ -441,7 +441,7 @@ context_window = 500000
 
 ### Ollama and LM Studio (local models)
 
-Declare the provider and every model it serves shows up in `/model`, with its real context window. This is its capabilities and a dot showing whether it is loaded in VRAM right now:
+Declare the provider and every model it serves shows up in `/model`. That Declare is with its real context window, its capabilities and a dot showing whether it is loaded in VRAM right now:
 
 ```toml
 [model_providers.ollama]
@@ -481,7 +481,7 @@ keep_alive = "30m"          # stay resident between turns
 truncate = false            # error instead of silently dropping history
 ```
 
-LM Studio's compatible endpoint does accept extra body fields. As a result, it needs no backend change:
+LM Studio's compatible endpoint does accept extra body fields. It needs no backend change:
 
 ```toml
 [model_providers.lmstudio.extra_body]

@@ -203,8 +203,8 @@ fn combine_front_skips_client_expanded_skill() {
     );
 }
 
-/// A queued command row never merges. `resolve` reads a prompt's LEADING token
-/// only, so a `/cmd args` folded in behind a plain row would reach the model as
+/// A queued command row never merges: `resolve` reads a prompt's LEADING token
+/// only. A `/cmd args` folded in behind a plain row would reach the model as
 /// literal prose. The command would never run.
 #[test]
 fn combine_front_stops_at_a_command_row() {
@@ -2378,10 +2378,13 @@ async fn goal_send_now_promotes_a_command_row_instead_of_steering_it() {
         .await;
 }
 
-/// DIAGNOSTIC (not a regression guard yet): the automatic ASAP path — a plain queued row with no `send_now`. Reaches `queue_input` and///
-/// `harvest_queued_prompts_into_interjections` exactly the same way whether or not a goal is active. Confirms the harvest function itself
-/// carries no goal-awareness. So if goal mode really blocks ASAP delivery, the gate must live in how often turn.rs's loop *calls* the
-/// harvest during a goal round. It cannot live in the harvest or the enqueue path.
+/// DIAGNOSTIC (not a regression guard yet): the automatic ASAP path — a
+/// plain queued row with no `send_now`. Reaches `queue_input` and///
+/// `harvest_queued_prompts_into_interjections` exactly the same way whether a
+/// goal is active. Confirms the harvest function itself carries no
+/// goal-awareness. The gate must live in how often turn.rs's loop *calls* the
+/// harvest during a goal round, not in the harvest or the enqueue path. This
+/// holds if goal mode blocks ASAP delivery.
 #[tokio::test]
 async fn plain_queue_during_goal_turn_is_harvested_like_any_other_turn() {
     let local = tokio::task::LocalSet::new();

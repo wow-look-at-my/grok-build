@@ -33,14 +33,13 @@ pub fn truncate_line(line: &str, max_chars: usize) -> Cow<'_, str> {
 }
 
 /// Soft-wrap a long line by inserting newlines every `wrap_width` characters.
-/// **All content is preserved** — nothing is discarded.
-///
-/// Returns `Cow::Borrowed` if the line is already within `wrap_width` (zero-copy).
-///
-/// This is the correct strategy for bash and task_output, where the total output
-/// is already size-bounded (30KB). The model benefits from seeing all of it. The
-/// problem with long lines isn't size — it's that the model has no structure to
-/// anchor on. Wrapping adds that structure without losing content.
+/// **All content is preserved** — nothing is discarded. Returns
+/// `Cow::Borrowed` if the line is already within `wrap_width` (zero-copy).
+/// This is the correct strategy for bash and task_output, where the total
+/// output is already size-bounded (30KB). The model benefits from seeing all
+/// of it. The problem with long lines isn't size — it's that the model has
+/// no structure to anchor on. Wrapping adds that structure without losing
+/// content.
 pub fn soft_wrap_line(line: &str, wrap_width: usize) -> Cow<'_, str> {
     // Fast path: same byte-length optimization as truncate_line (see comment there).
     if line.len() <= wrap_width {
@@ -72,7 +71,7 @@ pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
 }
 
 /// Truncate a string to at most `max_bytes` bytes at a valid UTF-8 boundary.
-/// Returns the string if it fits. No truncation marker is added.
+/// Returns the original string if it fits.
 pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
     truncate_bytes(s, max_bytes)
 }
@@ -118,10 +117,9 @@ impl<'a> PartialOutput<'a> {
     }
 }
 
-/// Truncate output to a UTF-8-safe preview plus a model-visible footer.
-///
-/// The cap decides whether truncation happens. When triggered, the returned
-/// value contains the first `preview_bytes` bytes snapped to a char boundary
+/// Truncate output to a UTF-8-safe preview plus a model-visible footer. The
+/// cap decides whether truncation happens. When triggered, the returned value
+/// contains the first `preview_bytes` bytes snapped to a char boundary
 /// followed by `[Output truncated - <N> bytes total...]`. This holds where
 /// `N` is the size of the whole output, not of the part on hand.
 pub fn truncate_with_preview(
@@ -272,11 +270,10 @@ pub fn truncate_front_and_back(s: &str, max_chars: usize) -> (String, bool) {
 
 /// Truncate a string by keeping the first and last halves of a **character**
 /// budget, inserting `"..."` in the middle. Used in the image-description
-/// pipeline.
-///
-/// When `s.chars().count() <= max_chars` the input is returned unchanged.
-/// Otherwise the result contains `⌊max_chars/2⌋` chars from the start,
-/// the literal `"..."`, then `⌊max_chars/2⌋` chars from the end.
+/// pipeline. When `s.chars().count() <= max_chars` the input is returned
+/// unchanged. Otherwise the result contains `⌊max_chars/2⌋` chars from
+/// the start, the literal `"..."`, then `⌊max_chars/2⌋` chars from the
+/// end.
 pub fn truncate_middle(s: &str, max_chars: usize) -> String {
     const MARKER: &str = "...";
     const MARKER_LEN: usize = MARKER.len();
@@ -317,10 +314,8 @@ pub fn truncate_middle(s: &str, max_chars: usize) -> String {
 }
 
 /// Truncate a multi-line string at line boundaries to fit within a character
-/// budget.
-///
-/// Returns `(result, was_truncated)`. When the content already fits, the
-/// joined+trimmed content is returned unchanged.
+/// budget. Returns `(result, was_truncated)`. When the content already fits,
+/// the joined+trimmed content is returned unchanged.
 pub fn truncate_lines_to_char_budget(content: &str, budget: usize) -> (String, bool) {
     let trimmed = content.trim();
     if trimmed.len() <= budget {
@@ -689,7 +684,9 @@ mod tests {
 
     // ---- truncate_bytes ----
 
-    /// The budget lands inside the character; the prefix must stop before it.
+    /// The crash this function exists to prevent: `&msg[..200]` where a later
+    /// byte is the middle of an em dash in a commit message. The budget lands
+    /// inside the character; the prefix must stop before it.
     #[test]
     fn truncate_bytes_em_dash_straddling_the_offset() {
         let msg = format!("{}—{}", "a".repeat(199), "b".repeat(20));

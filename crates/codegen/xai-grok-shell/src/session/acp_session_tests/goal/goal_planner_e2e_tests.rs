@@ -29,7 +29,7 @@ enum SpawnBehaviour {
     /// Parse `{PLAN_FILE}` out of the prompt, write `body` there, then respond `Done`.
     WritePlanThenDone { body: &'static [u8] },
     /// Like [`Self::WritePlanThenDone`], but the planner child also reports
-    /// the todo list it built for ITSELF with `todo_write`.
+    /// the todo list it built for ITSELF with `todo_write` while planning.
     WritePlanThenDoneWithTodos {
         body: &'static [u8],
         todos: &'static [&'static str],
@@ -55,8 +55,7 @@ enum SpawnBehaviour {
     NoWriteThenDone,
     /// Reply with subagent runtime failure.
     Runtime { message: String, cancelled: bool },
-    /// Mimic the real coordinator after a user Stop with `cancel_subagents`:
-    /// every Task spawn is rejected as cancelled.
+    /// Mimic the real coordinator after a user Stop with `cancel_subagents`.
     AdmissionGatedThenWrite {
         opened: StdArc<std::sync::atomic::AtomicBool>,
         body: &'static [u8],
@@ -74,7 +73,7 @@ struct PlannerSpawnCapture {
     fork_context: StdArc<std::sync::Mutex<Vec<bool>>>,
     surface_completion: StdArc<std::sync::Mutex<Vec<bool>>>,
     model: StdArc<std::sync::Mutex<Vec<Option<String>>>>,
-    /// Every prompt the coordinator was asked to spawn a planner with.
+    /// Every prompt the coordinator was asked to spawn a planner.
     prompt: StdArc<std::sync::Mutex<Vec<String>>>,
 }
 
@@ -375,10 +374,9 @@ fn create_test_goal(actor: &SessionActor) {
     );
 }
 
-/// Every todo on the session's LIVE list, as `(id, content, status)`.
-///
-/// Read through the session's own tool bridge, which is where `todo_write`
-/// keeps it — the same state the model and the pager see.
+/// Every todo on the session's LIVE list, as `(id, content, status)`. Read
+/// through the session's own tool bridge, which is where `todo_write` keeps
+/// it — the same state the model and the pager see.
 async fn live_todos(actor: &SessionActor) -> Vec<(String, String, crate::tools::todo::TodoStatus)> {
     use crate::tools::todo::TodoState;
     use xai_grok_tools::types::resources::State;
@@ -398,7 +396,7 @@ async fn live_todos(actor: &SessionActor) -> Vec<(String, String, crate::tools::
         .unwrap_or_default()
 }
 
-/// Just the contents of the live list, in order.
+/// The contents of the live list, in order.
 async fn live_todo_contents(actor: &SessionActor) -> Vec<String> {
     live_todos(actor)
         .await
@@ -458,8 +456,8 @@ const CHECKLIST_PLAN: &[u8] = b"# Plan: ship the exporter\n\n## Goal kind\ncode-
 2. wire it into the publish path\n\
 3. cover it with an end-to-end test\n";
 
-/// The scripted planner the seeding tests drive: it writes [`CHECKLIST_PLAN`]
-/// and reports the same steps on ITS OWN list with `todo_write`.
+/// The scripted planner the seeding tests drive: it writes
+/// [`CHECKLIST_PLAN`].
 fn scripted_planner_with_todos() -> SpawnBehaviour {
     SpawnBehaviour::WritePlanThenDoneWithTodos {
         body: CHECKLIST_PLAN,
@@ -516,9 +514,9 @@ fn plan_updates(
 }
 
 /// A seeded item is a todo like any other. The seed dispatches through the
-/// session's own `todo_write`. So the same `Plan` session update a
-/// model-written list produces is enqueued for the client. It carries the
-/// items the planner listed.
+/// session's own `todo_write`, so the same `Plan` session update a
+/// model-written list produces is enqueued for the client. That seed is
+/// carrying the items the planner listed.
 #[tokio::test(flavor = "current_thread")]
 async fn the_seed_reaches_the_client_as_a_plan_update() {
     let local = tokio::task::LocalSet::new();
@@ -589,9 +587,9 @@ async fn a_lite_goal_never_spawns_the_planner() {
 }
 
 /// path hands the planner a prompt that tells it to list the plan's work with
-/// the session's own todo tool. The whole feature rests on that instruction.
-/// The test asserts it on the prompt the coordinator was actually given,
-/// rather than on a template rendered in isolation.
+/// the session's own todo tool. The instruction the whole feature rests on,
+/// asserted on the prompt the coordinator was given rather than on a template
+/// rendered in isolation.
 #[tokio::test(flavor = "current_thread")]
 async fn the_planner_is_spawned_with_the_todo_instruction() {
     let local = tokio::task::LocalSet::new();
@@ -634,8 +632,8 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
 /// This is the shipped reader that carries a planner child's items back
 /// ([`crate::agent::subagent::session_todo_contents`]). The shipped reader is
 /// driven against a real bound session whose list was written through the real
-/// tool. It is also driven against an id that was never bound. This is the
-/// proxy-mode / no-child case.
+/// tool. And against an id that was never bound, which is the proxy-mode /
+/// no-child case.
 #[tokio::test(flavor = "current_thread")]
 async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
     let local = tokio::task::LocalSet::new();
@@ -670,9 +668,9 @@ async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
         .await;
 }
 
-/// The gate for the objective's first criteria. One `setup_goal` call, with no
-/// model turn of its own, leaves the session's LIVE todo list carrying the
-/// planner's items. Each is a fresh pending harness-minted item.
+/// The gate for the objective's first criteria: one `setup_goal` call — with no
+/// model turn of its own. It leaves the session's LIVE todo list carrying the
+/// planner's items, each a fresh pending harness-minted item.
 #[tokio::test(flavor = "current_thread")]
 async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
     let local = tokio::task::LocalSet::new();
@@ -1473,13 +1471,13 @@ async fn planner_runtime_failure_pauses_goal_with_canonical_message() {
         .await;
 }
 
-/// Regression. After a user Stop (ESC / Ctrl-C) the real coordinator latches
-/// the session in `spawn_blocked_sessions`. Then every Task spawn, the goal
-/// planner included, is rejected as cancelled until an `OpenSpawnAdmission`
-/// arrives. The only reopen site runs after the goal-slash dispatch, and the
-/// resume path early-returns before it, which wedged goals until restart.
-/// Setting/resuming a goal is user re-engagement, so the planner must open
-/// admission itself before spawning.
+/// Regression: after a user Stop (ESC / Ctrl-C) the real coordinator latches
+/// the session in `spawn_blocked_sessions`, and every Task spawn — the goal
+/// planner included. The goal planner is rejected as cancelled until an
+/// `OpenSpawnAdmission` arrives. The only reopen site runs after the
+/// goal-slash dispatch, and the resume path early-returns before it, which
+/// wedged goals until restart. Setting/resuming a goal is user re-engagement,
+/// so the planner must open admission itself before spawning.
 #[tokio::test(flavor = "current_thread")]
 async fn planner_reopens_spawn_admission_blocked_by_prior_cancel() {
     let local = tokio::task::LocalSet::new();
@@ -2150,11 +2148,9 @@ async fn stop_then_slash_goal_resume_reopens_spawn_admission_before_planner_retr
 
 /// End-to-end gate (enabled side). When the planner is on and writes a plan,
 /// `setup_goal`'s reminder folds in the plan-aware block carrying the actual
-/// `plan_path()` pointer. Setup_goal`'s reminder also folds the `##
-/// Deviations` instruction, and the legacy discipline intact. This planner
-/// lists no todo items, so nothing is seeded. The reminder must tell the
-/// implementer to put the steps on the list, and must never claim they are
-/// already there.
+/// Deviations` instruction, and the discipline intact. This planner lists no
+/// todo items, so nothing is seeded. The reminder must tell the implementer
+/// to put the steps on the list, and must never claim they are already there.
 #[tokio::test(flavor = "current_thread")]
 async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
     let local = tokio::task::LocalSet::new();
@@ -2171,7 +2167,7 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
             else {
                 panic!("a published plan must flow through to inference");
             };
-            // Printed so `cargo test -- --nocapture` captures the exact reminder text for review: the assertions below are the gate.
+            // Printed so `cargo test -- --nocapture` captures the exact reminder text for review: the assertions below are the gate, this is the artifact a reader.
             println!("=== plan-aware setup_goal reminder ===\n{reminder}\n=== end ===\n");
 
             let snap = actor.goal_tracker.lock().snapshot().cloned().unwrap();

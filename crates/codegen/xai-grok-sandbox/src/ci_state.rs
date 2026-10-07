@@ -9,7 +9,7 @@ pub enum CiStatus {
     Off,
     /// A run has failed or errored (failing/errored/cancelled/timed-out).
     Red,
-    /// A run is currently in progress / queued / pending (non-terminal).
+    /// A run is in progress / queued / pending (non-terminal).
     Yellow,
     /// A run has concluded successfully.
     Green,
@@ -33,17 +33,16 @@ impl CiStatus {
     }
 }
 
-/// A single workflow run as reported by `gh run list --json`.
-///
-/// `gh` emits camelCase keys (`headBranch`, `workflowName`); without the
-/// rename every non-single-word field silently deserialized to its default.
+/// A single workflow run as reported by `gh run list --json`. `gh` emits
+/// camelCase keys (`headBranch`, `workflowName`); without the rename every
+/// non-single-word field silently deserialized to its default.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GhRun {
-    /// GitHub `status` of the run: `queued`, `in_progress`, `completed`, `requested`, `waiting`, `pending` … — `""`.
+    /// GitHub `status` of the run.
     #[serde(default)]
     pub status: String,
-    /// GitHub `conclusion` of a completed run: `success`, `failure`, `cancelled`, `neutral`, `skipped`, `timed_out`, `action_required`.
+    /// GitHub `conclusion` of a completed run.
     #[serde(default)]
     pub conclusion: String,
     /// Branch this run was triggered against.
@@ -139,11 +138,10 @@ where
         .collect()
 }
 
-/// Parse the raw stdout of `gh run list --json` into runs.
-///
-/// Pure and headless-safe. Returns `None` when `gh` produced no usable JSON
-/// (or the output decodes to empty), so callers degrade to "no CI status"
-/// instead of panicking.
+/// Parse the raw stdout of `gh run list --json` into runs. Pure and
+/// headless-safe. Returns `None` when `gh` produced no usable JSON (or the
+/// output decodes to empty), so callers degrade to "no CI status" instead of
+/// panicking.
 pub fn parse_gh_runs(stdout: &[u8]) -> Option<Vec<GhRun>> {
     // `gh` can colourise piped JSON (e.g. `GH_FORCE_TTY`, `--color always`), which would break serde parsing.
     let runs = strip_ansi_csi(stdout);

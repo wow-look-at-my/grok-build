@@ -219,15 +219,11 @@ fn git_stdout(git_root: &Path, args: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// Split on `&&` `||` `;` `|` and newlines that are not inside quotes.
-///
-/// The walk is by CHARACTER, never by raw byte index: quotes are ASCII (`'` /
-/// `"`). A multi-byte UTF-8 character is neither a separator nor a quote. It
-/// is skipped whole. That keeps `i` on a char boundary whenever the statement
-/// slices below run. (The previous byte-index walk stepped onto a UTF-8
-/// continuation byte and panicked — "byte index N is not a char boundary"
-/// — on any command carrying non-ASCII text, which aborted the whole
-/// session.)
+/// Split on `&&` `||` `;` `|` and newlines that are not inside quotes. The
+/// walk is by CHARACTER, never by raw byte index. The walk quotes are ASCII
+/// (`'` / `"`), and a multi-byte UTF-8 character is neither a separator nor a
+/// quote. It is skipped whole. That keeps `i` on a char boundary whenever the
+/// statement slices below run.
 fn split_statements(command: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -238,7 +234,7 @@ fn split_statements(command: &str) -> Vec<&str> {
             if c == q {
                 quote = None;
             } else if c == '\\' {
-                // Escaped character: skip it whole, whatever its width, so the scan never steps into the middle.
+                // Escaped character.
                 chars.next();
             }
             continue;
@@ -257,6 +253,7 @@ fn split_statements(command: &str) -> Vec<&str> {
             0
         };
         if sep_len > 0 {
+            // `i` is a `char_indices` offset of an ASCII separator.
             #[allow(clippy::string_slice)]
             let stmt = command[start..i].trim();
             if !stmt.is_empty() {

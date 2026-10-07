@@ -446,7 +446,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         ConversationToolChoice::None => ToolChoiceParam::Auto, // ToolChoiceParam has no none variant, so fall back to the default
     });
 
-    // The mandatory-reasoning remap happens BEFORE the Messages mapping.
+    // The mandatory-reasoning remap happens BEFORE the Messages mapping: for a reasoning-mandatory target, `None`/`Minimal` must not be omitted from the wire.
     let effective_effort = wire_reasoning_effort(req.reasoning_mandatory, req.reasoning_effort);
     let effort = effective_effort
         .map(|e| e.to_messages_api())

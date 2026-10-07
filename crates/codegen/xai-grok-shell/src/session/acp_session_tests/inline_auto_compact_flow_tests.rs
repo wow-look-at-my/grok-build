@@ -1038,8 +1038,8 @@ async fn a_prompt_that_leaves_no_room_for_an_answer_compacts() {
         })
         .await;
 }
-/// A context-overflow error hitting immediately after a compaction (the very
-/// next resubmit overflows again) must NOT compact a second time in a row. It
+/// A context-overflow error hitting immediately after a compaction (the next
+/// resubmit overflows again) must NOT compact a second time in a row. It
 /// must deterministically shrink the sent conversation instead. Setting
 /// `context_overflow_recovery` to `Compacted` up front skips straight to the
 /// second-attempt branch, so this never needs a real compaction/LLM call.
@@ -1119,7 +1119,7 @@ async fn third_consecutive_overflow_gives_up_instead_of_looping() {
         .await;
 }
 /// A successful sample must clear `context_overflow_recovery` back to
-/// `None`. Then a later, unrelated overflow gets its own fresh compaction
+/// `None` so a later. Unrelated overflow gets its own fresh compaction
 /// attempt rather than skipping straight to the reduce fallback.
 #[tokio::test(flavor = "current_thread")]
 async fn successful_sample_resets_context_overflow_recovery() {
@@ -1326,9 +1326,9 @@ async fn compaction_at_tokens_fixed_and_disabled() {
         .await;
 }
 /// `reseed_context_budget_output_cap` must derive the tool-output cap from
-/// what's actually left of the context window, not a static config value.
-/// Regression for the reported failure where a single ~372K-token tool result
-/// overflowed a 524K window that had 365K tokens already in use.
+/// what's left of the context window, not a static config value. Regression
+/// for the reported failure where a single ~372K-token tool result overflowed
+/// a 524K window that had 365K tokens already in use.
 #[tokio::test(flavor = "current_thread")]
 async fn reseed_context_budget_output_cap_derives_from_remaining_window() {
     let local = tokio::task::LocalSet::new();
@@ -1352,7 +1352,7 @@ async fn reseed_context_budget_output_cap_derives_from_remaining_window() {
         .await;
 }
 /// A near-full window must not shrink the cap to nothing: the floor keeps
-/// tool calls usable rather than failing every one outright.
+/// tool calls usable rather than failing every outright.
 #[tokio::test(flavor = "current_thread")]
 async fn reseed_context_budget_output_cap_floors_near_a_full_window() {
     let local = tokio::task::LocalSet::new();

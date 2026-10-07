@@ -54,7 +54,7 @@ async fn deliver_interjection(
             redirect_kind: crate::session::events::RedirectKind::Interjection,
         });
     // Buffer only into an actually-running turn: the buffer is drained
-    // exclusively by the turn loop, so an interjection arriving.
+    // exclusively by the turn loop, so an interjection arriving while idle.
     let turn_running = session
         .current_prompt_id
         .lock()
@@ -1210,7 +1210,7 @@ pub(super) async fn run_session(
                             }
                         }
                         SessionCommand::DeliverQueuedPromptsNow => {
-                            // . Harvest first: the cancel only pays off if there is something to drain after it.
+                            // Harvest first: the cancel only pays off if there is something to drain after it.
                             if session.harvest_queued_prompts_into_interjections(true).await {
                                 session.cancel_in_flight_stream_for_interjection();
                             }
@@ -1224,7 +1224,7 @@ pub(super) async fn run_session(
                             }
                             // Clear, don't flush: converting interjections to prompt turns would restart the model after a stop
                             session.pending_interjections.clear();
-                            // Drop a stale asap-injection cancel flag and the in-flight id.
+                            // Drop a stale asap-injection cancel flag.
                             session
                                 .interjection_cancel_requested
                                 .store(false, std::sync::atomic::Ordering::SeqCst);

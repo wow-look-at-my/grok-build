@@ -88,7 +88,8 @@ fn every_registered_setting_is_exercised() {
     let reg = SettingsRegistry::defaults();
     let mut missing: Vec<&str> = Vec::new();
     for meta in reg.all() {
-        // Harness model slots are built from one table, so the keyboard.
+        // Harness model slots are built from one table, so the keyboard and
+        // mouse tests below WALK that table and cover.
         if xai_grok_models::slot_for_setting_key(meta.key).is_some() {
             continue;
         }
@@ -4519,9 +4520,10 @@ fn pr15_int_stepper_rejects_text_input_keys() {
         );
     }
 
-    // The stepper is still NOT a free-form text input. Letters, sign/decimal
-    // punctuation, Space, and navigation/edit keys other than Backspace are
-    // silently dropped, leaving the buffer untouched (back at the seed).
+    // The stepper is still NOT a free-form text input. The stepper letters,
+    // sign/decimal punctuation, Space, and navigation/edit keys other than
+    // Backspace are silently dropped, leaving the buffer untouched (back at
+    // the seed).
     let reject_keys = &[
         KeyCode::Char('a'),
         KeyCode::Char('-'),
@@ -6233,7 +6235,7 @@ fn pr14_string_settings_use_known_model_validator() {
 // with no working row fails here.
 // ---------------------------------------------------------------------------
 
-/// Every slot has a picker row, and each one is a `KnownModel`-style
+/// Every slot has a picker row, and each is a `KnownModel`-style
 /// `DynamicEnum` under Models whose empty default means "inherit".
 #[test]
 fn harness_model_slot_rows_are_registered_model_pickers() {
@@ -6313,10 +6315,9 @@ fn harness_model_slot_rows_are_discoverable_via_search() {
     }
 }
 
-/// Build a modal whose catalog carries one model, focused on `key`.
-///
-/// The slot rows sit deep in the Models category, past `navigate_to`'s
-/// keystroke guard, so the focus is placed directly.
+/// Build a modal whose catalog carries one model, focused on `key`. The slot
+/// rows sit deep in the Models category, past `navigate_to`'s keystroke
+/// guard, so the focus is placed directly.
 fn slot_modal_focused_on(key: &str) -> SettingsModalState {
     let snapshot = PagerLocalSnapshot {
         available_models: vec![(
@@ -6434,13 +6435,11 @@ fn mouse_click_on_a_harness_model_slot_row_opens_the_picker() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// vim_mode (scrollback navigation) — PAGER-owned, paired.
+// vim_mode (scrollback navigation) — PAGER-owned, paired with simple_mode
 
-/// Keyboard Space on the vim_mode row dispatches the typed setter
-/// with the inverted snapshot value (default false → true). Same
-/// shape as the `multiline_mode` test above; both rows are
-/// PAGER-owned Bool settings.
+/// Keyboard Space on the vim_mode row dispatches the typed setter with the
+/// inverted snapshot value (default false → true). Same shape as the
+/// `multiline_mode` test above; both rows are PAGER-owned Bool settings.
 #[test]
 fn vim_mode_space_dispatches_typed_setter() {
     let mut s = make_state();

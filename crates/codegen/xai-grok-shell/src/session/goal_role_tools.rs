@@ -286,9 +286,9 @@ pub(crate) mod tests {
     }
 
     /// The planner's `{TODO_TOOL}` resolves to the harness's own todo tool on
-    /// both paths. It comes from the describe summary when an explicit harness
-    /// is committed. Otherwise it comes from the parent bridge via
-    /// [`RoleToolNames::with_todo`].
+    /// both paths: from the describe summary. This happens when an explicit
+    /// harness is committed, and from the parent bridge via
+    /// [`RoleToolNames::with_todo`] otherwise.
     #[test]
     fn todo_tool_resolves_from_the_summary_and_from_the_parent_bridge() {
         let summary = RoleToolNames::from_summary(&summary_with(&[

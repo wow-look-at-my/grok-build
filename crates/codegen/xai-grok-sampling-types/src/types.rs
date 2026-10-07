@@ -530,7 +530,7 @@ pub struct ToolCallResponse {
     #[serde(rename = "type")]
     pub kind: String,
     pub function: ToolCallFunction,
-    /// Everything else the provider put on the call.
+    /// Everything else the provider put on the call, kept.
     #[serde(flatten, default)]
     pub vendor: std::collections::BTreeMap<String, serde_json::Value>,
 }
@@ -677,10 +677,9 @@ impl std::fmt::Display for CostTicksOverflow {
 
 impl std::error::Error for CostTicksOverflow {}
 
-///
 /// `field` names where the amount came from and rides the error. An amount
-/// whose tick count leaves `i64` is `Err`: no tick count that the source did
-/// not report is ever produced.
+/// whose tick count leaves `i64` is `Err`: no tick count that the source
+/// did not report is ever produced.
 pub fn ticks_from_usd(field: &'static str, usd: f64) -> Result<i64, CostTicksOverflow> {
     let scaled = (usd * TICKS_PER_USD).round();
     if !scaled.is_finite() || scaled.abs() >= I64_TICKS_BOUND {
@@ -2070,8 +2069,7 @@ mod tests {
         assert_eq!(original.0, cloned_inner.0);
     }
 
-    // ========================================================================
-    // usd_float_to_ticks — convert provider USD float.
+    // usd_float_to_ticks — convert provider USD float to integer ticks
 
     #[test]
     fn usd_float_to_ticks_converts_correctly() {

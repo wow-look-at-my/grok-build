@@ -5,8 +5,8 @@ use crate::Aliases;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-// ───────────────────────────────────────────────────────────────────────────
-// Agent usage frequency.
+// Agent usage frequency — how strongly system-prompt/tool wording nudges the
+// model toward spawning subagents
 
 /// How strongly system-prompt and tool-description wording nudges the model
 /// toward using the `task` tool to spawn subagents.
@@ -37,13 +37,12 @@ impl AgentUsageFrequency {
         }
     }
 
-    /// Parse a config/env string into a level.
-    ///
-    /// Accepts the canonical kebab-case form plus common variants (`snake_case`,
-    /// spaces, mixed case) so a hand-typed `config.toml` value or env var isn't
-    /// rejected over punctuation. Returns `None` on no match; the caller decides
-    /// how to report an invalid value (config resolution warns and falls back
-    /// to the default — see `SubagentsConfig::resolve_usage_frequency`).
+    /// Parse a config/env string into a level. Accepts the canonical
+    /// kebab-case form plus common variants (`snake_case`, spaces, mixed
+    /// case) so a hand-typed `config.toml` value or env var isn't rejected
+    /// over punctuation. Returns `None` on no match; the caller decides how
+    /// to report an invalid value (config resolution warns and falls back to
+    /// the default — see `SubagentsConfig::resolve_usage_frequency`).
     pub fn parse(raw: &str) -> Option<Self> {
         let normalized = raw.trim().to_ascii_lowercase().replace(['_', ' '], "-");
         Some(match normalized.as_str() {
@@ -856,8 +855,8 @@ pub struct TaskOutputToolInput {
     /// Lenient on the wire (invisible to the advertised schema — schemars
     /// ignores serde aliases and custom deserializers): also accepts the
     /// singular `task_id` key and a bare string/number instead of an array.
-    /// Models frequently mirror `kill_task`'s singular `task_id` here (most
-    /// organic calls in soak rollouts did). They previously hard-failed
+    /// Models frequently mirror `kill_task`'s singular `task_id` here (in
+    /// soak rollouts 3 of 4 organic calls did) and previously. Hard-failed
     /// with "Provide a non-empty task_ids list", after which they abandoned
     /// the background-task workflow for shell polling. A call naming both
     /// keys folds them through [`TaskOutputToolInput::TASK_IDS_KEYS`], so the

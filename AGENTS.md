@@ -4,7 +4,7 @@ Guidelines for autonomous coding agents working in this repository.
 
 ## Push-first workflow (most important)
 
-CI is the source of truth and builds every pushed branch. A branch that is only built locally is not production-real, and holding work back while you verify serially wastes time. This is when a parallel CI build can be running.
+CI is the source of truth and builds every pushed branch. A branch that is only built locally is not production-real, and holding work back while you verify serially wastes time. This applies when a parallel CI build can be running.
 
 **PUSH FIRST, VERIFY AFTER.**
 
@@ -136,10 +136,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Text is changed by sending that id with new content.
 - Every `todo_write` is a merge, and an item the call omits survives with its status untouched. `merge: false` used to clear the list and keep only what the call resent. This is how a status update that forgot the flag erased the user's list.
-- `merge` is still accepted on the wire and ignored, and is `#[schemars(skip)]` now that both values behave the same. Advertising it will describe a choice the tool no longer offers.
+- `merge` is still accepted on the wire and ignored. It is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
 - `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.
 - The list only grows, and every `todo_write` echoes all of it. So `summarize_todo_state` echoes a completed or cancelled item as its first line, cut at `FINISHED_ITEM_ECHO_CHARS`. The state keeps the full text. The post-compaction reminder already collapses finished items to counts.
-- opencode's `todowrite` sends a whole list with no ids, so it merges by ITEM TEXT, not by position. Position is not identity: keying on it let a reordered or shorter list write one row's text over another's. This loses work as surely as a delete.
+- opencode's `todowrite` sends a whole list with no ids, so it merges by ITEM TEXT, not by position. Position is not identity. Keying on it let a reordered or shorter list write one row's text over another's, which loses work as surely as a delete.
 
 ## Cost-indicator feature notes
 
@@ -155,7 +155,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Stream-timing notes
 
-- `itl_intervals_ms` truncates every gap to whole milliseconds. As a result, a stream above many chunks/s reads as a run of zeros and `itl_p50_ms` reports 0 for one that stutters. `InferenceLatencyStats.chunk_offsets_us` keeps each content chunk's arrival offset from `stream_start` in microseconds instead, off the `Instant`s all backend streams already record.
+- `itl_intervals_ms` truncates every gap to whole milliseconds. A stream above many chunks/s reads as a run of zeros and `itl_p50_ms` reports 0 for one that stutters. `InferenceLatencyStats.chunk_offsets_us` keeps each content chunk's arrival offset from `stream_start` in microseconds instead, off the `Instant`s all backend streams already record.
 - `GROK_LOG_STREAM_TIMING=1` adds it to `shell.turn.inference_done` in `~/.grok/logs/unified.jsonl`. Opt-in: it is one number per chunk on a log that is otherwise one line per model call. The gate is read once per process (`inference_metrics::log_stream_timing`), so one run's entries agree.
 - The offsets are client-side SSE-parse times, so transport jitter is in them. They are not a measurement of server decode.
 
@@ -174,13 +174,13 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## Tool-call provider-field notes
 
 - A tool call carries keys this client only relays: `extra_content` (Google's spelling) and `provider_specific_fields` (a translating gateway's). Gemini 3 rejects a replayed function call whose thought signature is missing, and that signature reaches an OpenAI-shaped client only inside one of them.
-- `ToolCall::vendor` holds them from the response — including off the streaming chunk that opens the call. This is where Gemini puts the signature — and `ToolCallRequest` flattens them back onto the replay. Nothing reads them: verbatim is the only form the provider accepts.
+- `ToolCall::vendor` holds them from the response — including off the streaming chunk that opens the call, which is where Gemini puts the signature. `ToolCallRequest` flattens them back onto the replay. Nothing reads them: verbatim is the only form the provider accepts.
 - The allowlist (`TOOL_CALL_VENDOR_KEYS`) is what keeps response-shaped bookkeeping out of the request. A provider that sends none leaves the map empty, and an empty map flattens to nothing, so its requests are unchanged.
 
 ## Goal-planner cancellation notes
 
-- Nothing replans. A Send Now delivers its text to the planner already running (`SubagentEvent::Interject`, routed by the coordinator id the spawn publishes on the goal tracker) instead of cancelling it, so an `Interrupted` reaching. The loop is a bare cancel. The Send is terminal — retrying one spawned dead planners in 2.3 s before the attempt cap paused the goal.
-- The planner runs off a slash command, not a turn, and a user Stop latches the session's Task spawns closed. This is until a turn reopens them (`open_subagent_spawn_admission`). `maybe_run_goal_planner` reopens them itself. Without that, `/goal resume` after a Stop is rejected before a subagent exists, at latency 0, for every message the session has left.
+- Nothing replans. A Send Now delivers its text to the planner already running (`SubagentEvent::Interject`, routed by the coordinator id the spawn publishes on the goal tracker) instead of cancelling it. An `Interrupted` reaching the loop is a bare cancel and is terminal. Retrying one spawned dead planners in 2.3 s before the attempt cap paused the goal.
+- The planner runs off a slash command, not a turn. And a user Stop latches the session's Task spawns closed until a turn reopens them (`open_subagent_spawn_admission`). `maybe_run_goal_planner` reopens them itself. Without that, `/goal resume` after a Stop is rejected before a subagent exists, at latency 0, for every message the session has left.
 - A pause the user asked for says so (`planner_cancelled_pause_message`). "Planning failed" on a cancel sends the reader hunting a broken planner that is doing exactly what it was told.
 
 ## Messages thinking-dialect notes
@@ -202,7 +202,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 Pointing `build-test` at `vars.CI_RUNNER` turns tests red, because they assert on host semantics the org's lean image does not provide. Measured on that runner, with unmodified test sources:
 
-- no PID 1 that reaps orphans and no process-group signal delivery — every `*_grandchild*` case across `xai-grok-shell`, `xai-grok-test-support`, `xai-tty-utils` and the pager PTY harness (`PTY grandchild leaked after controller Drop`). This is plus `scope_teardown_kills_a_background_grandchild`, which hangs to the 60s timeout instead of failing.
+- no PID 1 that reaps orphans and no process-group signal delivery — every `*_grandchild*` case across `xai-grok-shell`, `xai-grok-test-support`, `xai-tty-utils` and the pager PTY harness (`PTY grandchild leaked after controller Drop`). Plus `scope_teardown_kills_a_background_grandchild`, which hangs to the 60s timeout instead of failing.
 - overlayfs reports `st_blocks=2` for every file, so `disk_usage_cmd` and `fs_size` measure ~1 KiB for anything.
 - no UTF-8 locale by default, so `xai-grok-sandbox`'s `fails_closed_on_non_utf8_*` hit errno 84.
 
@@ -211,7 +211,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 ## Todo-stop-gate notes
 
 - The built-in todo gate is a participant in the turn-end STOP-HOOK gate, not a mechanism beside it (`acp_session_impl/turn.rs`, on `StopGateDecision::AllowStop`). It fires only after the user hooks allowed the stop. Its reminder rides the same `stop_hook_feedback` user message a hook block uses. It consumes the SAME `stop_continuations_this_turn` budget. So `MAX_STOP_HOOK_CONTINUATIONS_PER_TURN` is the stuck-release: a model that never engages its todos stops anyway.
-- switches. They are ORed, not ANDed (`todo_stop_gate_enabled`). The persisted `[ui].stop_gate_unfinished_todos` toggle ships ON and is the switch. `todo_gate.enabled` (remote `todo_gate_enabled`, or the `--todo-gate` CLI force-enable) is an opt-in on top, for a session whose toggle the user turned off. ANDing them is what shipped the feature dead: `TodoGateConfig::default().enabled` is false, so every default session took the `None` arm and the gate never ran.
+- switches, and they are ORed, not ANDed (`todo_stop_gate_enabled`). The persisted `[ui].stop_gate_unfinished_todos` toggle ships ON and is the switch. `todo_gate.enabled` (remote `todo_gate_enabled`, or the `--todo-gate` CLI force-enable) is an opt-in on top, for a session whose toggle the user turned off. ANDing them is what shipped the feature dead: `TodoGateConfig::default().enabled` is false, so every default session took the `None` arm and the gate never ran.
 - `todo_gate_applicable` is the other half and still binds. It allows no gate while the goal loop is active, because the continuation directive drives the loop there. It allows no gate for a prompt that carries no `<task_completion_discipline>` block.
 - `todo_stop_gate_blocks` is pure and table-tested. The actor supplies the toggle, the shared continuation counter, and `evaluate_todo_gate` over the live todo state.
 
@@ -273,7 +273,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Workflow agent-concurrency notes
 
-- `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once. As a result, a per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying. This is under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`). The knob operators lower to stay under a hard per-host concurrent-request limit.
+- `WorkflowHostParams.agent_slots` is a semaphore owned by `WorkflowManager` and shared by every run it launches (`session/workflow/manager.rs`), not one fresh semaphore per run. Up to `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION` runs can be active at once. A per-run semaphore will let total live agent-spawned LLM requests scale with active run count instead of staying under the configured cap (`GROK_WORKFLOW_MAX_CONCURRENT_AGENTS` / `workflow_max_concurrent_agents`). The knob operators lower to stay under a hard per-host concurrent-request limit.
 
 ## Endpoint allowlist notes
 

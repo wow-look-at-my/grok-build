@@ -1,4 +1,4 @@
-//! Stands in for the macOS linker during a Linux cross build.
+//! Stands in for the macOS linker during a Linux cross build. Compiling for `aarch64-apple-darwin` on Linux works.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -42,10 +42,9 @@ struct Recorded {
     output: PathBuf,
 }
 
-/// Read `@file` arguments into the list they stand for.
-///
-/// rustc falls back to a response file when a command line grows past what the
-/// system takes, and this link names hundreds of rlibs.
+/// Read `@file` arguments into the list they stand for. rustc falls back to a
+/// response file when a command line grows past what the system takes, and
+/// this link names hundreds of rlibs.
 fn expand_response_files(args: Vec<OsString>) -> Result<Vec<String>, String> {
     let mut out = Vec::with_capacity(args.len());
     for arg in args {
@@ -138,10 +137,9 @@ fn search_dir(arg: &str, next: Option<&String>) -> Option<PathBuf> {
     arg.strip_prefix("-L").map(PathBuf::from)
 }
 
-/// Copy the static and dynamic libraries out of one search directory.
-///
-/// A name already copied is kept: the first `-L` wins, which is the order the
-/// linker itself searches.
+/// Copy the static and dynamic libraries out of one search directory. A name
+/// already copied is kept: the first `-L` wins, which is the order the linker
+/// itself searches.
 fn copy_libraries(dir: &Path, libs: &Path, copied: &mut HashSet<String>) -> Result<(), String> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         // A search path that does not exist is one the real link also skips.
@@ -272,8 +270,8 @@ mod tests {
     }
 
     /// rustc deletes its temporary object directory the moment the linker
-    /// returns. A bundle that only referenced those paths is therefore empty
-    /// by the time the macOS job reads it.
+    /// returns. A bundle that only referenced those paths would be empty by
+    /// the time the macOS job read it.
     #[test]
     fn inputs_are_copied_rather_than_referenced() {
         let work = temp_dir("copy");

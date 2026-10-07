@@ -6,11 +6,10 @@ use std::panic::AssertUnwindSafe;
 
 use futures_util::FutureExt;
 
-/// Text describing what a panic carried.
-///
-/// Both payloads `panic!` itself produces are a `&'static str` (a literal) and
-/// a `String` (a formatted one). Anything else still has to be reportable, so
-/// it is named as a non-message rather than reported as nothing.
+/// Text describing what a panic carried. Both payloads `panic!` itself
+/// produces are a `&'static str` (a literal) and a `String` (a formatted
+/// one). Anything else still has to be reportable, so it is named as a
+/// non-message rather than reported as nothing.
 pub fn panic_payload(panic: &(dyn Any + Send)) -> String {
     if let Some(text) = panic.downcast_ref::<&'static str>() {
         return (*text).to_string();
@@ -21,11 +20,10 @@ pub fn panic_payload(panic: &(dyn Any + Send)) -> String {
     "panicked with a payload that is not a message".to_string()
 }
 
-/// Run `task` where a panic is a value rather than a lost task.
-///
-/// `what` names the work in the log line, so a panic in detached work is
-/// attributable without a backtrace. The panic hook still runs; this adds the
-/// caller's view of the same failure.
+/// Run `task` where a panic is a value rather than a lost task. `what` names
+/// the work in the log line, so a panic in detached work is attributable
+/// without a backtrace. The panic hook still runs; this adds the caller's
+/// view of the same failure.
 pub async fn guarded<F: Future>(what: &'static str, task: F) -> Result<F::Output, String> {
     match AssertUnwindSafe(task).catch_unwind().await {
         Ok(output) => Ok(output),

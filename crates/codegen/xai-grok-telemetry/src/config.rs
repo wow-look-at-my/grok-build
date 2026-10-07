@@ -492,8 +492,8 @@ mod wire_alias_tests {
         assert!(text.contains("otel_transport"), "{err}");
     }
 
-    /// The outgoing shape keeps the canonical key, so a config written back to
-    /// disk does not grow the legacy spelling.
+    /// The outgoing shape keeps the canonical key, so a config written back
+    /// to disk does not grow the spelling.
     #[test]
     fn the_transport_serializes_under_the_canonical_key_only() {
         let mut cfg = TelemetryConfig::default();

@@ -28,8 +28,7 @@ type CiCacheEntry = (Option<CiStatus>, Instant);
 static CI_CACHE: LazyLock<Mutex<HashMap<CiCacheKey, CiCacheEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Nudged by an off-thread poll that lands on a *different* color, so a
-/// session with no input.
+/// Nudged by an off-thread poll that lands on a *different* color.
 static CI_CHANGE_TX: LazyLock<Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>> =
     LazyLock::new(|| Mutex::new(None));
 
@@ -156,12 +155,11 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
 }
 
 /// Talk to the unsandboxed CI-status host worker for a sandboxed session,
-/// returning an [`Output`] shaped like a `gh` run's stdout.
-///
-/// It is authoritative. When the worker replies with the nothing-usable
-/// sentinel, we hand the caller an `Output` whose body attenuates to "no
-/// runs". The dot then degrades to the "off" state rather than falling through
-/// to an in-jail `gh` spawn. Only a genuinely absent/unusable worker
+/// returning an [`Output`] shaped like a `gh` run's stdout. It is
+/// authoritative. We hand the caller an `Output` whose body attenuates to
+/// "no ru. The dot degrades to the "off" state rather than falling through
+/// to an in-jail `gh` spawn. This happens when the worker replies with the
+/// nothing-usable sentinel. Only a genuinely absent/unusable worker
 /// connection returns `None`.
 fn run_gh_via_ci_host(repo_root: &Path, args: &[&str], fd: i32) -> Option<std::process::Output> {
     #[cfg(unix)]
@@ -224,7 +222,7 @@ fn run_gh_direct(repo_root: &Path, args: &[&str]) -> Option<std::process::Output
         .stderr(std::process::Stdio::piped());
     xai_grok_tools::util::detach_std_command(&mut cmd);
     cmd.envs(xai_grok_tools::util::pager_env());
-    // `gh` colourises even piped `--json` output under CLICOLOR_FORCE or GH_FORCE_TTY (inherited from terminal-launched dev environments).
+    // `gh` colourises even piped `--json` output under CLICOLOR_FORCE or GH_FORCE_TTY (inherited from terminal-launched dev environments) and forcing beats NO_COLOR in gh's precedence.
     cmd.env("NO_COLOR", "1");
     cmd.env("CLICOLOR_FORCE", "0");
     cmd.env_remove("GH_FORCE_TTY");
@@ -244,8 +242,7 @@ fn run_gh_direct(repo_root: &Path, args: &[&str]) -> Option<std::process::Output
     Some(output)
 }
 
-/// Read the cached CI status for `(repo_root, branch)`, scheduling a
-/// throttled off-thread `gh` refresh when the entry is missing or stale.
+/// Read the cached CI status for `(repo_root, branch)`.
 pub fn ci_status_lazy(repo_root: &Path, branch: &str) -> Option<CiStatus> {
     let cached = ci_status_peek(repo_root, branch);
     refresh_ci_status(repo_root, branch);
@@ -294,7 +291,7 @@ pub fn refresh_ci_status(repo_root: &Path, branch: &str) {
     if !needs_refresh {
         return;
     }
-    // Reserve the slot with a fresh timestamp BEFORE spawning so this frame's other reads (and the next few frames).
+    // Reserve the slot with a fresh timestamp BEFORE spawning so this frame's other reads (and the next few frames) don't spawn duplicate refreshes until this lands.
     cache.insert(key.clone(), (cached, Instant::now()));
     drop(cache);
     spawn_ci_refresh(key, cached);
@@ -483,7 +480,7 @@ mod tests {
         let json = br#"[{"conclusion":"","status":"in_progress","headBranch":"master","workflowName":"CI"},{"conclusion":"failure","status":"completed","headBranch":"master","workflowName":"Release"}]"#;
         let runs = parse_gh_runs(json).expect("parseable");
         assert_eq!(runs.len(), 2);
-        // The camelCase keys must reach their snake_case fields — defaulting them away is invisible.
+        // The camelCase keys must reach their snake_case fields.
         assert_eq!(runs[0].head_branch.as_deref(), Some("master"));
         assert_eq!(runs[0].workflow_name, "CI");
         assert_eq!(runs[1].workflow_name, "Release");
@@ -595,12 +592,11 @@ mod tests {
     }
 
     /// Publish an in-process peer speaking the worker's protocol over
-    /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to the
-    /// jailed pager. Answer one `gh-status <branch>` request with `json`.
-    ///
-    /// The peer asserts the request shape. A caller that reached `gh` some
-    /// other way, or asked for the wrong thing, therefore fails here. It does
-    /// not silently read whatever the peer felt like sending. Callers hold
+    /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to
+    /// the jailed pager. Answer one `gh-status <branch>` request with `json`.
+    /// The peer asserts the request shape, so a caller that reached `gh`.
+    /// Some other way, or asked for the wrong thing, fails here rather than
+    /// silently reading whatever the peer felt like sending. Callers hold
     /// [`ci_env_lock`] for as long as the variable must stay set.
     #[cfg(unix)]
     fn publish_ci_host_peer(json: &'static [u8]) -> i32 {
@@ -630,13 +626,11 @@ mod tests {
         raw
     }
 
-    /// Drive the SHIPPED CI-status path exactly as a `--sandbox` session does.
-    /// `gh_ci_status` → `run_gh` → the `GROK_CI_HOST_FD` env read → the host
-    /// worker, with no fd passed by hand.
-    ///
-    /// `repo_root` does not exist. A real in-jail `gh` spawn could only fail:
-    /// reading a color back at all proves the answer came over the inherited
-    /// worker connection.
+    /// Drive the SHIPPED CI-status path exactly as a `--sandbox` session
+    /// does. `gh_ci_status` → `run_gh` → the `GROK_CI_HOST_FD` env read
+    /// → the host worker, with no fd passed by hand. `repo_root` does not
+    /// exist. A real in-jail `gh` spawn could only fail: reading a color back
+    /// at all proves the answer came over the inherited worker connection.
     #[test]
     #[cfg(unix)]
     fn the_shipped_ci_status_reads_the_host_worker_the_jail_hands_it() {
@@ -730,7 +724,7 @@ mod tests {
     #[test]
     fn sandboxed_query_reduces_a_host_result_to_a_real_status() {
         let _env = ci_env_lock();
-        // A host worker answering exactly what `gh run list --json` emits.
+        // A host worker answering exactly what `gh run list --json` emits: the shipped `gh_ci_status` reduction must read it and produce Green.
         let json = br#"[{"status":"completed","conclusion":"success","headBranch":"master","workflowName":"CI"}]"#;
         let output = host_peer_reply(json);
         // The transport produced a synthetic success `Output` shaped like a real `gh` run.
@@ -751,7 +745,7 @@ mod tests {
     #[test]
     fn sandboxed_query_degrades_to_off_on_a_malformed_host_answer() {
         let _env = ci_env_lock();
-        // A worker replying with the "." sentinel (its `gh` failed / the branch had no runs) must read back as no status at all.
+        // A worker replying with the "." sentinel (its `gh` failed / the branch had no runs) must read back as no status at all — the transport reports `None`.
         use std::os::unix::net::UnixStream;
         let (ours, theirs) = UnixStream::pair().expect("pair");
         let ours_raw = std::os::unix::io::AsRawFd::as_raw_fd(&ours);
@@ -852,7 +846,7 @@ mod tests {
 
     #[test]
     fn refresh_without_runtime_leaves_a_reservation_and_never_panics() {
-        // No tokio runtime here, so nothing can poll `gh`; the call must still be infallible.
+        // No tokio runtime here, so nothing can poll `gh`.
         let repo = "/refresh/no-runtime";
         refresh_ci_status(Path::new(repo), "master");
         assert!(cache_has(repo, "master"));
@@ -887,7 +881,7 @@ mod tests {
 
     #[test]
     fn the_pulse_period_is_wall_clock_time_not_a_frame_count() {
-        // Both cadences the event loop uses.
+        // Both cadences the event loop uses: Slow on an idle screen.
         let slow_step = Duration::from_millis(83);
         let fast_step = Duration::from_millis(33);
         let span = CI_PULSE_PERIOD * 3;
@@ -970,13 +964,12 @@ mod tests {
         assert!(lum(bright) > lum(dim), "brighter frame must be lighter");
     }
 
-    /// The shipped status-bar call site must feed the pulse ELAPSED WALL TIME.
-    /// The pulse math above is only half the fix. A render path that still
-    /// passes `scrollback.animation_tick()` would keep the old frame-counted
-    /// behavior with a `Duration`-shaped cast.
-    ///
-    /// Structural, because the call site lives inside a ratatui render pass that
-    /// no unit test can run. It reads the real file and asserts the CI dot's
+    /// The shipped status-bar call site must feed the pulse ELAPSED WALL
+    /// TIME. The pulse math above is only half the fix. A render path that
+    /// still passes `scrollback.animation_tick()` would keep the
+    /// frame-counted behavior with a `Duration`-shaped cast. Structural,
+    /// because the call site lives inside a ratatui render pass that no unit
+    /// test can run. It reads the real file and asserts the CI dot's
     /// in-progress arm goes through `in_progress_dot_color` (the wall-clock
     /// entry point) and never through the tick counter.
     #[test]

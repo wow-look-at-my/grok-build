@@ -184,7 +184,7 @@ impl ProcessScope {
     }
 
     /// Lock the group set, tolerating a poisoned mutex: the critical sections
-    /// here are panic-free, and a best-effort reaper must still run even if some
+    /// here are panic-free. A best-effort reaper must still run even if some
     /// unrelated thread panicked while holding the lock.
     ///
     /// `parking_lot::Mutex` would make the tolerance structural rather than

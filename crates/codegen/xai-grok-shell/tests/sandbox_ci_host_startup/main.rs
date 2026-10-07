@@ -18,7 +18,7 @@ const MODE_SESSION: &str = "session";
 
 const REPORT: &str = "sandbox-ci-host-startup: ";
 
-/// The one case this binary runs, under the name a test runner lists it by.
+/// The case this binary runs, under the name a test runner lists it by.
 const TEST_NAME: &str = "the_shipped_startup_path_hands_a_confined_session_its_worker";
 
 fn main() {
@@ -238,7 +238,7 @@ fn parent() {
         println!("{REPORT}workspace_leg=applied and answering");
     }
 
-    // The profile whose apply never refuses, so the hand-off is driven on hosts that cannot install a second profile.
+    // The profile whose apply never refuses.
     let devbox_leg = run_session_child("devbox", &workspace);
     println!("{REPORT}devbox_leg={}", devbox_leg.summary());
     assert!(
@@ -259,9 +259,9 @@ fn parent() {
 
 /// A session confined IN PLACE keeps the worker to itself. The hand-off makes
 /// the worker's fd exec-surviving, and names it in the environment, only
-/// where an exec follows. Doing either leaves every child of the session
-/// holding a live socket to an UNCONFINED `gh`, with the number to read it
-/// on. This happens where none does.
+/// where an exec follows. Where none does, doing either leaves every child of
+/// the session holding a live socket to an UNCONFINED `gh`. That none is with
+/// the number to read it on.
 #[cfg(unix)]
 fn assert_worker_is_the_sessions_alone(report: &SessionReport) {
     if report.reexeced == "1" {
@@ -363,12 +363,10 @@ fn run_session_child(profile: &str, workspace: &Path) -> SessionReport {
     report
 }
 
-/// Wait for a child, and kill it once `limit` is up.
-///
-/// A hang here is otherwise the test runner's per-test timeout. That timeout
-/// reports the whole case as timed out and none of what the session managed
-/// to say.
-/// Killing it keeps the report, and the assertions then name what is missing.
+/// Wait for a child, and kill it once `limit` is up. A hang here is otherwise
+/// the test runner's per-test timeout, which reports the whole case. As timed
+/// out and none of what the session managed to say. Killing it keeps the
+/// report, and the assertions then name what is missing.
 #[cfg(unix)]
 fn wait_with_deadline(
     child: &mut std::process::Child,

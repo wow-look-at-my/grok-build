@@ -879,12 +879,13 @@ fn managed_worktrees_boundary_in(grok_home: &Path, path: &Path) -> Option<std::p
 
 /// Resolves the worktree base directory (`<main checkout
 /// root>/.grok/worktrees`) for a given source path. managed root that holds
-/// it, so a worktree made.
+/// it.
 pub fn worktree_base_dir_for_source(source_path: &Path) -> Result<std::path::PathBuf> {
     worktree_base_dir_for_source_in(&grok_home(), source_path)
 }
 
-/// [`worktree_base_dir_for_source`] with the legacy root under an explicit grok home.
+/// [`worktree_base_dir_for_source`] with the root under an explicit grok
+/// home.
 pub fn worktree_base_dir_for_source_in(
     grok_home: &Path,
     source_path: &Path,
@@ -3512,8 +3513,8 @@ mod tests {
     }
 
     /// [`worktree_db_fixture`] with the checkout's location under
-    /// `<home>/worktrees` chosen by the caller.
-    /// either depth the old managed location has been written at.
+    /// `<home>/worktrees` chosen by the caller. either depth the managed
+    /// location has been written at.
     fn worktree_db_fixture_under(
         temp: &tempfile::TempDir,
         under_worktrees: &[&str],
@@ -3705,10 +3706,9 @@ mod tests {
     }
 
     /// Every resolver that asks "is this cwd grok-managed?" walks up to the
-    /// managed boundary and consults the registry. A checkout sitting
-    /// directly under the legacy root (the shape an unforked grok build left
-    /// behind) must therefore resolve exactly like one inside a per-repository
-    /// bucket.
+    /// managed boundary. It consults the registry, so a checkout sitting
+    /// directly under the root (the shape an unforked grok build left behind)
+    /// must resolve exactly like one inside a per-repository bucket.
     #[test]
     fn resolvers_answer_for_a_checkout_at_either_depth_of_the_old_location() {
         for under in [

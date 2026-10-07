@@ -1,4 +1,4 @@
-//! Integration test driving the REAL shipped CI-status path against the `gh` CLI.
+//! Integration test driving the REAL shipped CI-status path against the `gh`.
 
 use std::path::PathBuf;
 
@@ -47,7 +47,7 @@ fn real_gh_run_list_parses_and_reduces_to_tri_state() {
 
 #[test]
 fn real_gh_run_list_reports_runs_and_reduces_empty_branch_to_off() {
-    // A branch that (at the time of writing) has no workflow runs at all → no CI signal → Off.
+    // A branch that (at the time of writing) has.
     let (runs, status) = gh_ci_status(&repo_root(), "feature/gh-ci-monitor");
     if runs.is_empty() {
         assert_eq!(status, CiStatus::Off);

@@ -130,7 +130,9 @@ fn profile_confines(name: &str) -> bool {
 }
 
 /// Whether this process is confined by a profile that restricts **writes** to
-/// the workspace.
+/// the workspace, `$GROK_HOME` and the temp dirs (`workspace`, `read-only`,
+/// `strict`, the `pathbox` jail, or a custom profile that extends one of
+/// them).
 pub fn confines_home_writes() -> bool {
     if is_jailed() {
         return true;
@@ -687,9 +689,10 @@ mod tests {
     /// The predicate and the builder must never disagree about whether an
     /// exec follows. `apply_sandbox` asks the predicate BEFORE it starts the
     /// CI host worker, and the answer decides whether the worker's fd is made
-    /// exec-surviving. Suppose a predicate says yes where the builder then
-    /// produces no command. It leaves an inheritable fd, and its number in
-    /// the environment, in a session that went on to confine itself in place.
+    /// exec-surviving. A predicate that says yes where the builder then
+    /// produces no command leaves an inheritable fd, and its number in the
+    /// environment. That predicate is in a session that went on to confine
+    /// itself in place.
     #[test]
     #[cfg(target_os = "linux")]
     fn the_reexec_predicate_agrees_with_the_builder() {
@@ -1055,8 +1058,8 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn pathbox_needs_no_nono_hook_protection_but_is_confining() {
-        // The pathbox jail is the re-exec jail; it must not trip the nono
-        // hook write-deny manager.
+        // The pathbox jail is the re-exec jail. It must not trip the nono
+        // hook write-deny manager. It must report as a confining profile.
         let ws = std::env::temp_dir().join(format!(
             "grok-pathbox-hw-{}",
             std::time::SystemTime::now()

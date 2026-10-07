@@ -6,7 +6,7 @@ use std::path::Path;
 
 /// Env var set on the re-executed jailed binary naming the inherited fd of the host worker's stream.
 pub const CI_HOST_FD_ENV: &str = "GROK_CI_HOST_FD";
-/// Env var set on the host worker itself so a re-entry of `main` knows it is the worker.
+/// Env var set on the host worker itself.
 pub const CI_HOST_MARKER_ENV: &str = "GROK_CI_HOST_SUBPROCESS";
 
 /// The max size of a single worker response we accept.
@@ -52,8 +52,8 @@ const ALLOWED_COMMANDS: &[(&str, &str)] = &[
 /// `gh api` takes no subcommand, so it is admitted on its own.
 const ALLOWED_BARE_COMMANDS: &[&str] = &["api"];
 
-/// Every flag a request may carry. It is an allowlist rather than a deny-list.
-/// The flags that matter are the ones that turn a read into a write:
+/// Every flag a request may carry. An allowlist rather than a deny-list
+/// because the flags that matter are the ones that turn a read into a write.
 /// `-X POST`, `--method`, `--field`, `--input`.
 const ALLOWED_FLAGS: &[&str] = &[
     "--json",
@@ -187,8 +187,7 @@ fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
         }
     }
 
-    // The worker is the process that outlives the jail by design: it is
-    // started on the host moments before the re-exec.
+    // The worker is the process that outlives the jail by design.
     #[allow(clippy::disallowed_methods)]
     match cmd.spawn() {
         Ok(_) => {
@@ -228,7 +227,7 @@ pub fn reclaim_from_failed_exec(fd: std::os::unix::io::RawFd) {
     // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
     if flags >= 0 {
-        // SAFETY:.
+        // SAFETY.
         unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
     }
     // SAFETY: this runs on the startup path, before the session exists.
@@ -347,7 +346,6 @@ fn tail_lossy(bytes: &[u8], max: usize) -> String {
 }
 
 /// Whether an argv is a read-only `gh` invocation this worker will run.
-///
 /// Gates, all of which must hold: the shape is bounded, every flag is in
 /// [`ALLOWED_FLAGS`], and the leading command is in [`ALLOWED_COMMANDS`] or
 /// [`ALLOWED_BARE_COMMANDS`].
@@ -422,11 +420,9 @@ fn query_branch(branch: &str) -> Option<Vec<u8>> {
     bounded_json(stdout)
 }
 
-/// Run the fixed PR/checks query for `branch`: the branch's pull request
-/// (`gh pr view`) and its check runs (`gh pr checks`), combined into a single
-/// JSON object on one line:
-///   `{"state":"OPEN","merged":false,"isDraft":false,"url":..,"number":..,"title":..,"checks":[...]}`
-///
+/// Run the fixed PR/checks query for `branch`. The branch's pull request (`gh pr view`) and its
+/// check runs (`gh pr checks`), combined into a single JSON object on one line:
+/// `{"state":"OPEN","merged":false,"isDraft":false,"url":..,"number":..,"title":..,"checks":[...]}`
 /// Returns `None` when `gh` is unavailable, the branch has no pull request
 /// (`gh pr view` exits non-zero), or the combined document overflows the cap.
 /// The caller maps `None` to the `.` nothing-usable sentinel, and the jailed
@@ -495,8 +491,7 @@ fn run_gh_safely(args: &[&str], ok_codes: &[i32]) -> Option<Vec<u8>> {
     Some(output.stdout)
 }
 
-/// Keep a raw `gh` stdout body only when it is within the response cap and
-/// not empty, so a misbehaving `gh` cannot.
+/// Keep a raw `gh` stdout body only when it is within the response cap.
 fn bounded_json(stdout: Vec<u8>) -> Option<Vec<u8>> {
     (stdout.len() <= MAX_RESPONSE_BYTES && !stdout.is_empty()).then_some(stdout)
 }
@@ -628,13 +623,11 @@ pub fn query_gh_host(fd: i32, args: &[&str]) -> Option<GhHostResponse> {
     serde_json::from_slice(&response).ok()
 }
 
-/// Run a read-only `gh` command wherever this process can actually reach `gh`:
-/// through the host worker when sandboxed, by spawning it directly otherwise.
-///
-/// The host worker is authoritative once it exists. A sandboxed session never
-/// falls back to an in-jail spawn. This applies where `gh` reaches neither
-/// the host credentials nor the network and would answer with a misleading
-/// failure.
+/// Run a read-only `gh` command wherever this process can reach `gh`: through
+/// the host worker when sandboxed, by spawning it directly otherwise. The
+/// host worker is authoritative once it exists. A sandboxed session never
+/// falls back to an in-jail spawn, where `gh` reaches neither the host
+/// credentials nor the network. It would answer with a misleading failure.
 pub fn run_gh(cwd: &Path, args: &[&str]) -> Option<GhHostResponse> {
     #[cfg(unix)]
     if let Some(fd) = ci_host_fd() {
@@ -720,10 +713,10 @@ mod tests {
         );
     }
 
-    /// The hand-off starts a worker only where one is this process's to
-    /// start. Each of these is a process that must NOT fork another. The
-    /// first is the worker itself re-entering `main`. The second is a session
-    /// a jail already handed a worker.
+    /// The hand-off starts a worker only where one is this process's to start.
+    /// Each of these is a process that must NOT fork another: the worker itself
+    /// re-entering `main`. A session a jail already handed a worker, and a
+    /// process already inside the pathbox jail.
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn the_hand_off_starts_no_worker_where_one_is_not_this_processes_to_start() {
@@ -758,8 +751,8 @@ mod tests {
     }
 
     /// An exec that was prepared for and then did not happen must leave nothing
-    /// behind. The session is confined in place in that case. An inheritable
-    /// fd whose number is in the environment is a live socket to an unconfined
+    /// behind. The session is confined in place in that case. An inheritable fd
+    /// whose number is in the environment is a live socket to an unconfined
     /// `gh` for every child the session spawns.
     #[test]
     #[serial_test::serial(ci_host_env)]
@@ -787,7 +780,8 @@ mod tests {
         );
     }
 
-    /// The jailed pager is a process this one execs into, so the worker fd must survive an exec.
+    /// The jailed pager is a process this execs into, so the worker fd must
+    /// survive an exec.
     #[test]
     fn worker_fd_survives_an_exec() {
         use std::io::Read as _;
@@ -1006,7 +1000,7 @@ mod tests {
     }
 
     /// Drive the jailed-side transport against an in-process peer speaking
-    /// the real worker protocol.
+    /// the real worker protocol: one request line in, one answer line out.
     fn peer(answers: Vec<&'static str>) -> i32 {
         peer_expecting("", answers)
     }

@@ -875,7 +875,7 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
             ))),
         ));
     agent.pending_todo_entry = Some(entry_id);
-    // Tasks pane sits at the top of the agent view and auto-opens on a new live running task —.
+    // Tasks pane sits at the top of the agent.
     let task_id = todo_capture_task_id(capture_id);
     agent.session.bg_tasks.insert(
         task_id.clone(),
@@ -906,7 +906,7 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
 
 /// Stop the capture's spinner. The tasks-pane row stays, finished, the way a
 /// finished bash task does: it holds the capture agent's transcript. That is
-/// the only place the user can read what this run actually did.
+/// the only place the user can read what this run did.
 fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
     if let Some(entry_id) = agent.pending_todo_entry.take() {
         agent.scrollback.remove_entry(entry_id);
@@ -926,8 +926,8 @@ fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
 }
 
 /// Send a `/todo` capture. Bypasses the prompt queue — works even while the
-/// agent is mid-turn. Fires an ACP ext method. Leaves a running tool in the
-/// transcript plus a tasks-pane row. [`handle_todo_captured`] replaces that row
+/// agent is mid-turn. Fires an ACP ext method. It leaves a running tool in the
+/// transcript plus a tasks-pane row, which [`handle_todo_captured`] replaces
 /// with what landed on the list.
 pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: bool) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
@@ -957,9 +957,8 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: boo
     }]
 }
 
-/// Replace the `/todo` running block with the items that were appended, or with
-/// why none were. Both outcomes are transcript blocks: a capture the user asked
-/// for and never sees the result of is the failure mode worth avoiding here.
+/// Replace the `/todo` running block with the items that were appended, or
+/// with why none were. Both outcomes are transcript blocks: a capture.
 pub(super) fn handle_todo_captured(
     app: &mut AppView,
     agent_id: AgentId,

@@ -4745,10 +4745,9 @@ async fn workflow_spawns_bypass_the_session_concurrent_limit() {
 /// A prompt that makes [`TestRunner`]'s run future unwind.
 const PANICKING_PROMPT: &str = "panic mid-run";
 
-/// A child that dies mid-run has to leave a finished record behind.
-///
-/// The unwinding is caught where the run is pushed, so what the coordinator
-/// still owes whoever holds the task id is an answer. That answer is naming the
+/// A child that dies mid-run has to leave a finished record behind. The
+/// unwinding is caught where the run is pushed, so what the coordinator still
+/// owes whoever holds the task id is an answer. That answer is naming the
 /// failure. A bare "panicked" cannot be told apart from any other way a child
 /// can die. The caller is the one that has to decide what to do about it.
 #[tokio::test]

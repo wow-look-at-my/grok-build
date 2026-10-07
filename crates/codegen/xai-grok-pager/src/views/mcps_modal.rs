@@ -633,7 +633,7 @@ mod tests {
     /// A server whose command could not be started reports `unavailable` plus
     /// the reason. Dropping the reason leaves the row saying only that the
     /// server is not working, which is what sent an operator looking for a
-    /// hang. That hang was really `uvx` not being installed.
+    /// hang. That hang was `uvx` not being installed.
     #[test]
     fn convert_list_response_keeps_the_reason_a_server_is_unavailable() {
         let servers = convert_list_response(McpsListResponse {

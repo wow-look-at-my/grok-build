@@ -35,8 +35,8 @@ fn test_conversation_item_roundtrip() {
     assert_eq!(chat_msg.tool_call_id, Some("call_123".to_string()));
 }
 
-/// `reasoning_content` is unverified text, so `Native` and `TextOnly` send the
-/// same body. `Scrubbed` is the one level that changes it: the fold has
+/// `reasoning_content` is unverified text, so `Native` and `TextOnly` send
+/// the same body. `Scrubbed` is the level that changes it: the fold has
 /// nothing to fold.
 #[test]
 fn the_replay_level_only_scrubs_a_chat_completions_request() {
@@ -819,7 +819,9 @@ fn todo_capture_loop_maps_to_assistant_call_and_tool_message() {
     );
 }
 
-/// Whatever spelling it arrived in has to go back out unchanged.
+/// A later gemini rejects a replayed function call whose thought signature is
+/// missing. The signature only ever reaches an OpenAI-shaped client on the
+/// call itself. Whatever spelling it arrived in has to go back out unchanged.
 #[test]
 fn a_tool_calls_provider_fields_survive_the_round_trip() {
     for key in ["extra_content", "provider_specific_fields"] {
@@ -875,6 +877,11 @@ fn a_tool_call_without_provider_fields_replays_unchanged() {
     );
 }
 
+// Strict-schema message profiles (Cerebras `wrong_api_format`)
+
+/// A two-turn conversation whose assistant items carry both a recorded
+/// `model_id` and a replayed reasoning sibling — exactly. The history
+/// shape that produced a later cerebras on `messages.6.assistant`.
 fn history_with_model_id_and_reasoning() -> Vec<ConversationItem> {
     vec![
         ConversationItem::system("You are helpful."),
@@ -901,12 +908,11 @@ fn wire_body(items: Vec<ConversationItem>, profile: ChatMessageProfile) -> serde
 }
 
 /// The decisive check: for a strict-schema target, the serialized assistant
-/// messages carry neither `model_id` nor `reasoning_content`.
-///
-/// This drives the real `From<ConversationRequest> for ChatCompletionRequest`
-/// conversion (the same one `SamplingClient::conversation_stream` uses), then
-/// inspects the JSON the provider would receive. Both properties are absent,
-/// not null or empty — a strict schema rejects on presence.
+/// messages carry neither `model_id` nor `reasoning_content`. This drives the
+/// real `From<ConversationRequest> for ChatCompletionRequest` conversion (the
+/// same one `SamplingClient::conversation_stream` uses), then inspects the
+/// JSON the provider would receive. Both properties are absent, not null or
+/// empty — a strict schema rejects on presence.
 #[test]
 fn strict_profile_omits_model_id_and_reasoning_content_from_wire_body() {
     let body = wire_body(
@@ -1056,8 +1062,9 @@ fn strict_profile_preserves_tool_calls_and_results() {
 }
 
 /// Only the *serialized body* is narrowed. The stored conversation keeps both
-/// values. That lets the Messages backend resolve thinking signatures. It
-/// also lets a later turn on a tolerant provider still send reasoning.
+/// values, which is what lets the Messages backend resolve thinking
+/// signatures. It lets a later turn on a tolerant provider still send
+/// reasoning.
 #[test]
 fn strict_profile_leaves_stored_history_untouched() {
     let items = history_with_model_id_and_reasoning();
@@ -1149,8 +1156,8 @@ fn partial_profiles_suppress_independently() {
 }
 
 /// `strip_unsupported_message_properties` drops exactly what the provider
-/// named. It reports whether it changed anything. The retry loop can then tell
-/// a productive strip from a no-op.
+/// named. Reports whether it changed anything so the retry loop can tell a
+/// productive strip from a no-op.
 #[test]
 fn strip_unsupported_message_properties_narrows_named_fields_only() {
     let mut req = ConversationRequest::from_items(history_with_model_id_and_reasoning());

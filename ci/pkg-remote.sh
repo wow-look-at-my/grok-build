@@ -59,13 +59,13 @@ v1_get_url() {
 		jq -r '.archiveLocation // empty'
 }
 
-# binpazer, not tar: it carries a Block Index, so a reader seeks to one artifact instead of decompressing the whole member to reach it.
+# binpazer, not tar: it carries a Block Index.
 BINPAZER="${BINPAZER:-binpazer}"
 TYPE_ARTIFACT=1
 TYPE_NAMES=2
 
-# The names block. binpazer stores payloads. Binpazer does not model a file name or a permission.
-# So both travel as their own critical block. They travel in the order the artifact blocks were written.
+# The names block. binpazer stores payloads. Binpazer does not model a file name or a permission,
+# so both travel as their own critical block. In the order the artifact blocks were written.
 #
 # The mode rides with the name because a package's artifact set includes the build script's own
 # binary. Restored without its execute bit, cargo answers "could not execute process ... (never
@@ -154,7 +154,7 @@ get_once)
 	blob="$(mktemp)" || exit 1
 	trap 'rm -f "$blob"' EXIT
 	curl -fsS --max-time 300 "$url" -o "$blob" 2>/dev/null || exit 1
-	# The names ride in their own block: binpazer stores payloads.
+	# The names ride in their own block: binpazer stores payloads, and a file name is the caller's business.
 	namefile="$blob.names"
 	"$BINPAZER" extract "$blob" --type "$TYPE_NAMES" -o "$namefile" 2>/dev/null || exit 1
 	i=0

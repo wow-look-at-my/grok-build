@@ -238,7 +238,7 @@ where
         GoalRoleModelFailOpenReason::SpawnFailed,
         Some(error.to_string()),
     );
-    // Retry on the session harness — use the matching `fallback` render.
+    // Retry on the session harness.
     spawn(None, None, prompt.fallback).await
 }
 
@@ -264,11 +264,11 @@ const GOAL_PLANNER_PROMPT_TEMPLATE: &str = include_str!("templates/goal_planner_
 pub(crate) enum GoalPlannerOutcome {
     Planned {
         plan_file: PathBuf,
-        /// Contents of the planner child's own todo list, in order — the steps it named with `todo_write`.
+        /// Contents of the planner child's own todo list.
         todos: Vec<String>,
         latency_ms: u64,
     },
-    /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token` is wired to `start_planner_run`.
+    /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token` is wired to `start_planner_run`; when the token fires mid-spawn (a user Stop, or the turn being cancelled) the attempt returns `Interrupted`.
     Interrupted,
     FailClosed {
         reason: GoalPlannerFailClosedReason,
@@ -356,7 +356,7 @@ pub(crate) struct ChannelSpawner {
     /// Default (inherit) keeps the historic `::default()` spawn behavior.
     pub(crate) role_override: RoleSpawnOverride,
     pub(crate) cancel_token: tokio_util::sync::CancellationToken,
-    /// Cell published with the coordinator id this spawn runs under.
+    /// Cell published with the coordinator id this spawn runs under, so a Send Now can address the live planner child.
     pub(crate) subagent_id_slot: Option<std::sync::Arc<std::sync::Mutex<Option<String>>>>,
     /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
     pub(crate) fallback: RoleFallbackReporter,
@@ -486,7 +486,7 @@ impl ChannelSpawner {
         }
         Ok(PlannerSpawnOutput {
             output: result.output.to_string(),
-            // The child's own list, read out of its live `TodoState` when it finished — a `todo_write` the planner issued.
+            // The child's own list, read out of its live `TodoState`.
             todos: result.todos,
         })
     }
@@ -719,9 +719,9 @@ mod tests {
     }
 
     /// The planner is told to build its OWN todo list with the session's todo
-    /// tool, and the prompt names the tool the harness actually exposes. That
-    /// list is what the parent merges into the session's list, so a prompt that
-    /// drops the instruction silently loses every step.
+    /// tool, and the prompt names the tool the harness exposes. That list is
+    /// what the parent merges into the session's list, so a prompt that drops
+    /// the instruction silently loses every step.
     #[test]
     fn planner_prompt_requires_the_todo_list_and_names_the_real_tool() {
         let template = GOAL_PLANNER_PROMPT_TEMPLATE;
@@ -738,9 +738,9 @@ mod tests {
         assert_no_tool_placeholders(&rendered);
     }
 
-    /// The planner's harness must actually expose the todo tool: the prompt's
-    /// instruction to list the plan's work is inert. The session's list stays
-    /// empty, if the toolset the planner runs on has no such tool.
+    /// The planner's harness must expose the todo tool: the prompt's
+    /// instruction to list the plan's work is inert. The session's list
+    /// stays empty, if the toolset the planner runs on has no such tool.
     #[test]
     fn planner_harness_toolset_exposes_the_todo_tool() {
         let definition = xai_grok_agent::config::AgentDefinition::general_purpose();

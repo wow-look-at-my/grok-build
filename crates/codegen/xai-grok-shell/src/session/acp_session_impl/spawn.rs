@@ -854,7 +854,7 @@ pub(crate) async fn spawn_session_actor(
         ),
         two_pass_enabled,
     };
-    // The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON, written by the pager's settings modal) is the master switch.
+    // The persisted `[ui].stop_gate_unfinished_todos` toggle (default ON, written by the pager's settings modal) is the master switch for the built-in todo-stop gate.
     let mut reminder_policy = resolve_reminder_policy(remote_settings.as_ref(), todo_gate);
     reminder_policy.stop_gate_unfinished_todos = effective_cfg
         .as_ref()

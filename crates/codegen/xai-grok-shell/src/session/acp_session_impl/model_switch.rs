@@ -273,11 +273,10 @@ impl SessionActor {
         self.emit_status_snapshot_detached();
         Ok(model_id)
     }
-    /// Handle [`SessionCommand::FlattenHistory`].
-    ///
-    /// Rewrites the conversation so nothing in it belongs to the model that
-    /// produced it. A history already free of reasoning and tool calls is
-    /// untouched, and the report says nothing was converted.
+    /// Handle [`SessionCommand::FlattenHistory`]. Rewrites the conversation
+    /// so nothing in it belongs to the model that produced it. A history
+    /// already free of reasoning and tool calls is untouched, and the report
+    /// says nothing was converted.
     pub(super) async fn handle_flatten_history(
         &self,
     ) -> xai_grok_sampling_types::conversation::FlattenReport {

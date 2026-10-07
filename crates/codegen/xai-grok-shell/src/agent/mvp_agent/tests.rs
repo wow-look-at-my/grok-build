@@ -542,9 +542,9 @@ async fn upload_harness_trace_turns_uploads_disabled_does_not_burn_counter() {
         "uploads-disabled path must not persist a counter",
     );
 }
-/// Guards the hard-disabled trace-upload seam. Trace upload is
-/// permanently off. So no per-harness-turn trace context (and hence no
-/// manifest) can be created, even with maximally-enabling config.
+/// Guards the hard-disabled trace-upload seam. With trace upload
+/// permanently off, no per-harness-turn trace context (and hence no
+/// manifest) may be created even with maximally-enabling config.
 #[tokio::test(flavor = "current_thread")]
 async fn upload_harness_trace_turns_build_per_turn_manifest() {
     let agent = build_minimal_agent_for_tests();
@@ -991,9 +991,9 @@ fn harnesses_are_compatible_rejects_strict_mismatches() {
     ));
 }
 
-/// An agent type nobody has heard of is never strict.
+/// An agent type nobody has heard of is never strict. This is because
 /// `is_strict_harness_agent_type` refuses to enforce a harness it cannot
-/// resolve. So against the non-strict default it is COMPATIBLE.
+/// resolve -- so against the non-strict default it is COMPATIBLE.
 #[test]
 fn an_unknown_agent_type_is_never_strict() {
     assert!(harnesses_are_compatible("grok-build", "cursor"));

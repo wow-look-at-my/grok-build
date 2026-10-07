@@ -8,13 +8,12 @@ fn get_u64(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Optio
 }
 
 /// True when a `/v1/models` entry is shaped by Synthetic's schema.
-///
 /// An entry is considered Synthetic when it carries any of the Synthetic-only
-/// markers. This covers * a `provider` of `synthetic`, * a
-/// `reasoning_parameters` object with an `efforts` array, * a
-/// `context_length` field, * a `syn:`-prefixed routing slug (e.g.
-/// `syn:large:text`).
-///
+/// markers:
+/// * a `provider` of `synthetic`,
+/// * a `reasoning_parameters` object with an `efforts` array,
+/// * a `context_length` field,
+/// * a `syn:`-prefixed routing slug (e.g. `syn:large:text`).
 /// This is intentionally narrow (none of these appear on standard xAI/OpenAI
 /// or Anthropic-style listings), so a Synthetic entry is routed through
 /// [`parse_synthetic_model_entry`] while ordinary entries are left to the
@@ -54,11 +53,10 @@ pub(crate) fn parse_synthetic_model_entry(
     Some(apply_synthetic_schema(value, parsed))
 }
 
-/// Apply Synthetic's non-standard `/v1/models` keys onto a parsed entry.
-///
-/// Pure and idempotent. Only the fields Synthetic actually provides are
-/// overridden, so passing a non-Synthetic entry (or one missing these keys)
-/// is a no-op that leaves the generic parse intact.
+/// Apply Synthetic's non-standard `/v1/models` keys onto a parsed entry. Pure
+/// and idempotent. Only the fields Synthetic provides are overridden, so
+/// passing a non-Synthetic entry (or one missing these keys) is a no-op that
+/// leaves the generic parse intact.
 pub(crate) fn apply_synthetic_schema(
     value: &serde_json::Value,
     mut parsed: ModelEntryConfig,
@@ -154,7 +152,8 @@ mod tests {
     #[test]
     fn synthetic_listing_missing_extended_fields_falls_back_to_generic() {
         // A Synthetic entry without the Synthetic-only keys must still parse
-        // (not be dropped).
+        // (not be dropped) and keep the generic parser's
+        // DEFAULT_CONTEXT_WINDOW fallback.
         let value = serde_json::json!({
             "id": "syn:minimal",
             "name": "syn:minimal",

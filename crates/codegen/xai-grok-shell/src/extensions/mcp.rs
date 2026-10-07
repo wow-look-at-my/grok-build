@@ -743,9 +743,9 @@ pub(crate) async fn build_mcp_status(
     // Once init has finished, a configured server that is in neither set has no
     // client and is not starting: its spawn failed. Reporting nothing for it
     // left the UI with no status to render, which reads as "still starting" —
-    // forever, for a command. That command was never going to run. Before init
-    // finishes there is nothing to conclude, so those servers are still left
-    // out.
+    // forever. That nothing is for a command that was never going to run.
+    // Before init finishes there is nothing to conclude, so those servers are
+    // still left out.
     for config in &configs {
         let cname = crate::session::mcp_servers::mcp_server_name(config);
         if client_statuses.iter().any(|c| c.name == cname) {
@@ -2362,8 +2362,8 @@ mod tests {
 
     /// A config change (adding a server is one) cancels init back to "not
     /// started". A failure recorded before that must still be reported: this
-    /// window is exactly when an operator is staring at the row they just
-    /// added. This is where "stuck on initializing" was seen.
+    /// window is exactly when an operator is staring at the row they added.
+    /// This is where "stuck on initializing" was seen.
     #[tokio::test]
     async fn a_recorded_failure_is_reported_even_when_init_was_cancelled() {
         let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
@@ -2387,7 +2387,7 @@ mod tests {
     }
 
     /// Before init has run there is nothing to conclude about a configured
-    /// server, so it is left out entirely — exactly as before this change.
+    /// server, so it is left out entirely — exactly as before.
     #[tokio::test]
     async fn a_server_is_not_judged_before_init_has_finished() {
         let mcp_state = Arc::new(TokioMutex::new(McpState::new(vec![stdio_config(

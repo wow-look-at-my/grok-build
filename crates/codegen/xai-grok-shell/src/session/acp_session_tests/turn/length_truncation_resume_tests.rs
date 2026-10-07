@@ -1,4 +1,4 @@
-//! A response that hits the output token cap (`finish_reason: "length"` / `stop_reason: "max_tokens"`) is a turn cut off mid-thought.
+//! A response that hits the output token cap.
 
 use super::support::*;
 use super::*;
@@ -26,10 +26,10 @@ fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg
     });
 }
 
-/// This is a single Chat Completions SSE chunk carrying all of `content`
-/// in one delta. The single Chat Completions SSE chunk is terminated
-/// with the given `finish_reason` — `"length"` for a truncated
-/// response, `"stop"` for a normal one.
+/// This is a single Chat Completions SSE chunk carrying all of `content` in
+/// one delta. The Chat Completions SSE chunk is terminated with the given
+/// `finish_reason` — `"length"` for a truncated response, `"stop"` for a
+/// normal one.
 fn chat_completion_response(text: &str, finish_reason: &str) -> ScriptedResponse {
     let chunk = serde_json::json!({
         "id": "chatcmpl-test",
@@ -58,8 +58,9 @@ fn chat_completion_response(text: &str, finish_reason: &str) -> ScriptedResponse
 }
 
 /// `(actor, request-count fn)` wired against `server` over Chat Completions.
-/// `max_turns` bounds the resumption loop. A regression that never stops
-/// continuing thus fails on the bound instead of hanging the test.
+/// That `(actor, request-count fn)` is with `max_turns` bounding the
+/// resumption loop so a regression that never stops continuing fails on the
+/// bound instead of hanging the test.
 async fn length_truncation_actor(
     server: &MockInferenceServer,
     max_turns: Option<usize>,
@@ -139,9 +140,6 @@ fn completions_request_count(server: &MockInferenceServer) -> usize {
         .count()
 }
 
-/// Length-truncated chunks followed by a normal stop: the turn must
-/// resubmit twice on its own and converge to `EndTurn`/`Completed`. Proving
-/// a truncated response is never mistaken for a finished turn.
 #[tokio::test(flavor = "current_thread")]
 async fn length_truncated_response_resumes_and_completes() {
     let local = tokio::task::LocalSet::new();

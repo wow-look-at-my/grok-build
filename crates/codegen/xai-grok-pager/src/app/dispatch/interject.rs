@@ -234,14 +234,13 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
 
 /// Cancel-and-send: send `text` (+ images) as a fresh `sendNow` prompt so the
 /// shell cancels the running turn and runs it next. The user block paints at
-/// dispatch (the arm hides the queue echo; the adoption reuses the block).
-///
-/// A slash invocation this client OWNS (a pager builtin: `/plan`, `/model`, …)
-/// is not a message at all. It is routed back through the submit path instead.
-/// The shell has no such command. Sending the text would hand the model the
-/// literal `/cmd args`. Shell-owned commands (ACP-advertised skills and
-/// builtins) keep the send-now route. The shell resolves those when the prompt's
-/// own turn starts, which is exactly what "now" means for them.
+/// dispatch (the arm hides the queue echo; the adoption reuses the block). A
+/// slash invocation this client OWNS (a pager builtin: `/plan`, `/model`,
+/// …) is not a message at all and is routed back through the submit path
+/// instead. The shell has no such command. Sending the text would hand the
+/// model the literal `/cmd args`. Shell-owned commands (ACP-advertised skills
+/// and builtins) keep the send-now route. The shell resolves those when the
+/// prompt's own turn starts, which is exactly what "now" means for them.
 pub(super) fn dispatch_send_prompt_now(
     app: &mut AppView,
     text: String,

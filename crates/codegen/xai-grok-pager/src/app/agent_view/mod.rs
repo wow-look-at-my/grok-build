@@ -1301,6 +1301,7 @@ pub struct AgentView {
     /// Session mode to apply once this agent's ACP session exists. Set when the agent is spawned from the dashboard with `/plan` active (the session does not exist yet, so the mode can't be sent immediately).
     /// Consumed in the `SessionCreated` / `WorktreeSessionCreated` handlers, mirroring `AgentSession.deferred_model_switch`.
     pub(crate) deferred_session_mode: Option<xai_grok_tools::types::SessionMode>,
+    /// Session-mode changes this pager has requested for this session, oldest first.
     pub(crate) mode_requests: VecDeque<ModeRequest>,
     pub(crate) next_mode_request_seq: u64,
     /// Permission mode chosen on Welcome before the ACP session exists.
@@ -1404,7 +1405,7 @@ pub struct AgentView {
     pub(crate) timeline_hover_preview: Option<(usize, String)>,
     /// Running agent definition for this session (`x.ai/session/info` `agentName`).
     pub session_agent_name: Option<String>,
-    /// Index into `BuiltinAgentName::shift_tab_variants()` for the Shift+Tab ring's current agent-identity stop; `None`.
+    /// Index into `BuiltinAgentName::shift_tab_variants()` for the Shift+Tab.
     pub shift_tab_ring_agent_index: Option<u8>,
     /// The agent name to restore when the ring wraps back past the last agent-identity stop to Plan.
     pub shift_tab_base_agent: Option<String>,
@@ -1456,7 +1457,9 @@ pub struct AgentView {
     pub(crate) loading_placeholder_id: Option<EntryId>,
     /// Entry ID of the in-flight manual `/recap` loading block (rendered with the animated "running" sidebar). Set when `/recap` is dispatched and taken by the `SessionRecap` handler, which fills the block with the summary and stops the animation. `None` when no manual recap is pending (auto recaps never show a loading block).
     pub(crate) pending_recap_entry: Option<EntryId>,
+    /// Entry ID of the in-flight `/todo`.
     pub(crate) pending_todo_entry: Option<EntryId>,
+    /// Tasks-pane row for the in-flight `/todo` capture (`todo-capture:` prefix).
     pub(crate) pending_todo_task_id: Option<String>,
     /// The manually-chosen session title (`/rename` or the dashboard rename flow), as distinct from the auto-generated
     /// `generated_session_title` below. Set optimistically at dispatch, persisted by the shell as `Summary.title_is_manual`, and restored from disk on resume (`TaskResult::SessionMetaFromDisk`). Drives the prompt-border inline title and wins precedence for the dashboard modal label and the OSC terminal title. The on-disk write is best-effort (failure surfaces a system block through the existing
@@ -1511,7 +1514,7 @@ pub struct AgentView {
     /// (a rapid double-Enter on a queued bash command could "disappear": the interject overtook the row, the no-op dropped the send-now, and the armed cancel expectation hid the still-queued row).
     /// Parked here and fired from the confirming `x.ai/queue/changed`
     pub(crate) send_now_awaiting_confirm: Option<String>,
-    /// An interrupt-with-the-queue (bare Enter on an empty composer) the user fired.
+    /// An interrupt-with-the-queue (bare Enter on an empty composer) the user fired while a row was still an optimistic echo.
     pub(crate) deliver_now_awaiting_confirm: bool,
     /// User blocks painted at send-now dispatch, keyed by prompt id; the turn-start adoption consumes an entry to reuse its block. The flag marks an edit-interject override (fresher than the mirror text the adoption captures). Cleared on session reload.
     pub(crate) send_now_painted_blocks:

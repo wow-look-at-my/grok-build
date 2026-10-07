@@ -517,11 +517,11 @@ pub struct GoalOrchestration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_baseline_file: Option<PathBuf>,
 
-    /// True once the harness has populated the session's todo list from the published plan.
+    /// True once the harness has populated the session's todo list from the published plan (the planner's own list, or the plan body when the planner named nothing).
     #[serde(default)]
     pub plan_todos_seeded: bool,
 
-    /// True once the harness created and squat-verified the scratch root AND the implementer subdir.
+    /// True once the harness created and squat-verified the scratch root AND the implementer subdir, so prompts can honestly say the dir exists.
     #[serde(skip)]
     pub scratch_dir_ready: bool,
 
@@ -991,7 +991,7 @@ impl GoalTracker {
             o.plan_baseline_file = None;
             // Same for the seed guard: a later goal seeds its own plan.
             o.plan_todos_seeded = false;
-            // Terminal transition: reset all strategist state so a recreated/reactivated goal never inherits a stale count.
+            // Terminal transition: reset all strategist state.
             o.reset_strategist_fields();
             o.reset_evaluator_blocker_fields();
             // The achieved ack points the user at the details file, so it must outlive the scratch-root removal below

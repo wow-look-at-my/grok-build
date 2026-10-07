@@ -1416,20 +1416,17 @@ fn make_version_mismatch_notification(
         .to_string(),
     )
 }
-/// Run the leader IPC server on the Unix socket at `socket_path`.
-///
-/// The leader lock is taken after this function creates the socket. A client
-/// that waits for the socket can then connect as soon as the server listens.
-///
-/// Until `ready_rx` reads `true`, the server accepts connections and IPC
-/// registrations. An ACP request gets a `leader_starting` JSON-RPC error, so the
-/// client retries. An ACP notification is dropped. After that, all ACP traffic
-/// goes to the agent.
-///
-/// `relay_demand_tx` becomes `true` when the first [`ClientMode::Headless`]
-/// client registers. `run_leader` starts the grok.com relay only then. A leader
-/// that serves only interactive clients thus never copies its ACP stream onto
-/// the relay.
+/// Run the leader IPC server. The socket_path is where the Unix socket will
+/// be created. Acquiring the leader lock AFTER this function creates the
+/// socket. This ordering ensures that: - Clients waiting for socket can
+/// connect as soon as we're ready - The lock acquisition happens after we're
+/// listening #. Readiness gating The `ready_rx` watch channel controls
+/// whether ACP messages are forwarded to the agent. While
+/// `*ready_rx.borrow() == false` (leader still initializing): - Client
+/// connections and IPC registrations are accepted normally. ACP requests
+/// (messages with an `id`) receive a structured `leader_starting` JSON-RPC
+/// error. So the client can retry rather than hang. - ACP notifications (no
+/// `id`) are dropped with a trace log.
 pub async fn run_leader_server(
     socket_path: std::path::PathBuf,
     acp_tx: mpsc::UnboundedSender<String>,

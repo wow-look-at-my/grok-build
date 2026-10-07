@@ -240,7 +240,7 @@ pub fn stream_ollama<'a>(
                     text: assistant_thinking,
                 })],
                 content: None,
-                // Deliberately unsigned: Ollama's thinking is plain text, so there is no blob binding it to the model that wrote it.
+                // Deliberately unsigned: Ollama's thinking is plain text.
                 encrypted_content: None,
                 status: None,
             }));
@@ -261,7 +261,7 @@ pub fn stream_ollama<'a>(
             items,
             stop_reason,
             usage,
-            // A local runtime bills nothing, so there is no price to report and the shell's own pricing fallback answers.
+            // A local runtime bills nothing.
             cost_usd_ticks: None,
             message_chunks_emitted: message_chunk_count,
             doom_loop_signals: Vec::new(),

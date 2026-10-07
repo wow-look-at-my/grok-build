@@ -3,8 +3,8 @@
 use super::common::*;
 
 /// User messages in the most recent request body that contain `needle`.
-/// Counted per-request, not across all of them. Every later request replays
-/// the same history. So a cross-request tally cannot tell a duplicate from a
+/// Counted per-request, not across all of them: every later request replays
+/// the same history. A cross-request tally cannot tell a duplicate from a
 /// resend.
 #[cfg(unix)]
 fn user_hits_in_last_request(content: &ContentController, needle: &str) -> usize {
@@ -37,6 +37,7 @@ async fn queued_message_renders_once_not_twice() {
         format!("while [ ! -e {} ]; do /bin/sleep 0.2; done", flag.display())
     };
 
+    // Tool one call: the flag-gated background command the wait blocks on.
     let bg_args = json!({
         "command": gated_loop(&park_flag),
         "description": "flag-gated command",
@@ -46,6 +47,8 @@ async fn queued_message_renders_once_not_twice() {
     let _background_turn =
         expect_tool_turn(&content, "call_qonce_bg", "run_terminal_command", bg_args);
 
+    // Tool the flag-gated foreground hold: the flag-gated foreground hold
+    // — the mid-turn window where the follow-up is queued.
     let id_hold_args = json!({
         "command": gated_loop(&id_ready_flag),
         "description": "hold for id extraction"
@@ -118,6 +121,7 @@ async fn queued_message_renders_once_not_twice() {
         "no request has been made since the follow-up was typed"
     );
 
+    // Tool a later call: block on the REAL task.
     let wait_args = json!({
         "task_ids": [task_id],
         "timeout_ms": 600_000

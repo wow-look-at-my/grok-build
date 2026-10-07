@@ -2936,7 +2936,7 @@ fn resolve_context_window_drives_auto_compaction_threshold() {
 
 #[test]
 fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
-    // Drive the SHIPPED catalog choke point — `config::resolve_model_list`.
+    // Drive the SHIPPED catalog choke point — `config::resolve_model_list`, the production call site of `resolve_context_window` — with a representative prefetched `/v1/models` listing.
     use xai_grok_sampling_types::CompactionAtTokens;
 
     // Prefetched listing: `preview-big` knows its own 1M window (as it would from the provider API).
@@ -2956,7 +2956,7 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
 
     let resolved = crate::agent::config::resolve_model_list(&cfg, Some(prefetched));
 
-    // The config sibling that was left at DEFAULT answers for its own window because a listing sibling with the same routing slug (`grok-4`).
+    // The config sibling that was left at DEFAULT answers for its own window.
     let default_cw = crate::remote::DEFAULT_CONTEXT_WINDOW;
     let sibling_has_real_window = resolved
         .values()
@@ -3016,20 +3016,18 @@ fn production_resolve_model_list_backfills_window_per_slugs_into_compaction() {
     );
 }
 
-/// BYOK / custom-provider gap, driven through the SHIPPED `resolve_model_list`
-/// choke point.
-///
-/// A model that carries its OWN `base_url` + API key (e.g.
-/// `openrouter/deepseek/deepseek-v4-flash-0731` at `https://gateway.pazer.ai/v1`)
-/// is never present in the xAI-proxy `/v1/models` prefetch listing. The
-/// sibling-based backfill has no non-default source to copy from and the model
-/// stays at a hardcoded default (200k/256k). The backfill must instead ask the
-/// model's OWN provider `/v1/models` for the real window.
-///
-/// Here the "own provider" is a loopback axum mock serving `/v1/models` with a
-/// 1M window for the byok slug. The catalog entry starts at the 256k DEFAULT
-/// sentinel with its own key. `resolve_model_list` must raise it to 1M by
-/// fetching from the model's own base.
+/// BYOK / custom-provider gap, driven through the SHIPPED
+/// `resolve_model_list` choke point. A model that carries its OWN `base_url`
+/// + API key (e.g. `openrouter/deepseek/deepseek-v4-flash-0731` at
+/// `https://gateway.pazer.ai/v1`) is never present in the xAI-proxy
+/// `/v1/models` prefetch listing. The sibling-based backfill has no
+/// non-default source to copy from and the model stays at a hardcoded default
+/// (200k/256k). The backfill must instead ask the model's OWN provider
+/// `/v1/models` for the real window. Here the "own provider" is a loopback
+/// axum mock serving `/v1/models` with a 1M window for the byok slug. The
+/// catalog entry starts at the 256k DEFAULT sentinel with its own key.
+/// `resolve_model_list` must raise it to 1M by fetching from the model's own
+/// base.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn resolve_model_list_backfills_byok_window_from_models_own_provider_base() {
     use axum::routing::get;
@@ -3079,7 +3077,6 @@ async fn resolve_model_list_backfills_byok_window_from_models_own_provider_base(
 }
 
 /// A config-declared model must show up in the picker with a visible label.
-///
 /// The wire `name` is what every row renders, and it is the only thing that
 /// distinguishes one row from another. Nothing in config.toml is required to
 /// set it. It has to fall back to something non-empty -- otherwise the

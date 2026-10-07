@@ -1,4 +1,5 @@
 //! `/version` -- which build this session is running.
+
 use super::debug_context::{BinaryFreshness, BinaryIdentity, binary_identity};
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
 

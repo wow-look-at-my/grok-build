@@ -1921,12 +1921,14 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
-    // A `--sandbox` session starts on the host (outside the jail).
+    // A `--sandbox` session starts on the host (outside the jail), where we
+    // spawn an unsandboxed `gh` CI-status worker and hand its stream fd into
+    // the jail.
     if xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
         xai_grok_sandbox::ci_host::run_ci_host_worker();
         std::process::exit(0);
     }
-    // Before anything else: a `--sandbox=pathbox` (or any `--ro`/`--rw`/`--rn` path flag) replaces this process with itself inside bwrap.
+    // Before anything else.
     xai_grok_sandbox::jail::maybe_reexec_into_jail();
     xai_grok_telemetry::startup::mark_process_start();
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {

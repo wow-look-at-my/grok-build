@@ -415,8 +415,9 @@ impl SessionActor {
             extra.insert("cancellationContext".to_string(), ctx);
         }
         let extra_meta = (!extra.is_empty()).then_some(extra);
-        // Session-cumulative cost at the terminal: this is the last point in
-        // a turn where a subagent fold can still land.
+        // Session-cumulative cost at the terminal. This is the last point in
+        // a turn where a subagent fold can still land after the final model
+        // call.
         let session_cost_usd_ticks = self
             .chat_state_handle
             .try_get_session_usage()
@@ -706,6 +707,8 @@ mod goal_pause_message_tests {
         ))
     }
 
+    /// The reported trap: a content rejection (here a later vision) offered
+    /// `/goal resume`, which rebuilt the same request and failed the same way.
     #[test]
     fn content_rejections_do_not_offer_a_bare_resume() {
         for status in [400u16, 403, 404, 413, 422] {

@@ -171,8 +171,7 @@ impl PullDiagnostics {
         tokio::spawn(async move {
             loop {
                 // Guarded so the slot cannot outlive its task: `begin`
-                // reports a pull running until `finish` says otherwise, so a
-                // round that died.
+                // reports a pull running until `finish` says otherwise.
                 let round = crate::util::detached::guarded(
                     "lsp pull diagnostics",
                     pull.resolve(&uri, &key),

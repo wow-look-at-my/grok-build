@@ -1226,20 +1226,18 @@ fn send_prompt_with_images_while_running_and_steer_queues_on_server() {
     assert_eq!(agent_ref(&app, id).session.queue_len(), 0);
 }
 
-/// Regression (queue reorder race). A plain prompt typed while a turn is running
-/// must never overtake an older prompt still waiting in the local drip-feed queue.
-/// An example is prompts queued during "Starting session…" before the turn began.
-/// There the first drains to start the turn and the rest are stranded locally.
-/// Immediate-sending the new prompt onto the server queue while the old one stayed
-/// local ran them AHEAD of it (the merge is server-rows-first). Thus `[2, 3]`
-/// showed up as `[3, 2]`.
-///
-/// The order is now held by moving the older row to the server queue FIRST
-/// rather than by holding the newer one back
-/// (`migrate_local_rows_to_server_queue`). Leaving it stranded is what latched
-/// mid-turn delivery off for the rest of a never-idle session. What must never
-/// happen is unchanged: "three" reaching the shell before "two", or at all
-/// while "two" is still stuck locally.
+/// Regression (queue reorder race). A plain prompt typed while a turn is
+/// running must never overtake an older prompt still waiting in the local
+/// drip-feed queue. E.g. prompts queued during "Starting session…" before
+/// the turn began, where the first drains to start the turn and the rest are
+/// stranded locally. Immediate-sending the new prompt onto the server queue
+/// while the one stayed local ran them AHEAD of it (the merge is
+/// server-rows-first). So `[2, 3]` showed up as `[3, 2]`. The order is now
+/// held by moving the older row to the server queue FIRST rather than by
+/// holding the newer one back (`migrate_local_rows_to_server_queue`). Leaving
+/// it stranded is what latched mid-turn delivery off for the rest of a
+/// never-idle session. What must never happen is unchanged: "three" reaching
+/// the shell before "two", or at all while "two" is still stuck locally.
 #[test]
 fn send_while_running_with_pending_local_prompt_preserves_fifo() {
     let mut app = test_app_with_agent();
@@ -6579,8 +6577,8 @@ fn idle_enter_sends_immediately() {
     assert!(app.agents[&id].shared_queue.is_empty());
 }
 
-/// Enter while a turn is running hands the prompt to the shell right away. The
-/// running turn then harvests it at its next gap between tool calls / model
+/// Enter while a turn is running hands. The prompt to the shell right away, so
+/// the running turn harvests it at its next gap between tool calls / model
 /// requests. Holding it in the local drip-feed queue instead would delay it to
 /// the end of the whole turn — the ASAP-send bug.
 #[test]
@@ -6614,8 +6612,8 @@ fn mid_turn_enter_routes_to_the_shell_queue_for_gap_delivery() {
     );
 }
 
-/// Bare Enter on an empty composer mid-turn interrupts. Server-owned rows ride
-/// one `queue/deliver_now`, and local rows the shell never saw are sent as
+/// Bare Enter on an empty composer mid-turn interrupts: server-owned rows ride
+/// one `queue/deliver_now`. Local rows the shell never saw are sent as
 /// interjections. Both cancel the in-flight model stream shell-side.
 #[test]
 fn empty_enter_mid_turn_interrupts_with_every_queued_row() {
@@ -6664,10 +6662,10 @@ fn interrupt_without_a_queue_sends_nothing() {
 
 /// A row stuck in the local queue during a turn used to latch mid-turn
 /// delivery off for the rest of the session. The local queue drains only at
-/// idle. A non-empty local queue makes every later prompt local too, where the
-/// running turn's harvest can never see it. Sending a prompt now hands the
-/// stuck rows to the shell first, oldest first, so both reach the queue the
-/// turn actually harvests.
+/// idle. A non-empty local queue makes every later prompt local too, where
+/// the running turn's harvest can never see it. Sending a prompt now hands
+/// the stuck rows to the shell first, oldest first, so both reach the queue
+/// the turn harvests.
 #[test]
 fn sending_mid_turn_migrates_stuck_local_rows_to_the_shell() {
     let mut app = test_app_with_agent();

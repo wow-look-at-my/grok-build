@@ -93,9 +93,9 @@ fn inference_slugs(server: &MockInferenceServer) -> Vec<String> {
         .collect()
 }
 
-/// The first-party URLs point at a trap server, the way the old default
-/// pointed them at cli-chat-proxy. A model the user took from the provider
-/// must never send its prompt there.
+/// The first-party URLs point at a trap server, the way the default pointed
+/// them at cli-chat-proxy. A model the user took from the provider must never
+/// send its prompt there.
 #[tokio::test]
 async fn provider_listed_and_configured_models_send_only_to_the_provider() {
     let provider = MockInferenceServer::start_with_models(listed_models())

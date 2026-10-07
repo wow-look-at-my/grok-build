@@ -666,7 +666,6 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
 
     /// Deliver a model-sent message to one child of `parent_session_id`
     /// (`SubagentEvent::MessageChild`) and answer with what became of it.
-    ///
     /// Scoping is the difference from `handle_interject`: a child of another
     /// session is refused rather than steered, and every path answers. The
     /// calling tool reports a real outcome instead of a silent success.

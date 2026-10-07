@@ -161,19 +161,18 @@ const WORKER_FD_ENV: &str = "GROK_CI_HOST_TEST_FD";
 /// The branch the jailed child asks about.
 const JAILED_CHILD_ENV: &str = "GROK_JAILED_CHILD_BRANCH";
 
-/// A `--sandbox` session reaches `gh` only through the host worker. The jail is
-/// entered by exec. The ONE thing that carries the connection is an
-/// exec-surviving fd whose number the jail sets in the new image's environment.
-///
-/// bwrap makes that a placement question the macOS side does not have.
-/// `--setenv` is an option for bwrap and everything after `--` is argv for the
-/// jailed program. Emitting it on the wrong side of that separator sets no
-/// variable at all. The jailed pager then reports no CI while the run gains
-/// stray arguments. Only running real bubblewrap catches it.
-///
-/// The answer is checked for SHAPE, not content. A runner with no `gh` (and no
-/// credentials) is answered by the worker's nothing-usable sentinel. That
-/// still proves the jail carried the connection. This is the claim here.
+/// A `--sandbox` session reaches `gh` only through the host worker. The jail
+/// is entered by exec. The thing that carries the connection is an
+/// exec-surviving fd whose number the jail sets in the new image's
+/// environment. bwrap makes that a placement question the macOS side does not
+/// have. `--setenv` is an option for bwrap and everything after `--` is argv
+/// for the jailed program. Emitting it on the wrong side of that separator
+/// sets no variable at all. The jailed pager then reports no CI while the run
+/// gains stray arguments. Only running real bubblewrap catches it. The answer
+/// is checked for SHAPE, not content: a runner with no `gh` (and no
+/// credentials) is answered by the worker's nothing-usable sentinel. The
+/// answer is also checked that still proves the jail carried the connection.
+/// This is the claim here.
 #[test]
 fn the_jailed_process_reaches_the_host_worker_through_the_bwrap_jail() {
     if !bwrap_is_usable() {
@@ -184,7 +183,7 @@ fn the_jailed_process_reaches_the_host_worker_through_the_bwrap_jail() {
     let grok_home = fixture_dir("worker-home");
     std::fs::create_dir_all(grok_home.join("sandbox-tmp")).unwrap();
 
-    // The host side. The shipped worker loop in a real child of this binary, its socket end dup2'd onto a known fd - what `spawn_ci_host` does.
+    // The host side.
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
     let theirs_fd = theirs.into_raw_fd();
     const WORKER_FD: i32 = 3;
@@ -297,7 +296,7 @@ fn bwrap_worker_self_entry() {
     xai_grok_sandbox::ci_host::run_ci_host_worker_on(stream);
 }
 
-/// Delegate the parent jails: find the worker the way the shipped pager does,
+/// Delegate the parent jails. Find the worker the way the shipped pager does,
 /// ask it one fixed-shape question. Write what came back where the parent can
 /// read it (the jailed cwd is a granted mount).
 #[test]

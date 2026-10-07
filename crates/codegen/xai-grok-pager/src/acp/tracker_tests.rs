@@ -5623,8 +5623,7 @@ fn a_large_body_costs_a_bounded_preview_and_a_moving_size() {
 }
 
 // ── set_last_turn_cost branch semantics (direct, on the shipped fn)
-// ── These drive `AcpUpdateTracker::set_last_turn_cost` DIRECTLY — no
-// re-implementation — to pin the attribution-branch behavior.
+// ──.
 
 fn finish_one_turn(tracker: &mut AcpUpdateTracker, sb: &mut ScrollbackState, prompt: &str) {
     tracker.handle_update(agent_chunk("response text"), &meta(), sb);
@@ -5699,10 +5698,10 @@ fn set_last_turn_cost_keyless_with_streaming_attaches_to_stream() {
 
 #[test]
 fn set_last_turn_cost_keyed_streaming_matches_running_prompt() {
-    // A keyed TurnCompleted whose prompt EQUALS the running turn attaches to the still-streaming block.
+    // A keyed TurnCompleted whose prompt EQUALS.
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
-    // Simulate the running turn: stream once.
+    // Simulate the running turn: stream once, then a new stream with the running prompt active.
     tracker.handle_update(agent_chunk("response"), &meta(), &mut sb);
     tracker.set_last_turn_cost(
         &mut sb,
@@ -5719,11 +5718,11 @@ fn set_last_turn_cost_keyed_streaming_matches_running_prompt() {
 
 #[test]
 fn set_last_turn_cost_keyed_streaming_mismatch_skips_stream() {
-    // A keyed TurnCompleted whose prompt does NOT match the running turn, with nothing in the map for it.
+    // A keyed TurnCompleted whose prompt does NOT match the running turn.
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     tracker.handle_update(agent_chunk("newer turn streaming"), &meta(), &mut sb);
-    // The streaming block belongs to running prompt "cur-2".
+    // The streaming block belongs to running prompt "cur-2", a stale.
     tracker.set_last_turn_cost(&mut sb, Some("old-1"), Some("cur-2"), Some(9_000_000_000));
     assert_eq!(
         agent_costs(&mut sb),

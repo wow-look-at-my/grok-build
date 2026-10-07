@@ -465,7 +465,8 @@ fn escalate_and_reap(child: &mut Child, group: &ProcessGroup) -> EscalateResult 
         }
     }
     // `has_running_members`, not `has_live_members`: the kill leaves the
-    // descendants as orphaned zombies until init reaps them.
+    // descendants as orphaned zombies until init reaps them, and those count
+    // as live.
     #[cfg(unix)]
     if group.has_running_members() != Some(false) {
         errors.push("fetch process group still has running members after teardown".to_owned());

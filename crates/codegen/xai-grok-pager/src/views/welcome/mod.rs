@@ -554,7 +554,7 @@ pub(super) fn render_version_badge(
         spans.push(sep.clone());
     }
 
-    // The build-commit short hash, displayed after the version string so the welcome screen shows exactly.
+    // This is the build-commit short hash.
     let commit_short = xai_grok_version::BUILD_COMMIT_SHORT;
     let show_hash = commit_short != "unknown" && !matches!(mode, VersionBadgeMode::HeroFooter);
 
@@ -2856,6 +2856,8 @@ mod tests {
         assert!(rect.is_none(), "no hash link rect when hash is unknown");
     }
 
+    /// A later OSC link is only emitted when `hyperlink_route().emit_osc8`
+    /// is true (i.e. `Osc8Support::Native` and no skip reason).
     #[test]
     fn commit_hash_link_gated_by_url_availability() {
         // Real hash → URL available → link would be pushed when emit_osc8.

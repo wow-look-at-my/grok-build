@@ -342,9 +342,8 @@ impl SessionActor {
     }
     /// Put `text` in front of the main agent: now when it is idle, at the
     /// running turn's next safe point otherwise. Never interrupts the turn.
-    ///
-    /// Rides the buffer `flush_pending_skill_reminders` drains. That is what
-    /// makes a mid-turn notice land without a second flush site to keep in
+    /// Rides the buffer `flush_pending_skill_reminders` drains, which is what
+    /// makes a mid-turn notice land. Without a second flush site to keep in
     /// sync with the turn loop's safe points.
     pub(crate) fn deliver_reminder_to_main_agent(&self, text: String) {
         let tag = self.reminder_wrapper_tag();

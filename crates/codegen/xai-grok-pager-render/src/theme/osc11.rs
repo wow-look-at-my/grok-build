@@ -184,6 +184,7 @@ fn unix_read_with_timeout(timeout: Duration) -> Option<String> {
     if !ends_with_osc_terminator(&buf) {
         return None;
     }
+    // A reply that is not UTF-8 is not the terminal's a later OSC answer at all (it is some other byte on the wire).
     #[allow(clippy::disallowed_methods)]
     let decoded = String::from_utf8(buf).ok();
     decoded

@@ -297,7 +297,7 @@ pub(crate) struct SubagentSpawnContext {
     pub available_models: indexmap::IndexMap<String, crate::agent::config::ModelEntry>,
     /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
     pub subagent_model_overrides: std::collections::HashMap<String, String>,
-    /// `[models] subagent_default`: the model a subagent runs.
+    /// `[models] subagent_default`.
     pub subagent_default_model: Option<String>,
     /// Per-subagent enable/disable toggles from config.toml `[subagents.toggle]`.
     /// Omitted agents default to enabled (`true`).

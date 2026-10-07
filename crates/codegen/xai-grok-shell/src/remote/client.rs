@@ -79,7 +79,7 @@ async fn add_bundle_fetch_headers(
 }
 /// Fetch the bundled subagent cache payload from cli-chat-proxy `GET /v1/subagents/bundle`.
 ///
-/// Uses the shell's standard auth for proxy requests: the user-session token.
+/// the user-session token.
 pub async fn fetch_subagent_bundle(
     cli_chat_proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
@@ -638,7 +638,6 @@ pub(crate) fn fetch_models_for_api_base_blocking(
 }
 
 /// Fetch and parse a listing from an exact URL.
-///
 /// [`fetch_models_for_api_base_blocking`] derives the URL from an inference
 /// base. A provider that serves its listing somewhere else
 /// (`[model_providers.<id>].models_list_url`) names the URL itself, and
@@ -703,7 +702,7 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| get_string(obj, "base_url"))
         .unwrap_or_else(|| default_base_url.to_owned());
     let name = get_string(obj, "name").or_else(|| Some(model.clone()));
-    // Anthropic exposes its per-model input-context-window in the `/v1/models` listing as `max_input_tokens`.
+    // Anthropic exposes its per-model input-context-window in the `/v1/models` listing as `max_input_tokens` ("Maximum input context window size in tokens for this model").
     let top_provider = obj.get("top_provider").and_then(|v| v.as_object());
     let capabilities = obj.get("capabilities").and_then(|v| v.as_object());
     let context_window = get_u64(obj, "contextWindow")
@@ -901,12 +900,11 @@ pub(crate) fn parse_remote_model_value(
     })
 }
 
-/// The per-token price a model listing states, or all zeros when it states none.
-///
-/// Shapes are read.
-/// `{type: "tokens", unit, input, output, cache_read, cache_write}`, where
-/// `unit` is `per_token`, `per_thousand_tokens` or `per_million_tokens`.
-/// OpenRouter's `pricing` object, whose values are USD per token.
+/// The per-token price a model listing states, or all zeros when it states
+/// none. Shapes are read. `{type: "tokens", unit, input, output, cache_read,
+/// cache_write}`, where `unit` is `per_token`, `per_thousand_tokens` or
+/// `per_million_tokens`. OpenRouter's `pricing` object, whose values are USD
+/// per token.
 pub(crate) fn parse_listing_pricing(
     obj: &serde_json::Map<String, serde_json::Value>,
 ) -> xai_grok_sampling_types::ModelPricing {

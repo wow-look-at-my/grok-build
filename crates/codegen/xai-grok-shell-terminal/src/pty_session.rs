@@ -100,7 +100,7 @@ impl Shell {
                 group: Some(group), ..
             } if group.wants_hangup() => {
                 let _ = group.hangup();
-                // Hand it to the job-control children directly rather than trusting the shell to forward it.
+                // Hand it to the job-control.
                 let _ = group.hangup_session_jobs();
                 true
             }

@@ -1656,9 +1656,9 @@ mod tests {
             Some(xai_grok_tools::types::tool::ToolKind::Execute)
         );
     }
-    /// The registry is read on every preset resolution. A caller can panic
-    /// while it holds the lock. What the lock does after that decides whether
-    /// one bad registration ends preset resolution for the rest of the process.
+    /// The registry is read on every preset resolution. What the lock does
+    /// after a caller panicked while holding it decides whether one bad
+    /// registration ends preset resolution for the rest of the process.
     #[test]
     fn a_poisoned_preset_registry_still_answers() {
         let poisoner = std::thread::spawn(|| {

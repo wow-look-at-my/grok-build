@@ -625,11 +625,12 @@ impl SessionActor {
 
     /// Send Now during an active goal turn: hand the text to the planner that
     /// is ALREADY running as mid-turn context. Nothing is cancelled or
-    /// restarted. A planner respawn will throw away the work in flight. It
-    /// will also make the user's message arrive as a fresh objective instead
-    /// of an addition to the plan being written. With no planner in flight (none
-    /// registered yet, or already finished) there is nothing to steer, and the
-    /// text still reaches the parent agent through the turn interjection.
+    /// restarted. A planner respawn would throw away the work in flight. The
+    /// planner respawn make the user's message arrive as a fresh objective
+    /// instead of an addition to the plan being written. With no planner in
+    /// flight (none registered yet, or already finished) there is nothing to
+    /// steer, and the text still reaches the parent agent through the turn
+    /// interjection.
     fn enqueue_prompt_as_planner_context(&self, item: &InputItem) {
         let text = item
             .prompt_blocks
@@ -871,9 +872,9 @@ impl SessionActor {
             if let Some(new_text) = new_text.filter(|t| !t.trim().is_empty()) {
                 Self::apply_queued_prompt_edit(&mut item, new_text.to_string(), owner);
             }
-            // A command row is promoted instead of steered. `resolve` reads only
-            // a prompt's leading token, so a `/cmd args` folded into the goal
-            // turn would reach the model as literal prose.
+            // A command row is promoted instead of steered: `resolve` reads only
+            // a prompt's leading token. A `/cmd args` folded into the goal turn
+            // would reach the model as literal prose.
             let merge_into_goal = turn_running
                 && goal_active
                 && Self::extract_bash_command(&item.prompt_blocks).is_none()

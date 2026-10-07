@@ -1,4 +1,4 @@
-//! Drives the shipped `[jail]` config -> plan -> bwrap/Seatbelt builders end to end against a fixture `config.toml`.
+//! Drives the shipped `[jail]` config -> plan -> bwrap/Seatbelt builders end to end against a fixture `config.toml` under an isolated `$GROK_HOME`.
 
 #![cfg(unix)]
 
@@ -144,7 +144,7 @@ fn config_defaults_supply_and_override_are_materialized() {
     // 1) No `[jail]` section -> the historical jail.
     let (ok, txt) = run_capture(&home, "");
     assert!(ok, "no-config capture failed:\n{txt}");
-    // 2) Every axis overridden -> the struct round-ends and the emitted rules.
+    // 2) Every axis overridden -> the struct round-ends and the emitted rules on this platform reflect a read-only grok home / writable system base.
     let over = "[jail]\ncwd = \"ro\"\ngrok_home = \"ro\"\ntmp = \"rw\"\nsystem = \"rw\"\n";
     let (ok, txt2) = run_capture(&home, over);
     assert!(ok, "override capture failed:\n{txt2}");

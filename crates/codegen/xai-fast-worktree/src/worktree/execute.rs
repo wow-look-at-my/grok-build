@@ -193,13 +193,13 @@ pub(crate) fn execute_create_worktree(plan: WorktreePlan) -> Result<CreateWorktr
 
 /// Keeps the repository's own `git status` blind to its managed worktrees
 /// dir. The destination is a descendant of the working tree it was created
-/// in. Without this, the main checkout reports `.grok/` as untracked for as
-/// long as any worktree exists. The entry belongs in the repository's exclude
-/// data: where one clone happens to park its checkouts is not a property of
-/// the project. The tracked `.gitignore` stays untouched. Questions are
-/// asked, of different sources. The destination's shape names the directory
-/// whose status is at stake; git names the repository that directory belongs
-/// to.
+/// in, so without this the main checkout reports `.grok/` as untracked. This
+/// holds for as long as any worktree exists. The entry belongs in the
+/// repository's exclude data: where one clone happens to park its checkouts
+/// is not a property of the project. The tracked `.gitignore` stays
+/// untouched. Questions are asked, of different sources. The destination's
+/// shape names the directory whose status is at stake; git names the
+/// repository that directory belongs to.
 fn keep_managed_worktrees_out_of_status(source: &Path, worktree_path: &Path) {
     let Some(owner) = crate::managed_root::main_root_for_managed_path(worktree_path) else {
         return;
@@ -210,7 +210,9 @@ fn keep_managed_worktrees_out_of_status(source: &Path, worktree_path: &Path) {
     let Some(main_root) = repo.common_dir().parent() else {
         return;
     };
-    // Both can reach one directory by different routes.
+    // Both can reach one directory by different routes: git resolves a macOS
+    // temporary directory to `/private/var/...` where the caller still holds
+    // `/var/...`.
     let (Ok(owner), Ok(main_root)) = (dunce::canonicalize(owner), dunce::canonicalize(main_root))
     else {
         return;

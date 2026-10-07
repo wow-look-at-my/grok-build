@@ -48,9 +48,10 @@ impl CompactConversationRequest {
         xai_tool_types::Aliases::new("user_context", &["userContext"]);
 }
 
-/// `CompactConversationRequest` as it arrives over ACP. This happens with each
-/// key spelling its own field, so a request naming both folds them instead of
-/// tripping serde's duplicate-field check.
+/// `CompactConversationRequest` as it arrives over ACP. That
+/// `CompactConversationRequest` is with each key spelling its own field, so a
+/// request naming both folds them instead of tripping serde's duplicate-field
+/// check.
 #[derive(Debug, Default, serde::Deserialize)]
 struct CompactConversationRequestWire {
     #[serde(default)]
@@ -279,7 +280,6 @@ impl TryFrom<ClientFeedbackInputWire> for ClientFeedbackInput {
 }
 
 impl ClientFeedbackInput {
-    /// Clamp rating value to valid range based on rating type.
     fn clamp_rating_value(
         rating_type: Option<prod_mc_cli_chat_proxy_types::feedback_types::RatingType>,
         rating_value: Option<i32>,

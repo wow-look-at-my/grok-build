@@ -1002,10 +1002,10 @@ impl SessionActor {
     }
     /// Build the per-response boundary update, projecting the response's usage
     /// into the Messages API `message.usage` shape (uncached `input_tokens`).
-    ///
-    /// `cost_usd_ticks` is the cost this exact call was billed at (as recorded
-    /// into the ledgers by `record_response_token_usage`) and
-    /// `session_cost_usd_ticks` the session ledger's running total after it.
+    /// `input_tokens`). `cost_usd_ticks` is the cost this exact call was
+    /// billed at (as recorded into the ledgers by
+    /// `record_response_token_usage`) and `session_cost_usd_ticks` the
+    /// session ledger's running total after it.
     pub(super) fn response_completed_update(
         &self,
         response: &xai_grok_sampling_types::ConversationResponse,

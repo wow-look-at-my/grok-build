@@ -237,7 +237,6 @@ mod tests {
     const EXTRACTED_BODY: &str = "old platform skill body\n";
     const OLDER_EXTRACTED_BODY: &str = "even older platform skill body\n";
 
-    /// Purge against a table with create-skill generations and one help body.
     fn purge_with_test_table(home: &std::path::Path) {
         let current = sha256_hex(EXTRACTED_BODY.as_bytes());
         let older = sha256_hex(OLDER_EXTRACTED_BODY.as_bytes());

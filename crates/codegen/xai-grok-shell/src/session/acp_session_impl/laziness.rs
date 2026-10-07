@@ -434,7 +434,7 @@ impl SessionActor {
             ..ConversationRequest::default()
         };
 
-        // Invisibility-critical: build a fresh `SamplingClient` via `prepare_chat_completion`.
+        // Invisibility-critical.
         let slot_sampler = self.resolve_slot_sampler("laziness_classifier").await;
         // The model has to come from whichever client ends up carrying the
         // request.

@@ -9,20 +9,13 @@ use wait::start_background_wait;
 
 pub const CI_TOOL_NAME: &str = "ci";
 
-/// How long a background `wait` watches before it reports what it last saw.
-const DEFAULT_WAIT_SECS: u64 = 3600;
-const MAX_WAIT_SECS: u64 = 14_400;
+/// How long one `wait` call may block before reporting what it last saw.
+const DEFAULT_WAIT_SECS: u64 = 300;
+const MAX_WAIT_SECS: u64 = 1800;
 /// Gap between polls while waiting.
 const WAIT_POLL_SECS: u64 = 15;
 /// Extra life for the waiter's task past the watch budget.
 const WAIT_TASK_MARGIN_SECS: u64 = 120;
-
-/// Exit codes of the background wait's task.
-const WAIT_EXIT_PASSING: i32 = 0;
-const WAIT_EXIT_FAILING: i32 = 1;
-const WAIT_EXIT_STILL_RUNNING: i32 = 2;
-const WAIT_EXIT_NO_RUNS: i32 = 3;
-const WAIT_EXIT_QUERY_FAILED: i32 = 4;
 
 /// How much of a failing log one call returns.
 const LOG_TAIL_BYTES: usize = 24_000;
@@ -30,8 +23,7 @@ const LOG_TAIL_BYTES: usize = 24_000;
 const DEFAULT_RUN_LIMIT: u32 = 10;
 const MAX_RUN_LIMIT: u32 = 50;
 
-// ---------------------------------------------------------------------------
-// Input schema.
+// Input schema
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -86,8 +78,7 @@ pub struct CiInput {
     pub timeout_secs: Option<u64>,
 }
 
-// ---------------------------------------------------------------------------
-// Output.
+// Output
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiRunSummary {
@@ -150,9 +141,9 @@ fn push_repo<'a>(args: &mut Vec<&'a str>, repo: Option<&'a str>) {
     }
 }
 
-/// The `owner/name` of the repository at `cwd`, read from its `origin` remote.
-///
-/// One local `git` call, so naming the repository costs no API request.
+/// The `owner/name` of the repository at `cwd`, read from its `origin`
+/// remote. One local `git` call, so naming the repository costs no API
+/// request.
 pub fn remote_repo(cwd: &std::path::Path) -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["remote", "get-url", "origin"])
@@ -194,8 +185,6 @@ fn repo_from_remote_url(url: &str) -> Option<String> {
     valid_repo_token(&repo).then_some(repo)
 }
 
-/// Whether `token` is safe to hand to `gh` as a repository name: non-empty
-/// segments of git-safe characters, no `/` inside either segment.
 fn valid_repo_token(token: &str) -> bool {
     let Some((owner, name)) = token.split_once('/') else {
         return false;
@@ -213,7 +202,6 @@ fn valid_repo_token(token: &str) -> bool {
 }
 
 /// The repository to query: the caller's, named by the git remote at `cwd`.
-///
 /// An explicitly requested name that is not a valid `owner/name` is refused
 /// rather than quietly replaced by the session's own repository.
 fn query_repo(cwd: &std::path::Path, requested: Option<&str>) -> Result<Option<String>, String> {
@@ -259,11 +247,10 @@ impl std::fmt::Display for CiQueryError {
 }
 
 /// Read a branch's runs through whichever `gh` path this process can reach.
-///
 /// `repo` must be a name [`valid_repo_token`] accepted, or `None` to ask the
-/// repository the git remote at `cwd` points at.
-///
-/// An empty `Ok` means the branch has no runs. Every failure to ask is an `Err` that says what `gh` said, so a dead token never reads as "nothing pushed".
+/// repository the git remote at `cwd` points at. An empty `Ok` means the
+/// branch has no runs. Every failure to ask is an `Err` that says what `gh`
+/// said, so a dead token never reads as "nothing pushed".
 pub fn fetch_runs(
     cwd: &std::path::Path,
     branch: &str,
@@ -341,10 +328,9 @@ fn tail(text: &str, max: usize) -> (String, bool) {
     (text[start..].to_string(), true)
 }
 
-/// The sentence a model reads off a state, phrased as what to do next.
-///
-/// `repo` names the repository the query went to, so an empty answer says
-/// where it was empty rather than guessing what the repository has.
+/// The sentence a model reads off a state, phrased as what to do next. `repo`
+/// names the repository the query went to, so an empty answer says where it
+/// was empty rather than guessing what the repository has.
 fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
     match state {
         CiStatus::Green => format!("CI is passing on {branch}."),
@@ -365,7 +351,7 @@ fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
     }
 }
 
-// --------------------------------------------------------------------------- Tool implementation.
+// Tool implementation
 
 #[derive(Debug, Default)]
 pub struct CiTool;
@@ -532,6 +518,38 @@ fn status_output(
         task_id: None,
         summary: state_summary(state, branch, repo),
     })
+}
+
+/// Poll until the branch's runs settle or the budget runs out. A timeout is
+/// not a failure: it answers with the state it last saw. The caller learns
+/// the branch is still moving rather than that the tool broke.
+fn wait_output(
+    cwd: &std::path::Path,
+    branch: &str,
+    limit: u32,
+    repo: Option<&str>,
+    timeout_secs: Option<u64>,
+) -> Result<CiOutput, xai_tool_runtime::ToolError> {
+    let budget = std::time::Duration::from_secs(
+        timeout_secs.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS),
+    );
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        let output = status_output(cwd, branch, limit, repo)?;
+        if output.settled || std::time::Instant::now() >= deadline {
+            if !output.settled {
+                return Ok(CiOutput {
+                    summary: format!(
+                        "Waited {}s and CI is still running on {branch}. Do other work and ask again.",
+                        budget.as_secs()
+                    ),
+                    ..output
+                });
+            }
+            return Ok(output);
+        }
+        std::thread::sleep(std::time::Duration::from_secs(WAIT_POLL_SECS));
+    }
 }
 
 fn logs_output(

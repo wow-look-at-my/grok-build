@@ -230,10 +230,9 @@ impl EndpointsConfig {
         xai_tool_types::Aliases::new("models_list_url", &["models_endpoint"]);
 }
 
-/// `EndpointsConfig` with each list-URL key spelling as its own field. A
-/// table naming both thus folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`].
-/// It does not fail the whole `[endpoints]` table as a duplicate field.
-///
+/// `EndpointsConfig` with each list-URL key spelling as its own field. So a
+/// table naming both folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`]
+/// rather than failing the whole `[endpoints]` table as a duplicate field.
 /// Every field carries `#[serde(default)]` from the container, which is the
 /// same rule [`EndpointsConfig`] applies on its own: an absent key is unset,
 /// never an error. `external_otel_master_switch` is absent here because it is
@@ -325,8 +324,8 @@ mod endpoints_wire_alias_tests {
 
     /// A `[endpoints]` table naming the list URL under both keys is one URL
     /// stated twice. The table can arrive from a managed-config or campaign
-    /// layer, not only from the user's own file. A duplicate-field rejection
-    /// here will take the whole config down with it.
+    /// layer, not only from the user's own file. And a duplicate-field
+    /// rejection here would take the whole config down with it.
     #[test]
     fn a_table_naming_the_list_url_under_both_keys_under_one_value_parses_once() {
         let cfg = parse(
@@ -475,7 +474,8 @@ impl EndpointsConfig {
         resolved
     }
     /// The cli-chat-proxy base URL through which all auxiliary services (and
-    /// OAuth/session inference) resolve.
+    /// OAuth/session inference) resolve: explicit `cli_chat_proxy_base_url`,
+    /// else BLANK.
     pub fn proxy_url(&self) -> String {
         blank_as_unset(&self.cli_chat_proxy_base_url).unwrap_or_default()
     }
@@ -1250,7 +1250,7 @@ pub struct ModelsConfig {
     /// Globs that mark a model as a favorite, joined with every `[model_providers.<id>].favorite_models` list.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub favorite_models: Option<Vec<String>>,
-    /// Force `supports_reasoning_effort = true` on these models, so `/effort` and the effort menu work.
+    /// Force `supports_reasoning_effort = true` on these models.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub force_reasoning_effort_models: Option<Vec<String>>,
     /// Fallback `agent_type` for models without a per-model override.
@@ -2773,17 +2773,15 @@ impl Config {
         })
     }
     /// The output-rate floor and time-to-first-token limit for `model_id`, or
-    /// `None` when both are off.
-    ///
-    /// The floor resolves per-model first: `[model.<id>].min_output_tokens_per
-    /// _sec` is the endpoint's own number. It is the only one that can differ
-    /// between models in one session. `[ui].min_output_tokens_per_sec` is the
-    /// session-wide fallback the settings modal writes. Zero at either layer is
-    /// off, so a per-model `0` turns the gate off for that model without touching
-    /// the session value.
-    ///
-    /// The timing is shared: `[ui].output_rate_sustained_secs` plus the
-    /// `[output_rate_floor]` window and budget, each raised to its minimum.
+    /// `None` when both are off. The floor resolves per-model first:
+    /// `[model.<id>].min_output_tokens_per _sec` is the endpoint's own
+    /// number. It is the only one that can differ between models in one
+    /// session. `[ui].min_output_tokens_per_sec` is the session-wide fallback
+    /// the settings modal writes. Zero at either layer is off, so a per-model
+    /// `0` turns the gate off for that model without touching the session
+    /// value. The timing is shared: `[ui].output_rate_sustained_secs` plus
+    /// the `[output_rate_floor]` window and budget, each raised to its
+    /// minimum.
     pub(crate) fn resolve_output_rate_floor(
         &self,
         model_id: &str,
@@ -3164,12 +3162,12 @@ impl Config {
             },
         }
     }
-    /// Planner role model: `[goal]` config, then remote when the user opted in.
-    /// The pair itself has no env layer. Both switches around it do.
-    ///
-    /// An `Explicit` pair is applied as `runtime_overrides.model`, resolved before
-    /// `resolve_subagent_sampling_config`, so it wins over a user
-    /// `[subagents.models]` pin; `InheritCurrent` hands precedence back to that pin.
+    /// Planner role model: `[goal]` config, then remote when the user opted
+    /// in. The pair itself has no env layer. Both switches around it do. An
+    /// `Explicit` pair is applied as `runtime_overrides.model`, resolved
+    /// before `resolve_subagent_sampling_config`, so it wins over a user
+    /// `[subagents.models]` pin; `InheritCurrent` hands precedence back to
+    /// that pin.
     pub(crate) fn resolve_goal_planner_model(
         &self,
         use_current_only: bool,
@@ -3234,16 +3232,13 @@ impl Config {
             },
         }
     }
-    /// The model for one harness model slot, or `None` when the slot
-    /// inherits the session model.
-    ///
-    /// Precedence is the slot's environment variable, then `[models]
-    /// <slot>` in `config.toml`, then the slot's compiled default. A slot
-    /// whose `fallback` is `SessionModel` and which nothing sets answers
-    /// `None`, and the caller keeps the session model.
-    ///
-    /// The slot id must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`]
-    /// lists. An unknown id is a programming error and answers `None`.
+    /// The model for one harness model slot, or `None` when the slot inherits
+    /// the session model. Precedence is the slot's environment variable, then
+    /// `[models] <slot>` in `config.toml`, then the slot's compiled default.
+    /// A slot whose `fallback` is `SessionModel` and which nothing sets
+    /// answers `None`, and the caller keeps the session model. The slot id
+    /// must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists. An unknown
+    /// id is a programming error and answers `None`.
     pub(crate) fn resolve_harness_model(&self, slot_id: &str) -> Option<Resolved<String>> {
         let slot = xai_grok_models::slot_by_id(slot_id)?;
         if let Ok(v) = std::env::var(slot.env)
@@ -3767,7 +3762,6 @@ fn attach_trusted_auth_config(cfg: &Config, key: &str, entry: &mut ModelEntry) {
 }
 
 /// Build one catalog entry that inherits `[model_providers.<provider_id>]`.
-///
 /// This is the same merge a `[model.<id>] model_provider = "..."` block gets,
 /// reachable for an entry that has no config block at all — an autodetected
 /// model.
@@ -3954,8 +3948,7 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        // Entries with a real (non-default) context window. They act as a per-slug `/v1/models`
-        // listing that backfills entries left at the silent hardcoded default.
+        // Entries that carry a real (non-default) context window.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)
@@ -4311,9 +4304,8 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
         .collect()
 }
 impl ModelEntryConfig {
-    /// A listing entry with nothing set but the endpoint it is reached at.
-    ///
-    /// A parser that knows only a model's name and window fills those in over
+    /// A listing entry with nothing set but the endpoint it is reached at. A
+    /// parser that knows only a model's name and window fills those in over
     /// this, rather than restating fields it has no answer for.
     pub(crate) fn minimal(base_url: &str) -> Self {
         Self {
@@ -4455,7 +4447,7 @@ pub struct ModelEntryConfig {
     /// Defaults to the all-disabled state via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "is_default_laziness_detector")]
     pub laziness_detector: LazinessDetectorPerModelConfig,
-    /// Per-token USD pricing used to derive cost when the backend reports token usage but no wire cost.
+    /// Per-token USD pricing used to derive.
     #[serde(default, skip_serializing_if = "is_default_model_pricing")]
     pub pricing: xai_grok_sampling_types::ModelPricing,
     /// Floor on this model's output tokens/sec.
@@ -4470,7 +4462,6 @@ pub struct ModelEntryConfig {
 }
 
 /// Convert a `[.*.extra_body]` TOML table into the JSON body fields it names.
-///
 /// A TOML value has no null, and every other scalar maps straight across, so
 /// nothing is lost. A value that cannot be represented is dropped with a
 /// warning rather than being sent as a guess.
@@ -4636,7 +4627,7 @@ pub struct ConfigModelOverride {
     pub compaction_at_tokens: Option<CompactionAtTokens>,
     pub show_model_fingerprint: Option<bool>,
     pub stream_tool_calls: Option<bool>,
-    /// Opt this model into strict message-schema handling: omit `model_id`/`reasoning_content` from replayed Chat Completions messages.
+    /// Opt this model into strict message-schema handling: omit `model_id`/`reasoning_content` from replayed Chat Completions messages for providers that reject unknown message properties.
     pub strict_message_schema: Option<bool>,
     pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
     pub min_output_tokens_per_sec: Option<f64>,
@@ -4644,7 +4635,7 @@ pub struct ConfigModelOverride {
     /// Extra top-level fields merged into every request body for this model.
     #[serde(default)]
     pub extra_body: IndexMap<String, toml::Value>,
-    /// Suppress the modelinfo price lookup for this model.
+    /// Suppress the modelinfo price.
     pub pricing_lookup_enabled: Option<bool>,
     pub reasoning_summary: Option<ReasoningSummary>,
 }
@@ -4899,7 +4890,7 @@ pub struct ModelInfo {
     pub show_model_fingerprint: bool,
     /// When `Some(true)`, the sampler injects `stream_tool_calls: true`
     pub stream_tool_calls: Option<bool>,
-    /// When true, this model's Chat Completions schema is strict.
+    /// When true, this model's Chat Completions schema is strict: the wire body must omit message-level properties the provider does not define.
     #[serde(default, skip_serializing_if = "is_false")]
     pub strict_message_schema: bool,
     /// Responses API `reasoning.summary` override; `None` keeps the request builder's default.

@@ -641,7 +641,8 @@ mod tests {
     #[test]
     fn dispatch_lookup_matches_a_lowercase_name_case_insensitively() {
         // A typed /TODO or /Todo must reach the (lowercase-named) todo
-        // command, and the case-sensitive typed token must survive.
+        // command, and the case-sensitive typed token must survive to
+        // `run_with_token`.
         let cmd: Arc<dyn SlashCommand> = Arc::new(DummyCommand {
             name: "todo",
             aliases: &[],

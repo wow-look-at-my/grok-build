@@ -102,7 +102,9 @@ pub(crate) fn assign_skeptic_models(
         .collect()
 }
 
-/// Whether skeptic runs on another model than it did last round.
+/// Whether one skeptic runs on another model than it did last round. One skeptic
+/// continues its previous run (`resume_from`). A run cannot continue on a model that
+/// did not write its history. A change means a fresh start.
 pub(crate) fn skeptic0_model_changed(
     previous: &[crate::util::config::GoalRoleModel],
     current: &[crate::util::config::GoalRoleModel],
@@ -1539,7 +1541,8 @@ async fn run_one_skeptic(
 /// [`run_one_skeptic`], run a second time on a fresh cold spawn when the
 /// first run gave no verdict. Without the retry, a skeptic that ran out of
 /// budget reaches the implementer as a gap it cannot fix. A second failure
-/// still counts as a refute.
+/// still counts as a refute. Returns the result and the spawn id that
+/// produced it, so one skeptic's resume chain follows the live session.
 async fn run_skeptic_retrying_no_verdict(
     spawner: &Arc<dyn GoalClassifierSpawner>,
     skeptic_idx: u32,
@@ -1636,7 +1639,7 @@ pub(crate) struct VerificationStageInputs<'a> {
     /// The stage diffs the CURRENT `plan_file` against it so the skeptics see mid-run plan edits.
     /// `None` when no baseline was captured (planner-off goals or a snapshot failure).
     pub plan_baseline_file: Option<&'a Path>,
-    /// Rendered run log ([`run_log::build_run_log`]) — the harness's own record of the implementer's tool calls.
+    /// Rendered run log.
     pub run_log: Option<&'a str>,
     /// The goal-wide implementer scratch dir ([`super::goal_tracker::implementer_scratch_dir`]).
     pub implementer_scratch_dir: &'a Path,
@@ -1885,7 +1888,7 @@ pub(crate) async fn run_verification_stage(
         prior_gaps: inputs.prior_gaps,
     };
 
-    // When N > 1, run skeptic 0 first: a high-confidence refute is decisive and can never yield Achieved.
+    // When N > 1, run the first skeptic alone: any refute it backs with a verdict is decisive and can never yield Achieved. A non-blocking decisive
     // A non-blocking decisive refute skips the rest of the panel; a blocking refute fans out so the panel can distinguish Blocked from NotAchieved.
     // N == 1 never resumes skeptic 0 (a resumed sole judge would be the biased approver), so it stays cold and returns None.
     let (results, decisive_refute, skeptic0_session_id): (
@@ -1906,11 +1909,12 @@ pub(crate) async fn run_verification_stage(
             inputs.inherit_tool_names,
         )
         .await;
-        let high_refute = first.refuted && first.confidence == SkepticConfidence::High;
-        if high_refute && !first.blocking.is_blocking() {
+        // Any refute with a verdict is decisive, whatever its confidence. Only a failed skeptic defers to the cold panel.
+        let decisive = first.refuted && !first.has_no_verdict();
+        if decisive && !first.blocking.is_blocking() {
             (vec![first], true, Some(skeptic0_id))
         } else {
-            // `high_refute` here means skeptic 0 was blocking (the non-blocking case short-circuited above), so its refute remains binding
+            // `decisive` here means the first skeptic was blocking (the non-blocking case short-circuited above), so its refute remains binding
             let cold_ids: Vec<String> = (1..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
             let rest = (1..n).zip(&cold_ids).map(|(idx, id)| {
                 run_skeptic_retrying_no_verdict(
@@ -1931,7 +1935,7 @@ pub(crate) async fn run_verification_stage(
                     .into_iter()
                     .map(|(r, _)| r),
             );
-            (all, high_refute, Some(skeptic0_id))
+            (all, decisive, Some(skeptic0_id))
         }
     } else {
         let cold_ids: Vec<String> = (0..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
@@ -1964,7 +1968,7 @@ pub(crate) async fn run_verification_stage(
         });
     }
     let (refuted_count, total, quorum_achieved) = aggregate_skeptic_verdicts(&results);
-    // A decisive skeptic-0 refute overrides the quorum: a skeptic 0 that refuted with high confidence can never approve
+    // A decisive refute from the first skeptic overrides the quorum: the cold panel can never approve over it
     // That holds even when the blocking fan-out ran the full panel (the fan-out only chooses Blocked vs NotAchieved)
     let achieved = quorum_achieved && !decisive_refute;
     emit_event(Event::GoalVerifierAggregateVerdict {

@@ -46,11 +46,10 @@ pub struct ChatStateActor {
     cancellation_token: tokio_util::sync::CancellationToken,
 }
 
-/// Text describing what a panic carried, for a log line.
-///
-/// Both payloads `panic!` itself produces are a `&'static str` (a literal)
-/// and a `String` (a formatted one). Anything else is named as a non-message
-/// rather than reported as nothing.
+/// Text describing what a panic carried, for a log line. Both payloads
+/// `panic!` itself produces are a `&'static str` (a literal) and a `String`
+/// (a formatted one). Anything else is named as a non-message rather than
+/// reported as nothing.
 fn panic_payload(panic: &(dyn Any + Send)) -> String {
     if let Some(text) = panic.downcast_ref::<&'static str>() {
         return (*text).to_string();

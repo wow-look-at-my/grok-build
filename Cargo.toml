@@ -499,18 +499,17 @@ useless_format = "allow"
 # `--lib --bins`. This leaves every `#[cfg(test)]` module out of the build, so
 # a test asserting on a value it just built is not what these deny.
 #
-# A crate that still carries hits names the lint in an inner attribute. That
-# attribute sits at the top of its crate root, with the count of hits. The crate roots are
-# `src/lib.rs`, `src/main.rs`, each `src/bin/*.rs` and `build.rs`. They are
-# separate roots and inherit nothing. An example is
-# `#![allow(clippy::string_slice)] // 4 hits predate the gate`. That set of lines
-# is the whole exception surface, and deleting one is the whole work item. A
-# cleared crate cannot keep its exemption quietly, because the deny bites its next
-# build. A package cannot both inherit this table and add its own `[lints.clippy]`
-# ("cannot override `workspace.lints` in `lints`"), which is why the exceptions are
-# attributes and not manifest keys. `xai-grok-markdown` is the one crate that
-# spells its own `[lints.clippy]`, because it already declares `[lints.rust]`. A
-# lint denied here must be added to that table by hand.
+# A crate that still carries hits names the lint in an inner attribute at the top
+# of its crate root (`src/lib.rs`, `src/main.rs`, each `src/bin/*.rs`, `build.rs`,
+# which are separate roots and inherit nothing). That crate is with the count it is
+# carrying: `#![allow(clippy::string_slice)] // 4 hits predate the gate`. That set
+# of lines is the whole exception surface, and deleting one is the whole work item.
+# A cleared crate cannot keep its exemption quietly, because the deny bites its
+# next build. A package cannot both inherit this table and add its own
+# `[lints.clippy]` ("cannot override `workspace.lints` in `lints`"), which is why
+# the exceptions are attributes and not manifest keys. `xai-grok-markdown` is the
+# one crate that spells its own `[lints.clippy]`, because it already declares
+# `[lints.rust]`. A lint denied here must be added to that table by hand.
 string_slice = "deny"
 unwrap_used = "deny"
 expect_used = "deny"

@@ -319,7 +319,7 @@ Switch the color theme. Alias: `/t`.
 
 ### `/feedback [message]`
 
-Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you — and `Enter` loads one into Write. As a result, you can review, pick a type, and send it. `/feedback <message>` sends the message immediately. If the send fails, the message is saved to Drafts.
+Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you. `Enter` loads one into Write so you can review, pick a type, and send it. `/feedback <message>` sends the message immediately. If the send fails, the message is saved to Drafts.
 
 ```
 /feedback
@@ -339,7 +339,7 @@ fix the retry loop first. /btw what does WBC stand for?
 
 ### `/todo <what to add>`
 
-Put something on the agent's todo list without interrupting what it is doing. A separate lightweight agent forks off the session, spends a few read-only tool calls working out what the item must say, and appends it. It shares the session's context but is a different instance. As a result, the running turn is untouched.
+Put something on the agent's todo list without interrupting what it is doing. A separate lightweight agent forks off the session, spends a few read-only tool calls working out what the item must say, and appends it. It shares the session's context but is a different instance. The running turn is untouched.
 
 ```
 /todo add a way to push changes to 2 git repos
@@ -357,7 +357,7 @@ Check the current session for terminal, clipboard, color, input, notification, a
 
 ### `/debug [what is wrong]`
 
-Turn Grok on itself. The question goes to the model along with this session's execution context: the binary that is running and whether it is still the installed one. This is version and commit, the config directory and every config layer, the debug-log path for this session. This is whether logging is on, the working directory, the current model with the context window and reasoning effort it actually resolved. This is the `GROK_*`/`XAI_*` environment (credential-shaped values are named but never printed).
+Turn Grok on itself. The question goes to the model along with this session's execution context. The binary that is running and whether it is still the installed one, version and commit, the config directory and every config layer. The debug-log path for this session and whether logging is on, the working directory, the current model with the context window. It reasoning effort it actually resolved, and the `GROK_*`/`XAI_*` environment (credential-shaped values are named but never printed).
 
 ```
 /debug why was the context size defaulted to 256k? this model is supposed to be 1m context

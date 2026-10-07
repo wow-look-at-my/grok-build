@@ -406,10 +406,8 @@ async fn test_concurrent_gates_single_flight() {
 }
 
 /// The single-flight guarantee itself, with no dependence on how both gates
-/// interleave. While a peer's claim is live, a launch gate must leave the index
-/// alone. If the lease stopped being honoured, processes would reindex the
-/// shared database at once. This goes red, where the racing test above cannot be
-/// relied on to.
+/// interleave. While a peer's claim is live, a launch gate must leave the
+/// index alone.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_gate_does_not_reindex_behind_a_live_peer_claim() {
     let tmp = tempfile::TempDir::new().unwrap();

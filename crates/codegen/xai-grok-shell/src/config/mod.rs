@@ -877,7 +877,7 @@ impl StorageMode {
             Ok("local") => return Self::Local,
             _ => {}
         }
-        // `remote.writeback_enabled` is deliberately not consulted: Writeback flushes every turn of the conversation to grok-code-backend.
+        // `remote.writeback_enabled` is deliberately not consulted.
         let _ = remote;
         Self::Local
     }
@@ -1514,7 +1514,7 @@ pub fn apply_sandbox(
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    // Whether a bwrap re-exec follows decides how the worker's fd is handed over, so it is settled.
+    // Whether a bwrap re-exec follows decides how the worker's fd is handed over, so it is settled before the worker starts.
     #[cfg(target_os = "linux")]
     let reexec_follows = xai_grok_sandbox::bwrap_reexec_planned(&sandbox_profile, &workspace);
     #[cfg(not(target_os = "linux"))]
@@ -1608,7 +1608,7 @@ pub fn apply_sandbox(
             BwrapStartup::Continue => {}
         }
         // Still running, so the exec the worker's fd was prepared for never
-        // happened.
+        // happened: the command will not build, or `exec` itself failed.
         if reexec_follows && let Some(fd) = xai_grok_sandbox::ci_host::ci_host_fd() {
             xai_grok_sandbox::ci_host::reclaim_from_failed_exec(fd);
         }

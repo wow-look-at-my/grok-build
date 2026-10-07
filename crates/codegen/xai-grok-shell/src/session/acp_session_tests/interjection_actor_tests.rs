@@ -904,10 +904,10 @@ async fn forced_harvest_delivers_rows_queued_before_the_turn_started() {
         .await;
 }
 
-/// The first-Enter contract, shell side. A row that arrives while a turn is
-/// running is picked up by the turn loop's OWN harvest. The loop runs that
-/// harvest before each model request, with no user gesture behind it. The row
-/// then lands in the interjection buffer the next request drains. No second Enter, and no
+/// The first-Enter contract, shell side: a row that arrives while a turn is
+/// running is picked up by the turn loop's OWN harvest. The one it runs
+/// before each model request, with no user gesture behind it. It lands in the
+/// interjection buffer the next request drains. No second Enter, and no
 /// `DeliverQueuedPromptsNow`, is involved anywhere in this path.
 #[tokio::test]
 async fn a_row_arriving_mid_turn_reaches_the_asap_buffer_unprompted() {
