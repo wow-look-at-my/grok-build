@@ -92,11 +92,7 @@ pub fn dashboard_enabled() -> bool {
     state::load_persisted_enabled().unwrap_or(true)
 }
 
-/// Command to name in the "use /X to switch between sessions" session banners (the `/new` session-created banner and the fork marker).
-///
-/// `/dashboard` when the feature is enabled. `None` when it is off — the tip
-/// would point at a refused command, so callers fall back to a plain
-/// session-id banner.
+/// The command the session-switch banners name, or `None` when the dashboard is off.
 pub(crate) fn session_switch_hint_command() -> Option<&'static str> {
     dashboard_enabled().then_some("/dashboard")
 }
