@@ -2649,10 +2649,7 @@ async fn queue_input_hidden_user_fallback_mid_wait_folds() {
                     respond_to,
                 ))
                 .await;
-            assert!(
-                !cancel,
-                "a mid-wait prompt must not cancel the turn"
-            );
+            assert!(!cancel, "a mid-wait prompt must not cancel the turn");
             let state = actor.state.lock().await;
             assert!(
                 state.pending_inputs.iter().all(|i| i.prompt_id != "d-mid"),
