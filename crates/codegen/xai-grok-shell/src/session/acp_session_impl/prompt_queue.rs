@@ -319,15 +319,13 @@ impl SessionActor {
         let goal_active = self.goal_tracker.lock().status()
             == Some(crate::session::goal_tracker::GoalStatus::Active);
         let blocked_in_wait = self.tool_context.blocking_wait_depth.depth() > 0;
-        // A send-now cancel cuts off every tool in flight. Only a turn that does nothing but wait may lose its tools this way.
-        let only_waiting = self.tool_context.blocking_wait_depth.only_waiting();
         // Drain-policy rows are held work: visible user/protected rows and queue-hidden human fallbacks (interjection fallback)
         // Runtime wakes (CancelWithProducer / DropEphemeral) do not block auto-send-now
         let held_user_queue = state.pending_inputs.iter().any(|queued| {
             queued.input_origin.policy().shutdown == ShutdownPolicy::Drain
                 && Some(queued.prompt_id.as_str()) != running_front_id.as_deref()
         });
-        let auto_send_now = follow_up_steer && turn_running && only_waiting && !held_user_queue;
+        let auto_send_now = follow_up_steer && turn_running && blocked_in_wait && !held_user_queue;
         let send_now = item.is_queue_editable() && (send_now || auto_send_now);
         // A wait is a gap: the harvest aborts the wait, not the turn. A queued send-now cancels the turn, so skip then.
         let harvest_into_wait = !send_now

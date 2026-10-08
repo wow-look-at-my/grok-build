@@ -72,8 +72,6 @@ pub struct BlockingWaitState(parking_lot::Mutex<BlockingWaitInner>);
 #[derive(Default)]
 struct BlockingWaitInner {
     depth: usize,
-    /// Tools in flight that are neither a wait nor a foreground subagent. A send-now cancel would cut them off.
-    busy: usize,
     generation: u64,
     /// Union of waits aborted by a mid-turn interjection.
     /// Concurrent aborts merge so a side-work wait cannot replace the implement set.
@@ -86,11 +84,6 @@ impl BlockingWaitState {
     }
     pub(crate) fn depth(&self) -> usize {
         self.0.lock().depth
-    }
-    /// The turn only waits: a wait or a foreground subagent is in flight, and no other tool.
-    pub(crate) fn only_waiting(&self) -> bool {
-        let inner = self.0.lock();
-        inner.depth > 0 && inner.busy == 0
     }
     #[cfg(test)]
     pub(crate) fn set_depth_for_test(&self, depth: usize) {
@@ -138,7 +131,6 @@ impl BlockingWaitState {
         let mut state = self.0.lock();
         state.generation = state.generation.wrapping_add(1);
         state.depth = 0;
-        state.busy = 0;
         state.interrupted_wait_ids = None;
     }
 }
@@ -164,29 +156,6 @@ impl Drop for BlockingWaitGuard {
         let mut inner = self.state.0.lock();
         if inner.generation == self.generation {
             inner.depth = inner.depth.saturating_sub(1);
-        }
-    }
-}
-/// Holds one tool that is not a wait in the busy count for as long as it runs.
-pub(crate) struct BusyToolGuard {
-    state: Arc<BlockingWaitState>,
-    generation: u64,
-}
-impl BusyToolGuard {
-    pub(crate) fn enter(state: Arc<BlockingWaitState>) -> Self {
-        let generation = {
-            let mut inner = state.0.lock();
-            inner.busy = inner.busy.saturating_add(1);
-            inner.generation
-        };
-        Self { state, generation }
-    }
-}
-impl Drop for BusyToolGuard {
-    fn drop(&mut self) {
-        let mut inner = self.state.0.lock();
-        if inner.generation == self.generation {
-            inner.busy = inner.busy.saturating_sub(1);
         }
     }
 }
