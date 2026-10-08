@@ -2,12 +2,10 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// A bare Esc from the prompt pane never cancels a running turn: it shows the "Press Ctrl+c to cancel the turn" toast, leaves the stream running, and preserves a non-empty draft.
-/// Ctrl+C then remains the cancel gesture (clear-first with a draft, cancel on the empty prompt).
-/// Proves the real binary routes a bare Esc through `try_handle_esc_policy`'s turn-running branch (hint, not cancel) before the idle clear and rewind branches.
+/// A bare Esc from the prompt pane cancels a running turn at once, with no Ctrl+C reminder, and keeps a non-empty draft.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
-async fn esc_mid_turn_hints_ctrl_c_from_prompt_preserves_draft() {
+async fn esc_mid_turn_cancels_from_prompt_preserves_draft() {
     let content = ContentController::start().await.expect("start content");
     // Stream a long paced response so the turn is still visibly running when Esc lands
     let long_response = format!(
@@ -33,7 +31,6 @@ async fn esc_mid_turn_hints_ctrl_c_from_prompt_preserves_draft() {
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("stream started");
 
-    // Type a draft into the prompt while the turn streams (the prompt stays focused after submit)
     // A distinctive single token avoids any wrapping ambiguity
     let draft = "DRAFTKEEPME";
     harness.inject_keys(draft.as_bytes()).expect("type draft");
@@ -43,35 +40,23 @@ async fn esc_mid_turn_hints_ctrl_c_from_prompt_preserves_draft() {
 
     harness.inject_keys(keys::ESC).expect("press esc");
     harness
-        .wait_for_text("Press Ctrl+c to cancel the turn", Duration::from_secs(10))
-        .expect("mid-turn Esc must show the Ctrl+C hint");
+        .wait_for_text("Turn cancelled by user", Duration::from_secs(15))
+        .expect("mid-turn Esc must cancel the turn");
 
     harness.update(Duration::from_millis(600));
     let screen = harness.screen_contents();
-    assert!(
-        !screen.contains("Turn cancelled by user"),
-        "Esc must not cancel the turn\nscreen:\n{screen}"
-    );
     assert!(
         screen.contains(draft),
         "mid-turn Esc must preserve the draft\nscreen:\n{screen}"
     );
     assert!(
+        !screen.contains("to cancel the turn"),
+        "mid-turn Esc must not show a Ctrl+C reminder\nscreen:\n{screen}"
+    );
+    assert!(
         !screen.contains("press again to clear"),
         "running-turn Esc must not arm the idle clear\nscreen:\n{screen}"
     );
-
-    // Ctrl+C is the real cancel: the first press clears the draft, the second (empty prompt) cancels
-    harness
-        .inject_keys(keys::CTRL_C)
-        .expect("ctrl+c clears draft");
-    harness
-        .wait_for_text_absent(draft, Duration::from_secs(10))
-        .expect("first Ctrl+C clears the draft");
-    harness.inject_keys(keys::CTRL_C).expect("ctrl+c cancels");
-    harness
-        .wait_for_text("Turn cancelled by user", Duration::from_secs(15))
-        .expect("turn cancelled marker");
     assert!(
         !harness.contains_text("panicked"),
         "pager panicked\nscreen:\n{}",

@@ -2552,7 +2552,6 @@ pub(crate) fn render_session_picker_body(
         disable_search: false,
         compact_bottom_bar: false,
         search_only_on_slash: false,
-        vim_normal_first: crate::appearance::cache::load_vim_mode(),
     };
 
     picker::render_picker(
@@ -3438,7 +3437,6 @@ mod tests {
             disable_search: false,
             compact_bottom_bar: false,
             search_only_on_slash: false,
-            vim_normal_first: false,
         }
     }
 

@@ -29,11 +29,7 @@ impl AgentView {
             .block_viewer
             .as_ref()
             .is_some_and(|v| v.list_state.input_mode().is_some());
-        let allow_i_alt = self.vim_mode;
-        if !viewer_has_input
-            && (matches!(key.code, KeyCode::Tab | KeyCode::Char(' '))
-                || (allow_i_alt && matches!(key.code, KeyCode::Char('i'))))
-        {
+        if !viewer_has_input && matches!(key.code, KeyCode::Tab | KeyCode::Char(' ')) {
             if self.parked_card().is_some() {
                 self.set_active_pane(AgentPane::Prompt, false);
                 return InputOutcome::Changed;
@@ -61,23 +57,9 @@ impl AgentView {
             self.highlighted_link_idx = None;
             return InputOutcome::Action(Action::OpenLink(target));
         }
-        let action = registry.lookup_with_mode(key, When::ScrollbackFocused, self.vim_mode);
+        let action = registry.lookup(key, When::ScrollbackFocused);
         if action == Some(ActionId::OpenBlockViewer) && self.try_open_child_from_selected_row() {
             return InputOutcome::Changed;
-        }
-        if self.vim_mode
-            && key!('x').matches(key)
-            && !self.scrollback.is_selected_group_header()
-            && let Some(idx) = self.scrollback.selected()
-            && let Some(entry) = self.scrollback.entry(idx)
-            && let crate::scrollback::block::RenderBlock::BgTask(ref bt) = entry.block
-            && self
-                .session
-                .bg_tasks
-                .get(&bt.task_id)
-                .is_some_and(|t| t.status == crate::app::agent::BgTaskStatus::Running)
-        {
-            return InputOutcome::Action(Action::KillBgTask(bt.task_id.clone()));
         }
         if key.code == KeyCode::Esc
             && key.modifiers.is_empty()
@@ -93,25 +75,13 @@ impl AgentView {
         {
             return InputOutcome::Changed;
         }
-        if self.vim_mode
-            && key!('/').matches(key)
-            && self.no_input_overlay_pending()
-            && self.btw_state.is_none()
-        {
-            if self.scrollback.is_empty() {
-                return InputOutcome::ActionThenForward(Action::FocusPrompt);
-            }
-            self.open_scrollback_search(None);
-            return InputOutcome::Changed;
-        }
         if registry.lookup(key, When::ScrollbackFocused) == Some(ActionId::ToggleMouseCapture) {
             return InputOutcome::Action(Action::ToggleMouseCapture);
         }
         if let Some(outcome) = resolve_action(action) {
             return outcome;
         }
-        if !self.vim_mode
-            && let KeyCode::Char(c) = key.code
+        if let KeyCode::Char(c) = key.code
             && (c.is_ascii_alphabetic() || c == '/')
             && (key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT)
         {
@@ -1504,7 +1474,6 @@ mod paste_routing_tests {
     #[test]
     fn scrollback_search_paste_stays_scoped_and_browse_is_inert() {
         let mut agent = make_agent();
-        agent.vim_mode = false;
         agent.set_active_pane(AgentPane::Scrollback, true);
         agent.prompt.set_text("hidden prompt");
         agent.scrollback_search = Some(ScrollbackSearchState::open());

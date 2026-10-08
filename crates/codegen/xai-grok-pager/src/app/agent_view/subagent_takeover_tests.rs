@@ -3,7 +3,7 @@ use crate::app::actions::Action;
 use crate::app::agent_view::test_fixtures::{
     add_running_execute, ctrl, key, make_agent, parent_with_child,
 };
-use crate::app::agent_view::{AgentPane, AgentView, InputMode, ViewSurface};
+use crate::app::agent_view::{AgentPane, AgentView, ViewSurface};
 use crate::app::app_view::InputOutcome;
 use crate::scrollback::block::RenderBlock;
 use crate::scrollback::blocks::SubagentBlock;
@@ -313,12 +313,10 @@ fn takeover_shows_dashboard_button_only_inside_the_overlay() {
 }
 /// A parent whose child, with a transcript, sits on bare scrollback under an open takeover. `vim_mode` is pinned on
 /// both views: `AgentView::new` reads it from the user's config, which CI does not have.
-fn open_takeover(child_sid: &str, vim_mode: bool) -> AgentView {
+fn open_takeover(child_sid: &str) -> AgentView {
     let mut parent = parent_with_child(child_sid);
     let child = parent.subagent_view_mut(child_sid).expect("child view");
     add_running_execute(child);
-    child.set_input_mode(InputMode::Vim);
-    parent.set_vim_mode_recursive(vim_mode);
     parent.open_subagent_fullscreen(child_sid.to_owned());
     parent
 }
@@ -329,84 +327,54 @@ fn open_takeover(child_sid: &str, vim_mode: bool) -> AgentView {
 #[test]
 fn child_root_only_chords_are_swallowed() {
     let registry = ActionRegistry::defaults();
-    for vim_mode in [true, false] {
-        let mut parent = open_takeover("child", vim_mode);
-        for chord in [
-            ctrl('p'),
-            ctrl('m'),
-            ctrl('r'),
-            ctrl('o'),
-            ctrl('l'),
-            key(KeyCode::F(2)),
-        ] {
-            let outcome = parent.handle_input(&chord, &registry);
-            assert!(
-                matches!(outcome, InputOutcome::Changed | InputOutcome::Unchanged),
-                "vim={vim_mode} {chord:?}: {outcome:?}"
-            );
-            let child = parent.subagent_view("child").expect("child view");
-            assert!(
-                child.active_modal.is_none(),
-                "vim={vim_mode} {chord:?} opened a modal"
-            );
-            assert!(
-                child.is_bare_scrollback(),
-                "vim={vim_mode} {chord:?} left bare scrollback"
-            );
-        }
-        let question = key(KeyCode::Char('?'));
-        let shift_slash = Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT));
-        for printable in [&question, &shift_slash] {
-            let outcome = parent.handle_input(printable, &registry);
-            let expected = if vim_mode || printable == &question {
-                matches!(outcome, InputOutcome::Changed | InputOutcome::Unchanged)
-            } else {
-                matches!(
-                    outcome,
-                    InputOutcome::ActionThenForward(Action::FocusPrompt)
-                )
-            };
-            assert!(expected, "vim={vim_mode} {printable:?}: {outcome:?}");
-            let child = parent.subagent_view("child").expect("child view");
-            assert!(
-                child.active_modal.is_none(),
-                "vim={vim_mode} {printable:?} opened a modal"
-            );
-            assert!(
-                child.is_bare_scrollback(),
-                "vim={vim_mode} {printable:?} left bare scrollback"
-            );
-            assert_eq!(AgentPane::Scrollback, child.active_pane);
-        }
-        assert_eq!(Some("child"), parent.active_subagent.as_deref());
-        if vim_mode {
-            parent.handle_input(&key(KeyCode::Char('/')), &registry);
-            parent.handle_input(&key(KeyCode::Char('?')), &registry);
-            let child = parent.subagent_view("child").expect("child view");
-            assert!(child.active_modal.is_none());
-            assert_eq!(
-                Some("?"),
-                child.scrollback_search.as_ref().map(|s| s.query())
-            );
-            parent.handle_input(&key(KeyCode::Esc), &registry);
-            assert!(
-                parent
-                    .subagent_view("child")
-                    .expect("child view")
-                    .scrollback_search
-                    .is_none()
-            );
-            assert_eq!(Some("child"), parent.active_subagent.as_deref());
-        }
-        parent.handle_input(&key(KeyCode::Char('q')), &registry);
-        assert_eq!(None, parent.active_subagent, "vim={vim_mode}");
+    let mut parent = open_takeover("child");
+    for chord in [
+        ctrl('p'),
+        ctrl('m'),
+        ctrl('r'),
+        ctrl('o'),
+        ctrl('l'),
+        key(KeyCode::F(2)),
+    ] {
+        let outcome = parent.handle_input(&chord, &registry);
+        assert!(
+            matches!(outcome, InputOutcome::Changed | InputOutcome::Unchanged),
+            "{chord:?}: {outcome:?}"
+        );
+        let child = parent.subagent_view("child").expect("child view");
+        assert!(child.active_modal.is_none(), "{chord:?} opened a modal");
+        assert!(child.is_bare_scrollback(), "{chord:?} left bare scrollback");
     }
+    let question = key(KeyCode::Char('?'));
+    let shift_slash = Event::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT));
+    for printable in [&question, &shift_slash] {
+        let outcome = parent.handle_input(printable, &registry);
+        let expected = if printable == &question {
+            matches!(outcome, InputOutcome::Changed | InputOutcome::Unchanged)
+        } else {
+            matches!(
+                outcome,
+                InputOutcome::ActionThenForward(Action::FocusPrompt)
+            )
+        };
+        assert!(expected, "{printable:?}: {outcome:?}");
+        let child = parent.subagent_view("child").expect("child view");
+        assert!(child.active_modal.is_none(), "{printable:?} opened a modal");
+        assert!(
+            child.is_bare_scrollback(),
+            "{printable:?} left bare scrollback"
+        );
+        assert_eq!(AgentPane::Scrollback, child.active_pane);
+    }
+    assert_eq!(Some("child"), parent.active_subagent.as_deref());
+    parent.handle_input(&key(KeyCode::Char('q')), &registry);
+    assert_eq!(None, parent.active_subagent);
 }
 /// The child resolves a key pane-first exactly as a root does: with the mouse-capture toggle enabled, Ctrl+R on
 /// scrollback is `ToggleMouseCapture` (allowed) rather than the `OpenSessions` chord it maps to under `AgentScreen`.
 #[test]
 fn child_ctrl_r_keeps_scrollback_precedence() {
-    let mut parent = open_takeover("child", true);
+    let mut parent = open_takeover("child");
     let outcome = parent.handle_input(&ctrl('r'), &ActionRegistry::defaults_with_config(true));
     assert!(
         matches!(outcome, InputOutcome::Action(Action::ToggleMouseCapture)),

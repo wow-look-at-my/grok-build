@@ -177,24 +177,24 @@ mod tests {
     }
 
     #[test]
-    fn vim_mode_round_trip() {
+    fn ui_bool_round_trip() {
         let dir = tempdir().unwrap();
         let path = dir.path().join(xai_grok_config::USER_CONFIG_FILENAME);
         fs::write(&path, "[ui]\ncompact_mode = false\n").unwrap();
 
         let mut doc = read_config_document_for_edit(&path).expect("parse");
         if let Some(ui) = doc.get_mut("ui").and_then(|i| i.as_table_mut()) {
-            ui.insert("vim_mode", toml_edit::value(true));
+            ui.insert("show_timeline", toml_edit::value(true));
         }
         fs::write(&path, doc.to_string()).unwrap();
 
         let doc2 = read_config_document_for_edit(&path).expect("reparse");
         let enabled = doc2
             .get("ui")
-            .and_then(|h| h.get("vim_mode"))
+            .and_then(|h| h.get("show_timeline"))
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        assert!(enabled, "expected vim_mode = true after round-trip");
+        assert!(enabled, "expected show_timeline = true after round-trip");
 
         let body = fs::read_to_string(&path).unwrap();
         assert!(

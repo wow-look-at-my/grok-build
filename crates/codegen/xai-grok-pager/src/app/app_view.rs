@@ -3436,7 +3436,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             disable_search: false,
             compact_bottom_bar: false,
             search_only_on_slash: false,
-            vim_normal_first: crate::appearance::cache::load_vim_mode(),
         };
         match crate::views::session_picker::handle_pending_delete_key(ctx.sp_pending_delete, ev) {
             crate::views::session_picker::PendingDeleteKey::Confirm(pd) => {
