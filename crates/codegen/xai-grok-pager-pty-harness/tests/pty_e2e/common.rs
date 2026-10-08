@@ -429,7 +429,7 @@ pub(crate) const MOUSE_OFF_STICKY: &str =
 pub(crate) const MOUSE_OFF_HINT_PROMPT: &str =
     "/toggle-mouse-reporting to enable mouse reporting and restore TUI features";
 
-/// Seed `~/.grok/config.toml` with a `[ui]` section body (e.g. `"vim_mode = true"`).
+/// Seed `~/.grok/config.toml` with a `[ui]` section body (e.g. `"show_timestamps = true"`).
 /// Same `{GROK_HOME|HOME}/.grok/config.toml` location `seed_mouse_reporting_toggle_config` uses; call before spawning the pager.
 pub(crate) fn seed_ui_config(content: &ContentController, ui_body: &str) {
     let grok_home = content.home().join(".grok");

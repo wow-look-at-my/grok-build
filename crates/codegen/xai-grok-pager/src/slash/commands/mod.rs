@@ -65,7 +65,6 @@ pub mod tutorial;
 pub mod usage;
 pub mod version;
 pub mod view_plan;
-pub mod vim_mode;
 pub mod voice;
 pub mod workflow;
 pub mod workflows;
@@ -128,7 +127,6 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(theme::ThemeCommand),
         Arc::new(auto::AutoCommand),
         Arc::new(always_approve::AlwaysApproveCommand),
-        Arc::new(vim_mode::VimModeCommand),
         Arc::new(multiline::MultilineCommand),
         Arc::new(compact_mode::CompactModeCommand),
         Arc::new(timestamps::TimestampsCommand),
@@ -223,10 +221,6 @@ mod tests {
             "scheduler_create".to_string()
         ]));
         assert!(reg.get("loop").is_some(), "/loop should be registered");
-        assert!(
-            reg.get("vim-mode").is_some(),
-            "/vim-mode should be registered"
-        );
         assert!(reg.get("find").is_some(), "/find should be registered");
     }
     #[test]

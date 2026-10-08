@@ -1,7 +1,7 @@
 //! Plan UI: the plan chip and preview, plan approval and feedback, and casual plan commenting (incl. the casual-commenting test fixture).
 use super::AgentView;
 #[cfg(test)]
-use super::{ActivePane, InputMode, test_fixtures};
+use super::{ActivePane, test_fixtures};
 #[cfg(test)]
 use crate::actions::ActionRegistry;
 use crate::app::actions::Action;
@@ -1218,66 +1218,13 @@ mod plan_chip_tests {
         assert!(!agent.should_show_plan_chip(&appearance));
     }
     #[test]
-    fn set_input_mode_vim_empty_prompt_switches_to_scrollback_and_j_selects_next() {
-        crate::appearance::cache::set_simple_mode(true);
-        let mut agent = make_agent();
-        agent.vim_mode = true;
-        agent.set_active_pane(ActivePane::Prompt, true);
-        agent.set_input_mode(InputMode::Vim);
-        assert_eq!(agent.active_pane, ActivePane::Scrollback);
-        assert!(!agent.is_simple_mode());
-        let registry = ActionRegistry::defaults();
-        let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        let outcome = agent.handle_scrollback_key(&j, &registry);
-        assert!(matches!(outcome, InputOutcome::Action(Action::SelectNext)));
-    }
-    #[test]
-    fn set_input_mode_vim_nonempty_prompt_keeps_pane() {
-        let mut agent = make_agent();
-        agent.set_active_pane(ActivePane::Prompt, true);
-        agent.prompt.set_text("draft");
-        agent.set_input_mode(InputMode::Vim);
+    fn new_agent_starts_on_the_prompt_pane() {
+        let agent = make_agent();
         assert_eq!(agent.active_pane, ActivePane::Prompt);
     }
     #[test]
-    fn set_input_mode_simple_from_scrollback_leaves_pane_unchanged() {
+    fn scrollback_j_forwards_to_prompt() {
         let mut agent = make_agent();
-        agent.vim_mode = true;
-        agent.set_active_pane(ActivePane::Scrollback, true);
-        agent.set_input_mode(InputMode::Simple);
-        assert_eq!(agent.active_pane, ActivePane::Scrollback);
-        assert!(agent.is_simple_mode());
-        let registry = ActionRegistry::defaults();
-        let x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
-        let outcome = agent.handle_scrollback_key(&x, &registry);
-        assert_eq!(agent.active_pane, ActivePane::Scrollback);
-        assert!(matches!(outcome, InputOutcome::Unchanged));
-    }
-    #[test]
-    fn new_agent_respects_persisted_simple_mode_for_mode_and_pane() {
-        crate::appearance::cache::set_simple_mode(true);
-        let a1 = make_agent();
-        assert!(a1.is_simple_mode());
-        assert_eq!(a1.active_pane, ActivePane::Prompt);
-        crate::appearance::cache::set_simple_mode(false);
-        let a2 = make_agent();
-        assert!(!a2.is_simple_mode());
-        assert_eq!(a2.active_pane, ActivePane::Scrollback);
-    }
-    #[test]
-    fn set_input_mode_reconciles_pane_orthogonal_to_active_modal_field() {
-        let mut agent = make_agent();
-        agent.set_active_pane(ActivePane::Prompt, true);
-        agent.active_modal = None;
-        agent.set_input_mode(InputMode::Vim);
-        assert_eq!(agent.active_pane, ActivePane::Scrollback);
-        assert!(agent.active_modal.is_none());
-    }
-    #[test]
-    fn scrollback_j_with_vim_mode_off_forwards_to_prompt() {
-        crate::appearance::cache::set_vim_mode(false);
-        let mut agent = make_agent();
-        agent.vim_mode = false;
         agent.set_active_pane(ActivePane::Scrollback, true);
         let registry = ActionRegistry::defaults();
         let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
@@ -1287,39 +1234,17 @@ mod plan_chip_tests {
                 outcome,
                 InputOutcome::ActionThenForward(Action::FocusPrompt)
             ),
-            "vim-off: bare 'j' in scrollback must forward to prompt; got {outcome:?}"
+            "bare 'j' in scrollback must forward to prompt; got {outcome:?}"
         );
     }
     #[test]
-    fn scrollback_j_with_vim_mode_on_selects_next() {
-        crate::appearance::cache::set_vim_mode(true);
-        let mut agent = make_agent();
-        agent.vim_mode = true;
-        agent.set_active_pane(ActivePane::Scrollback, true);
-        let registry = ActionRegistry::defaults();
-        let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        let outcome = agent.handle_scrollback_key(&j, &registry);
-        assert!(
-            matches!(outcome, InputOutcome::Action(Action::SelectNext)),
-            "vim-on: bare 'j' in scrollback must dispatch SelectNext; got {outcome:?}"
-        );
-    }
-    #[test]
-    fn scrollback_arrow_down_works_in_both_modes() {
+    fn scrollback_arrow_down_selects_next() {
         let registry = ActionRegistry::defaults();
         let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
-        let mut a_off = make_agent();
-        a_off.vim_mode = false;
-        a_off.set_active_pane(ActivePane::Scrollback, true);
+        let mut agent = make_agent();
+        agent.set_active_pane(ActivePane::Scrollback, true);
         assert!(matches!(
-            a_off.handle_scrollback_key(&down, &registry),
-            InputOutcome::Action(Action::SelectNext)
-        ));
-        let mut a_on = make_agent();
-        a_on.vim_mode = true;
-        a_on.set_active_pane(ActivePane::Scrollback, true);
-        assert!(matches!(
-            a_on.handle_scrollback_key(&down, &registry),
+            agent.handle_scrollback_key(&down, &registry),
             InputOutcome::Action(Action::SelectNext)
         ));
     }

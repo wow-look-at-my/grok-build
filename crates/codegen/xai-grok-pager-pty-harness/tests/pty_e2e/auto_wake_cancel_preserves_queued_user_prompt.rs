@@ -42,6 +42,7 @@ const HOLD_SLEEP_SECS: &str = "15";
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum WakeCancelGesture {
+    Esc,
     CtrlC,
     StopClick,
     SendNow,
@@ -166,7 +167,10 @@ pub(crate) async fn run_wake_cancel_scenario(gesture: WakeCancelGesture, cast_pr
 
     // StopClick / SendNow gate on the wake stop affordance first: the pane is still idle here (nothing typed), so a rendered [stop] is the wake turn's
     // That affordance does not exist without the wake-turn cancel support
-    if !matches!(gesture, WakeCancelGesture::CtrlC) {
+    if matches!(
+        gesture,
+        WakeCancelGesture::StopClick | WakeCancelGesture::SendNow
+    ) {
         harness
             .wait_for_text("[stop]", Duration::from_secs(10))
             .unwrap_or_else(|_| {
@@ -200,6 +204,9 @@ pub(crate) async fn run_wake_cancel_scenario(gesture: WakeCancelGesture, cast_pr
     }
 
     match gesture {
+        WakeCancelGesture::Esc => {
+            harness.inject_keys(keys::ESC).expect("press esc");
+        }
         WakeCancelGesture::CtrlC => {
             harness.inject_keys(keys::CTRL_C).expect("press ctrl+c");
         }

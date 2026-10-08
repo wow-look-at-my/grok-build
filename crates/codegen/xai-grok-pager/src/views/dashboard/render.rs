@@ -537,14 +537,14 @@ fn render_location_picker(
     modal: &mut LocationPickerState,
 ) {
     use crate::views::modal_window::{
-        ModalSizing, ModalWindowConfig, Shortcut, push_vim_nav_search_hint, render_modal_window,
+        ModalSizing, ModalWindowConfig, Shortcut, render_modal_window,
     };
     use crate::views::picker::{
         PickerEntry, PickerRow, render_divider, render_picker_content,
         render_picker_search_bar_with_label,
     };
 
-    let mut shortcuts = vec![
+    let shortcuts = vec![
         Shortcut {
             label: "\u{2191}\u{2193} nav",
             clickable: false,
@@ -566,8 +566,6 @@ fn render_location_picker(
             id: 3,
         },
     ];
-    // Show `i search` in the footer when vim nav mode is active (the picker starts in input mode, but Esc drops to nav under vim)
-    push_vim_nav_search_hint(&mut shortcuts, modal.picker.search_active);
     let config = ModalWindowConfig {
         title: "Change directory",
         tabs: None,
@@ -2710,7 +2708,7 @@ fn render_footer(
             crate::actions::ActionId::DashboardShortcutsHelp,
             key!('.', CONTROL),
         );
-        // The ↑/↓ (and vim j/k) nav chip is intentionally omitted.
+        // The ↑/↓ nav chip is intentionally omitted.
         if state.selected_idle_overflow {
             let toggle = if state.idle_show_all {
                 "show fewer"
@@ -2823,7 +2821,6 @@ fn render_footer(
             let h = HintItem::new(esc, esc_label);
             if reply_empty { h } else { h.pinned() }
         };
-        let vim_mode = crate::appearance::cache::load_vim_mode();
         // Two-focus model: Tab toggles between the reply and row nav. Vim opens the reply unfocused so j/k keep selecting.
         let peek_focused = state.peek.as_ref().map(|p| p.focused).unwrap_or(true);
         let question_focused = peek_focused && has_pending_question;
@@ -2853,29 +2850,11 @@ fn render_footer(
                 h.push(HintItem::new(stop, stop_label).pinned());
             }
             h
-        } else if vim_mode && !peek_focused {
             // Vim unfocused: Enter focuses the reply (not open/send).
             // Right still attaches; show it so open stays discoverable
             // Pending question: keep 1-9 select (digits still work unfocused).
-            let mut h = vec![
-                HintItem::new(enter, "input"),
-                // Pin open: attach is the replacement for Enter in this mode.
-                HintItem::new(key!(Right), "open").pinned(),
-                tab_hint,
-                esc_hint,
-            ];
-            if has_pending_question {
-                h.insert(2, select_hint);
-            }
-            if !reply_empty {
-                h.insert(1, HintItem::new(send_open, "send+open"));
-            }
-            if show_ctrl_x {
-                h.push(HintItem::new(stop, stop_label).pinned());
-            }
-            h
         } else if has_pending_question {
-            // Non-vim unfocused (or other) with a pending question: open and select
+            // Unfocused with a pending question: open and select
             let mut h = vec![
                 HintItem::new(enter, "open"),
                 select_hint,

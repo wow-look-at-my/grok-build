@@ -1843,7 +1843,7 @@ fn handle_browse(state: &mut MemoryModalState, key: &KeyEvent) -> InputOutcome {
             state.disabled_reason = (!enabled).then_some(MemoryDisabledReason::SessionToggle);
             InputOutcome::Action(Action::MemoryToggle { enabled })
         }
-        // `i` aliases `/` (vim-nav "press i to search").
+        // `i` aliases `/`.
         KeyCode::Char('/') | KeyCode::Char('i') if key.modifiers.is_empty() => {
             state.mode = MemoryModalMode::FilterFocused;
             InputOutcome::Changed
@@ -1918,8 +1918,6 @@ fn build_shortcuts(state: &MemoryModalState) -> Vec<Shortcut<'static>> {
                 plain(fullscreen_label),
                 plain("Esc close"),
             ]);
-            // Browse is nav mode (filter inactive), so append `i search` last (matching the shared pickers)
-            modal_window::push_vim_nav_search_hint(&mut shortcuts, false);
             shortcuts
         }
         MemoryModalMode::FilterFocused => vec![
@@ -2692,18 +2690,6 @@ mod tests {
             ));
             assert_eq!(state.mode, MemoryModalMode::Browse);
         }
-    }
-
-    /// Wiring check: the Browse footer carries the shared `i search` hint under vim nav mode.
-    #[test]
-    fn browse_footer_advertises_i_search_under_vim() {
-        crate::appearance::cache::set_vim_mode(true);
-        let vim = build_shortcuts(&MemoryModalState::new(build_test_entries()));
-        assert!(
-            vim.iter().any(|s| s.label == "i search"),
-            "vim-mode Browse footer must advertise `i search`"
-        );
-        crate::appearance::cache::set_vim_mode(false);
     }
 
     fn buffer_text(buf: &Buffer) -> String {
