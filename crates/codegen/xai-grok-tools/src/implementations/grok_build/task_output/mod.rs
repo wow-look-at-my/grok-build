@@ -191,6 +191,46 @@ pub(crate) fn task_output_requires_expr() -> Expr<ToolRequirement> {
 pub struct TaskOutputTool;
 
 impl TaskOutputTool {
+    /// The standard output of an `lpi` invocation, or nothing when it fails.
+    async fn run_lpi(argv: &[String]) -> Option<String> {
+        let (program, args) = argv.split_first()?;
+        let output = tokio::process::Command::new(program)
+            .args(args)
+            .output()
+            .await
+            .ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    /// A reading of a task's own log, when `lpi` can give one. A running task is
+    /// read as it stands. A task that finished successfully seeds the model when
+    /// none exists, because reading needs one and an unfinished log is
+    /// truncated.
+    async fn lpi_reading(snapshot: &crate::computer::types::TaskSnapshot) -> Option<String> {
+        if !crate::lpi_progress::available() {
+            return None;
+        }
+        let key = crate::lpi_progress::key_for(&snapshot.cwd, &snapshot.command);
+        let log = snapshot.output_file.as_path();
+
+        let Some(stdout) = Self::run_lpi(&crate::lpi_progress::read_argv(&key, log, None)).await
+        else {
+            if snapshot.completed && snapshot.exit_code == Some(0) {
+                let _ = Self::run_lpi(&crate::lpi_progress::learn_argv(&key, log)).await;
+            }
+            return None;
+        };
+
+        let reading = stdout
+            .lines()
+            .rev()
+            .find_map(crate::lpi_progress::parse_snapshot)?;
+        Some(crate::lpi_progress::progress_line(&reading))
+    }
+
     async fn run_single_task(
         &self,
         task_id: &str,
@@ -245,6 +285,13 @@ impl TaskOutputTool {
                 let res = resources.lock().await;
                 resolved_max_output_bytes(&res, "get_command_or_subagent_output", output_byte_limit)
             };
+
+            // A reading of the task's own log, folded in as the tool's own line.
+            let mut snapshot = snapshot;
+            if let Some(line) = Self::lpi_reading(&snapshot).await {
+                snapshot.output.push_str(&format!("\n[lpi {line}]"));
+            }
+
             return Ok(TaskOutputOutput::Result(apply_running_wait_hint(
                 snapshot_to_result(snapshot, &read_file_name, max_output_bytes),
                 wait_hint,
@@ -1242,6 +1289,60 @@ mod tests {
         assert_eq!(
             still_running_wait_hint(WaitHint::ReturnedEarly, WaitSubject::Subagent),
             "Wait returned early because another finished. Unless the user specified, do not kill this subagent and do not tell it to stop just because this wait returned. It is still working. You will be notified automatically when it completes. Do other work, or wait again with a longer timeout_ms."
+        );
+    }
+
+    /// Drives the shipped reading path, not the pure helpers: a fake `lpi` on
+    /// `PATH` prints its own notice and a snapshot. The reading surfaces the
+    /// last snapshot line.
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn lpi_reading_surfaces_the_snapshot_from_a_task_log() {
+        use std::io::Write;
+
+        const SNAPSHOT: &str = r#"{"progress":0.6012861728668213,"units_done":2,"units_total":3,"units_pct":66.66666666666666,"has_times":true,"elapsed_seconds":0.00018,"elapsed_known":true,"eta_kind":"none","pace":0,"match_rate":1,"confidence":"high","current_lines":2,"matched_lines":2,"novel_lines":0,"overflow_lines":0}"#;
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("lpi");
+        let mut file = std::fs::File::create(&bin).unwrap();
+        write!(
+            file,
+            "#!/bin/sh\nprintf '%s\\n' 'no model for key x yet'\nprintf '%s\\n' '{SNAPSHOT}'\n"
+        )
+        .unwrap();
+        drop(file);
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        // PATH is process-global, so one lock serializes the readers here.
+        static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("PATH");
+        let mut entries = vec![dir.path().to_path_buf()];
+        if let Some(saved) = &saved {
+            entries.extend(std::env::split_paths(saved));
+        }
+        unsafe { std::env::set_var("PATH", std::env::join_paths(entries).unwrap()) };
+
+        let log = dir.path().join("task.log");
+        std::fs::write(&log, "compiling a\ncompiling b\n").unwrap();
+        let mut snapshot = make_snapshot("task-lpi", false, None);
+        snapshot.output_file = log;
+
+        let reading = TaskOutputTool::lpi_reading(&snapshot).await;
+
+        unsafe {
+            match saved {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+
+        assert_eq!(
+            reading.as_deref(),
+            Some("progress 60% (2/3 units), confidence high")
         );
     }
 
