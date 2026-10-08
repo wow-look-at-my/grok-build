@@ -25,12 +25,26 @@ struct TestControl {
     interjections: mpsc::UnboundedSender<String>,
     admission_gate: Option<AdmissionGate>,
     admitted_messages: Option<mpsc::UnboundedSender<(ActiveAgentMessageOperation, String)>>,
+    /// When set, each `progress()` call advances the counters.
+    progress_steps: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
 }
 
 impl ChildControl for TestControl {
     type ProgressFuture = std::future::Ready<SubagentProgress>;
 
     fn progress(&self) -> Self::ProgressFuture {
+        if let Some(steps) = &self.progress_steps {
+            let step = steps.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            return std::future::ready(SubagentProgress {
+                turn_count: step,
+                tool_call_count: step,
+                tokens_used: u64::from(step) * 100,
+                context_window_tokens: 1_000,
+                context_usage_pct: 10,
+                tools_used: vec!["read_file".to_owned()],
+                error_count: 0,
+            });
+        }
         std::future::ready(SubagentProgress {
             turn_count: 2,
             tool_call_count: 3,
@@ -105,6 +119,8 @@ pub(in crate::implementations::grok_build::task::coordinator) struct RunnerBehav
     /// Type returned for a resume source that is not in the completed map.
     pub(in crate::implementations::grok_build::task::coordinator) durable_resume_type:
         Option<&'static str>,
+    /// `TestControl::progress` advances its counters on every call.
+    pub(in crate::implementations::grok_build::task::coordinator) graduated_progress: bool,
 }
 
 struct TestRunner {
@@ -126,6 +142,7 @@ struct TestRunner {
     wake_runs: mpsc::UnboundedSender<WakeRun>,
     admitted_messages: Option<mpsc::UnboundedSender<(ActiveAgentMessageOperation, String)>>,
     admission_gate: Option<AdmissionGate>,
+    progress_steps: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
 }
 
 impl ChildRunner for TestRunner {
@@ -157,6 +174,7 @@ impl ChildRunner for TestRunner {
         let wake_runs = self.wake_runs.clone();
         let admitted_messages = self.admitted_messages.clone();
         let admission_gate = self.admission_gate.clone();
+        let progress_steps = self.progress_steps.clone();
         let failed_wake_teardown_ready = self.failed_wake_teardown_ready.clone();
         Box::pin(async move {
             let ChildRunRequest {
@@ -265,6 +283,7 @@ impl ChildRunner for TestRunner {
                     } else {
                         None
                     },
+                    progress_steps: progress_steps.clone(),
                 },
             };
             let rejects_deferred_start = reject_wake_after_deferred_start
@@ -509,6 +528,9 @@ pub(in crate::implementations::grok_build::task::coordinator) fn harness_with_op
     let (advertise_tx, advertise_targets) = mpsc::unbounded_channel();
     let (wake_run_tx, wake_runs) = mpsc::unbounded_channel();
     let (admitted_message_tx, admitted_messages) = mpsc::unbounded_channel();
+    let progress_steps = behavior
+        .graduated_progress
+        .then(|| std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)));
     let actor = tokio::spawn(
         SubagentCoordinator::from_channel(
             command_rx,
@@ -529,6 +551,7 @@ pub(in crate::implementations::grok_build::task::coordinator) fn harness_with_op
                 wake_runs: wake_run_tx,
                 admitted_messages: Some(admitted_message_tx),
                 admission_gate: None,
+                progress_steps: progress_steps.clone(),
             },
             config,
         )
@@ -611,6 +634,7 @@ fn harness_with_admission_gate(
                 admitted_messages: Some(admitted_message_tx),
                 admission_gate: Some(gate),
                 interjections: interjection_tx,
+                progress_steps: None,
             },
             config,
         )
@@ -2198,6 +2222,96 @@ async fn completed_resume_source_uses_request_uuid_as_agent_id() {
     let _ = harness.finish.send(());
     resume_spawn.await.unwrap().unwrap();
 
+    harness.actor.abort();
+}
+
+/// A child spawned with `resume_from` is a NEW child whose status must come
+/// from its own live state. It reports running with its own progress while the
+/// finished source stays finished, and that progress moves as it works.
+#[tokio::test]
+async fn a_resumed_child_reports_its_own_live_state_not_the_source() {
+    let mut harness = harness_with_options(
+        RunnerBehavior {
+            graduated_progress: true,
+            ..Default::default()
+        },
+        CoordinatorConfig::default(),
+    );
+    // The source finishes first; the resume then continues its transcript.
+    let source = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move { backend.spawn(request("resume-src", true), None).await }
+    });
+    assert_eq!(harness.started.recv().await.as_deref(), Some("resume-src"));
+    let _ = harness.finish.send(());
+    source.await.unwrap().unwrap();
+
+    let mut resume = request("resume-child", true);
+    resume.resume_from = Some("resume-src".to_owned());
+    let resume_spawn = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move { backend.spawn(resume, None).await }
+    });
+    assert_eq!(
+        harness.started.recv().await.as_deref(),
+        Some("resume-child")
+    );
+
+    let first = harness
+        .backend
+        .query("resume-child", false, None)
+        .await
+        .expect("resumed child is queryable");
+    let SubagentSnapshotStatus::Running {
+        tool_call_count: first_tools,
+        ..
+    } = first.status
+    else {
+        panic!(
+            "a working resumed child must report Running: {:?}",
+            first.status
+        );
+    };
+
+    // A genuinely finished child stays distinguishable from the working one.
+    let source_snapshot = harness
+        .backend
+        .query("resume-src", false, None)
+        .await
+        .expect("source stays queryable");
+    assert!(
+        source_snapshot.status.is_terminal(),
+        "the source stays finished while the resumed child works: {:?}",
+        source_snapshot.status
+    );
+
+    let second = harness
+        .backend
+        .query("resume-child", false, None)
+        .await
+        .expect("resumed child stays queryable");
+    let SubagentSnapshotStatus::Running {
+        tool_call_count: second_tools,
+        ..
+    } = second.status
+    else {
+        panic!("the resumed child is still working: {:?}", second.status);
+    };
+    assert!(
+        second_tools > first_tools,
+        "the resumed child's progress must advance as it works: {first_tools} -> {second_tools}"
+    );
+
+    let inspection = harness
+        .backend
+        .inspect("resume-child")
+        .await
+        .expect("resumed child inspectable");
+    assert_eq!(inspection.resumed_from.as_deref(), Some("resume-src"));
+    assert!(inspection.snapshot.is_running());
+
+    let _ = harness.finish.send(());
+    resume_spawn.await.unwrap().unwrap();
     harness.actor.abort();
 }
 
