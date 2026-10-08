@@ -312,11 +312,11 @@ fn meta_for(reg: &SettingsRegistry, key: SettingKey) -> &SettingMeta {
 fn setting_row_visible_gates_voice_capture_on_key_releases() {
     let reg = SettingsRegistry::defaults();
     let voice = meta_for(&reg, "voice_capture_mode");
-    let vim = meta_for(&reg, "vim_mode");
+    let timestamps = meta_for(&reg, "show_timestamps");
     // voice_mode = true; kitty_releases varies.
     assert!(!setting_row_visible(voice, false, true));
     assert!(setting_row_visible(voice, true, true));
-    assert!(setting_row_visible(vim, false, true));
+    assert!(setting_row_visible(timestamps, false, true));
 }
 
 #[test]
@@ -325,13 +325,13 @@ fn setting_row_visible_hides_voice_rows_when_voice_mode_off() {
     let keybind = meta_for(&reg, "voice_keybind_enabled");
     let capture = meta_for(&reg, "voice_capture_mode");
     let language = meta_for(&reg, "voice_stt_language");
-    let vim = meta_for(&reg, "vim_mode");
+    let timestamps = meta_for(&reg, "show_timestamps");
     // Gate off: all voice rows gone even with kitty releases
     assert!(!setting_row_visible(keybind, true, false));
     assert!(!setting_row_visible(capture, true, false));
     assert!(!setting_row_visible(language, true, false));
     // Non-voice rows unaffected.
-    assert!(setting_row_visible(vim, true, false));
+    assert!(setting_row_visible(timestamps, true, false));
     // Gate on: all visible (kitty releases for capture).
     assert!(setting_row_visible(keybind, true, true));
     assert!(setting_row_visible(capture, true, true));
@@ -736,9 +736,8 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "dashboard_preview",
         // PAGER-owned page_flip_on_send (Appearance).
         "page_flip_on_send",
-        "simple_mode",
-        // PAGER-owned vim_mode (Appearance, paired with simple_mode).
-        "vim_mode",
+        // PAGER-owned vim_mode (Appearance,
+        // paired with simple_mode).
         // Theme enums.
         "theme",
         "auto_dark_theme",
@@ -952,7 +951,7 @@ fn filter_mode_swallows_chars_into_query() {
     assert!(matches!(s.mode(), SettingsModalMode::Browse));
 }
 
-/// `i` aliases `/` without modifiers: from Browse it enters FilterFocused exactly like `/` (vim-nav "press i to search").
+/// `i` aliases `/` without modifiers: from Browse it enters FilterFocused exactly like `/`.
 #[test]
 fn i_key_enters_filter_like_slash() {
     let mut s = make_state();
@@ -976,19 +975,6 @@ fn modified_i_does_not_enter_filter() {
         ));
         assert!(matches!(s.mode(), SettingsModalMode::Browse));
     }
-}
-
-/// Wiring check: the Browse footer carries the shared `i search` hint under vim nav mode.
-#[test]
-fn browse_footer_advertises_i_search_under_vim() {
-    crate::appearance::cache::set_vim_mode(true);
-    let s = make_state();
-    assert!(matches!(s.mode(), SettingsModalMode::Browse));
-    assert!(
-        build_shortcuts(&s).iter().any(|sc| sc.label == "i search"),
-        "vim-mode Browse footer must advertise `i search`"
-    );
-    crate::appearance::cache::set_vim_mode(false);
 }
 
 #[test]
@@ -4439,7 +4425,7 @@ fn compute_filtered_single_word_match_emits_header_then_setting() {
             meta_index: 1,
         },
         RowEntry::Setting {
-            key: "simple_mode",
+            key: "show_timeline",
             meta_index: 2,
         },
     ];
@@ -4501,7 +4487,7 @@ fn advance_prev_recovers_when_selection_is_hidden() {
     // The filter must match exactly one setting, so the "LAST visible" target is unambiguous
     // `ascii` is a simple_mode keyword and hits nothing else (settings_e2e pins that)
     // Corrupt `selected` to the now-hidden compact_mode; Up must land on simple_mode
-    s.set_query("ascii");
+    s.set_query("flowchart");
     let compact_idx = s
         .rows
         .iter()
@@ -4510,12 +4496,12 @@ fn advance_prev_recovers_when_selection_is_hidden() {
     s.selected = compact_idx;
     let moved = s.advance_prev();
     assert!(moved);
-    let simple_idx = s
+    let mermaid_idx = s
         .rows
         .iter()
-        .position(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "simple_mode"))
+        .position(|r| matches!(r, RowEntry::Setting { key, .. } if *key == "render_mermaid"))
         .unwrap();
-    assert_eq!(s.selected, simple_idx);
+    assert_eq!(s.selected, mermaid_idx);
 }
 
 // The renderer reserves one empty visual line ABOVE every section header EXCEPT the one that lands

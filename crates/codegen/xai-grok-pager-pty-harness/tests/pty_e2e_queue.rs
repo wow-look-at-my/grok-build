@@ -10,6 +10,8 @@ mod common;
 
 #[path = "pty_e2e/auto_wake_cancel_preserves_queued_user_prompt.rs"]
 mod auto_wake_cancel_preserves_queued_user_prompt;
+#[path = "pty_e2e/auto_wake_cancel_via_esc_preserves_queued_user_prompt.rs"]
+mod auto_wake_cancel_via_esc_preserves_queued_user_prompt;
 #[path = "pty_e2e/auto_wake_cancel_via_stop_click_preserves_queued_user_prompt.rs"]
 mod auto_wake_cancel_via_stop_click_preserves_queued_user_prompt;
 #[path = "pty_e2e/bash_queued_mid_turn_drains_as_bash.rs"]
@@ -36,10 +38,10 @@ mod esc_esc_clears_idle_prompt_into_the_stash;
 mod esc_esc_opens_rewind_picker_silent_first_press;
 #[path = "pty_e2e/esc_idle_empty_no_messages_is_swallowed_noop.rs"]
 mod esc_idle_empty_no_messages_is_swallowed_noop;
-#[path = "pty_e2e/esc_mid_turn_hints_ctrl_c_from_prompt_preserves_draft.rs"]
-mod esc_mid_turn_hints_ctrl_c_from_prompt_preserves_draft;
-#[path = "pty_e2e/esc_mid_turn_hints_ctrl_c_from_scrollback.rs"]
-mod esc_mid_turn_hints_ctrl_c_from_scrollback;
+#[path = "pty_e2e/esc_mid_turn_cancels_from_prompt_preserves_draft.rs"]
+mod esc_mid_turn_cancels_from_prompt_preserves_draft;
+#[path = "pty_e2e/esc_mid_turn_cancels_from_scrollback.rs"]
+mod esc_mid_turn_cancels_from_scrollback;
 #[path = "pty_e2e/mid_turn_slash_dropdown_esc_dismisses_not_cancel.rs"]
 mod mid_turn_slash_dropdown_esc_dismisses_not_cancel;
 #[path = "pty_e2e/queue_and_interjection_lifecycle.rs"]

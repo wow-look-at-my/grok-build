@@ -1039,7 +1039,7 @@ pub fn render_doc_picker_overlay(
             .collect()
     };
     let non_sel = vec![false; filtered.len()];
-    let mut picker_shortcuts: Vec<Shortcut<'_>> = vec![
+    let picker_shortcuts: Vec<Shortcut<'_>> = vec![
         Shortcut {
             label: "\u{2191}/\u{2193} nav",
             clickable: false,
@@ -1056,7 +1056,6 @@ pub fn render_doc_picker_overlay(
             id: 0,
         },
     ];
-    mw::push_vim_nav_search_hint(&mut picker_shortcuts, state.search_active);
     let base_sizing = ModalSizing {
         width_pct: 0.70,
         max_width: 120,

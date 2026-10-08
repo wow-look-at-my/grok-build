@@ -2070,7 +2070,6 @@ mod link_click_tests {
     fn make_search_agent() -> (AgentView, ActionRegistry) {
         use crate::scrollback::block::RenderBlock;
         let mut agent = make_agent();
-        agent.vim_mode = true;
         setup_scrollback_area(&mut agent, Rect::new(0, 0, 80, 24));
         agent
             .scrollback
@@ -2082,9 +2081,8 @@ mod link_click_tests {
         (agent, ActionRegistry::defaults())
     }
     /// Empty-scrollback (new-session) counterpart to `make_search_agent`.
-    fn make_empty_vim_agent() -> (AgentView, ActionRegistry) {
+    fn make_empty_agent() -> (AgentView, ActionRegistry) {
         let mut agent = make_agent();
-        agent.vim_mode = true;
         setup_scrollback_area(&mut agent, Rect::new(0, 0, 80, 24));
         assert!(agent.scrollback.is_empty());
         (agent, ActionRegistry::defaults())
@@ -2118,51 +2116,21 @@ mod link_click_tests {
             settle_search(agent);
         }
     }
+    /// '/' from scrollback focuses the prompt and forwards, like letters do; it never opens search.
     #[test]
-    fn vim_slash_opens_scrollback_search() {
+    fn slash_focuses_prompt_and_forwards() {
         let (mut agent, reg) = make_search_agent();
-        assert!(agent.scrollback_search.is_none());
-        let out = press(&mut agent, &reg, KeyCode::Char('/'));
-        assert!(matches!(out, InputOutcome::Changed));
-        let search = agent.scrollback_search.as_ref().expect("search opened");
-        assert!(search.is_composing());
-        assert_eq!(search.query(), "");
-    }
-    /// Vim `/` on an empty scrollback (new session) must focus the prompt and forward `/` like non-vim mode rather than open an empty search.
-    #[test]
-    fn vim_slash_empty_scrollback_focuses_prompt() {
-        let (mut agent, reg) = make_empty_vim_agent();
         let out = press(&mut agent, &reg, KeyCode::Char('/'));
         assert!(
             matches!(out, InputOutcome::ActionThenForward(Action::FocusPrompt)),
-            "vim `/` on empty scrollback must focus the prompt, got {out:?}"
-        );
-        assert!(agent.scrollback_search.is_none());
-    }
-    #[test]
-    fn non_vim_slash_does_not_open_search() {
-        let (mut agent, reg) = make_search_agent();
-        agent.vim_mode = false;
-        press(&mut agent, &reg, KeyCode::Char('/'));
-        assert!(agent.scrollback_search.is_none());
-    }
-    /// Regression: non-vim '/' from scrollback must focus the prompt and forward, like letters do.
-    #[test]
-    fn non_vim_slash_focuses_prompt_and_forwards() {
-        let (mut agent, reg) = make_search_agent();
-        agent.vim_mode = false;
-        let out = press(&mut agent, &reg, KeyCode::Char('/'));
-        assert!(
-            matches!(out, InputOutcome::ActionThenForward(Action::FocusPrompt)),
-            "'/' from scrollback (non-vim) must focus the prompt and forward, got {out:?}"
+            "'/' from scrollback must focus the prompt and forward, got {out:?}"
         );
         assert!(agent.scrollback_search.is_none());
     }
     /// '?' must bubble past the pane handler; the palette binding lives at agent level.
     #[test]
-    fn non_vim_question_mark_still_bubbles_to_palette() {
+    fn question_mark_still_bubbles_to_palette() {
         let (mut agent, reg) = make_search_agent();
-        agent.vim_mode = false;
         let out = press(&mut agent, &reg, KeyCode::Char('?'));
         assert!(
             matches!(out, InputOutcome::Unchanged),
@@ -2176,16 +2144,10 @@ mod link_click_tests {
             reg,
         )
     }
-    #[test]
-    fn router_slash_opens_search_when_no_overlay_pending() {
-        let (mut agent, reg) = make_search_agent();
-        route_slash(&mut agent, &reg);
-        assert!(agent.scrollback_search.is_some());
-    }
-    /// Router-level symmetry with the non-empty case: empty scrollback focuses the prompt, not search.
+    /// Through the full router, `/` on an empty scrollback focuses the prompt, not search.
     #[test]
     fn router_slash_focuses_prompt_when_scrollback_empty() {
-        let (mut agent, reg) = make_empty_vim_agent();
+        let (mut agent, reg) = make_empty_agent();
         let out = route_slash(&mut agent, &reg);
         assert!(
             matches!(out, InputOutcome::ActionThenForward(Action::FocusPrompt)),
@@ -2194,62 +2156,9 @@ mod link_click_tests {
         assert!(agent.scrollback_search.is_none());
     }
     #[test]
-    fn router_slash_blocked_while_permission_pending() {
-        let (mut agent, reg) = make_search_agent();
-        agent
-            .permission_queue
-            .push_back(super::test_fixtures::make_followup_permission_state());
-        route_slash(&mut agent, &reg);
-        assert!(agent.scrollback_search.is_none());
-    }
-    #[test]
-    fn router_slash_blocked_while_plan_approval_pending() {
-        let (mut agent, reg) = make_search_agent();
-        agent.plan_approval_view = Some(super::test_fixtures::make_plan_approval_view_state());
-        route_slash(&mut agent, &reg);
-        assert!(agent.scrollback_search.is_none());
-    }
-    #[test]
-    fn router_slash_blocked_while_cancel_turn_pending() {
-        let (mut agent, reg) = make_search_agent();
-        agent.cancel_turn_view = Some(crate::views::modal::CancelTurnViewState {
-            active_idx: 0,
-            running_count: 1,
-        });
-        route_slash(&mut agent, &reg);
-        assert!(agent.scrollback_search.is_none());
-    }
-    #[test]
-    fn router_slash_blocked_while_question_pending() {
-        let (mut agent, reg) = make_search_agent();
-        agent.question_view =
-            Some(super::paste_key_tests::make_question_view_state_in_input_mode());
-        route_slash(&mut agent, &reg);
-        assert!(agent.scrollback_search.is_none());
-    }
-    #[test]
-    fn router_slash_blocked_while_btw_panel_open() {
-        let (mut agent, reg) = make_search_agent();
-        agent.btw_state = Some(crate::views::btw_overlay::BtwOverlayState::Loading {
-            question: "q".into(),
-        });
-        route_slash(&mut agent, &reg);
-        assert!(agent.scrollback_search.is_none());
-    }
-    #[test]
-    fn router_slash_restarts_search_while_browsing() {
-        let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
-        type_query_and_settle(&mut agent, &reg, "foo");
-        press(&mut agent, &reg, KeyCode::Enter);
-        assert!(!agent.scrollback_search.as_ref().unwrap().is_composing());
-        route_slash(&mut agent, &reg);
-        assert!(agent.scrollback_search.as_ref().unwrap().is_composing());
-    }
-    #[test]
     fn typing_builds_query_and_finds_matches() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query_and_settle(&mut agent, &reg, "foo");
         let search = agent.scrollback_search.as_ref().unwrap();
         assert_eq!(search.query(), "foo");
@@ -2259,7 +2168,7 @@ mod link_click_tests {
     #[test]
     fn backspace_edits_the_query() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query_and_settle(&mut agent, &reg, "fox");
         assert_eq!(agent.scrollback_search.as_ref().unwrap().match_count(), 0);
         press(&mut agent, &reg, KeyCode::Backspace);
@@ -2271,7 +2180,7 @@ mod link_click_tests {
     #[test]
     fn enter_accepts_then_n_and_shift_n_navigate() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query_and_settle(&mut agent, &reg, "foo");
         press(&mut agent, &reg, KeyCode::Enter);
         assert!(!agent.scrollback_search.as_ref().unwrap().is_composing());
@@ -2302,7 +2211,7 @@ mod link_click_tests {
     #[test]
     fn esc_cancels_search() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query(&mut agent, &reg, "foo");
         let out = press(&mut agent, &reg, KeyCode::Esc);
         assert!(matches!(out, InputOutcome::Changed));
@@ -2311,7 +2220,7 @@ mod link_click_tests {
     #[test]
     fn arrow_keys_navigate_matches_while_browsing() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query_and_settle(&mut agent, &reg, "foo");
         press(&mut agent, &reg, KeyCode::Enter);
         assert_eq!(
@@ -2336,7 +2245,7 @@ mod link_click_tests {
     #[test]
     fn arrow_keys_navigate_matches_while_composing() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query_and_settle(&mut agent, &reg, "foo");
         assert!(agent.scrollback_search.as_ref().unwrap().is_composing());
         assert_eq!(
@@ -2650,7 +2559,7 @@ mod link_click_tests {
     #[test]
     fn search_active_reserves_two_bottom_rows() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query(&mut agent, &reg, "foo");
         let area = Rect::new(0, 0, 80, 24);
         let buf = render_agent(&mut agent, area, &reg);
@@ -2674,7 +2583,7 @@ mod link_click_tests {
     #[test]
     fn browsing_leaves_non_search_keys_to_normal_handling() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query(&mut agent, &reg, "foo");
         press(&mut agent, &reg, KeyCode::Enter);
         press(&mut agent, &reg, KeyCode::Char('j'));
@@ -2685,14 +2594,13 @@ mod link_click_tests {
     fn search_is_smart_case() {
         use crate::scrollback::block::RenderBlock;
         let mut agent = make_agent();
-        agent.vim_mode = true;
         setup_scrollback_area(&mut agent, Rect::new(0, 0, 80, 24));
         agent
             .scrollback
             .push_block(RenderBlock::user_prompt("Error and error"));
         agent.scrollback.prepare_layout(80, 24);
         let reg = ActionRegistry::defaults();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query_and_settle(&mut agent, &reg, "error");
         assert_eq!(
             agent.scrollback_search.as_ref().unwrap().match_count(),
@@ -2700,7 +2608,7 @@ mod link_click_tests {
             "a lowercase query is case-insensitive"
         );
         press(&mut agent, &reg, KeyCode::Esc);
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query_and_settle(&mut agent, &reg, "Error");
         assert_eq!(
             agent.scrollback_search.as_ref().unwrap().match_count(),
@@ -2711,7 +2619,7 @@ mod link_click_tests {
     #[test]
     fn enter_on_empty_query_closes_search() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         let out = press(&mut agent, &reg, KeyCode::Enter);
         assert!(matches!(out, InputOutcome::Changed));
         assert!(agent.scrollback_search.is_none());
@@ -2719,7 +2627,7 @@ mod link_click_tests {
     #[test]
     fn esc_dismisses_search_while_browsing() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query(&mut agent, &reg, "foo");
         press(&mut agent, &reg, KeyCode::Enter);
         let out = press(&mut agent, &reg, KeyCode::Esc);
@@ -2729,7 +2637,7 @@ mod link_click_tests {
     #[test]
     fn navigate_with_no_matches_is_noop() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query_and_settle(&mut agent, &reg, "zzz");
         press(&mut agent, &reg, KeyCode::Enter);
         assert_eq!(agent.scrollback_search.as_ref().unwrap().match_count(), 0);
@@ -2741,7 +2649,7 @@ mod link_click_tests {
     #[test]
     fn composing_swallows_tab_without_changing_pane() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         let out = press(&mut agent, &reg, KeyCode::Tab);
         assert!(matches!(out, InputOutcome::Unchanged));
         assert_eq!(agent.active_pane, AgentPane::Scrollback);
@@ -2750,7 +2658,7 @@ mod link_click_tests {
     #[test]
     fn leaving_scrollback_pane_clears_search() {
         let (mut agent, reg) = make_search_agent();
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         assert!(agent.scrollback_search.is_some());
         agent.set_active_pane(AgentPane::Prompt, false);
         assert!(agent.scrollback_search.is_none());
@@ -2759,7 +2667,7 @@ mod link_click_tests {
     fn esc_with_running_turn_dismisses_search_not_cancel_turn() {
         let (mut agent, reg) = make_search_agent();
         agent.session.state = AgentState::TurnRunning;
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         type_query(&mut agent, &reg, "foo");
         let esc = Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         let out = agent.handle_input(&esc, &reg);
@@ -2773,7 +2681,7 @@ mod link_click_tests {
             agent.is_bare_scrollback(),
             "scrollback focused with nothing layered on top"
         );
-        press(&mut agent, &reg, KeyCode::Char('/'));
+        agent.open_scrollback_search(None);
         assert!(
             !agent.is_bare_scrollback(),
             "an open scrollback search is a layered sub-state"
@@ -2784,7 +2692,7 @@ mod link_click_tests {
         let reg = ActionRegistry::defaults();
         let mut parent = make_agent();
         let (mut child, _) = make_search_agent();
-        press(&mut child, &reg, KeyCode::Char('/'));
+        child.open_scrollback_search(None);
         type_query(&mut child, &reg, "foo");
         assert!(child.scrollback_search.is_some());
         let child_sid = "child-sid".to_string();
@@ -2816,7 +2724,7 @@ mod link_click_tests {
         let reg = ActionRegistry::defaults();
         let mut parent = make_agent();
         let (mut child, _) = make_search_agent();
-        press(&mut child, &reg, KeyCode::Char('/'));
+        child.open_scrollback_search(None);
         type_query(&mut child, &reg, "fo");
         assert!(child.scrollback_search.as_ref().unwrap().is_composing());
         let child_sid = "child-sid".to_string();
@@ -2846,7 +2754,7 @@ mod link_click_tests {
         let reg = ActionRegistry::defaults();
         let mut parent = make_agent();
         let (mut child, _) = make_search_agent();
-        press(&mut child, &reg, KeyCode::Char('/'));
+        child.open_scrollback_search(None);
         assert!(child.scrollback_search.is_some());
         let child_sid = "child-sid".to_string();
         parent.insert_test_child(child_sid.clone(), Box::new(child));
@@ -2887,24 +2795,6 @@ mod link_click_tests {
             search.current_index(),
             Some(0),
             "child search parks the cursor on the first match"
-        );
-    }
-    #[test]
-    fn o_key_cycles_links_via_registry() {
-        let registry = ActionRegistry::defaults();
-        let o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE);
-        assert_eq!(
-            registry.lookup(&o, When::ScrollbackFocused),
-            Some(ActionId::OpenNextLink)
-        );
-    }
-    #[test]
-    fn shift_o_key_cycles_links_backward_via_registry() {
-        let registry = ActionRegistry::defaults();
-        let shift_o = KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT);
-        assert_eq!(
-            registry.lookup(&shift_o, When::ScrollbackFocused),
-            Some(ActionId::OpenPrevLink)
         );
     }
     #[test]

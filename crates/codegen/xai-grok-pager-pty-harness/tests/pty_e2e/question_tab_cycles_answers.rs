@@ -1,7 +1,4 @@
 // Per-test-case module for the `pty_e2e` integration test crate.
-//
-// Regression pin: Tab inside the `ask_user_question` card used to hand focus to the scrollback
-// The card stayed drawn and the shortcuts bar kept advertising card keys
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -113,17 +110,9 @@ fn string_leaves(value: &serde_json::Value, out: &mut Vec<String>) {
 }
 
 /// Drive the full Tab / Esc / answer-walk contract on a live `ask_user_question` card.
-/// `vim_mode` only changes the seed config; the contract is the same.
-async fn assert_question_tab_contract(vim_mode: bool) {
+async fn assert_question_tab_contract() {
     let content = ContentController::start().await.expect("start content");
-    if vim_mode {
-        seed_ui_config(&content, "vim_mode = true\nsimple_mode = false");
-    }
-    let call_id = if vim_mode {
-        "call_ask_tab_vim"
-    } else {
-        "call_ask_tab"
-    };
+    let call_id = "call_ask_tab";
     let _turn = expect_tool_turn(
         &content,
         call_id,
@@ -143,13 +132,7 @@ async fn assert_question_tab_contract(vim_mode: bool) {
     )
     .expect("spawn pager with content");
 
-    let dump = |suffix: &str| {
-        if vim_mode {
-            format!("question_tab_vim_{suffix}")
-        } else {
-            format!("question_tab_{suffix}")
-        }
-    };
+    let dump = |suffix: &str| format!("question_tab_{suffix}");
 
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
@@ -183,25 +166,6 @@ async fn assert_question_tab_contract(vim_mode: bool) {
     );
     write_screen_dump_if_requested(&harness, &dump("00b_parked"));
 
-    // Vim mode only: parked j/k navigate the scrollback and must not walk the card behind the pane
-    // (Without vim mode a bare letter focuses the prompt and types, a different path outside this contract.)
-    if vim_mode {
-        let parked_cursor = cursor_row(&harness);
-        harness.inject_keys(b"j").expect("parked j");
-        harness.inject_keys(b"k").expect("parked k");
-        assert_eq!(
-            cursor_row(&harness),
-            parked_cursor,
-            "parked j/k must not move the answer cursor\nscreen:\n{}",
-            harness.screen_contents()
-        );
-        assert!(
-            harness.contains_text(PARKED_HINT),
-            "scrollback keeps the keyboard after parked j/k\nscreen:\n{}",
-            harness.screen_contents()
-        );
-    }
-
     harness.inject_keys(TAB).expect("Tab back into the card");
     harness
         .wait_for_text(FOCUSED_HINT, Duration::from_secs(10))
@@ -212,7 +176,7 @@ async fn assert_question_tab_contract(vim_mode: bool) {
         "the walk resumes where it was parked",
     );
 
-    // Focused j walks answers the same way as Tab; vim mode must not steal it
+    // Focused j walks answers the same way as Tab
     harness.inject_keys(b"j").expect("focused j");
     expect_cursor_row(
         &mut harness,
@@ -284,7 +248,7 @@ async fn assert_question_tab_contract(vim_mode: bool) {
         .iter()
         .filter(|leaf| leaf.contains("has answered your questions"))
         .collect();
-    eprintln!("[tool result vim_mode={vim_mode}] {answered:?}");
+    eprintln!("[tool result] {answered:?}");
     for expected in [
         format!("\"{FIRST_QUESTION}\"=\"{}\"", FIRST_ROWS[0]),
         format!("\"{SECOND_QUESTION}\"=\"{}\"", SECOND_ROWS[1]),
@@ -301,12 +265,5 @@ async fn assert_question_tab_contract(vim_mode: bool) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn question_tab_cycles_answers() {
-    assert_question_tab_contract(false).await;
-}
-
-/// Same contract under `[ui].vim_mode = true`: focused j/k walk answers, Esc parks, parked j/k stay on the scrollback, Tab returns, wrap and submit.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
-async fn question_tab_cycles_answers_in_vim_mode() {
-    assert_question_tab_contract(true).await;
+    assert_question_tab_contract().await;
 }
