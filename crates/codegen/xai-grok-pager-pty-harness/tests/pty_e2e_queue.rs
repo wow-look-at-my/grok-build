@@ -30,6 +30,8 @@ mod ctrlc_with_queued_prompt_no_dup;
 mod edit_interject_lone_queued_row_keeps_tui_alive;
 #[path = "pty_e2e/empty_enter_delivers_both_queued_rows.rs"]
 mod empty_enter_delivers_both_queued_rows;
+#[path = "pty_e2e/empty_enter_delivers_queue_while_a_tool_runs.rs"]
+mod empty_enter_delivers_queue_while_a_tool_runs;
 #[path = "pty_e2e/empty_enter_interrupts_with_queued.rs"]
 mod empty_enter_interrupts_with_queued;
 #[path = "pty_e2e/esc_esc_clears_idle_prompt_into_the_stash.rs"]
