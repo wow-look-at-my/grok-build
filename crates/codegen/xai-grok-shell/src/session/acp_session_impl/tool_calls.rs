@@ -1443,6 +1443,38 @@ impl SessionActor {
             hook_name: rewrite.hook_name,
         }))
     }
+    /// Who this call's reader is and which session records it must stay out of,
+    /// or `None` when no goal guard applies. A goal's implementer reads its own
+    /// directory; a goal verifier child reads the main session's instead.
+    fn goal_bookkeeping_reader(
+        &self,
+    ) -> Option<crate::session::goal_classifier::run_log::BookkeepingReader> {
+        use crate::session::goal_classifier::run_log::BookkeepingReader;
+        use crate::session::goal_tracker::{GoalStatus, GoalTracker};
+
+        let own_dir = crate::session::persistence::session_dir(&self.session_info);
+        if let Some(main) = self.tool_context.goal_main_session_dir.as_ref() {
+            let plan = GoalTracker::new(main.clone());
+            return Some(BookkeepingReader {
+                session_dir: own_dir.to_string_lossy().into_owned(),
+                main_session_dir: Some(main.to_string_lossy().into_owned()),
+                allowed_paths: vec![plan.plan_path(), plan.plan_baseline_path()],
+                // The run log, patch and verdict the harness wrote for it.
+                refuse_harness_evidence_names: false,
+            });
+        }
+        let tracker = self.goal_tracker.lock();
+        if tracker.status() != Some(GoalStatus::Active) {
+            return None;
+        }
+        Some(BookkeepingReader {
+            session_dir: tracker.session_dir().to_string_lossy().into_owned(),
+            main_session_dir: None,
+            allowed_paths: vec![tracker.plan_path(), tracker.plan_baseline_path()],
+            refuse_harness_evidence_names: true,
+        })
+    }
+
     pub(crate) async fn prepare_tool_call(
         &self,
         call: crate::sampling::types::ToolCallResponse,
@@ -1728,28 +1760,25 @@ impl SessionActor {
                 .await?;
             return Ok(Err(ToolLoop::Continue));
         }
-        if self.goal_tracker.lock().status()
-            == Some(crate::session::goal_tracker::GoalStatus::Active)
-        {
-            let session_dir = crate::session::persistence::session_dir(&self.session_info);
-            if let Some(target) = crate::session::goal_classifier::run_log::goal_bookkeeping_target(
+        if let Some(reader) = self.goal_bookkeeping_reader()
+            && let Some(target) = crate::session::goal_classifier::run_log::bookkeeping_refusal(
+                &reader,
                 &call.function.arguments,
-                &session_dir.to_string_lossy(),
-            ) {
-                tracing::info!(
-                    tool_name = %call.function.name,
-                    target,
-                    "goal: refused a read of session bookkeeping"
-                );
-                let msg = format!(
-                    "Refused: this call touches `{target}`, the session's own record. \
-                     Reading the transcript is the verifier's job. Do not collect, extract \
-                     or summarize evidence. Keep working on the objective."
-                );
-                self.handle_tool_not_executed(&call.id, &tool_call_id, msg)
-                    .await?;
-                return Ok(Err(ToolLoop::Continue));
-            }
+            )
+        {
+            tracing::info!(
+                tool_name = %call.function.name,
+                target,
+                "goal: refused a read of session bookkeeping"
+            );
+            let msg = format!(
+                "Refused: this call touches `{target}`, the session's own record. \
+                 Reading the transcript is the verifier's job. Do not collect, extract \
+                 or summarize evidence. Keep working on the objective."
+            );
+            self.handle_tool_not_executed(&call.id, &tool_call_id, msg)
+                .await?;
+            return Ok(Err(ToolLoop::Continue));
         }
         let tool_call_display = mcp_preparation
             .approval(self, &tool_call_id, &call.function.name, &mut tool_input)
