@@ -64,21 +64,10 @@ pub fn load_config_from_toml(root: &TomlValue) -> Config {
         table: &toml::map::Map<String, TomlValue>,
         key: &str,
     ) -> T {
-        let Some(value) = table.get(key) else {
-            return T::default();
-        };
-        match value.clone().try_into() {
-            Ok(parsed) => parsed,
-            Err(error) => {
-                // One bad value drops the whole section to its defaults. Say so, or the user's settings vanish silently.
-                tracing::error!(
-                    section = key,
-                    %error,
-                    "config.toml section does not parse; every key in it falls back to its default"
-                );
-                T::default()
-            }
-        }
+        table
+            .get(key)
+            .and_then(|v| v.clone().try_into().ok())
+            .unwrap_or_default()
     }
     if let Some(TomlValue::Table(toolset)) = table.get("toolset")
         && toolset.get("use_concise").is_some()
