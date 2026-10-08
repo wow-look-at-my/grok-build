@@ -1,10 +1,10 @@
-//! Top-level input routing for [`AgentView`]: `handle_input` fans events out to the active pane/overlay handlers, plus the pane and input-mode setters.
+//! Top-level input routing for [`AgentView`]: `handle_input` fans events out to the active pane/overlay handlers.
 #[cfg(test)]
 use super::paste::paste_key_tests;
 #[cfg(test)]
 use super::test_fixtures;
 use super::{
-    AgentPane, AgentView, BlockingCard, ComposerRoute, CtaPhase, EscStep, InputMode, KeyOwner,
+    AgentPane, AgentView, BlockingCard, ComposerRoute, CtaPhase, EscStep, KeyOwner,
     MULTI_CLICK_TIMEOUT_MS, PromptInputMode, ViewSurface, active_contexts_for_pane,
     format_key_for_log, is_link_modifier_for_key, is_mouse_reporting_toggle_chord, resolve_action,
 };
@@ -51,7 +51,7 @@ impl AgentView {
         if !self.no_input_overlay_pending() {
             return true;
         }
-        !self.vim_mode && self.session.state.is_idle()
+        self.session.state.is_idle()
     }
     /// Views that own input ahead of the dashboard overlay cascade.
     /// That cascade runs before `handle_input`, so without this guard Left/Esc on an empty prompt would exit the overlay.
@@ -67,9 +67,10 @@ impl AgentView {
             || self.persona_detail.is_some()
             || self.block_viewer.is_some()
     }
-    /// The dropdown is only open while the draft holds an `@` token, so `text().is_empty()` already covers it.
-    /// An open modal or media view ([`Self::modal_owns_input`]) also fails the guard, so those own Esc/Left instead of the overlay back-out stealing them.
-    /// An open `/jump` picker fails it too, so the picker owns Esc/Left instead of being left latent.
+    /// The dropdown is only open while the draft holds an `@` token, so
+    /// `text().is_empty()` already covers it. An open modal or media view
+    /// ([`Self::modal_owns_input`]) also fails the guard, so those own
+    /// Esc/Left instead of the overlay back-out stealing them.
     pub(crate) fn is_empty_focused_prompt(&self) -> bool {
         self.active_pane == AgentPane::Prompt
             && self.prompt.text().is_empty()
@@ -84,9 +85,10 @@ impl AgentView {
     ) -> Vec<&crate::views::workflows::WorkflowRunSnapshot> {
         self.workflow_runs.iter().rev().collect()
     }
-    /// No per-pane `Esc` consumer is pending (text selection, link highlight, goal detail, rewind overlay, open `/btw` panel, or open `/jump` picker).
-    /// `Esc` is then free to back out of the dashboard overlay rather than clear or dismiss one of them first.
-    /// Shared by both overlay back-out guards so a future Esc consumer is added once here.
+    /// No per-pane `Esc` consumer is pending (text selection, link highlight,
+    /// goal detail, rewind overlay, open `/btw` panel, or open `/jump`
+    /// picker). `Esc` is then free to back out of the dashboard overlay
+    /// rather than clear or dismiss one of them first.
     pub(crate) fn no_esc_consumer_pending(&self) -> bool {
         self.persistent_text_selection.is_none()
             && self.highlighted_link_idx.is_none()
@@ -96,9 +98,10 @@ impl AgentView {
             && self.btw_state.is_none()
             && self.jump_state.is_none()
     }
-    /// It only applies to an empty, Normal-mode composer with no per-pane Esc consumer pending.
-    /// Used only in the overlay cascade; the full-screen Esc policy (clear / rewind while idle; mid-turn cancel or swallow) is untouched.
-    /// While one is in flight, Esc must fall through to [`Self::try_handle_esc_policy`], not detach to the dashboard.
+    /// It only applies to an empty, Normal-mode composer with no per-pane Esc
+    /// consumer pending. Used only in the overlay cascade; the full-screen
+    /// Esc policy (clear / rewind while idle; mid-turn cancel or swallow) is
+    /// untouched.
     pub(crate) fn overlay_esc_backs_out_from_prompt(&self) -> bool {
         self.is_empty_focused_prompt()
             && self.prompt_input_mode == PromptInputMode::Normal
@@ -182,8 +185,6 @@ impl AgentView {
         false
     }
     /// Handle a terminal event when this agent view is active.
-    /// Pane-specific (prompt widget or scrollback navigation)
-    /// Agent-level (cancel, yolo; checked if the pane didn't consume)
     pub fn handle_input(&mut self, ev: &Event, registry: &ActionRegistry) -> InputOutcome {
         self.handle_input_inner(ev, registry, false)
     }
@@ -842,10 +843,7 @@ impl AgentView {
                 {
                     return outcome;
                 }
-                if self.active_pane == AgentPane::Scrollback
-                    && !self.vim_mode
-                    && self.no_input_overlay_pending()
-                {
+                if self.active_pane == AgentPane::Scrollback && self.no_input_overlay_pending() {
                     return InputOutcome::ActionThenForward(Action::FocusPrompt);
                 }
                 if self.active_pane == AgentPane::Prompt {
@@ -1024,7 +1022,7 @@ impl AgentView {
         if let Event::Key(key) = ev
             && key.kind != KeyEventKind::Release
             && matches!(self.active_pane, AgentPane::Prompt | AgentPane::Scrollback)
-            && let Some(outcome) = self.try_handle_esc_policy(key, registry)
+            && let Some(outcome) = self.try_handle_esc_policy(key)
         {
             return outcome;
         }
@@ -1142,7 +1140,7 @@ impl AgentView {
                 if self.in_dashboard_overlay {
                     contexts.push(crate::actions::When::DashboardOverlay);
                 }
-                let entries = shortcuts_help::build_entries(&contexts, registry, self.vim_mode);
+                let entries = shortcuts_help::build_entries(&contexts, registry);
                 let state = shortcuts_help::build_initial_picker_state(&entries);
                 self.active_modal = Some(crate::views::modal::ActiveModal::ShortcutsHelp {
                     entries,
@@ -1211,28 +1209,6 @@ impl AgentView {
         }
         self.active_pane = target;
         true
-    }
-    pub(crate) fn set_input_mode(&mut self, mode: InputMode) {
-        self.input_mode = mode;
-        if mode == InputMode::Vim
-            && self.prompt.text().trim().is_empty()
-            && self.active_pane == AgentPane::Prompt
-        {
-            let _switched = self.set_active_pane(AgentPane::Scrollback, false);
-        }
-    }
-    /// Propagate a vim-mode change to this view and every nested subagent view.
-    /// `ToggleVimMode` / `SetVimMode` only walk the top-level `app.agents`, so without this an already-open subagent view keeps its stale `vim_mode`.
-    /// `j`/`k` then forward to the prompt (the vim-off fallback) instead of navigating, because the subagent view never saw the toggle.
-    pub(crate) fn set_vim_mode_recursive(&mut self, enabled: bool) {
-        self.vim_mode = enabled;
-        for child in self.subagent_views.values_mut() {
-            child.set_vim_mode_recursive(enabled);
-        }
-    }
-    #[cfg(test)]
-    pub(crate) fn is_simple_mode(&self) -> bool {
-        self.input_mode == InputMode::Simple
     }
 }
 #[cfg(test)]
@@ -1458,9 +1434,9 @@ mod btw_focus_tests {
         Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
     use ratatui::layout::Rect;
-    /// Idle agent focused on the prompt (the realistic state while `/btw` is open).
-    /// `make_agent` starts in scrollback focus (vim default), and these tests don't render.
-    /// So focus the prompt and seed `last_btw_area`; keyboard scrollability reads from it.
+    /// Idle agent focused on the prompt (the realistic state while `/btw` is
+    /// open). `make_agent` starts in scrollback focus (vim default), and
+    /// these tests don't render.
     fn prompt_focused_agent() -> AgentView {
         let mut agent = make_agent();
         agent.set_active_pane(AgentPane::Prompt, true);
@@ -1806,39 +1782,21 @@ mod focus_gained_restore_tests {
             .push_back(make_followup_permission_state());
     }
     #[test]
-    fn should_restore_prompt_on_focus_gained_permission_vim_turn_running() {
+    fn should_restore_prompt_on_focus_gained_permission_turn_running() {
         let mut agent = scrollback_agent();
-        agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         with_permission(&mut agent);
         assert!(agent.should_restore_prompt_on_focus_gained());
     }
     #[test]
-    fn should_restore_prompt_on_focus_gained_permission_non_vim_turn_running() {
+    fn should_restore_prompt_on_focus_gained_idle_no_overlay() {
         let mut agent = scrollback_agent();
-        agent.vim_mode = false;
-        agent.session.state = AgentState::TurnRunning;
-        with_permission(&mut agent);
-        assert!(agent.should_restore_prompt_on_focus_gained());
-    }
-    #[test]
-    fn should_restore_prompt_on_focus_gained_idle_non_vim_no_overlay() {
-        let mut agent = scrollback_agent();
-        agent.vim_mode = false;
         agent.session.state = AgentState::Idle;
         assert!(agent.should_restore_prompt_on_focus_gained());
     }
     #[test]
-    fn should_restore_prompt_on_focus_gained_idle_vim_no_overlay() {
+    fn should_restore_prompt_on_focus_gained_busy_no_overlay() {
         let mut agent = scrollback_agent();
-        agent.vim_mode = true;
-        agent.session.state = AgentState::Idle;
-        assert!(!agent.should_restore_prompt_on_focus_gained());
-    }
-    #[test]
-    fn should_restore_prompt_on_focus_gained_busy_non_vim_no_overlay() {
-        let mut agent = scrollback_agent();
-        agent.vim_mode = false;
         agent.session.state = AgentState::TurnRunning;
         assert!(!agent.should_restore_prompt_on_focus_gained());
     }
@@ -1846,7 +1804,6 @@ mod focus_gained_restore_tests {
     fn should_restore_prompt_on_focus_gained_permission_already_prompt() {
         let mut agent = make_agent();
         agent.active_pane = AgentPane::Prompt;
-        agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         with_permission(&mut agent);
         assert!(!agent.should_restore_prompt_on_focus_gained());
@@ -1854,7 +1811,6 @@ mod focus_gained_restore_tests {
     #[test]
     fn should_restore_prompt_on_focus_gained_permission_with_modal() {
         let mut agent = scrollback_agent();
-        agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         with_permission(&mut agent);
         agent.active_modal = Some(ActiveModal::CommandPalette {
@@ -1865,25 +1821,22 @@ mod focus_gained_restore_tests {
         assert!(!agent.should_restore_prompt_on_focus_gained());
     }
     #[test]
-    fn should_restore_prompt_on_focus_gained_plan_approval_vim() {
+    fn should_restore_prompt_on_focus_gained_plan_approval() {
         let mut agent = scrollback_agent();
-        agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         agent.plan_approval_view = Some(make_plan_approval_view_state());
         assert!(agent.should_restore_prompt_on_focus_gained());
     }
     #[test]
-    fn should_restore_prompt_on_focus_gained_question_vim() {
+    fn should_restore_prompt_on_focus_gained_question() {
         let mut agent = scrollback_agent();
-        agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         agent.question_view = Some(make_question_view_state_in_input_mode());
         assert!(agent.should_restore_prompt_on_focus_gained());
     }
     #[test]
-    fn should_restore_prompt_on_focus_gained_cancel_turn_vim() {
+    fn should_restore_prompt_on_focus_gained_cancel_turn() {
         let mut agent = scrollback_agent();
-        agent.vim_mode = true;
         agent.session.state = AgentState::TurnRunning;
         agent.cancel_turn_view = Some(CancelTurnViewState {
             active_idx: 0,
@@ -1901,11 +1854,10 @@ mod mid_turn_esc_hint_tests {
     use crate::app::agent::AgentState;
     use crate::app::app_view::InputOutcome;
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    fn running_agent(vim_mode: bool) -> AgentView {
+    fn running_agent() -> AgentView {
         let mut agent = make_agent();
         agent.session.state = AgentState::TurnRunning;
         agent.active_pane = AgentPane::Prompt;
-        agent.vim_mode = vim_mode;
         agent
     }
     fn press_esc(agent: &mut AgentView) -> InputOutcome {
@@ -1914,36 +1866,31 @@ mod mid_turn_esc_hint_tests {
             &ActionRegistry::defaults(),
         )
     }
-    /// Esc never cancels a running turn; it names the registry cancel key instead, in every mode and from either pane.
+    /// Esc cancels a running turn from either pane, with no toast, and keeps the draft.
     #[test]
-    fn mid_turn_esc_shows_ctrl_c_hint_instead_of_cancelling() {
-        for (vim_mode, pane) in [
-            (false, AgentPane::Prompt),
-            (true, AgentPane::Prompt),
-            (false, AgentPane::Scrollback),
-        ] {
-            let mut agent = running_agent(vim_mode);
+    fn mid_turn_esc_cancels_the_turn() {
+        for pane in [AgentPane::Prompt, AgentPane::Scrollback] {
+            let mut agent = running_agent();
             agent.active_pane = pane;
             agent.prompt.set_text("draft");
             let outcome = press_esc(&mut agent);
             assert!(
-                matches!(outcome, InputOutcome::Changed),
-                "vim={vim_mode} pane={pane:?}: expected Changed, got {outcome:?}"
+                matches!(outcome, InputOutcome::Action(Action::CancelTurn)),
+                "pane={pane:?}: expected CancelTurn, got {outcome:?}"
             );
             assert_eq!(
-                Some("Press Ctrl+c to cancel the turn"),
-                agent.active_toast_message(),
-                "vim={vim_mode} pane={pane:?}"
+                Some(crate::app::actions::CancelTrigger::Esc),
+                agent.cancel_trigger_hint,
+                "pane={pane:?}"
             );
-            assert_eq!(None, agent.cancel_trigger_hint);
-            assert!(agent.session.state.is_turn_running());
+            assert_eq!(None, agent.active_toast_message(), "no Ctrl+C reminder");
             assert_eq!("draft", agent.prompt.text(), "the draft is preserved");
         }
     }
     /// While a cancel is already in flight, Esc is swallowed without a hint (Ctrl+C escalates to quit there, so the hint would mislead) and never re-sends the cancel.
     #[test]
     fn esc_while_cancelling_is_swallowed_without_hint() {
-        let mut agent = running_agent(false);
+        let mut agent = running_agent();
         agent.session.state = AgentState::TurnCancelling;
         let outcome = press_esc(&mut agent);
         assert!(matches!(outcome, InputOutcome::Changed), "got {outcome:?}");
@@ -1953,7 +1900,7 @@ mod mid_turn_esc_hint_tests {
     /// Ctrl+C on an empty prompt is still the cancel gesture.
     #[test]
     fn ctrl_c_still_cancels() {
-        let mut agent = running_agent(false);
+        let mut agent = running_agent();
         let outcome = agent.handle_input(
             &Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)),
             &ActionRegistry::defaults(),
@@ -2150,7 +2097,6 @@ mod scrollback_paste_focus_forward_tests {
     use crossterm::event::Event;
     fn scrollback_agent() -> (AgentView, ActionRegistry) {
         let mut agent = make_agent();
-        agent.vim_mode = false;
         agent.set_active_pane(AgentPane::Scrollback, true);
         (agent, ActionRegistry::defaults())
     }

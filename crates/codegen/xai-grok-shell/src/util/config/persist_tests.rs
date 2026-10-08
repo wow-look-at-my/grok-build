@@ -1414,10 +1414,10 @@ fn settings_helpers_target_correct_ui_fields() {
     assert_eq!(cfg.ui.show_timestamps, Some(true));
     let cfg = apply(|cfg| cfg.ui.show_timestamps = Some(false));
     assert_eq!(cfg.ui.show_timestamps, Some(false));
-    let cfg = apply(|cfg| cfg.ui.simple_mode = Some(true));
-    assert_eq!(cfg.ui.simple_mode, Some(true));
-    let cfg = apply(|cfg| cfg.ui.simple_mode = Some(false));
-    assert_eq!(cfg.ui.simple_mode, Some(false));
+    let cfg = apply(|cfg| cfg.ui.show_thinking_blocks = Some(true));
+    assert_eq!(cfg.ui.show_thinking_blocks, Some(true));
+    let cfg = apply(|cfg| cfg.ui.show_thinking_blocks = Some(false));
+    assert_eq!(cfg.ui.show_thinking_blocks, Some(false));
     let cfg = apply(|cfg| cfg.ui.theme = Some("tokyonight".to_string()));
     assert_eq!(cfg.ui.theme, Some("tokyonight".to_string()));
     let cfg = apply(|cfg| cfg.ui.theme = Some("auto".to_string()));
@@ -1542,7 +1542,7 @@ custom_user_key = "preserve-me"
     );
 }
 #[test]
-fn set_show_timestamps_and_simple_mode_round_trip_through_merge() {
+fn set_show_timestamps_and_show_thinking_blocks_round_trip_through_merge() {
     let original = r#"
 [ui]
 compact_mode = true
@@ -1551,7 +1551,7 @@ custom_unknown_key = 42
     let root: TomlValue = toml::from_str(original).unwrap();
     let mut cfg = load_config_from_toml(&root);
     cfg.ui.show_timestamps = Some(false);
-    cfg.ui.simple_mode = Some(false);
+    cfg.ui.show_thinking_blocks = Some(false);
     let mut table = root.as_table().unwrap().clone();
     merge_section(&mut table, "ui", &cfg.ui);
     let ui = table.get("ui").unwrap().as_table().unwrap();
@@ -1559,7 +1559,10 @@ custom_unknown_key = 42
         ui.get("show_timestamps").and_then(|v| v.as_bool()),
         Some(false),
     );
-    assert_eq!(ui.get("simple_mode").and_then(|v| v.as_bool()), Some(false));
+    assert_eq!(
+        ui.get("show_thinking_blocks").and_then(|v| v.as_bool()),
+        Some(false)
+    );
     assert_eq!(
         ui.get("compact_mode").and_then(|v| v.as_bool()),
         Some(true),
@@ -1724,12 +1727,13 @@ fn follow_bound_rmw_refuses_absent_dest_ancestor_retarget() {
 #[test]
 fn atomic_write_string_preserves_config_toml_symlink() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (link, target) = dotfiles_config_symlink(dir.path(), Some("[ui]\nsimple_mode = false\n"));
-    atomic_write_string(&link, "[ui]\nsimple_mode = true\n").unwrap();
+    let (link, target) =
+        dotfiles_config_symlink(dir.path(), Some("[ui]\nshow_timestamps = false\n"));
+    atomic_write_string(&link, "[ui]\nshow_timestamps = true\n").unwrap();
     assert_still_symlink(&link);
     assert_eq!(target, std::fs::read_link(&link).unwrap());
     assert_eq!(
-        "[ui]\nsimple_mode = true\n",
+        "[ui]\nshow_timestamps = true\n",
         std::fs::read_to_string(&target).unwrap()
     );
 }

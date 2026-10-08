@@ -109,12 +109,6 @@ async fn scripted_table_cell_selection() {
 /// Type-to-find pickers carry vim-mode. With vim-mode on, the command palette opens in INPUT (a letter filters
 /// immediately). Esc clears the query, a second Esc drops to NAV (letters no longer filter), and `i` re-enters
 /// INPUT. The footer's `i search` hint is absent on open (input) and present in nav.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "scripted scenario; run with cargo test -- --ignored"]
-async fn scripted_vim_modal_command_palette() {
-    run_scenario("vim_modal_command_palette.yaml").await;
-}
-
 /// Selecting a tool header copies only the operand (the path or command), not the `Read ` / `Run ` / `$ ` label.
 /// This guards the Selectable::Spans regression on tool-call headers.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -518,13 +512,6 @@ fn scenarios_parse() {
 #[test]
 fn ansi_execute_output_scenario_parses() {
     let path = scenario_path("ansi_execute_output.yaml");
-    let scenario = ScriptedScenario::from_file(&path).unwrap_or_else(|err| panic!("parse: {err}"));
-    assert!(!scenario.steps.is_empty(), "scenario has no steps");
-}
-
-#[test]
-fn vim_modal_command_palette_scenario_parses() {
-    let path = scenario_path("vim_modal_command_palette.yaml");
     let scenario = ScriptedScenario::from_file(&path).unwrap_or_else(|err| panic!("parse: {err}"));
     assert!(!scenario.steps.is_empty(), "scenario has no steps");
 }
