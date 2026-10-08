@@ -2552,6 +2552,57 @@ async fn queue_input_queue_mode_wait_delivers_without_cancelling() {
         .await;
 }
 
+/// Steer: a wait beside a working tool must not turn a follow-up into a send-now.
+/// The cancel would cut the working tool off. The row reaches the turn as an interjection instead.
+#[tokio::test]
+#[serial_test::serial(follow_up_steer_cache)]
+async fn queue_input_wait_beside_a_working_tool_folds_instead_of_cancelling() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            crate::util::config::set_follow_up_steer_cache(true);
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+                state.front_message_committed = true;
+            }
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("running".into());
+            let depth = actor.tool_context.blocking_wait_depth.clone();
+            let _wait = crate::tools::tool_context::BlockingWaitGuard::enter(depth.clone());
+            let _busy = crate::tools::tool_context::BusyToolGuard::enter(depth);
+
+            let (respond_to, _p) = oneshot::channel();
+            let cancel = actor
+                .queue_input(queue_input_request(
+                    vec![acp::ContentBlock::Text(acp::TextContent::new("first"))],
+                    "first",
+                    respond_to,
+                ))
+                .await;
+            assert!(!cancel, "a working tool in the batch must not be cancelled");
+
+            let state = actor.state.lock().await;
+            assert!(
+                state.pending_inputs.iter().all(|i| i.prompt_id != "first"),
+                "the row must not stay held until the batch ends"
+            );
+            drop(state);
+            let interjections: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(interjections, vec!["first"]);
+        })
+        .await;
+}
+
 #[tokio::test]
 #[serial_test::serial(follow_up_steer_cache)]
 async fn queue_input_auto_send_now_when_wait_and_held_queue_empty() {

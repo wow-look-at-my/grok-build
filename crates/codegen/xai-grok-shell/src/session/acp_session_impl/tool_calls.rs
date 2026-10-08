@@ -80,7 +80,7 @@ fn should_flush_held_queue_before_wait(
 ) -> bool {
     has_interruptible_wait && steer && !goal_loop_active
 }
-use crate::tools::tool_context::BlockingWaitGuard;
+use crate::tools::tool_context::{BlockingWaitGuard, BusyToolGuard};
 /// Clears `awaiting_plan_approval` (and re-persists) when the [`SessionActor::request_plan_approval`] await resolves or is dropped.
 /// Resolve means a decision came back; drop means the model turn was cancelled, so a cancelled in-session approval can never strand the bit `true`.
 /// `PlanModeState` writes are immediate (no debounce), so writing `false` here would race the quit and lose the gate.
@@ -749,6 +749,12 @@ impl SessionActor {
                 let display_cwd = display_cwd.clone();
                 let interruptible =
                     is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments());
+                // Taken when the batch is built, so a tool still waiting for its turn in the batch counts too.
+                let busy_guard = (!interruptible
+                    && !xai_grok_tools::implementations::grok_build::task::is_task_tool_id(
+                        &prepared.tool_name,
+                    ))
+                .then(|| BusyToolGuard::enter(blocking_wait_depth.clone()));
                 let prepared = {
                     let mut dispatch_prepared = prepared.clone();
                     if interruptible
@@ -791,6 +797,7 @@ impl SessionActor {
                     .and_then(|path| file_locks.get(path).cloned());
                 let tools_execute_span = tracing::Span::current();
                 async move {
+                    let _busy_guard = busy_guard;
                     let exec_start = std::time::Instant::now();
                     let tool_span = crate::session::telemetry::tool_execution_span(
                         &tools_execute_span,
