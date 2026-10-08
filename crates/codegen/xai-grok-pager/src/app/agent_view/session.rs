@@ -2,10 +2,10 @@
 #[cfg(test)]
 use super::test_agent_view;
 use super::{
-    ActivePane, AgentRole, AgentView, ChildLink, InlineMediaHitAreas, InputMode,
-    MODE_REQUEST_LOG_CAP, ModeRequest, PaneAreas, PluginCtaState, PromptInputMode, PromptMode,
-    REWOUND_PROMPT_ID_CAP, ReplayRebuiltState, SELF_ORIGINATED_PROMPT_CAP, SessionReload,
-    ViewSurface, superseded_mode_request,
+    ActivePane, AgentRole, AgentView, ChildLink, InlineMediaHitAreas, MODE_REQUEST_LOG_CAP,
+    ModeRequest, PaneAreas, PluginCtaState, PromptInputMode, PromptMode, REWOUND_PROMPT_ID_CAP,
+    ReplayRebuiltState, SELF_ORIGINATED_PROMPT_CAP, SessionReload, ViewSurface,
+    superseded_mode_request,
 };
 use crate::app::agent::{AgentSession, GoalDisplayStatus};
 use crate::app::app_view::InputOutcome;
@@ -152,7 +152,7 @@ impl AgentView {
     /// The prompt widget is initialized with the session's working directory.
     pub fn new(session: AgentSession, scrollback: ScrollbackState) -> Self {
         let prompt = PromptWidget::new_with_cwd(&session.cwd);
-        let mut view = Self {
+        Self {
             session,
             session_binding_epoch: 0,
             scrollback,
@@ -204,8 +204,6 @@ impl AgentView {
             prompt_mode: PromptMode::Normal,
             prompt_input_mode: PromptInputMode::Normal,
             multiline_mode: false,
-            vim_mode: crate::appearance::cache::load_vim_mode(),
-            input_mode: InputMode::Vim,
             bash_turn: false,
             stashed_prompt: None,
             prompt_stash: None,
@@ -478,14 +476,7 @@ impl AgentView {
             follow_up_pending: HashMap::new(),
             follow_up_pending_order: VecDeque::new(),
             pending_adoption_updates: Vec::new(),
-        };
-        let mode = if crate::appearance::cache::load_simple_mode() {
-            InputMode::Simple
-        } else {
-            InputMode::Vim
-        };
-        view.set_input_mode(mode);
-        view
+        }
     }
     /// Register a child view; the sole path that turns a view into a child, so the role is stamped exactly once.
     /// A child always opens on its transcript, whatever `AgentView::new` chose: `q`/`Esc` close from bare scrollback.

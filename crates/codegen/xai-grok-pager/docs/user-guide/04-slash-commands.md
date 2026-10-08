@@ -141,10 +141,6 @@ For quick recall, press `↑` on an empty prompt instead. With prompts queued, t
 
 Toggle compact display — less padding and tighter spacing for denser output.
 
-### `/vim-mode`
-
-Toggle vim-style scrollback keys (`j`/`k`, `h`/`l`, `g`/`G`, `y`/`Y`, and so on). With it off (the default), a bare letter or `Shift+letter` in the scrollback just focuses the prompt and types the character. The setting persists to `[ui] vim_mode`.
-
 ### `/plan`
 
 Enter plan mode.

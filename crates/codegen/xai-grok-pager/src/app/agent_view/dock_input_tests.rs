@@ -1052,7 +1052,6 @@ fn tab_cycles_scrollback_to_dock_to_prompt() {
     insert_running_task(&mut agent, "bg-1");
     agent.dock_shown = true;
     agent.dock_on = true;
-    agent.vim_mode = true;
     agent.active_pane = AgentPane::Scrollback;
     agent.dock_cursor = agent
         .dock_items()
@@ -1179,7 +1178,6 @@ fn clicking_selected_stop_kills_without_hover() {
 #[test]
 fn tab_from_scrollback_skips_dock_when_hidden() {
     let mut agent = dock_with_task();
-    agent.vim_mode = true;
     agent.dock_shown = false;
     agent.active_pane = AgentPane::Scrollback;
     let registry = ActionRegistry::defaults();

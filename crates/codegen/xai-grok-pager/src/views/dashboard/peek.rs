@@ -118,8 +118,7 @@ impl PeekPanelState {
             options: fields.options,
             request_id: fields.request_id,
             reject_option: fields.reject_option,
-            // Vim: unfocused so row nav isn't stolen by the reply; non-vim: focused to type.
-            focused: !crate::appearance::cache::load_vim_mode(),
+            focused: true,
             selected_option: None,
             // Populated by the render-time refresh from the live agent (see `peek_model_and_mode`); defaults are harmless until then
             model_name: None,
@@ -136,10 +135,6 @@ impl PeekPanelState {
         let row_changed = row != self.row;
         if row_changed {
             self.row = row;
-            // Vim: drop reply focus on row change so continued j/k isn't typed into the reply.
-            if crate::appearance::cache::load_vim_mode() {
-                self.focused = false;
-            }
         }
         self.label = fields.label;
         self.time_ago = fields.time_ago;
@@ -1842,7 +1837,6 @@ mod tests {
     fn render_peek_reply_paste_preview_uses_overlay() {
         use ratatui::buffer::Buffer;
         use ratatui::layout::Rect;
-        crate::appearance::cache::set_vim_mode(false);
         let theme = Theme::current();
         let mut panel = PeekPanelState::new(DashboardRowId::TopLevel(AgentId(0)), fields("Idle"));
         panel.focused = true;

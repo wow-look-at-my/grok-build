@@ -182,19 +182,6 @@ pub struct Shortcut<'a> {
     pub id: usize,
 }
 
-/// Append an `i search` footer hint when a vim-nav picker is in NAV mode (vim-mode on and search not yet active).
-/// The hint is how users discover they can start typing.
-/// No-op otherwise. Shared by the picker modals' footer builders.
-pub fn push_vim_nav_search_hint<'a>(shortcuts: &mut Vec<Shortcut<'a>>, search_active: bool) {
-    if !search_active && crate::appearance::cache::load_vim_mode() {
-        shortcuts.push(Shortcut {
-            label: "i search",
-            clickable: false,
-            id: 0,
-        });
-    }
-}
-
 /// The content area returned by [`render_modal_window`] so the caller knows where to draw their domain-specific content.
 pub struct ModalContentArea {
     /// Rect for the main content (between top padding and footer), inset by `h_pad` on each side.
@@ -1125,27 +1112,6 @@ mod tests {
             sizing: ModalSizing::default(),
             fold_info: None,
         }
-    }
-
-    /// The `i search` footer hint appears only in vim NAV mode (vim-mode on, search inactive), not when typing and not when vim-mode is off.
-    #[test]
-    fn vim_nav_search_hint_only_in_vim_nav_mode() {
-        crate::appearance::cache::set_vim_mode(true);
-        let mut nav: Vec<Shortcut<'static>> = vec![];
-        push_vim_nav_search_hint(&mut nav, false);
-        assert!(
-            nav.iter().any(|s| s.label == "i search"),
-            "vim + nav must surface the i hint"
-        );
-
-        let mut searching: Vec<Shortcut<'static>> = vec![];
-        push_vim_nav_search_hint(&mut searching, true);
-        assert!(searching.is_empty(), "no i hint while already searching");
-
-        crate::appearance::cache::set_vim_mode(false);
-        let mut off: Vec<Shortcut<'static>> = vec![];
-        push_vim_nav_search_hint(&mut off, false);
-        assert!(off.is_empty(), "no i hint when vim-mode is off");
     }
 
     /// Embedded mode (minimal) fills the given area with no centered popup box; the default (full TUI) renders a smaller, centered popup.

@@ -490,7 +490,6 @@ fn open_previous_actions_button_is_v2_only_and_follows_new_agent() {
 
 #[test]
 fn dashboard_session_picker_renders_simple_open_surface() {
-    crate::appearance::cache::set_vim_mode(true);
     let area = Rect::new(0, 0, 100, 28);
     let mut buf = Buffer::empty(area);
     let mut state = DashboardState::new();
@@ -554,7 +553,6 @@ fn dashboard_session_picker_renders_simple_open_surface() {
         !content.contains("i search"),
         "leaving the field must not add an i search hint, got: {content:?}"
     );
-    crate::appearance::cache::set_vim_mode(false);
     assert!(
         content.contains("/ to search"),
         "an unfocused search field must show the browse hint, got: {content:?}"
@@ -1440,54 +1438,7 @@ fn render_footer_surfaces_shortcuts_link() {
     );
 }
 
-/// The location picker opens with input focused, but under vim `Esc` drops it to NAV.
 /// Its footer must surface the `i search` hint there (and hide it in input mode / when vim is off).
-#[test]
-fn location_picker_footer_shows_i_hint_in_vim_nav() {
-    use super::super::state::LocationPickerState;
-    let make = || {
-        LocationPickerState::new(
-            vec![],
-            std::path::PathBuf::from("/tmp"),
-            std::collections::HashMap::new(),
-        )
-    };
-    let area = Rect::new(0, 0, 160, 48);
-    let theme = Theme::current();
-
-    // Vim on in NAV (search inactive): hint present
-    crate::appearance::cache::set_vim_mode(true);
-    let mut nav = make();
-    nav.picker.search_active = false;
-    let mut buf = Buffer::empty(area);
-    render_location_picker(&mut buf, area, &theme, &mut nav);
-    assert!(
-        buf_to_text(&buf).contains("i search"),
-        "location picker footer must show `i search` in vim nav mode",
-    );
-
-    // Vim on in INPUT (the open default): hint absent
-    let mut input = make();
-    input.picker.search_active = true;
-    let mut buf_input = Buffer::empty(area);
-    render_location_picker(&mut buf_input, area, &theme, &mut input);
-    assert!(
-        !buf_to_text(&buf_input).contains("i search"),
-        "no `i search` hint while typing (input mode)",
-    );
-
-    // Vim off: hint absent regardless of mode
-    crate::appearance::cache::set_vim_mode(false);
-    let mut off = make();
-    off.picker.search_active = false;
-    let mut buf_off = Buffer::empty(area);
-    render_location_picker(&mut buf_off, area, &theme, &mut off);
-    assert!(
-        !buf_to_text(&buf_off).contains("i search"),
-        "no `i search` hint when vim-mode is off",
-    );
-}
-
 /// Pressing the help key returns the `DashboardOpenShortcutsHelp` action so the dispatcher can build the modal state.
 /// No `error_toast` is set: an earlier iteration surfaced a hint via the dispatch input placeholder, which conflicted with the typing slot.
 #[test]
@@ -3749,48 +3700,16 @@ fn dispatch_text_rows_grows_with_newlines() {
 
 /// Overview list focused (via Tab) with vim on: the nav chip is dropped from the bottom bar to save space.
 /// Neither the vim `j/k` nor the arrow nav is advertised; the action chips (open) remain.
-#[test]
-fn render_footer_list_focused_vim_on_omits_nav() {
-    let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
-    let theme = Theme::current();
-    let mut state = DashboardState::new();
-    state.focus_row(DashboardRowId::TopLevel(crate::app::agent::AgentId(0)));
-    state.list_focused = true;
-    let registry = crate::actions::ActionRegistry::defaults();
-    crate::appearance::cache::set_vim_mode(true);
-    render_footer(
-        &mut buf,
-        Rect::new(0, 0, 200, 1),
-        &theme,
-        &state,
-        &registry,
-        Some(RowState::Idle),
-        false,
-        None,
-    );
-    let content = buf_to_text(&buf);
-    // Reset before asserting so a failure doesn't leak vim state into the next test sharing this thread's cache
-    crate::appearance::cache::set_vim_mode(false);
-    assert!(
-        !content.contains(":nav") && !content.contains("j/k"),
-        "list-focused footer must omit the nav chip, got: {content:?}",
-    );
-    assert!(
-        content.contains(":open"),
-        "list-focused footer keeps the open chip, got: {content:?}",
-    );
-}
-
+// Reset before asserting so a failure doesn't leak vim state into the next test sharing this thread's cache
 /// Overview list focused with vim off: the nav chip is likewise dropped (no arrow nav advertised), saving bottom-bar space for the action chips.
 #[test]
-fn render_footer_list_focused_vim_off_omits_nav() {
+fn render_footer_list_focused_omits_nav() {
     let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
     let theme = Theme::current();
     let mut state = DashboardState::new();
     state.focus_row(DashboardRowId::TopLevel(crate::app::agent::AgentId(0)));
     state.list_focused = true;
     let registry = crate::actions::ActionRegistry::defaults();
-    crate::appearance::cache::set_vim_mode(false);
     render_footer(
         &mut buf,
         Rect::new(0, 0, 200, 1),
@@ -3847,7 +3766,6 @@ fn render_footer_peek_mode_shows_peek_hints() {
 /// Peek footer flips to send affordances once the reply has text and is focused: `enter:send · ctrl+s:send+open · esc:back`.
 #[test]
 fn render_footer_peek_with_reply_text_shows_send() {
-    crate::appearance::cache::set_vim_mode(false);
     let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
     let theme = Theme::current();
     let mut state = DashboardState::new();
@@ -3884,60 +3802,9 @@ fn render_footer_peek_with_reply_text_shows_send() {
     );
 }
 
-/// Vim with an unfocused peek: Enter focuses the reply (`input`), not open/send.
-#[test]
-fn render_footer_vim_unfocused_peek_enter_shows_input() {
-    crate::appearance::cache::set_vim_mode(true);
-    let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
-    let theme = Theme::current();
-    let mut state = DashboardState::new();
-    state.list_focused = true; // List focus used to steal the footer from the peek
-    state.peek = Some(crate::views::dashboard::peek::PeekPanelState::new(
-        DashboardRowId::TopLevel(crate::app::agent::AgentId(0)),
-        crate::views::dashboard::peek::PeekFields {
-            label: "label".into(),
-            time_ago: String::new(),
-            response_type: "Idle".into(),
-            last_user_message: None,
-            question: None,
-            options: Vec::new(),
-            request_id: None,
-            reject_option: None,
-        },
-    ));
-    assert!(!state.peek.as_ref().unwrap().focused);
-    state.peek_reply.set_text("draft");
-    let registry = crate::actions::ActionRegistry::defaults();
-    render_footer(
-        &mut buf,
-        Rect::new(0, 0, 200, 1),
-        &theme,
-        &state,
-        &registry,
-        Some(RowState::Idle),
-        true,
-        None,
-    );
-    let content = buf_to_text(&buf);
-    assert!(
-        content.contains(":input"),
-        "vim unfocused peek must label Enter as input, got: {content:?}",
-    );
-    assert!(
-        content.contains(":open"),
-        "vim unfocused peek must surface Right:open for attach, got: {content:?}",
-    );
-    assert!(
-        content.contains(":back"),
-        "non-empty draft must label Esc as back, got: {content:?}",
-    );
-    crate::appearance::cache::set_vim_mode(false);
-}
-
-/// Non-vim unfocused peek with a typed draft: Esc clears the draft first (`back`), not New Agent.
+/// An unfocused peek with a typed draft: Esc clears the draft first (`back`), not New Agent.
 #[test]
 fn render_footer_peek_unfocused_with_draft_esc_is_back() {
-    crate::appearance::cache::set_vim_mode(false);
     let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
     let theme = Theme::current();
     let mut state = DashboardState::new();
@@ -3982,7 +3849,6 @@ fn render_footer_peek_unfocused_with_draft_esc_is_back() {
 /// A pending question is an ANSWER surface only when focused AND an option is selected.
 #[test]
 fn render_footer_peek_question_focus_flips_answer_vs_open() {
-    crate::appearance::cache::set_vim_mode(false);
     let theme = Theme::current();
     let registry = crate::actions::ActionRegistry::defaults();
     let make_state = |focused: bool, selected: Option<usize>| {
@@ -4065,39 +3931,7 @@ fn render_footer_peek_question_focus_flips_answer_vs_open() {
     );
 
     // Vim unfocused with a question: Enter:input, Right:open, still 1-9 select
-    crate::appearance::cache::set_vim_mode(true);
-    let mut vim_q = make_state(false, None);
     // Rebuild under vim so focused defaults false.
-    vim_q.peek = Some({
-        let mut peek = crate::views::dashboard::peek::PeekPanelState::new(
-            DashboardRowId::TopLevel(crate::app::agent::AgentId(0)),
-            crate::views::dashboard::peek::PeekFields {
-                label: "label".into(),
-                time_ago: String::new(),
-                response_type: "NeedsInput".into(),
-                last_user_message: None,
-                question: Some("Allow?".into()),
-                options: vec![
-                    ("allow".into(), "Allow".into()),
-                    ("deny".into(), "Deny".into()),
-                ],
-                request_id: None,
-                reject_option: None,
-            },
-        );
-        peek.focused = false;
-        peek
-    });
-    let vim_unfocused = render(&vim_q);
-    assert!(
-        vim_unfocused.contains(":input"),
-        "vim unfocused question must label Enter as input, got: {vim_unfocused:?}",
-    );
-    assert!(
-        vim_unfocused.contains(":select"),
-        "vim unfocused question must keep 1-9 select, got: {vim_unfocused:?}",
-    );
-    crate::appearance::cache::set_vim_mode(false);
 }
 
 /// When a row (NeedsInput or otherwise) is selected with an empty prompt, the footer shows `Enter:open`.
