@@ -577,6 +577,14 @@ impl SessionActor {
         insert_at
     }
 
+    /// Whether an explicit deliver-now may cancel the running turn, under the guards Send Now uses.
+    pub(super) async fn deliver_now_cancels_running_turn(&self) -> bool {
+        let goal_active = self.goal_tracker.lock().status()
+            == Some(crate::session::goal_tracker::GoalStatus::Active);
+        let state = self.state.lock().await;
+        Self::send_now_cancels_running_turn(&state, goal_active)
+    }
+
     fn send_now_cancels_running_turn(state: &State, goal_active: bool) -> bool {
         state.running_prompt_id().is_some() && !goal_active && !Self::front_awaiting_commit(state)
     }
