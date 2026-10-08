@@ -28,6 +28,14 @@ fn follow_up_config_mtime_ns() -> u64 {
         .unwrap_or(0)
 }
 
+/// Read `[ui].follow_up_behavior` by itself. A bad value in another `[ui]` key must not turn Steer into Queue.
+fn steer_from_effective_config(root: &toml::Value) -> bool {
+    root.get("ui")
+        .and_then(|ui| ui.get("follow_up_behavior"))
+        .and_then(toml::Value::as_str)
+        == Some("steer")
+}
+
 /// Update the hot-path Steer cache (same-process tests / after a local write).
 pub fn set_follow_up_steer_cache(steer: bool) {
     FOLLOW_UP_STEER_CACHE.store(
@@ -61,9 +69,7 @@ pub async fn follow_up_steer_enabled() -> bool {
             return false;
         }
     };
-    let enabled = super::load::load_config_from_toml(&root)
-        .ui
-        .follow_up_steer_enabled();
+    let enabled = steer_from_effective_config(&root);
     FOLLOW_UP_STEER_CACHE.store(
         if enabled {
             FOLLOW_UP_CACHE_STEER
@@ -595,4 +601,35 @@ pub async fn set_cancel_subagents_on_turn_cancel(value: String) -> Result<()> {
 /// Restart-required: `resolve_tips` reads this once at startup.
 pub async fn set_show_tips(value: bool) -> Result<()> {
     update_config(|cfg| cfg.cli.show_tips = Some(value)).await
+}
+
+#[cfg(test)]
+mod steer_tests {
+    use super::steer_from_effective_config;
+
+    fn parse(text: &str) -> toml::Value {
+        toml::from_str(text).expect("valid toml")
+    }
+
+    #[test]
+    fn steer_survives_a_bad_sibling_ui_key() {
+        let root = parse("[ui]\nfollow_up_behavior = \"steer\"\nscroll_speed = 9000\n");
+        assert!(
+            super::super::load::load_config_from_toml(&root)
+                .ui
+                .follow_up_behavior
+                .is_none(),
+            "fixture must break the typed [ui] parse"
+        );
+        assert!(steer_from_effective_config(&root));
+    }
+
+    #[test]
+    fn queue_and_unset_read_as_not_steer() {
+        assert!(!steer_from_effective_config(&parse(
+            "[ui]\nfollow_up_behavior = \"queue\"\n"
+        )));
+        assert!(!steer_from_effective_config(&parse("[ui]\n")));
+        assert!(!steer_from_effective_config(&parse("")));
+    }
 }
