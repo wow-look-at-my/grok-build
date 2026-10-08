@@ -75,7 +75,7 @@ async fn deliver_interjection(
     match in_flight {
         InFlightStream::Cancel => {
             tracing::info!("Queued mid-turn interjection");
-            session.cancel_in_flight_stream_for_interjection();
+            let _ = session.cancel_in_flight_stream_for_interjection();
         }
         InFlightStream::Keep => {
             tracing::info!("Queued mid-turn interjection; in-flight stream kept");
@@ -1211,8 +1211,18 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::DeliverQueuedPromptsNow => {
                             // Harvest first: the cancel only pays off if there is something to drain after it.
-                            if session.harvest_queued_prompts_into_interjections(true).await {
-                                session.cancel_in_flight_stream_for_interjection();
+                            if session.harvest_queued_prompts_into_interjections(true).await
+                                && !session.cancel_in_flight_stream_for_interjection()
+                                && session.deliver_now_cancels_running_turn().await
+                            {
+                                // A tool holds the turn, so cut it the way Send Now does. The harvested rows run next.
+                                let settled = session
+                                    .cancel_turn_for_send_now(&mut replay_buffer)
+                                    .await
+                                    .settled;
+                                if settled {
+                                    SessionActor::maybe_start_running_task(session.clone(), completion_tx.clone()).await;
+                                }
                             }
                         }
                         SessionCommand::Cancel(options) => {

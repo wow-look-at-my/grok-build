@@ -820,7 +820,7 @@ impl SessionActor {
                 is_turn_active.store(false, std::sync::atomic::Ordering::Relaxed);
             }
             // The aborted turn's `BlockingWaitGuard`s drop asynchronously (they live in tool futures owned by the drainer task / subagent spawn task).
-            // Until they do, `queue_input` would read a stale depth > 0 and auto-send-now the next prompt against a turn already gone.
+            // Until they do, `queue_input` would read a stale depth > 0 and harvest the next prompt into a turn already gone.
             self.tool_context.blocking_wait_depth.reset();
             self.flush_pending_skill_reminders().await;
         }

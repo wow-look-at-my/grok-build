@@ -30,6 +30,8 @@ mod ctrlc_with_queued_prompt_no_dup;
 mod edit_interject_lone_queued_row_keeps_tui_alive;
 #[path = "pty_e2e/empty_enter_delivers_both_queued_rows.rs"]
 mod empty_enter_delivers_both_queued_rows;
+#[path = "pty_e2e/empty_enter_delivers_queue_while_a_tool_runs.rs"]
+mod empty_enter_delivers_queue_while_a_tool_runs;
 #[path = "pty_e2e/empty_enter_interrupts_with_queued.rs"]
 mod empty_enter_interrupts_with_queued;
 #[path = "pty_e2e/esc_esc_clears_idle_prompt_into_the_stash.rs"]
@@ -64,6 +66,8 @@ mod send_now_tip_after_mid_turn_queue;
 mod send_then_ctrlc_rewinds_to_composer_no_history_dup;
 #[path = "pty_e2e/shift_tab_plan_nudge_from_always_approve_enters_plan.rs"]
 mod shift_tab_plan_nudge_from_always_approve_enters_plan;
+#[path = "pty_e2e/steer_folds_follow_up_into_running_turn.rs"]
+mod steer_folds_follow_up_into_running_turn;
 #[path = "pty_e2e/up_focuses_queue_bottom_row.rs"]
 mod up_focuses_queue_bottom_row;
 #[path = "pty_e2e/verify_bashq_claim2_force_interject.rs"]
