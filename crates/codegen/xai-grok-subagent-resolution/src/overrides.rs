@@ -222,6 +222,7 @@ mod tests {
             foreground_wait_budget_ms: None,
             output_schema: None,
             loop_task_id: None,
+            resource: None,
         }
     }
 
@@ -750,5 +751,45 @@ mod tests {
             Some("CWD role instructions."),
         );
         assert!(result.role_prompt_warning.is_none());
+    }
+
+    // -- Resource conflict policy uses the resolved isolation --
+
+    #[test]
+    fn a_role_worktree_default_isolates_a_conflicting_spawn() {
+        use xai_tool_types::resource_lock::{
+            ResourceConflictResolution, ResourceKey, resolve_resource_conflict,
+        };
+
+        // The effective isolation folds in the role's `default_isolation`, so the conflict policy honors it too.
+        let overrides = make_overrides(None, None, None, None, None);
+        let role = SubagentRole {
+            default_isolation: Some("worktree".into()),
+            ..Default::default()
+        };
+        let effective =
+            resolve_effective_overrides(&overrides, Some(&role), &empty_personas(), None, None);
+        assert_eq!(effective.isolation, SubagentIsolationMode::Worktree);
+        assert_eq!(
+            resolve_resource_conflict(effective.isolation, false, true),
+            ResourceConflictResolution::Wait,
+            "an already-isolated child cannot be separated by another worktree",
+        );
+
+        // Without a role default, a collision is separated into a worktree.
+        let plain = resolve_effective_overrides(&overrides, None, &empty_personas(), None, None);
+        assert_eq!(plain.isolation, SubagentIsolationMode::None);
+        assert_eq!(
+            resolve_resource_conflict(plain.isolation, false, true),
+            ResourceConflictResolution::SeparateWorktree,
+        );
+
+        // The lock key comes from the declared resource, not the agent.
+        assert_eq!(
+            ResourceKey::repo_path("/repo"),
+            ResourceKey::from_resource(&xai_tool_types::resource_lock::SubagentResource::RepoPath(
+                "/repo".into()
+            )),
+        );
     }
 }

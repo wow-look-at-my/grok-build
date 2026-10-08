@@ -9,6 +9,7 @@ mod ext;
 mod glob;
 mod grep;
 mod read;
+pub mod resource_lock;
 mod schema_utils;
 pub mod serde_lenient;
 mod task;
@@ -25,6 +26,9 @@ pub use grep::{
     LenientNumberSchema, LenientNumberSchemaMin0, deserialize_lenient_u32,
 };
 pub use read::{ReadLineCounts, ReadLineRange};
+pub use resource_lock::{
+    ResourceConflictResolution, ResourceKey, SubagentResource, resolve_resource_conflict,
+};
 pub use schema_utils::parse_arguments_from_schema_lossy;
 pub use serde_lenient::{
     deserialize_lenient_bool, deserialize_lenient_i64, deserialize_lenient_option_bool,
