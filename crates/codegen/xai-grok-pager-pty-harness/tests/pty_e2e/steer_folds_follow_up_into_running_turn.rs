@@ -92,6 +92,12 @@ async fn steer_folds_follow_up_into_running_turn() {
         "the first request that carries the follow-up must be the one after the tool\n{}",
         dump_non_system_messages(&bodies)
     );
+    assert_eq!(
+        block_lines_containing(&harness, STEER_MARKER),
+        1,
+        "the follow-up must render exactly once\nscreen:\n{}",
+        harness.screen_contents()
+    );
     assert!(
         !harness.contains_text("panicked"),
         "pager panicked\nscreen:\n{}",
