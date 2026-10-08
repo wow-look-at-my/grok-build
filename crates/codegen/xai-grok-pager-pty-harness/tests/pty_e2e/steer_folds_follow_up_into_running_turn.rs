@@ -176,6 +176,95 @@ async fn steer_folds_follow_up_typed_during_final_answer() {
     harness.quit().expect("clean quit");
 }
 
+/// Steer mode: a follow-up typed while the turn blocks on a task wait reaches the model once.
+/// The wait is interruptible, so the follow-up must not sit until the task ends.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn steer_delivers_follow_up_typed_during_task_wait() {
+    const MARKER: &str = "STEER_WAIT_MARKER_XYZ";
+    let content = ContentController::start().await.expect("start content");
+    seed_ui_config(&content, "follow_up_behavior = \"steer\"");
+    let bg_args = json!({
+        "command": "/bin/sleep 40",
+        "description": "long task",
+        "is_background": true
+    })
+    .to_string();
+    let _bg = expect_tool_turn(&content, "call_wait_bg", "run_terminal_command", bg_args);
+    content.set_response("TURN1_SETTLED");
+
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_in_dir(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text("TURN1_SETTLED", Duration::from_secs(45))
+        .expect("turn 1 settled");
+    let task_id = poll_for(Duration::from_secs(10), || {
+        content
+            .request_bodies()
+            .iter()
+            .find_map(|b| extract_task_id(&b.to_string()))
+    })
+    .expect("task id in a request body");
+
+    let wait_args = json!({ "task_ids": [task_id] }).to_string();
+    let _wait = expect_tool_turn(
+        &content,
+        "call_wait_block",
+        "wait_commands_or_subagents",
+        wait_args,
+    );
+    content.set_response("WAIT_SETTLED");
+    harness
+        .inject_keys(b"now wait\r")
+        .expect("submit wait prompt");
+    harness.update(Duration::from_secs(4));
+    harness
+        .inject_keys(format!("{MARKER} during wait").as_bytes())
+        .expect("type follow-up");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\r").expect("submit follow-up");
+
+    let reached = poll_for(Duration::from_secs(20), || {
+        content
+            .request_bodies()
+            .iter()
+            .any(|b| b.to_string().contains(MARKER))
+            .then_some(())
+    });
+    assert!(
+        reached.is_some(),
+        "the follow-up sat behind the wait\nscreen:\n{}\n{}",
+        harness.screen_contents(),
+        dump_non_system_messages(&content.request_bodies())
+    );
+    harness
+        .wait_for_text("WAIT_SETTLED", Duration::from_secs(30))
+        .expect("settled after the follow-up");
+    harness.update(Duration::from_secs(2));
+    assert_eq!(
+        block_lines_containing(&harness, MARKER),
+        1,
+        "the follow-up must render exactly once\nscreen:\n{}",
+        harness.screen_contents()
+    );
+    harness.quit().expect("clean quit");
+}
+
 /// Steer mode: a follow-up typed during an auto-wake turn reaches that turn at its next request.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
