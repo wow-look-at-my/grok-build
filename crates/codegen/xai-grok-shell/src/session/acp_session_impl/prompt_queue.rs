@@ -1,5 +1,4 @@
 use super::*;
-use xai_agent_lifecycle::ShutdownPolicy;
 
 /// Outcome of a queue send-now request ([`SessionActor::handle_interject_queued_prompt`]).
 /// `mutated` reports whether the request changed anything (promoted, steered, or saved an edit).
@@ -220,9 +219,6 @@ impl SessionActor {
                 (trace_gcs_config, artifact_tracker)
             };
 
-        // Sampled before the lock: resolving it can touch disk.
-        let follow_up_steer = crate::util::config::follow_up_steer_enabled().await;
-
         let mut state = self.state.lock().await;
 
         // User prompts have priority over queued synthetic auto-wake prompts
@@ -313,20 +309,13 @@ impl SessionActor {
         };
 
         // Use `running_prompt_id()`, not `current_prompt_id`, which is cleared while the front is still unpopped
-        // Auto send-now fires only when the turn is blocked in a wait and the held queue is empty
         let running_front_id = state.running_prompt_id().map(str::to_string);
         let turn_running = running_front_id.is_some();
         let goal_active = self.goal_tracker.lock().status()
             == Some(crate::session::goal_tracker::GoalStatus::Active);
         let blocked_in_wait = self.tool_context.blocking_wait_depth.depth() > 0;
-        // Drain-policy rows are held work: visible user/protected rows and queue-hidden human fallbacks (interjection fallback)
-        // Runtime wakes (CancelWithProducer / DropEphemeral) do not block auto-send-now
-        let held_user_queue = state.pending_inputs.iter().any(|queued| {
-            queued.input_origin.policy().shutdown == ShutdownPolicy::Drain
-                && Some(queued.prompt_id.as_str()) != running_front_id.as_deref()
-        });
-        let auto_send_now = follow_up_steer && turn_running && blocked_in_wait && !held_user_queue;
-        let send_now = item.is_queue_editable() && (send_now || auto_send_now);
+        // Only an explicit send-now cancels the turn. A cancel cuts off every tool in flight, so a plain follow-up never makes one.
+        let send_now = item.is_queue_editable() && send_now;
         // A wait is a gap: the harvest aborts the wait, not the turn. A queued send-now cancels the turn, so skip then.
         let harvest_into_wait = !send_now
             && turn_running
