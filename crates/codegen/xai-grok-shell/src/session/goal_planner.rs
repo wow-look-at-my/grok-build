@@ -441,6 +441,7 @@ impl ChannelSpawner {
                 foreground_wait_budget_ms: Some(
                     crate::session::goal_planner::goal_planner_await_budget().as_millis() as u64,
                 ),
+                resource_lock_exempt: true,
                 ..Default::default()
             },
             run_in_background: false,

@@ -4998,6 +4998,60 @@ async fn conflicting_spawn_waits_when_a_worktree_is_unavailable() {
     harness.actor.abort();
 }
 
+/// A lock-exempt spawn pinned by an explicit `cwd` to a held resource starts at
+/// once in the shared tree. This happens where a locking spawn would park on
+/// the holder.
+#[tokio::test]
+async fn lock_exempt_spawn_starts_while_its_cwd_is_held() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(true, std::time::Duration::from_millis(150)),
+    );
+    let backend = harness.backend.clone();
+
+    let first = {
+        let backend = backend.clone();
+        tokio::spawn(async move {
+            let mut holder = request("lock-a", false);
+            holder.cwd = Some("/repo".to_owned());
+            backend.spawn(holder, None).await
+        })
+    };
+    harness.requests.recv().await.expect("holder starts");
+
+    let mut exempt = request("lock-b", false);
+    exempt.cwd = Some("/repo".to_owned());
+    exempt.runtime_overrides.resource_lock_exempt = true;
+    let second = {
+        let backend = backend.clone();
+        tokio::spawn(async move { backend.spawn(exempt, None).await })
+    };
+    let b = harness
+        .requests
+        .recv()
+        .await
+        .expect("exempt child starts while the holder is live");
+    assert_eq!(b.id, "lock-b");
+    assert_eq!(
+        b.runtime_overrides.isolation, None,
+        "an exempt child runs in the shared tree",
+    );
+
+    let _ = harness.finish_one.send("lock-b".to_owned());
+    let result = second
+        .await
+        .expect("spawn task joined")
+        .expect("coordinator channel open");
+    assert!(
+        result.success,
+        "the exempt child must run, not time out on the lock: {:?}",
+        result.error,
+    );
+    let _ = harness.finish_one.send("lock-a".to_owned());
+    let _ = first.await;
+    harness.actor.abort();
+}
+
 /// When the holder never releases, the bounded wait ends in a clear failure.
 #[tokio::test]
 async fn conflicting_spawn_fails_when_the_holder_never_releases() {

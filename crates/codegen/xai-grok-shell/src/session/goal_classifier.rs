@@ -519,6 +519,7 @@ impl ChannelSpawner {
             runtime_overrides: SubagentRuntimeOverrides {
                 model,
                 harness_agent_type,
+                resource_lock_exempt: true,
                 ..Default::default()
             },
             run_in_background: false,
