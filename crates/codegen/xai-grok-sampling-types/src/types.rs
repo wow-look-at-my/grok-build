@@ -2203,7 +2203,6 @@ mod tests {
 
     #[test]
     fn usage_struct_deserializes_bifrost_cost_object() {
-        // Bifrost re-serializes the upstream `BifrostCost` as an object with
         // `total_cost` (and optional per-tier breakdown). The deserializer
         // must accept this shape and expose the same USD float.
         let json = json!({

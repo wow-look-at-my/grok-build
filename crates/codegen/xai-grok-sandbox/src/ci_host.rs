@@ -134,7 +134,6 @@ static SESSION_CI_HOST_FD: std::sync::OnceLock<i32> = std::sync::OnceLock::new()
 /// Start the host worker for a session that is confined in place, before the
 /// confinement is installed, and publish its fd to this process. A confining
 /// profile sandbox (`--sandbox=workspace`, `read-only`, `strict`, a custom
-/// profile) is applied to the running session by `sandbox_init`.
 pub fn start_ci_host_for_session(repo_root: &Path, survives_exec: bool) -> Option<i32> {
     if is_ci_host_subprocess() || ci_host_fd().is_some() || crate::is_jailed() {
         return None;
