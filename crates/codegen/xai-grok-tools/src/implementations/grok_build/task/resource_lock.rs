@@ -32,8 +32,11 @@ impl Default for ResourceLockConfig {
 
 /// The resource key a spawn declares, if any. An explicit
 /// [`xai_tool_types::SubagentResource`] wins; otherwise an explicit `cwd` is
-/// the resource. A spawn that declares neither takes no lock.
+/// the resource. A spawn that declares neither, or is lock-exempt, takes no lock.
 pub(super) fn resource_key_for(request: &SubagentRequest) -> Option<ResourceKey> {
+    if request.runtime_overrides.resource_lock_exempt {
+        return None;
+    }
     if let Some(resource) = request.runtime_overrides.resource.as_ref() {
         return Some(ResourceKey::from_resource(resource));
     }

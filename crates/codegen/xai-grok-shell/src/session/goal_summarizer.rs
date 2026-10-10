@@ -161,6 +161,7 @@ impl ChannelSpawner {
                 model,
                 harness_agent_type,
                 capability_mode: Some(SubagentCapabilityMode::ReadOnly),
+                resource_lock_exempt: true,
                 ..Default::default()
             },
             run_in_background: false,

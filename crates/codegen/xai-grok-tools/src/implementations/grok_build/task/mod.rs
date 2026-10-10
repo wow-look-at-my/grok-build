@@ -647,6 +647,7 @@ impl xai_tool_runtime::Tool for TaskTool {
                 output_schema: None,
                 loop_task_id: None,
                 resource,
+                resource_lock_exempt: false,
             },
             run_in_background: input.run_in_background,
             // Model-spawned subagents must still appear in the idle reminder.

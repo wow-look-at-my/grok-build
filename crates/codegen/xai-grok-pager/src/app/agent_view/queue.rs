@@ -408,7 +408,6 @@ impl AgentView {
             .find(|entry| entry.id == server_id)
             .map(|entry| ServerRowCapabilities::for_pane(&entry.kind, mutation))
     }
-    /// `Some(is_prompt_like)` for a resolvable merged-queue row; `None` when it
     /// can't be resolved. Prompt-like rows may interject: plain prompts, plus
     /// raw skill slash rows (`/find-session args`) whose wire payload IS the
     /// display text. The shell expands those at the interjection drain. Rows

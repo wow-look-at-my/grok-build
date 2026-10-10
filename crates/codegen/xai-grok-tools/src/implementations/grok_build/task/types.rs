@@ -247,6 +247,8 @@ pub struct SubagentRuntimeOverrides {
     pub loop_task_id: Option<String>,
     /// The resource this child will touch, used to derive its inter-agent lock key.
     pub resource: Option<xai_tool_types::SubagentResource>,
+    /// The child takes no inter-agent lock, whatever its `cwd` or `resource`.
+    pub resource_lock_exempt: bool,
 }
 
 /// Re-export of [`xai_tool_types::is_not_sentinel`] for existing call sites.
