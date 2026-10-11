@@ -4998,6 +4998,158 @@ async fn conflicting_spawn_waits_when_a_worktree_is_unavailable() {
     harness.actor.abort();
 }
 
+/// A spawn on `/repo` its caller blocks on until it finishes.
+fn blocking_request(id: &str, caller: &str) -> SubagentRequest {
+    let mut request = request(id, false);
+    request.parent_session_id = caller.to_owned();
+    request.await_to_completion = true;
+    request.cwd = Some("/repo".to_owned());
+    request
+}
+
+/// Spawn `request` on its own task and return the join handle.
+fn spawn_on(
+    backend: &ChannelBackend,
+    request: SubagentRequest,
+) -> tokio::task::JoinHandle<Result<SubagentResult, xai_tool_runtime::ToolError>> {
+    let backend = backend.clone();
+    tokio::spawn(async move { backend.spawn(request, None).await })
+}
+
+/// Children one caller blocks on hold the caller's lock together. A panel of
+/// them on one path all start at once in the shared tree.
+#[tokio::test]
+async fn children_the_caller_blocks_on_share_its_path_lock() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(false, std::time::Duration::from_millis(150)),
+    );
+    let backend = harness.backend.clone();
+
+    let first = spawn_on(&backend, blocking_request("skeptic-1", "parent"));
+    assert_eq!(
+        harness.requests.recv().await.expect("first starts").id,
+        "skeptic-1"
+    );
+    let second = spawn_on(&backend, blocking_request("skeptic-2", "parent"));
+    let started = harness
+        .requests
+        .recv()
+        .await
+        .expect("second starts while the first holds the path");
+    assert_eq!(started.id, "skeptic-2");
+    assert_eq!(started.runtime_overrides.isolation, None);
+
+    let _ = harness.finish_one.send("skeptic-2".to_owned());
+    let _ = harness.finish_one.send("skeptic-1".to_owned());
+    for handle in [first, second] {
+        let result = handle
+            .await
+            .expect("spawn task joined")
+            .expect("coordinator channel open");
+        assert!(
+            result.success,
+            "a sharing child must not time out: {:?}",
+            result.error
+        );
+    }
+    harness.actor.abort();
+}
+
+/// A grandchild its caller blocks on holds for the same owner as that caller,
+/// so the share reaches any depth of blocking calls.
+#[tokio::test]
+async fn a_blocking_grandchild_shares_its_callers_path_lock() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(false, std::time::Duration::from_millis(150)),
+    );
+    let backend = harness.backend.clone();
+
+    let child = spawn_on(&backend, blocking_request("child", "parent"));
+    harness.requests.recv().await.expect("child starts");
+    let sibling = spawn_on(&backend, blocking_request("sibling", "parent"));
+    harness.requests.recv().await.expect("sibling starts");
+    let grandchild = spawn_on(&backend, blocking_request("grandchild", "sibling"));
+    let started = harness
+        .requests
+        .recv()
+        .await
+        .expect("grandchild starts while its caller's owner holds the path");
+    assert_eq!(started.id, "grandchild");
+
+    let _ = harness.finish_one.send("grandchild".to_owned());
+    let result = grandchild
+        .await
+        .expect("spawn task joined")
+        .expect("coordinator channel open");
+    assert!(result.success, "{:?}", result.error);
+    let _ = harness.finish_one.send("sibling".to_owned());
+    let _ = harness.finish_one.send("child".to_owned());
+    let _ = sibling.await;
+    let _ = child.await;
+    harness.actor.abort();
+}
+
+/// Sharing is only between children of one owner: a child its caller blocks
+/// on still waits on a path an independent child holds. An independent
+/// child still waits on a path a blocking child holds.
+#[tokio::test]
+async fn path_lock_excludes_children_of_another_owner() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(false, std::time::Duration::from_millis(150)),
+    );
+    let backend = harness.backend.clone();
+
+    let mut independent = request("independent", false);
+    independent.cwd = Some("/repo".to_owned());
+    let holder = spawn_on(&backend, independent);
+    harness
+        .requests
+        .recv()
+        .await
+        .expect("independent child starts");
+
+    let blocked = spawn_on(&backend, blocking_request("skeptic", "parent"));
+    let result = blocked
+        .await
+        .expect("spawn task joined")
+        .expect("coordinator channel open");
+    assert!(
+        !result.success,
+        "a blocking child of another owner must wait on the holder",
+    );
+    assert!(
+        harness.requests.try_recv().is_err(),
+        "the waiting child never started",
+    );
+    let _ = harness.finish_one.send("independent".to_owned());
+    let _ = holder.await;
+
+    let shared = spawn_on(&backend, blocking_request("skeptic-2", "parent"));
+    harness
+        .requests
+        .recv()
+        .await
+        .expect("blocking child starts");
+    let mut late = request("late", false);
+    late.cwd = Some("/repo".to_owned());
+    let late = spawn_on(&backend, late);
+    let result = late
+        .await
+        .expect("spawn task joined")
+        .expect("coordinator channel open");
+    assert!(
+        !result.success,
+        "an independent child must wait on a blocking child's hold",
+    );
+    assert!(harness.requests.try_recv().is_err());
+    let _ = harness.finish_one.send("skeptic-2".to_owned());
+    let _ = shared.await;
+    harness.actor.abort();
+}
+
 /// When the holder never releases, the bounded wait ends in a clear failure.
 #[tokio::test]
 async fn conflicting_spawn_fails_when_the_holder_never_releases() {
