@@ -88,18 +88,28 @@ impl ResourceLockRegistry {
 
     /// Whether `owner` can take `key` now.
     pub(super) fn is_free(&self, key: &ResourceKey, owner: &str) -> bool {
-        self.holders.get(key).is_none_or(|hold| hold.owner == owner)
+        self.holders
+            .get(key)
+            .is_none_or(|hold| hold.owner == owner || hold.members.is_empty())
     }
 
     /// Take `key` for `holder` on behalf of `owner`, or report who holds it.
     pub(super) fn acquire(&mut self, key: ResourceKey, holder: &str, owner: &str) -> LockOutcome {
         match self.holders.get_mut(&key) {
-            Some(hold) if hold.owner != owner => {
-                return LockOutcome::Conflict {
-                    holder: hold.members[0].clone(),
-                };
-            }
-            Some(hold) => hold.members.push(holder.to_owned()),
+            Some(hold) if hold.owner == owner => hold.members.push(holder.to_owned()),
+            Some(hold) => match hold.members.first() {
+                Some(first) => {
+                    return LockOutcome::Conflict {
+                        holder: first.clone(),
+                    };
+                }
+                None => {
+                    *hold = Hold {
+                        owner: owner.to_owned(),
+                        members: vec![holder.to_owned()],
+                    };
+                }
+            },
             None => {
                 self.holders.insert(
                     key.clone(),
