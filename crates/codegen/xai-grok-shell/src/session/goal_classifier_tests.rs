@@ -202,10 +202,10 @@ async fn channel_spawner_inherit_index_leaves_model_none() {
     handle.await.unwrap();
 }
 
-/// A skeptic runs in the session cwd and judges the tree as it stands. Its
-/// spawn takes no resource lock that another child's path could starve.
+/// A skeptic runs in the session cwd and its caller blocks on it, so it holds
+/// the path lock under its caller's ownership.
 #[tokio::test]
-async fn channel_spawner_skeptic_is_resource_lock_exempt() {
+async fn channel_spawner_skeptic_blocks_its_caller_in_the_session_cwd() {
     use xai_grok_tools::implementations::grok_build::task::types::{SubagentEvent, SubagentResult};
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let spawner = ChannelSpawner {
@@ -234,9 +234,10 @@ async fn channel_spawner_skeptic_is_resource_lock_exempt() {
     };
     assert_eq!(request.cwd.as_deref(), Some("/Users/someone/repos"));
     assert!(
-        request.runtime_overrides.resource_lock_exempt,
-        "a skeptic must not wait on another child's lock on its cwd",
+        request.blocks_its_caller(),
+        "a skeptic shares its caller's lock only while its caller blocks on it",
     );
+    assert_eq!(request.parent_session_id, "parent");
     let _ = request.result_tx.send(SubagentResult::default());
     handle.await.unwrap();
 }

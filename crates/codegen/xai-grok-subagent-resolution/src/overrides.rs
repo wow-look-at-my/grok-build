@@ -223,7 +223,6 @@ mod tests {
             output_schema: None,
             loop_task_id: None,
             resource: None,
-            resource_lock_exempt: false,
         }
     }
 

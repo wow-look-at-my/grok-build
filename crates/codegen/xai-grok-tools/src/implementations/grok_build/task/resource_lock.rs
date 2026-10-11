@@ -32,11 +32,8 @@ impl Default for ResourceLockConfig {
 
 /// The resource key a spawn declares, if any. An explicit
 /// [`xai_tool_types::SubagentResource`] wins; otherwise an explicit `cwd` is
-/// the resource. A spawn that declares neither, or is lock-exempt, takes no lock.
+/// the resource. A spawn that declares neither takes no lock.
 pub(super) fn resource_key_for(request: &SubagentRequest) -> Option<ResourceKey> {
-    if request.runtime_overrides.resource_lock_exempt {
-        return None;
-    }
     if let Some(resource) = request.runtime_overrides.resource.as_ref() {
         return Some(ResourceKey::from_resource(resource));
     }
@@ -51,28 +48,68 @@ pub(super) enum LockOutcome {
     Conflict { holder: String },
 }
 
-/// Which child holds which resource key.
+/// One held key: the lock owner it belongs to, and the children holding it
+/// for that owner.
+struct Hold {
+    owner: String,
+    members: Vec<String>,
+}
+
+/// Which children hold which resource key, and for which lock owner. A lock
+/// owner is the agent a hold belongs to.
 #[derive(Default)]
 pub(super) struct ResourceLockRegistry {
-    holders: HashMap<ResourceKey, String>,
+    holders: HashMap<ResourceKey, Hold>,
     held_by: HashMap<String, Vec<ResourceKey>>,
+    /// The lock owner of every live child.
+    owners: HashMap<String, String>,
     /// Holders whose worktree was created by the conflict policy.
     temporary_worktrees: HashSet<String>,
 }
 
 impl ResourceLockRegistry {
-    pub(super) fn is_free(&self, key: &ResourceKey) -> bool {
-        !self.holders.contains_key(key)
+    /// The lock owner `request` holds for. A child its caller blocks on holds
+    /// for the caller's owner, which is the caller itself when the caller is
+    /// not a child. Any other child is its own owner.
+    pub(super) fn owner_for(&self, request: &SubagentRequest) -> String {
+        if !request.blocks_its_caller() {
+            return request.id.clone();
+        }
+        self.owners
+            .get(&request.parent_session_id)
+            .cloned()
+            .unwrap_or_else(|| request.parent_session_id.clone())
     }
 
-    /// Take `key` for `holder`, or report who holds it.
-    pub(super) fn acquire(&mut self, key: ResourceKey, holder: &str) -> LockOutcome {
-        if let Some(existing) = self.holders.get(&key) {
-            return LockOutcome::Conflict {
-                holder: existing.clone(),
-            };
+    /// Record the lock owner of a child that is starting.
+    pub(super) fn register(&mut self, holder: &str, owner: String) {
+        self.owners.insert(holder.to_owned(), owner);
+    }
+
+    /// Whether `owner` can take `key` now.
+    pub(super) fn is_free(&self, key: &ResourceKey, owner: &str) -> bool {
+        self.holders.get(key).is_none_or(|hold| hold.owner == owner)
+    }
+
+    /// Take `key` for `holder` on behalf of `owner`, or report who holds it.
+    pub(super) fn acquire(&mut self, key: ResourceKey, holder: &str, owner: &str) -> LockOutcome {
+        match self.holders.get_mut(&key) {
+            Some(hold) if hold.owner != owner => {
+                return LockOutcome::Conflict {
+                    holder: hold.members[0].clone(),
+                };
+            }
+            Some(hold) => hold.members.push(holder.to_owned()),
+            None => {
+                self.holders.insert(
+                    key.clone(),
+                    Hold {
+                        owner: owner.to_owned(),
+                        members: vec![holder.to_owned()],
+                    },
+                );
+            }
         }
-        self.holders.insert(key.clone(), holder.to_owned());
         self.held_by.entry(holder.to_owned()).or_default().push(key);
         LockOutcome::Acquired
     }
@@ -82,14 +119,18 @@ impl ResourceLockRegistry {
         self.temporary_worktrees.insert(holder.to_owned());
     }
 
-    /// Release every key `holder` took. Returns whether its worktree was
-    /// policy-created (and is therefore disposable).
+    /// Release every key `holder` took. A key stays held while another member
+    /// still holds it. Returns whether its worktree was policy-created (and is
+    /// therefore disposable).
     pub(super) fn release_all(&mut self, holder: &str) -> bool {
+        self.owners.remove(holder);
         if let Some(keys) = self.held_by.remove(holder) {
             for key in keys {
-                // Only clear the forward entry when this holder still owns it,
-                // so a re-acquired key is never freed by a stale release.
-                if self.holders.get(&key).is_some_and(|owner| owner == holder) {
+                let Some(hold) = self.holders.get_mut(&key) else {
+                    continue;
+                };
+                hold.members.retain(|member| member != holder);
+                if hold.members.is_empty() {
                     self.holders.remove(&key);
                 }
             }
@@ -114,6 +155,8 @@ pub(super) struct LockWaiter {
     /// When the bounded lock wait gives up and the spawn fails.
     pub(super) deadline: tokio::time::Instant,
     pub(super) key: ResourceKey,
+    /// The lock owner the spawn will hold the key for.
+    pub(super) owner: String,
     /// Who held the key when the spawn parked, for the failure message.
     pub(super) holder: String,
 }

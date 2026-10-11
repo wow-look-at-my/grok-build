@@ -1004,13 +1004,12 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 deadline,
             } => (Some(queued_for), deadline),
         };
-        // Inter-agent resource lock. A spawn whose declared resource is held by
-        // a live child either moves into its own temporary worktree or parks
-        // until that child releases.
+        // A held resource isolates or parks the spawn unless its owner holds it.
+        let lock_owner = self.resource_locks.owner_for(&request);
         if self.config.resource_lock.enabled
             && let Some(key) = resource_key_for(&request)
         {
-            match self.resource_locks.acquire(key.clone(), &id) {
+            match self.resource_locks.acquire(key.clone(), &id, &lock_owner) {
                 LockOutcome::Acquired => {}
                 LockOutcome::Conflict { holder } => {
                     match decide_conflict(&request, &self.config.resource_lock) {
@@ -1036,6 +1035,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                                 wake_origin,
                                 wake_of,
                                 key,
+                                lock_owner,
                                 holder,
                             );
                             return;
@@ -1044,6 +1044,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 }
             }
         }
+        self.resource_locks.register(&id, lock_owner);
         let cancellation = request.cancel_token.clone();
         // `spawn_reply: None`: the caller was auto-backgrounded while queued.
         let handle_only = request.run_in_background || spawn_reply.is_none();
@@ -1131,6 +1132,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         wake_origin: Option<WakeOrigin>,
         wake_of: Option<DisplacedCompletedChild>,
         key: xai_tool_types::ResourceKey,
+        owner: String,
         holder: String,
     ) {
         let id = request.id.clone();
@@ -1158,6 +1160,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
             foreground_deadline,
             deadline,
             key,
+            owner,
             holder,
         });
         if let Some(tx) = registered_tx {
@@ -1174,7 +1177,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
         let mut kept = VecDeque::new();
         for waiter in self.lock_waiters.take() {
             if waiter.request.cancel_token.is_cancelled()
-                || self.resource_locks.is_free(&waiter.key)
+                || self.resource_locks.is_free(&waiter.key, &waiter.owner)
             {
                 ready.push(waiter);
             } else {
@@ -1188,7 +1191,7 @@ impl<R: ChildRunner> SubagentCoordinator<R> {
                 continue;
             }
             // Another waiter ahead of this may have taken the key.
-            if !self.resource_locks.is_free(&waiter.key) {
+            if !self.resource_locks.is_free(&waiter.key, &waiter.owner) {
                 self.lock_waiters.push_back(waiter);
                 continue;
             }
