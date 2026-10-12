@@ -142,7 +142,7 @@ jobs:
       - name: Test (PTY end-to-end)
         run: |
           cargo nextest run --locked --workspace --profile ci \
-            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui)' \
+            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_queue)' \
             --run-ignored all --test-threads 4
 
       - uses: ./.github/actions/upload-cargo-timings
