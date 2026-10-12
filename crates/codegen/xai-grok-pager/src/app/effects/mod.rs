@@ -1,7 +1,7 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
 //! This module takes [`Effect`] values produced by [`super::dispatch`] and spawns them as async tasks on a [`JoinSet`].
 //! When tasks complete, the event loop converts their output into [`TaskResult`] and feeds it back through dispatch.
-mod helpers;
+pub(crate) mod helpers;
 mod session_list;
 use super::actions;
 use super::worktree_session;

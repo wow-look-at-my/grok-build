@@ -107,6 +107,74 @@ const ALLOWED_FLAGS: &[&str] = &[
     "-r",
 ];
 
+/// One settings write, as the session asked for it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SettingWriteRequest {
+    pub key: String,
+    pub value: serde_json::Value,
+}
+
+/// The outcome of a host-side settings write.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SettingWriteResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl SettingWriteResponse {
+    pub fn done() -> Self {
+        Self {
+            ok: true,
+            error: None,
+        }
+    }
+
+    pub fn failed(error: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            error: Some(error.into()),
+        }
+    }
+}
+
+/// Settings keys the worker may write to `$GROK_HOME/config.toml` for the user.
+/// Every entry is a display or model-selection preference. Capability-granting
+/// keys (permission mode, sandbox profile, `auto_allow_bash`, provider commands,
+/// `hooks-paths`) are absent, so the worker cannot be driven from inside the jail
+/// into escalating the session that asked.
+pub const ALLOWED_SETTING_KEYS: &[&str] = &[
+    "compact_mode",
+    "trace_upload",
+    "feedback_trace_card",
+    "show_timestamps",
+    "dashboard_preview",
+    "page_flip_on_send",
+    "confirm_before_rewind",
+    "stop_gate_unfinished_todos",
+    "stop_gate_ci_failing",
+    "thinking_summaries",
+    "combine_queued_prompts",
+    "follow_up_behavior",
+    "show_timeline",
+    "contextual_hints.undo",
+    "default_model",
+];
+
+/// Whether `key` is one the worker is permitted to persist.
+pub fn setting_key_allowed(key: &str) -> bool {
+    ALLOWED_SETTING_KEYS.contains(&key)
+}
+
+/// Parse a `setting <json>` body, refusing any key outside the allowlist.
+pub fn parse_setting_request(json: &str) -> Option<SettingWriteRequest> {
+    let request: SettingWriteRequest = serde_json::from_str(json).ok()?;
+    if !setting_key_allowed(&request.key) {
+        return None;
+    }
+    Some(request)
+}
+
 /// Whether this process is the host CI worker (its `main` should run the
 /// worker loop and exit rather than start a session).
 pub fn is_ci_host_subprocess() -> bool {
@@ -244,7 +312,23 @@ fn dup2_to_stdin_stdout(fd: std::os::unix::io::RawFd) {
 /// Run the host CI worker: serve the fixed `gh` status query on stdin/stdout
 /// (both the inherited socket fd) until EOF, then return.
 pub fn run_ci_host_worker() {
-    serve(std::io::stdin(), std::io::stdout());
+    serve(std::io::stdin(), std::io::stdout(), refuse_setting_write);
+}
+
+/// Run the host CI worker with the settings writer the host supplies.
+pub fn run_ci_host_worker_with<F>(setting_writer: F)
+where
+    F: Fn(&SettingWriteRequest) -> SettingWriteResponse,
+{
+    serve(std::io::stdin(), std::io::stdout(), setting_writer);
+}
+
+/// The writer a host that persists no settings serves with.
+pub fn refuse_setting_write(request: &SettingWriteRequest) -> SettingWriteResponse {
+    SettingWriteResponse::failed(format!(
+        "this host does not persist settings (refused `{}`)",
+        request.key
+    ))
 }
 
 /// Serve the worker protocol on one socket instead of stdin/stdout.
@@ -253,10 +337,25 @@ pub fn run_ci_host_worker_on(stream: UnixStream) {
     let Ok(write_half) = stream.try_clone() else {
         return;
     };
-    serve(stream, write_half);
+    serve(stream, write_half, refuse_setting_write);
 }
 
-fn serve<R: std::io::Read, W: Write>(input: R, output: W) {
+/// [`run_ci_host_worker_on`] with the host's settings writer.
+#[cfg(unix)]
+pub fn run_ci_host_worker_on_with<F>(stream: UnixStream, setting_writer: F)
+where
+    F: Fn(&SettingWriteRequest) -> SettingWriteResponse,
+{
+    let Ok(write_half) = stream.try_clone() else {
+        return;
+    };
+    serve(stream, write_half, setting_writer);
+}
+
+fn serve<R: std::io::Read, W: Write, F>(mut input: R, output: W, setting_writer: F)
+where
+    F: Fn(&SettingWriteRequest) -> SettingWriteResponse,
+{
     let mut reader = BufReader::new(input);
     let mut out = output;
     loop {
@@ -270,7 +369,7 @@ fn serve<R: std::io::Read, W: Write>(input: R, output: W) {
         if line.is_empty() {
             continue;
         }
-        handle_request(line, &mut out);
+        handle_request_with(line, &mut out, &setting_writer);
         let _ = out.flush();
     }
 }
@@ -278,9 +377,19 @@ fn serve<R: std::io::Read, W: Write>(input: R, output: W) {
 /// Serve one request line, writing the single-line answer to `out`. Pure and
 /// testable: drives the fixed `gh` queries (`gh-status <branch>` for the CI
 /// dot, `gh-pr <branch>` for the shell's `x.ai/pr/status`), runs an
-/// allowlisted `gh <json argv>`, and answers the `.` nothing-usable sentinel
-/// for anything else (confinement).
+/// allowlisted `gh <json argv>`, persists an allowlisted `setting <json>`
+/// through the host's writer. It answers the `.` nothing-usable sentinel for
+/// anything else (confinement).
 pub fn handle_request<W: Write>(line: &str, out: &mut W) {
+    handle_request_with(line, out, refuse_setting_write);
+}
+
+/// [`handle_request`] with the host's settings writer.
+pub fn handle_request_with<W, F>(line: &str, out: &mut W, setting_writer: F)
+where
+    W: Write,
+    F: Fn(&SettingWriteRequest) -> SettingWriteResponse,
+{
     if let Some(branch) = line.strip_prefix("gh-status ") {
         // A lone `.` is the "nothing usable" sentinel (see module docs).
         write_one_line(out, query_branch(branch).unwrap_or_else(|| vec![b'.']));
@@ -294,6 +403,15 @@ pub fn handle_request<W: Write>(line: &str, out: &mut W) {
         let payload = run_allowlisted(json)
             .and_then(|response| serde_json::to_vec(&response).ok())
             .unwrap_or_else(|| vec![b'.']);
+        write_one_line(out, payload);
+        return;
+    }
+    if let Some(json) = line.strip_prefix("setting ") {
+        let response = match parse_setting_request(json) {
+            Some(request) => setting_writer(&request),
+            None => SettingWriteResponse::failed("setting refused: key not allowlisted"),
+        };
+        let payload = serde_json::to_vec(&response).unwrap_or_else(|_| vec![b'.']);
         write_one_line(out, payload);
         return;
     }
@@ -622,6 +740,41 @@ pub fn query_gh_host(fd: i32, args: &[&str]) -> Option<GhHostResponse> {
     serde_json::from_slice(&response).ok()
 }
 
+/// Ask the host worker to persist one allowlisted user setting.
+#[cfg(unix)]
+pub fn write_setting_on_host(
+    fd: i32,
+    key: &str,
+    value: &serde_json::Value,
+) -> Option<SettingWriteResponse> {
+    let request = SettingWriteRequest {
+        key: key.to_string(),
+        value: value.clone(),
+    };
+    let json = serde_json::to_string(&request).ok()?;
+    let response = exchange(fd, &format!("setting {json}"))?;
+    serde_json::from_slice(&response).ok()
+}
+
+/// Persist one allowlisted user setting on the unsandboxed host worker this
+/// process can reach. `None` means no worker is reachable (an unconfined
+/// session, or a worker too old to answer), so the caller writes in-process.
+pub fn persist_setting_on_host(
+    key: &str,
+    value: &serde_json::Value,
+) -> Option<SettingWriteResponse> {
+    #[cfg(unix)]
+    {
+        let fd = ci_host_fd()?;
+        write_setting_on_host(fd, key, value)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (key, value);
+        None
+    }
+}
+
 /// Run a read-only `gh` command wherever this process can reach `gh`: through
 /// the host worker when sandboxed, by spawning it directly otherwise. The
 /// host worker is authoritative once it exists. A sandboxed session never
@@ -667,6 +820,94 @@ mod tests {
         let mut sink = Sink(Vec::new());
         handle_request(line, &mut sink);
         sink.0
+    }
+
+    /// The worker hands an allowlisted key to the host's writer and reports the
+    /// writer's verdict back on one line.
+    #[test]
+    fn setting_request_reaches_the_hosts_writer() {
+        let mut sink = Sink(Vec::new());
+        handle_request_with(
+            r#"setting {"key":"default_model","value":{"string":"model-b"}}"#,
+            &mut sink,
+            |request| {
+                assert_eq!(request.key, "default_model");
+                assert_eq!(request.value["string"].as_str(), Some("model-b"));
+                SettingWriteResponse::done()
+            },
+        );
+        let text = String::from_utf8(sink.0).expect("utf-8 answer");
+        assert!(text.contains("\"ok\":true"), "answer: {text}");
+    }
+
+    /// Capability-granting keys are refused before the writer is consulted, so
+    /// a confined session cannot escalate through its own host worker.
+    #[test]
+    fn setting_request_refuses_every_capability_granting_key() {
+        for key in [
+            "permission_mode",
+            "sandbox",
+            "auto_allow_bash",
+            "hooks-paths",
+            "default_reasoning_effort",
+        ] {
+            assert!(
+                !setting_key_allowed(key),
+                "`{key}` grants capability and must stay off ALLOWED_SETTING_KEYS"
+            );
+            let request = format!(r#"{{"key":"{key}","value":{{"string":"x"}}}}"#);
+            assert!(
+                parse_setting_request(&request).is_none(),
+                "`{key}` must not parse into a write request"
+            );
+        }
+    }
+
+    /// A refused key answers a structured failure rather than the `.` sentinel.
+    /// The session reports the write as failed rather than falling back to an
+    /// in-process write the sandbox will reject.
+    #[test]
+    fn refused_setting_answers_a_failure_not_the_sentinel() {
+        let mut sink = Sink(Vec::new());
+        handle_request_with(
+            r#"setting {"key":"permission_mode","value":{"string":"bypassPermissions"}}"#,
+            &mut sink,
+            |_| SettingWriteResponse::done(),
+        );
+        let text = String::from_utf8(sink.0).expect("utf-8 answer");
+        assert!(text.contains("\"ok\":false"), "answer: {text}");
+    }
+
+    #[test]
+    fn write_setting_on_host_roundtrips_the_response() {
+        let fd = peer(vec![r#"{"ok":true,"error":null}"#]);
+        let got = write_setting_on_host(
+            fd,
+            "default_model",
+            &serde_json::json!({"string": "model-b"}),
+        )
+        .expect("a response");
+        assert!(got.ok);
+    }
+
+    #[test]
+    fn write_setting_on_host_reports_a_failed_write() {
+        let fd = peer(vec![r#"{"ok":false,"error":"config.toml is unwritable"}"#]);
+        let got = write_setting_on_host(fd, "default_model", &serde_json::json!({"string": "m"}))
+            .expect("a response");
+        assert!(!got.ok);
+        assert_eq!(got.error.as_deref(), Some("config.toml is unwritable"));
+    }
+
+    /// The default writer a host that persists nothing serves with: it refuses,
+    /// so an unprepared host cannot silently claim a settings write landed.
+    #[test]
+    fn the_default_setting_writer_refuses() {
+        let response = refuse_setting_write(&SettingWriteRequest {
+            key: "default_model".to_string(),
+            value: serde_json::json!({"string": "model-b"}),
+        });
+        assert!(!response.ok);
     }
 
     /// Set an env var for one test and restore it on drop.

@@ -2,14 +2,16 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// **`/model` under `--sandbox=workspace` switches live and on the wire, session-only.**
-/// `workspace` write-denies `$GROK_HOME/config.toml` (trust boundary), so the persist
-/// leg of the switch must report success without touching disk and must not roll the
-/// session back. See docs/user-guide/18-sandbox.md, "Direct global write protection".
+/// **`/model` under `--sandbox=workspace` switches live, on the wire, and on disk.**
+/// `workspace` write-denies `$GROK_HOME/config.toml` (trust boundary) for this
+/// process, so the persist leg rides the unsandboxed host worker that started
+/// before confinement. The switch must apply live and must land in `config.toml`;
+/// the in-process deny still stands for every tool path. See
+/// docs/user-guide/18-sandbox.md, "Direct global write protection".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 #[cfg(unix)]
-async fn sandbox_workspace_model_switch_applies_session_only_and_switches_on_wire() {
+async fn sandbox_workspace_model_switch_switches_on_wire_and_persists() {
     let content = ContentController::start_with_models(vec![
         MockModel::new("model-a"),
         MockModel::new("model-b"),
@@ -86,14 +88,20 @@ async fn sandbox_workspace_model_switch_applies_session_only_and_switches_on_wir
         "the request after the switch must carry the switched model\nbodies: {bodies:#?}"
     );
 
-    // The profile write-denies config.toml: the switch must NOT reach disk
-    // (session-only by design, docs/user-guide/18-sandbox.md).
-    let config = std::fs::read_to_string(content.sandbox().grok_home().join("config.toml"))
-        .unwrap_or_default();
-    assert!(
-        !config.contains("model-b"),
-        "[models].default must not be written to the write-denied config.toml\nconfig.toml:\n{config}"
-    );
+    // The in-process write-deny still holds; the host worker started before confinement is what lands the write.
+    let config_path = content.sandbox().grok_home().join("config.toml");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let config = std::fs::read_to_string(&config_path).unwrap_or_default();
+        if config.contains("model-b") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "[models].default must reach config.toml through the host worker\nconfig.toml:\n{config}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
 
     harness.quit().expect("clean quit");
 }
