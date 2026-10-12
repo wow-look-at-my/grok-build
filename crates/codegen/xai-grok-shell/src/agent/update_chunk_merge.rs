@@ -463,9 +463,7 @@ fn merge_xai_chunks(
                     tool_index: prev_idx,
                     name: prev_name.or(new_name),
                     arguments_delta: merged_args,
-                    // The LATEST title wins, the opposite of the name. A name
-                    // is stated once and never changes; a title is restated
-                    // every time the arguments name the call more exactly.
+                    // The LATEST title wins, the opposite of the name.
                     title: new_title.or(prev_title),
                 },
                 meta: None,

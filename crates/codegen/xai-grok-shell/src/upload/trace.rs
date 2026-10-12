@@ -620,8 +620,8 @@ pub(crate) async fn upload_artifact_to_gcs(
 }
 /// One-shot artifact upload and manifest recording.
 ///
-/// `Confirm` (detached/interactive contexts) keeps the direct awaited upload:
-/// the recorded status reflects the actual result, and an interactive turn's
+/// `Confirm` (detached/interactive contexts) keeps the direct awaited upload.
+/// The recorded status reflects the actual result, and an interactive turn's
 /// manifest never races a queue it does not flush. `Defer` (blocking turn
 /// end) routes through the durable queue accept so the prompt response stays
 /// fast and a process exit cannot lose the artifact.

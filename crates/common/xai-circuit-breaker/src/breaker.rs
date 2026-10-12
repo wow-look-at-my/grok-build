@@ -188,12 +188,8 @@ impl CircuitBreaker {
         }
     }
 
-    /// The window is a ring of success/failure counters, and every section that
-    /// writes it is arithmetic, so a poison can only arrive from a caller's own
-    /// panic. Recovering the counters keeps tripping working; refusing to do so
-    /// would turn one bad request into a breaker that never observes anything
-    /// again. `parking_lot::Mutex` is the structural fix and is not a dependency
-    /// of this crate.
+    /// The window is a ring of success/failure counters, and every section
+    /// that writes it is arithmetic.
     #[allow(clippy::disallowed_methods)]
     fn lock_window(&self) -> std::sync::MutexGuard<'_, SlidingWindow> {
         self.inner.window.lock().unwrap_or_else(|e| e.into_inner())

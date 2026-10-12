@@ -147,14 +147,6 @@ impl ToolBridge {
 
     /// [`ToolNamespace`] for a registered tool by client-facing name, or
     /// `None` for unknown names.
-    ///
-    /// Kind alone does not identify an implementation: two namespaces can
-    /// register the same kind with different semantics (grok_build's
-    /// merge-capable `todo_write` versus opencode's replace-only
-    /// `todowrite`, both [`ToolKind::Plan`]). Callers that need one specific
-    /// implementation pair this with the kind, so a `name_override` cannot
-    /// hide it and a same-kind tool from another harness cannot impersonate
-    /// it.
     pub fn tool_namespace(&self, tool_name: &str) -> Option<crate::types::tool::ToolNamespace> {
         self.registry
             .get_tool_metadata(tool_name)

@@ -3,11 +3,7 @@
 use super::mcp_failed_reminder::{classify_failed_servers, render_failed_section};
 use super::*;
 
-/// Margin added to one init pass's own budget before
-/// [`SessionActor::wait_for_mcp_initialized`] gives up. Covers the scheduling
-/// slack between a pass finishing and the state settling, and nothing more:
-/// the point of the deadline is that a session never waits on a server that is
-/// not coming back.
+/// Margin added to one init pass's own budget before [`SessionActor::wait_for_mcp_initialized`] gives up.
 const MCP_INIT_WAIT_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
 use crate::session::mcp_servers::{McpOauthDiscovery, SharedMcpState, Superseded};
 use xai_grok_telemetry::instrument_task;
@@ -1428,9 +1424,7 @@ impl SessionActor {
                     if e.is_auth_rejection() && sname != "unknown" {
                         spawn_auth_failures.push(sname.clone());
                     } else if sname != "unknown" {
-                        // A spawn that never produced a client leaves nothing
-                        // for `build_mcp_status` to report, so the reason is
-                        // kept here or the server shows as merely absent.
+                        // A spawn that never produced a client leaves nothing for `build_mcp_status` to report.
                         spawn_failures.push((sname.clone(), e.to_string()));
                     }
                     let cfg = claim

@@ -22,10 +22,6 @@ pub enum AuthScheme {
     Bearer,
     XApiKey,
     /// Do not attach authentication headers.
-    ///
-    /// This is useful for local OpenAI-compatible servers and, importantly,
-    /// prevents a live first-party session credential from being forwarded to
-    /// an unrelated endpoint.
     None,
 }
 
@@ -68,21 +64,10 @@ pub struct SamplerConfig {
     /// Header name to environment variable, resolved into request headers at client build and never persisted.
     #[serde(default)]
     pub env_http_headers: IndexMap<String, String>,
-    /// Extra top-level fields merged into every request body, from
-    /// `[model.<id>].extra_body` / `[model_providers.<id>].extra_body`.
-    ///
-    /// The typed request structs here are closed, so a per-deployment setting
-    /// that only one target understands has nowhere else to go: LM Studio's
-    /// `ttl` and Ollama's `keep_alive`, `truncate` and `options.num_ctx` are
-    /// each one of those. Merged after the body is built, so it can never
-    /// displace a field a builder decided.
+    /// Extra top-level fields merged into every request body.
     #[serde(default)]
     pub extra_body: serde_json::Map<String, serde_json::Value>,
-    /// Total context window size in tokens. The session reads it for its
-    /// compaction decisions. The sampler holds one thing to it: the requested
-    /// output shares this window with the prompt, so `apply_conversation_defaults`
-    /// cuts `max_output_tokens` to what is left rather than send a body the
-    /// provider rejects on its arithmetic. `0` means unknown, and nothing is cut.
+    /// Total context window size in tokens. The session reads it for its compaction decisions.
     pub context_window: u64,
     /// Provider request-body cap, already defaulted from `api_backend` by model resolution; `None` budgets to 50 MiB.
     #[serde(default)]
@@ -102,12 +87,7 @@ pub struct SamplerConfig {
     #[serde(default)]
     pub reasoning_summary: Option<ReasoningSummary>,
 
-    /// Which optional message properties this target's Chat Completions schema
-    /// accepts. [`ChatMessageProfile::PERMISSIVE`] (the default) sends
-    /// `model_id`/`reasoning_content` on replayed assistant messages;
-    /// [`ChatMessageProfile::STRICT`] omits them for providers that validate
-    /// message schemas strictly. Set from the per-model
-    /// `strict_message_schema` config flag.
+    /// Which optional message properties this target's Chat Completions schema accepts.
     #[serde(default)]
     pub chat_message_profile: ChatMessageProfile,
 
@@ -147,9 +127,7 @@ pub struct SamplerConfig {
     #[serde(default)]
     pub doom_loop_recovery: Option<DoomLoopRecoveryPolicy>,
 
-    /// Floor on the model's output tokens/sec; `None` (or an unarmed policy)
-    /// leaves the stream ungated. A response that stays under the floor for a
-    /// whole window is abandoned and resampled on this policy's own budget.
+    /// Floor on the model's output tokens/sec; `None` (or an unarmed policy) leaves the stream ungated.
     #[serde(default)]
     pub output_rate_floor: Option<xai_grok_sampling_types::OutputRateFloorPolicy>,
 

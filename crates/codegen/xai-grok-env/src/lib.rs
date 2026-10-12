@@ -5,11 +5,7 @@
     unreachable_code,
     dead_code
 )]
-//! Backend environment presets for the Grok CLI crate family: endpoint URL
-//! defaults, environment selection, and env-var test support.
-//!
-//! The compiled production endpoints identify first-party hosts. They are never
-//! connected to by default: a value resolves to its `GROK_*` env var, else blank.
+//! Backend environment presets for the Grok CLI crate family: endpoint URL defaults, environment selection.
 #![deny(clippy::indexing_slicing)]
 mod registry;
 pub use registry::{FIRST_PARTY_CREDENTIAL_ENV_VARS, env_bool, env_string};

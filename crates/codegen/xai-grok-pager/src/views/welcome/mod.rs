@@ -166,8 +166,7 @@ pub struct WelcomeRenderResult {
     pub privacy_banner_opt_out_rect: Option<Rect>,
     pub privacy_banner_terms_rect: Option<Rect>,
     pub privacy_banner_policy_rect: Option<Rect>,
-    /// Screen rect of the build-commit hash text in the version badge, so the
-    /// caller can wrap it with an OSC 8 hyperlink when the terminal supports it.
+    /// Screen rect of the build-commit hash text in the version badge.
     pub commit_hash_link_rect: Option<Rect>,
     /// Hit-test rects for the chat workspace-mode segmented control.
     #[cfg(feature = "local-workspace")]
@@ -555,12 +554,7 @@ pub(super) fn render_version_badge(
         spans.push(sep.clone());
     }
 
-    // The build-commit short hash, displayed after the version string so the
-    // welcome screen shows exactly which commit the binary was built from.
-    // The full hash (BUILD_COMMIT) is used as the OSC 8 link target via the
-    // returned `hash_link_rect` (see below). Suppressed when the build ran
-    // outside a git worktree (`"unknown"`), and in the HeroFooter mode (the
-    // hero-box layout already shows the hash inline inside the box).
+    // This is the build-commit short hash.
     let commit_short = xai_grok_version::BUILD_COMMIT_SHORT;
     let show_hash = commit_short != "unknown" && !matches!(mode, VersionBadgeMode::HeroFooter);
 
@@ -593,8 +587,6 @@ pub(super) fn render_version_badge(
     }
 
     // Append the commit hash span (with a separator) after the version text.
-    // Track whether the hash is the last span so we can compute its screen
-    // position for the OSC 8 link overlay.
     if show_hash {
         spans.push(sep.clone());
         spans.push(Span::styled(
@@ -610,10 +602,6 @@ pub(super) fn render_version_badge(
         spans.pop();
     }
 
-    // Compute the hash span's absolute screen rect so the caller can wrap it
-    // with an OSC 8 hyperlink. The Paragraph widget places the line according
-    // to `align`; for right-aligned lines the line starts at
-    // `area.x + area.width - line_width`.
     let mut hash_link_rect = None;
     if show_hash && let Some(hash_span) = spans.last() {
         let total_width: usize = spans.iter().map(|s| s.content.width()).sum();
@@ -2763,9 +2751,7 @@ mod tests {
     /// reads back the painted cell symbols — no terminal required.
     #[test]
     fn version_badge_paints_commit_hash() {
-        // Only run the assertion when the build actually has a commit hash
-        // (in this repo it does; in a tarball it would be "unknown" and the
-        // hash span is suppressed).
+        // Only run the assertion when the build has a commit hash.
         let hash = xai_grok_version::BUILD_COMMIT_SHORT;
         if hash == "unknown" {
             return;
@@ -2791,8 +2777,7 @@ mod tests {
             hash,
             inline,
         );
-        // HeroFooter must NOT contain the hash (suppressed to avoid duplication
-        // with the hero-box inline badge).
+        // HeroFooter must NOT contain the hash (suppressed to avoid duplication with the hero-box inline badge).
         let footer = badge_text(VersionBadgeMode::HeroFooter, None);
         assert!(
             !footer.contains(hash),
@@ -2801,9 +2786,7 @@ mod tests {
         );
     }
 
-    /// `render_version_badge` must return a `Some(rect)` covering exactly the
-    /// hash text when the hash is present, so the caller can wrap it with an
-    /// OSC 8 link. The rect's width must equal the display width of the hash.
+    /// The rect's width must equal the display width of the hash.
     #[test]
     fn version_badge_returns_hash_link_rect() {
         let hash = xai_grok_version::BUILD_COMMIT_SHORT;
@@ -2834,7 +2817,7 @@ mod tests {
         assert_eq!(rect.height, 1, "hash rect is a single row");
         assert_eq!(rect.y, 0, "hash rect y matches the badge row");
 
-        // Verify the cells under the rect actually contain the hash text.
+        // Verify the cells under the rect contain the hash text.
         let painted: String = (rect.x..rect.x + rect.width)
             .map(|x| {
                 buf.cell((x, rect.y))
@@ -2873,13 +2856,8 @@ mod tests {
         assert!(rect.is_none(), "no hash link rect when hash is unknown");
     }
 
-    /// The OSC 8 link is only emitted when `hyperlink_route().emit_osc8` is
-    /// true (i.e. `Osc8Support::Native` and no skip reason). This test verifies
-    /// the gating logic in `app_view.rs` by checking that `commit_github_url`
-    /// returns `None` for "unknown" (so no link is pushed even if the route
-    /// would emit OSC 8), and `Some` for a real hash (so the link is pushed
-    /// when the route allows it). The actual `emit_osc8` gate is tested in
-    /// `hyperlink_route.rs`.
+    /// A later OSC link is only emitted when `hyperlink_route().emit_osc8`
+    /// is true (i.e. `Osc8Support::Native` and no skip reason).
     #[test]
     fn commit_hash_link_gated_by_url_availability() {
         // Real hash → URL available → link would be pushed when emit_osc8.

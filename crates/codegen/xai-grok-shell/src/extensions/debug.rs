@@ -47,9 +47,7 @@ struct DebugTriggerParams {
 }
 
 impl DebugTriggerParams {
-    /// The keys `session_id` is read under. ACP params are camelCase, which is
-    /// what the container's own renaming reads the field as; the snake_case
-    /// spelling arrives from shell-side callers.
+    /// The keys `session_id` is read under.
     const SESSION_ID_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("sessionId", &["session_id"]);
 }

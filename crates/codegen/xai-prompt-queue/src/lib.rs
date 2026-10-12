@@ -1,7 +1,6 @@
-#![allow(clippy::string_slice)] // 1 hit predates the gate
+#![allow(clippy::string_slice)]
 
-//! Shared prompt-queue wire types, merge rules, and the one definition of
-//! "this queue row's text is a command".
+//! Shared prompt-queue wire types, merge rules, and the definition of "this queue row's text is a command".
 
 #![deny(clippy::indexing_slicing)]
 
@@ -15,18 +14,6 @@ pub use combine::{
 pub use types::{COMBINED_DISPLAY_TEXTS_META, QueueChanged, QueueEntryMeta, QueueEntryWire};
 
 /// Whether `text` is a slash invocation — a `/name` or `/name args` line.
-///
-/// A command line means something only as the LEADING token of its own turn:
-/// the shell resolves a prompt's first token, so a row carrying one must never
-/// be delivered as ordinary user text by any other route (folded into a running
-/// turn, merged with a neighbour, migrated onto the server queue) or the model
-/// reads the literal `/cmd args` and the command never runs.
-///
-/// This is the SINGLE definition of that shape. Both ends — the pager
-/// (`QueuedPrompt` classification and the submit path) and the shell
-/// (`deliverable_mid_turn`, the promote-path combine gate, the goal merges) —
-/// ask here, so the two cannot drift into disagreeing about what a command is.
-/// A bare `/` or a lone `/ ` is not one: no token, so the line is ordinary text.
 pub fn is_slash_invocation(text: &str) -> bool {
     let trimmed = text.trim();
     let Some(without_slash) = trimmed.strip_prefix('/') else {

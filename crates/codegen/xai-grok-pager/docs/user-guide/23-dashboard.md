@@ -19,8 +19,7 @@ disk), or the workflows run UI (`/workflow runs`).
   from inside a session.
 - **`Ctrl+\`** — same view as the slash command.
 
-Set `GROK_AGENT_DASHBOARD=0` or
-`[dashboard].enabled = false` to disable.
+Set `GROK_AGENT_DASHBOARD=0` or `[dashboard].enabled = false` to disable.
 
 ---
 

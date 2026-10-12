@@ -748,8 +748,8 @@ pub fn render_filter_indicator(
 /// Parse `[bracket]` highlight markers in a string into styled spans.
 /// Text inside `[...]` gets `highlight_style`, the rest gets `base_style`.
 /// Brackets are stripped from the output.
-// Both offsets are `find` results for an ASCII bracket, or one past such a
-// match, so every slice here starts and ends on a char boundary.
+/// for an ASCII bracket, or one past such a match. Every slice here starts
+/// and ends on a char boundary.
 #[allow(clippy::string_slice)]
 fn parse_highlight_spans<'a>(s: &'a str, base_style: Style, highlight_style: Style) -> Line<'a> {
     let mut spans = Vec::new();

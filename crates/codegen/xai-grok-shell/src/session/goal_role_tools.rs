@@ -25,12 +25,9 @@ pub(crate) struct RoleToolNames {
     pub web_search: String,
     /// `{WEB_FETCH_TOOL}`: `ToolKind::WebFetch` (planner template only).
     pub web_fetch: String,
-    /// `{TODO_TOOL}` — `ToolKind::Plan`. The planner template names it because
-    /// the planner builds its OWN todo list with that tool as it writes the
-    /// plan; the parent then merges the child's list into the session's.
+    /// `{TODO_TOOL}` — `ToolKind::Plan`.
     pub todo: String,
-    /// `{TOOLSET_TOOLS}` block (verifier-only placeholder; the planner and
-    /// strategist templates do not reference it). Empty on the inherit path.
+    /// `{TOOLSET_TOOLS}` block (verifier-only placeholder; the planner and strategist templates do not reference it).
     pub toolset_tools: String,
 }
 
@@ -111,10 +108,6 @@ impl RoleToolNames {
     }
 
     /// Set `{TODO_TOOL}` from the parent bridge's `Plan`-kind tool name.
-    ///
-    /// A builder rather than another `from_parent` argument: the planner's
-    /// prompt is the only one that names the todo tool, so the other roles'
-    /// call sites (and their tests) keep the literal default.
     pub(crate) fn with_todo(mut self, todo: Option<String>) -> Self {
         self.todo = sanitized_or_default(todo, Self::TODO_FALLBACK);
         self
@@ -137,8 +130,7 @@ impl RoleToolNames {
             get(ToolKind::Execute),
             get(ToolKind::WebSearch),
             get(ToolKind::WebFetch),
-            // The planner builds its own list with the todo tool, so the
-            // explicit-harness render must name THAT harness's todo tool.
+            // The planner builds its own list with the todo tool.
             get(ToolKind::Plan),
             enumerate_toolset_tools(&summary.tool_names),
         )
@@ -295,7 +287,7 @@ pub(crate) mod tests {
 
     /// The planner's `{TODO_TOOL}` resolves to the harness's own todo tool on
     /// both paths: from the describe summary when an explicit harness is
-    /// committed, and from the parent bridge via [`RoleToolNames::with_todo`]
+    /// committed. And from the parent bridge via [`RoleToolNames::with_todo`]
     /// otherwise.
     #[test]
     fn todo_tool_resolves_from_the_summary_and_from_the_parent_bridge() {

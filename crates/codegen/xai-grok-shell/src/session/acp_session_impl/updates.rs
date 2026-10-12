@@ -353,8 +353,8 @@ impl SessionActor {
     /// Emit a notification that has come out of the high-frequency streaming path (after the `ReplayBuffer` has decided to flush it).
     /// ACP (`AgentMessageChunk`, `AgentThoughtChunk`) delegates to `emit_notification_direct` (persists and forwards to the gateway).
     /// xAI (`ToolCallDeltaChunk`) inlines a gateway forward as `ExtNotification` only, with no persistence and no hook dispatch.
-    /// xAI (`ResponseCompleted`) is forwarded AND persisted: it is the only carrier of a message's cost.
-    /// It stays on this rail so it keeps its order against its own response's chunks, and it gets no `_meta` because this rail mints no `eventId`.
+    /// (`ResponseCompleted`) is forwarded AND persisted: it is the only carrier of a message's cost. It stays on this rail so it keeps its order
+    /// against its own response's chunks. It gets no `_meta` because this rail mints no `eventId`.
     pub(super) async fn emit_buffered(&self, notification: SessionNotification) {
         match notification {
             SessionNotification::Acp(n) => {
@@ -1002,10 +1002,10 @@ impl SessionActor {
     }
     /// Build the per-response boundary update, projecting the response's usage
     /// into the Messages API `message.usage` shape (uncached `input_tokens`).
-    ///
-    /// `cost_usd_ticks` is the cost this exact call was billed at (as recorded
-    /// into the ledgers by `record_response_token_usage`) and
-    /// `session_cost_usd_ticks` the session ledger's running total after it.
+    /// `input_tokens`). `cost_usd_ticks` is the cost this exact call was
+    /// billed at (as recorded into the ledgers by
+    /// `record_response_token_usage`) and `session_cost_usd_ticks` the
+    /// session ledger's running total after it.
     pub(super) fn response_completed_update(
         &self,
         response: &xai_grok_sampling_types::ConversationResponse,

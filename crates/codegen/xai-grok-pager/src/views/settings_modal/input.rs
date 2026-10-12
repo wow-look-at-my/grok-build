@@ -421,12 +421,7 @@ fn handle_int_stepper(
             SettingsKeyOutcome::Changed
         }
         KeyCode::Enter => {
-            // Commit the raw buffer: parse as i64, clamp to [min,max], then
-            // dispatch. Stepper steps keep the buffer in-range, but typed
-            // digits may land out of range until the user Backspaces, so the
-            // clamp on commit is the guarantee that a dispatched value is
-            // always valid. An empty buffer parses to None and is treated as a
-            // no-op (nothing dispatches).
+            // Commit the raw buffer: parse as i64, clamp to [min,max], then dispatch.
             let clamped = buffer.parse::<i64>().ok().map(|i| i.clamp(min, max));
             state.transition_to_browse();
             match clamped.and_then(|i| action_for_int(setting_key, i)) {
@@ -441,11 +436,10 @@ fn handle_int_stepper(
                 }
             }
         }
-        // Digit typing: append the digit to the in-place buffer so the user can
-        // type e.g. `1000000` directly. The value is only clamped on commit
-        // (and when later stepping), so a number still being entered is never
-        // truncated mid-keystroke. Backspace drops the last digit, letting the
-        // user clear the seeded value before typing a fresh one.
+        // Digit typing: append the digit to the in-place buffer so the user
+        // can type e.g. `1000000` directly. The value is only clamped on
+        // commit (and when later stepping), so a number still being entered
+        // is never truncated mid-keystroke.
         KeyCode::Char(c) if key.modifiers.is_empty() && c.is_ascii_digit() => {
             // Cap buffer length to avoid unbounded growth from held keys.
             if buffer.chars().count() >= 12 {

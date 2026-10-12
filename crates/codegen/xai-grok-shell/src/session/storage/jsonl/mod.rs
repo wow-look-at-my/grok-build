@@ -822,10 +822,7 @@ impl JsonlStorageAdapter {
             }
             Err(error) => return Err(error),
         };
-        // Sort before capping, and cap on runs actually restored. Capping raw
-        // `read_dir` output restored whichever subset the filesystem happened
-        // to yield first, and let an entry that is rejected anyway — a
-        // symlink, a cleared run, an unreadable manifest — evict a real run.
+        // Sort before capping, and cap on runs restored.
         let mut entries: Vec<_> = std::fs::read_dir(&workflows_dir)?
             .filter_map(Result::ok)
             .take(MAX_SCANNED_WORKFLOW_ENTRIES)

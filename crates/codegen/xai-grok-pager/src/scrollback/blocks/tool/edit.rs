@@ -757,7 +757,6 @@ pub struct EditToolCallBlock {
     pub prefix: &'static str,
     pub display_name: Option<String>,
     /// One-liner summary can't be trusted: the call touched multiple files, or the path fell back to the tool title.
-    /// It suppresses the diffstat suffix, and `ScrollbackState` keeps such blocks expanded.
     pub summary_untrusted: bool,
     /// Cached `(insertions, deletions)` count, computed eagerly from hunks.
     change_counts: (usize, usize),

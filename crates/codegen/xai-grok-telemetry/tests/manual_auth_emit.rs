@@ -1,10 +1,5 @@
 #![allow(clippy::disallowed_methods)] // test clients hit localhost mocks
-//! Wire test pinning the **build-baseline disabled contract** for product
-//! events. `client::track` is hard-disabled in this build (returns before any
-//! routing), so `log_event(ManualAuth)` must NOT POST to the product events
-//! endpoint — even with `TelemetryMode::Enabled` and a fully-configured client
-//! pointed at a live collector. Mocks the observability backend (real HTTP
-//! collector) and asserts it receives nothing.
+//! Wire test pinning the **build-baseline disabled contract** for product events.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -67,8 +62,7 @@ async fn manual_auth_does_not_post_when_product_telemetry_disabled() {
         principal: Some("user-xyz".into()),
     });
 
-    // The emit is fire-and-forget; give any (erroneous) POST ample time to land,
-    // then assert the collector stayed empty.
+    // The emit is fire-and-forget.
     tokio::time::sleep(Duration::from_secs(1)).await;
     let count = bodies.lock().unwrap().len();
     assert_eq!(

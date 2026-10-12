@@ -554,16 +554,14 @@ fn default_web_search_model() -> String {
     std::env::var("GROK_WEB_SEARCH_MODEL").unwrap_or_else(|_| "grok-4.5".to_string())
 }
 
-/// The `web_search` backend for a session.
-///
-/// `[web_search] provider = "kagi"` (which resolves to
-/// `GROK_WEB_SEARCH_PROVIDER=kagi`) routes the tool through Kagi's Search API.
-/// Kagi returns results already filtered, ranked, and snippet-ed, so no
-/// synthesis model is called and none has to be configured.
-///
-/// Kagi takes its own credential — `Authorization: Bot <token>`, not the
-/// session bearer — so the token is read from `KAGI_API_KEY`. Without one this
-/// falls back to the default backend rather than silently disabling search.
+/// The `web_search` backend for a session. `[web_search] provider = "kagi"`
+/// (which resolves to `GROK_WEB_SEARCH_PROVIDER=kagi`) routes the tool
+/// through Kagi's Search API. Kagi returns results already filtered, ranked,
+/// and snippet-ed, so no synthesis model is called and none has to be
+/// configured. Kagi takes its own credential — `Authorization: Bot
+/// <token>`, not the session bearer — so the token is read from
+/// `KAGI_API_KEY`. Without one this falls back to the default backend rather
+/// than silently disabling search.
 fn web_search_config(
     token: &str,
     api_base_url: &str,

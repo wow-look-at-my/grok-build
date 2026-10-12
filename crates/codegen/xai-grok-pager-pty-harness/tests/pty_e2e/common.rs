@@ -56,7 +56,6 @@ pub(crate) fn unified_log_path(content: &ContentController) -> PathBuf {
 pub(crate) const UNDO_TIP_SENTINEL: &str = "to undo";
 
 /// Suffix of the mid-turn send-now tip: `Queued · Enter to interrupt & send` (or the interject chord in multiline).
-/// Chord-agnostic like [`UNDO_TIP_SENTINEL`].
 pub(crate) const SEND_NOW_TIP_SENTINEL: &str = "to interrupt & send";
 
 /// A draft of FIRE_PEAK_LEN (20) or more chars.
@@ -190,17 +189,10 @@ pub(crate) fn spawn_polling_session_with_env(
 
 // ── Agent type mismatch e2e tests ──────────────────────────────────────
 
-/// Start the mock server with two models that have different agent types,
-/// and return a `ContentController` configured for agent-type-mismatch
-/// testing. The default model is `"default-model"` (no agent type → uses
+/// Start the mock server with models that have different agent types, and
+/// return a `ContentController` configured for agent-type-mismatch testing.
+/// The default model is `"default-model"` (no agent type → uses
 /// `grok-build` harness).
-///
-/// The second model's agent type must be one `is_strict_harness_agent_type`
-/// recognizes, which means a name in `BuiltinAgentName`. An unknown name
-/// resolves to non-strict -- deliberately, so no harness is enforced that
-/// cannot be verified -- and non-strict against non-strict is COMPATIBLE, so a
-/// made-up type produces no mismatch and every one of these tests waits out its
-/// timeout on a modal that was never going to open.
 pub(crate) async fn start_dual_agent_type_content() -> ContentController {
     ContentController::start_with_models(vec![
         MockModel::new("default-model"),
@@ -210,8 +202,7 @@ pub(crate) async fn start_dual_agent_type_content() -> ContentController {
     .expect("start content with dual agent types")
 }
 
-/// A strict-harness agent type for mismatch tests -- see
-/// [`start_dual_agent_type_content`] for why it cannot be an arbitrary string.
+/// A strict-harness agent type for mismatch tests.
 pub(crate) const STRICT_HARNESS_AGENT_TYPE: &str = "grok-build-orchestrator";
 
 // ── Folder-trust welcome sub-state e2e ──────────────────────────────────
