@@ -420,8 +420,21 @@ fn parse_skeptic_terminal_rejects_lowercase() {
 }
 
 #[test]
-fn parse_skeptic_terminal_rejects_json_and_prose() {
-    assert_eq!(parse_skeptic_terminal_response("{\"refuted\":true}"), None);
+fn parse_skeptic_terminal_accepts_json_and_rejects_prose() {
+    assert_eq!(
+        parse_skeptic_terminal_response("{\"refuted\":true}"),
+        Some(true)
+    );
+    assert_eq!(
+        parse_skeptic_terminal_response("{\n  \"refuted\": false,\n  \"evidence\": \"ok\"\n}"),
+        Some(false),
+        "a JSON verdict answers without any terminal phrase",
+    );
+    assert_eq!(
+        parse_skeptic_terminal_response("```json\n{\"refuted\": false}\n```"),
+        Some(false),
+        "a fence-wrapped JSON verdict must parse, not degrade to a synthetic refute",
+    );
     assert_eq!(
         parse_skeptic_terminal_response("The work is Refuted"),
         None,
@@ -492,7 +505,7 @@ fn parse_verdict_json_parses_findings_and_drops_empty() {
 
 #[test]
 fn parse_verdict_json_omits_details_md_optional_field() {
-    // `details_md` is a harness extension to the literal VERDICT_SCHEMA; only `refuted`, `evidence`, and `confidence` are required
+    // `details_md` is a harness extension to the literal VERDICT_SCHEMA; only the `refuted` boolean decides
     // A clean parse without `details_md` succeeds; the aggregator then falls back to the on-disk per-skeptic details file
     let body = r#"{"refuted":false,"evidence":"src/x.rs:1","confidence":"high"}"#;
     let v = parse_verdict_json(body).expect("parses");
@@ -547,25 +560,109 @@ fn parse_verdict_json_rejects_missing_refuted_field() {
 }
 
 #[test]
-fn parse_verdict_json_rejects_missing_evidence_per_design() {
-    // The schema makes `evidence` mandatory to stop rubber-stamping
-    assert!(parse_verdict_json(r#"{"refuted":false,"confidence":"high"}"#).is_none());
+fn parse_verdict_json_accepts_missing_evidence() {
+    // The boolean `refuted` field is the vote; a thin verdict answers with it
+    let v = parse_verdict_json(r#"{"refuted":false,"confidence":"high"}"#).expect("parses");
+    assert!(!v.refuted);
+    assert!(v.evidence.is_empty());
 }
 
 #[test]
-fn parse_verdict_json_rejects_empty_evidence() {
-    // Stronger than "missing evidence": a whitespace-only or empty string is the same rubber-stamp failure mode
-    assert!(parse_verdict_json(r#"{"refuted":false,"evidence":"","confidence":"high"}"#).is_none());
-    assert!(
-        parse_verdict_json(r#"{"refuted":false,"evidence":"   \n  ","confidence":"high"}"#)
-            .is_none()
-    );
+fn parse_verdict_json_accepts_empty_evidence() {
+    let v = parse_verdict_json(r#"{"refuted":false,"evidence":"","confidence":"high"}"#)
+        .expect("parses");
+    assert!(!v.refuted);
+    let v = parse_verdict_json(r#"{"refuted":false,"evidence":"   \n  ","confidence":"high"}"#)
+        .expect("parses");
+    assert!(!v.refuted);
 }
 
 #[test]
-fn parse_verdict_json_rejects_missing_confidence() {
-    // Matches the verdict schema `required: ["refuted","evidence","confidence"]`.
-    assert!(parse_verdict_json(r#"{"refuted":true,"evidence":"x"}"#).is_none());
+fn parse_verdict_json_missing_confidence_degrades_to_unknown() {
+    // The verdict schema names `confidence`, but a vote without it still votes
+    let v = parse_verdict_json(r#"{"refuted":true,"evidence":"x"}"#).expect("parses");
+    assert!(v.refuted);
+    assert_eq!(v.confidence, SkepticConfidence::Unknown);
+}
+
+/// The shipped channel-resolution path, table-driven: the JSON `refuted` field is the
+/// vote. The terminal response answers only when no JSON verdict exists, and only a
+/// genuinely verdict-free run keeps the fail-closed refute.
+#[test]
+fn json_refuted_field_decides_the_vote_across_channels() {
+    struct Row {
+        label: &'static str,
+        json: Option<&'static str>,
+        terminal: &'static str,
+        want_refuted: bool,
+    }
+    let rows = [
+        Row {
+            label: "json false with no terminal phrase",
+            json: Some(r#"{"refuted":false}"#),
+            terminal: "The plan is satisfied by the diff.",
+            want_refuted: false,
+        },
+        Row {
+            label: "json false with full evidence",
+            json: Some(r#"{"refuted":false,"evidence":"src/x.rs:1","confidence":"high"}"#),
+            terminal: "",
+            want_refuted: false,
+        },
+        Row {
+            label: "json true with no terminal phrase",
+            json: Some(r#"{"refuted":true}"#),
+            terminal: "cannot confirm anything",
+            want_refuted: true,
+        },
+        Row {
+            label: "json true overrides a Not Refuted phrase",
+            json: Some(r#"{"refuted":true,"evidence":"src/x.rs:9","confidence":"low"}"#),
+            terminal: "Not Refuted",
+            want_refuted: true,
+        },
+        Row {
+            label: "terminal json verdict with no verdict file",
+            json: None,
+            terminal: "{\"refuted\":false}",
+            want_refuted: false,
+        },
+        Row {
+            label: "terminal phrase only",
+            json: None,
+            terminal: "Not Refuted",
+            want_refuted: false,
+        },
+        Row {
+            label: "prose only fails closed",
+            json: None,
+            terminal: "hmm, refuted maybe",
+            want_refuted: true,
+        },
+        Row {
+            label: "json without a refuted boolean fails closed",
+            json: Some(r#"{"evidence":"x","confidence":"high"}"#),
+            terminal: "maybe",
+            want_refuted: true,
+        },
+    ];
+    for row in rows {
+        let (result, _details_md) = skeptic_result_from_sources(0, row.json, row.terminal, 10);
+        assert_eq!(result.refuted, row.want_refuted, "{}", row.label);
+    }
+}
+
+/// Clean `{"refuted": false}` verdicts with no terminal phrase carry the panel: the
+/// aggregator sees zero refutes and the goal is achieved.
+#[test]
+fn json_votes_without_phrases_reach_the_aggregate_as_not_refuted() {
+    let votes: Vec<SkepticResult> = [1_u32, 2]
+        .into_iter()
+        .map(|idx| skeptic_result_from_sources(idx, Some(r#"{"refuted":false}"#), "done", 5).0)
+        .collect();
+    let (refuted, total, achieved) = aggregate_skeptic_verdicts(&votes);
+    assert_eq!((refuted, total), (0, 2));
+    assert!(achieved, "two JSON not-refuted votes must achieve");
 }
 
 #[test]
@@ -2459,7 +2556,7 @@ async fn verification_stage_skeptic_terminal_only_fallback_counts() {
         "terminal-only skeptic must surface as confidence=unknown",
     );
     assert!(log.iter().any(|t| t == "skeptic:1:true:unknown"));
-    assert!(body.contains("verdict JSON missing/malformed; used terminal token"));
+    assert!(body.contains("verdict JSON missing/malformed; used terminal response"));
 }
 
 #[tokio::test]
