@@ -736,9 +736,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "dashboard_preview",
         // PAGER-owned page_flip_on_send (Appearance).
         "page_flip_on_send",
-        // PAGER-owned vim_mode (Appearance,
-        // paired with simple_mode).
-        // Theme enums.
+        // PAGER-owned vim_mode (Appearance, paired with simple_mode). Theme enums.
         "theme",
         "auto_dark_theme",
         "auto_light_theme",
@@ -756,8 +754,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "collapsed_edit_blocks",
         // SHARED-owned thinking_summaries (Appearance; below collapsed_edit_blocks, because those rows above it are pinned into one adjacency chain).
         "thinking_summaries",
-        // SHARED-owned thinking-summary history window and count floor
-        // (Appearance; registered directly after thinking_summaries).
+        // SHARED-owned thinking-summary history window and count floor (Appearance; registered directly after thinking_summaries).
         "thinking_summary_history_window_secs",
         "thinking_summary_history_min_count",
         // SHELL-owned display_refresh_auto_cadence (Appearance).
