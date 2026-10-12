@@ -60,7 +60,6 @@ jobs:
 
   build-test:
     name: Build & test
-    needs: slopfix
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ubuntu-22.04
     # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s. A job past this is broken, not slow.
@@ -151,7 +150,6 @@ jobs:
 
   build-release:
     name: Build release (${{ matrix.name }})
-    needs: slopfix
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
     strategy:
@@ -311,7 +309,7 @@ jobs:
   # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
   release:
     name: Create buildhost release
-    needs: [build-test, test-darwin-sandbox, build-release]
+    needs: [slopfix, build-test, test-darwin-sandbox, build-release]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:
@@ -357,7 +355,6 @@ jobs:
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
-    needs: slopfix
     runs-on: macos-14
     timeout-minutes: 25
     steps:
