@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/slopfix@master
 
@@ -49,7 +49,7 @@ jobs:
     # Its own job, not a step of build-test: rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build it would otherwise sit behind.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
@@ -69,7 +69,7 @@ jobs:
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS: the -j3 compile-RAM cap belongs to the build step alone.
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Report disk before build
         run: df -h /
@@ -170,7 +170,7 @@ jobs:
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: ./.github/actions/setup-protoc
 
@@ -318,7 +318,7 @@ jobs:
     outputs:
       version: ${{ steps.rel.outputs.version }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Create release
         id: rel
@@ -334,7 +334,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/actions@cache-download#latest
         with:
@@ -358,7 +358,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
@@ -378,7 +378,7 @@ jobs:
       artifact-metadata: write # buildhost-publish-release records what it stored on the org's linked artifacts page
       actions: write # cache-cleanup deletes this run's binary hand-offs
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/actions@cache-download#latest
         with:
