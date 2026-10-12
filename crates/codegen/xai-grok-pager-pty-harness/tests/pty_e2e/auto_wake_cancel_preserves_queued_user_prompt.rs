@@ -194,7 +194,7 @@ pub(crate) async fn run_wake_cancel_scenario(gesture: WakeCancelGesture, cast_pr
     harness.update(Duration::from_millis(500));
     if matches!(gesture, WakeCancelGesture::SendNow) {
         harness
-            .wait_for_text("send now", Duration::from_secs(3))
+            .wait_for_text("interrupt & send", Duration::from_secs(3))
             .unwrap_or_else(|_| {
                 panic!(
                     "Send now affordance missing during idle-looking wake; screen:\n{}",
