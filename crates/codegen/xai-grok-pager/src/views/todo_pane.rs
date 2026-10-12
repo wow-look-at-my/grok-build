@@ -157,10 +157,16 @@ fn empty_placeholder_message(todos_empty: bool, counts: TodoCounts) -> String {
     }
 }
 
+/// Whether the header has a `done/total` count to draw: there are items, and at least one of them
+/// is not cancelled.
+fn header_shown(counts: TodoCounts) -> bool {
+    counts.total() > 0 && counts.total_excluding_cancelled() > 0
+}
+
 /// The header's `done/total` count: completed items over every task that can still be completed.
 /// `None` when there are no items at all, or none that can be completed (every task cancelled).
 fn header_count_line(counts: TodoCounts) -> Option<Line<'static>> {
-    if counts.total() == 0 {
+    if !header_shown(counts) {
         return None;
     }
     let total = counts.total_excluding_cancelled();
@@ -296,9 +302,7 @@ impl TodoPane {
         self.show_done = !self.show_done;
     }
 
-    /// Desired height in lines for layout computation. Returns 0 when hidden (overlay not visible or no
-    /// items). When visible but empty, returns 1 (for the placeholder message). Otherwise: the visible
-    /// items plus the header line, capped at `min(10, 15% of view_height)` but at least 1.
+    /// Desired height in lines for layout computation.
     pub fn desired_height(&self, view_height: u16) -> u16 {
         if !self.overlay.visible {
             return 0;
@@ -309,7 +313,9 @@ impl TodoPane {
         }
         let fraction_cap = (view_height as f32 * MAX_TODO_FRACTION).floor() as u16;
         let max = MAX_TODO_HEIGHT.min(fraction_cap).max(1);
-        ((count as u16) + HEADER_HEIGHT).min(max).max(1)
+        ((count as u16) + u16::from(header_shown(self.counts())))
+            .min(max)
+            .max(1)
     }
 
     /// Number of items that pass the `show_done` filter.
@@ -397,10 +403,10 @@ impl TodoPane {
         }
     }
 
-    /// Split the inner area into the header row and the list body. A pane too short to hold a
-    /// header above at least one item gets no header row: the items keep every line.
-    fn split_header(inner: Rect) -> (Option<Rect>, Rect) {
-        if inner.height <= HEADER_HEIGHT {
+    /// Split the inner area into the header row and the list body. The row is reserved only when
+    /// there is a count to draw and room for an item below it; otherwise the items keep every line.
+    fn split_header(inner: Rect, show_header: bool) -> (Option<Rect>, Rect) {
+        if !show_header || inner.height <= HEADER_HEIGHT {
             return (None, inner);
         }
         let header = Rect {
@@ -451,10 +457,9 @@ impl TodoPane {
             }
             return;
         }
-        let (header_row, body) = Self::split_header(inner);
-        if let Some(header_row) = header_row
-            && let Some(line) = header_count_line(self.counts())
-        {
+        let header = header_count_line(self.counts());
+        let (header_row, body) = Self::split_header(inner, header.is_some());
+        if let (Some(header_row), Some(line)) = (header_row, header) {
             use crate::render::SafeBuf;
             buf.set_line_safe(header_row.x, header_row.y, &line, header_row.width);
         }
