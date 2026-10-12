@@ -204,8 +204,8 @@ fn combine_front_skips_client_expanded_skill() {
 }
 
 /// A queued command row never merges: `resolve` reads a prompt's LEADING token
-/// only, so a `/cmd args` folded in behind a plain row would reach the model as
-/// literal prose and the command would never run.
+/// only. A `/cmd args` folded in behind a plain row would reach the model as
+/// literal prose. The command would never run.
 #[test]
 fn combine_front_stops_at_a_command_row() {
     let mut pending = std::collections::VecDeque::from([
@@ -2315,7 +2315,7 @@ async fn queue_input_send_now_during_goal_turn_merges_as_interjections_fifo() {
 
 /// The goal-turn exception: a COMMAND row is promoted to run as its own turn
 /// instead of steering the live planner. `resolve` reads only a prompt's leading
-/// token, so steering `/cmd args` into the goal turn would hand the model the
+/// token. Steering `/cmd args` into the goal turn would hand the model the
 /// literal line and the command would never run.
 #[tokio::test]
 async fn goal_send_now_promotes_a_command_row_instead_of_steering_it() {
@@ -2379,11 +2379,12 @@ async fn goal_send_now_promotes_a_command_row_instead_of_steering_it() {
 }
 
 /// DIAGNOSTIC (not a regression guard yet): the automatic ASAP path — a
-/// plain queued row with no `send_now` — reaches `queue_input` and/// `harvest_queued_prompts_into_interjections` exactly the same way whether
-/// or not a goal is active. Confirms the harvest function itself carries no
-/// goal-awareness, so if goal mode really blocks ASAP delivery the gate must
-/// live in how often turn.rs's loop *calls* the harvest during a goal round,
-/// not in the harvest or the enqueue path.
+/// plain queued row with no `send_now`. Reaches `queue_input` and///
+/// `harvest_queued_prompts_into_interjections` exactly the same way whether a
+/// goal is active. Confirms the harvest function itself carries no
+/// goal-awareness. The gate must live in how often turn.rs's loop *calls* the
+/// harvest during a goal round, not in the harvest or the enqueue path. This
+/// holds if goal mode blocks ASAP delivery.
 #[tokio::test]
 async fn plain_queue_during_goal_turn_is_harvested_like_any_other_turn() {
     let local = tokio::task::LocalSet::new();
@@ -2436,7 +2437,7 @@ async fn plain_queue_during_goal_turn_is_harvested_like_any_other_turn() {
 }
 
 #[tokio::test]
-async fn queue_input_auto_send_now_only_inside_wait_window() {
+async fn queue_input_wait_folds_held_and_new_rows() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -2551,9 +2552,10 @@ async fn queue_input_queue_mode_wait_delivers_without_cancelling() {
         .await;
 }
 
+/// Steer: a follow-up during a wait reaches the running turn at its next step. It never cancels the turn, which would cut off every tool in flight.
 #[tokio::test]
 #[serial_test::serial(follow_up_steer_cache)]
-async fn queue_input_auto_send_now_when_wait_and_held_queue_empty() {
+async fn queue_input_steer_wait_folds_follow_ups_without_cancelling() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -2571,67 +2573,39 @@ async fn queue_input_auto_send_now_when_wait_and_held_queue_empty() {
                 .expect("current_prompt_id mutex poisoned") = Some("running".into());
             actor.tool_context.blocking_wait_depth.set_depth_for_test(1);
 
-            let _ = prompt_queue::take_queued_commit_count();
-            let (respond_to, _p) = oneshot::channel();
-            let cancel = actor
-                .queue_input(queue_input_request(
-                    vec![acp::ContentBlock::Text(acp::TextContent::new("first"))],
-                    "first",
-                    respond_to,
-                ))
-                .await;
-            assert!(cancel, "first prompt during empty-held wait must cancel");
-            assert_eq!(prompt_queue::take_queued_commit_count(), 0);
+            for (text, id) in [("first", "first"), ("second", "second")] {
+                let (respond_to, _p) = oneshot::channel();
+                let cancel = actor
+                    .queue_input(queue_input_request(
+                        vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
+                        id,
+                        respond_to,
+                    ))
+                    .await;
+                assert!(!cancel, "a Steer follow-up must not cancel the turn: {id}");
+            }
 
             let state = actor.state.lock().await;
-            let order: Vec<&str> = state
-                .pending_inputs
-                .iter()
-                .map(|i| i.prompt_id.as_str())
-                .collect();
-            assert_eq!(order, vec!["running", "first"]);
             assert!(
-                state
-                    .pending_inputs
-                    .iter()
-                    .find(|i| i.prompt_id == "first")
-                    .is_some_and(|i| i.send_now),
-                "first empty-held wait prompt is send-now"
+                state.pending_inputs.iter().all(|i| !i.send_now),
+                "no follow-up becomes a send-now"
             );
-
             drop(state);
-            let (respond_to, _p2) = oneshot::channel();
-            let cancel2 = actor
-                .queue_input(queue_input_request(
-                    vec![acp::ContentBlock::Text(acp::TextContent::new("second"))],
-                    "second",
-                    respond_to,
-                ))
-                .await;
-            assert!(!cancel2, "second prompt with held row must not cancel");
-            let state = actor.state.lock().await;
-            let order: Vec<&str> = state
-                .pending_inputs
-                .iter()
-                .map(|i| i.prompt_id.as_str())
+            let interjections: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
                 .collect();
-            assert_eq!(order, vec!["running", "first", "second"]);
-            assert!(
-                !state
-                    .pending_inputs
-                    .iter()
-                    .find(|i| i.prompt_id == "second")
-                    .is_some_and(|i| i.send_now),
-                "second prompt is a plain held append"
-            );
+            assert_eq!(interjections, vec!["first", "second"]);
         })
         .await;
 }
 
 /// Hidden user-origin interjection fallbacks still count as held work.
-/// A mid-wait prompt must not auto-send-now and cancel the running turn just because the fallback is queue-hidden.
+/// A mid-wait prompt folds into the running turn and never cancels it.
 #[tokio::test]
-async fn queue_input_auto_send_now_blocked_by_hidden_user_fallback() {
+async fn queue_input_hidden_user_fallback_mid_wait_folds() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -2675,10 +2649,7 @@ async fn queue_input_auto_send_now_blocked_by_hidden_user_fallback() {
                     respond_to,
                 ))
                 .await;
-            assert!(
-                !cancel,
-                "hidden user fallback must block auto-send-now cancel"
-            );
+            assert!(!cancel, "a mid-wait prompt must not cancel the turn");
             let state = actor.state.lock().await;
             assert!(
                 state.pending_inputs.iter().all(|i| i.prompt_id != "d-mid"),
@@ -2700,10 +2671,10 @@ async fn queue_input_auto_send_now_blocked_by_hidden_user_fallback() {
         .await;
 }
 
-/// A foreground subagent await (its `BlockingWaitGuard`) opens the same send-now window.
+/// A foreground subagent await (its `BlockingWaitGuard`) is a wait too: a follow-up folds into the turn and never cancels it.
 #[tokio::test]
 #[serial_test::serial(follow_up_steer_cache)]
-async fn queue_input_auto_send_now_during_foreground_subagent_await_window() {
+async fn queue_input_foreground_subagent_await_folds_without_cancelling() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -2739,8 +2710,19 @@ async fn queue_input_auto_send_now_during_foreground_subagent_await_window() {
                 ))
                 .await;
             assert!(
-                cancel,
-                "a prompt sent during a foreground subagent await must take the send-now path"
+                !cancel,
+                "a prompt sent during a foreground subagent await must not cancel the subagent's turn"
+            );
+            let folded: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(
+                folded,
+                vec!["preempt"],
+                "it reaches the turn when the subagent returns"
             );
 
             drop(wait_guard);
@@ -2771,8 +2753,8 @@ async fn queue_input_auto_send_now_during_foreground_subagent_await_window() {
                 .collect();
             assert_eq!(
                 order,
-                vec!["running", "during-await", "after-await"],
-                "the mid-await prompt runs next; the later one queues behind it"
+                vec!["running", "after-await"],
+                "the mid-await prompt went into the turn; the later one queues"
             );
         })
         .await;
@@ -4137,27 +4119,17 @@ async fn rewind_if_pristine_never_pops_an_interjection_fallback_front() {
         .await;
 }
 
-/// Regression: the ASAP harvest's opening-pass skip must fire only on the
-/// true opening pass of the WHOLE turn, never on the opening pass of a later
-/// round within it (a goal round, an auto-recovery retry). `loop_index`
-/// alone cannot tell the two apart — each round calls
-/// `process_conversation_turn` fresh, resetting `loop_index` to 0 — so a
-/// `loop_index == 1` skip gated on nothing else silenced every automatic
-/// ASAP delivery for the rest of a goal turn: round 2 onward never harvested
-/// a single queued row, though manual send-now (a different code path)
-/// still worked. `first_round` carries the missing turn-scoped half.
+/// Regression. Consider the ASAP harvest's opening-pass skip. That skip must
+/// fire only on the true opening pass of the WHOLE turn, never on the
+/// opening pass of a later round. That round is within it (a goal round, an
+/// auto-recovery retry).
 #[test]
 fn harvest_gate_skips_only_the_turns_true_opening_pass() {
     use super::turn::should_harvest_before_request;
 
-    // Round 1, request 1: the turn has produced nothing yet — skip.
     assert!(!should_harvest_before_request(1, true));
-    // Round 1, request 2+: later requests in the same round always harvest.
     assert!(should_harvest_before_request(2, true));
     assert!(should_harvest_before_request(3, true));
-    // Round 2+ (a goal continuation, or an auto-recovery retry): loop_index
-    // resets to 1, but the turn already produced output in round 1 — this is
-    // the exact case that was silently skipped before the fix.
     assert!(should_harvest_before_request(1, false));
     assert!(should_harvest_before_request(2, false));
 }

@@ -93,14 +93,10 @@ fn todo_gate_reminder_renders_plan_tool_name() {
     );
 }
 
-// Interaction with the existing periodic TodoNudge reminder: they
-// address different concerns. The design intentionally
-// separates them, so the gate's reminder must use the gate's own
-// vocabulary — not the periodic-nudge phrasing. The real
-// `TodoNudgeState::try_fire` text is gated behind `&mut self` +
-// private counter fields, so we keep the assertion to the gate
-// side (positive: the gate uses its own phrasing; the periodic
-// nudge's signature phrase must not leak in).
+// Interaction with the existing periodic TodoNudge reminder: they address
+// different concerns. The design intentionally separates them, so the gate's
+// reminder must use the gate's own vocabulary — not the periodic-nudge
+// phrasing.
 #[test]
 fn todo_gate_has_its_own_vocabulary() {
     let gate = build_todo_gate_reminder(&[("t1", "only-pending")], &[]);
@@ -112,9 +108,8 @@ fn todo_gate_has_its_own_vocabulary() {
         "gate reminder must use its own signature phrase, got:\n{gate}"
     );
     // The periodic-nudge text from
-    // `xai_grok_tools::reminders::todo_nudge::try_fire` is "The {}
-    // tool hasn't been used recently…" — leaking that phrase into
-    // the gate's body would conflate the two reminders.
+    // `xai_grok_tools::reminders::todo_nudge::try_fire` is "The {} tool
+    // hasn't been used recently…".
     assert!(
         !gate.contains("hasn't been used recently"),
         "gate must not borrow the periodic-nudge phrasing, got:\n{gate}"
@@ -152,9 +147,8 @@ fn budget_permits_exactly_max_blocks_then_releases() {
 
 #[test]
 fn toggle_off_blocks_nothing_at_any_budget_state() {
-    // The persisted `[ui].stop_gate_unfinished_todos` toggle is the
-    // master switch: with it off, the todo gate must never block,
-    // whatever the continuation counter is.
+    // The persisted `[ui].stop_gate_unfinished_todos` toggle is the master
+    // switch: with it off, the todo gate must never block.
     let nudge = TodoGateDecision::Nudge {
         reminder: String::new(),
         reason: TodoGateReason::InFlight,
@@ -186,8 +180,6 @@ fn todo_gate_empty_state_no_compaction_passes() {
 #[test]
 fn todo_gate_reminder_omits_empty_sections() {
     // Only the populated sections render; empty buckets are dropped.
-    // The backed-in-progress bucket is never listed (deliberately
-    // removed — the gate already decided not to nudge on those).
     let r = build_todo_gate_reminder(&[("t1", "only-pending")], &[]);
     assert!(r.contains("Pending:"));
     assert!(!r.contains("In-progress (no backing"));
@@ -299,9 +291,7 @@ fn as_input_completed_and_cancelled_are_dropped() {
     );
     let input = c.as_input();
     assert!(input.pending.is_empty());
-    // Insertion-order partition is computed AFTER completed /
-    // cancelled are filtered out: `first-ip` (which appears
-    // before `second-ip` in `todos`) is the one backed slot.
+    // Insertion-order partition is computed AFTER completed / cancelled are filtered out: `first-ip`.
     assert_eq!(contents(&input.in_progress_backed), vec!["first-ip"]);
     assert_eq!(contents(&input.in_progress_unbacked), vec!["second-ip"]);
 }

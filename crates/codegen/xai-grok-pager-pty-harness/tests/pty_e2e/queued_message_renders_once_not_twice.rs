@@ -1,14 +1,10 @@
-//! PTY, flag-file driven like `endline_park_is_markerless`: the "queued
-//! message appears 2x" regression. A message queued mid-turn is delivered
-//! into the running turn at its next model request — asserting it renders
-//! exactly once as a "❯ " block with no queue row left behind, and reaches
-//! the model exactly once, carrying the interjection preamble.
+//! PTY, flag-file driven like `endline_park_is_markerless`: the "queued message appears 2x" regression.
 #[allow(unused_imports)]
 use super::common::*;
 
 /// User messages in the most recent request body that contain `needle`.
 /// Counted per-request, not across all of them: every later request replays
-/// the same history, so a cross-request tally cannot tell a duplicate from a
+/// the same history. A cross-request tally cannot tell a duplicate from a
 /// resend.
 #[cfg(unix)]
 fn user_hits_in_last_request(content: &ContentController, needle: &str) -> usize {
@@ -41,7 +37,7 @@ async fn queued_message_renders_once_not_twice() {
         format!("while [ ! -e {} ]; do /bin/sleep 0.2; done", flag.display())
     };
 
-    // Tool call 1: the flag-gated background command the wait blocks on.
+    // Tool one call: the flag-gated background command the wait blocks on.
     let bg_args = json!({
         "command": gated_loop(&park_flag),
         "description": "flag-gated command",
@@ -51,8 +47,8 @@ async fn queued_message_renders_once_not_twice() {
     let _background_turn =
         expect_tool_turn(&content, "call_qonce_bg", "run_terminal_command", bg_args);
 
-    // Tool call 2: the flag-gated foreground hold — the mid-turn window
-    // where the follow-up is queued.
+    // Tool the flag-gated foreground hold: the flag-gated foreground hold
+    // — the mid-turn window where the follow-up is queued.
     let id_hold_args = json!({
         "command": gated_loop(&id_ready_flag),
         "description": "hold for id extraction"
@@ -101,8 +97,7 @@ async fn queued_message_renders_once_not_twice() {
     });
 
     // Queue the follow-up while the id-hold tool is still running: the turn
-    // is inside a tool, so nothing has been sent to the model since it was
-    // typed.
+    // is inside a tool.
     harness
         .inject_keys(format!("{QUEUED_TEXT}\r").as_bytes())
         .expect("queue follow-up mid-turn");
@@ -126,9 +121,7 @@ async fn queued_message_renders_once_not_twice() {
         "no request has been made since the follow-up was typed"
     );
 
-    // Tool call 3: block on the REAL task. The follow-up must already have
-    // been delivered on the request that produced this call — it is not held
-    // for the wait, and nothing was cancelled to deliver it.
+    // Tool a later call: block on the REAL task.
     let wait_args = json!({
         "task_ids": [task_id],
         "timeout_ms": 600_000

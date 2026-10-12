@@ -415,9 +415,9 @@ impl SessionActor {
             extra.insert("cancellationContext".to_string(), ctx);
         }
         let extra_meta = (!extra.is_empty()).then_some(extra);
-        // Session-cumulative cost at the terminal: this is the last point in a
-        // turn where a subagent fold can still land after the final model call,
-        // so a client's idle total is only exact if it is refreshed here.
+        // Session-cumulative cost at the terminal. This is the last point in
+        // a turn where a subagent fold can still land after the final model
+        // call.
         let session_cost_usd_ticks = self
             .chat_state_handle
             .try_get_session_usage()
@@ -535,15 +535,9 @@ impl SessionActor {
         )
     }
 
-    /// Whether re-sending the same request could plausibly succeed.
-    ///
-    /// Every terminal sampler failure arrives as `-32603`, so the pause path
-    /// treats them all as infra and offers `/goal resume`. For a request the
-    /// server rejected on its content, that offer is a loop: resume rebuilds
-    /// the same conversation and earns the same rejection. The status is what
-    /// separates the two — 4xx is about what was sent, minus the ones that
-    /// clear on their own: 401 (a credential refresh runs between attempts),
-    /// 408/425 (timing), 429 (the wait is the remedy).
+    /// Whether re-sending the same request could plausibly succeed. Every
+    /// terminal sampler failure arrives as `-32603`, so the pause path treats
+    /// them all as infra and offers `/goal resume`.
     pub(super) fn retry_can_clear_turn_error(err: &acp::Error) -> bool {
         match crate::sampling::error::http_status_from_error(err) {
             Some(401 | 408 | 425 | 429) => true,
@@ -713,7 +707,7 @@ mod goal_pause_message_tests {
         ))
     }
 
-    /// The reported trap: a content rejection (here the vision 404) offered
+    /// The reported trap: a content rejection (here a later vision) offered
     /// `/goal resume`, which rebuilt the same request and failed the same way.
     #[test]
     fn content_rejections_do_not_offer_a_bare_resume() {

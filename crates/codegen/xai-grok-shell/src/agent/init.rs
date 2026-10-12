@@ -436,9 +436,7 @@ fn init_process(cfg: &AgentConfig, auth_manager: &AuthManager) {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        // Every agent mode (stdio/headless/leader and the in-process TUI
-        // agent) passes through here, so diagnostic uploads always carry
-        // the version stamp and the resource ceilings in effect.
+        // Every agent mode (stdio/headless/leader and the in-process TUI agent) passes through here.
         xai_grok_telemetry::unified_log::set_version(xai_grok_version::version());
         let limits = crate::util::limits::ProcessLimits::read();
         limits.log();

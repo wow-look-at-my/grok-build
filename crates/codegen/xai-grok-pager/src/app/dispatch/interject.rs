@@ -119,20 +119,17 @@ fn dispatch_interject_on_inner(
 }
 
 /// Interrupt the running turn with the whole queue (bare Enter on an empty
-/// composer while busy).
-///
-/// Server-owned rows ride one `x.ai/queue/deliver_now`: the shell harvests
-/// them into the running turn and cancels the in-flight model stream, so the
-/// model stops mid-response and reads them. Local rows the shell has never
-/// seen (image prompts, skill-expanded slash rows, anything queued before the
-/// session bound) are sent as interjections here, which cancels the same
-/// stream shell-side.
-///
-/// Rows that own their own turn — bash commands, client-expanded slash
-/// payloads, and a slash invocation the shell must resolve (`/compact`,
-/// `/plan`; the interjection drain resolves skills only) — cannot be folded
-/// into another turn as user text, so they stay queued and run when this turn
-/// ends. That is named in the toast rather than left for the user to notice.
+/// composer while busy). Server-owned rows ride one `x.ai/queue/deliver_now`:
+/// the shell harvests them into the running turn and cancels the in-flight
+/// model stream. The model stops mid-response and reads them. Local rows the
+/// shell has never seen (image prompts, skill-expanded slash rows, anything
+/// queued before the session bound) are sent as interjections here, which
+/// cancels the same stream shell-side. Rows that own their own turn — bash
+/// commands, client-expanded slash payloads, and a slash invocation the shell
+/// must resolve (`/compact`, `/plan`. The interjection drain resolves skills
+/// only) — cannot be folded into another turn as user text, so they stay
+/// queued and run when this turn ends. That is named in the toast rather than
+/// left for the user to notice.
 pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<Effect> {
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
@@ -146,10 +143,10 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
         }
         let session_id = agent.session.session_id.clone();
         let running = agent.session.current_prompt_id.clone();
-        // The shell folds only steering text into a running turn; a queued bash
-        // row is executed from its block meta, and a slash invocation is
-        // resolved by the shell only when its own turn starts, so both keep
-        // their own turn (`wire_row_is_steering_text` mirrors the shell's rule).
+        // The shell folds only steering text into a running turn. A queued bash
+        // row is executed from its block meta. A slash invocation is resolved by
+        // the shell only when its own turn starts, so both keep their own turn
+        // (`wire_row_is_steering_text` mirrors the shell's rule).
         let (server_rows, stuck_server) = agent
             .shared_queue
             .iter()
@@ -166,9 +163,7 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
         let (deliverable, stuck_local): (Vec<u64>, Vec<u64>) = local_ids
             .into_iter()
             .partition(|row| agent.queue_row_prompt_like(*row) == Some(true));
-        // A row whose own `session/prompt` RPC is still in flight may not exist
-        // shell-side yet, so a deliver-now fired now could harvest nothing. Park
-        // it for the confirming broadcast (see `deliver_now_awaiting_confirm`).
+        // A row whose own `session/prompt` RPC is still.
         let awaiting_confirm = !agent.optimistic_queue_ids.is_empty();
         (
             session_id,
@@ -220,8 +215,7 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
             (true, true) => {
                 "Interrupting — messages sent; bash/command rows run when this turn ends"
             }
-            // Only rows that own their turn are queued: nothing can be folded
-            // into this turn, so say that instead of claiming an interrupt.
+            // Only rows that own their turn are queued: nothing can be folded into this turn.
             (false, _) => "Nothing to send now — bash/command rows run when this turn ends",
         });
     }
@@ -240,13 +234,12 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
 
 /// Cancel-and-send: send `text` (+ images) as a fresh `sendNow` prompt so the
 /// shell cancels the running turn and runs it next. The user block paints at
-/// dispatch (the arm hides the queue echo; the adoption reuses the block).
-///
-/// A slash invocation this client OWNS (a pager builtin: `/plan`, `/model`, …)
-/// is not a message at all and is routed back through the submit path instead:
-/// the shell has no such command, so sending the text would hand the model the
-/// literal `/cmd args`. Shell-owned commands (ACP-advertised skills and
-/// builtins) keep the send-now route — the shell resolves those when the
+/// dispatch (the arm hides the queue echo; the adoption reuses the block). A
+/// slash invocation this client OWNS (a pager builtin: `/plan`, `/model`,
+/// …) is not a message at all and is routed back through the submit path
+/// instead. The shell has no such command. Sending the text would hand the
+/// model the literal `/cmd args`. Shell-owned commands (ACP-advertised skills
+/// and builtins) keep the send-now route. The shell resolves those when the
 /// prompt's own turn starts, which is exactly what "now" means for them.
 pub(super) fn dispatch_send_prompt_now(
     app: &mut AppView,
@@ -297,9 +290,9 @@ pub(super) fn dispatch_send_prompt_now(
     }
 
     // A payload-free pager-builtin invocation: hand it to the submit path,
-    // which resolves the registry (pager builtins execute; shell commands land
-    // back on the local queue and run as their own turn). A row carrying a
-    // client-expanded payload keeps the old route — that payload IS the send.
+    // which resolves the registry (pager builtins execute; shell commands
+    // land back on the local queue and run as their own turn). A row carrying
+    // a client-expanded payload keeps the route — that payload IS the send.
     if wire_blocks.is_none() {
         let pager_owned = app
             .agents
@@ -308,8 +301,7 @@ pub(super) fn dispatch_send_prompt_now(
         if pager_owned {
             // The producer already took the text (and any attachment) out of
             // the composer, so hand the attachment to the row this command
-            // queues — what the Enter path does with composer images
-            // (`drain_prompt_state_to_last_queued`).
+            // queues.
             let queued_before = app
                 .agents
                 .get(&id)
@@ -342,7 +334,7 @@ pub(super) fn dispatch_send_prompt_now(
     super::queue::arm_send_now_and_paint_dispatched(agent, &prompt_id, &text);
 
     // A skill's expanded payload IS the send: build_content_blocks would send
-    // `text`, the display form, instead of what the model must actually see.
+    // `text`, the display form, instead of what the model must see.
     let blocks = match wire_blocks {
         Some(blocks) => blocks,
         None => {
@@ -375,9 +367,7 @@ pub(super) fn dispatch_send_prompt_now(
 }
 
 /// Whether `text` names a command this client must execute itself — a pager
-/// builtin (`/plan`, `/model`, …). Shell-advertised commands are deliberately
-/// excluded: the shell resolves those when the prompt runs as its own turn, so
-/// they keep the plain send-now route.
+/// builtin (`/plan`, `/model`, …).
 fn is_pager_owned_slash_invocation(agent: &AgentView, text: &str) -> bool {
     crate::slash::parse_invocation(text.trim()).is_some_and(|invocation| {
         agent
@@ -388,16 +378,13 @@ fn is_pager_owned_slash_invocation(agent: &AgentView, text: &str) -> bool {
     })
 }
 
-/// Give a command's force-sent attachments to the row the command just queued.
-///
-/// The composer producer drains the text and its images before dispatching, so
-/// a command that runs through the registry has to be told where the
-/// attachment goes: onto the prompt row it queued (the `/plan <description>`
+/// Give a command's force-sent attachments to the row the command queued. The
+/// composer producer drains the text and its images before dispatching. A
+/// command that runs through the registry has to be told where the attachment
+/// goes: onto the prompt row it queued (the `/plan <description>`
 /// description), or nowhere. `queued_before` is the queue's back row as the
 /// command was dispatched, so only a row the command itself created is
-/// touched. A command that queues nothing — a local action like `/theme` — has
-/// no row to carry an image and says so rather than dropping it silently,
-/// mirroring the submit path's "Images removed (skill prompt)" policy.
+/// touched.
 fn park_command_images(
     app: &mut AppView,
     id: AgentId,

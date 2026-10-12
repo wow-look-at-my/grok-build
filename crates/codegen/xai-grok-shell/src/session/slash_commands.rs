@@ -604,7 +604,6 @@ pub const PAGER_COMMAND_KEYS: &[&str] = &[
     "usage",
     "version",
     "view-plan",
-    "vim-mode",
     "voice",
     "welcome",
     "workflow",

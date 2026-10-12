@@ -218,16 +218,7 @@ impl AgentView {
                         self.prompt.slash_close();
                         slash_accepted_send = true;
                     } else {
-                        // Whether to wait for an argument is the registry's
-                        // two-bit contract, not the trailing space: insert_text
-                        // gets one whenever a command ACCEPTS args, so keying
-                        // off it also stalls on `/login` and `/compact`, whose
-                        // args are optional and which run fine without them.
-                        //
-                        // Ask that of the LINE the accept produced, never of
-                        // the row on its own: an argument row's insert_text is
-                        // a bare value (`cursor-model`), which parses as no
-                        // command at all and reads as forever-incomplete.
+                        // Whether to wait for an argument is the registry's two-bit contract, not the trailing space.
                         let had_selection = snap.selection().is_some();
                         self.prompt.slash_commit_preview();
                         self.prompt.accept_slash_completion(&self.session.models);
@@ -239,9 +230,7 @@ impl AgentView {
                         if chains {
                             return InputOutcome::Changed;
                         }
-                        // The accepted text carries the space that was there to
-                        // type an argument into. Nothing is going to be typed
-                        // into it, so it would ride along into the command line.
+                        // The accepted text carries the space that was there to type an argument into.
                         let sent = self.prompt.text().trim_end().to_owned();
                         self.prompt.set_text(&sent);
                         self.prompt.set_cursor(sent.len());
@@ -566,16 +555,8 @@ impl AgentView {
                         self.prompt_input_mode = PromptInputMode::Normal;
                         return InputOutcome::Action(action);
                     }
-                    // Empty (or backslash continuation). Mid-turn + a queued
-                    // follow-up: bare Enter interrupts the running turn and
-                    // hands the model everything queued, so the interrupt needs
-                    // no chord.
-                    // Skip while editing a queued row (edit-mode Enter is
-                    // handled earlier for non-empty; empty must stay a no-op).
-                    // Guard on an actually-empty composer: try_send() also
-                    // returns None after a backslash continuation, which leaves
-                    // the (non-empty) draft in place — that Enter must only
-                    // insert the newline, not fire a queued follow-up.
+                    // Empty (or backslash continuation). Mid-turn + a queued follow-up: bare Enter interrupts the running turn and hands the model everything queued, so the interrupt needs no chord. Skip while editing a queued row (edit-mode Enter
+                    // is handled earlier for non-empty; empty must stay a no-op).
                     if matches!(self.prompt_mode, PromptMode::Normal)
                         && self.prompt.text().trim().is_empty()
                         && let Some(outcome) = if self.session.state.is_turn_running() {
@@ -791,11 +772,7 @@ impl AgentView {
     /// Esc policy (Prompt/Scrollback after overlay steal).
     /// Call only after overlay / dropdown / search / selection declined Esc.
     /// Returns `None` when the key is not a bare Esc press.
-    pub(super) fn try_handle_esc_policy(
-        &mut self,
-        key: &KeyEvent,
-        registry: &ActionRegistry,
-    ) -> Option<InputOutcome> {
+    pub(super) fn try_handle_esc_policy(&mut self, key: &KeyEvent) -> Option<InputOutcome> {
         if key.kind == KeyEventKind::Release
             || key.code != KeyCode::Esc
             || !key.modifiers.is_empty()
@@ -814,18 +791,16 @@ impl AgentView {
             return Some(InputOutcome::Changed);
         }
 
-        // Mid-turn (running or already cancelling), every mode: Esc never cancels; point at the registry cancel binding instead
-        // A streaming wake turn follows the same policy as a running turn (the pane state is Idle only because wake turns are not adopted)
+        // Mid-turn, every mode: Esc cancels a running turn, `/compact` or wake turn from either pane, and keeps the draft.
+        // While a cancel is in flight, Esc does nothing.
         // Push the grace deadline out so an Esc mash past the turn's end cannot silently arm the rewind picker below
         if self.stoppable_activity_running() || self.any_cancel_pending() {
-            if self.stoppable_activity_running()
-                && let Some(cancel_key) = registry.key_for(ActionId::CancelTurn)
-            {
-                let cancel_key = cancel_key.display();
-                self.show_toast(&format!("Press {cancel_key} to cancel the turn"));
-            }
             self.suppress_rewind_arm(std::time::Instant::now());
-            return Some(InputOutcome::Changed);
+            if !self.stoppable_activity_running() {
+                return Some(InputOutcome::Changed);
+            }
+            self.cancel_trigger_hint = Some(crate::app::actions::CancelTrigger::Esc);
+            return Some(InputOutcome::Action(Action::CancelTurn));
         }
 
         // CLEAR mutates the composer (drops text/image chips), so it fires only while the PROMPT pane owns keys

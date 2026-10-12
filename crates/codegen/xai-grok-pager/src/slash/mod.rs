@@ -110,9 +110,7 @@ pub struct SuggestionRow {
     pub tag: Option<String>,
     /// Provenance badge; `Some` only on rows in a builtin/skill name collision.
     pub provenance: Option<CommandProvenance>,
-    /// Whether this model is resident in VRAM, for a provider that reports it
-    /// (Ollama, LM Studio). `None` — every other row, and every remote model —
-    /// draws no dot at all: "nobody can say" is not "not loaded".
+    /// Whether this model is resident in VRAM, for a provider that reports it (Ollama, LM Studio).
     pub loaded_in_vram: Option<bool>,
 }
 
@@ -1778,10 +1776,7 @@ mod tests {
         );
     }
     /// The Enter path must ask this of the whole prompt line, never of a
-    /// suggestion row on its own. An argument row's `insert_text` is a bare
-    /// value, and a bare value parses as no invocation at all -- so asking
-    /// here reads "incomplete" for a line that is finished, and Enter stops
-    /// sending. `/model <name>` is the case that caught it.
+    /// suggestion row on its own.
     #[test]
     fn an_argument_value_alone_is_not_a_complete_command() {
         let reg = test_registry();

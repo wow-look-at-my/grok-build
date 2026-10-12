@@ -227,9 +227,7 @@ pub struct McpClientStatus {
     pub name: String,
     pub status: McpSessionStatus,
     pub tools: Vec<McpToolEntry>,
-    /// Why an `Unavailable` server is unavailable, as recorded in
-    /// [`McpState::init_failed`]. Without it the UI can only say a server is
-    /// not working, which is indistinguishable from one still starting.
+    /// Why an `Unavailable` server is unavailable, as recorded in [`McpState::init_failed`].
     pub error: Option<String>,
     pub icons: Vec<xai_grok_mcp::servers::McpIcon>,
 }
@@ -745,8 +743,9 @@ pub(crate) async fn build_mcp_status(
     // Once init has finished, a configured server that is in neither set has no
     // client and is not starting: its spawn failed. Reporting nothing for it
     // left the UI with no status to render, which reads as "still starting" —
-    // forever, for a command that was never going to run. Before init finishes
-    // there is nothing to conclude, so those servers are still left out.
+    // forever. That nothing is for a command that was never going to run.
+    // Before init finishes there is nothing to conclude, so those servers are
+    // still left out.
     for config in &configs {
         let cname = crate::session::mcp_servers::mcp_server_name(config);
         if client_statuses.iter().any(|c| c.name == cname) {
@@ -765,10 +764,8 @@ pub(crate) async fn build_mcp_status(
         if auth_required.contains(cname) {
             continue;
         }
-        // A recorded reason is proof the server failed, whatever phase init is
-        // in — a config change cancels init back to "not started", and that
-        // window is exactly when an operator is looking at the row they just
-        // added. Without a reason, only a finished pass can conclude anything.
+        // A recorded reason is proof the server failed, whatever phase init
+        // is in.
         let reason = init_failed
             .get(cname)
             .filter(|reason| !reason.is_empty())
@@ -2307,10 +2304,10 @@ mod tests {
     }
 
     /// A configured server that never produced a client is the shape a bad
-    /// `command` takes: `uvx` with no uv installed fails at spawn, so there is
-    /// no client to report on and nothing marks it as still handshaking.
-    /// Emitting nothing for it left the UI without a status, which reads as a
-    /// server that is still starting — forever.
+    /// `command` takes: `uvx` with no uv installed fails at spawn. There is no
+    /// client to report on and nothing marks it as still handshaking. Emitting
+    /// nothing for it left the UI without a status, which reads as a server
+    /// that is still starting — forever.
     #[tokio::test]
     async fn a_server_that_failed_to_spawn_is_reported_with_its_reason() {
         let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
@@ -2365,8 +2362,8 @@ mod tests {
 
     /// A config change (adding a server is one) cancels init back to "not
     /// started". A failure recorded before that must still be reported: this
-    /// window is exactly when an operator is staring at the row they just
-    /// added, which is where "stuck on initializing" was seen.
+    /// window is exactly when an operator is staring at the row they added.
+    /// This is where "stuck on initializing" was seen.
     #[tokio::test]
     async fn a_recorded_failure_is_reported_even_when_init_was_cancelled() {
         let mut state = McpState::new(vec![stdio_config("kagi", "uvx")]);
@@ -2390,7 +2387,7 @@ mod tests {
     }
 
     /// Before init has run there is nothing to conclude about a configured
-    /// server, so it is left out entirely — exactly as before this change.
+    /// server, so it is left out entirely — exactly as before.
     #[tokio::test]
     async fn a_server_is_not_judged_before_init_has_finished() {
         let mcp_state = Arc::new(TokioMutex::new(McpState::new(vec![stdio_config(

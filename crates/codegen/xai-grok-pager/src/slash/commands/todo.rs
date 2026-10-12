@@ -1,10 +1,6 @@
-//! `/todo` -- show the todo list, or capture a request as a todo item without interrupting the agent.
+//! `/todo` -- show the todo list, or capture a request as todo items without interrupting the agent.
 //!
 //! With no arguments it toggles the todo pane, the same pane `Ctrl-T` shows.
-//! With arguments it returns `CommandResult::Action(Action::SendTodo { .. })` so the dispatch layer
-//! fires it as an ACP ext method (`x.ai/todo`) that bypasses the prompt queue.
-//! The shell forks a short-lived side agent that may read, and may append to
-//! the todo list, and may do nothing else.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
@@ -69,11 +65,8 @@ impl SlashCommand for TodoCommand {
     }
 }
 
-/// Whether the typed name asks for an urgent capture.
-///
-/// Exactly `TODO`, all caps, with nothing else to it. `/Todo` and `/ToDo` are
-/// shift-key noise, not a request to jump the queue, so only the deliberate
-/// all-caps spelling counts.
+/// Whether the typed name asks for an urgent capture. Exactly `TODO`, all
+/// caps, with nothing else to it.
 fn is_urgent_token(token: &str) -> bool {
     token.trim_start_matches('/') == "TODO"
 }

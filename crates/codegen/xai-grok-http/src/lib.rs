@@ -1,4 +1,4 @@
-#![allow(clippy::expect_used)] // 5 hits predate the gate
+#![allow(clippy::expect_used)] // Hits predate the gate
 
 //! HTTP clients for the application.
 //!
