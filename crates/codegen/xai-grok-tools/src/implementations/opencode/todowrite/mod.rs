@@ -358,6 +358,8 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
                         priority,
                         status,
                         meta: None,
+                        verification: None,
+                        verification_passed: false,
                     },
                 );
             }
