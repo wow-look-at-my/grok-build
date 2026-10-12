@@ -1251,6 +1251,12 @@ impl AgentView {
             }
             status.push("plan", Line::from(Span::styled("plan", plan_style)));
         }
+        let counts = self.todo.counts();
+        if let Some(badge_spans) =
+            crate::views::agent::render_todo_badge_spans(&counts, self.hit_badge.hovered, &theme)
+        {
+            status.push("badge", Line::from(badge_spans));
+        }
         if let Some(ref goal) = self.goal_state {
             let tick = self.tasks.tick_count() as usize;
             let active_subagent_tokens = self.live_standalone_subagent_tokens();
@@ -1387,6 +1393,7 @@ impl AgentView {
         self.hit_context.rect = areas.get("context").copied();
         self.hit_credits.rect = areas.get("credits").copied();
         self.hit_plan_button.rect = areas.get("plan").copied();
+        self.hit_badge.rect = areas.get("badge").copied();
         let dropdown_open = self.prompt.any_dropdown_open();
         self.hit_dashboard
             .set_unless_dropdown(areas.get("dashboard").copied(), dropdown_open);

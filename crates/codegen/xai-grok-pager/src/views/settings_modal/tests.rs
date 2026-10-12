@@ -756,6 +756,10 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "collapsed_edit_blocks",
         // SHARED-owned thinking_summaries (Appearance; below collapsed_edit_blocks, because those rows above it are pinned into one adjacency chain).
         "thinking_summaries",
+        // SHARED-owned thinking-summary history window and count floor
+        // (Appearance; registered directly after thinking_summaries).
+        "thinking_summary_history_window_secs",
+        "thinking_summary_history_min_count",
         // SHELL-owned display_refresh_auto_cadence (Appearance).
         "display_refresh_auto_cadence",
         // Mouse — scroll + drag selection. The scroll classification/lines/direction knobs follow scroll_speed.
