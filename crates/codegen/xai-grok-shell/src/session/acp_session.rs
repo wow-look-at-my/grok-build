@@ -1148,6 +1148,8 @@ pub(crate) struct SessionActor {
     pub(crate) next_title_refresh_idx: std::cell::Cell<usize>,
     /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`), resolved a single time at spawn.
     pub(crate) thinking_summaries_enabled: bool,
+    /// The summarization task this session queued most recently, in flight or not.
+    pub(crate) thinking_summary_tail: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// True while THIS session has a prompt turn in flight (RAII-guarded in `handle_prompt`).
     /// `tool_context.is_turn_active` is the agent-wide coordinator flag shared by all sessions, so it is unusable for per-session decisions.
     /// `Arc` so it can be re-checked inside the chat-state actor's `RepairHistory` handler.
