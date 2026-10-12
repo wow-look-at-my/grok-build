@@ -26,6 +26,8 @@ pub struct TodoCaptureOutcome {
     pub added: Vec<String>,
     /// Read-only tool calls the capture agent spent getting there.
     pub tools_used: usize,
+    /// The "the user assigned this" text to start a turn with, when no turn was running and nothing was put in front of the agent.
+    pub wake_reminder: Option<String>,
 }
 
 /// Failure surface of a `/todo` capture run. Typed to the ACP boundary so
@@ -576,8 +578,18 @@ impl SessionActor {
             "todo capture appended items"
         );
         // The list alone does not say who wrote an item.
-        self.deliver_reminder_to_main_agent(captured_todos_reminder(urgent, &todo_tool, &added));
-        Ok(TodoCaptureOutcome { added, tools_used })
+        let reminder = captured_todos_reminder(urgent, &todo_tool, &added);
+        let wake_reminder = if self.turn_is_running() {
+            self.deliver_reminder_to_main_agent(reminder);
+            None
+        } else {
+            Some(reminder)
+        };
+        Ok(TodoCaptureOutcome {
+            added,
+            tools_used,
+            wake_reminder,
+        })
     }
 
     /// Push the capture run's new transcript lines to the client's task row

@@ -139,8 +139,6 @@ impl TodoCounts {
         self.in_progress + self.pending + self.completed + self.cancelled
     }
 
-    /// Tasks that count toward completion progress: every status except
-    /// cancelled.
     pub fn total_excluding_cancelled(&self) -> usize {
         self.in_progress + self.pending + self.completed
     }
