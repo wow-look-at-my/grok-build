@@ -24,6 +24,8 @@ mod coordinator_state;
 pub use coordinator_state::{cap_completion_output, completion_summary, terminal_snapshot};
 pub mod model_policy;
 pub use model_policy::TaskParams;
+mod resource_lock;
+pub use resource_lock::ResourceLockConfig;
 pub mod root_control;
 pub mod types;
 
@@ -594,12 +596,9 @@ impl xai_tool_runtime::Tool for TaskTool {
             .then(|| {
                 tool_cancellation.map(|tool_cancellation| {
                     let child_cancellation = child_cancellation.clone();
-                    // The handle is kept to abort the forwarder once the child
-                    // is no longer foreground, so the only thing that can come
-                    // back from it is a panic. Guarded so that panic names the
-                    // forwarder rather than leaving a child running that nobody
-                    // can cancel any more. The returned handle is kept by the
-                    // caller and aborted, so nothing joins it.
+                    // The handle is kept to abort the forwarder once the
+                    // child is no longer foreground. The only thing that
+                    // can come back from it is a panic.
                     #[allow(clippy::disallowed_methods)]
                     tokio::spawn(crate::util::detached::fire_and_forget(
                         "subagent cancellation forwarder",
@@ -612,6 +611,11 @@ impl xai_tool_runtime::Tool for TaskTool {
             })
             .flatten();
 
+        // A model-declared cwd is the resource the child is pinned to, so
+        // spawns aimed at one directory lock against each other.
+        let resource = cwd
+            .as_ref()
+            .map(|path| xai_tool_types::SubagentResource::RepoPath(path.clone()));
         let request = SubagentRequest {
             id: id.clone(),
             prompt: input.prompt.clone(),
@@ -642,6 +646,7 @@ impl xai_tool_runtime::Tool for TaskTool {
                 foreground_wait_budget_ms: None,
                 output_schema: None,
                 loop_task_id: None,
+                resource,
             },
             run_in_background: input.run_in_background,
             // Model-spawned subagents must still appear in the idle reminder.

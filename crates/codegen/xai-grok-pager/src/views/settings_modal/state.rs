@@ -75,9 +75,7 @@ pub enum SettingsModalMode {
         supports_preview: bool,
     },
     /// Group sub-sheet: a list of the group's children. `child_idx` is the
-    /// focused child. Space/Enter toggles a Bool child in place, and opens
-    /// the editor or picker of any other child, which returns to this sheet.
-    /// Esc returns to Browse.
+    /// focused child.
     PickingGroup {
         key: SettingKey,
         child_idx: usize,
@@ -247,8 +245,7 @@ pub struct SettingsModalState {
     /// When true, Esc/Enter from `PickingEnum` close the modal instead of returning to Browse.
     /// Set by deep-link open (`OpenSettingsFocus` / `/privacy`); cleared on leave from the picker.
     pub close_on_picker_exit: bool,
-    /// The group sheet and child index that opened the current editor or
-    /// picker. Leaving that editor goes back to the sheet, not to Browse.
+    /// The group sheet and child index that opened the current editor or picker.
     pub(super) group_return: Option<(SettingKey, usize)>,
     /// Last left-click on a picker radio: `(choice index, when)`.
     pub(super) picker_last_click: Option<(usize, std::time::Instant)>,
@@ -569,10 +566,9 @@ impl SettingsModalState {
         self.breadcrumb_hovered = false;
     }
 
-    /// Transition to Browse, clearing sub-pane hover/breadcrumb state
-    /// to prevent stale hit-rects across mode changes.
-    /// A child editor or picker opened from a group sheet returns to that
-    /// sheet instead.
+    /// Transition to Browse, clearing sub-pane hover/breadcrumb state to
+    /// prevent stale hit-rects across mode changes. A child editor or picker
+    /// opened from a group sheet returns to that sheet instead.
     pub(crate) fn transition_to_browse(&mut self) {
         self.state.mode = match self.group_return.take() {
             Some((key, child_idx)) => SettingsMode::PickingGroup { key, child_idx },
@@ -988,7 +984,6 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "compact_mode" => Some(Action::SetCompactMode(new)),
         "show_timestamps" => Some(Action::SetTimestamps(new)),
         "show_timeline" => Some(Action::SetTimeline(new)),
-        "simple_mode" => Some(Action::SetSimpleMode(new)),
         "contextual_hints.undo" => Some(Action::SetContextualHintUndo(new)),
         "contextual_hints.plan_mode" => Some(Action::SetContextualHintPlanMode(new)),
         "contextual_hints.image_input" => Some(Action::SetContextualHintImageInput(new)),
@@ -998,7 +993,6 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
         "contextual_hints.export_copy" => Some(Action::SetContextualHintExportCopy(new)),
         "contextual_hints.ssh_wrap" => Some(Action::SetContextualHintSshWrap(new)),
         "multiline_mode" => Some(Action::SetMultilineMode(new)),
-        "vim_mode" => Some(Action::SetVimMode(new)),
         "voice_keybind_enabled" => Some(Action::SetVoiceKeybindEnabled(new)),
         "remember_tool_approvals" => Some(Action::SetRememberToolApprovals(new)),
         "toolset.ask_user_question.timeout_enabled" => {

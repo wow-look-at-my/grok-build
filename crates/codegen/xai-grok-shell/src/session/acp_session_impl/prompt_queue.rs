@@ -1,5 +1,4 @@
 use super::*;
-use xai_agent_lifecycle::ShutdownPolicy;
 
 /// Outcome of a queue send-now request ([`SessionActor::handle_interject_queued_prompt`]).
 /// `mutated` reports whether the request changed anything (promoted, steered, or saved an edit).
@@ -220,9 +219,6 @@ impl SessionActor {
                 (trace_gcs_config, artifact_tracker)
             };
 
-        // Sampled before the lock: resolving it can touch disk.
-        let follow_up_steer = crate::util::config::follow_up_steer_enabled().await;
-
         let mut state = self.state.lock().await;
 
         // User prompts have priority over queued synthetic auto-wake prompts
@@ -286,8 +282,7 @@ impl SessionActor {
             .unwrap_or_else(|| "synthetic".to_string());
         let log_owner = client_identifier.clone().unwrap_or_default();
         // A command line means something only as the LEADING token of its own
-        // turn (`resolve`), so it must never be steered into another turn as
-        // text — see the goal merge below.
+        // turn (`resolve`).
         let text_is_command =
             Self::row_text_is_command(&Self::queue_text_from_blocks(&prompt_blocks));
         let mut item = InputItem {
@@ -314,20 +309,13 @@ impl SessionActor {
         };
 
         // Use `running_prompt_id()`, not `current_prompt_id`, which is cleared while the front is still unpopped
-        // Auto send-now fires only when the turn is blocked in a wait and the held queue is empty
         let running_front_id = state.running_prompt_id().map(str::to_string);
         let turn_running = running_front_id.is_some();
         let goal_active = self.goal_tracker.lock().status()
             == Some(crate::session::goal_tracker::GoalStatus::Active);
         let blocked_in_wait = self.tool_context.blocking_wait_depth.depth() > 0;
-        // Drain-policy rows are held work: visible user/protected rows and queue-hidden human fallbacks (interjection fallback)
-        // Runtime wakes (CancelWithProducer / DropEphemeral) do not block auto-send-now
-        let held_user_queue = state.pending_inputs.iter().any(|queued| {
-            queued.input_origin.policy().shutdown == ShutdownPolicy::Drain
-                && Some(queued.prompt_id.as_str()) != running_front_id.as_deref()
-        });
-        let auto_send_now = follow_up_steer && turn_running && blocked_in_wait && !held_user_queue;
-        let send_now = item.is_queue_editable() && (send_now || auto_send_now);
+        // Only an explicit send-now cancels the turn. A cancel cuts off every tool in flight, so a plain follow-up never makes one.
+        let send_now = item.is_queue_editable() && send_now;
         // A wait is a gap: the harvest aborts the wait, not the turn. A queued send-now cancels the turn, so skip then.
         let harvest_into_wait = !send_now
             && turn_running
@@ -589,6 +577,14 @@ impl SessionActor {
         insert_at
     }
 
+    /// Whether an explicit deliver-now may cancel the running turn, under the guards Send Now uses.
+    pub(super) async fn deliver_now_cancels_running_turn(&self) -> bool {
+        let goal_active = self.goal_tracker.lock().status()
+            == Some(crate::session::goal_tracker::GoalStatus::Active);
+        let state = self.state.lock().await;
+        Self::send_now_cancels_running_turn(&state, goal_active)
+    }
+
     fn send_now_cancels_running_turn(state: &State, goal_active: bool) -> bool {
         state.running_prompt_id().is_some() && !goal_active && !Self::front_awaiting_commit(state)
     }
@@ -626,11 +622,12 @@ impl SessionActor {
 
     /// Send Now during an active goal turn: hand the text to the planner that
     /// is ALREADY running as mid-turn context. Nothing is cancelled or
-    /// restarted — a planner respawn would throw away the work in flight and
-    /// make the user's message arrive as a fresh objective instead of an
-    /// addition to the plan being written. With no planner in flight (none
-    /// registered yet, or already finished) there is nothing to steer, and the
-    /// text still reaches the parent agent through the turn interjection.
+    /// restarted. A planner respawn would throw away the work in flight. The
+    /// planner respawn make the user's message arrive as a fresh objective
+    /// instead of an addition to the plan being written. With no planner in
+    /// flight (none registered yet, or already finished) there is nothing to
+    /// steer, and the text still reaches the parent agent through the turn
+    /// interjection.
     fn enqueue_prompt_as_planner_context(&self, item: &InputItem) {
         let text = item
             .prompt_blocks
@@ -873,8 +870,8 @@ impl SessionActor {
                 Self::apply_queued_prompt_edit(&mut item, new_text.to_string(), owner);
             }
             // A command row is promoted instead of steered: `resolve` reads only
-            // a prompt's leading token, so a `/cmd args` folded into the goal
-            // turn would reach the model as literal prose.
+            // a prompt's leading token. A `/cmd args` folded into the goal turn
+            // would reach the model as literal prose.
             let merge_into_goal = turn_running
                 && goal_active
                 && Self::extract_bash_command(&item.prompt_blocks).is_none()
@@ -1203,13 +1200,6 @@ impl SessionActor {
     }
 
     /// Whether a queued row's display text is a command line.
-    ///
-    /// Thin wrapper over [`xai_prompt_queue::is_slash_invocation`] — the one
-    /// definition the pager reads too — so every shell-side gate asks the same
-    /// question. Such a row must run as its own turn: `resolve` reads a prompt's
-    /// leading token, and the interjection drain expands skills but resolves no
-    /// builtin, so steering or merging it would hand the model the literal
-    /// `/cmd args` and the command would never run.
     pub(super) fn row_text_is_command(text: &str) -> bool {
         xai_prompt_queue::is_slash_invocation(text)
     }

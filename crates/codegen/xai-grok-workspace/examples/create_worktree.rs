@@ -1,15 +1,4 @@
 //! Drive the shipped worktree creation path against a real repository.
-//!
-//!     cargo run -p xai-grok-workspace --example create_worktree -- create <source> <label>
-//!     cargo run -p xai-grok-workspace --example create_worktree -- remove <path>
-//!
-//! `create` runs the two RPC entry points `grok --worktree=<label>` runs, in the
-//! same order: `prepare_worktree_creation` picks the destination and
-//! `create_worktree_streaming` builds the checkout and registers it. It prints
-//! the destination, which is what the pager shows and cd's into.
-//!
-//! `remove` runs `remove_worktree`, the other half of the same path, so a
-//! throwaway checkout can be discarded the way the product discards one.
 
 use std::path::Path;
 
@@ -91,8 +80,7 @@ fn main() -> anyhow::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    // `create_worktree_streaming` uses `spawn_local` for its background copy, so
-    // this needs a LocalSet rather than a plain block_on.
+    // `create_worktree_streaming` uses `spawn_local` for its background copy.
     let local = tokio::task::LocalSet::new();
 
     match verb.as_str() {

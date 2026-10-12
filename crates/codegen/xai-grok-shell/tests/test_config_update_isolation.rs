@@ -185,12 +185,12 @@ async fn update_config_preserves_config_toml_symlink() {
     let repo = home.join("dotfiles");
     fs::create_dir_all(&repo).unwrap();
     let target = repo.join("config.toml");
-    fs::write(&target, "[ui]\nsimple_mode = false\n").unwrap();
+    fs::write(&target, "[ui]\nshow_thinking_blocks = false\n").unwrap();
     let link = home.join("config.toml");
     std::os::unix::fs::symlink(&target, &link).unwrap();
 
     xai_grok_shell::util::config::update_config(|cfg| {
-        cfg.ui.simple_mode = Some(true);
+        cfg.ui.show_thinking_blocks = Some(true);
     })
     .await
     .expect("update_config should succeed");
@@ -204,7 +204,7 @@ async fn update_config_preserves_config_toml_symlink() {
     assert_eq!(target, fs::read_link(&link).unwrap());
     let raw = fs::read_to_string(&target).unwrap();
     assert!(
-        raw.contains("simple_mode = true"),
+        raw.contains("show_thinking_blocks = true"),
         "symlink target must receive the settings save:\n{raw}"
     );
 }
@@ -223,7 +223,7 @@ async fn update_config_refuses_unreadable_config_toml() {
     fs::create_dir(&squat).unwrap();
 
     let err = xai_grok_shell::util::config::update_config(|cfg| {
-        cfg.ui.simple_mode = Some(true);
+        cfg.ui.show_thinking_blocks = Some(true);
     })
     .await
     .expect_err("unreadable config.toml must fail closed");
@@ -249,13 +249,13 @@ async fn update_config_refuses_retarget_between_load_and_save() {
 
     let a = home.join("a.toml");
     let b = home.join("b.toml");
-    fs::write(&a, "[ui]\nsimple_mode = false\nfrom_a = true\n").unwrap();
-    fs::write(&b, "[ui]\nsimple_mode = false\nfrom_b = true\n").unwrap();
+    fs::write(&a, "[ui]\nshow_thinking_blocks = false\nfrom_a = true\n").unwrap();
+    fs::write(&b, "[ui]\nshow_thinking_blocks = false\nfrom_b = true\n").unwrap();
     let link = home.join("config.toml");
     std::os::unix::fs::symlink(&a, &link).unwrap();
 
     let err = xai_grok_shell::util::config::update_config(|cfg| {
-        cfg.ui.simple_mode = Some(true);
+        cfg.ui.show_thinking_blocks = Some(true);
         fs::remove_file(&link).unwrap();
         std::os::unix::fs::symlink(&b, &link).unwrap();
     })
@@ -274,7 +274,7 @@ async fn update_config_refuses_retarget_between_load_and_save() {
         "referent A must stay unmerged:\n{raw_a}"
     );
     assert!(
-        !raw_a.contains("simple_mode = true"),
+        !raw_a.contains("show_thinking_blocks = true"),
         "must not publish onto A after retarget:\n{raw_a}"
     );
     assert!(
@@ -282,7 +282,7 @@ async fn update_config_refuses_retarget_between_load_and_save() {
         "referent B must stay unmerged:\n{raw_b}"
     );
     assert!(
-        !raw_b.contains("simple_mode = true"),
+        !raw_b.contains("show_thinking_blocks = true"),
         "must not merge A's snapshot onto B:\n{raw_b}"
     );
     assert_eq!(b, fs::read_link(&link).unwrap());

@@ -10,6 +10,8 @@ mod common;
 
 #[path = "pty_e2e/auto_wake_cancel_preserves_queued_user_prompt.rs"]
 mod auto_wake_cancel_preserves_queued_user_prompt;
+#[path = "pty_e2e/auto_wake_cancel_via_esc_preserves_queued_user_prompt.rs"]
+mod auto_wake_cancel_via_esc_preserves_queued_user_prompt;
 #[path = "pty_e2e/auto_wake_cancel_via_stop_click_preserves_queued_user_prompt.rs"]
 mod auto_wake_cancel_via_stop_click_preserves_queued_user_prompt;
 #[path = "pty_e2e/bash_queued_mid_turn_drains_as_bash.rs"]
@@ -28,6 +30,8 @@ mod ctrlc_with_queued_prompt_no_dup;
 mod edit_interject_lone_queued_row_keeps_tui_alive;
 #[path = "pty_e2e/empty_enter_delivers_both_queued_rows.rs"]
 mod empty_enter_delivers_both_queued_rows;
+#[path = "pty_e2e/empty_enter_delivers_queue_while_a_tool_runs.rs"]
+mod empty_enter_delivers_queue_while_a_tool_runs;
 #[path = "pty_e2e/empty_enter_interrupts_with_queued.rs"]
 mod empty_enter_interrupts_with_queued;
 #[path = "pty_e2e/esc_esc_clears_idle_prompt_into_the_stash.rs"]
@@ -36,10 +40,10 @@ mod esc_esc_clears_idle_prompt_into_the_stash;
 mod esc_esc_opens_rewind_picker_silent_first_press;
 #[path = "pty_e2e/esc_idle_empty_no_messages_is_swallowed_noop.rs"]
 mod esc_idle_empty_no_messages_is_swallowed_noop;
-#[path = "pty_e2e/esc_mid_turn_hints_ctrl_c_from_prompt_preserves_draft.rs"]
-mod esc_mid_turn_hints_ctrl_c_from_prompt_preserves_draft;
-#[path = "pty_e2e/esc_mid_turn_hints_ctrl_c_from_scrollback.rs"]
-mod esc_mid_turn_hints_ctrl_c_from_scrollback;
+#[path = "pty_e2e/esc_mid_turn_cancels_from_prompt_preserves_draft.rs"]
+mod esc_mid_turn_cancels_from_prompt_preserves_draft;
+#[path = "pty_e2e/esc_mid_turn_cancels_from_scrollback.rs"]
+mod esc_mid_turn_cancels_from_scrollback;
 #[path = "pty_e2e/mid_turn_slash_dropdown_esc_dismisses_not_cancel.rs"]
 mod mid_turn_slash_dropdown_esc_dismisses_not_cancel;
 #[path = "pty_e2e/queue_and_interjection_lifecycle.rs"]
@@ -62,6 +66,8 @@ mod send_now_tip_after_mid_turn_queue;
 mod send_then_ctrlc_rewinds_to_composer_no_history_dup;
 #[path = "pty_e2e/shift_tab_plan_nudge_from_always_approve_enters_plan.rs"]
 mod shift_tab_plan_nudge_from_always_approve_enters_plan;
+#[path = "pty_e2e/steer_folds_follow_up_into_running_turn.rs"]
+mod steer_folds_follow_up_into_running_turn;
 #[path = "pty_e2e/up_focuses_queue_bottom_row.rs"]
 mod up_focuses_queue_bottom_row;
 #[path = "pty_e2e/verify_bashq_claim2_force_interject.rs"]

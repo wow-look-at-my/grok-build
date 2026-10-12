@@ -594,9 +594,7 @@ async fn upload_pair(
         return false;
     };
 
-    // Telemetry hard-disabled in this build: local heap profiling still runs,
-    // but the GCS upload egress is neutralized. The in-process test hook above
-    // is kept for unit tests; the real network upload never happens.
+    // Telemetry hard-disabled in this build: local heap profiling still runs, but the GCS upload egress is neutralized.
     let _ = (handles, heap_path, heap_ct, meta_object, meta_path, meta_ct);
     log_upload_result(heap_object, file_size, false, Some("telemetry_disabled"))
 }

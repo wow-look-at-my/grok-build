@@ -273,11 +273,7 @@ mod tests {
 
     #[test]
     fn tolerates_unknown_metadata_fields() {
-        // Models in the wild add fields the schema does not ask for (a
-        // `reasoning` field paused a real goal: the strict deserializer
-        // rejected an otherwise-valid verdict twice and the goal went to
-        // infra_paused). Extra keys are ignored; the required fields still
-        // gate the verdict.
+        // Models in the wild add fields.
         let raw = r#"{"reasoning":"why I think so","decision":"continue","evidence":"observed evidence","next_step":"do one thing","blocker_key":"","extra":true}"#;
         let verdict = parse_goal_evaluator_verdict(raw).unwrap();
         assert_eq!(verdict.decision, GoalEvaluatorDecision::Continue);

@@ -781,11 +781,10 @@ impl LocalTerminalActor {
         }
 
         let snapshot = static_shell.snapshot.clone();
-        // The write end of the snapshot pipe is owned by this task alone, so a
-        // failure to drain it has to be reported: the child blocks on fd 3
-        // either way and the caller cannot tell a slow write from a dead task.
-        // `fire_and_forget` is that report: it logs the panic under the task's
-        // own name, so the dropped handle has nothing left to lose.
+        // The write end of the snapshot pipe is owned by this task alone, so
+        // a failure to drain it has to be reported. The child blocks on a
+        // later fd either way and the caller cannot tell a slow write from a
+        // dead task.
         #[allow(clippy::disallowed_methods)]
         tokio::spawn(crate::util::detached::fire_and_forget(
             "static shell snapshot writer",
@@ -912,8 +911,6 @@ impl LocalTerminalActor {
         }
 
         let snapshot = shell_state.snapshot.clone();
-        // The child blocks reading fd 3 until this drains, so the task failing
-        // is not something the caller can see from the pipe: it has to say so.
         // `fire_and_forget` logs a panic under the task's own name, so the
         // dropped handle has nothing left to lose.
         #[allow(clippy::disallowed_methods)]
@@ -2304,7 +2301,7 @@ impl LocalTerminalActor {
                         .unwrap_or(0);
                     let pipeline_owner = Some(new_owner_session_id.to_string());
                     // Guarded: this is the only thing emitting this monitor's
-                    // events after the hand-off, so a round that died mid-flight
+                    // events after the hand-off. A round that died mid-flight
                     // would leave the subscriber waiting on a notification that
                     // never comes. The log names the pipeline so the gap is
                     // attributable without a backtrace.
@@ -2540,18 +2537,13 @@ impl LocalTerminalBackend {
             actor.run().await;
         };
 
-        // The actor answers every command the handle sends, so its death is the
-        // death of the terminal for this session. Guarded so the unwind is
-        // attributed to the actor rather than leaving later sends to report an
-        // unexplained closed channel.
+        // The actor answers every command the handle sends, so its death is the death of the terminal for this session.
         let actor_fut = crate::util::detached::fire_and_forget("local terminal actor", actor_fut);
 
         if use_spawn_local {
             tokio::task::spawn_local(actor_fut);
         } else {
-            // `actor_fut` is already wrapped in `fire_and_forget`, which logs the
-            // panic under the actor's own name; the dropped handle adds nothing to
-            // lose.
+            // `actor_fut` is already wrapped in `fire_and_forget`, which logs the panic under the actor's own name.
             #[allow(clippy::disallowed_methods)]
             tokio::spawn(actor_fut);
         }

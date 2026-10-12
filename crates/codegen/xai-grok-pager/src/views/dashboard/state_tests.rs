@@ -843,7 +843,6 @@ fn state_with_open_peek() -> DashboardState {
     // PeekPanelState::new seeds focus from load_vim_mode(); pin off so
     // older tests that assume a focused reply don't depend on config /
     // process cache. Vim tests set true and restore themselves.
-    crate::appearance::cache::set_vim_mode(false);
     let mut s = make_state_with_selection();
     s.peek = Some(super::super::peek::PeekPanelState::new(
         DashboardRowId::TopLevel(AgentId(0)),
@@ -1609,8 +1608,6 @@ fn peek_right_arrow_opens_agent_in_focused_question_picker() {
         DashboardRowId::TopLevel(AgentId(0)),
         f,
     ));
-    // Pin focused: PeekPanelState::new seeds from load_vim_mode().
-    state.peek.as_mut().unwrap().focused = true;
     let reg = crate::actions::ActionRegistry::defaults();
     assert_eq!(state.peek.as_ref().unwrap().selected_option, None);
 
@@ -1984,10 +1981,9 @@ fn peek_ask_question_answer_routing() {
     }
 }
 
-/// Tab toggles peek reply focus; unfocused printable re-focuses and types (non-vim).
+/// Tab toggles peek reply focus; unfocused printable re-focuses and types.
 #[test]
 fn peek_tab_toggles_focus_and_typing_refocuses() {
-    crate::appearance::cache::set_vim_mode(false);
     let mut state = state_with_open_peek();
     let reg = crate::actions::ActionRegistry::defaults();
     assert!(state.peek.as_ref().unwrap().focused);
@@ -2003,110 +1999,8 @@ fn peek_tab_toggles_focus_and_typing_refocuses() {
     assert_eq!(state.peek_reply.text(), "y");
 }
 
-/// Vim: peek reply starts unfocused; j navigates; Enter focuses (no attach).
-#[test]
-fn vim_peek_opens_unfocused_jk_nav_enter_focuses() {
-    let mut state = state_with_open_peek();
-    // Fixture pins vim off; re-enable and rebuild so the panel is
-    // born unfocused under vim.
-    crate::appearance::cache::set_vim_mode(true);
-    state.peek = Some(super::super::peek::PeekPanelState::new(
-        DashboardRowId::TopLevel(AgentId(0)),
-        peek_fields_for_test("Idle"),
-    ));
-    let reg = crate::actions::ActionRegistry::defaults();
-    assert!(
-        !state.peek.as_ref().unwrap().focused,
-        "vim peek must not auto-focus the reply"
-    );
-    let j = state.handle_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), &reg);
-    assert!(
-        matches!(j, InputOutcome::Action(Action::DashboardSelectNext)),
-        "vim j on unfocused peek must navigate, got {j:?}"
-    );
-    assert!(
-        state.peek_reply.text().is_empty(),
-        "j must not type into the reply, got {:?}",
-        state.peek_reply.text()
-    );
-    let enter = state.handle_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &reg);
-    assert!(matches!(enter, InputOutcome::Changed));
-    assert!(
-        state.peek.as_ref().unwrap().focused,
-        "Enter must focus the peek reply in vim mode"
-    );
-    let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), &reg);
-    assert_eq!(state.peek_reply.text(), "j");
-    crate::appearance::cache::set_vim_mode(false);
-}
-
-/// Vim unfocused: `i` focuses without inserting; other printables are swallowed.
-#[test]
-fn vim_peek_unfocused_i_focuses_printable_swallowed() {
-    let mut state = state_with_open_peek();
-    crate::appearance::cache::set_vim_mode(true);
-    state.peek = Some(super::super::peek::PeekPanelState::new(
-        DashboardRowId::TopLevel(AgentId(0)),
-        peek_fields_for_test("Idle"),
-    ));
-    let reg = crate::actions::ActionRegistry::defaults();
-    assert!(!state.peek.as_ref().unwrap().focused);
-
-    let x = state.handle_key(&KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), &reg);
-    assert!(
-        matches!(x, InputOutcome::Unchanged),
-        "vim unfocused printable must be swallowed, got {x:?}"
-    );
-    assert!(
-        !state.peek.as_ref().unwrap().focused,
-        "swallowed key must not focus the reply"
-    );
-    assert!(
-        state.peek_reply.text().is_empty(),
-        "swallowed key must not type, got {:?}",
-        state.peek_reply.text()
-    );
-
-    let i = state.handle_key(&KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE), &reg);
-    assert!(matches!(i, InputOutcome::Changed));
-    assert!(
-        state.peek.as_ref().unwrap().focused,
-        "i must focus the peek reply"
-    );
-    assert!(
-        state.peek_reply.text().is_empty(),
-        "i must not be inserted, got {:?}",
-        state.peek_reply.text()
-    );
-    crate::appearance::cache::set_vim_mode(false);
-}
-
-/// Vim: apply_fields row change clears peek reply focus.
-#[test]
-fn vim_peek_row_change_unfocuses_reply() {
-    let mut state = state_with_open_peek();
-    crate::appearance::cache::set_vim_mode(true);
-    state.peek.as_mut().unwrap().focused = true;
-    let other = DashboardRowId::TopLevel(AgentId(99));
-    let fields = super::super::peek::PeekFields {
-        label: "other".into(),
-        time_ago: String::new(),
-        response_type: "Idle".into(),
-        last_user_message: None,
-        question: None,
-        options: vec![],
-        request_id: None,
-        reject_option: None,
-    };
-    let changed = state.peek.as_mut().unwrap().apply_fields(other, fields);
-    assert!(changed);
-    assert!(
-        !state.peek.as_ref().unwrap().focused,
-        "vim row change must unfocus the reply"
-    );
-    crate::appearance::cache::set_vim_mode(false);
-}
-
+// Fixture pins vim off; re-enable and rebuild so the panel is
+// born unfocused under vim.
 /// Non-registry editing chords reach the reply widget while the peek is focused: Ctrl+A moves the
 /// caret to the start and. CtrlCtrl+K kills to end-of-line — the full `PromptWidget` editing surface,
 /// not the old bare-char-only editor.
@@ -2749,8 +2643,7 @@ fn question_mark_honor_gate_matches_empty_or_list_focus() {
 /// vim-mode OFF — `j`/`k` type into the dispatch input (they are
 /// NOT hijacked as row navigation). Mirrors the agent scrollback.
 #[test]
-fn vim_off_jk_type_into_input() {
-    crate::appearance::cache::set_vim_mode(false);
+fn jk_type_into_input() {
     let reg = crate::actions::ActionRegistry::defaults();
     let mut state = DashboardState::new();
     for ch in ['j', 'k'] {
@@ -2759,51 +2652,17 @@ fn vim_off_jk_type_into_input() {
     assert_eq!(
         state.dispatch.text(),
         "jk",
-        "vim-off j/k must type into the input, not navigate"
+        "j/k must type into the input, not navigate"
     );
 }
 
 /// vim-mode ON with the overview list focused (via Tab) — `j`/`k`
 /// navigate the row list. In the input focus they type (covered by
 /// `vim_on_jk_type_into_input_when_focused`).
-#[test]
-fn vim_on_jk_navigate_when_list_focused() {
-    crate::appearance::cache::set_vim_mode(true);
-    let reg = crate::actions::ActionRegistry::defaults();
-    let mut state = DashboardState::new();
-    state.list_focused = true;
-    let j = state.handle_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), &reg);
-    assert!(
-        matches!(j, InputOutcome::Action(Action::DashboardSelectNext)),
-        "vim j must select the next row, got {j:?}"
-    );
-    let k = state.handle_key(&KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE), &reg);
-    assert!(
-        matches!(k, InputOutcome::Action(Action::DashboardSelectPrev)),
-        "vim k must select the previous row, got {k:?}"
-    );
-    crate::appearance::cache::set_vim_mode(false);
-}
 
 /// vim-mode ON but the INPUT focused (the default) — `j`/`k` type
 /// into the dispatch prompt; navigation requires Tab to the overview
 /// first. This is the "distinct focus areas" contract.
-#[test]
-fn vim_on_jk_type_into_input_when_focused() {
-    crate::appearance::cache::set_vim_mode(true);
-    let reg = crate::actions::ActionRegistry::defaults();
-    let mut state = DashboardState::new();
-    assert!(!state.list_focused, "input focused by default");
-    for ch in ['j', 'k'] {
-        let _ = state.handle_key(&KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE), &reg);
-    }
-    assert_eq!(
-        state.dispatch.text(),
-        "jk",
-        "input-focused vim j/k must type, not navigate"
-    );
-    crate::appearance::cache::set_vim_mode(false);
-}
 
 /// Tab toggles the two-focus model: input bar ↔ overview list.
 #[test]
@@ -2979,20 +2838,14 @@ fn list_focus_enter_on_button_sends_draft_else_creates() {
 /// Overview focused: a non-nav printable key hands focus back to the
 /// input. In vim mode `i` enters the input without typing the `i`.
 #[test]
-fn vim_i_returns_focus_to_input_without_typing() {
-    crate::appearance::cache::set_vim_mode(true);
+fn printable_returns_focus_to_input_and_types() {
     let reg = crate::actions::ActionRegistry::defaults();
     let mut state = make_state_with_selection();
     state.list_focused = true;
     let outcome = state.handle_key(&KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE), &reg);
     assert!(matches!(outcome, InputOutcome::Changed));
     assert!(!state.list_focused, "i focuses the input");
-    assert!(
-        state.dispatch.text().is_empty(),
-        "i must NOT be typed, got {:?}",
-        state.dispatch.text()
-    );
-    crate::appearance::cache::set_vim_mode(false);
+    assert_eq!(state.dispatch.text(), "i", "i must be typed");
 }
 
 /// A multi-line bracketed paste keeps its full raw text (what gets
@@ -4418,27 +4271,12 @@ fn idle_overflow_enter_and_arrows_toggle_show_all() {
     assert!(!state.idle_show_all, "Left re-folds");
 }
 
-/// vim mode ON with the LIST focused — `l` / `h` on the Idle overflow.
+/// `h` / `l` on the Idle overflow type into the input.
 #[test]
-fn idle_overflow_vim_hl_focus_gated() {
+fn idle_overflow_hl_type_into_input() {
     let reg = crate::actions::ActionRegistry::defaults();
-
-    // vim ON with the LIST focused — `l`/`h` toggle show-all
-    crate::appearance::cache::set_vim_mode(true);
-    let mut state = DashboardState::new();
-    state.focus_idle_overflow();
-    state.list_focused = true;
-    let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE), &reg);
-    let show_all_after_l = state.idle_show_all;
-    let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE), &reg);
-    let show_all_after_h = state.idle_show_all;
-    crate::appearance::cache::set_vim_mode(false);
-    assert!(show_all_after_l, "list-focused vim `l` must reveal");
-    assert!(!show_all_after_h, "list-focused vim `h` must re-fold");
-
     // vim ON with the INPUT focused (list_focused == false) and an empty draft —
     // `h`/`l` must type into the prompt, never toggle show-all.
-    crate::appearance::cache::set_vim_mode(true);
     let mut state = DashboardState::new();
     state.focus_idle_overflow();
     // Input focused is the default; leave list_focused == false.
@@ -4446,15 +4284,14 @@ fn idle_overflow_vim_hl_focus_gated() {
     let show_all_after_input_h = state.idle_show_all;
     let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE), &reg);
     let show_all_after_input_l = state.idle_show_all;
-    let typed = state.dispatch.text().to_string();
-    crate::appearance::cache::set_vim_mode(false);
     assert!(
         !show_all_after_input_h && !show_all_after_input_l,
-        "input-focused vim `h`/`l` must not toggle show-all",
+        "`h`/`l` must not toggle show-all",
     );
     assert_eq!(
-        typed, "hl",
-        "input-focused vim `h`/`l` must type into the dispatch input",
+        state.dispatch.text(),
+        "hl",
+        "`h`/`l` must type into the dispatch input",
     );
 }
 
@@ -4682,7 +4519,6 @@ fn shortcuts_modal_key_toggles_inline_expand() {
             crate::actions::When::Always,
         ],
         &reg,
-        true,
     );
     let picker = crate::views::shortcuts_help::build_initial_picker_state(&entries);
     let mut modal = Box::new(ShortcutsModalState {
@@ -4725,7 +4561,6 @@ fn shortcuts_modal_detail_round_trip_preserves_browse_state() {
             crate::actions::When::Always,
         ],
         &reg,
-        true,
     );
     let picker = crate::views::shortcuts_help::build_initial_picker_state(&entries);
     let mut modal = Box::new(ShortcutsModalState {
@@ -5143,9 +4978,9 @@ fn section_keys_work_with_draft_when_list_focused() {
     );
 }
 
-/// vim `l` opens detail on list-focused rows; focused dispatch types `l`.
+/// `l` on a row types into the input and never opens the row.
 #[test]
-fn vim_l_row_attach_and_input_focus() {
+fn l_on_a_row_types_and_never_attaches() {
     use crate::app::actions::Action;
     use crate::views::dashboard::DashboardRowId;
 
@@ -5153,56 +4988,18 @@ fn vim_l_row_attach_and_input_focus() {
     let id = DashboardRowId::TopLevel(crate::app::agent::AgentId(42));
     let l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE);
 
-    crate::appearance::cache::set_vim_mode(true);
-    let mut state = DashboardState::new();
-    state.focus_row(id.clone());
-    state.list_focused = true;
-    match state.handle_key(&l, &reg) {
-        InputOutcome::Action(Action::DashboardAttach(row)) => assert_eq!(row, id),
-        other => panic!("list-focused vim `l` must attach, got {other:?}"),
+    for list_focused in [true, false] {
+        let mut state = DashboardState::new();
+        state.focus_row(id.clone());
+        state.list_focused = list_focused;
+        let outcome = state.handle_key(&l, &reg);
+        assert!(
+            !matches!(outcome, InputOutcome::Action(Action::DashboardAttach(_))),
+            "list_focused={list_focused}: `l` must not attach, got {outcome:?}",
+        );
+        assert_eq!(state.dispatch.text(), "l");
+        assert!(!state.list_focused, "typing focuses the input");
     }
-
-    let mut state = DashboardState::new();
-    state.focus_row(id);
-    state.list_focused = false;
-    let outcome = state.handle_key(&l, &reg);
-    crate::appearance::cache::set_vim_mode(false);
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::DashboardAttach(_))),
-        "input-focused vim `l` must not attach, got {outcome:?}",
-    );
-    assert_eq!(state.dispatch.text(), "l");
-}
-
-/// vim `l` on peek: unfocused attaches; focused empty reply types `l`.
-#[test]
-fn vim_l_peek_attach_and_focused_type() {
-    use crate::app::actions::Action;
-    let reg = crate::actions::ActionRegistry::defaults();
-    let l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE);
-
-    // state_with_open_peek pins vim off for seed focus; enable after.
-    let mut state = state_with_open_peek();
-    crate::appearance::cache::set_vim_mode(true);
-    state.peek.as_mut().unwrap().focused = false;
-    match state.handle_key(&l, &reg) {
-        InputOutcome::Action(Action::DashboardAttach(row)) => {
-            assert_eq!(row, DashboardRowId::TopLevel(AgentId(0)));
-        }
-        other => panic!("unfocused peek vim `l` must attach, got {other:?}"),
-    }
-
-    let mut state = state_with_open_peek();
-    crate::appearance::cache::set_vim_mode(true);
-    assert!(state.peek.as_ref().unwrap().focused);
-    let outcome = state.handle_key(&l, &reg);
-    let reply = state.peek_reply.text().to_string();
-    crate::appearance::cache::set_vim_mode(false);
-    assert!(
-        !matches!(outcome, InputOutcome::Action(Action::DashboardAttach(_))),
-        "focused reply vim `l` must not attach, got {outcome:?}",
-    );
-    assert_eq!(reply, "l");
 }
 
 fn press(state: &mut DashboardState, code: KeyCode) -> InputOutcome {
@@ -5236,35 +5033,6 @@ fn section_keys_stay_inert_in_search_mode() {
     assert!(
         !state.search_mode,
         "Enter applies the query and leaves search mode"
-    );
-
-    // Assert after each press so a collapse-then-re-expand pair cannot net out to the start
-    crate::appearance::cache::set_vim_mode(true);
-    let mut state = DashboardState::new();
-    state.focus_section(key_sec);
-    state.enter_search_mode();
-    state.list_focused = true;
-    let collapsed_before = state.is_section_collapsed(key_sec);
-    let after_h = press(&mut state, KeyCode::Char('h'));
-    let collapsed_after_h = state.is_section_collapsed(key_sec);
-    let after_l = press(&mut state, KeyCode::Char('l'));
-    let collapsed_after_l = state.is_section_collapsed(key_sec);
-    crate::appearance::cache::set_vim_mode(false);
-    assert_eq!(
-        collapsed_after_h, collapsed_before,
-        "list-focused vim `h` stays inert in search mode"
-    );
-    assert_eq!(
-        collapsed_after_l, collapsed_before,
-        "list-focused vim `l` stays inert in search mode"
-    );
-    assert!(
-        matches!(after_h, InputOutcome::Unchanged),
-        "list-focused vim `h` must be swallowed, got {after_h:?}"
-    );
-    assert!(
-        matches!(after_l, InputOutcome::Unchanged),
-        "list-focused vim `l` must be swallowed, got {after_l:?}"
     );
 }
 
@@ -5348,48 +5116,15 @@ fn section_and_idle_overflow_keys_yield_to_a_typed_draft_from_input() {
     assert!(!state.idle_show_all, "Enter did not toggle the overflow");
 }
 
-/// List-focused vim `h`/`l` fold sections; input-focused or vim-off type.
+/// Bare letters on a section header type into the input and never fold the section.
 #[test]
-fn section_vim_hl_collapse_expand() {
+fn section_letters_type_into_input() {
     let reg = crate::actions::ActionRegistry::defaults();
     let key_sec = SectionKey::State(RowState::Working);
-
-    // vim ON with the LIST focused — `h`/`l` fold the section
-    crate::appearance::cache::set_vim_mode(true);
-    let mut state = DashboardState::new();
-    state.focus_section(key_sec);
-    state.list_focused = true;
-    let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE), &reg);
-    let collapsed_after_h = state.is_section_collapsed(key_sec);
-    let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE), &reg);
-    let collapsed_after_l = state.is_section_collapsed(key_sec);
     // Reset before asserting so a failure can't leak vim state
     // into another test sharing this thread's cache.
-    crate::appearance::cache::set_vim_mode(false);
-    assert!(collapsed_after_h, "list-focused vim `h` must collapse");
-    assert!(!collapsed_after_l, "list-focused vim `l` must expand");
-
     // vim ON with the INPUT focused (list_focused == false) and an empty draft —
     // `h`/`l` must type into the prompt, never fold the section.
-    crate::appearance::cache::set_vim_mode(true);
-    let mut state = DashboardState::new();
-    state.focus_section(key_sec);
-    // Input focused is the default; leave list_focused == false.
-    let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE), &reg);
-    let collapsed_after_input_h = state.is_section_collapsed(key_sec);
-    let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE), &reg);
-    let collapsed_after_input_l = state.is_section_collapsed(key_sec);
-    let typed = state.dispatch.text().to_string();
-    crate::appearance::cache::set_vim_mode(false);
-    assert!(
-        !collapsed_after_input_h && !collapsed_after_input_l,
-        "input-focused vim `h`/`l` must not fold the section",
-    );
-    assert_eq!(
-        typed, "hl",
-        "input-focused vim `h`/`l` must type into the dispatch input",
-    );
-
     // vim OFF — bare letters are dispatch-input edits, never
     // collapse keys, even with a section header selected.
     let mut state = DashboardState::new();
@@ -5397,12 +5132,12 @@ fn section_vim_hl_collapse_expand() {
     let _ = state.handle_key(&KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE), &reg);
     assert!(
         !state.is_section_collapsed(key_sec),
-        "vim-off `l` must not collapse",
+        "`l` must not collapse",
     );
     assert_eq!(
         state.dispatch.text(),
         "l",
-        "vim-off `l` must type into the dispatch input",
+        "`l` must type into the dispatch input",
     );
 }
 
@@ -5564,7 +5299,7 @@ fn reanchor_keeps_row_cursor_under_state_filter_despite_collapsed_flag() {
 /// Clicking anywhere on the dispatch input box focuses the input. (clears `list_focused`). This
 /// must hold in vim mode too — there the overview owns the keyboard (j/k nav), so a mouse user who.
 #[test]
-fn click_on_dispatch_box_focuses_input_in_both_modes() {
+fn click_on_dispatch_box_focuses_input() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     use ratatui::layout::Rect;
     let box_rect = Rect {
@@ -5579,10 +5314,9 @@ fn click_on_dispatch_box_focuses_input_in_both_modes() {
         row: 1,
         modifiers: crossterm::event::KeyModifiers::NONE,
     };
-    for vim in [false, true] {
-        crate::appearance::cache::set_vim_mode(vim);
+    {
         let mut state = DashboardState::new();
-        // Overview focused (as if via Tab / vim nav).
+        // Overview focused (as if via Tab).
         state.list_focused = true;
         // Box rect as recorded by `render_dashboard`.
         state.dispatch_rect = Some(box_rect);
@@ -5590,14 +5324,13 @@ fn click_on_dispatch_box_focuses_input_in_both_modes() {
         let focused_input = !state.list_focused;
         // Reset before asserting so a failure can't leak vim state
         // into another test sharing this thread's cache.
-        crate::appearance::cache::set_vim_mode(false);
         assert!(
             matches!(outcome, InputOutcome::Changed),
-            "vim={vim}: click on dispatch box must report Changed, got {outcome:?}",
+            "click on dispatch box must report Changed, got {outcome:?}",
         );
         assert!(
             focused_input,
-            "vim={vim}: click on dispatch box must focus the input (clear list_focused)",
+            "click on dispatch box must focus the input (clear list_focused)",
         );
     }
 }
@@ -6026,8 +5759,6 @@ fn ctrl_l_opens_location_picker() {
 
 #[test]
 fn location_picker_esc_closes() {
-    // Pin vim-mode off; this test asserts the non-vim picker path.
-    crate::appearance::cache::set_vim_mode(false);
     let mut state = DashboardState::new();
     state.location_picker = Some(location_picker(vec![location_candidate("/tmp", "tmp")]));
     let reg = crate::actions::ActionRegistry::defaults();
@@ -6311,7 +6042,6 @@ fn search_mode_owns_keys_while_a_hidden_peek_keeps_its_lease() {
     use crate::app::actions::Action;
     use crate::views::dashboard::peek::PeekPanelState;
 
-    crate::appearance::cache::set_vim_mode(false);
     let (id, mut agents) = lease_fixture_agent();
     let mut state = DashboardState::new();
     let row = DashboardRowId::TopLevel(id);

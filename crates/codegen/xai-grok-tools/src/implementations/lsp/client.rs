@@ -678,11 +678,7 @@ impl LspClient {
         let update = self.documents.plan(&uri_str);
         let version = update.version();
 
-        // Recorded before the send, not after. A server can publish about this
-        // revision on another thread while this one is still inside the send,
-        // and a versionless publish is credited with the newest version we have
-        // sent. Read a moment too early it is credited with no version at all,
-        // settles nothing, and the report is never shown.
+        // Recorded before the send, not after.
         let previous = self
             .documents
             .commit(&uri_str, version, language_id, new_end);
@@ -726,10 +722,7 @@ impl LspClient {
         };
 
         if let Err(e) = sent {
-            // The record describes the text the *server* has. Left advanced
-            // over a send that never went out, it would aim every later
-            // incremental range at a revision the server never received — the
-            // same protocol violation the range exists to avoid.
+            // The record describes the text the *server* has.
             self.documents.restore(&uri_str, previous);
             tracing::debug!(server = %self.server_name, error = %e, "failed to send document update");
             return None;

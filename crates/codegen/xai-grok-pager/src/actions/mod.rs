@@ -50,22 +50,15 @@ pub enum ActionId {
     PageDown,
     HalfPageUp,
     HalfPageDown,
-    GotoTop,
-    GotoBottom,
     SelectNext,
     SelectPrev,
     NextTurn,
     PrevTurn,
-    NextResponse,
-    PrevResponse,
 
     // View
     Collapse,
     Expand,
-    ToggleFold,
-    ToggleExpandAll,
     ExpandAllThinking,
-    ToggleRaw,
     ToggleMouseCapture,
 
     // Agent
@@ -79,13 +72,7 @@ pub enum ActionId {
     FocusScrollback,
 
     // Block content
-    CopyBlockContent,
-    CopyBlockMeta,
     OpenBlockViewer,
-
-    // Link navigation
-    OpenNextLink,
-    OpenPrevLink,
 
     // Panes
     ToggleTodos,
@@ -101,7 +88,6 @@ pub enum ActionId {
 
     // Scrollback (contextual)
     Rewind,
-    KillBgTask,
 
     // Debug
     DumpInputLog,
@@ -292,9 +278,6 @@ impl ActionRegistry {
                 def.default_key = key!('q', CONTROL);
                 def.alt_keys = vec![key!('d', CONTROL)];
             }
-            if def.id == ActionId::HalfPageDown {
-                def.default_key = key!('d', CONTROL);
-            }
             if def.id == ActionId::InterjectPrompt {
                 def.default_key = key!(Enter, CONTROL);
                 def.alt_keys = vec![key!('i', CONTROL)];
@@ -340,42 +323,11 @@ impl ActionRegistry {
         Self::new(actions)
     }
 
-    /// The scrollback `j`/`k` scroll and the dashboard `j`/`k` row-nav only resolve when vim-mode is on. With vim-mode
-    /// off the letters fall through so the caller can type them into its prompt. Arrow, Tab, Esc, Space, PgUp, PgDn,
-    /// `?`, and all `Ctrl+letter` shortcuts always resolve. Only the bare-letter primary or alt is gated.
-    pub fn lookup_with_mode(
-        &self,
-        event: &KeyEvent,
-        context: When,
-        vim_mode: bool,
-    ) -> Option<ActionId> {
-        // Contexts where a bare letter is also a typeable input key, so the vim-off suppression applies
-        // Both views own a text prompt that `j`/`k` must reach when vim-mode is off
-        let letter_gated = matches!(context, When::ScrollbackFocused | When::DashboardFocused);
-        for def in &self.actions {
-            if def.context != context {
-                continue;
-            }
-            let suppress_default =
-                !vim_mode && letter_gated && def.default_key.is_letter_or_shift_letter();
-            if !suppress_default && def.default_key.matches(event) {
-                return Some(def.id);
-            }
-            // When vim_mode is off, also suppress any alt key that is itself a bare letter
-            // Example: the `j`/`k` alts on the dashboard's SelectNext/SelectPrev
-            // Non-letter alts (arrows, Tab, Space) always match
-            for alt in &def.alt_keys {
-                if !vim_mode && letter_gated && alt.is_letter_or_shift_letter() {
-                    continue;
-                }
-                if alt.matches(event) {
-                    return Some(def.id);
-                }
-            }
-        }
-        None
-    }
-
+    // Contexts where a bare letter is also a typeable input key, so the vim-off suppression applies
+    // Both views own a text prompt that `j`/`k` must reach when vim-mode is off
+    // When vim_mode is off, also suppress any alt key that is itself a bare letter
+    // Example: the `j`/`k` alts on the dashboard's SelectNext/SelectPrev
+    // Non-letter alts (arrows, Tab, Space) always match
     pub fn find(&self, id: ActionId) -> Option<&ActionDef> {
         self.actions.iter().find(|d| d.id == id)
     }
@@ -402,24 +354,6 @@ impl ActionRegistry {
 
     pub fn key_for(&self, id: ActionId) -> Option<KeyShortcut> {
         self.find(id).map(|def| def.default_key)
-    }
-
-    /// Get the effective hint key for an action, accounting for vim mode.
-    /// In non-vim mode, bare-letter scrollback bindings are suppressed.
-    /// This returns the first non-letter alt key instead (e.g. arrow keys), so hints show a key that actually works.
-    pub fn key_for_mode(&self, id: ActionId, vim_mode: bool) -> Option<KeyShortcut> {
-        let def = self.find(id)?;
-        if !vim_mode
-            && def.context == When::ScrollbackFocused
-            && def.default_key.is_letter_or_shift_letter()
-        {
-            def.alt_keys
-                .iter()
-                .find(|k| !k.is_letter_or_shift_letter())
-                .copied()
-        } else {
-            Some(def.default_key)
-        }
     }
 
     /// Get all actions (for command palette).
@@ -643,13 +577,15 @@ mod tests {
     #[test]
     fn scrollback_actions_only_at_scrollback_level() {
         let registry = ActionRegistry::defaults();
-        let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+        let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
         assert_eq!(
-            registry.lookup(&j, When::ScrollbackFocused),
+            registry.lookup(&down, When::ScrollbackFocused),
             Some(ActionId::SelectNext)
         );
-        assert_eq!(registry.lookup(&j, When::AgentScreen), None);
-        assert_eq!(registry.lookup(&j, When::Always), None);
+        assert_eq!(registry.lookup(&down, When::AgentScreen), None);
+        assert_eq!(registry.lookup(&down, When::Always), None);
+        let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+        assert_eq!(registry.lookup(&j, When::ScrollbackFocused), None);
     }
 
     #[test]

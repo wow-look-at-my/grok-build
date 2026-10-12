@@ -431,8 +431,8 @@ async fn first_subagent_turn_allocation_does_not_walk_the_sessions_index() {
     assert_eq!(agent.session_turn_number(&sid), Some(1));
 }
 /// Agent-side upload path with trace upload HARD-DISABLED (build baseline):
-/// even with maximally-enabling config, no harness trace uploads are built,
-/// no turn numbers burn, and no counter is persisted.
+/// even with maximally-enabling config, no harness trace uploads are built.
+/// No turn numbers burn, and no counter is persisted.
 #[tokio::test(flavor = "current_thread")]
 async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
     let agent = build_minimal_agent_for_tests();
@@ -473,9 +473,7 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
         agent.allocate_turn_number(&sid);
     }
     assert_eq!(agent.session_turn_number(&sid), Some(3));
-    // Trace upload is hard-disabled in this build: even with enabling
-    // config, no trace context is created, no counter burns, and nothing
-    // is persisted for upload.
+    // Trace upload is hard-disabled in this build.
     let built = agent
         .build_harness_trace_uploads(
             &sid,
@@ -544,7 +542,7 @@ async fn upload_harness_trace_turns_uploads_disabled_does_not_burn_counter() {
         "uploads-disabled path must not persist a counter",
     );
 }
-/// Guards the hard-disabled trace-upload seam: with trace upload
+/// Guards the hard-disabled trace-upload seam. With trace upload
 /// permanently off, no per-harness-turn trace context (and hence no
 /// manifest) may be created even with maximally-enabling config.
 #[tokio::test(flavor = "current_thread")]
@@ -993,12 +991,9 @@ fn harnesses_are_compatible_rejects_strict_mismatches() {
     ));
 }
 
-/// An agent type nobody has heard of is never strict, because
+/// An agent type nobody has heard of is never strict. This is because
 /// `is_strict_harness_agent_type` refuses to enforce a harness it cannot
-/// resolve -- so against the non-strict default it is COMPATIBLE. Worth
-/// pinning: a test that wants a mismatch has to name a real strict harness, and
-/// an invented one silently produces the opposite of what it looks like it asks
-/// for. (Against a strict harness it still mismatches, from the other side.)
+/// resolve -- so against the non-strict default it is COMPATIBLE.
 #[test]
 fn an_unknown_agent_type_is_never_strict() {
     assert!(harnesses_are_compatible("grok-build", "cursor"));
@@ -3936,8 +3931,7 @@ fn enable_trace_upload_config(agent: &MvpAgent) {
 }
 #[tokio::test]
 async fn product_analytics_stays_disabled_even_with_telemetry_config_on() {
-    // Telemetry is hard-disabled in this build: enabling config must not
-    // turn product analytics back on.
+    // Telemetry is hard-disabled in this build: enabling config must not turn product analytics back on.
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_product_telemetry(&agent);
     assert!(!agent.product_analytics_enabled());
@@ -4012,8 +4006,7 @@ async fn diagnostic_upload_skipped_for_opted_out_user() {
 }
 #[tokio::test]
 async fn diagnostic_upload_not_wired_even_for_normal_user() {
-    // Trace upload is hard-disabled in this build: even a normal user with
-    // fully-enabling config gets no diagnostics uploader and zero egress.
+    // Trace upload is hard-disabled in this build.
     let (stub_url, count) = spawn_counting_storage_stub().await;
     let agent = build_agent_with_auth(xai_grok_login::GrokAuth::test_default());
     enable_trace_upload_config(&agent);
@@ -4282,8 +4275,7 @@ async fn session_opened_before_the_decision_sees_it_land() {
 /// A mid-session remote-settings flip (kill switch) then stops collection without a new session.
 #[tokio::test]
 async fn collection_config_gate_mirror_follows_trace_upload_flip() {
-    // Trace upload is hard-disabled in this build: the live mirror must be
-    // off even with maximally-enabling config, and stay off after any flip.
+    // Trace upload is hard-disabled in this build: the live mirror must be off even with maximally-enabling config.
     let agent = build_agent_with_auth(crate::auth::GrokAuth::test_default());
     enable_trace_upload_config(&agent);
     agent.sync_collection_config_gate();
@@ -8769,7 +8761,7 @@ mod soft_default_settings_emit {
 /// Session replicas carry the session summary, first prompt and repo head to
 /// cli-chat-proxy. Upstream lets the server switch that on through
 /// `remote_settings.session_registry_enabled` whenever the operator set
-/// nothing locally; this build ignores the remote flag, so the only way the
+/// nothing locally. This build ignores the remote flag, so the only way the
 /// replica client exists is an explicit local opt-in.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
