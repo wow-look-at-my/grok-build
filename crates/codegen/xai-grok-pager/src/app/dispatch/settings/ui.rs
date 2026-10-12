@@ -13,11 +13,10 @@ use super::setters::{
     set_page_flip_on_send_inner, set_prompt_suggestions_inner, set_remember_tool_approvals_inner,
     set_render_mermaid_inner, set_respect_manual_folds_inner, set_scroll_lines_inner,
     set_scroll_mode_inner, set_scroll_speed_inner, set_show_thinking_blocks_inner,
-    set_show_tips_inner, set_simple_mode_inner, set_stop_gate_ci_failing_inner,
-    set_stop_gate_unfinished_todos_inner, set_theme_inner, set_thinking_summaries_inner,
-    set_timeline_inner, set_timestamps, set_timestamps_inner, set_ttft_timeout_secs_inner,
-    set_vim_mode_inner, set_voice_capture_mode_inner, set_voice_keybind_enabled_inner,
-    set_voice_stt_language_inner,
+    set_show_tips_inner, set_stop_gate_ci_failing_inner, set_stop_gate_unfinished_todos_inner,
+    set_theme_inner, set_thinking_summaries_inner, set_timeline_inner, set_timestamps,
+    set_timestamps_inner, set_ttft_timeout_secs_inner, set_voice_capture_mode_inner,
+    set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
 };
 use crate::app::actions::{Action, Effect};
 use crate::app::app_view::{ActiveView, AppView};
@@ -88,7 +87,6 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 // Prefer optimistic pending over confirmed active.
                 plan_mode_active: agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
                 show_tips: show_tips_from_app,
-                vim_mode: crate::appearance::cache::load_vim_mode(),
                 scroll_speed: crate::appearance::cache::load_scroll_speed(),
                 respect_manual_folds: respect_manual_folds_from_app,
                 auto_mode_gate: auto_mode_gate_from_app,
@@ -232,7 +230,6 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         // Prefer optimistic pending over confirmed active.
         plan_mode_active: agent.plan_mode_pending.unwrap_or(agent.plan_mode_active),
         show_tips: show_tips_from_app,
-        vim_mode: crate::appearance::cache::load_vim_mode(),
         scroll_speed: crate::appearance::cache::load_scroll_speed(),
         respect_manual_folds: respect_manual_folds_from_app,
         auto_mode_gate: auto_mode_gate_from_app,
@@ -421,52 +418,11 @@ pub(in crate::app::dispatch) fn dispatch_toggle_compact_mode(app: &mut AppView) 
     set_compact_mode(app, new)
 }
 
-/// Toggle vim-style scrollback keybindings (`/vim-mode` slash command path).
-/// Off is the default: bare-letter and Shift+letter scrollback bindings (j/k/h/l/g/G/y/Y/o/O/r/x/e/E/L/H and the `i` FocusPrompt alt) are suppressed.
-/// Delegates to the registry-driven `set_vim_mode` so the cache, modal snapshot, toast, and `Effect::PersistSetting` all flow through one path.
-pub(in crate::app::dispatch) fn dispatch_toggle_vim_mode(app: &mut AppView) -> Vec<Effect> {
-    // Toggle the effective value (the pager cache) so `/vim-mode` works from any view, including the session-less dashboard
-    let prev = crate::appearance::cache::load_vim_mode();
-    let enabled = !prev;
-    // Propagate to every agent and nested subagent view and mirror the pager cache
-    // Background and open subagent views pick up the change without a restart; `set_vim_mode_inner` is shared with the `SetVimMode` settings path
-    set_vim_mode_inner(app, enabled);
-    refresh_open_settings_modals(app);
-    let msg = if enabled {
-        "Vim mode: on"
-    } else {
-        "Vim mode: off"
-    };
-    tracing::info!(vim_mode = enabled, "Vim mode toggled");
-    match app.active_view {
-        ActiveView::Agent(id) => {
-            if let Some(agent) = app.agents.get_mut(&id) {
-                agent
-                    .scrollback
-                    .push_block(RenderBlock::system(msg.to_string()));
-            }
-        }
-        ActiveView::AgentDashboard => {
-            // On the dashboard, j/k navigate the overview only when it holds focus
-            // Turning vim on focuses the overview so the user can navigate immediately, mirroring the agent view's "normal mode"
-            // A toast would route to the dashboard's red error slot
-            let has_agents = !app.agents.is_empty();
-            if let Some(d) = app.dashboard.as_mut() {
-                d.list_focused = enabled && has_agents;
-            }
-        }
-        _ => {
-            app.show_toast(msg);
-        }
-    }
-    // Persist like the shared setter so `/vim-mode` survives a restart (writes `[ui].vim_mode` to config.toml)
-    vec![Effect::PersistSetting {
-        key: "vim_mode",
-        value: crate::settings::SettingValue::Bool(enabled),
-        rollback_value: crate::settings::SettingValue::Bool(prev),
-    }]
-}
-
+// Propagate to every agent and nested subagent view and mirror the pager cache
+// Background and open subagent views pick up the change without a restart; `set_vim_mode_inner` is shared with the `SetVimMode` settings path
+// On the dashboard, j/k navigate the overview only when it holds focus
+// Turning vim on focuses the overview so the user can navigate immediately, mirroring the agent view's "normal mode"
+// A toast would route to the dashboard's red error slot
 /// Toggle timestamps (Ctrl+? keybinding path).
 /// Delegates to the registry-driven `set_timestamps` so persistence, the cache, and UI reconciliation all flow through a single code path.
 pub(in crate::app::dispatch) fn dispatch_toggle_timestamps(app: &mut AppView) -> Vec<Effect> {
@@ -619,7 +575,6 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         coding_data_sharing_lock: app.coding_data_sharing_lock(),
         plan_mode_active: agent_plan_mode(app),
         show_tips: app.show_tips,
-        vim_mode: crate::appearance::cache::load_vim_mode(),
         scroll_speed: crate::appearance::cache::load_scroll_speed(),
         respect_manual_folds: app.appearance.scrollback.scroll.respect_manual_folds,
         auto_mode_gate: app.auto_mode_gate,
@@ -658,7 +613,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("follow_up_behavior", SettingValue::Enum(s)) => {
             crate::appearance::FollowUpBehavior::from_canonical(s).map(Action::SetFollowUpBehavior)
         }
-        ("simple_mode", SettingValue::Bool(b)) => Some(Action::SetSimpleMode(*b)),
         ("contextual_hints.undo", SettingValue::Bool(b)) => Some(Action::SetContextualHintUndo(*b)),
         ("contextual_hints.plan_mode", SettingValue::Bool(b)) => {
             Some(Action::SetContextualHintPlanMode(*b))
@@ -685,7 +639,6 @@ pub(in crate::app::dispatch) fn action_for_reset(
         ("render_mermaid", SettingValue::Enum(s)) => {
             crate::appearance::RenderMermaid::from_canonical(s).map(Action::SetRenderMermaid)
         }
-        ("vim_mode", SettingValue::Bool(b)) => Some(Action::SetVimMode(*b)),
         ("remember_tool_approvals", SettingValue::Bool(b)) => {
             Some(Action::SetRememberToolApprovals(*b))
         }
@@ -859,7 +812,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                 set_follow_up_behavior_inner(app, mode);
             }
         }
-        ("simple_mode", SettingValue::Bool(b)) => set_simple_mode_inner(app, *b),
         ("contextual_hints.undo", SettingValue::Bool(b)) => {
             set_contextual_hint_inner(app, |h, v| h.undo = v, *b)
         }
@@ -1050,8 +1002,6 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             }
         }
         ("scroll_lines", SettingValue::Int(i)) => set_scroll_lines_inner(app, *i as u8),
-        // vim_mode: direct inner call.
-        ("vim_mode", SettingValue::Bool(b)) => set_vim_mode_inner(app, *b),
         ("remember_tool_approvals", SettingValue::Bool(b)) => {
             set_remember_tool_approvals_inner(app, *b)
         }

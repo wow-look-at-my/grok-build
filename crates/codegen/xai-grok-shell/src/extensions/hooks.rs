@@ -159,9 +159,7 @@ pub(crate) struct ClientHookResponse {
 }
 
 impl ClientHookResponse {
-    /// The keys [`system_message`](Self::system_message) is read under. Claude
-    /// Code's hook JSON calls it `reason`; the ACP shape calls it
-    /// `systemMessage`, and a client that sends both says one thing twice.
+    /// The keys [`system_message`](Self::system_message) is read under.
     pub(crate) const SYSTEM_MESSAGE_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("systemMessage", &["reason"]);
 }
@@ -747,7 +745,7 @@ mod wire_alias_tests {
         assert_eq!(deny.decision, super::ClientHookDecision::Deny);
     }
 
-    /// Two different messages tell the user two different reasons to proceed.
+    /// Different messages tell the user different reasons to proceed.
     #[test]
     fn a_hook_reply_whose_message_spellings_disagree_is_an_error_naming_the_field() {
         let err = serde_json::from_str::<ClientHookResponse>(

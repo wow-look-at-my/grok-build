@@ -3672,17 +3672,6 @@ pub fn render_extensions_modal(
             clickable: true,
             id: 99,
         });
-        // Show `i search` in the footer when vim nav mode is active. On those tabs `i` never opens search,
-        // so the hint would mislabel the key.
-        let i_is_action_key = extensions_action_keys(state.active_tab)
-            .iter()
-            .any(|&(ch, _)| ch == 'i');
-        if !i_is_action_key {
-            modal_window::push_vim_nav_search_hint(
-                &mut shortcuts,
-                state.picker_state.search_active,
-            );
-        }
     }
 
     // Render modal window chrome.

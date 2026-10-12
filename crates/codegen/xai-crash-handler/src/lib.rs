@@ -1,6 +1,6 @@
-#![allow(clippy::cast_lossless)] // 1 hit predates the gate
-#![allow(clippy::cast_possible_truncation)] // 6 hits predate the gate
-#![allow(clippy::cast_sign_loss)] // 4 hits predate the gate
+#![allow(clippy::cast_lossless)]
+#![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+#![allow(clippy::cast_sign_loss)] // Hits predate the gate
 
 //! Cross-platform crash handler with startup crash detection.
 //!

@@ -2149,9 +2149,7 @@ impl SessionActor {
                         | ToolKind::MemoryGet
                         | ToolKind::WebSearch
                         | ToolKind::WebFetch
-                        // The `ci` tool is a read of GitHub state: it declares
-                        // itself read-only, and a missing kind here would make
-                        // the shell prompt for approval on every CI query.
+                        // The `ci` tool is a read of GitHub state: it declares itself read-only.
                         | ToolKind::Ci
                         | ToolKind::EnterPlan
                         | ToolKind::ExitPlan
@@ -2368,8 +2366,7 @@ impl SessionActor {
             _ => serde_json::to_value(&tool_call_input)?,
         };
         let mut canonical_meta = self.stamp_tool_meta(None, wire_name, Some(&tool_call_input));
-        // One function names every tool call, finished or still streaming, so a
-        // row cannot rename itself when the last argument byte lands.
+        // One function names every tool call, finished or still streaming.
         let kind = self.agent.borrow().tool_bridge().tool_kind(wire_name);
         let title = tool_title::tool_input_title(
             &tool_call_input,
@@ -3108,17 +3105,15 @@ impl SessionActor {
         self.chat_state_handle.push_tool_result(tool_chat);
         vec![]
     }
-    /// Name a tool call the model is still writing, from the arguments so far.
-    ///
-    /// Returns a title only when this fragment CHANGED it. The chunk carries
-    /// the answer to the client, which has neither the tool registry nor the
-    /// typed inputs a title is read from, and a repeat of the current title is
-    /// bytes on the wire that redraw the same row.
-    ///
-    /// Every step is allowed to fail and say nothing. A half-written argument
-    /// that names no tool yet, a name the registry does not know, and a body
-    /// past the size cap all leave the row showing the wire name, which is what
-    /// it showed before any of this existed.
+    /// Name a tool call the model is still writing, from the arguments so
+    /// far. Returns a title only when this fragment CHANGED it. The chunk
+    /// carries the answer to the client, which has neither the tool registry
+    /// nor the typed inputs a title is read from. A repeat of the current
+    /// title is bytes on the wire that redraw the same row. Every step is
+    /// allowed to fail and say nothing. A half-written argument that names no
+    /// tool yet. A name the registry does not know. A body past the size cap
+    /// all leave the row showing the wire name, which is what it showed
+    /// before any of this existed.
     pub(super) async fn streaming_tool_title(
         self: &Arc<Self>,
         tool_index: u32,
@@ -3131,9 +3126,7 @@ impl SessionActor {
                 live.entry(tool_index)
                     .or_insert_with(|| tool_title::StreamingToolArgs::new(name.to_string()));
             }
-            // Only the opening fragment carries the name. One that arrives for
-            // an index that never opened belongs to a call this session cannot
-            // name.
+            // Only the opening fragment carries the name.
             let entry = live.get_mut(&tool_index)?;
             if let Some(delta) = arguments_delta {
                 entry.push(delta);
@@ -3145,11 +3138,7 @@ impl SessionActor {
         };
         let completed = crate::session::helpers::partial_json::complete_partial_json(&args)?;
         let value = serde_json::from_str::<serde_json::Value>(&completed).ok()?;
-        // An empty object names nothing worth showing. A tool that takes no
-        // arguments does parse from one and would be named correctly, but so
-        // would a half-written `{"path":`, and that one reads as "Read" with an
-        // empty path. Waiting for the first whole field costs the argument-less
-        // tools a few milliseconds and keeps the blank titles out.
+        // An empty object names nothing worth showing.
         if !value.as_object().is_some_and(|obj| !obj.is_empty()) {
             return None;
         }
@@ -3308,8 +3297,7 @@ mod ci_tool_title_tests {
 
     #[test]
     fn a_ci_call_about_another_repository_says_which() {
-        // A query that goes to a different repository must not read in the
-        // transcript as a query about the session's own branch.
+        // A query that goes to a different repository.
         let mut ask = input(CiAction::Status, Some("fix/darwin-version-stamp"));
         ask.repo = Some("wow-look-at-my/go-toolchain".to_string());
         assert_eq!(

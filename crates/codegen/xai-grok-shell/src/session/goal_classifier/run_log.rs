@@ -1,11 +1,4 @@
 //! The run log: the harness's own record of what the implementer ran.
-//!
-//! Every tool call the implementer made during the goal, and what each one
-//! returned, is already in the conversation. The verifier reads that record
-//! (`RUN_LOG` in the evidence packet) instead of a proof file the
-//! implementer wrote about itself. The implementer's prose and reasoning are
-//! left out on purpose: a verifier that reads the narration inherits its
-//! bias. A command line and its output carry none.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -15,16 +8,13 @@ use xai_grok_tools::util::{ceil_char_boundary, truncate_bytes};
 
 use super::evidence::sanitize_final_response;
 
-/// Bytes of a tool result kept from its start. A test run puts its
-/// summary at the end, so the tail is kept apart (below).
+/// Bytes of a tool result kept from its start.
 pub(crate) const RUN_LOG_RESULT_HEAD_BYTES: usize = 8 * 1024;
 /// Bytes of a tool result kept from its end.
 pub(crate) const RUN_LOG_RESULT_TAIL_BYTES: usize = 4 * 1024;
-/// Bytes of a tool call's arguments kept. A command line is short; an edit
-/// carries the whole file body and the diff already shows that.
+/// Bytes of a tool call's arguments kept.
 pub(crate) const RUN_LOG_ARGS_MAX_BYTES: usize = 2 * 1024;
-/// Cap on the rendered log. The newest calls are kept; the count of older
-/// calls dropped is stated in the header so an absence reads as an absence.
+/// Cap on the rendered log.
 pub(crate) const RUN_LOG_MAX_BYTES: usize = 1024 * 1024;
 
 /// Sentinel rendered as the `RUN_LOG:` value when no log was written.
@@ -39,20 +29,18 @@ pub(crate) struct RunLog {
     pub calls: usize,
     /// Older calls dropped to fit [`RUN_LOG_MAX_BYTES`].
     pub elided_calls: usize,
-    /// A compaction summary sits inside the goal's span, so calls before it
-    /// are gone from the conversation and therefore from the log.
+    /// A compaction summary sits inside the goal's span, so calls before it are gone from the conversation and therefore from the log.
     pub compacted: bool,
     /// Calls whose result was replaced because it showed the implementer's own words back (see [`AuthoredFiles`]).
     pub withheld: usize,
 }
 
-/// Build the run log from `items`.
-///
-/// `start_prompt_index` is the session prompt index at which the goal was
-/// created. Calls on a turn before it are outside the goal and are skipped.
-/// `None` keeps every call. A compaction summary inside the goal's span is
-/// reported through [`RunLog::compacted`]; everything after it is kept,
-/// because the summary sits at or after the goal start.
+/// Build the run log from `items`. `start_prompt_index` is the session prompt
+/// index at which the goal was created. Calls on a turn before it are outside
+/// the goal and are skipped. `None` keeps every call. A compaction summary
+/// inside the goal's span is reported through [`RunLog::compacted`].
+/// Everything after it is kept, because the summary sits at or after the goal
+/// start.
 pub(crate) fn build_run_log(
     items: &[ConversationItem],
     start_prompt_index: Option<usize>,
@@ -70,8 +58,7 @@ pub(crate) fn build_run_log(
         match item {
             ConversationItem::User(u) => {
                 if u.synthetic_reason == SyntheticReason::CompactionMeta {
-                    // The summary sits at or after the goal start when the
-                    // goal is active, so what follows it is the goal's.
+                    // The summary sits at or after the goal start when the goal is active, so what follows it is the goal's.
                     compacted |= in_goal;
                     in_goal = true;
                 } else if let (Some(idx), Some(start)) = (u.prompt_index, start_prompt_index) {
@@ -103,8 +90,7 @@ pub(crate) fn build_run_log(
             _ => {}
         }
     }
-    // A call with no result is one still in flight, or one the model never
-    // got an answer to. Either way the verifier must see it was made.
+    // A call with no result is one still in flight, or one the model never got an answer to.
     let mut unanswered: Vec<(&str, &str)> = pending.into_values().collect();
     unanswered.sort_unstable();
     for (name, args) in unanswered {

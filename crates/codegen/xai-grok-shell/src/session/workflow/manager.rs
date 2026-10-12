@@ -94,9 +94,7 @@ pub(crate) struct WorkflowManager {
     active: HashMap<String, ActiveRun>,
     retiring: Vec<(String, oneshot::Receiver<()>)>,
     max_concurrent_agents: usize,
-    /// Agent slots shared by every run this manager launches, so the
-    /// session's OVERALL workflow-agent concurrency stays capped even when
-    /// several runs are active at once (see `WORKFLOW_MAX_ACTIVE_RUNS_PER_SESSION`).
+    /// Agent slots shared by every run this manager launches.
     agent_slots: Arc<tokio::sync::Semaphore>,
     /// `agent()` spawns carry the owning session's mode instead of reclassifying.
     task_model_selection: LatchedTaskModelSelection,
@@ -2052,8 +2050,7 @@ mod tests {
             .launch(resolve_inline(parallel_n_script(N)).unwrap(), spec())
             .unwrap();
 
-        // Both runs together must never hold more than CAP live agents,
-        // even though each run alone would be allowed CAP of its own.
+        // Both runs together must never hold more than CAP live agents.
         let mut live = Vec::new();
         for _ in 0..CAP {
             live.push(recv_spawn(&mut subagent_rx).await);

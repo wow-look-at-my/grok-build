@@ -28,12 +28,9 @@ pub enum WebSearchConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         excluded_domains: Option<Vec<String>>,
     },
-    /// Kagi's own search index instead of an LLM-synthesized answer.
-    ///
-    /// Kagi returns ranked, already-filtered results with snippets, so no
-    /// model call is made and no synthesis model has to be configured. Auth is
-    /// a Search API token (`Authorization: Bot <token>`), a different scheme and
-    /// credential from the Responses-API bearer the other arms use.
+    /// Kagi's own search index instead of an LLM-synthesized answer. Kagi
+    /// returns ranked, already-filtered results with snippets, so no model
+    /// call is made and no synthesis model has to be configured.
     Kagi {
         api_key: String,
         #[serde(default = "default_kagi_base_url")]

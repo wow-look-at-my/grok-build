@@ -5,9 +5,7 @@ reads the same project conventions other agents use, and imports the rest.
 
 ## Picked up automatically
 
-- **Rules & instructions** — `AGENTS.md` (the OpenCode convention),
-  `CLAUDE.md` (including nested ones), and `*.md` rules under
-  `.claude/rules/` and `.cursor/rules/`.
+- **Rules & instructions** — `AGENTS.md` (the OpenCode convention), `CLAUDE.md` (including nested ones), and `*.md` rules under `.claude/rules/` and `.cursor/rules/`.
 - **Skills & custom commands** — `~/.claude/skills/`, `~/.claude/commands/`,
   `~/.cursor/skills/`, and their project-level twins. Flat command `.md`
   files become slash commands here too.

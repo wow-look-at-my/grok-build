@@ -505,9 +505,7 @@ mod tests {
         #[allow(clippy::disallowed_methods)] // test fixture; the test kills it
         let mut child = cmd.spawn().expect("spawn sigterm-ignoring child");
         group.attach_std(&child).expect("attach");
-        // The shell installs its trap ~0.3ms after exec. Signal before that
-        // and it dies to the default SIGTERM, leaving a zombie that still
-        // reports live — the test then passes without exercising SIGKILL.
+        // The shell installs its trap ~0.3ms after exec.
         std::thread::sleep(Duration::from_millis(250));
 
         let started = std::time::Instant::now();
@@ -519,8 +517,7 @@ mod tests {
             "an occupied group must still get the full grace, took {elapsed:?}"
         );
 
-        // Bounded: without SIGKILL this fails in seconds rather than blocking
-        // the run on `sleep 1000`.
+        // Bounded: without SIGKILL this fails in seconds rather than blocking the run on `sleep 1000`.
         let reap_deadline = std::time::Instant::now() + Duration::from_secs(5);
         let status = loop {
             match child.try_wait().expect("poll child") {

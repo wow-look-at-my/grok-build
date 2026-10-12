@@ -75,9 +75,7 @@ pub struct AgentBuilder {
     write_file_enabled: bool,
     active_agent_messages_enabled: bool,
     subagents_enabled: bool,
-    /// How strongly system-prompt/tool wording nudges the model toward
-    /// spawning subagents via the `task` tool. Independent of
-    /// `subagents_enabled`, which gates the tool's presence entirely.
+    /// How strongly system-prompt/tool wording nudges the model toward spawning subagents via the `task` tool.
     subagent_usage_frequency: xai_tool_types::AgentUsageFrequency,
     background_workflows_enabled: bool,
     ask_user_question_enabled: bool,
@@ -575,9 +573,8 @@ impl AgentBuilder {
         self
     }
     /// Set how strongly system-prompt/tool wording nudges the model toward
-    /// spawning subagents via the `task` tool (default: `AgentUsageFrequency::Default`,
-    /// i.e. no added nudge). Purely a wording knob — it never changes whether
-    /// the tool itself is available; see `with_subagents_enabled` for that.
+    /// spawning subagents via the `task` tool (default:
+    /// `AgentUsageFrequency::Default`, i.e. no added nudge).
     pub fn with_subagent_usage_frequency(
         mut self,
         frequency: xai_tool_types::AgentUsageFrequency,
@@ -814,7 +811,6 @@ impl AgentBuilder {
                 .iter()
                 .any(|tc| tc.id.ends_with(":write") || tc.id.ends_with(":Write"));
             // A read-only agent's prompt says it has no file editing tools.
-            // A `write` tool here contradicts that prompt.
             let read_only = definition.permission_mode == PermissionMode::Plan;
             let known_kinds = tool_bridge_builder.known_tool_kinds();
             let has_edit_tool = tool_config.tools.iter().any(|tc| {
@@ -1455,8 +1451,7 @@ pub(crate) fn task_tool_description(
     description
 }
 /// A sub-agent shares the session's permission actor (rules, approvals and
-/// denials). Without this line a model that was refused a command spends
-/// attempts on a sub-agent to find out whether the refusal carries over.
+/// denials).
 const TASK_PERMISSION_NOTE: &str = "\n\nA sub-agent runs under this session's permission \
      rules, approvals and denials. A command denied to you is denied to it too, so do not \
      delegate a denied action.";
@@ -1853,8 +1848,8 @@ mod tests {
     }
     /// The bridge's full-discovery snapshot must record every discovered
     /// skill name — including `paths:`-gated and preloaded skills that the
-    /// listing baseline (`slash_skills`) holds back — so session-start
-    /// telemetry can reuse it instead of re-walking the disk.
+    /// listing baseline (`slash_skills`) holds back. Session-start telemetry
+    /// can reuse it instead of re-walking the disk.
     #[tokio::test]
     async fn discovery_snapshot_records_gated_and_preloaded_skills() {
         use xai_grok_tools::computer::local::LocalTerminalBackend;

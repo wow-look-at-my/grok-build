@@ -358,13 +358,13 @@ pub(super) fn fork_runtime_model(requested: Option<String>, parent: &str) -> Str
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| parent.to_string())
 }
-/// Item contents of a bound session's live todo list, in order.
-///
-/// A session's todo list is a `State<TodoState>` resource on its OWN toolset,
-/// and every session the workspace knows is bound here keyed by session id — so
-/// this is how a parent reads a child's list without the child having to hand it
-/// over. Empty when the session is unknown (proxy mode, or a session that was
-/// never bound) or has no list at all, which is exactly "nothing to merge".
+/// Item contents of a bound session's live todo list, in order. A session's
+/// todo list is a `State<TodoState>` resource on its OWN toolset. Every
+/// session the workspace knows is bound here keyed by session id — so this
+/// is how a parent reads a child's list without the child. That child is
+/// having to hand it over. Empty when the session is unknown (proxy mode, or
+/// a session that was never bound) or has no list at all, which is exactly
+/// "nothing to merge".
 pub(crate) async fn session_todo_contents(
     workspace_ops: &xai_grok_workspace::WorkspaceOps,
     session_id: &str,
@@ -2106,10 +2106,7 @@ pub(crate) async fn run_shell_child(
     result.tool_calls = tool_calls;
     result.turns = turns;
     result.duration_ms = start.elapsed().as_millis() as u64;
-    // The child's OWN todo list, read while its session (and so its live
-    // `State<TodoState>`) is still bound here — the last moment the parent can
-    // see it. A `/goal` planner builds that list with `todo_write` as it works;
-    // this carries it back so the spawning session can merge it into its own.
+    // The child's OWN todo list, read while its session (and so its live `State<TodoState>`) is still bound here — the last moment the parent can see it.
     result.todos = session_todo_contents(&ctx.workspace_ops, child_session_id.0.as_ref()).await;
     if let Some(trace_gcs_config) = gcs_upload_ctx.upload_method.as_ref().map(|method| {
         crate::session::repo_changes::TraceExportConfig {

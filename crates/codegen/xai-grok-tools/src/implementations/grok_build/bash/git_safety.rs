@@ -1,11 +1,4 @@
 //! Bash PreToolUse-style guards for git-repo file deletion and history rewrite.
-//!
-//! Policy (also documented in the user-guide and system prompt):
-//! - Never `rm` a non-ignored file in a git repo (tracked or untracked).
-//!   Commit first, then `git rm`.
-//! - Do not hide a deletion with `git commit --amend` after `git rm`,
-//!   `git reset --hard`, `git filter-branch` / `filter-repo`, or a force-push
-//!   of rewritten history.
 use crate::implementations::editor_infra::duplicate_write::find_git_root;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -226,15 +219,11 @@ fn git_stdout(git_root: &Path, args: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// Split on `&&` `||` `;` `|` and newlines that are not inside quotes.
-///
-/// The walk is by CHARACTER, never by raw byte index: quotes are ASCII (`'` /
-/// `"`), and a multi-byte UTF-8 character is neither a separator nor a quote,
-/// so it is skipped whole. That keeps `i` on a char boundary whenever the
-/// statement slices below run. (The previous byte-index walk stepped onto a
-/// UTF-8 continuation byte and panicked — "byte index N is not a char
-/// boundary" — on any command carrying non-ASCII text, which aborted the
-/// whole session.)
+/// Split on `&&` `||` `;` `|` and newlines that are not inside quotes. The
+/// walk is by CHARACTER, never by raw byte index. The walk quotes are ASCII
+/// (`'` / `"`), and a multi-byte UTF-8 character is neither a separator nor a
+/// quote. It is skipped whole. That keeps `i` on a char boundary whenever the
+/// statement slices below run.
 fn split_statements(command: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -245,8 +234,7 @@ fn split_statements(command: &str) -> Vec<&str> {
             if c == q {
                 quote = None;
             } else if c == '\\' {
-                // Escaped character: skip it whole, whatever its width, so the
-                // scan never steps into the middle of a multi-byte char.
+                // Escaped character.
                 chars.next();
             }
             continue;
@@ -265,8 +253,7 @@ fn split_statements(command: &str) -> Vec<&str> {
             0
         };
         if sep_len > 0 {
-            // `i` is a `char_indices` offset of an ASCII separator and `start`
-            // is 0 or such an offset plus the separator's width.
+            // `i` is a `char_indices` offset of an ASCII separator.
             #[allow(clippy::string_slice)]
             let stmt = command[start..i].trim();
             if !stmt.is_empty() {
@@ -276,7 +263,6 @@ fn split_statements(command: &str) -> Vec<&str> {
             continue;
         }
     }
-    // Same walk: `start` is a separator boundary or 0.
     #[allow(clippy::string_slice)]
     let stmt = command[start..].trim();
     if !stmt.is_empty() {
@@ -473,12 +459,12 @@ mod tests {
         assert_eq!(parts, vec!["echo 'a && b'", "rm foo"]);
     }
 
-    /// Regression: the statement scanner walked the command by RAW BYTE index
-    /// and sliced `&command[i..]` every iteration, so any multi-byte UTF-8
-    /// character panicked with "byte index N is not a char boundary" and the
-    /// panic aborted the whole session (observed as an instant quit-to-shell
-    /// on `SCRATCH=…; cat >> ci.log <<'EOF' …em-dash… EOF`). The em-dash in
-    /// CI-log prose is enough to trigger it.
+    /// Regression: the statement scanner walked the command by RAW BYTE index.
+    /// The statement scanner sliced `&command[i..]` every iteration, so any
+    /// multi-byte UTF-8 character panicked with "byte index N is not a char
+    /// boundary". The panic aborted the whole session (observed as an instant
+    /// quit-to-shell on `SCRATCH=…; cat >> ci.log <<'EOF' …em-dash… EOF`).
+    /// The em-dash in CI-log prose is enough to trigger it.
     #[test]
     fn split_survives_multibyte_utf8_in_a_heredoc() {
         let with_dash = "SCRATCH=/tmp/grok-ci; cat >> \"$SCRATCH/ci.log\" <<'EOF'\n\
@@ -512,7 +498,7 @@ mod tests {
         assert_eq!(bash_command_violation(with_dash, tmp.path()), None);
     }
 
-    /// A `\` escape skipping two raw bytes must not step into a multi-byte
+    /// A `\` escape skipping raw bytes must not step into a multi-byte
     /// char either (the quoted-region `i += 2` had the same hazard).
     #[test]
     fn split_survives_backslash_before_a_multibyte_char() {

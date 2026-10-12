@@ -3,8 +3,8 @@ use super::types::{SchedulerError, interval_duration};
 const MINIMUM_INTERVAL_SECS: u64 = 60;
 
 /// Parse an interval string like "5m", "2h", "30s", "1d" into seconds.
-/// Minimum interval is 60 seconds; values below are clamped. An interval with
-/// no duration to add to a timestamp is refused here, where it arrives as text.
+/// interval is many seconds; values below are clamped. An interval with no
+/// duration to add to a timestamp is refused here, where it arrives as text.
 pub fn parse_interval(s: &str) -> Result<u64, SchedulerError> {
     let s = s.trim();
     if s.is_empty() {

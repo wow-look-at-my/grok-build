@@ -1,9 +1,4 @@
 //! Checks what `ci/zig-cc` forwards to zig.
-//!
-//! cc-rs adds `--target=arm64-apple-macosx`, and zig answers that with
-//! "unknown architecture: 'arm64'". Every C and assembly file in ring and
-//! aws-lc failed on it, so the wrapper drops cc-rs's target selection. A fake
-//! `zig` on PATH records the argument list the wrapper produces.
 
 #![cfg(unix)]
 
