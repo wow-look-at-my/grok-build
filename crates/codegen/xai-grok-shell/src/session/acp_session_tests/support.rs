@@ -566,6 +566,7 @@ async fn create_test_actor_inner(
         turn_summary_enabled: false,
         title_refresh_enabled: false,
         thinking_summaries_enabled: false,
+        thinking_summary_history: Default::default(),
         thinking_summary_tail: Default::default(),
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),

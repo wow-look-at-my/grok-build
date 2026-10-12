@@ -572,6 +572,12 @@ pub fn current_value_for(
         "stop_gate_ci_failing" => Some(SettingValue::Bool(ui.stop_gate_ci_failing_enabled())),
         // Resolved once per session in the shell.
         "thinking_summaries" => Some(SettingValue::Bool(ui.thinking_summaries_enabled())),
+        "thinking_summary_history_window_secs" => Some(SettingValue::Int(i64::from(
+            ui.thinking_summary_history_window_secs_value(),
+        ))),
+        "thinking_summary_history_min_count" => Some(SettingValue::Int(i64::from(
+            ui.thinking_summary_history_min_count_value(),
+        ))),
         // Per-tip contextual hints: `None` (inherit) reads as the default ON
         "contextual_hints.undo" => {
             Some(SettingValue::Bool(ui.contextual_hints.undo.unwrap_or(true)))
@@ -1114,6 +1120,20 @@ mod tests {
                         "thinking_summaries default drifts from UiConfig::default()"
                     );
                     assert!(*default, "thinking_summaries must default ON");
+                }
+                ("thinking_summary_history_window_secs", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        i64::from(ui.thinking_summary_history_window_secs_value()),
+                        "thinking_summary_history_window_secs default drifts from UiConfig::default()",
+                    );
+                }
+                ("thinking_summary_history_min_count", SettingKind::Int { default, .. }) => {
+                    assert_eq!(
+                        *default,
+                        i64::from(ui.thinking_summary_history_min_count_value()),
+                        "thinking_summary_history_min_count default drifts from UiConfig::default()",
+                    );
                 }
                 // group_tool_verbs: Option<bool>; None reads as true (client default)
                 ("group_tool_verbs", SettingKind::Bool { default }) => {
