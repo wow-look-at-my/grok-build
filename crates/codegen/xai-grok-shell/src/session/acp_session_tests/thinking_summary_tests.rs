@@ -308,7 +308,7 @@ async fn a_second_summary_carries_the_first_as_its_direction_block() {
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
             actor.thinking_summaries_enabled = true;
-            // Two seconds between calls, so the default window covers both.
+            // A couple of seconds between calls, so the default window covers both.
             actor.thinking_summary_history = ThinkingSummaryHistory::new(120, 5);
             let actor = std::sync::Arc::new(actor);
 
@@ -365,8 +365,8 @@ async fn a_second_summary_carries_the_first_as_its_direction_block() {
 }
 
 /// Past the window, with the count floor at zero, no prior summary reaches the
-/// next call. The same two calls under a count floor do carry it, so the window
-/// is what excluded it.
+/// next call. The same calls under a count floor do carry it, so the window is
+/// what excluded it.
 #[tokio::test]
 async fn a_summary_past_the_window_is_left_out_and_the_count_floor_carries_it() {
     use crate::session::helpers::thinking_summary::ThinkingSummaryHistory;
@@ -388,7 +388,6 @@ async fn a_summary_past_the_window_is_left_out_and_the_count_floor_carries_it() 
                 server.set_response("Reuse the retry helper");
                 aim_at(&actor, &server).await;
 
-                // Nine seconds apart: outside a 2 s window, inside a 120 s one.
                 actor.spawn_thinking_summary(
                     &response_carrying_thinking("First pass at the retry loop."),
                     Some(1_000),

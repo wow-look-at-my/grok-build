@@ -2178,8 +2178,7 @@ fn defaults_round_trip_through_registry() {
             "output_rate_window_secs" => SettingValue::Int(10),
             "output_rate_max_retries" => SettingValue::Int(2),
             "ttft_timeout_secs" => SettingValue::Int(120),
-            // The thinking-summary history ships with a two-minute lookback and a
-            // five-summary floor, so a rapid-fire run keeps a short direction chain.
+            // The thinking-summary history ships with a two-minute lookback and a five-summary floor.
             "thinking_summary_history_window_secs" => SettingValue::Int(120),
             "thinking_summary_history_min_count" => SettingValue::Int(5),
             "scroll_speed" => SettingValue::Int(50),

@@ -1176,8 +1176,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             },
             restart_required: true,
         },
-        // SHARED: `[ui].thinking_summary_history_window_secs`. How far back, in
-        // seconds, a summary call may look for earlier summaries.
+        // SHARED: `[ui].thinking_summary_history_window_secs`.
         SettingMeta {
             key: "thinking_summary_history_window_secs",
             category: SettingCategory::Appearance,
