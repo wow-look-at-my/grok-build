@@ -307,7 +307,9 @@ pub(crate) fn acp_tool_update(
             use xai_grok_tools::types::output::TodoWriteOutput;
             let (status, content) = match todo_output {
                 TodoWriteOutput::TodosUpdated(_) => (acp::ToolCallStatus::Completed, None),
-                TodoWriteOutput::DuplicateId(msg) | TodoWriteOutput::InvalidArgument(msg) => (
+                TodoWriteOutput::DuplicateId(msg)
+                | TodoWriteOutput::InvalidArgument(msg)
+                | TodoWriteOutput::TooManyInProgress(msg) => (
                     acp::ToolCallStatus::Failed,
                     Some(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
                         acp::TextContent::new(msg.clone()),
@@ -608,6 +610,29 @@ pub(crate) fn acp_plan_update(output: &ToolOutput) -> Option<acp::Plan> {
     }
 }
 
+/// Plan entries for the turn-end cleanup: the live todo list, with every item
+/// still `in_progress` marked as no longer running. The status is left alone.
+/// Completion is a fact about the work and a turn ending is not one. An item
+/// still in progress is published in progress and carries `meta.stale` for a
+/// client that ends a spinner on that instead.
+pub(crate) fn turn_end_plan_entries(state: &crate::tools::todo::TodoState) -> Vec<acp::PlanEntry> {
+    use crate::tools::todo::{TodoStatus, plan_entry_from_todo_item};
+
+    state
+        .todo_items()
+        .map(|item| {
+            let running = item.status == TodoStatus::InProgress;
+            let mut entry = plan_entry_from_todo_item(item.clone());
+            if running {
+                let mut meta = entry.meta.take().unwrap_or_default();
+                meta.insert("stale".into(), true.into());
+                entry = entry.meta(Some(meta));
+            }
+            entry
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,47 +763,51 @@ mod tests {
     }
 
     #[test]
-    fn test_turn_end_plan_cleanup_preserves_semantics_and_priority() {
-        use crate::tools::todo::plan_entry_from_todo_item;
+    fn test_turn_end_plan_cleanup_keeps_status_and_marks_running_stale() {
         use xai_grok_tools::implementations::grok_build::todo::{
-            TodoItem, TodoPriority, TodoStatus,
+            TodoItem, TodoPriority, TodoState, TodoStatus,
         };
 
         // Simulate a mixed todo list at turn end.
-        let items = [
+        let mut state = TodoState::default();
+        state.push(
+            "1".into(),
             TodoItem {
                 content: "Done".to_string(),
                 priority: TodoPriority::Medium,
                 status: TodoStatus::Completed,
                 meta: None,
+                verification: None,
+                verification_passed: false,
             },
+        );
+        state.push(
+            "2".into(),
             TodoItem {
                 content: "Dropped".to_string(),
                 priority: TodoPriority::Low,
                 status: TodoStatus::Cancelled,
                 meta: None,
+                verification: None,
+                verification_passed: false,
             },
+        );
+        state.push(
+            "3".into(),
             TodoItem {
-                content: "Stale spinner".to_string(),
+                content: "Still running".to_string(),
                 priority: TodoPriority::High,
                 status: TodoStatus::InProgress,
                 meta: None,
+                verification: None,
+                verification_passed: false,
             },
-        ];
+        );
 
-        // Build plan entries using the canonical helper, then override in_progress to completed (same logic as emit_turn_end_plan_cleanup).
-        let entries: Vec<acp::PlanEntry> = items
-            .iter()
-            .map(|item| {
-                let mut entry = plan_entry_from_todo_item(item.clone());
-                if item.status == TodoStatus::InProgress {
-                    entry.status = acp::PlanEntryStatus::Completed;
-                }
-                entry
-            })
-            .collect();
+        // Drive the shipped conversion, not a copy of it.
+        let entries = turn_end_plan_entries(&state);
 
-        let [completed, cancelled, in_progress] = entries.as_slice() else {
+        let [completed, cancelled, running] = entries.as_slice() else {
             panic!("expected three plan entries: {entries:?}");
         };
         // Completed item: unchanged, medium priority preserved
@@ -794,11 +823,19 @@ mod tests {
             Some(&serde_json::Value::Bool(true))
         );
 
-        // In-progress item: overridden to Completed, HIGH priority preserved
-        assert_eq!(in_progress.status, acp::PlanEntryStatus::Completed);
-        assert_eq!(in_progress.priority, acp::PlanEntryPriority::High);
-        // No cancelled marker (it was in_progress, not cancelled)
-        assert!(in_progress.meta.is_none());
+        // In-progress item: still in progress.
+        assert_eq!(running.status, acp::PlanEntryStatus::InProgress);
+        assert_eq!(running.priority, acp::PlanEntryPriority::High);
+        assert_eq!(
+            running.meta.as_ref().and_then(|m| m.get("stale")),
+            Some(&serde_json::Value::Bool(true))
+        );
+        assert!(
+            !running
+                .meta
+                .as_ref()
+                .is_some_and(|m| m.contains_key("cancelled"))
+        );
     }
 
     #[test]
@@ -823,6 +860,8 @@ mod tests {
                     status:
                         xai_grok_tools::implementations::grok_build::todo::TodoStatus::Completed,
                     meta: None,
+                    verification: None,
+                    verification_passed: false,
                 },
             ],
             state: xai_grok_tools::implementations::grok_build::todo::TodoState::default(),

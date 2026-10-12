@@ -135,7 +135,7 @@ pub(super) const PLAN_SEED_ID_PREFIX: &str = "plan";
 
 /// [`add_only_todo_args`] with an explicit id prefix. So callers that append
 /// their own kind of item (a `/todo` capture, the goal planner's seed) keep
-/// their provenance while sharing one append-only argument shape.
+/// their provenance while sharing one. Append-only argument shape.
 pub(super) fn add_only_todo_args_with_prefix(
     contents: &[String],
     urgent: bool,

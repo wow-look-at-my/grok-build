@@ -1843,6 +1843,8 @@ mod tests {
             priority: Default::default(),
             status,
             meta: None,
+            verification: None,
+            verification_passed: false,
         }
     }
 

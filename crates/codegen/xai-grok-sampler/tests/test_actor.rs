@@ -1616,8 +1616,9 @@ mod output_rate {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    /// A collapsed stream gets a backup generation beside it. The original never
-    /// finishes and the backup answers at the same time, so the backup's answer wins.
+    /// A collapsed stream gets a backup generation beside it. The never
+    /// finishes and the backup answers at the same time, so the backup's
+    /// answer wins.
     async fn a_collapsed_stream_loses_to_a_backup_that_finishes_first() {
         let counter = Arc::new(AtomicU32::new(0));
         let counter_handler = Arc::clone(&counter);

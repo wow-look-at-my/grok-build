@@ -12,8 +12,7 @@
 //! - <path>
 //! ...
 //!
-//! RUN_LOG: <run-log path or `(unavailable)`>
-//!
+//! RUN_LOG: <run-log path or `(unavailable)`> !
 //! PLAN_FILE: <plan path or `(unavailable)`>
 //!
 //! PLAN_CHANGES: <unified diff of plan edits, or `(none)`>
