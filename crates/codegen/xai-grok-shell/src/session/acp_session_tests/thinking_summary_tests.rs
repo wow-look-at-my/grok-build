@@ -83,13 +83,15 @@ async fn aim_at(actor: &SessionActor, server: &MockInferenceServer) {
 async fn take_thinking_summary(
     grx: &mut tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
 ) -> Option<serde_json::Value> {
-    for _ in 0..4000 {
+    // Timer ticks, not yields: the summary waits on a real HTTP round trip, and a loaded runner can spend all of a yield budget before it lands.
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(5));
+    for _ in 0..1000 {
         while let Ok(msg) = grx.try_recv() {
             if let Some(update) = summary_update(&msg) {
                 return Some(update);
             }
         }
-        tokio::task::yield_now().await;
+        interval.tick().await;
     }
     None
 }
