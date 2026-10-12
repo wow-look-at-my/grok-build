@@ -1148,9 +1148,8 @@ pub(crate) struct SessionActor {
     pub(crate) next_title_refresh_idx: std::cell::Cell<usize>,
     /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`), resolved a single time at spawn.
     pub(crate) thinking_summaries_enabled: bool,
-    /// The thinking summaries THIS session has produced, plus how far back the
-    /// next summary call may look (`[ui].thinking_summary_history_*`, resolved
-    /// once at spawn). An empty history for the first call of a session.
+    /// The thinking summaries THIS session has produced, plus how far back the next summary call may look
+    /// (`[ui].thinking_summary_history_*`, resolved once at spawn).
     pub(crate) thinking_summary_history:
         crate::session::helpers::thinking_summary::ThinkingSummaryHistory,
     /// The summarization task this session queued most recently, in flight or not.

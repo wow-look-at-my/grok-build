@@ -122,8 +122,7 @@ pub enum PromptOrigin {
     GoalClassifierNudge,
     /// Scheduled task (`/loop`) prompt fired by the scheduler via the pager.
     SchedulerFired,
-    /// A `/todo` capture that added items while no turn was running. The shell wakes a turn with the
-    /// reminder text so the work begins; the item is already on the list.
+    /// A `/todo` capture that added items while no turn was running.
     TodoAdded {
         capture_id: String,
     },
