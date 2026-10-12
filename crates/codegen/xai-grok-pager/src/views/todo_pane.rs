@@ -138,6 +138,12 @@ impl TodoCounts {
     pub fn total(&self) -> usize {
         self.in_progress + self.pending + self.completed + self.cancelled
     }
+
+    /// Tasks that count toward completion progress: every status except
+    /// cancelled.
+    pub fn total_excluding_cancelled(&self) -> usize {
+        self.in_progress + self.pending + self.completed
+    }
 }
 
 fn empty_placeholder_message(todos_empty: bool, counts: TodoCounts) -> String {
@@ -150,6 +156,32 @@ fn empty_placeholder_message(todos_empty: bool, counts: TodoCounts) -> String {
         (d, c) => format!("{d} done. {c} cancelled."),
     }
 }
+
+/// The header's `done/total` count: completed items over every task that can still be completed.
+/// `None` when there are no items at all, or none that can be completed (every task cancelled).
+fn header_count_line(counts: TodoCounts) -> Option<Line<'static>> {
+    if counts.total() == 0 {
+        return None;
+    }
+    let total = counts.total_excluding_cancelled();
+    if total == 0 {
+        return None;
+    }
+    let theme = crate::theme::Theme::current();
+    let count_style = Style::default().fg(theme.text_secondary);
+    Some(Line::from(vec![
+        Span::styled(counts.completed.to_string(), count_style),
+        Span::styled("/", Style::default().fg(theme.gray_dim)),
+        Span::styled(total.to_string(), count_style),
+        Span::styled(
+            format!(" {}", crate::glyphs::check_mark()),
+            Style::default().fg(theme.text_secondary),
+        ),
+    ]))
+}
+
+/// Lines the header (the `done/total` count) occupies at the top of the pane.
+const HEADER_HEIGHT: u16 = 1;
 
 /// Absolute maximum height (in lines) the todo pane will request.
 const MAX_TODO_HEIGHT: u16 = 10;
@@ -265,8 +297,8 @@ impl TodoPane {
     }
 
     /// Desired height in lines for layout computation. Returns 0 when hidden (overlay not visible or no
-    /// items). When visible but empty, returns 2 (for placeholder message). Otherwise: `min(10, 15% of
-    /// view_height)` but at least 1.
+    /// items). When visible but empty, returns 1 (for the placeholder message). Otherwise: the visible
+    /// items plus the header line, capped at `min(10, 15% of view_height)` but at least 1.
     pub fn desired_height(&self, view_height: u16) -> u16 {
         if !self.overlay.visible {
             return 0;
@@ -277,7 +309,7 @@ impl TodoPane {
         }
         let fraction_cap = (view_height as f32 * MAX_TODO_FRACTION).floor() as u16;
         let max = MAX_TODO_HEIGHT.min(fraction_cap).max(1);
-        (count as u16).min(max).max(1)
+        ((count as u16) + HEADER_HEIGHT).min(max).max(1)
     }
 
     /// Number of items that pass the `show_done` filter.
@@ -365,9 +397,31 @@ impl TodoPane {
         }
     }
 
+    /// Split the inner area into the header row and the list body. A pane too short to hold a
+    /// header above at least one item gets no header row: the items keep every line.
+    fn split_header(inner: Rect) -> (Option<Rect>, Rect) {
+        if inner.height <= HEADER_HEIGHT {
+            return (None, inner);
+        }
+        let header = Rect {
+            x: inner.x,
+            y: inner.y,
+            width: inner.width,
+            height: HEADER_HEIGHT,
+        };
+        let body = Rect {
+            x: inner.x,
+            y: inner.y + HEADER_HEIGHT,
+            width: inner.width,
+            height: inner.height - HEADER_HEIGHT,
+        };
+        (Some(header), body)
+    }
+
     /// Render the todo pane into the given area. Rebuilds entries from `todos` each call, which is
-    /// cheap at the typical count of under 20 items. Runs layout, then renders the `ListPane` widget in
-    /// a padded inner area matching the scrollback's horizontal layout.
+    /// cheap at the typical count of a bounded number of items. Draws the `done/total` header line,
+    /// then renders the `ListPane` widget in the rows below it, in a padded inner area matching the
+    /// scrollback's horizontal layout.
     pub fn render(
         &mut self,
         area: Rect,
@@ -397,18 +451,26 @@ impl TodoPane {
             }
             return;
         }
+        let (header_row, body) = Self::split_header(inner);
+        if let Some(header_row) = header_row
+            && let Some(line) = header_count_line(self.counts())
+        {
+            use crate::render::SafeBuf;
+            buf.set_line_safe(header_row.x, header_row.y, &line, header_row.width);
+        }
         self.list_state
-            .prepare_layout(&self.entries, inner.width, inner.height);
+            .prepare_layout(&self.entries, body.width, body.height);
         ListPane::new(&self.entries)
             .focused(focused)
             .style(self.list_style)
-            .render(inner, buf, &mut self.list_state);
+            .render(body, buf, &mut self.list_state);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xai_grok_shell::tools::TodoPriority;
 
     fn counts(completed: usize, cancelled: usize) -> TodoCounts {
         TodoCounts {
@@ -445,5 +507,139 @@ mod tests {
             empty_placeholder_message(false, counts(0, 2)),
             "2 cancelled."
         );
+    }
+
+    fn item(content: &str, status: TodoStatus) -> TodoItem {
+        TodoItem {
+            content: content.into(),
+            priority: TodoPriority::default(),
+            status,
+            meta: None,
+        }
+    }
+
+    /// Renders a visible pane into a buffer. It returns each row as a string, the way the other
+    /// pane tests in this crate read a rendered buffer.
+    fn render_pane(pane: &mut TodoPane, width: u16, height: u16) -> Vec<String> {
+        pane.overlay.show();
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        pane.render(
+            area,
+            &mut buf,
+            false,
+            &crate::appearance::LayoutConfig::default(),
+        );
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    /// Some of tasks done: the header draws `2/5` above the items.
+    #[test]
+    fn header_draws_completed_over_total() {
+        let mut pane = TodoPane::new();
+        pane.update_todos(vec![
+            item("alpha", TodoStatus::Completed),
+            item("beta", TodoStatus::Completed),
+            item("gamma", TodoStatus::InProgress),
+            item("delta", TodoStatus::Pending),
+            item("epsilon", TodoStatus::Pending),
+        ]);
+
+        let lines = render_pane(&mut pane, 60, 8);
+        assert_eq!(
+            lines[0].trim(),
+            format!("2/5 {}", crate::glyphs::check_mark()),
+            "header row: {lines:?}",
+        );
+        assert!(
+            lines[1].contains("alpha"),
+            "items render below the header: {lines:?}",
+        );
+    }
+
+    /// Cancelled tasks stay out of the denominator, so the count can still reach `N/N`.
+    #[test]
+    fn header_excludes_cancelled_from_the_total() {
+        let mut pane = TodoPane::new();
+        pane.update_todos(vec![
+            item("alpha", TodoStatus::Completed),
+            item("beta", TodoStatus::Completed),
+            item("gamma", TodoStatus::Cancelled),
+            item("delta", TodoStatus::Pending),
+        ]);
+
+        let lines = render_pane(&mut pane, 60, 8);
+        assert!(
+            lines[0].contains("2/3"),
+            "cancelled tasks are excluded from the total, got: {lines:?}",
+        );
+    }
+
+    /// Every task cancelled: nothing can be completed, so there is no count to draw.
+    #[test]
+    fn header_absent_when_all_cancelled() {
+        let mut pane = TodoPane::new();
+        pane.update_todos(vec![
+            item("alpha", TodoStatus::Cancelled),
+            item("beta", TodoStatus::Cancelled),
+        ]);
+
+        let lines = render_pane(&mut pane, 60, 8);
+        assert!(
+            !lines.iter().any(|l| l.contains('/')),
+            "no done/total count when every task is cancelled: {lines:?}",
+        );
+        assert!(
+            lines[0].contains("alpha"),
+            "the items take the whole pane: {lines:?}",
+        );
+    }
+
+    /// No items at all: the placeholder holds the pane and no count is drawn.
+    #[test]
+    fn header_absent_when_no_todos() {
+        let mut pane = TodoPane::new();
+
+        let lines = render_pane(&mut pane, 60, 8);
+        assert!(
+            lines[0].contains("No todo items."),
+            "placeholder message expected: {lines:?}",
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains('/')),
+            "no done/total count without items: {lines:?}",
+        );
+    }
+
+    /// A one-line pane gives that line to the items rather than to the header.
+    #[test]
+    fn header_yields_the_last_line_to_items() {
+        let mut pane = TodoPane::new();
+        pane.update_todos(vec![item("alpha", TodoStatus::Pending)]);
+
+        let lines = render_pane(&mut pane, 60, 1);
+        assert!(
+            lines[0].contains("alpha"),
+            "a 1-row pane draws the item, not the header: {lines:?}",
+        );
+    }
+
+    /// The header line is part of what the pane asks the layout for.
+    #[test]
+    fn desired_height_reserves_the_header_line() {
+        let mut pane = TodoPane::new();
+        pane.overlay.show();
+        pane.update_todos(
+            (0..5)
+                .map(|i| item(&format!("task {i}"), TodoStatus::Pending))
+                .collect(),
+        );
+        assert_eq!(pane.desired_height(100), 6, "5 items plus the header");
     }
 }
