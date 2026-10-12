@@ -15,11 +15,13 @@ fn completion_cancel_trigger(result: &PromptTurnResult) -> Option<&str> {
 }
 
 impl SessionActor {
-    /// Emit a cosmetic `Plan` update at turn end to clear stale spinners.
-    /// When the model ends the turn without a cleanup `todo_write` call, remaining `in_progress` items keep spinning in the UI.
+    /// Emit a `Plan` update at turn end so a client can end spinners left by a
+    /// turn that finished without a cleanup `todo_write` call.
+    /// Every item keeps its real status, and an item still `in_progress` carries
+    /// `meta.stale`; a turn ending is not a completion.
     /// No-op if no `in_progress` items exist.
     pub(super) async fn emit_turn_end_plan_cleanup(&self) {
-        use crate::tools::todo::{TodoState, TodoStatus, plan_entry_from_todo_item};
+        use crate::tools::todo::{TodoState, TodoStatus};
         use xai_grok_tools::types::resources::State;
 
         // Read the current TodoState (no mutation).
@@ -43,26 +45,15 @@ impl SessionActor {
                 return;
             }
 
-            // Build plan entries, showing in_progress items as completed
-            // `plan_entry_from_todo_item` keeps cancelled metadata and priority
-            let entries: Vec<_> = state
-                .0
-                .todo_items()
-                .map(|item| {
-                    let mut entry = plan_entry_from_todo_item(item.clone());
-                    if item.status == TodoStatus::InProgress {
-                        entry.status = acp::PlanEntryStatus::Completed;
-                    }
-                    entry
-                })
-                .collect();
+            // Real statuses, with `meta.stale` on anything still running.
+            let entries: Vec<_> = crate::session::acp_conversion::turn_end_plan_entries(&state.0);
 
             (entries, stale_count)
         };
 
         tracing::info!(
             stale_count,
-            "emitting transient turn-end Plan cleanup — in_progress shown as completed"
+            "emitting transient turn-end Plan cleanup - in_progress items marked stale"
         );
 
         // Transient: this cosmetic UI update must not be persisted or replayed on session reload

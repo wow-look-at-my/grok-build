@@ -463,9 +463,10 @@ mod tests {
 
     /// `message_start` opens every stream with an empty content list. A
     /// gateway that writes an unset slice as `null` puts this shape on the
-    /// wire for every turn it relays. The event is internally tagged, so serde
-    /// buffers it and the failure arrives without a line/column -- exactly the
-    /// bare "invalid type: null, expected a sequence" users see.
+    /// wire. This happens for every turn it relays. The event is internally
+    /// tagged, so serde buffers it and the failure arrives without a
+    /// line/column -- exactly the bare "invalid type: null, expected a
+    /// sequence" users see.
     #[test]
     fn message_start_deserializes_null_content() {
         let event: MessageStreamEvent = serde_json::from_str(

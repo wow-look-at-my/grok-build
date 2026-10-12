@@ -601,7 +601,9 @@ impl ToolOutput {
             )
             }
             ToolOutput::Todo(
-                TodoWriteOutput::DuplicateId(_) | TodoWriteOutput::InvalidArgument(_),
+                TodoWriteOutput::DuplicateId(_)
+                | TodoWriteOutput::InvalidArgument(_)
+                | TodoWriteOutput::TooManyInProgress(_),
             ) => true,
             ToolOutput::GrepSearch(g) => g.exit_code > 1,
             _ => false,
@@ -682,6 +684,7 @@ impl ToolOutput {
                 TodoWriteOutput::TodosUpdated(success) => success.summary_for_prompt.to_owned(),
                 TodoWriteOutput::DuplicateId(msg) => msg.to_owned(),
                 TodoWriteOutput::InvalidArgument(msg) => msg.to_owned(),
+                TodoWriteOutput::TooManyInProgress(msg) => msg.to_owned(),
             },
             ToolOutput::WebSearch(web_search_output) => {
                 if let Some(ref pre) = web_search_output.pre_formatted {
@@ -921,6 +924,8 @@ pub enum TodoWriteOutput {
     /// Used so missing-field errors surface as the terse `Invalid argument: …`
     /// line, instead of the framework's wrapper around a `ToolError`.
     InvalidArgument(String),
+    /// The write would leave more items `in_progress` than the cap allows. Rejected whole: the list is left as it was.
+    TooManyInProgress(String),
 }
 /// Why the session plan file is not a ready (empty/non-empty) file.
 #[derive(
@@ -1988,6 +1993,8 @@ mod tests {
                     priority: TodoPriority::Medium,
                     status: TodoStatus::Pending,
                     meta: None,
+                    verification: None,
+                    verification_passed: false,
                 }],
                 state: TodoState::default(),
             })
@@ -2047,6 +2054,8 @@ mod tests {
                 priority: TodoPriority::High,
                 status: TodoStatus::InProgress,
                 meta: None,
+                verification: None,
+                verification_passed: false,
             }],
             state: TodoState::default(),
         });
