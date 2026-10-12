@@ -531,6 +531,8 @@ impl ChannelSpawner {
             runtime_overrides: SubagentRuntimeOverrides {
                 model,
                 harness_agent_type,
+                // The skeptic audits the work.
+                goal_verifier: true,
                 ..Default::default()
             },
             run_in_background: false,
