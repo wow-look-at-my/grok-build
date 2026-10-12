@@ -280,7 +280,8 @@ const COMPOUND_WORDS: &[&str] = &[
 
 /// Commands whose effect does not reach the next tool call. The shell keeps
 /// only the cwd, exported variables, options, functions and aliases between
-/// calls, so a split after one of these runs the rest in a different shell.
+/// calls, so a split after one of these runs the rest. That rest is in a
+/// different shell.
 const STATEFUL_WORDS: &[&str] = &[
     "exec",
     "local",
@@ -462,7 +463,6 @@ pub struct SplitSegment {
 }
 
 /// Split `a; b && c` into the commands a separate tool call can run each.
-///
 /// each segment is safe to run in its own shell.
 pub fn split_command_list(command: &str) -> Option<Vec<SplitSegment>> {
     let segments = parse(command)?;
@@ -604,9 +604,8 @@ pub struct CapturePlan {
     pub status_file: Option<PathBuf>,
 }
 
-/// Rewrite a single pipeline so each stage's output lands in a file.
-///
-/// `a | b | tail -n 5` runs as `a | tee s1 | b`.
+/// Rewrite a single pipeline so each stage's output lands in a file. `a | b |
+/// tail -n 5` runs as `a | tee s1 | b`.
 pub fn plan_pipeline_capture(command: &str, log_file: &Path) -> Option<CapturePlan> {
     let mut segments = parse(command)?;
     if segments.len() != 1 {
