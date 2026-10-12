@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/slopfix@master
 
@@ -49,7 +49,7 @@ jobs:
     # Its own job, not a step of build-test: rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build it would otherwise sit behind.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
@@ -60,7 +60,6 @@ jobs:
 
   build-test:
     name: Build & test
-    needs: slopfix
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ubuntu-22.04
     # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s. A job past this is broken, not slow.
@@ -70,7 +69,7 @@ jobs:
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS: the -j3 compile-RAM cap belongs to the build step alone.
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Report disk before build
         run: df -h /
@@ -151,7 +150,6 @@ jobs:
 
   build-release:
     name: Build release (${{ matrix.name }})
-    needs: slopfix
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 45
     strategy:
@@ -172,7 +170,7 @@ jobs:
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: ./.github/actions/setup-protoc
 
@@ -311,7 +309,7 @@ jobs:
   # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
   release:
     name: Create buildhost release
-    needs: [build-test, test-darwin-sandbox, build-release]
+    needs: [slopfix, fmt, build-test, test-darwin-sandbox, build-release, link-darwin]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:
@@ -320,7 +318,7 @@ jobs:
     outputs:
       version: ${{ steps.rel.outputs.version }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Create release
         id: rel
@@ -329,14 +327,14 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
-  # One cc, and the only step in the workflow that needs a Mac. It waits on the tests as well as its bundle: it takes seconds, so starting it early buys nothing and spends a macOS runner on a tree that may not pass.
+  # One cc, and the only step in the workflow that needs a Mac.
   link-darwin:
     name: Link darwin/arm64 (macOS)
-    needs: [build-release, build-test]
+    needs: build-release
     runs-on: macos-14
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/actions@cache-download#latest
         with:
@@ -357,11 +355,10 @@ jobs:
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
-    needs: slopfix
     runs-on: macos-14
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
@@ -381,7 +378,7 @@ jobs:
       artifact-metadata: write # buildhost-publish-release records what it stored on the org's linked artifacts page
       actions: write # cache-cleanup deletes this run's binary hand-offs
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/actions@cache-download#latest
         with:
