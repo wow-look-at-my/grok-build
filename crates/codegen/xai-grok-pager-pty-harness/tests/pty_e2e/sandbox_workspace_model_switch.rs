@@ -10,22 +10,6 @@ use super::common::*;
 #[ignore]
 #[cfg(unix)]
 async fn sandbox_workspace_model_switch_applies_session_only_and_switches_on_wire() {
-    let support = xai_grok_sandbox::SandboxManager::support_info();
-    if !support.is_supported {
-        eprintln!("skip: no kernel sandbox on this host: {}", support.details);
-        return;
-    }
-    // The workspace profile's deny list is mounted through bubblewrap on Linux;
-    // with no bwrap the pager refuses to start under the profile.
-    if cfg!(target_os = "linux")
-        && !std::process::Command::new("bwrap")
-            .arg("--version")
-            .status()
-            .is_ok_and(|s| s.success())
-    {
-        eprintln!("skip: no usable bwrap on this host");
-        return;
-    }
     let content = ContentController::start_with_models(vec![
         MockModel::new("model-a"),
         MockModel::new("model-b"),
@@ -47,6 +31,24 @@ async fn sandbox_workspace_model_switch_applies_session_only_and_switches_on_wir
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
+
+    // The confined pager records kernel enforcement in its own event log
+    // during startup.
+    let events_path = content
+        .sandbox()
+        .grok_home()
+        .join("sessions")
+        .join("sandbox-events.jsonl");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !workspace_profile_applied(&events_path) {
+        assert!(
+            Instant::now() < deadline,
+            "the pager never recorded kernel enforcement of the workspace profile; \
+             events log:\n{}",
+            std::fs::read_to_string(&events_path).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
 
     // A session must exist so `/model` sends the session-scoped SetSessionModel.
     harness
@@ -94,4 +96,20 @@ async fn sandbox_workspace_model_switch_applies_session_only_and_switches_on_wir
     );
 
     harness.quit().expect("clean quit");
+}
+
+/// Whether the sandbox event log holds a kernel-enforced application of the
+/// workspace profile: the `ProfileApplied` event the pager writes only after
+/// `Sandbox::apply` succeeds.
+fn workspace_profile_applied(events_path: &std::path::Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(events_path) else {
+        return false;
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .any(|event| {
+            event.get("event_type").and_then(serde_json::Value::as_str) == Some("ProfileApplied")
+                && event.get("profile").and_then(serde_json::Value::as_str) == Some("workspace")
+                && event.get("enforced").and_then(serde_json::Value::as_bool) == Some(true)
+        })
 }
