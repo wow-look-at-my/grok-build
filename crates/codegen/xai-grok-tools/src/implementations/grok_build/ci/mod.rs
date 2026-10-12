@@ -150,9 +150,9 @@ fn push_repo<'a>(args: &mut Vec<&'a str>, repo: Option<&'a str>) {
     }
 }
 
-/// The `owner/name` of the repository at `cwd`, read from its `origin` remote.
-///
-/// One local `git` call, so naming the repository costs no API request.
+/// The `owner/name` of the repository at `cwd`, read from its `origin`
+/// remote. One local `git` call, so naming the repository costs no API
+/// request.
 pub fn remote_repo(cwd: &std::path::Path) -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["remote", "get-url", "origin"])
@@ -259,11 +259,10 @@ impl std::fmt::Display for CiQueryError {
 }
 
 /// Read a branch's runs through whichever `gh` path this process can reach.
-///
 /// `repo` must be a name [`valid_repo_token`] accepted, or `None` to ask the
-/// repository the git remote at `cwd` points at.
-///
-/// An empty `Ok` means the branch has no runs. Every failure to ask is an `Err` that says what `gh` said, so a dead token never reads as "nothing pushed".
+/// repository the git remote at `cwd` points at. An empty `Ok` means the
+/// branch has no runs. Every failure to ask is an `Err` that says what `gh`
+/// said, so a dead token never reads as "nothing pushed".
 pub fn fetch_runs(
     cwd: &std::path::Path,
     branch: &str,
@@ -341,10 +340,9 @@ fn tail(text: &str, max: usize) -> (String, bool) {
     (text[start..].to_string(), true)
 }
 
-/// The sentence a model reads off a state, phrased as what to do next.
-///
-/// `repo` names the repository the query went to, so an empty answer says
-/// where it was empty rather than guessing what the repository has.
+/// The sentence a model reads off a state, phrased as what to do next. `repo`
+/// names the repository the query went to, so an empty answer says where it
+/// was empty rather than guessing what the repository has.
 fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
     match state {
         CiStatus::Green => format!("CI is passing on {branch}."),

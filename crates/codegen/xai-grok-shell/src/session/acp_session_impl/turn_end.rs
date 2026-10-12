@@ -598,8 +598,8 @@ impl SessionActor {
         (turn_succeeded, suppress_goal_continuation, infra_pause)
     }
 
-    pub(super) async fn apply_infra_pause_after_turn_err(
-        &self,
+    pub(crate) async fn apply_infra_pause_after_turn_err(
+        self: &std::sync::Arc<Self>,
         message: String,
         retry_can_clear: bool,
     ) -> bool {
@@ -607,6 +607,44 @@ impl SessionActor {
             Some(rest) => rest.to_owned(),
             None => message.clone(),
         };
+        // A context-length overflow on an active goal is repaired in place:
+        // compaction shrinks the history. The goal's next continuation
+        // re-sends the smaller request. Gateway 400s carry no
+        // `model_metadata`, so the in-turn `should_compact_on_error` arm
+        // needs a response field this failure lacks. The shared text detector
+        // plus the session's own sampling config carry the decision here.
+        if xai_grok_compaction::is_context_length_error(&slash_detail)
+            && !self.compaction.is_suppressed()
+            && self.goal_tracker.lock().status()
+                == Some(crate::session::goal_tracker::GoalStatus::Active)
+        {
+            if let Some(context_window) = self
+                .chat_state_handle
+                .get_sampling_config()
+                .await
+                .map(|cfg| cfg.context_window.get())
+            {
+                let tokens_used = self.chat_state_handle.get_estimated_total_tokens().await;
+                let trigger_info =
+                    crate::session::acp_session::compaction::AutoCompactTriggerInfo {
+                        tokens_used,
+                        context_window,
+                        percentage: xai_token_estimation::usage_percentage_u8(
+                            tokens_used,
+                            context_window,
+                        ),
+                        reason_override: None,
+                    };
+                if self.run_compact_only(trigger_info, false).await.is_ok() {
+                    self.send_slash_command_output(&format!(
+                        "Goal turn hit the model's context limit: {slash_detail}. \
+                         Compacted the session history; the goal continues on the smaller context."
+                    ))
+                    .await;
+                    return false;
+                }
+            }
+        }
         let paused = self
             .auto_pause_goal_if_active_with_message(
                 crate::session::goal_tracker::GoalPauseReason::Infra,
