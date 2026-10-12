@@ -173,3 +173,22 @@ fn reject_hardlinked_files_on_registry_source() {
     assert!(matches!(err, HookWriteDenyError::HardLink { .. }));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn user_config_write_denied_exactly_by_hook_write_deny_profiles() {
+    for (profile, denied) in [
+        (ProfileName::Workspace, true),
+        (ProfileName::ReadOnly, true),
+        (ProfileName::Strict, true),
+        (ProfileName::Custom("auditor".to_string()), true),
+        (ProfileName::Devbox, false),
+        (ProfileName::Off, false),
+        (ProfileName::Pathbox, false),
+    ] {
+        assert_eq!(
+            profile_denies_user_config_write(&profile),
+            denied,
+            "{profile} config-write denial"
+        );
+    }
+}

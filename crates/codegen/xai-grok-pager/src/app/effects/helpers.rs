@@ -993,6 +993,16 @@ pub(crate) async fn persist_setting(
     value: crate::settings::SettingValue,
 ) -> Result<(), String> {
     use crate::settings::SettingValue;
+    // Profiles that write-deny the trust-boundary files make
+    // `$GROK_HOME/config.toml` read-only in-process, so a settings save
+    // cannot reach disk.
+    if xai_grok_sandbox::requested_confinement_denies_user_config_write() {
+        tracing::info!(
+            key,
+            "skipping settings save: config.toml is read-only under the sandbox profile"
+        );
+        return Ok(());
+    }
     fn kind_mismatch(key: &str, expected: &str, got: &SettingValue) -> String {
         format!("persist_setting({key}) expected {expected}, got {got:?}")
     }

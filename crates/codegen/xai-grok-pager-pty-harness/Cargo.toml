@@ -66,6 +66,9 @@ git2 = { workspace = true }
 serial_test = { workspace = true }
 toml = { workspace = true }
 unicode-width = { workspace = true }
+# Support probe for the `--sandbox=workspace` PTY case. The crate is already in the pager
+# binary's graph the tests exec, so it adds no crate compiles.
+xai-grok-sandbox = { path = "../xai-grok-sandbox", features = ["enforce"] }
 
 [[test]]
 name = "env_op_compile"
