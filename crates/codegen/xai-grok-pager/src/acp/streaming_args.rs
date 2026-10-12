@@ -1,26 +1,14 @@
 //! The live tail of a tool call's arguments, as the model writes them.
-//!
-//! A call's arguments arrive as raw JSON fragments split at arbitrary byte
-//! offsets. Showing them verbatim puts `\n` and `\"` on screen and renders a
-//! file write as one enormous line. This decodes the escapes as the fragments
-//! land and keeps the last few lines, so the row shows what the model is
-//! typing right now.
-//!
-//! The tail is bounded in both directions. Older lines are dropped, and a
-//! single line stops growing past [`MAX_LINE_CHARS`], so a multi-megabyte
-//! write costs a fixed amount however long it runs.
 
 use std::collections::VecDeque;
 
 /// How many trailing lines the preview keeps.
 pub const MAX_TAIL_LINES: usize = 5;
 
-/// How many characters one preview line keeps. The row is one terminal wide,
-/// so anything past this is never drawn.
+/// How many characters one preview line keeps. The row is one terminal wide, so anything past this is never drawn.
 const MAX_LINE_CHARS: usize = 512;
 
-/// How wide a tab is rendered. Ratatui draws a literal tab as one cell, which
-/// collapses indented code into a ragged column.
+/// How wide a tab is rendered.
 const TAB_WIDTH: usize = 4;
 
 /// What the decoder is waiting for in the middle of an escape sequence.
@@ -30,7 +18,7 @@ enum EscapeState {
     None,
     /// A `\` arrived and its escape character has not.
     Backslash,
-    /// A `\u` arrived; `len` of the four hex digits are in `hex`.
+    /// A `\u` arrived; `len` of those hex digits are in `hex`.
     Unicode { hex: [u8; 4], len: usize },
 }
 
@@ -39,7 +27,7 @@ enum EscapeState {
 pub struct StreamingArgsTail {
     /// The trailing decoded lines, oldest first, newest last.
     lines: VecDeque<String>,
-    /// Where an escape sequence split across two fragments left off.
+    /// Where an escape sequence split across fragments left off.
     escape: EscapeState,
     /// A lone high surrogate waiting for its pair.
     pending_surrogate: Option<u16>,
@@ -63,9 +51,7 @@ impl StreamingArgsTail {
         }
     }
 
-    /// The decoded tail, oldest line first. A trailing empty line is kept: it
-    /// is where the next character goes, and dropping it makes a finished line
-    /// look like it is still being written.
+    /// The decoded tail, oldest line first.
     pub fn lines(&self) -> impl Iterator<Item = &str> {
         self.lines.iter().map(String::as_str)
     }
@@ -97,15 +83,13 @@ impl StreamingArgsTail {
                             len: 0,
                         }
                     }
-                    // `\"`, `\\`, `\/` and anything a provider invents: the
-                    // character itself is what the model wrote.
+                    // `\"`, `\\`, `\/` and anything a provider invents: the character itself is what the model wrote.
                     other => self.emit(other),
                 }
             }
             EscapeState::Unicode { mut hex, len } => {
                 if !ch.is_ascii_hexdigit() {
-                    // Not a `\uXXXX` after all. Nothing sane to decode, so drop
-                    // the sequence and take this character as ordinary text.
+                    // Not a `\uXXXX` after all.
                     self.escape = EscapeState::None;
                     self.pending_surrogate = None;
                     self.push_char(ch);
@@ -137,7 +121,6 @@ impl StreamingArgsTail {
                 self.emit(ch);
                 return;
             }
-            // The pair did not decode. Fall through and treat `unit` on its own.
         }
         if (0xD800..0xDC00).contains(&unit) {
             self.pending_surrogate = Some(unit);

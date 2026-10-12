@@ -48,11 +48,7 @@ fn is_declared_submodule(dir: &Path) -> bool {
     let Some(workdir) = superproject.workdir() else {
         return false;
     };
-    // `workdir` arrives canonicalized by git2 while `dir` arrives as the caller
-    // or the OS watcher named it. On macOS `/var`, `/tmp` and `/etc` are
-    // symlinks, so the two spell the same tree differently and the prefix test
-    // fails: a submodule the project declares then reads as a foreign
-    // workspace and drops out of the watch. Compare both in canonical form.
+    // `workdir` arrives canonicalized by git2 while `dir` arrives as the caller or the OS watcher named it.
     let canonical_dir = canonical(dir);
     let canonical_workdir = canonical(workdir);
     let Ok(relative) = canonical_dir.strip_prefix(&canonical_workdir) else {

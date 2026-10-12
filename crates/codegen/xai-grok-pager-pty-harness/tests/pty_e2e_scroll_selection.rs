@@ -47,8 +47,6 @@ mod page_flip_on_send_pty;
 mod plan_scrollbar_grab_zone_pty;
 #[path = "pty_e2e/quote_block_drag_copy_excludes_bars_pty.rs"]
 mod quote_block_drag_copy_excludes_bars_pty;
-#[path = "pty_e2e/quote_block_raw_mode_copy_keeps_source_pty.rs"]
-mod quote_block_raw_mode_copy_keeps_source_pty;
 #[path = "pty_e2e/read_tool_header_selection_copies_path_only_pty.rs"]
 mod read_tool_header_selection_copies_path_only_pty;
 #[path = "pty_e2e/recap_header_not_in_selection_pty.rs"]

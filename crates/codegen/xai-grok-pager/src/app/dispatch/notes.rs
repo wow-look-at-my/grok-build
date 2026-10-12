@@ -853,14 +853,10 @@ pub(super) fn dispatch_send_btw(
     }]
 }
 
-/// Prefix for the synthetic tasks-pane row that tracks an in-flight `/todo`
-/// capture. Kill requests for these ids are local-only (there is no shell
-/// bg-task to cancel); completion marks the row finished and keeps it.
+/// Prefix for the synthetic tasks-pane row that tracks an in-flight `/todo` capture.
 pub(crate) const TODO_CAPTURE_TASK_PREFIX: &str = "todo-capture:";
 
-/// The tasks-pane row id for a capture. The client mints `capture_id` and
-/// sends it to the shell, which stamps its progress updates with it — that
-/// round trip is what lets a transcript line find the row it belongs to.
+/// The tasks-pane row id for a capture.
 pub(crate) fn todo_capture_task_id(capture_id: &str) -> String {
     format!("{TODO_CAPTURE_TASK_PREFIX}{capture_id}")
 }
@@ -869,9 +865,8 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
     if let Some(old_id) = agent.pending_todo_task_id.take() {
         agent.session.bg_tasks.remove(&old_id);
     }
-    // Same chrome as a running tool: name `/todo`, summary is the request.
-    // A system one-liner is easy to miss at the bottom of the transcript;
-    // a running tool stays in the live turn the way other in-flight work does.
+    // Same chrome as a running tool: name `/todo`, summary is the request. A system one-liner is easy to miss at the bottom of the transcript. A running tool stays in the
+    // live turn the way other in-flight work does.
     let entry_id = agent
         .scrollback
         .push(crate::scrollback::entry::ScrollbackEntry::running(
@@ -880,8 +875,7 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
             ))),
         ));
     agent.pending_todo_entry = Some(entry_id);
-    // Tasks pane sits at the top of the agent view and auto-opens on a new
-    // live running task — that is the "in-flight at the top" surface.
+    // Tasks pane sits at the top of the agent.
     let task_id = todo_capture_task_id(capture_id);
     agent.session.bg_tasks.insert(
         task_id.clone(),
@@ -911,8 +905,8 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
 }
 
 /// Stop the capture's spinner. The tasks-pane row stays, finished, the way a
-/// finished bash task does: it holds the capture agent's transcript, and that
-/// is the only place the user can read what this run actually did.
+/// finished bash task does: it holds the capture agent's transcript. That is
+/// the only place the user can read what this run did.
 fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
     if let Some(entry_id) = agent.pending_todo_entry.take() {
         agent.scrollback.remove_entry(entry_id);
@@ -926,14 +920,13 @@ fn finish_todo_capture_ui(agent: &mut AgentView, ok: bool) {
             BgTaskStatus::Failed
         };
         task.end_time = Some(std::time::SystemTime::now());
-        // The running scrollback entry is gone above, so a row pointing at it
-        // would open a viewer on an entry that no longer exists.
+        // The running scrollback entry is gone above.
         task.scrollback_entry_id = None;
     }
 }
 
 /// Send a `/todo` capture. Bypasses the prompt queue — works even while the
-/// agent is mid-turn. Fires an ACP ext method and leaves a running tool in the
+/// agent is mid-turn. Fires an ACP ext method. It leaves a running tool in the
 /// transcript plus a tasks-pane row, which [`handle_todo_captured`] replaces
 /// with what landed on the list.
 pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: bool) -> Vec<Effect> {
@@ -950,9 +943,7 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: boo
             return vec![];
         };
         agent.prompt.set_text("");
-        // Repeated `/todo`s are independent captures, so each gets its own
-        // block; only the newest id is tracked, and an older spinner is stopped
-        // by whichever response lands.
+        // Repeated `/todo`s are independent captures, so each gets its own block; only the newest id is tracked.
         begin_todo_capture_ui(agent, &request, &capture_id);
         session_id
     };
@@ -966,9 +957,8 @@ pub(super) fn dispatch_send_todo(app: &mut AppView, request: String, urgent: boo
     }]
 }
 
-/// Replace the `/todo` running block with the items that were appended, or with
-/// why none were. Both outcomes are transcript blocks: a capture the user asked
-/// for and never sees the result of is the failure mode worth avoiding here.
+/// Replace the `/todo` running block with the items that were appended, or
+/// with why none were. Both outcomes are transcript blocks: a capture.
 pub(super) fn handle_todo_captured(
     app: &mut AppView,
     agent_id: AgentId,

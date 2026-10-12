@@ -116,8 +116,7 @@ impl ToolKind {
             | ToolKind::Monitor
             | ToolKind::GoalUpdate
             | ToolKind::Workflow
-            // Reads nothing and writes nothing here. It hands text to another
-            // session, which is a mutation of that session's conversation.
+            // Reads nothing and writes nothing here.
             | ToolKind::SendMessage
             | ToolKind::Feedback
             | ToolKind::Other => false,

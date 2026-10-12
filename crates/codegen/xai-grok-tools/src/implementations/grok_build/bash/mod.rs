@@ -4955,9 +4955,9 @@ mod tests {
         #[test]
         fn unix_shell_omits_utility_and_chaining_notes() {
             let out = render(BashTool::default_description_template_enabled(), true);
-            // On a real bash/unix shell the utilities exist and `&&` works, so
-            // neither the unavailable-utilities note nor the `;`-chaining note
-            // renders — that guidance is trained in, not repeated in the schema.
+            // On a real bash/unix shell the utilities exist and `&&` works,
+            // so neither the unavailable-utilities note nor the `;`-chaining
+            // note renders.
             assert!(
                 !out.contains("are NOT available in this shell"),
                 "must not emit PowerShell warning on Unix, got:\n{out}"

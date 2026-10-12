@@ -258,7 +258,7 @@ mod linux {
             //
             // Guarded because a cleanup that unwinds leaves the cgroup
             // directory and the children inside it behind, and the caller is in
-            // `Drop` with nothing to hand an error back to.
+            // `Drop`. This holds with nothing to hand an error back to.
             tokio::spawn(crate::util::detached::fire_and_forget(
                 "cgroup cleanup on drop",
                 async move {

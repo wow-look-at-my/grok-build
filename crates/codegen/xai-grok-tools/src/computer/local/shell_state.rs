@@ -1164,16 +1164,12 @@ mod tests {
     }
 
     /// Regression test: `set -a` must not break the commands that follow it.
-    ///
-    /// Under allexport every assignment is exported, which caught both the dump
-    /// function's own locals (env_vars is a copy of the environment) and the
-    /// snapshot's grok_snap_* carriers (FUNCTIONS_B64 is every function in the
-    /// shell). Either one leaves the environment big enough that the next exec
-    /// fails with E2BIG, which the shell reports as an unexplained 126 -- from a
-    /// command that has nothing wrong with it.
-    ///
-    /// Runs several commands after `set -a`, since the environment grew with
-    /// each snapshot round-trip rather than all at once.
+    /// Under allexport every assignment is exported, which caught both the
+    /// dump function's own locals (env_vars is a copy of the environment) and
+    /// the snapshot's grok_snap_* carriers (FUNCTIONS_B64 is every function
+    /// in the shell). Runs several commands after `set -a`, since the
+    /// environment grew with each snapshot round-trip rather than all at
+    /// once.
     #[tokio::test]
     async fn test_allexport_does_not_break_later_commands_bash() {
         if !bash_available() {
@@ -1199,7 +1195,7 @@ mod tests {
             assert!(stdout.contains("OK"), "round {round}: got {stdout:?}");
         }
 
-        // allexport must survive the round-trips it just stopped breaking.
+        // allexport must survive the round-trips it stopped breaking.
         let (code, stdout) = run_command(
             &mut state,
             "case $- in *a*) echo SET;; *) echo UNSET;; esac",

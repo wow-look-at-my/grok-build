@@ -306,11 +306,6 @@ impl SharedPluginRegistryHandle {
     }
 
     /// Get the current registry snapshot (cheap Arc clone).
-    ///
-    /// A poison is recovered rather than propagated: the guarded value is one
-    /// `Option<Arc<PluginRegistry>>` swap, and this runs on the path every new
-    /// session takes to get its plugins.
-    /// `parking_lot::RwLock` is the structural fix and is not a dependency here.
     #[allow(clippy::disallowed_methods)]
     pub fn snapshot(&self) -> Option<std::sync::Arc<PluginRegistry>> {
         self.inner
@@ -547,8 +542,7 @@ fn count_lsp_servers(dp: &DiscoveredPlugin) -> usize {
 /// Each entry in the inner `hooks` array is one hook handler spec.
 fn count_hook_specs(hooks_path: Option<&Path>, inline_hooks: Option<&serde_json::Value>) -> usize {
     fn count_in_value(v: &serde_json::Value) -> usize {
-        // Normalize so a Claude Code-shape inline value (no top-level `hooks`
-        // key) is counted; Grok's native wrapped shape is unchanged.
+        // Normalize so a Claude Code-shape inline value (no top-level `hooks` key) is counted.
         let normalized = super::manifest::normalize_inline_hooks(v);
         let Some(events) = normalized.get("hooks").and_then(|h| h.as_object()) else {
             return 0;
@@ -641,7 +635,6 @@ mod tests {
     #[test]
     fn count_hook_specs_counts_claude_code_shape_inline_hooks() {
         // Claude Code declares hooks inline without a top-level `hooks` key.
-        // Previously this counted as 0; normalization must make it count.
         let claude_shape = serde_json::json!({
             "PreToolUse": [
                 {
