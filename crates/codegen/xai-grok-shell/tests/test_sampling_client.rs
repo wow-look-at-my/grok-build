@@ -516,13 +516,13 @@ async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
     );
 }
 
-/// Upgrade path, Anthropic Messages API. A legacy session whose assistant
-/// carries inline `reasoning: {text, encrypted, id}` (text = thinking,
-/// encrypted = signature) must. That session is on load, reconstruct a
-/// sibling Reasoning item that emits a Anthropic Messages `thinking` content
-/// block (with `thinking` + `signature`) on the outgoing `/v1/messages`
-/// request. The assistant records the model the client here calls. This is
-/// because a signature only replays to the model that minted it — see
+/// Upgrade path, Anthropic Messages API. A legacy session whose assistant carries
+/// inline `reasoning: {text, encrypted, id}` (text = thinking, encrypted =
+/// signature) must. That session is on load, reconstruct a sibling Reasoning item
+/// that emits a Anthropic Messages `thinking` content block (with `thinking`
+/// + `signature`) on the outgoing `/v1/messages` request. The assistant
+/// records the model the client here calls. This is because a signature only
+/// replays to the model that minted it — see
 /// `messages_upgrade_drops_a_thinking_block_minted_by_another_model` for the
 /// other half.
 #[tokio::test]

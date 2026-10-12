@@ -989,13 +989,13 @@ impl PagerArgs {
             (None, saved) => SandboxStartup::Apply(saved),
         }
     }
-    /// Enforce the pathbox CLI contract (independent of the raw-argv jail
-    /// pass, which stays authoritative for the re-exec): - a `--sandbox` with
-    /// no value is invalid everywhere. This also covers - a non-pathbox
-    /// `--sandbox <profile>` cannot be combined with `--ro`/`--rw`/`--rn`
-    /// path flags. This also covers - `--sandbox=pathbox` and path flags
-    /// alone are valid (the pathbox jail). Returns `Ok(())` for a valid
-    /// request or a user-facing error otherwise.
+    /// Enforce the pathbox CLI contract (independent of the raw-argv jail pass,
+    /// which stays authoritative for the re-exec):
+    ///  - a `--sandbox` with no value is invalid everywhere;
+    ///  - a non-pathbox `--sandbox <profile>` cannot be combined with
+    ///    `--ro`/`--rw`/`--rn` path flags;
+    ///  - `--sandbox=pathbox` and path flags alone are valid (the pathbox jail).
+    /// Returns `Ok(())` for a valid request or a user-facing error otherwise.
     pub fn validate_sandbox(&self) -> Result<(), String> {
         let has_path_flags = !(self.sandbox_ro.is_empty()
             && self.sandbox_rw.is_empty()

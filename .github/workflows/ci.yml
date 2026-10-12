@@ -33,13 +33,23 @@ env:
     {"name": "windows/arm64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc", "darwin": false}]
 
 jobs:
+  # Runs first and gates every build job, so a prose, YAML or workflow finding fails the run. That run is in a minute instead of after the cold compile.
+  slopfix:
+    name: Slopfix
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
+
+      - uses: wow-look-at-my/slopfix@master
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-22.04
     # Its own job, not a step of build-test: rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build it would otherwise sit behind.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
@@ -59,7 +69,7 @@ jobs:
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS: the -j3 compile-RAM cap belongs to the build step alone.
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Report disk before build
         run: df -h /
@@ -123,17 +133,15 @@ jobs:
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
-      # The check that turns a banned pattern into a red branch. An entry set to `deny` in `[workspace.lints.clippy]` is a compile error here. The lint names the file that reintroduced it. `clippy.toml`'s `disallowed-methods` list covers the calls no lint of clippy's covers, and is denied through the same table. A deny lands only with the per-crate exceptions for the hits that predate it. The tree is green the moment the entry is added. Warnings that are not denied stay warnings. `-D warnings` over a workspace this size buries the one line that matters, and this repo has never gated on clippy style before. `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process. A test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build. The deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here. `!cancelled()` keeps a test failure from hiding a lint failure, and the other way round. `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally, and the lint tables differ between versions. One crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
+      # The check that turns a banned pattern into a red branch. An entry set to `deny` in `[workspace.lints.clippy]` is a compile error here. The lint names the file that reintroduced it. `clippy.toml`'s `disallowed-methods` list covers the calls no lint of clippy's covers, and is denied through the same table. A deny lands only with the per-crate exceptions for the hits that predate it. The tree is green the moment the entry is added. Warnings that are not denied stay warnings. `-D warnings` over a workspace this size buries the one line that matters, and this repo has never gated on clippy style before. `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process. A test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build. The deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here. `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally, and the lint tables differ between versions. One crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
       - name: Lint (workspace)
-        if: ${{ !cancelled() }}
         run: cargo clippy --locked --workspace --lib --bins --keep-going
 
-      # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/. `!cancelled()` keeps a workspace-test failure from hiding a PTY failure.
+      # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/.
       - name: Test (PTY end-to-end)
-        if: ${{ !cancelled() }}
         run: |
           cargo nextest run --locked --workspace --profile ci \
-            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui)' \
+            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_queue)' \
             --run-ignored all --test-threads 4
 
       - uses: ./.github/actions/upload-cargo-timings
@@ -162,7 +170,7 @@ jobs:
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: ./.github/actions/setup-protoc
 
@@ -301,7 +309,7 @@ jobs:
   # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
   release:
     name: Create buildhost release
-    needs: [build-test, test-darwin-sandbox, build-release]
+    needs: [slopfix, fmt, build-test, test-darwin-sandbox, build-release, link-darwin]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:
@@ -310,7 +318,7 @@ jobs:
     outputs:
       version: ${{ steps.rel.outputs.version }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Create release
         id: rel
@@ -319,14 +327,14 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
-  # One cc, and the only step in the workflow that needs a Mac. It waits on the tests as well as its bundle: it takes seconds, so starting it early buys nothing and spends a macOS runner on a tree that may not pass.
+  # One cc, and the only step in the workflow that needs a Mac.
   link-darwin:
     name: Link darwin/arm64 (macOS)
-    needs: [build-release, build-test]
+    needs: build-release
     runs-on: macos-14
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/actions@cache-download#latest
         with:
@@ -350,7 +358,7 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
@@ -370,7 +378,7 @@ jobs:
       artifact-metadata: write # buildhost-publish-release records what it stored on the org's linked artifacts page
       actions: write # cache-cleanup deletes this run's binary hand-offs
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/actions@cache-download#latest
         with:

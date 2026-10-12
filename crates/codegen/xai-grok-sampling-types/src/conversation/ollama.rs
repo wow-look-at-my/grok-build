@@ -15,10 +15,12 @@ pub const NUM_PREDICT_OPTION: &str = "num_predict";
 /// Build the body for `POST /api/chat`. Fields here exist nowhere on Ollama's
 /// OpenAI-compatible endpoint, and each is a correctness matter rather than a
 /// tuning knob: * `options.num_ctx` pins the window. Without it the runner
-/// picks one from available VRAM and the catalog's number becomes a guess the
-/// harness compacts against. * `truncate: false` turns a prompt overflow into
-/// a server error. The default drops the oldest messages in silence, which
-/// orphans tool calls. * `keep_alive` keeps the model resident between turns.
+/// picks one.
+///   available VRAM and the catalog's number becomes a guess the harness
+///   compacts against.
+/// * `truncate: false` turns a prompt overflow into a server error.
+///   default drops the oldest messages in silence, which orphans tool calls.
+/// * `keep_alive` keeps the model resident between turns.
 pub fn build_ollama_chat_request(req: &ConversationRequest) -> OllamaChatRequest {
     let plan = ThinkingReplayPlan::new(req, false);
     let messages = build_ollama_messages(req, &plan);

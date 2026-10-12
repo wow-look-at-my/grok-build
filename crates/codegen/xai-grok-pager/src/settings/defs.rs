@@ -817,54 +817,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
         },
         SettingMeta {
-            // Persisted key stays `simple_mode`.
-            key: "simple_mode",
-            category: SettingCategory::Appearance,
-            owner: SettingOwner::Shared,
-            label: "Disable vim input mode",
-            description: "Use plain readline-style input instead of vim keys in the prompt. Experimental.",
-            keywords: &[
-                "simple",
-                "ascii",
-                "minimal",
-                "plain",
-                "vim",
-                "readline",
-                "experimental",
-                "editor",
-                "input",
-                "prompt",
-            ],
-            kind: SettingKind::Bool {
-                // `Option<bool>`: `None` is treated as `true`
-                default: ui_default.simple_mode.unwrap_or(true),
-            },
-            restart_required: false,
-        },
-        // SHELL-owned, persisted to `[ui].vim_mode` in config.toml.
-        // Defaults to the same value main's `appearance::persist::VIM_MODE_DEFAULT` shipped with
-        // Bundled next to `simple_mode` because they pair up: simple_mode controls the input editor's vim behaviour, vim_mode controls the scrollback's
-        SettingMeta {
-            key: "vim_mode",
-            category: SettingCategory::Appearance,
-            owner: SettingOwner::Shell,
-            label: "Vim scrollback navigation",
-            description: "Enable vim keys (h/j/k/l, gg/G, /) for navigating the scrollback. Does not affect the input prompt.",
-            keywords: &[
-                "vim",
-                "scrollback",
-                "navigation",
-                "hjkl",
-                "keys",
-                "keybindings",
-                "scroll",
-            ],
-            kind: SettingKind::Bool {
-                default: ui_default.vim_mode.unwrap_or(false),
-            },
-            restart_required: false,
-        },
-        SettingMeta {
             key: "theme",
             category: SettingCategory::Appearance,
             owner: SettingOwner::Shared,

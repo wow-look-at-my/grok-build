@@ -404,7 +404,7 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
             SamplingError::EventStreamError(xai_grok_sampling_types::error::error_chain(e))
         }
         SamplingError::Serialization(e) => {
-            // serde_json::Error is not Clone; its Display already carries the line/column exactly once.
+            // serde_json::Error is not Clone; its Display already carries the original line/column exactly once.
             SamplingError::serialization_message(e)
         }
         SamplingError::Api {

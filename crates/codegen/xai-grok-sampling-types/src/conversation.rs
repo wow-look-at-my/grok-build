@@ -578,8 +578,8 @@ impl From<ToolDefinition> for ToolSpec {
 /// Merge caller-supplied extra fields into a serialized request body. A
 /// dotted key addresses a nested object (`"options.num_ctx"` reaches
 /// `options: { num_ctx }`). This is because TOML cannot spell a nested table
-/// inline beside scalar siblings. And an `[extra_body.options]` sub-table is
-/// a different shape from the flat map the rest of the config uses.
+/// inline beside scalar siblings and an `[extra_body.options]` sub-table is a
+/// different shape. From the flat map the rest of the config uses.
 pub fn merge_extra_body(
     body: &mut serde_json::Value,
     extras: &serde_json::Map<String, serde_json::Value>,

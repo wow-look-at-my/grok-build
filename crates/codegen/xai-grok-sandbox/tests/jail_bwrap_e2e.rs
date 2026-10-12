@@ -297,8 +297,8 @@ fn bwrap_worker_self_entry() {
 }
 
 /// Delegate the parent jails. Find the worker the way the shipped pager does,
-/// ask it one fixed-shape question. The shipped pager write what came back
-/// where the parent can read it (the jailed cwd is a granted mount).
+/// ask it one fixed-shape question. Write what came back where the parent can
+/// read it (the jailed cwd is a granted mount).
 #[test]
 fn bwrap_jailed_child_self_entry() {
     let Ok(branch) = std::env::var(JAILED_CHILD_ENV) else {

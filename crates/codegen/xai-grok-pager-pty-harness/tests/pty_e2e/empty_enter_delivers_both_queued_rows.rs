@@ -2,8 +2,8 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// The resubmitted request carries the prompt followed by alpha then bravo,
-/// each with the mid-turn preamble.
+/// The resubmitted request carries the original prompt followed by alpha then
+/// bravo, each with the mid-turn preamble.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn empty_enter_delivers_both_queued_rows() {

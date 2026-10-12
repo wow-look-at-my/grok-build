@@ -274,7 +274,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                 "interjection must not appear on the first request; user blobs: {first_user:?}"
             );
 
-            // The conversation must contain the interjection as a standalone.
+            // The conversation must contain the interjection.
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
@@ -402,7 +402,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                 "interjection must not appear on the first request; user blobs: {first_user:?}"
             );
 
-            // The conversation must contain the interjection as a standalone.
+            // The conversation must contain the interjection.
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)

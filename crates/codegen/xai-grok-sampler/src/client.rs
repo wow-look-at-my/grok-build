@@ -2260,7 +2260,7 @@ impl SamplingClient {
             .narrowed_by(self.defaults.chat_message_profile);
 
         // The provider counts the requested output against the same window as
-        // the prompt.
+        // the prompt, so the default applied above is not free.
         let usable_window =
             xai_token_estimation::window_less_estimate_slack(self.defaults.context_window);
         if let Some(clamp) =

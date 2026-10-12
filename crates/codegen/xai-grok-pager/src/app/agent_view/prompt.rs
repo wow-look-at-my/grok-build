@@ -772,11 +772,7 @@ impl AgentView {
     /// Esc policy (Prompt/Scrollback after overlay steal).
     /// Call only after overlay / dropdown / search / selection declined Esc.
     /// Returns `None` when the key is not a bare Esc press.
-    pub(super) fn try_handle_esc_policy(
-        &mut self,
-        key: &KeyEvent,
-        registry: &ActionRegistry,
-    ) -> Option<InputOutcome> {
+    pub(super) fn try_handle_esc_policy(&mut self, key: &KeyEvent) -> Option<InputOutcome> {
         if key.kind == KeyEventKind::Release
             || key.code != KeyCode::Esc
             || !key.modifiers.is_empty()
@@ -795,18 +791,16 @@ impl AgentView {
             return Some(InputOutcome::Changed);
         }
 
-        // Mid-turn (running or already cancelling), every mode: Esc never cancels; point at the registry cancel binding instead
-        // A streaming wake turn follows the same policy as a running turn (the pane state is Idle only because wake turns are not adopted)
+        // Mid-turn, every mode: Esc cancels a running turn, `/compact` or wake turn from either pane, and keeps the draft.
+        // While a cancel is in flight, Esc does nothing.
         // Push the grace deadline out so an Esc mash past the turn's end cannot silently arm the rewind picker below
         if self.stoppable_activity_running() || self.any_cancel_pending() {
-            if self.stoppable_activity_running()
-                && let Some(cancel_key) = registry.key_for(ActionId::CancelTurn)
-            {
-                let cancel_key = cancel_key.display();
-                self.show_toast(&format!("Press {cancel_key} to cancel the turn"));
-            }
             self.suppress_rewind_arm(std::time::Instant::now());
-            return Some(InputOutcome::Changed);
+            if !self.stoppable_activity_running() {
+                return Some(InputOutcome::Changed);
+            }
+            self.cancel_trigger_hint = Some(crate::app::actions::CancelTrigger::Esc);
+            return Some(InputOutcome::Action(Action::CancelTurn));
         }
 
         // CLEAR mutates the composer (drops text/image chips), so it fires only while the PROMPT pane owns keys

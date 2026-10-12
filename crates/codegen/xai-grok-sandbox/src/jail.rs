@@ -13,7 +13,7 @@ const SYSTEM_RO_BASE: &[&str] = &[
     "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/opt", "/run", "/var",
 ];
 
-/// Extra read-only system paths macOS needs that the Linux base omits. bwrap binds the whole tree at the VFS layer.
+/// Extra read-only system paths macOS needs that the Linux base.
 #[cfg(target_os = "macos")]
 const SYSTEM_RO_BASE_MACOS: &[&str] = &["/System", "/Library", "/private"];
 
@@ -463,8 +463,8 @@ impl JailPlan {
     /// with a bare chdir error, which reads as a broken sandbox rather than a
     /// missing `--rw`.
     fn check_cwd_is_bound(&self) -> Result<(), JailError> {
-        // The temp directory is compared exactly. On Linux it is a fresh
-        // tmpfs, so a path under it exists on the host and not in the jail.
+        // The temp directory is compared exactly: on Linux it is a fresh
+        // tmpfs. A path under it exists on the host and not in the jail.
         if self.cwd == self.temp_dir {
             return Ok(());
         }
@@ -1235,8 +1235,7 @@ mod tests {
     }
 
     // ── cwd rw default
-    // ───────────────────────────────────────────────────── These drive the
-    // shipped functions end to end (`parse_jail_args` → `build_plan` → `bwrap_command` / `seatbelt_profile`) from the real working directory.
+    // ─────────────────────────────────────────────────────.
 
     /// Run the shipped parse + plan against the real cwd, with the release
     /// (no-config) defaults so the assertions are independent of any host

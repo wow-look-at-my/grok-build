@@ -363,11 +363,10 @@ impl<'a> EntryRenderer<'a> {
         if self.should_show_cache_hit() { 1 } else { 0 }
     }
 
-    /// Width reserved on the right side of content lines for the timestamp and
-    /// (when present) the per-message cost indicator.
-    ///
-    /// When > 0, content is wrapped at `content_width - reserved` so text
-    /// never collides with the overlay.
+    /// Width reserved on the right side of content lines for the timestamp
+    /// and (when present) the per-message cost indicator. When > 0, content
+    /// is wrapped at `content_width - reserved` so text never collides with
+    /// the overlay.
     fn timestamp_reserved(&self) -> u16 {
         let cost = self.cost_reserved();
         if self.appearance().show_timestamps && self.should_show_timestamp() {
@@ -918,8 +917,8 @@ impl Renderable for EntryRenderer<'_> {
             if self.appearance().show_timestamps
                 && let Some(ts) = self.entry.created_at
             {
-                // Check if mouse is hovering the timestamp zone (a later
-                // rightmost cols of the first content row).
+                // Check if mouse is hovering the timestamp zone (rightmost
+                // cols of the first content row).
                 let ts_hovered = self.mouse_pos.is_some_and(|(mx, my)| {
                     my == first_content_y
                         && mx >= content_area.x + content_area.width.saturating_sub(10)

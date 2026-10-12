@@ -134,7 +134,6 @@ static SESSION_CI_HOST_FD: std::sync::OnceLock<i32> = std::sync::OnceLock::new()
 /// Start the host worker for a session that is confined in place, before the
 /// confinement is installed, and publish its fd to this process. A confining
 /// profile sandbox (`--sandbox=workspace`, `read-only`, `strict`, a custom
-/// profile) is applied to the running session by `sandbox_init`.
 pub fn start_ci_host_for_session(repo_root: &Path, survives_exec: bool) -> Option<i32> {
     if is_ci_host_subprocess() || ci_host_fd().is_some() || crate::is_jailed() {
         return None;
@@ -227,7 +226,7 @@ pub fn reclaim_from_failed_exec(fd: std::os::unix::io::RawFd) {
     // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
     if flags >= 0 {
-        // SAFETY:.
+        // SAFETY.
         unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
     }
     // SAFETY: this runs on the startup path, before the session exists.

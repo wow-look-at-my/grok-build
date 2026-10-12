@@ -341,7 +341,6 @@ pub struct ConsentGate {
 /// - Missing fields from old servers are ignored
 /// - New fields added in the future don't break existing clients
 /// - Callers can distinguish "server said false" from "server didn't say"
-///
 /// `remote = "Self"` makes the derives inherent functions. The trait impls
 /// below call them, and `Deserialize` folds `nfs_worktree` first.
 /// trait method, never the inherent `RemoteSettings::deserialize`.

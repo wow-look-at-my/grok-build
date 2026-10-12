@@ -1888,7 +1888,7 @@ pub(crate) async fn run_verification_stage(
         prior_gaps: inputs.prior_gaps,
     };
 
-    // When N > 1, run skeptic 0 first: a high-confidence refute is decisive and can never yield Achieved.
+    // When N > 1, run the first skeptic alone: any refute it backs with a verdict is decisive and can never yield Achieved. A non-blocking decisive
     // A non-blocking decisive refute skips the rest of the panel; a blocking refute fans out so the panel can distinguish Blocked from NotAchieved.
     // N == 1 never resumes skeptic 0 (a resumed sole judge would be the biased approver), so it stays cold and returns None.
     let (results, decisive_refute, skeptic0_session_id): (
@@ -1909,11 +1909,12 @@ pub(crate) async fn run_verification_stage(
             inputs.inherit_tool_names,
         )
         .await;
-        let high_refute = first.refuted && first.confidence == SkepticConfidence::High;
-        if high_refute && !first.blocking.is_blocking() {
+        // Any refute with a verdict is decisive, whatever its confidence. Only a failed skeptic defers to the cold panel.
+        let decisive = first.refuted && !first.has_no_verdict();
+        if decisive && !first.blocking.is_blocking() {
             (vec![first], true, Some(skeptic0_id))
         } else {
-            // `high_refute` here means skeptic 0 was blocking (the non-blocking case short-circuited above), so its refute remains binding
+            // `decisive` here means the first skeptic was blocking (the non-blocking case short-circuited above), so its refute remains binding
             let cold_ids: Vec<String> = (1..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
             let rest = (1..n).zip(&cold_ids).map(|(idx, id)| {
                 run_skeptic_retrying_no_verdict(
@@ -1934,7 +1935,7 @@ pub(crate) async fn run_verification_stage(
                     .into_iter()
                     .map(|(r, _)| r),
             );
-            (all, high_refute, Some(skeptic0_id))
+            (all, decisive, Some(skeptic0_id))
         }
     } else {
         let cold_ids: Vec<String> = (0..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
@@ -1967,7 +1968,7 @@ pub(crate) async fn run_verification_stage(
         });
     }
     let (refuted_count, total, quorum_achieved) = aggregate_skeptic_verdicts(&results);
-    // A decisive skeptic-0 refute overrides the quorum: a skeptic 0 that refuted with high confidence can never approve
+    // A decisive refute from the first skeptic overrides the quorum: the cold panel can never approve over it
     // That holds even when the blocking fan-out ran the full panel (the fan-out only chooses Blocked vs NotAchieved)
     let achieved = quorum_achieved && !decisive_refute;
     emit_event(Event::GoalVerifierAggregateVerdict {

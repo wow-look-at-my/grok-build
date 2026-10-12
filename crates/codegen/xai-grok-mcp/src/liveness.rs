@@ -170,7 +170,7 @@ async fn watch_transport(
                             server = %server_name_for_task,
                             "transport liveness watcher detected closed transport",
                         );
-                        // Clear our own slot before exiting so a subsequent `arm_liveness_watcher` can install a fresh handle. Self-cancel-by-drop.
+                        // Clear our own slot before exiting so a subsequent `arm_liveness_watcher` can install a fresh handle.
                         clear_liveness_slot(&liveness_slot);
 
                         if on_event

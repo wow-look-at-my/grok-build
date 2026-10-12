@@ -4362,8 +4362,8 @@ fn resolve_long_reasoning_reminder_precedence() {
     );
 }
 /// The output-rate floor is off by default, takes the session-wide `[ui]`
-/// value when one is set, and lets a model override it. It including with a
-/// zero. This turns the gate off for that model alone.
+/// value when one is set, and lets a model override it. It is including
+/// with a zero. This turns the gate off for that model alone.
 #[test]
 fn resolve_output_rate_floor_prefers_the_model_over_the_session() {
     let shipped = Config::default()
