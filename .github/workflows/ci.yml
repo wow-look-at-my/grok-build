@@ -184,7 +184,7 @@ jobs:
 
   build-release:
     name: Build release (${{ matrix.name }})
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: ${{ (github.event.repository.visibility == 'public' || !contains(fromJSON('["ubuntu-22.04"]'), matrix.runs-on)) && matrix.runs-on || vars.CI_RUNNER || matrix.runs-on }}
     permissions:
       contents: read
       actions: write # fail-fast cancels this run

@@ -531,6 +531,8 @@ mod tests {
             priority: TodoPriority::default(),
             status,
             meta: None,
+            verification: None,
+            verification_passed: false,
         }
     }
 

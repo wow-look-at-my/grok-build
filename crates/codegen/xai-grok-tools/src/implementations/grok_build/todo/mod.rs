@@ -161,6 +161,34 @@ pub(crate) fn summarize_todo_state(state: &TodoState) -> String {
     }
 }
 
+/// The environment variable that overrides the in-progress cap.
+pub const MAX_IN_PROGRESS_VAR: &str = "GROK_TODO_MAX_IN_PROGRESS";
+
+/// The in-progress cap when the override is unset or invalid.
+const DEFAULT_MAX_IN_PROGRESS: usize = 5;
+
+/// A value that is not a positive number keeps the default.
+pub(crate) fn max_in_progress_cap(raw: Option<&str>) -> usize {
+    raw.and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_MAX_IN_PROGRESS)
+}
+
+/// The refusal message when `state` has more items in progress than `cap`.
+pub(crate) fn in_progress_cap_violation(state: &TodoState, cap: usize) -> Option<String> {
+    let count = state
+        .todo_items_with_ids()
+        .filter(|(_, t)| t.status == TodoStatus::InProgress)
+        .count();
+    (count > cap).then(|| {
+        format!(
+            "Refused: {count} items would be in progress, over the cap of {cap}. \
+             Finish or move items out of in_progress first. Nothing was changed. \
+             {MAX_IN_PROGRESS_VAR} sets the cap."
+        )
+    })
+}
+
 /// Subagent type a todo verifier runs as.
 pub const VERIFIER_SUBAGENT_TYPE: &str = "general-purpose";
 
@@ -815,6 +843,22 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
                         .unwrap_or(TodoStatus::Pending);
                     todo_state.0.update(&outcome.id, None, Some(previous));
                 }
+            }
+
+            // A blocked item goes back to the status it had before this call.
+            // It never stays completed.
+            for outcome in &results {
+                if outcome.passed {
+                    todo_state.0.set_verification_passed(&outcome.id, true);
+                    continue;
+                }
+                let revert_to = previous_statuses
+                    .get(&outcome.id)
+                    .copied()
+                    .flatten()
+                    .filter(|status| *status != TodoStatus::Completed)
+                    .unwrap_or(TodoStatus::InProgress);
+                todo_state.0.update(&outcome.id, None, Some(revert_to));
             }
 
             let mut summary = summarize_todo_state(&todo_state.0);
