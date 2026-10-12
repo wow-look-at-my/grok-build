@@ -22,16 +22,25 @@ impl SessionActor {
         else {
             return;
         };
+        // One summarization request runs at a time per session.
+        let previous = self.thinking_summary_tail.lock().unwrap().take();
         let actor = self.clone();
-        tokio::task::spawn_local(async move {
+        let handle = tokio::task::spawn_local(async move {
+            if let Some(previous) = previous {
+                let _ = previous.await;
+            }
             actor
                 .generate_thinking_summary(thinking, stream_start_ms)
                 .await;
         });
+        *self.thinking_summary_tail.lock().unwrap() = Some(handle);
     }
 
     async fn generate_thinking_summary(&self, thinking: String, stream_start_ms: i64) {
         use crate::session::helpers::thinking_summary as helpers;
+        // Snapshot the session's earlier summaries before this call's own is
+        // recorded, so the block never contains the summary it is writing.
+        let prior = self.thinking_summary_history.prior_for(stream_start_ms);
         let setup = match self.prepare_side_call("thinking_summary").await {
             Ok(setup) => setup,
             Err(e) => {
@@ -45,7 +54,7 @@ impl SessionActor {
             crate::agent::config::thinking_off_effort(&self.models_manager.models(), &setup.model);
         let request = ConversationRequest {
             items: vec![ConversationItem::user(
-                helpers::thinking_summary_instruction(&thinking),
+                helpers::thinking_summary_instruction(&thinking, &prior),
             )],
             model: Some(setup.model.clone()),
             reasoning_effort,
@@ -74,6 +83,9 @@ impl SessionActor {
             tracing::warn!("thinking summary: the model returned no text");
             return;
         }
+        // Record BEFORE the broadcast: the next call may draw on this one.
+        self.thinking_summary_history
+            .record(stream_start_ms, summary.clone());
         self.send_xai_notification(XaiSessionUpdate::ThinkingSummary {
             stream_start_ms,
             summary,
