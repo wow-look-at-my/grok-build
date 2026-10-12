@@ -309,7 +309,7 @@ jobs:
   # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
   release:
     name: Create buildhost release
-    needs: [slopfix, fmt, build-test, test-darwin-sandbox, build-release]
+    needs: [slopfix, fmt, build-test, test-darwin-sandbox, build-release, link-darwin]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     permissions:
