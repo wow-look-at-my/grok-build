@@ -646,6 +646,8 @@ impl xai_tool_runtime::Tool for TaskTool {
                 foreground_wait_budget_ms: None,
                 output_schema: None,
                 loop_task_id: None,
+                // A model-issued spawn is never the goal verifier.
+                goal_verifier: false,
                 resource,
             },
             run_in_background: input.run_in_background,

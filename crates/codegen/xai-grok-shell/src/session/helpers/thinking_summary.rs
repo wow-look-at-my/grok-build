@@ -11,8 +11,7 @@ pub(crate) const THINKING_SUMMARY_MAX_CHARS: usize = 320;
 pub(crate) const THINKING_SUMMARY_MAX_OUTPUT_TOKENS: u32 = 4096;
 const INPUT_HEAD_CHARS: usize = 16_000;
 const INPUT_TAIL_CHARS: usize = 32_000;
-/// Upper bound on the per-session summary history, so a long session cannot
-/// grow it without limit. Only the newest entries are ever selected.
+/// Upper bound on the per-session summary history, so a long session cannot grow it without limit.
 pub(crate) const THINKING_SUMMARY_HISTORY_CAPACITY: usize = 64;
 
 /// The words of every reasoning item in the response, in order.
@@ -48,7 +47,7 @@ pub(crate) fn summarizable_thinking(thinking: &str) -> Option<String> {
 /// The prior summaries a call at `now_ms` may see: everything inside
 /// `window_secs` of it, together with the most recent `min_count`. The union
 /// keeps a few predecessors in view through a slow stretch where the time
-/// window alone would select nothing, and covers a rapid-fire burst without
+/// window alone would select nothing. It covers a rapid-fire burst without
 /// having to count it. Oldest first. A zero window and a zero count select
 /// nothing.
 pub(crate) fn select_prior_summaries(
@@ -73,16 +72,12 @@ pub(crate) fn select_prior_summaries(
         .collect()
 }
 
-/// The thinking summaries one session has produced, oldest first, keyed by the
-/// `stream_start_ms` of the call each describes, plus how far back the next
-/// call may draw on them. Per-actor: a subagent and its parent each keep their
-/// own chain, so one session's summaries never reach another's prompt.
+/// The thinking summaries one session has produced, oldest first, keyed by
+/// the `stream_start_ms` of the call each describes.
 pub(crate) struct ThinkingSummaryHistory {
     window_secs: u32,
     min_count: u32,
-    /// At least [`THINKING_SUMMARY_HISTORY_CAPACITY`], and never under the
-    /// configured count floor, so a raised `min_count` is honored in full
-    /// instead of being silently trimmed.
+    /// At least [`THINKING_SUMMARY_HISTORY_CAPACITY`].
     capacity: usize,
     entries: parking_lot::Mutex<VecDeque<(i64, String)>>,
 }
@@ -278,8 +273,6 @@ mod tests {
         let entries: VecDeque<(i64, String)> = (0..6)
             .map(|i| (1_000 * i, format!("summary {i}")))
             .collect();
-        // Window of 2.5s at t=5000 keeps entries at 3000..=5000; the count
-        // floor of 5 keeps everything from index 1 up. Union, oldest first.
         let selected = select_prior_summaries(&entries, 5_000, 2, 5);
         assert_eq!(
             selected,
@@ -298,8 +291,6 @@ mod tests {
         let entries: VecDeque<(i64, String)> = (0..3)
             .map(|i| (i * 600_000, format!("summary {i}")))
             .collect();
-        // Ten minutes between calls, a 2s window selects none by time; the
-        // floor of 2 still carries the two newest.
         let selected = select_prior_summaries(&entries, 1_200_000, 2, 2);
         assert_eq!(
             selected,
