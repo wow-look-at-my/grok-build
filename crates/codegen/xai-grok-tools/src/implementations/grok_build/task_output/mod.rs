@@ -1896,6 +1896,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-unknown".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -2264,6 +2265,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-done".into()],
                 timeout_ms: Some(600_000),
+                ..Default::default()
             },
         )
         .await
@@ -2298,6 +2300,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["task-run".into()],
                 timeout_ms: Some(200),
+                ..Default::default()
             },
         )
         .await
@@ -3028,6 +3031,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["sub-done".into()],
                 timeout_ms: Some(600_000),
+                ..Default::default()
             },
         )
         .await
@@ -3082,6 +3086,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["sub-run".into()],
                 timeout_ms: Some(5_000),
+                ..Default::default()
             },
         )
         .await
@@ -3109,6 +3114,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["never-existed".into()],
                 timeout_ms: Some(600_000),
+                ..Default::default()
             },
         )
         .await
@@ -3172,6 +3178,7 @@ mod tests {
                 TaskOutputToolInput {
                     task_ids: vec![id.to_string()],
                     timeout_ms: Some(600_000),
+                    ..Default::default()
                 },
             )
             .await
