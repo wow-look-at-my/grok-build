@@ -194,9 +194,7 @@ pub struct ToolContext {
     >,
     /// Route from this session to the one that spawned it, read by `send_message`.
     pub parent_messenger: Option<xai_grok_tools::implementations::grok_build::ParentMessenger>,
-    /// The main session's directory, set on a `/goal` verifier child, whose tool
-    /// calls must never read that session's record. `None` for every other
-    /// session, the main session included.
+    /// The main session's directory, set on a `/goal` verifier child, whose tool calls must never read that session's record.
     pub goal_main_session_dir: Option<std::path::PathBuf>,
     pub subagent_coordinator_sender: Option<
         xai_grok_tools::implementations::grok_build::task::backend::SubagentCoordinatorSender,

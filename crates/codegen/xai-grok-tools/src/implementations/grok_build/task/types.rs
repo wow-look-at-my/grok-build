@@ -251,10 +251,7 @@ pub struct SubagentRuntimeOverrides {
     pub foreground_wait_budget_ms: Option<u64>,
     pub output_schema: Option<serde_json::Value>,
     pub loop_task_id: Option<String>,
-    /// `/goal`-only: this child is the adversarial verifier. Its tool calls are
-    /// refused when they name the main session's record. The shared
-    /// `general-purpose` subagent type cannot identify the role, so the harness
-    /// sets this at the role's spawn.
+    /// `/goal`-only: this child is the adversarial verifier.
     pub goal_verifier: bool,
     /// The resource this child will touch, used to derive its inter-agent lock key.
     pub resource: Option<xai_tool_types::SubagentResource>,

@@ -284,9 +284,6 @@ fn only_prints_literals(command: &str) -> bool {
 }
 
 /// Names of the session's own record. The implementer never needs them.
-/// The first [`MAIN_SESSION_OUTPUT_FILE_COUNT`] are the session's generated
-/// outputs, which every reader refuses; the entries after them name the
-/// harness's own evidence files, which a goal verifier child reads.
 const BOOKKEEPING_FILES: &[&str] = &[
     "chat_history.jsonl",
     "updates.jsonl",
@@ -296,20 +293,11 @@ const BOOKKEEPING_FILES: &[&str] = &[
     "goal-verifier-details-",
 ];
 
-/// How many leading entries of [`BOOKKEEPING_FILES`] are the main session's
-/// generated outputs, its transcript and its update stream. A goal verifier
-/// child refuses those wherever they are spelled, and reads the harness's own
-/// evidence files that follow them.
+/// How many leading entries of [`BOOKKEEPING_FILES`] are the main session's generated outputs.
 const MAIN_SESSION_OUTPUT_FILE_COUNT: usize = 2;
 
 /// Who is reading a tool call, and which session directories that reader must
 /// stay out of.
-///
-/// A goal's implementer reads its own record to build evidence the verifier
-/// gathers for itself, so its own directory is refused. A goal verifier child
-/// is a separate session and reads the main session's directory the same way.
-/// The goal's plan and its baseline live in that directory and stay readable:
-/// they are the harness's own artifact, not model output.
 pub(crate) struct BookkeepingReader {
     /// The reader's own session directory.
     pub session_dir: String,
@@ -317,9 +305,7 @@ pub(crate) struct BookkeepingReader {
     pub main_session_dir: Option<String>,
     /// Paths the reader may read even though they sit in a session directory.
     pub allowed_paths: Vec<PathBuf>,
-    /// Whether the harness evidence names are refused on their own. A verifier
-    /// reads the run log and verdict files the harness wrote for it, so only
-    /// the main session refuses them.
+    /// Whether the harness evidence names are refused on their own.
     pub refuse_harness_evidence_names: bool,
 }
 
@@ -792,8 +778,7 @@ mod tests {
             refuse_harness_evidence_names: main_session_dir.is_none(),
         }
     }
-    /// Record file names, assembled so this module's own source never spells    /// one out: the running binary reads these very arguments, and it refuses
-    /// a call whose text names a record.
+    /// Record file names, assembled so this module's own source never spells /// one out: the running binary reads these arguments.
     const RECORD_TRANSCRIPT: &str = concat!("chat_", "history.jsonl");
     const RECORD_UPDATES: &str = concat!("updates", ".jsonl");
     const RECORD_RUNLOG: &str = concat!(".run", "log.md");
