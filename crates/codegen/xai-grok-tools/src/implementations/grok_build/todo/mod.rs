@@ -778,6 +778,22 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             // Always a merge.
             apply_merge(&mut todo_state.0, &input.todos, input.prepend)?;
 
+            // A blocked item goes back to the status it had before this call.
+            // It never stays completed.
+            for outcome in &results {
+                if outcome.passed {
+                    todo_state.0.set_verification_passed(&outcome.id, true);
+                    continue;
+                }
+                let revert_to = previous_statuses
+                    .get(&outcome.id)
+                    .copied()
+                    .flatten()
+                    .filter(|status| *status != TodoStatus::Completed)
+                    .unwrap_or(TodoStatus::InProgress);
+                todo_state.0.update(&outcome.id, None, Some(revert_to));
+            }
+
             let mut summary = summarize_todo_state(&todo_state.0);
             for outcome in results.iter().filter(|outcome| !outcome.passed) {
                 writeln!(
