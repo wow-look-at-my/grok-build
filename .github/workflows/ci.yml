@@ -327,10 +327,10 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
-  # One cc, and the only step in the workflow that needs a Mac. It waits on the tests as well as its bundle: it takes seconds, so starting it early buys nothing and spends a macOS runner on a tree that may not pass.
+  # One cc, and the only step in the workflow that needs a Mac.
   link-darwin:
     name: Link darwin/arm64 (macOS)
-    needs: [build-release, build-test]
+    needs: build-release
     runs-on: macos-14
     timeout-minutes: 15
     steps:
