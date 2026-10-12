@@ -690,7 +690,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 default: ui_default.split_and_tee_commands_enabled(),
             },
             restart_required: true,
-            hidden_in_minimal: false,
         },
         // SHARED. `[ui].min_output_tokens_per_sec`, `Option<u32>` widened to `i64`.
         SettingMeta {

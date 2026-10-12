@@ -36,7 +36,7 @@ jobs:
   # Runs first and gates every build job, so a prose, YAML or workflow finding fails the run. That run is in a minute instead of after the cold compile.
   slopfix:
     name: Slopfix
-    runs-on: ubuntu-22.04
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     timeout-minutes: 10
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
@@ -45,7 +45,7 @@ jobs:
 
   fmt:
     name: Rustfmt
-    runs-on: ubuntu-22.04
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     # Its own job, not a step of build-test: rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build it would otherwise sit behind.
     timeout-minutes: 10
     steps:
@@ -61,7 +61,7 @@ jobs:
   build-test:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
-    runs-on: ubuntu-22.04
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s. A job past this is broken, not slow.
     timeout-minutes: 75
     env:
@@ -310,7 +310,7 @@ jobs:
   release:
     name: Create buildhost release
     needs: [slopfix, fmt, build-test, test-darwin-sandbox, build-release, link-darwin]
-    runs-on: ubuntu-22.04
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -370,7 +370,7 @@ jobs:
     # Both binaries are stamped here. Patching bytes needs no Mac, and no signature is restored afterwards: a Homebrew install clears the quarantine that would otherwise make one matter.
     needs: [release, link-darwin]
     name: Publish buildhost release
-    runs-on: ubuntu-22.04
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     timeout-minutes: 30
     permissions:
       contents: read
