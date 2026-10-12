@@ -27,12 +27,9 @@ mod yolo_toggle_report_tests {
 /// lands in a running turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InFlightStream {
-    /// Cut the stream so the text reaches the very next request
-    /// (`SessionCommand::Interject`, the user's own interjection).
+    /// Cut the stream so the text reaches the next request (`SessionCommand::Interject`, the user's own interjection).
     Cancel,
-    /// Leave the stream alone; the text waits for the turn's next drain point
-    /// (`SessionCommand::InterjectWithoutCancel`, context handed to a live
-    /// subagent such as the goal planner).
+    /// Leave the stream alone; the text waits for the turn's next drain point.
     Keep,
 }
 /// Deliver an interjection to this session. A running turn buffers it; with
@@ -45,10 +42,7 @@ async fn deliver_interjection(
     images: Vec<acp::ImageContent>,
     in_flight: InFlightStream,
 ) {
-    // Broadcast to every attached client so all panes viewing this session
-    // render the interjection block, not just the originating client. The
-    // originator dedups this echo by `id` against its optimistic local block;
-    // viewers render it.
+    // Broadcast to every attached client so all panes viewing this session render the interjection block.
     session.broadcast_interjection(&text, id.as_deref());
     // Telemetry at enqueue (not drain) so it is recorded even when a cancel
     // clears the buffer before the next drain point.
@@ -60,9 +54,7 @@ async fn deliver_interjection(
             redirect_kind: crate::session::events::RedirectKind::Interjection,
         });
     // Buffer only into an actually-running turn: the buffer is drained
-    // exclusively by the turn loop, so an interjection arriving while idle
-    // (the pager's running-state check races turn end) would strand forever
-    // and silently drop the message. Run it as its own prompt turn instead.
+    // exclusively by the turn loop, so an interjection arriving while idle.
     let turn_running = session
         .current_prompt_id
         .lock()
@@ -83,7 +75,7 @@ async fn deliver_interjection(
     match in_flight {
         InFlightStream::Cancel => {
             tracing::info!("Queued mid-turn interjection");
-            session.cancel_in_flight_stream_for_interjection();
+            let _ = session.cancel_in_flight_stream_for_interjection();
         }
         InFlightStream::Keep => {
             tracing::info!("Queued mid-turn interjection; in-flight stream kept");
@@ -1218,12 +1210,19 @@ pub(super) async fn run_session(
                             }
                         }
                         SessionCommand::DeliverQueuedPromptsNow => {
-                            // The user asked for the queue NOW, so the stream
-                            // the model is mid-way through is what they are
-                            // interrupting. Harvest first: the cancel only pays
-                            // off if there is something to drain after it.
-                            if session.harvest_queued_prompts_into_interjections(true).await {
-                                session.cancel_in_flight_stream_for_interjection();
+                            // Harvest first: the cancel only pays off if there is something to drain after it.
+                            if session.harvest_queued_prompts_into_interjections(true).await
+                                && !session.cancel_in_flight_stream_for_interjection()
+                                && session.deliver_now_cancels_running_turn().await
+                            {
+                                // A tool holds the turn, so cut it the way Send Now does. The harvested rows run next.
+                                let settled = session
+                                    .cancel_turn_for_send_now(&mut replay_buffer)
+                                    .await
+                                    .settled;
+                                if settled {
+                                    SessionActor::maybe_start_running_task(session.clone(), completion_tx.clone()).await;
+                                }
                             }
                         }
                         SessionCommand::Cancel(options) => {
@@ -1235,8 +1234,7 @@ pub(super) async fn run_session(
                             }
                             // Clear, don't flush: converting interjections to prompt turns would restart the model after a stop
                             session.pending_interjections.clear();
-                            // Drop a stale asap-injection cancel flag and the
-                            // in-flight id so they cannot affect a later turn.
+                            // Drop a stale asap-injection cancel flag.
                             session
                                 .interjection_cancel_requested
                                 .store(false, std::sync::atomic::Ordering::SeqCst);
@@ -2454,17 +2452,12 @@ pub(super) async fn run_session(
                     if let Some(processed) = processed {
                         let _ = processed.send(());
                     }
-                    // A Shift+Tab to another agent during the turn. The next
-                    // turn must run under that agent's prompt and tools.
+                    // A Shift+Tab to another agent during the turn.
                     session.apply_pending_mode_agent().await;
                     // Drain monitor events that were routed to the mid-turn buffer but arrived after the turn ended
                     // The is_turn_active check races the buffer push
                     session.drain_monitor_buffer_to_pending().await;
-                    // Backstop for a `/compact` armed mid-turn: a turn that
-                    // answered in one pass reaches no second pre-sampling
-                    // boundary, so nothing inside it ran the request. Spawned,
-                    // not awaited — a compaction on this loop blocks the Cancel
-                    // the user presses to stop it.
+                    // Backstop for a `/compact` armed mid-turn.
                     if session.has_pending_manual_compact() {
                         let s = session.clone();
                         tokio::task::spawn_local(async move {

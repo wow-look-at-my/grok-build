@@ -12,15 +12,13 @@ pub const NUM_CTX_OPTION: &str = "num_ctx";
 /// `options.num_predict` — Ollama's spelling of a max-output budget.
 pub const NUM_PREDICT_OPTION: &str = "num_predict";
 
-/// Build the body for `POST /api/chat`.
-///
-/// Three fields here exist nowhere on Ollama's OpenAI-compatible endpoint, and
-/// each is a correctness matter rather than a tuning knob:
-///
-/// * `options.num_ctx` pins the window. Without it the runner picks one from
+/// Build the body for `POST /api/chat`. Fields here exist nowhere on Ollama's
+/// OpenAI-compatible endpoint, and each is a correctness matter rather than a
+/// tuning knob: * `options.num_ctx` pins the window. Without it the runner
+/// picks one.
 ///   available VRAM and the catalog's number becomes a guess the harness
 ///   compacts against.
-/// * `truncate: false` turns a prompt overflow into a server error. The
+/// * `truncate: false` turns a prompt overflow into a server error.
 ///   default drops the oldest messages in silence, which orphans tool calls.
 /// * `keep_alive` keeps the model resident between turns.
 pub fn build_ollama_chat_request(req: &ConversationRequest) -> OllamaChatRequest {
@@ -51,8 +49,7 @@ pub fn build_ollama_chat_request(req: &ConversationRequest) -> OllamaChatRequest
     if let Some(top_p) = req.top_p {
         options.insert("top_p".to_owned(), serde_json::json!(f64::from(top_p)));
     }
-    // The fitted output budget is `num_predict` here. `max_output_tokens` has
-    // already been fitted against the window by `fit_output_budget`.
+    // The fitted output budget is `num_predict` here.
     if let Some(max_output) = req.max_output_tokens {
         options.insert(NUM_PREDICT_OPTION.to_owned(), serde_json::json!(max_output));
     }
@@ -63,22 +60,19 @@ pub fn build_ollama_chat_request(req: &ConversationRequest) -> OllamaChatRequest
         stream: true,
         tools,
         think: ollama_think_value(req),
-        // Ollama's `format` takes a bare JSON schema, not the Chat Completions
-        // `{type, json_schema: {schema}}` envelope.
+        // Ollama's `format` takes a bare JSON schema.
         format: req.json_schema.clone(),
-        // Residency and truncation are the caller's to set through
-        // `extra_body`; a default here would overwrite what the user wrote.
+        // Residency and truncation are the caller's to set through `extra_body`.
         keep_alive: None,
         truncate: None,
         options,
     }
 }
 
-/// The `think` field for this request.
-///
-/// Ollama takes a bool or a model-defined level, and its own OpenAI-compat
-/// layer maps `reasoning_effort` onto exactly this. `None` leaves the model's
-/// own default alone, which is what an unset effort means everywhere else.
+/// The `think` field for this request. Ollama takes a bool or a model-defined
+/// level, and its own OpenAI-compat layer maps `reasoning_effort` onto
+/// exactly this. `None` leaves the model's own default alone, which is what
+/// an unset effort means everywhere else.
 fn ollama_think_value(req: &ConversationRequest) -> Option<serde_json::Value> {
     let effort = wire_reasoning_effort(req.reasoning_mandatory, req.reasoning_effort)?;
     Some(match effort {
@@ -114,7 +108,7 @@ fn build_ollama_messages(
                             text.push_str(t);
                         }
                         // Ollama takes bare base64, never a data URI and never
-                        // a URL: it has no fetcher, so a remote image would
+                        // a URL. It has no fetcher, so a remote image would
                         // reach the model as nothing at all.
                         ContentPart::Image { url } => {
                             if let Some(base64) = base64_payload(url) {
@@ -136,8 +130,7 @@ fn build_ollama_messages(
                     .tool_calls
                     .iter()
                     .map(|call| OllamaToolCall {
-                        // Ollama's own calls carry no id; one it never minted
-                        // is not a key it can match a result against.
+                        // Ollama's own calls carry no id.
                         id: (!call.id.is_empty()).then(|| call.id.to_string()),
                         function: OllamaToolCallFunction {
                             name: call.name.clone(),
@@ -196,11 +189,9 @@ fn build_ollama_messages(
 }
 
 /// Fold a thinking-only assistant message into the assistant message it
-/// precedes.
-///
-/// A reasoning item and the assistant message it belongs to are two items
-/// here and one message on Ollama's wire. Leaving them apart sends two
-/// consecutive assistant turns, which renders as two separate replies in the
+/// precedes. A reasoning item and the assistant message it belongs to are
+/// items here and one message on Ollama's wire. Leaving them apart sends
+/// consecutive assistant turns, which renders as separate replies in the
 /// model's own template.
 fn merge_thinking_into_following_assistant(messages: &mut Vec<OllamaMessage>) {
     let mut idx = 0;
@@ -222,7 +213,7 @@ fn merge_thinking_into_following_assistant(messages: &mut Vec<OllamaMessage>) {
 
 /// Ollama takes tool-call arguments as an object; every other backend here
 /// carries them as a JSON-encoded string. Arguments that do not parse go out
-/// as an object with the raw text under `input`, because dropping them sends
+/// as an object with the raw text under `input`. Because dropping them sends
 /// the model a call it never made.
 fn arguments_as_object(arguments: &str) -> serde_json::Value {
     let trimmed = arguments.trim();

@@ -295,7 +295,8 @@ mod tests {
     }
 
     /// `/effort` with no argument on an unflagged model must report the gate,
-    /// not a usage line that sends the user round again to learn the same thing.
+    /// not a usage line. That line sends the user round again to learn the same
+    /// thing.
     #[test]
     fn non_reasoning_model_empty_args_reports_the_gate_not_usage() {
         let mut state = ModelState::default();

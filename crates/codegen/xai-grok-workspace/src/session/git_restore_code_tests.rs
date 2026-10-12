@@ -138,7 +138,8 @@ fn restore_code_checkout_allowed_worktree_cwd_is_allowed() {
         &worktrees,
     ));
 }
-/// The old managed location also holds checkouts sitting directly under `worktrees/`.
+/// The managed location also holds checkouts sitting directly under
+/// `worktrees/`.
 #[test]
 fn restore_code_checkout_allowed_unbucketed_legacy_cwd_is_allowed() {
     let worktrees = roots(&["/home/u/.grok/worktrees"]);

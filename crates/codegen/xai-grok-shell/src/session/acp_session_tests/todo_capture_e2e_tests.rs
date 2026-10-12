@@ -1,15 +1,4 @@
 //! `/todo` capture end to end against a scripted model.
-//!
-//! The unit tests around the capture gate prove the sanitizer in isolation.
-//! This drives the real loop — model call, tool dispatch, todo-list write —
-//! against a mock inference server, because the one guarantee `/todo` makes is
-//! about the state the session is left in, and nothing short of running the
-//! loop can show that.
-//!
-//! The scripted response is deliberately adversarial: reasoning followed by a
-//! `todo_write` that asks for `merge: false` (a replace), targets an id the
-//! main agent is using, and flips it to `completed`. Every one of those is one
-//! JSON field away from destroying the main agent's list.
 
 use super::support::*;
 use super::*;
@@ -18,8 +7,7 @@ use std::time::Duration;
 use xai_grok_test_support::sse::responses_api_reasoning_then_tool_call_events;
 use xai_grok_test_support::{MockInferenceServer, ScriptedResponse};
 
-/// What the capture agent asks for: a replace, over the main agent's own item,
-/// marking it completed — plus the item it was actually asked to add.
+/// What the capture agent asks for: a replace, over the main agent's own item, marking it completed — plus the item it was asked to add.
 const ADVERSARIAL_TODO_ARGS: &str = r#"{"merge":false,"todos":[{"id":"t1","content":"ship the release","status":"completed"},{"id":"t2","content":"Add a second remote to ci/push.sh","status":"in_progress"}]}"#;
 
 /// The main agent's in-flight item, seeded through the real tool before the
@@ -196,9 +184,9 @@ async fn a_capture_appends_and_cannot_touch_the_main_agent_s_items() {
 }
 
 /// The capture's own turns never reach the conversation the main agent is
-/// working in — that is what makes it safe to run mid-turn. The one thing it
+/// working in — that is what makes it safe to run mid-turn. The thing it
 /// does add there is the notice that the user assigned these items, without
-/// which the agent reads them as somebody else's idea and cancels them.
+/// which the agent reads them as somebody else's idea. It cancels them.
 #[tokio::test(flavor = "current_thread")]
 async fn a_capture_leaves_the_parent_conversation_alone() {
     let local = tokio::task::LocalSet::new();
@@ -282,8 +270,7 @@ async fn a_capture_leaves_the_parent_conversation_alone() {
                 !notice.contains("Add a second remote to ci/push.sh"),
                 "a /todo notice must not name the items: {notice}"
             );
-            // The capture agent's own turns — its reasoning, its tool call,
-            // the tool result — stay in its own conversation.
+            // The capture agent's own turns — its reasoning, its tool call.
             assert!(!notice.contains("call_capture_1"), "{notice}");
         })
         .await;
@@ -291,8 +278,8 @@ async fn a_capture_leaves_the_parent_conversation_alone() {
 
 /// `/TODO` is the same capture with the items put where the user will act on
 /// them next. The adversarial call is still sanitized — the front of the list
-/// is not a way around the one-mutation rule — and the main agent's own item
-/// keeps its place, its content and its status.
+/// is not a way around the one-mutation rule. The main agent's own item keeps
+/// its place, its content and its status.
 #[tokio::test(flavor = "current_thread")]
 async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
     let local = tokio::task::LocalSet::new();
@@ -407,7 +394,7 @@ async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
 }
 
 /// A session whose task-list tool cannot address the item a capture adds is
-/// refused before any model call, rather than written through with semantics
+/// refused before any model call. It is not written through with semantics
 /// that cannot express the append.
 #[tokio::test(flavor = "current_thread")]
 async fn a_task_list_tool_without_item_ids_is_refused() {
@@ -439,8 +426,7 @@ async fn a_task_list_tool_without_item_ids_is_refused() {
                 matches!(err, TodoCaptureError::UnsupportedTodoTool(_)),
                 "got {err:?}"
             );
-            // No model was configured, so reaching one would have failed
-            // differently — the refusal has to come first.
+            // No model was configured, so reaching one would have failed differently — the refusal has to come first.
             let msg = err.to_string();
             assert!(
                 msg.contains("items carry ids") && msg.contains("todowrite"),

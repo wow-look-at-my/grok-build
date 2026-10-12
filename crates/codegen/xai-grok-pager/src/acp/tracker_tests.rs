@@ -5368,7 +5368,7 @@ fn a_named_write_shows_its_body_arriving() {
         "the preview moved with the body"
     );
 }
-/// A body past the tail's line budget keeps the row at a fixed height and
+/// A body past the tail's line budget keeps the row at a fixed height. It
 /// keeps showing the NEWEST lines, which is where the model is writing.
 #[test]
 fn a_long_body_shows_its_newest_lines_at_a_fixed_height() {
@@ -5389,9 +5389,7 @@ fn a_long_body_shows_its_newest_lines_at_a_fixed_height() {
         "the newest line is the one on screen"
     );
     assert_eq!(
-        // Ten `line0\n` fragments of 7 bytes, forty `line10\n` of 8.
-        block.summary,
-        "390 B",
+        block.summary, "390 B",
         "the size is what the tail alone cannot say"
     );
 }
@@ -5439,8 +5437,8 @@ fn a_streaming_title_renames_the_row_in_place() {
     assert_eq!(sb.len(), 1, "renaming never pushes a second entry");
 }
 /// A chunk with no title keeps the one the row already has. The shell sends
-/// a title only when it CHANGED, so treating an absent one as "unnamed"
-/// flips the row back to raw JSON on the next fragment.
+/// a title only when it CHANGED. Treating an absent one as "unnamed" flips
+/// the row back to raw JSON on the next fragment.
 #[test]
 fn a_titleless_chunk_leaves_the_name_alone() {
     let mut sb = ScrollbackState::new();
@@ -5462,9 +5460,9 @@ fn a_titleless_chunk_leaves_the_name_alone() {
         "a titleless fragment still extends the preview"
     );
 }
-/// Two calls in one turn are named independently. The first one's title
-/// lands while the second is still being written — the second call cannot
-/// hold the first one's name back.
+/// Calls in one turn are named independently. The first one's title lands
+/// while the second is still being written — the second call cannot hold
+/// the first one's name back.
 #[test]
 fn a_second_streaming_call_does_not_hold_the_first_ones_name_back() {
     let mut sb = ScrollbackState::new();
@@ -5593,7 +5591,6 @@ fn a_turn_that_ends_mid_argument_stops_the_preview_spinning() {
     );
     assert!(tracker.streaming_tools.is_empty());
 }
-/// A 600 KB write costs a bounded preview and a size that keeps moving.
 #[test]
 fn a_large_body_costs_a_bounded_preview_and_a_moving_size() {
     let mut sb = ScrollbackState::new();
@@ -5625,12 +5622,8 @@ fn a_large_body_costs_a_bounded_preview_and_a_moving_size() {
     );
 }
 
-// ── set_last_turn_cost branch semantics (direct, on the shipped fn) ──
-//
-// These drive `AcpUpdateTracker::set_last_turn_cost` DIRECTLY — no
-// re-implementation — to pin the attribution-branch behavior that the
-// order-independent claim rests on, and the keyed-miss guard added to stop
-// eviction-triggered mis-attribution.
+// ── set_last_turn_cost branch semantics (direct, on the shipped fn)
+// ──.
 
 fn finish_one_turn(tracker: &mut AcpUpdateTracker, sb: &mut ScrollbackState, prompt: &str) {
     tracker.handle_update(agent_chunk("response text"), &meta(), sb);
@@ -5651,21 +5644,16 @@ fn agent_costs(sb: &mut ScrollbackState) -> Vec<Option<i64>> {
 
 #[test]
 fn set_last_turn_cost_keyed_evicted_idle_is_dropped_not_misattributed() {
-    // A PROMPT-KEYED cost whose key was EVICTED from the bounded map,
-    // arriving with NOTHING streaming. Branch (1) has no streaming block,
-    // branch (2) map-misses, and branch (3) must NOT fall through to
-    // `last_finished_agent_entry` (guard): the older turn's cost must be a
-    // safe absence, never stamped onto a newer, already-finished entry.
+    // A PROMPT-KEYED cost whose key was EVICTED from the bounded map, arriving with NOTHING streaming.
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
-    // Finish two turns so `last_finished_agent_entry` points at the second.
+    // Finish turns so `last_finished_agent_entry` points at the second.
     finish_one_turn(&mut tracker, &mut sb, "p1");
     // Overwhelm the bounded map (>8) with filler prompts so "p-early" is
     // evicted before we attribute its cost.
     for i in 0..12 {
         finish_one_turn(&mut tracker, &mut sb, &format!("filler-{i}"));
     }
-    // p1 was evicted (12+1 entries pushed, map holds only the newest 8).
     assert!(
         !tracker.finished_prompt_costs.iter().any(|(p, _)| p == "p1"),
         "p1 must have been evicted from the bounded map for this edge to hold"
@@ -5674,9 +5662,6 @@ fn set_last_turn_cost_keyed_evicted_idle_is_dropped_not_misattributed() {
 
     // Late, evicted, keyed TurnCompleted for p1.
     tracker.set_last_turn_cost(&mut sb, Some("p1"), None, Some(1_000_000_000));
-    // Branch (3) must not fire for a keyed-notification: NO agent message
-    // entry may receive p1's cost (safe absence), even though
-    // `last_finished_agent_entry` still points at the newest filler.
     assert!(
         agent_costs(&mut sb).iter().all(|c| c.is_none()),
         "an evicted keyed cost must be dropped, not mis-attributed to the most-recently-finished entry"
@@ -5685,9 +5670,7 @@ fn set_last_turn_cost_keyed_evicted_idle_is_dropped_not_misattributed() {
 
 #[test]
 fn set_last_turn_cost_keyless_finished_attaches_to_last_finished() {
-    // A GENUINELY keyless TurnCompleted (no prompt key, as a future/other
-    // call site might supply) with a finished entry and nothing streaming:
-    // branch (3) fires and attaches to `last_finished_agent_entry`.
+    // A GENUINELY keyless TurnCompleted (no prompt key, as a future/other call site might supply) with a finished entry and nothing streaming.
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     finish_one_turn(&mut tracker, &mut sb, "p-solo");
@@ -5701,9 +5684,6 @@ fn set_last_turn_cost_keyless_finished_attaches_to_last_finished() {
 
 #[test]
 fn set_last_turn_cost_keyless_with_streaming_attaches_to_stream() {
-    // A keyless TurnCompleted while an agent message is streaming: branch
-    // (1) `(None, _)` matches the streaming block, so the fallback is not
-    // even consulted.
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     tracker.handle_update(agent_chunk("live"), &meta(), &mut sb);
@@ -5718,12 +5698,10 @@ fn set_last_turn_cost_keyless_with_streaming_attaches_to_stream() {
 
 #[test]
 fn set_last_turn_cost_keyed_streaming_matches_running_prompt() {
-    // A keyed TurnCompleted whose prompt EQUALS the running turn attaches
-    // to the still-streaming block (driver cost-before-finish, branch 1).
+    // A keyed TurnCompleted whose prompt EQUALS.
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
-    // Simulate the running turn: stream once, then a new stream with the
-    // running prompt active (as the shipped driver flow does).
+    // Simulate the running turn: stream once, then a new stream with the running prompt active.
     tracker.handle_update(agent_chunk("response"), &meta(), &mut sb);
     tracker.set_last_turn_cost(
         &mut sb,
@@ -5740,16 +5718,11 @@ fn set_last_turn_cost_keyed_streaming_matches_running_prompt() {
 
 #[test]
 fn set_last_turn_cost_keyed_streaming_mismatch_skips_stream() {
-    // A keyed TurnCompleted whose prompt does NOT match the running turn,
-    // with nothing in the map for it: branch (1) rejects on prompt mismatch
-    // and branch (3) must not fire (keyed guard) — so the newer streaming
-    // block stays cost-free and the stale cost is dropped (never corrupts
-    // the newer turn).
+    // A keyed TurnCompleted whose prompt does NOT match the running turn.
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     tracker.handle_update(agent_chunk("newer turn streaming"), &meta(), &mut sb);
-    // The streaming block belongs to running prompt "cur-2"; a stale
-    // TurnCompleted for an old prompt "old-1" (not in the map) must not.
+    // The streaming block belongs to running prompt "cur-2", a stale.
     tracker.set_last_turn_cost(&mut sb, Some("old-1"), Some("cur-2"), Some(9_000_000_000));
     assert_eq!(
         agent_costs(&mut sb),

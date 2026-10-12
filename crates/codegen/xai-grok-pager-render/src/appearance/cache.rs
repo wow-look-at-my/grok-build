@@ -28,9 +28,6 @@ const PAGE_FLIP_ON_SEND_DEFAULT: bool = UiConfig::PAGE_FLIP_ON_SEND_DEFAULT;
 /// Rollout flag.
 const COMBINE_QUEUED_PROMPTS_DEFAULT: bool = false;
 const FOLLOW_UP_BEHAVIOR_DEFAULT: FollowUpBehavior = FollowUpBehavior::Queue;
-const SIMPLE_MODE_DEFAULT: bool = true;
-/// This matches the previous on-disk default.
-const VIM_MODE_DEFAULT: bool = false;
 const SHOW_THINKING_BLOCKS_DEFAULT: bool = true;
 const GROUP_TOOL_VERBS_DEFAULT: bool = true;
 /// Rollout flag; while it is off, edit blocks render as the legacy expanded diffs.
@@ -219,62 +216,6 @@ pub fn load_follow_up_steer() -> bool {
 pub fn set_follow_up_behavior(value: FollowUpBehavior) {
     FOLLOW_UP_BEHAVIOR_CURRENT.with(|c| c.set(value));
     FOLLOW_UP_BEHAVIOR_LOADED.with(|l| l.set(true));
-}
-
-// -- Simple mode --------------------------------------------------------------
-
-thread_local! {
-    static SIMPLE_MODE_CURRENT: Cell<bool> = const { Cell::new(SIMPLE_MODE_DEFAULT) };
-    static SIMPLE_MODE_LOADED: Cell<bool> = const { Cell::new(false) };
-}
-
-pub fn load_simple_mode() -> bool {
-    SIMPLE_MODE_LOADED.with(|loaded| {
-        if !loaded.get() {
-            SIMPLE_MODE_CURRENT.with(|c| {
-                c.set(load_bool_from_effective_config(
-                    "simple_mode",
-                    SIMPLE_MODE_DEFAULT,
-                ))
-            });
-            loaded.set(true);
-        }
-    });
-    SIMPLE_MODE_CURRENT.with(|c| c.get())
-}
-
-pub fn set_simple_mode(enabled: bool) {
-    SIMPLE_MODE_CURRENT.with(|c| c.set(enabled));
-    SIMPLE_MODE_LOADED.with(|l| l.set(true));
-}
-
-// -- Vim mode (scrollback) ---------------------------------------------------
-
-thread_local! {
-    static VIM_MODE_CURRENT: Cell<bool> = const { Cell::new(VIM_MODE_DEFAULT) };
-    static VIM_MODE_LOADED: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Ephemeral process-wide source of truth; no Effect writes it back. First read seeds from `[ui].vim_mode`.
-pub fn load_vim_mode() -> bool {
-    VIM_MODE_LOADED.with(|loaded| {
-        if !loaded.get() {
-            VIM_MODE_CURRENT.with(|c| {
-                c.set(load_bool_from_effective_config(
-                    "vim_mode",
-                    VIM_MODE_DEFAULT,
-                ))
-            });
-            loaded.set(true);
-        }
-    });
-    VIM_MODE_CURRENT.with(|c| c.get())
-}
-
-/// Replace cached `vim_mode`.
-pub fn set_vim_mode(enabled: bool) {
-    VIM_MODE_CURRENT.with(|c| c.set(enabled));
-    VIM_MODE_LOADED.with(|l| l.set(true));
 }
 
 // -- Show thinking blocks ----------------------------------------------------
@@ -635,11 +576,8 @@ pub fn prime(ui: &UiConfig) {
             .and_then(FollowUpBehavior::from_canonical)
             .unwrap_or(FOLLOW_UP_BEHAVIOR_DEFAULT),
     );
-    set_simple_mode(ui.simple_mode.unwrap_or(SIMPLE_MODE_DEFAULT));
     set_keep_text_selection(text_selection_from_ui(ui));
-    // These keys live in the layered config, not the `UiConfig` arg; seed them so the first frame skips disk
-    // `load_*` is a no-op when already set (e.g. by the startup resolve).
-    let _ = load_vim_mode();
+    // These keys live in the layered config, not the `UiConfig` arg.
     let _ = load_scroll_speed();
     let _ = load_scroll_mode();
     let _ = load_invert_scroll();
@@ -745,8 +683,6 @@ mod tests {
             FOLLOW_UP_BEHAVIOR_DEFAULT.as_canonical(),
             ui.follow_up_behavior()
         );
-        assert_eq!(SIMPLE_MODE_DEFAULT, ui.simple_mode.unwrap_or(true));
-        assert_eq!(VIM_MODE_DEFAULT, ui.vim_mode.unwrap_or(false));
         assert_eq!(
             SHOW_THINKING_BLOCKS_DEFAULT,
             ui.show_thinking_blocks
@@ -833,30 +769,6 @@ mod tests {
             assert!(load_combine_queued_prompts());
             set_combine_queued_prompts(false);
             assert!(!load_combine_queued_prompts());
-        })
-        .join()
-        .unwrap();
-    }
-
-    #[test]
-    fn set_then_load_round_trips_simple_mode() {
-        std::thread::spawn(|| {
-            set_simple_mode(false);
-            assert!(!load_simple_mode());
-            set_simple_mode(true);
-            assert!(load_simple_mode());
-        })
-        .join()
-        .unwrap();
-    }
-
-    #[test]
-    fn set_then_load_round_trips_vim_mode() {
-        std::thread::spawn(|| {
-            set_vim_mode(true);
-            assert!(load_vim_mode());
-            set_vim_mode(false);
-            assert!(!load_vim_mode());
         })
         .join()
         .unwrap();
@@ -1024,38 +936,41 @@ mod tests {
             // ── compact independent (the other two stay true) ──
             set(false);
             set_timestamps(true);
-            set_simple_mode(true);
+            set_show_thinking_blocks(true);
             assert!(!load(), "compact toggled");
             assert!(
                 load_timestamps(),
                 "timestamps must NOT toggle when compact changed"
             );
             assert!(
-                load_simple_mode(),
-                "simple_mode must NOT toggle when compact changed"
+                load_show_thinking_blocks(),
+                "show_thinking_blocks must NOT toggle when compact changed"
             );
 
             // ── timestamps independent ──
             set(true);
             set_timestamps(false);
-            set_simple_mode(true);
+            set_show_thinking_blocks(true);
             assert!(load(), "compact must NOT toggle when timestamps changed");
             assert!(!load_timestamps(), "timestamps toggled");
             assert!(
-                load_simple_mode(),
-                "simple_mode must NOT toggle when timestamps changed"
+                load_show_thinking_blocks(),
+                "show_thinking_blocks must NOT toggle when timestamps changed"
             );
 
-            // ── simple_mode independent ──
+            // ── show_thinking_blocks independent ──
             set(true);
             set_timestamps(true);
-            set_simple_mode(false);
-            assert!(load(), "compact must NOT toggle when simple_mode changed");
+            set_show_thinking_blocks(false);
+            assert!(
+                load(),
+                "compact must NOT toggle when show_thinking_blocks changed"
+            );
             assert!(
                 load_timestamps(),
-                "timestamps must NOT toggle when simple_mode changed"
+                "timestamps must NOT toggle when show_thinking_blocks changed"
             );
-            assert!(!load_simple_mode(), "simple_mode toggled");
+            assert!(!load_show_thinking_blocks(), "show_thinking_blocks toggled");
         })
         .join()
         .unwrap();
@@ -1069,7 +984,7 @@ mod tests {
             // First reads exercise the lazy-seed branch
             let c1 = load();
             let t1 = load_timestamps();
-            let s1 = load_simple_mode();
+            let s1 = load_show_thinking_blocks();
 
             // Second reads must be stable.
             assert_eq!(load(), c1, "load() must be stable after first seed");
@@ -1079,9 +994,9 @@ mod tests {
                 "load_timestamps() must be stable after first seed"
             );
             assert_eq!(
-                load_simple_mode(),
+                load_show_thinking_blocks(),
                 s1,
-                "load_simple_mode() must be stable after first seed"
+                "load_show_thinking_blocks() must be stable after first seed"
             );
 
             let _ = (c1, t1, s1);
@@ -1097,14 +1012,14 @@ mod tests {
             let ui = UiConfig {
                 compact_mode: true,
                 show_timestamps: Some(false),
-                simple_mode: Some(false),
+                show_timeline: Some(true),
                 keep_text_selection: Some("hold".into()),
                 ..UiConfig::default()
             };
             prime(&ui);
             assert!(load());
             assert!(!load_timestamps());
-            assert!(!load_simple_mode());
+            assert!(load_show_timeline());
             assert_eq!(load_keep_text_selection(), TextSelection::Hold);
         })
         .join()

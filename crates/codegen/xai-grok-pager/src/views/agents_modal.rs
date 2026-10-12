@@ -1050,7 +1050,7 @@ pub fn render_agents_modal(
     state.window.active_tab = active_idx;
     let tab_labels: Vec<&str> = AgentsTab::ALL.iter().map(|t| t.label()).collect();
     let shortcuts: Vec<Shortcut<'_>> = match state.active_tab {
-        AgentsTab::Agents => build_agents_tab_shortcuts(state),
+        AgentsTab::Agents => build_agents_tab_shortcuts(),
         AgentsTab::Personas => build_personas_tab_shortcuts(state),
     };
     let config = ModalWindowConfig {
@@ -1077,8 +1077,8 @@ pub fn render_agents_modal(
     }
 }
 /// Build footer shortcuts for the Agents tab.
-fn build_agents_tab_shortcuts<'a>(state: &AgentsModalState) -> Vec<Shortcut<'a>> {
-    let mut shortcuts = vec![
+fn build_agents_tab_shortcuts<'a>() -> Vec<Shortcut<'a>> {
+    vec![
         Shortcut {
             label: "j/k nav",
             clickable: false,
@@ -1124,9 +1124,7 @@ fn build_agents_tab_shortcuts<'a>(state: &AgentsModalState) -> Vec<Shortcut<'a>>
             clickable: false,
             id: 0,
         },
-    ];
-    modal_window::push_vim_nav_search_hint(&mut shortcuts, state.search_active);
-    shortcuts
+    ]
 }
 /// Build footer shortcuts for the Personas tab.
 fn build_personas_tab_shortcuts<'a>(state: &AgentsModalState) -> Vec<Shortcut<'a>> {
@@ -1162,7 +1160,7 @@ fn build_personas_tab_shortcuts<'a>(state: &AgentsModalState) -> Vec<Shortcut<'a
             },
         ]
     } else {
-        let mut shortcuts = vec![
+        vec![
             Shortcut {
                 label: "j/k nav",
                 clickable: false,
@@ -1208,9 +1206,7 @@ fn build_personas_tab_shortcuts<'a>(state: &AgentsModalState) -> Vec<Shortcut<'a
                 clickable: false,
                 id: 0,
             },
-        ];
-        modal_window::push_vim_nav_search_hint(&mut shortcuts, state.search_active);
-        shortcuts
+        ]
     }
 }
 fn render_agents_search(
@@ -3065,30 +3061,15 @@ mod tests {
             "`i` must survive chrome dispatch to activate search"
         );
     }
-    /// Wiring check: both tab footers carry the shared `i search` hint under vim nav mode.
     #[test]
-    fn tab_footers_advertise_i_search_under_vim() {
-        crate::appearance::cache::set_vim_mode(true);
+    fn personas_footer_advertises_slash_search() {
         let s = make_persona_state(three_personas(), "", 0);
-        assert!(
-            build_agents_tab_shortcuts(&s)
-                .iter()
-                .any(|sc| sc.label == "i search"),
-            "vim-mode Agents footer must advertise `i search`"
-        );
-        assert!(
-            build_personas_tab_shortcuts(&s)
-                .iter()
-                .any(|sc| sc.label == "i search"),
-            "vim-mode Personas footer must advertise `i search`"
-        );
         assert!(
             build_personas_tab_shortcuts(&s)
                 .iter()
                 .any(|sc| sc.label == "/ search"),
             "Personas browse footer must advertise `/ search`"
         );
-        crate::appearance::cache::set_vim_mode(false);
     }
     #[test]
     fn search_text_changes_refilter_but_cursor_moves_do_not() {

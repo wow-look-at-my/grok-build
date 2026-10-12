@@ -78,16 +78,13 @@ pub fn conversation_item_to_chat_message(item: ConversationItem) -> ChatRequestM
 }
 
 /// [`conversation_item_to_chat_message`], but consulting `profile` for the
-/// optional message properties the target's schema accepts.
-///
-/// A suppressed property is set to `None`, which its `skip_serializing_if`
-/// omits from the JSON entirely — the property must be *absent*, not null or
-/// empty, because a strict-schema provider rejects on presence.
-///
-/// Only the serialized wire body is affected. The caller's stored
-/// conversation is untouched: `AssistantItem::model_id` still round-trips to
-/// disk and the Messages backend still reads it for thinking-signature
-/// handling.
+/// optional message properties the target's schema accepts. A suppressed
+/// property is set to `None`, which its `skip_serializing_if` omits from the
+/// JSON entirely. The property must be *absent*, not null or empty, because
+/// a strict-schema provider rejects on presence. Only the serialized wire
+/// body is affected. The caller's stored conversation is untouched:
+/// `AssistantItem::model_id` still round-trips to disk and the Messages
+/// backend still reads it for thinking-signature handling.
 pub fn conversation_item_to_chat_message_with_profile(
     item: ConversationItem,
     profile: ChatMessageProfile,
@@ -219,13 +216,12 @@ pub fn conversation_to_chat_messages(items: Vec<ConversationItem>) -> Vec<ChatRe
 }
 
 /// [`conversation_to_chat_messages`], consulting `profile` for which optional
-/// message properties the target's Chat Completions schema accepts.
-///
-/// The reasoning fold runs identically for every profile: suppression happens
+/// message properties the target's Chat Completions schema accepts. The
+/// reasoning fold runs identically for every profile: suppression happens
 /// *after* the fold, on the serialized message only. So a strict target
 /// receives the same conversation structure with `model_id` and/or
-/// `reasoning_content` absent, while a tolerant target and the Messages
-/// backend keep both values.
+/// `reasoning_content` absent. This happens while a tolerant target and the
+/// Messages backend keep both values.
 pub fn conversation_to_chat_messages_with_profile(
     items: Vec<ConversationItem>,
     profile: ChatMessageProfile,

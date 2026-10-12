@@ -229,8 +229,8 @@ fn volume_bytes_reports_a_real_volume() {
     );
 }
 
-/// One bucket per checkout, at either depth the old location has been written
-/// in, and none for anything else under the root.
+/// One bucket per checkout, at either depth the location has been written in,
+/// and none for anything else under the root.
 #[test]
 fn buckets_open_for_a_checkout_at_either_depth_of_the_old_location() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -249,8 +249,6 @@ fn buckets_open_for_a_checkout_at_either_depth_of_the_old_location() {
     // The fork's shape: a bucket per repository, a checkout per label.
     let deep = root.join("repos-buildhost/2026-09-14-reclaim");
     checkout(&deep, 8192);
-    // A bucket holding a plain directory -- a go build cache, on the real
-    // machine, at 208 MB. It is not a checkout and must not be a row.
     let cache = root.join("repos-buildhost/2026-09-14-gocache");
     std::fs::create_dir_all(cache.join("00")).unwrap();
     std::fs::write(cache.join("00/blob"), vec![b'z'; 32768]).unwrap();

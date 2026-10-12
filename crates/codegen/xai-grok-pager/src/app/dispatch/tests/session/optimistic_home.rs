@@ -1323,14 +1323,12 @@ fn send_from_welcome_honors_always_worktree() {
 /// Vim input mode parks an empty prompt on Scrollback; the worktree path must
 /// still land the forwarded first keystroke in the composer.
 #[test]
-fn keystroke_from_welcome_honors_always_worktree_under_vim() {
-    crate::appearance::cache::set_simple_mode(false);
+fn keystroke_from_welcome_honors_always_worktree() {
     let mut app = test_app_git();
     app.new_session_worktree_mode = crate::app::app_view::WorktreeMode::Always;
     assert!(maybe_create_home_session(&mut app).is_empty());
 
     let effects = leave_home_with(&mut app, &key_event(KeyCode::Char('h'), KeyModifiers::NONE));
-    crate::appearance::cache::set_simple_mode(true);
     assert!(
         effects
             .iter()

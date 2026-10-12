@@ -1,22 +1,6 @@
 use super::*;
 use crate::key;
 
-struct VimModeGuard(bool);
-
-impl VimModeGuard {
-    fn set(enabled: bool) -> Self {
-        let previous = crate::appearance::cache::load_vim_mode();
-        crate::appearance::cache::set_vim_mode(enabled);
-        Self(previous)
-    }
-}
-
-impl Drop for VimModeGuard {
-    fn drop(&mut self) {
-        crate::appearance::cache::set_vim_mode(self.0);
-    }
-}
-
 fn header(label: &'static str, idx: usize, count: usize) -> ShortcutsHelpEntry {
     ShortcutsHelpEntry::SectionHeader {
         label,
@@ -66,7 +50,7 @@ fn hint_with_action(
 #[test]
 fn build_entries_dedupes_identically_rendered_alt_keys() {
     let registry = crate::actions::ActionRegistry::defaults();
-    let entries = build_entries(&[When::DashboardFocused], &registry, false);
+    let entries = build_entries(&[When::DashboardFocused], &registry);
     let item = entries
         .iter()
         .find_map(|e| match e {
@@ -88,7 +72,7 @@ fn build_entries_dedupes_identically_rendered_alt_keys() {
 #[test]
 fn build_entries_lists_prompt_stash_with_ctrl_s_and_alt_s() {
     let registry = crate::actions::ActionRegistry::defaults();
-    let entries = build_entries(&[When::PromptFocused], &registry, false);
+    let entries = build_entries(&[When::PromptFocused], &registry);
     let alt = if cfg!(target_os = "macos") {
         "Opt"
     } else {
@@ -228,7 +212,7 @@ fn all_contexts() -> Vec<When> {
 #[test]
 fn build_entries_groups_by_category() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
 
     let headers: Vec<&str> = entries
         .iter()
@@ -247,7 +231,7 @@ fn mouse_reporting_shortcut_absent_by_default() {
     // Opt-in via config.toml; default registry must not advertise it.
     let registry = ActionRegistry::defaults();
     assert!(registry.find(ActionId::ToggleMouseCapture).is_none());
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let has_row = entries.iter().any(|e| {
         matches!(
             e,
@@ -273,7 +257,7 @@ fn mouse_reporting_shortcut_is_under_panels_when_enabled() {
         "Toggle mouse reporting (native copy/paste)",
     );
 
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let mut in_panels = false;
     let mut in_essentials = false;
     let mut seen = false;
@@ -316,7 +300,7 @@ fn mouse_reporting_shortcut_is_under_panels_when_enabled() {
 #[test]
 fn build_entries_deduplicates_within_category() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
 
     let mut current_cat_keys: std::collections::HashSet<KeyShortcut> =
         std::collections::HashSet::new();
@@ -343,7 +327,7 @@ fn build_entries_show_ctrl_g_tasks_and_ctrl_b() {
     {
         let registry = ActionRegistry::defaults();
         let prompt_contexts = [When::PromptFocused, When::AgentScreen, When::Always];
-        let entries = build_entries(&prompt_contexts, &registry, true);
+        let entries = build_entries(&prompt_contexts, &registry);
 
         let row = |action: ActionId| {
             entries.iter().find_map(|entry| match entry {
@@ -384,7 +368,7 @@ fn build_entries_show_ctrl_g_tasks_and_ctrl_b() {
 #[test]
 fn build_entries_includes_new_pane_actions() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
 
     let has_todos = entries.iter().any(|e| {
         matches!(
@@ -440,50 +424,31 @@ fn history_row(entries: &[ShortcutsHelpEntry]) -> Option<&ShortcutsHelpEntry> {
 }
 
 #[test]
-fn build_entries_includes_scrollback_search_in_vim_mode() {
+fn build_entries_includes_find_search() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
-    assert!(
-        has_scrollback_search(&entries),
-        "vim cheatsheet should list / search"
-    );
-    assert!(
-        !has_find_search(&entries),
-        "vim mode uses the `/` key row, not the /find slash row"
-    );
-}
-
-#[test]
-fn build_entries_includes_find_search_in_simple_mode() {
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, false);
+    let entries = build_entries(&all_contexts(), &registry);
     assert!(
         has_find_search(&entries),
-        "simple mode should list the /find scrollback search"
+        "the cheatsheet should list the /find scrollback search"
     );
     assert!(
         !has_scrollback_search(&entries),
-        "simple mode must not list the bare `/` key row"
+        "the cheatsheet must not list a bare `/` key row"
     );
 }
 
 #[test]
-fn build_entries_includes_history_row_in_both_modes() {
+fn build_entries_includes_history_row() {
     let registry = ActionRegistry::defaults();
-    for vim in [true, false] {
-        let entries = build_entries(&all_contexts(), &registry, vim);
-        assert!(
-            history_row(&entries).is_some(),
-            "history row should appear in vim={vim} mode"
-        );
-    }
+    let entries = build_entries(&all_contexts(), &registry);
+    assert!(history_row(&entries).is_some(), "history row should appear");
 }
 
 #[test]
 fn history_row_lit_only_by_prompt_focus() {
     let registry = ActionRegistry::defaults();
 
-    let entries = build_entries(&[When::PromptFocused], &registry, false);
+    let entries = build_entries(&[When::PromptFocused], &registry);
     let ShortcutsHelpEntry::Hint { dimmed, .. } =
         history_row(&entries).expect("history row present")
     else {
@@ -494,7 +459,7 @@ fn history_row_lit_only_by_prompt_focus() {
         "history row must be lit when the prompt is focused"
     );
 
-    let entries = build_entries(&[When::ScrollbackFocused], &registry, false);
+    let entries = build_entries(&[When::ScrollbackFocused], &registry);
     let ShortcutsHelpEntry::Hint { dimmed, .. } =
         history_row(&entries).expect("history row present")
     else {
@@ -503,7 +468,7 @@ fn history_row_lit_only_by_prompt_focus() {
     assert!(*dimmed, "history row must be dimmed without prompt focus");
 
     // Dashboard focus alone must not light it (unlike paste/undo/redo).
-    let entries = build_entries(&[When::DashboardFocused], &registry, false);
+    let entries = build_entries(&[When::DashboardFocused], &registry);
     let ShortcutsHelpEntry::Hint { dimmed, .. } =
         history_row(&entries).expect("history row present")
     else {
@@ -518,7 +483,7 @@ fn history_row_lit_only_by_prompt_focus() {
 #[test]
 fn build_entries_includes_paste() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let entry = entries
         .iter()
         .find(|e| {
@@ -560,7 +525,7 @@ fn build_entries_includes_paste() {
 #[test]
 fn build_entries_lists_undo_and_redo() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
 
     let (undo_keys, undo_help) = pseudo_hint(&entries, "undo").expect("undo row");
     assert!(undo_keys.contains(&key!('z', CONTROL)));
@@ -610,7 +575,6 @@ fn build_entries_dims_editor_pseudo_rows_outside_prompt_and_dashboard() {
                 &build_entries(
                     &[When::ScrollbackFocused, When::AgentScreen, When::Always],
                     &registry,
-                    true,
                 ),
                 label,
             ),
@@ -622,7 +586,6 @@ fn build_entries_dims_editor_pseudo_rows_outside_prompt_and_dashboard() {
                 &build_entries(
                     &[When::PromptFocused, When::AgentScreen, When::Always],
                     &registry,
-                    true,
                 ),
                 label,
             ),
@@ -631,7 +594,7 @@ fn build_entries_dims_editor_pseudo_rows_outside_prompt_and_dashboard() {
         );
         assert_eq!(
             pseudo_dimmed(
-                &build_entries(&[When::DashboardFocused, When::Always], &registry, true),
+                &build_entries(&[When::DashboardFocused, When::Always], &registry),
                 label,
             ),
             Some(false),
@@ -644,7 +607,7 @@ fn build_entries_dims_editor_pseudo_rows_outside_prompt_and_dashboard() {
 fn build_entries_dims_out_of_context_actions() {
     let registry = ActionRegistry::defaults();
     let prompt_contexts = vec![When::PromptFocused, When::AgentScreen, When::Always];
-    let entries = build_entries(&prompt_contexts, &registry, true);
+    let entries = build_entries(&prompt_contexts, &registry);
 
     let nav_dimmed = entries.iter().any(|e| {
         matches!(
@@ -681,7 +644,7 @@ fn build_entries_dims_out_of_context_actions() {
 fn build_entries_dims_both_pane_contexts_from_side_pane() {
     let registry = ActionRegistry::defaults();
     let todo_contexts = vec![When::AgentScreen, When::Always];
-    let entries = build_entries(&todo_contexts, &registry, true);
+    let entries = build_entries(&todo_contexts, &registry);
 
     let send_dimmed = entries.iter().any(|e| {
         matches!(
@@ -718,7 +681,7 @@ fn build_entries_dims_dashboard_list_vs_overlay() {
     };
 
     // Dashboard LIST: list shortcuts lit, overlay shortcuts dimmed.
-    let list = build_entries(&[When::DashboardFocused, When::Always], &registry, true);
+    let list = build_entries(&[When::DashboardFocused, When::Always], &registry);
     assert_eq!(
         dimmed_of(&list, "pin"),
         Some(false),
@@ -734,7 +697,6 @@ fn build_entries_dims_dashboard_list_vs_overlay() {
     let overlay = build_entries(
         &[When::AgentScreen, When::Always, When::DashboardOverlay],
         &registry,
-        true,
     );
     assert_eq!(
         dimmed_of(&overlay, "prev session"),
@@ -803,7 +765,7 @@ fn build_entries_overlay_stop_wins_dedup_and_shadows_cheatsheet_ctrl_x() {
     };
 
     // Dashboard LIST: the list stop survives, lit; the cheatsheet row keeps Ctrl+X (no overlay up)
-    let list = build_entries(&[When::DashboardFocused, When::Always], &registry, true);
+    let list = build_entries(&[When::DashboardFocused, When::Always], &registry);
     assert_eq!(
         stop_rows(&list),
         vec![("Stop / Delete agent".to_string(), false)],
@@ -822,7 +784,6 @@ fn build_entries_overlay_stop_wins_dedup_and_shadows_cheatsheet_ctrl_x() {
     let overlay = build_entries(
         &[When::AgentScreen, When::Always, When::DashboardOverlay],
         &registry,
-        true,
     );
     assert_eq!(
         stop_rows(&overlay),
@@ -1052,22 +1013,7 @@ fn modal_footer_advertises_detail() {
     );
 }
 
-/// Wiring check: the cheatsheet footer carries the shared `i search` hint under vim and keeps `/ search` regardless.
 /// The gate is covered centrally by `modal_window::tests::vim_nav_search_hint_only_in_vim_nav_mode`.
-#[test]
-fn modal_footer_advertises_i_search_under_vim() {
-    let _vim_mode = VimModeGuard::set(true);
-    let footer = modal_footer(false);
-    assert!(
-        footer.iter().any(|s| s.label == "i search"),
-        "vim-mode cheatsheet footer must advertise `i search`"
-    );
-    assert!(
-        footer.iter().any(|s| s.label == "/ search"),
-        "`/ search` must remain regardless of vim-mode"
-    );
-}
-
 /// Host path: Enter on a registry hint enters Detail (not Close) via the chrome and picker pipeline both hosts share.
 #[test]
 fn handle_modal_key_enter_on_hint_enters_detail() {
@@ -1207,7 +1153,7 @@ fn detail_from_entry_uses_long_help_for_body() {
         .find(ActionId::ShortcutsHelp)
         .expect("ShortcutsHelp is registered");
     let expected = def.long_help.expect("ShortcutsHelp has long_help");
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let entry = entries
         .iter()
         .find(|e| hint_expand_action_id(e) == Some(ActionId::ShortcutsHelp))
@@ -1314,7 +1260,7 @@ fn render_detail_body_spaces_paragraphs_with_blank_line() {
 #[test]
 fn enter_on_search_pseudo_row_opens_detail() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let idx = entries
         .iter()
         .position(|e| {
@@ -1328,7 +1274,7 @@ fn enter_on_search_pseudo_row_opens_detail() {
                 } if item.label == "search"
             )
         })
-        .expect("vim-mode entries include the `/`-search pseudo-row");
+        .expect("entries include the /find search pseudo-row");
     assert_eq!(
         entries
             .get(idx)
@@ -1359,7 +1305,7 @@ fn enter_on_search_pseudo_row_opens_detail() {
 #[test]
 fn enter_on_paste_pseudo_row_opens_detail() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let idx = entries
         .iter()
         .position(|e| {
@@ -1436,10 +1382,10 @@ fn esc_in_detail_returns_to_browse() {
     assert!(mode.is_browse(), "Esc in detail must return to browse");
 }
 
-/// Vim keys (h/j/k/g) are intentionally NOT bound in detail mode: vim modal bindings are owned separately.
+/// Letter keys (h/j/k/g) are not bound in detail mode.
 /// Arrows/Home scroll; Esc/Left/Backspace go back.
 #[test]
-fn detail_mode_ignores_vim_keys() {
+fn detail_mode_ignores_letter_keys() {
     use crossterm::event::KeyCode;
     let entries: Vec<ShortcutsHelpEntry> = vec![];
     let mut state = PickerState::default();
@@ -1483,7 +1429,7 @@ fn detail_mode_ignores_vim_keys() {
             "{code:?} must be inert in detail, got {out:?}"
         );
     }
-    // Non-vim keys still work: Down scrolls, Left returns to browse.
+    // Down scrolls, Left returns to browse.
     let mut mode = detail();
     let _ = handle_input(
         &make_key(KeyCode::Down),
@@ -1606,81 +1552,7 @@ fn ctrl_x_closes_from_browse_mode() {
 }
 
 #[test]
-fn vim_i_enters_search_and_printables_type_afterward() {
-    let _vim_mode = VimModeGuard::set(true);
-    let (entries, mut state) = setup_on_header();
-    assert!(!state.search_active);
-    let mut mode = browse_mode();
-    let enter_search = handle_input(
-        &make_key(crossterm::event::KeyCode::Char('i')),
-        &entries,
-        &mut state,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-    );
-    assert_eq!(enter_search, ShortcutsHelpOutcome::Changed);
-    assert!(state.search_active, "`i` must activate cheatsheet search");
-    assert!(state.query().is_empty(), "`i` must not enter search text");
-
-    let type_j = handle_input(
-        &make_key(crossterm::event::KeyCode::Char('j')),
-        &entries,
-        &mut state,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-    );
-    assert_eq!(type_j, ShortcutsHelpOutcome::Changed);
-    assert_eq!(state.query(), "j", "printables must type in active search");
-}
-
-#[test]
-fn vim_mode_jk_navigate_without_starting_search() {
-    let _vim_mode = VimModeGuard::set(true);
-    let entries = vec![
-        header("Nav", 0, 3),
-        hint("send", key!(Enter)),
-        hint("next", key!('n')),
-        hint("quit", key!('q', CONTROL)),
-    ];
-    let mut state = build_initial_picker_state(&entries);
-    let mut mode = browse_mode();
-
-    let down = handle_input(
-        &make_key(crossterm::event::KeyCode::Char('j')),
-        &entries,
-        &mut state,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-    );
-    assert_eq!(down, ShortcutsHelpOutcome::Changed);
-    assert_eq!(state.selected, 2, "`j` must select the next row");
-    assert!(state.query().is_empty(), "`j` must not enter search text");
-    assert!(!state.search_active, "`j` must leave search inactive");
-
-    let up = handle_input(
-        &make_key(crossterm::event::KeyCode::Char('k')),
-        &entries,
-        &mut state,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-    );
-    assert_eq!(up, ShortcutsHelpOutcome::Changed);
-    assert_eq!(state.selected, 1, "`k` must select the previous row");
-    assert!(state.query().is_empty(), "`k` must not enter search text");
-    assert!(!state.search_active, "`k` must leave search inactive");
-}
-
-#[test]
-fn non_vim_hjkl_start_search() {
-    let _vim_mode = VimModeGuard::set(false);
+fn hjkl_start_search() {
     let (entries, state) = setup_on_header();
 
     for ch in ['h', 'j', 'k', 'l'] {
@@ -1703,18 +1575,18 @@ fn non_vim_hjkl_start_search() {
         assert_eq!(
             result,
             ShortcutsHelpOutcome::Changed,
-            "non-vim `{ch}` must start search"
+            "`{ch}` must start search"
         );
-        assert_eq!(state.query(), ch.to_string(), "non-vim `{ch}` must type");
+        assert_eq!(state.query(), ch.to_string(), "`{ch}` must type");
     }
 }
 
 /// In non-vim mode, `j/k` row should drop the `j` key and show only the `Down` alt.
 /// `Down` still works and the row should not be dimmed.
 #[test]
-fn build_entries_vim_off_keeps_arrow_alt_without_vim_key() {
+fn build_entries_nav_row_lists_no_letter_keys() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, false);
+    let entries = build_entries(&all_contexts(), &registry);
 
     let nav = entries
         .iter()
@@ -1724,66 +1596,20 @@ fn build_entries_vim_off_keeps_arrow_alt_without_vim_key() {
             }
             _ => None,
         })
-        .expect("nav (SelectNext) row should be present in non-vim mode");
+        .expect("nav (SelectNext) row should be present");
     let (item, dimmed) = nav;
-    assert!(!dimmed, "nav row with Down alt should not be dimmed");
+    assert!(!dimmed, "nav row with Down should not be dimmed");
     assert!(
-        item.keys.iter().all(|k| !k.is_letter_or_shift_letter()),
-        "non-vim cheatsheet must not advertise letter keys; got {:?}",
+        item.keys.iter().all(
+            |k| !matches!(k.code, crossterm::event::KeyCode::Char(c) if c.is_ascii_alphabetic())
+        ),
+        "the cheatsheet must not advertise letter keys; got {:?}",
         item.keys.iter().map(|k| k.display()).collect::<Vec<_>>()
     );
-    assert!(
-        !item.keys.is_empty(),
-        "row must retain at least one (non-vim) key"
-    );
+    assert!(!item.keys.is_empty(), "row must keep at least one key");
 }
 
 /// In non-vim mode, scrollback bindings that have NO non-vim alt (e.g. `g` GotoTop, `y` CopyBlockContent) should be hidden from the cheatsheet.
-#[test]
-fn build_entries_vim_off_hides_vim_only_rows() {
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, false);
-
-    for label in ["top", "btm", "copy", "copy cmd"] {
-        let present = entries.iter().any(|e| {
-            matches!(
-                e,
-                ShortcutsHelpEntry::Hint { item, .. } if item.label == label
-            )
-        });
-        assert!(
-            !present,
-            "{label:?} (vim-only) should be hidden from cheatsheet when vim_mode=false"
-        );
-    }
-}
-
-/// Vim mode ON: both vim key and arrow alt should be visible on the same row.
-#[test]
-fn build_entries_vim_on_shows_both_vim_and_arrow_keys() {
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
-
-    let nav_keys: Vec<String> = entries
-        .iter()
-        .find_map(|e| match e {
-            ShortcutsHelpEntry::Hint { item, .. } if item.label == "nav" => {
-                Some(item.keys.iter().map(|k| k.display().to_string()).collect())
-            }
-            _ => None,
-        })
-        .expect("nav row should be present in vim mode");
-    let nav_keys_joined = nav_keys.join(" ");
-    assert!(
-        nav_keys_joined.contains('j') || nav_keys_joined.contains('J'),
-        "vim mode should show `j` key for nav: {nav_keys:?}"
-    );
-    assert!(
-        nav_keys_joined.contains('↓') || nav_keys_joined.to_lowercase().contains("down"),
-        "vim mode should also show arrow alt: {nav_keys:?}"
-    );
-}
-
 /// Asserts that the cheatsheet row for `label` advertises `expected_key` (primary or alt).
 /// Used by the Windows-fallback regressions below.
 fn assert_cheatsheet_row_has_key(entries: &[ShortcutsHelpEntry], label: &str, expected_key: &str) {
@@ -1805,7 +1631,7 @@ fn assert_cheatsheet_row_has_key(entries: &[ShortcutsHelpEntry], label: &str, ex
 #[test]
 fn build_entries_surfaces_interject_ctrl_i_fallback() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     // Action label is compact "send now" wording (interject under the hood).
     assert_cheatsheet_row_has_key(&entries, "send now", "Ctrl+i");
 }
@@ -1813,15 +1639,15 @@ fn build_entries_surfaces_interject_ctrl_i_fallback() {
 #[test]
 fn build_entries_surfaces_queue_ctrl_apostrophe_fallback() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     assert_cheatsheet_row_has_key(&entries, "queue", "Ctrl+'");
 }
 
 /// A section whose entries are all filtered out should have its header dropped, not rendered as a dead row.
 #[test]
-fn build_entries_vim_off_drops_empty_section_headers() {
+fn build_entries_drops_empty_section_headers() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, false);
+    let entries = build_entries(&all_contexts(), &registry);
 
     for entry in &entries {
         if let ShortcutsHelpEntry::SectionHeader {
@@ -1839,7 +1665,7 @@ fn build_entries_vim_off_drops_empty_section_headers() {
 #[test]
 fn build_entries_sets_action_id_on_registry_hints() {
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let shortcuts_id = entries.iter().find_map(|e| match e {
         ShortcutsHelpEntry::Hint {
             item,
@@ -1855,7 +1681,7 @@ fn build_entries_sets_action_id_on_registry_hints() {
     );
 
     // Registry rows carry ActionId; known display-only rows stay action-less.
-    let search_key = key!('/');
+    let search_key = key!(Null);
     let paste_key = key!('v', CONTROL);
     let undo_key = key!('z', CONTROL);
     let redo_key = key!('z', CONTROL | SHIFT);
@@ -1896,7 +1722,7 @@ fn build_entries_sets_action_id_on_registry_hints() {
 fn toggle_expand_outcome_for_hint_right_key() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let mut state = build_initial_picker_state(&entries);
     // Select first non-header row (Essentials section is first header at 0).
     state.selected = 1;
@@ -1949,57 +1775,10 @@ fn toggle_expand_outcome_for_hint_right_key() {
 }
 
 #[test]
-fn vim_h_collapses_only_expanded_action_hints() {
-    use crate::actions::ActionId;
-    let _vim_mode = VimModeGuard::set(true);
-    let entries = vec![
-        header("Nav", 0, 1),
-        hint_with_action("send", key!(Enter), ActionId::SendPrompt),
-    ];
-    let mut state = build_initial_picker_state(&entries);
-    state.selected = 1;
-    let mut mode = browse_mode();
-
-    let collapsed = handle_input(
-        &make_key(crossterm::event::KeyCode::Char('h')),
-        &entries,
-        &mut state,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-    );
-    assert_eq!(
-        collapsed,
-        ShortcutsHelpOutcome::Unchanged,
-        "vim h on a collapsed action hint must be inert"
-    );
-    assert!(state.query().is_empty(), "vim h must not enter search text");
-
-    let key_id = ExpandKey::Action(ActionId::SendPrompt);
-    let expanded = std::collections::HashSet::from([key_id]);
-    let collapse = handle_input(
-        &make_key(crossterm::event::KeyCode::Char('h')),
-        &entries,
-        &mut state,
-        false,
-        &no_collapsed(),
-        &expanded,
-        &mut mode,
-    );
-    assert_eq!(
-        collapse,
-        ShortcutsHelpOutcome::ToggleExpand(key_id),
-        "vim h must collapse an expanded action hint"
-    );
-    assert!(state.query().is_empty(), "vim h must not enter search text");
-}
-
-#[test]
 fn search_pseudo_row_expands() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let search_idx = entries
         .iter()
         .position(|e| {
@@ -2009,7 +1788,7 @@ fn search_pseudo_row_expands() {
                     if item.label == "search"
             )
         })
-        .expect("vim-mode entries include the `/`-search pseudo-row");
+        .expect("entries include the /find search pseudo-row");
     for code in [KeyCode::Right, KeyCode::Char('e'), KeyCode::Char(' ')] {
         let mut state = build_initial_picker_state(&entries);
         state.selected = search_idx;
@@ -2032,71 +1811,12 @@ fn search_pseudo_row_expands() {
     }
 }
 
-#[test]
-fn vim_l_expands_and_h_collapses_paste() {
-    use crossterm::event::KeyCode;
-    let _vim_mode = VimModeGuard::set(true);
-    let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
-    let paste_idx = entries
-        .iter()
-        .position(|e| {
-            matches!(
-                e,
-                ShortcutsHelpEntry::Hint {
-                    item,
-                    action_id: None,
-                    long_help: Some(_),
-                    ..
-                } if item.label == "paste"
-            )
-        })
-        .expect("paste pseudo-row with long_help");
-    let key_id = ExpandKey::Pseudo("paste");
-    assert_eq!(entries.get(paste_idx).and_then(expand_key), Some(key_id));
-    let mut state = build_initial_picker_state(&entries);
-    state.selected = paste_idx;
-    let mut mode = ShortcutsHelpMode::Browse;
-    let expand = handle_input(
-        &make_key(KeyCode::Char('l')),
-        &entries,
-        &mut state,
-        false,
-        &no_collapsed(),
-        &no_expanded(),
-        &mut mode,
-    );
-    assert_eq!(
-        expand,
-        ShortcutsHelpOutcome::ToggleExpand(key_id),
-        "vim l must expand the paste pseudo-row"
-    );
-    assert!(state.query().is_empty(), "vim l must not enter search text");
-
-    let expanded = std::collections::HashSet::from([key_id]);
-    let collapse = handle_input(
-        &make_key(KeyCode::Char('h')),
-        &entries,
-        &mut state,
-        false,
-        &no_collapsed(),
-        &expanded,
-        &mut mode,
-    );
-    assert_eq!(
-        collapse,
-        ShortcutsHelpOutcome::ToggleExpand(key_id),
-        "vim h must collapse the expanded paste pseudo-row"
-    );
-    assert!(state.query().is_empty(), "vim h must not enter search text");
-}
-
 /// `handle_modal_key` (chrome and picker pipeline) maps the hint-row expand to `ModalKeyOutcome::ToggleExpand` so dashboards behave identically.
 #[test]
 fn handle_modal_key_maps_toggle_expand() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let mut state = build_initial_picker_state(&entries);
     state.selected = 1;
     let mut window = crate::views::modal_window::ModalWindowState::default();
@@ -2126,7 +1846,7 @@ fn handle_modal_key_maps_toggle_expand() {
 fn handle_modal_key_left_collapses_expanded_hint() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let registry = ActionRegistry::defaults();
-    let entries = build_entries(&all_contexts(), &registry, true);
+    let entries = build_entries(&all_contexts(), &registry);
     let mut state = build_initial_picker_state(&entries);
     state.selected = 1;
     let key_id = entries

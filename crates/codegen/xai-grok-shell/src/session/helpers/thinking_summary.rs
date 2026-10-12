@@ -126,7 +126,7 @@ impl ThinkingSummaryHistory {
     }
 }
 
-/// The single user message sent to the summary model. `prior` holds the recent
+/// The user message sent to the summary model. `prior` holds the recent
 /// summaries for this session, oldest first, and is empty for the first one.
 pub(crate) fn thinking_summary_instruction(thinking: &str, prior: &[String]) -> String {
     let mut out = String::from(

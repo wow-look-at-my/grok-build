@@ -354,7 +354,6 @@ pub struct PagerLocalSnapshot {
     pub show_tips: Option<bool>,
     /// Process-wide vim-mode scrollback flag.
     /// Mirrors `appearance::cache::load_vim_mode()` at snapshot time.
-    pub vim_mode: bool,
     /// Process-wide mouse-wheel scroll speed (1-100).
     /// Mirrors `appearance::cache::load_scroll_speed()` at snapshot time.
     pub scroll_speed: u8,
@@ -385,7 +384,6 @@ impl Default for PagerLocalSnapshot {
             coding_data_sharing_lock: None,
             plan_mode_active: false,
             show_tips: None,
-            vim_mode: false,
             // Matches the registry default and `appearance::cache::SCROLL_SPEED_DEFAULT`
             // Bare `u8::default()` would be `0` (out of range) so we override
             scroll_speed: 50,
@@ -572,8 +570,7 @@ pub fn current_value_for(
             Some(SettingValue::Bool(ui.stop_gate_unfinished_todos_enabled()))
         }
         "stop_gate_ci_failing" => Some(SettingValue::Bool(ui.stop_gate_ci_failing_enabled())),
-        // Resolved once per session in the shell; the pager keeps the `[ui]`
-        // mirror so the row reads back what the next session will do.
+        // Resolved once per session in the shell.
         "thinking_summaries" => Some(SettingValue::Bool(ui.thinking_summaries_enabled())),
         "thinking_summary_history_window_secs" => Some(SettingValue::Int(i64::from(
             ui.thinking_summary_history_window_secs_value(),
@@ -581,7 +578,6 @@ pub fn current_value_for(
         "thinking_summary_history_min_count" => Some(SettingValue::Int(i64::from(
             ui.thinking_summary_history_min_count_value(),
         ))),
-        "simple_mode" => Some(SettingValue::Bool(ui.simple_mode.unwrap_or(true))),
         // Per-tip contextual hints: `None` (inherit) reads as the default ON
         "contextual_hints.undo" => {
             Some(SettingValue::Bool(ui.contextual_hints.undo.unwrap_or(true)))
@@ -612,8 +608,6 @@ pub fn current_value_for(
         )),
         // PAGER: read from the snapshot
         "multiline_mode" => Some(SettingValue::Bool(pager.multiline_mode)),
-        // PAGER: read from the process-wide cache (the snapshot mirror keeps the modal in sync with the live cache value)
-        "vim_mode" => Some(SettingValue::Bool(pager.vim_mode)),
         "scroll_speed" => Some(SettingValue::Int(pager.scroll_speed as i64)),
         // Live caches (like `group_tool_verbs`); scroll_lines shows the registry default 3 while unset (profile-default state)
         "scroll_mode" => Some(SettingValue::Enum(
@@ -955,13 +949,6 @@ mod tests {
                         "follow_up_behavior default drifts from UiConfig::default()"
                     );
                 }
-                ("simple_mode", SettingKind::Bool { default }) => {
-                    assert_eq!(
-                        *default,
-                        ui.simple_mode.unwrap_or(true),
-                        "simple_mode default drifts from UiConfig::default()"
-                    );
-                }
                 ("theme", SettingKind::Enum { default, .. }) => {
                     assert_eq!(
                         ui.theme, None,
@@ -1090,14 +1077,6 @@ mod tests {
                 // The defaults are pinned literally
                 ("show_tips", SettingKind::Bool { default }) => {
                     assert!(*default, "show_tips registry default must be true");
-                }
-                // vim_mode: Option<bool>; None reads as false
-                ("vim_mode", SettingKind::Bool { default }) => {
-                    assert_eq!(
-                        *default,
-                        ui.vim_mode.unwrap_or(false),
-                        "vim_mode default drifts from UiConfig::default()"
-                    );
                 }
                 // remember_tool_approvals: anchored on the resolver-shared const so the modal cannot drift from the gate
                 ("remember_tool_approvals", SettingKind::Bool { default }) => {
@@ -1316,10 +1295,7 @@ mod tests {
                          None, mapped to the `always_allow_all_sessions` canonical)",
                     );
                 }
-                // A harness model slot has no UiConfig field of its own: it
-                // lives in `[models]` and reaches the modal through the
-                // `harness_models` projection, which starts empty. Its
-                // registry default is the empty inherit sentinel.
+                // A harness model slot has no UiConfig field of its own: it lives in `[models]` and reaches the modal through the `harness_models` projection.
                 (key, SettingKind::DynamicEnum { default, .. })
                     if xai_grok_models::slot_for_setting_key(key).is_some() =>
                 {

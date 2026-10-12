@@ -164,8 +164,8 @@ fn laziness_injection_active_predicate_matrix() {
 }
 /// The built-in todo-stop gate ships ON: the persisted
 /// `[ui].stop_gate_unfinished_todos` toggle is the switch, and the `todo_gate`
-/// opt-in is an OR on top. ANDing the two is what left the shipped default
-/// unable to fire at all.
+/// opt-in is an OR on top. ANDing both is what left the shipped default unable
+/// to fire at all.
 #[test]
 fn todo_stop_gate_ships_enabled_without_the_opt_in() {
     let shipped = resolve_reminder_policy(None, false);

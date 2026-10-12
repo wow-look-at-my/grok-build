@@ -184,11 +184,11 @@ impl ProcessScope {
     }
 
     /// Lock the group set, tolerating a poisoned mutex: the critical sections
-    /// here are panic-free, and a best-effort reaper must still run even if some
+    /// here are panic-free. A best-effort reaper must still run even if some
     /// unrelated thread panicked while holding the lock.
     ///
     /// `parking_lot::Mutex` would make the tolerance structural rather than
-    /// per-call-site; it is not a dependency of this crate, and adding one is
+    /// per-call-site. It is not a dependency of this crate, and adding one is
     /// outside this change.
     #[allow(clippy::disallowed_methods)]
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Weak<ProcessGroup>>> {
@@ -226,9 +226,9 @@ impl Drop for ScopeInner {
         // `kill_all`, still reap any group whose owner is alive (a wedged unit),
         // in the same order.
         //
-        // `reap_groups` signals every enrolled group, so this guard is held
-        // across code that can panic, and a panic in `Drop` during a unwind is
-        // an abort. The poison is swallowed for the same reason the helper above
+        // `reap_groups` signals every enrolled group. This guard is held across
+        // code that can panic, and a panic in `Drop` during a unwind is an
+        // abort. The poison is swallowed for the same reason the helper above
         // does: a reaper that stops reaping leaks children. `parking_lot::Mutex`
         // is the structural fix and is not a dependency of this crate.
         #[allow(clippy::disallowed_methods)]
