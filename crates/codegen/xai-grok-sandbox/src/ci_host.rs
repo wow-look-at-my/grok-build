@@ -374,12 +374,7 @@ where
     }
 }
 
-/// Serve one request line, writing the single-line answer to `out`. Pure and
-/// testable: drives the fixed `gh` queries (`gh-status <branch>` for the CI
-/// dot, `gh-pr <branch>` for the shell's `x.ai/pr/status`), runs an
-/// allowlisted `gh <json argv>`, persists an allowlisted `setting <json>`
-/// through the host's writer. It answers the `.` nothing-usable sentinel for
-/// anything else (confinement).
+/// Serve one request line, writing the single-line answer to `out`.
 pub fn handle_request<W: Write>(line: &str, out: &mut W) {
     handle_request_with(line, out, refuse_setting_write);
 }
