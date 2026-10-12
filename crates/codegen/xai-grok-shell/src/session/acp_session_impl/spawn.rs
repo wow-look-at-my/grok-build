@@ -2109,6 +2109,7 @@ pub(crate) async fn spawn_session_actor(
                     .ui
                     .thinking_summary_history_min_count_value(),
             ),
+        thinking_summary_tail: Default::default(),
         session_turn_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),

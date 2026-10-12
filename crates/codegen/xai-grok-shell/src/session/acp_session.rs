@@ -1151,6 +1151,8 @@ pub(crate) struct SessionActor {
     /// once at spawn). An empty history for the first call of a session.
     pub(crate) thinking_summary_history:
         crate::session::helpers::thinking_summary::ThinkingSummaryHistory,
+    /// The summarization task this session queued most recently, in flight or not.
+    pub(crate) thinking_summary_tail: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// True while THIS session has a prompt turn in flight (RAII-guarded in `handle_prompt`).
     /// `tool_context.is_turn_active` is the agent-wide coordinator flag shared by all sessions, so it is unusable for per-session decisions.
     /// `Arc` so it can be re-checked inside the chat-state actor's `RepairHistory` handler.

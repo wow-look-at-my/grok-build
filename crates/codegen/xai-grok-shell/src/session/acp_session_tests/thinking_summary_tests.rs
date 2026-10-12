@@ -3,7 +3,39 @@
 use super::support::*;
 use super::*;
 use xai_grok_sampling_types::{ConversationItem, ConversationResponse, synthesized_reasoning_item};
-use xai_grok_test_support::MockInferenceServer;
+use xai_grok_test_support::sse::responses_api_script_exact;
+use xai_grok_test_support::{
+    DEFAULT_MODEL, InferenceEndpoint, InferenceExpectation, InferenceRequestMatcher,
+    MockInferenceServer, ScriptedResponse,
+};
+
+/// Where a summarization call lands once `aim_at` points the actor at the mock.
+const SUMMARY_PATH: &str = "/v1/responses";
+
+/// Answer a summarization call with `text`, parked until the handle releases it.
+fn hold_next_summary(server: &MockInferenceServer, name: &str, text: &str) -> InferenceExpectation {
+    server.expect_response_blocked(
+        name,
+        InferenceRequestMatcher::auxiliary(InferenceEndpoint::Responses),
+        ScriptedResponse::sse(responses_api_script_exact(text, DEFAULT_MODEL)),
+    )
+}
+
+/// The `thinking_summary` payload on one gateway message, if it carries one.
+fn summary_update(msg: &xai_acp_lib::AcpClientMessage) -> Option<serde_json::Value> {
+    let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
+        return None;
+    };
+    if args.request.method.as_ref() != "x.ai/session_notification" {
+        return None;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(args.request.params.get()) else {
+        return None;
+    };
+    let update = value.get("update")?;
+    (update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("thinking_summary"))
+        .then(|| update.clone())
+}
 
 /// Reasoning long enough to cover the path a real turn takes.
 fn long_reasoning() -> String {
@@ -53,24 +85,52 @@ async fn take_thinking_summary(
 ) -> Option<serde_json::Value> {
     for _ in 0..4000 {
         while let Ok(msg) = grx.try_recv() {
-            let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
-                continue;
-            };
-            if args.request.method.as_ref() != "x.ai/session_notification" {
-                continue;
-            };
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(args.request.params.get())
-            else {
-                continue;
-            };
-            let update = value.get("update")?;
-            if update.get("sessionUpdate").and_then(|v| v.as_str()) == Some("thinking_summary") {
-                return Some(update.clone());
+            if let Some(update) = summary_update(&msg) {
+                return Some(update);
             }
         }
         tokio::task::yield_now().await;
     }
     None
+}
+
+/// Every `thinking_summary` already on the gateway rail, leaving the rest queued.
+fn drain_thinking_summaries(
+    grx: &mut tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
+) -> Vec<serde_json::Value> {
+    let mut updates = Vec::new();
+    while let Ok(msg) = grx.try_recv() {
+        if let Some(update) = summary_update(&msg) {
+            updates.push(update);
+        }
+    }
+    updates
+}
+
+/// `true` once `ready` holds, checking it on timer ticks so the LocalSet runs.
+async fn wait_until(ready: impl Fn() -> bool) -> bool {
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(5));
+    for _ in 0..400 {
+        interval.tick().await;
+        if ready() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Run the LocalSet for `ticks` timer ticks, the window anything queued would
+/// have needed to reach the mock server.
+async fn settle(ticks: u32) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_millis(5));
+    for _ in 0..ticks {
+        interval.tick().await;
+    }
+}
+
+/// The `stream_start_ms` one summary update is keyed to.
+fn stream_start_of(update: &serde_json::Value) -> Option<i64> {
+    update.get("stream_start_ms").and_then(|v| v.as_i64())
 }
 
 #[tokio::test]
@@ -397,6 +457,170 @@ async fn zero_window_and_zero_count_leave_the_summary_call_stateless() {
             assert!(
                 !bodies[1].to_string().contains("<previous_summaries>"),
                 "zero window and zero count must not attach a prior block: {bodies:?}"
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn the_second_summary_waits_for_the_first_request_to_finish() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, mut grx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            actor.thinking_summaries_enabled = true;
+            let actor = std::sync::Arc::new(actor);
+
+            let server = MockInferenceServer::start().await.unwrap();
+            aim_at(&actor, &server).await;
+            let mut first = hold_next_summary(&server, "first summary", "Weighed the lexer");
+            let mut second = hold_next_summary(&server, "second summary", "Patched the offset");
+
+            actor.spawn_thinking_summary(
+                &response_carrying_thinking("whether the lexer or the caller is wrong"),
+                Some(1_000),
+            );
+            actor.spawn_thinking_summary(
+                &response_carrying_thinking("the caller passes a stale offset"),
+                Some(2_000),
+            );
+
+            // The first request is parked at its terminal event. Nothing else
+            // may reach the server, and nothing may be broadcast yet.
+            let arrived =
+                tokio::time::timeout(std::time::Duration::from_secs(20), first.wait_blocked())
+                    .await;
+            assert!(
+                arrived.is_ok(),
+                "the first summary request must reach the mock: {}",
+                server.request_log_summary()
+            );
+            assert_eq!(
+                server.request_count_for(SUMMARY_PATH),
+                1,
+                "one in-flight summary means one request: {}",
+                server.request_log_summary()
+            );
+            settle(50).await;
+            assert_eq!(
+                server.request_count_for(SUMMARY_PATH),
+                1,
+                "the second summary must not open a request while the first is held: {}",
+                server.request_log_summary()
+            );
+            assert!(
+                drain_thinking_summaries(&mut grx).is_empty(),
+                "no summary exists before its model call has been answered"
+            );
+
+            // Answering the first is what releases the second.
+            first.release();
+            let update = take_thinking_summary(&mut grx)
+                .await
+                .expect("the first summary is broadcast when its call is answered");
+            assert_eq!(
+                stream_start_of(&update),
+                Some(1_000),
+                "the first broadcast belongs to the first model call"
+            );
+            assert!(
+                update
+                    .get("summary")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .contains("lexer"),
+                "the broadcast is the first answer: {update}"
+            );
+            assert!(
+                wait_until(|| server.request_count_for(SUMMARY_PATH) >= 2).await,
+                "the second request must start once the first is answered: {}",
+                server.request_log_summary()
+            );
+            assert_eq!(
+                server.request_count_for(SUMMARY_PATH),
+                2,
+                "the second summary is one request of its own: {}",
+                server.request_log_summary()
+            );
+
+            second.release();
+            let update = take_thinking_summary(&mut grx)
+                .await
+                .expect("the queued summary is broadcast after its own call");
+            assert_eq!(
+                stream_start_of(&update),
+                Some(2_000),
+                "the second broadcast belongs to the second model call"
+            );
+            assert!(
+                update
+                    .get("summary")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .contains("offset"),
+                "the broadcast is the second answer: {update}"
+            );
+            assert_eq!(
+                server.request_count_for(SUMMARY_PATH),
+                2,
+                "two thinking blocks are two summary calls: {}",
+                server.request_log_summary()
+            );
+        })
+        .await;
+}
+
+/// A held summarization never blocks the caller: every later spawn returns
+/// immediately and stays queued, so the session issues exactly one request and
+/// broadcasts nothing.
+#[tokio::test]
+async fn a_held_summary_leaves_the_caller_free_and_the_queue_closed() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, mut grx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            actor.thinking_summaries_enabled = true;
+            let actor = std::sync::Arc::new(actor);
+
+            let server = MockInferenceServer::start().await.unwrap();
+            aim_at(&actor, &server).await;
+            let mut held = hold_next_summary(&server, "held summary", "never answered here");
+
+            actor.spawn_thinking_summary(&response_carrying_thinking("first thought"), Some(3_000));
+            let arrived =
+                tokio::time::timeout(std::time::Duration::from_secs(20), held.wait_blocked()).await;
+            assert!(
+                arrived.is_ok(),
+                "the held request must reach the mock: {}",
+                server.request_log_summary()
+            );
+
+            // A second block arrives while the first is still in flight.
+            let began = std::time::Instant::now();
+            actor
+                .spawn_thinking_summary(&response_carrying_thinking("second thought"), Some(4_000));
+            let returned_in = began.elapsed();
+            assert!(
+                returned_in < std::time::Duration::from_millis(250),
+                "spawn_thinking_summary must return without waiting for the chain: {returned_in:?}"
+            );
+
+            settle(50).await;
+            assert_eq!(
+                server.request_count_for(SUMMARY_PATH),
+                1,
+                "the follow-up summary stays queued behind the held request: {}",
+                server.request_log_summary()
+            );
+            assert!(
+                drain_thinking_summaries(&mut grx).is_empty(),
+                "a parked summarization broadcasts nothing"
             );
         })
         .await;

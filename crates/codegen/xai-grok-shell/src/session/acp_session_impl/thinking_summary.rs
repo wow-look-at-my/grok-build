@@ -22,12 +22,18 @@ impl SessionActor {
         else {
             return;
         };
+        // One summarization request runs at a time per session.
+        let previous = self.thinking_summary_tail.lock().unwrap().take();
         let actor = self.clone();
-        tokio::task::spawn_local(async move {
+        let handle = tokio::task::spawn_local(async move {
+            if let Some(previous) = previous {
+                let _ = previous.await;
+            }
             actor
                 .generate_thinking_summary(thinking, stream_start_ms)
                 .await;
         });
+        *self.thinking_summary_tail.lock().unwrap() = Some(handle);
     }
 
     async fn generate_thinking_summary(&self, thinking: String, stream_start_ms: i64) {
