@@ -202,6 +202,46 @@ async fn channel_spawner_inherit_index_leaves_model_none() {
     handle.await.unwrap();
 }
 
+/// A skeptic runs in the session cwd and its caller blocks on it, so it holds
+/// the path lock under its caller's ownership.
+#[tokio::test]
+async fn channel_spawner_skeptic_blocks_its_caller_in_the_session_cwd() {
+    use xai_grok_tools::implementations::grok_build::task::types::{SubagentEvent, SubagentResult};
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let spawner = ChannelSpawner {
+        event_tx: tx,
+        foreground_wait: None,
+        parent_session_id: "parent".into(),
+        parent_prompt_id: None,
+        cwd: Some("/Users/someone/repos".into()),
+        trace_sink: None,
+        skeptic_overrides: vec![RoleSpawnOverride::default()],
+        fallback: Default::default(),
+    };
+    let handle = tokio::spawn(async move {
+        let _ = spawner
+            .spawn_classifier(
+                "clf-lock",
+                0,
+                role_prompt("prompt"),
+                Path::new("/tmp/d.md"),
+                None,
+            )
+            .await;
+    });
+    let SubagentEvent::Spawn(request) = rx.recv().await.expect("spawn event") else {
+        panic!("expected Spawn");
+    };
+    assert_eq!(request.cwd.as_deref(), Some("/Users/someone/repos"));
+    assert!(
+        request.blocks_its_caller(),
+        "a skeptic shares its caller's lock only while its caller blocks on it",
+    );
+    assert_eq!(request.parent_session_id, "parent");
+    let _ = request.result_tx.send(SubagentResult::default());
+    handle.await.unwrap();
+}
+
 #[test]
 fn build_subagent_trace_items_shapes_a_task_call_pair() {
     use xai_grok_sampling_types::conversation::ConversationItem;
