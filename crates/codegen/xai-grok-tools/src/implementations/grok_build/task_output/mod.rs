@@ -1176,7 +1176,13 @@ impl TaskOutputTool {
             if input.waits() {
                 // Wait first, so the view reads the finished log.
                 let _ = self
-                    .run_single_task(&ids[0], input.timeout_ms, &ctx, resources.clone())
+                    .run_single_task(
+                        &ids[0],
+                        input.timeout_ms,
+                        &ctx,
+                        resources.clone(),
+                        output_byte_limit,
+                    )
                     .await?;
             }
             return self.run_view(&ids[0], &input, resources).await;
