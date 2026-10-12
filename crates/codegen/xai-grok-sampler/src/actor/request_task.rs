@@ -1521,8 +1521,8 @@ impl Backup<'_> {
         );
     }
 
-    /// Replace the original with this backup: tell the caller, replay what
-    /// the backup has produced, then follow it live to its end.
+    /// Replace the with this backup: tell the caller, replay what the backup
+    /// has produced, then follow it live to its end.
     async fn adopt(
         mut self,
         request_id: &RequestId,

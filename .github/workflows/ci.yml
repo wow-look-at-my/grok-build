@@ -60,6 +60,19 @@ jobs:
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
+      # Mono's entry answers the MZ magic a Cosmopolitan APE also carries, so the kernel never reaches the ELF header behind it.
+      - name: Drop the binfmt entry that claims MZ
+        run: |
+          set -euo pipefail
+          for entry in /proc/sys/fs/binfmt_misc/*; do
+            if [ -f "$entry" ] && grep -q '^magic 4d5a' "$entry"; then
+              echo -1 | sudo tee "$entry" >/dev/null
+              echo "removed $(basename "$entry")"
+            fi
+          done
+
+      - uses: wow-look-at-my/slopfix@master
+
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 

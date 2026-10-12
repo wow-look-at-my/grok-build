@@ -101,7 +101,7 @@ pub(crate) fn session_switch_hint_command() -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    /// The hint mirrors the dashboard flag: `None` when the env override
+    /// The hint mirrors the dashboard flag. `None` when the env override
     /// disables it (the tip would name a refused command), otherwise whatever
     /// `dashboard_enabled()` says. It is asserted as consistency, not a fixed
     /// value, so the test doesn't depend on the machine's persisted
