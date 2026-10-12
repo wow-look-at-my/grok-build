@@ -24,6 +24,8 @@ mod coordinator_state;
 pub use coordinator_state::{cap_completion_output, completion_summary, terminal_snapshot};
 pub mod model_policy;
 pub use model_policy::TaskParams;
+mod resource_lock;
+pub use resource_lock::ResourceLockConfig;
 pub mod root_control;
 pub mod types;
 
@@ -609,6 +611,11 @@ impl xai_tool_runtime::Tool for TaskTool {
             })
             .flatten();
 
+        // A model-declared cwd is the resource the child is pinned to, so
+        // spawns aimed at one directory lock against each other.
+        let resource = cwd
+            .as_ref()
+            .map(|path| xai_tool_types::SubagentResource::RepoPath(path.clone()));
         let request = SubagentRequest {
             id: id.clone(),
             prompt: input.prompt.clone(),
@@ -641,6 +648,7 @@ impl xai_tool_runtime::Tool for TaskTool {
                 loop_task_id: None,
                 // A model-issued spawn is never the goal verifier.
                 goal_verifier: false,
+                resource,
             },
             run_in_background: input.run_in_background,
             // Model-spawned subagents must still appear in the idle reminder.

@@ -7,8 +7,9 @@
 //!
 //! ## Backoff
 //!
-//! [`BACKOFF`] puts attempts at t=1s, t=5s and t=21s. The `exhausted` push follows the third failure.
-//! After that, one attempt runs every [`STEADY_RETRY_INTERVAL`] with no limit.
+//! [`BACKOFF`] puts attempts at t=1s, t=5s and t=21s. The `exhausted` push
+//! follows the third failure. After that, one attempt runs every
+//! [`STEADY_RETRY_INTERVAL`] with no limit.
 //!
 //! ## Guard rails (skip conditions)
 //!

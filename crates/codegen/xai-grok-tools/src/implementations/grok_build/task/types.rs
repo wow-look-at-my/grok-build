@@ -153,6 +153,12 @@ impl SubagentRequest {
         !self.run_in_background && !self.await_to_completion
     }
 
+    /// The caller is blocked until this child finishes: it is neither
+    /// backgrounded nor able to be auto-backgrounded.
+    pub fn blocks_its_caller(&self) -> bool {
+        !self.run_in_background && self.await_to_completion
+    }
+
     /// Resolve the foreground deadline for this request. Positive internal
     /// overrides take precedence; all ordinary requests use the host default.
     pub fn foreground_wait_budget(&self, default: std::time::Duration) -> std::time::Duration {
@@ -250,6 +256,8 @@ pub struct SubagentRuntimeOverrides {
     /// `general-purpose` subagent type cannot identify the role, so the harness
     /// sets this at the role's spawn.
     pub goal_verifier: bool,
+    /// The resource this child will touch, used to derive its inter-agent lock key.
+    pub resource: Option<xai_tool_types::SubagentResource>,
 }
 
 /// Re-export of [`xai_tool_types::is_not_sentinel`] for existing call sites.
