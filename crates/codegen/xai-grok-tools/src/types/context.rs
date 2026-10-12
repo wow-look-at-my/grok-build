@@ -16,7 +16,7 @@ pub struct TruncationConfig {
     /// `default_max_output_bytes`. Deliberately separate from `default_max_output_bytes` so an MCP-specific override (e.g. a repo's `[mcp]
     /// max_output_bytes`) never changes non-MCP readers like the opencode bash cap.
     pub mcp_max_output_bytes: Option<usize>,
-    /// Live ceiling derived from the model's remaining context-window budget.
+    /// Live ceiling derived from the model's remaining context-window budget (see `SessionActor::reseed_context_budget_output_cap` in xai-grok-shell), re-resolved before each tool-dispatch step.
     pub context_budget_max_output_bytes: Option<usize>,
     pub whole_read: WholeReadPolicy,
 }
@@ -45,7 +45,7 @@ impl TruncationConfig {
 
     /// Resolve the max output bytes for a specific tool.
     ///
-    /// Precedence. Per-tool override > default override > built-in fallback,
+    /// Precedence: per-tool override > default override > built-in fallback,
     /// then clamped to [`Self::context_budget_max_output_bytes`]. This happens
     /// when set (see its docs) so the live budget always wins over a static
     /// config value.

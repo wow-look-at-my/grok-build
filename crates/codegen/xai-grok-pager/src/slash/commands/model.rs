@@ -391,7 +391,7 @@ fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> 
             insert_text: chained_insert(&token, info),
             match_text: token,
             description: row_description(info),
-            // Only a provider that reports residency answers.
+            // Only a provider that reports residency answers this, so the dot appears beside local models and nowhere else.
             loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
         });
     }

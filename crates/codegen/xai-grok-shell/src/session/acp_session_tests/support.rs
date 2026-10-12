@@ -566,6 +566,8 @@ async fn create_test_actor_inner(
         turn_summary_enabled: false,
         title_refresh_enabled: false,
         thinking_summaries_enabled: false,
+        thinking_summary_history: Default::default(),
+        thinking_summary_tail: Default::default(),
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
@@ -663,10 +665,9 @@ pub(crate) fn user_item(id: &str, owner: &str) -> InputItem {
     user_item_with_rx(id, owner).0
 }
 
-/// Consider a user-originated row whose text. That row is a slash command,
-/// carried in both its wire blocks and its queue metadata — the shape a
-/// pager row that was never resolved. Client-side sends (an ACP/shell command
-/// passed through).
+/// A user-originated row whose text is a slash command, carried in both its
+/// wire blocks and its queue metadata. The shape a pager row that was never
+/// resolved client-side sends (an ACP/shell command passed through).
 #[cfg(test)]
 pub(crate) fn slash_command_item(id: &str, command: &str) -> InputItem {
     let mut item = user_item(id, "A");

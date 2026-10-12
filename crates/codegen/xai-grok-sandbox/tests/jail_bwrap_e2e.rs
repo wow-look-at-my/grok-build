@@ -170,8 +170,9 @@ const JAILED_CHILD_ENV: &str = "GROK_JAILED_CHILD_BRANCH";
 /// sets no variable at all. The jailed pager then reports no CI while the run
 /// gains stray arguments. Only running real bubblewrap catches it. The answer
 /// is checked for SHAPE, not content: a runner with no `gh` (and no
-/// credentials) is answered by the worker's nothing-usable sentinel, and that
-/// still. Proves the jail carried the connection. This is the claim here.
+/// credentials) is answered by the worker's nothing-usable sentinel. The
+/// answer is also checked that still proves the jail carried the connection.
+/// This is the claim here.
 #[test]
 fn the_jailed_process_reaches_the_host_worker_through_the_bwrap_jail() {
     if !bwrap_is_usable() {
@@ -295,7 +296,7 @@ fn bwrap_worker_self_entry() {
     xai_grok_sandbox::ci_host::run_ci_host_worker_on(stream);
 }
 
-/// Delegate the parent jails: find the worker the way the shipped pager does,
+/// Delegate the parent jails. Find the worker the way the shipped pager does,
 /// ask it one fixed-shape question. Write what came back where the parent can
 /// read it (the jailed cwd is a granted mount).
 #[test]

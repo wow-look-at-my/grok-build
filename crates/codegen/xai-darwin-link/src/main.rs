@@ -1,4 +1,4 @@
-//! Stands in for the macOS linker during a Linux cross build.
+//! Stands in for the macOS linker during a Linux cross build. Compiling for `aarch64-apple-darwin` on Linux works.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -270,8 +270,8 @@ mod tests {
     }
 
     /// rustc deletes its temporary object directory the moment the linker
-    /// returns, so a bundle that only referenced those paths would be empty by
-    /// the time. The macOS job read it.
+    /// returns. A bundle that only referenced those paths would be empty by
+    /// the time the macOS job read it.
     #[test]
     fn inputs_are_copied_rather_than_referenced() {
         let work = temp_dir("copy");

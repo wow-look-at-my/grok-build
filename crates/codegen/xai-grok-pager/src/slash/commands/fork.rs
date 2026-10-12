@@ -25,13 +25,7 @@ pub struct ForkArgs {
 /// are deliberately treated as the start of the directive (so `/fork --foo
 /// bar` becomes a directive `--foo bar`) -- the parser is conservative. This
 /// is because the args are user-typed text and we do not want to reject
-/// directives that happen to begin with `--`. Errors: - `--worktree` and
-/// `--no-worktree` cannot both appear. - a flag cannot be repeated. - `--at
-/// <turn>` returns a friendly "not supported in this version"
-///   message: the shell already supports the underlying parameter (see
-///   `xai_grok_shell::session::fork::ForkSessionRequest::target_prompt_index`)
-///   and a turn-picker UI is planned; this version deliberately rejects
-///   the flag so users discover the deferral cleanly.
+/// directives that happen to begin with `--`.
 pub fn parse_fork_args(args: &str) -> Result<ForkArgs, String> {
     let mut worktree_override: Option<bool> = None;
     let mut include_agents = false;

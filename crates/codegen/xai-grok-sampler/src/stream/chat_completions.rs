@@ -544,8 +544,8 @@ mod tests {
 
     /// End-to-end Chat Completions reasoning round-trip on the real path.
     /// Thinking deltas streamed by a provider during turn N must survive (a)
-    /// `stream_chat_completions`' synthesis into a `[Reasoning, Assistant]`
-    /// sibling pair, (b) the shell turn-loop commit. (the sibling rides
+    /// `stream_chat_completions`' synthesis. Into a `[Reasoning, Assistant]`
+    /// sibling pair, (b) the shell turn-loop commit (the sibling rides
     /// `push_tool_result`, the assistant rides `push_assistant_response`), and
     /// (c) the real `conversation_to_chat_messages` wire conversion for turn
     /// N+1, where it MUST appear as `reasoning_content` on the following
@@ -686,7 +686,7 @@ mod tests {
             "delta.reasoning must be captured into a Reasoning sibling; got: {reasoning_text:?}"
         );
 
-        // (b) Round-trip: shell commit order + real wire conversion for turn.
+        // (b) Round-trip.
         let mut items = response.items.clone();
         items.push(ConversationItem::user("continue"));
         let req = ConversationRequest::from_items(items);

@@ -131,10 +131,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&scratch);
     }
 
-    /// The redirect must never land in `$HOME` or `$GROK_HOME`: caches are
-    /// disposable. Mapping them into either would either widen the profile's
-    /// write set or fill the session's own state directory with garbage. This is
-    /// the regression guard for "map the caches onto tmpfs".
+    /// The redirect must never land in `$HOME` or `$GROK_HOME`. The redirect
+    /// caches are disposable. Mapping them into either would either widen the
+    /// profile's write set or fill the session's own state directory with
+    /// garbage. This is the regression guard for "map the caches onto tmpfs".
     #[test]
     fn cache_env_never_points_at_home_or_grok_home() {
         let scratch = std::env::temp_dir().join(format!(

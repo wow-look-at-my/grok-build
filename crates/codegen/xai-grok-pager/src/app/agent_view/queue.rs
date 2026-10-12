@@ -107,9 +107,12 @@ impl AgentView {
     /// intentional single-row semantics. Returns `None` when there is nothing
     /// queued to send. Exceptions keep the older cancel-and-send route for
     /// the top row: - A **sendable wait**: the turn is parked in a blocking
-    /// tool call. there is no model stream to interrupt and an interjection
-    /// would sit in the buffer until the wait ends. Send-now aborts the wait,
-    /// which is what "now" means while parked.
+    /// tool call. There is no model stream to interrupt and an interjection
+    /// would sit in the buffer until the wait ends. Send-now aborts the wait.
+    /// Which is what "now" means while parked. - **Nothing interjectable
+    /// queued**: send-now targets the first row that can go out (any server
+    /// row, or a local Prompt-kind row — plain or an expanded skill, its
+    /// wire_blocks riding along).
     pub(in crate::app) fn try_interrupt_with_queued_from_prompt(&mut self) -> Option<InputOutcome> {
         if !self.session.state.is_turn_running() {
             return None;
@@ -118,9 +121,7 @@ impl AgentView {
         let ids = self.queue.entry_ids();
         let id = *ids.first()?;
         let outcome = if self.is_parked_on_sendable_wait() || !self.queue_has_interjectable_row() {
-            // Force the first row that will go out, not blindly the oldest: a
-            // bash/command/cron row parked ahead of real prompts will
-            // otherwise bounce.
+            // Force the first row that will go out, not blindly.
             let target = ids
                 .iter()
                 .copied()
@@ -131,8 +132,8 @@ impl AgentView {
             InputOutcome::Action(Action::InterruptWithQueuedPrompts)
         };
         // Acting on the prompt-path send-now while its tip is up is the user
-        // accepting the hint — mirrors the undo / image-input funnels. So
-        // the send_now `shown → accepted` conversion is measurable.
+        // accepting the hint. It mirrors the undo / image-input funnels so the
+        // send_now `shown → accepted` conversion is measurable.
         if matches!(outcome, InputOutcome::Action(_))
             && self.ephemeral_tip.current_key() == Some(crate::tips::send_now::SEND_NOW_TIP_KEY)
         {
@@ -407,12 +408,12 @@ impl AgentView {
             .find(|entry| entry.id == server_id)
             .map(|entry| ServerRowCapabilities::for_pane(&entry.kind, mutation))
     }
-    /// Prompt-like rows may interject: plain prompts, plus raw skill slash
-    /// rows (`/find-session args`) whose wire payload IS the display text.
-    /// The shell expands those at the interjection drain. Rows with a
-    /// client-expanded payload (`/imagine`, `/loop`) and non-prompt kinds
-    /// stay queued: interjecting them would send the display text, not the
-    /// payload. So does a row that owns its own turn — a slash invocation
+    /// can't be resolved. Prompt-like rows may interject: plain prompts, plus
+    /// raw skill slash rows (`/find-session args`) whose wire payload IS the
+    /// display text. The shell expands those at the interjection drain. Rows
+    /// with a client-expanded payload (`/imagine`, `/loop`) and non-prompt
+    /// kinds stay queued: interjecting them would send the display text, not
+    /// the payload. So does a row that owns its own turn — a slash invocation
     /// (`is_steering_text`), whose text the shell's drain would deliver
     /// unresolved.
     pub(in crate::app) fn queue_row_prompt_like(&self, id: u64) -> Option<bool> {
@@ -433,11 +434,11 @@ impl AgentView {
         Some(crate::views::queue_pane::wire_row_is_steering_text(wire))
     }
 
-    /// Whether [`Self::force_interject_queue_row`] will deliver `id` rather
-    /// than bounce it off. The "Can't send this now" toast: any server row
-    /// (the shell folds any kind), a local Prompt-kind row (plain or an
+    /// The shell folds any kind), a local Prompt-kind row (plain or an
     /// expanded skill — its wire_blocks rides along), or a local Command
-    /// row (`/compact`, which sends as its own request).
+    /// row (`/compact`, which sends as its own request). This happens whether
+    /// [`Self::force_interject_queue_row`] will deliver `id` rather than
+    /// bounce it off the "Can't send this now" toast: any server row (.
     fn queue_row_force_sendable(&self, id: u64) -> bool {
         let Some(row) = self.queue.row_ref(id) else {
             return false;
@@ -814,9 +815,9 @@ impl AgentView {
     }
 
     /// Whether the one-step move this row was asked to make would have to cross
-    /// the shell/client boundary in the merged pane — up. For a client row,
-    /// down for a shell row. The pane draws every shell row first because the
-    /// drain runs them first (`maybe_drain_queue` holds every local row while any
+    /// the shell/client boundary in the merged pane. Up for a client row, down
+    /// for a shell row. The pane draws every shell row first because the drain
+    /// runs them first (`maybe_drain_queue` holds every local row while any
     /// non-running shell row exists). That move cannot be honored: rendering it
     /// would promise a run order the queue will not follow.
     fn at_queue_origin_boundary(&self, selection_id: u64) -> bool {
@@ -1001,7 +1002,7 @@ mod queue_edit_routing_tests {
     }
 
     /// Parked on a sendable wait with a bash row stuck ahead of a real
-    /// prompt: bare Enter must reach past the bash row. To the sendable
+    /// prompt: bare Enter must reach past the bash. Row to the sendable
     /// one instead of always bouncing off the oldest entry's "Can't send
     /// this now" toast while the later prompt sits right behind it.
     #[test]

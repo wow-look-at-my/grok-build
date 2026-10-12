@@ -1039,21 +1039,6 @@ impl RenderBlock {
         }
     }
 
-    /// Label for the copy-meta shortcut hint (e.g., "copy cmd", "copy path").
-    ///
-    /// Returns `None` for blocks without copyable metadata.
-    pub fn copy_meta_label(&self) -> Option<&'static str> {
-        match self {
-            RenderBlock::ToolCall(ToolCallBlock::Execute(_)) => Some("copy cmd"),
-            RenderBlock::ToolCall(ToolCallBlock::Read(_)) => Some("copy path"),
-            RenderBlock::ToolCall(ToolCallBlock::Edit(_)) => Some("copy path"),
-            RenderBlock::ToolCall(ToolCallBlock::WebFetch(_)) => Some("copy url"),
-            RenderBlock::ToolCall(ToolCallBlock::WebSearch(_)) => Some("copy query"),
-            RenderBlock::ToolCall(ToolCallBlock::Search(_)) => Some("copy pattern"),
-            _ => None,
-        }
-    }
-
     /// Access pre-wrap hyperlink targets via a closure, avoiding allocation.
     /// The hyperlinks are in the markdown renderer's coordinate space (pre-wrap line index, display-cell column range).
     /// The caller is responsible for mapping through word-wrapping and entry layout to reach screen coordinates.

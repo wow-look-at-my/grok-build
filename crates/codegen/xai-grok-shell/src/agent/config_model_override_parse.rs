@@ -1065,17 +1065,17 @@ mod tests {
 
     /// Drift guard across both user-facing model structs. A `[model.<id>]`
     /// table in `config.toml` is parsed into [`ConfigModelOverride`], not
-    /// into `ModelEntryConfig`. The key parses as an **unknown field** and is
-    /// silently discarded: the setting appears to work. This happens when a
-    /// field exists on `ModelEntryConfig` but not on `ConfigModelOverride`.
-    /// However, the setting has no effect. That is exactly how
-    /// `strict_message_schema` shipped broken — a Cerebras entry could set
-    /// it. The resolved profile still came out permissive, so the provider
-    /// rejected every replayed message. The field list is read from the
-    /// `ModelEntryConfig` declaration in the source itself. It cannot drift
-    /// from the struct the way a hand-kept list would. Each name is then fed
-    /// through the real parser — the same `parse_model_overrides` the
-    /// config loader calls — and must not come back as an unknown field.
+    /// into `ModelEntryConfig`. When a field exists on `ModelEntryConfig` but
+    /// not on `ConfigModelOverride`, the key parses as an **unknown field**.
+    /// It is silently discarded: the setting appears to work. However, the
+    /// setting has no effect. That is exactly how `strict_message_schema`
+    /// shipped broken — a Cerebras entry could set it. The resolved profile
+    /// still came out permissive, so the provider rejected every replayed
+    /// message. The field list is read from the `ModelEntryConfig`
+    /// declaration in the source itself. It cannot drift from the struct the
+    /// way a hand-kept list would. Each name is then fed through the real
+    /// parser — the same `parse_model_overrides` the config loader calls
+    /// — and must not come back as an unknown field.
     #[test]
     fn every_user_settable_model_entry_field_is_accepted_by_the_override() {
         // `loaded_in_vram` is runtime state, not config.

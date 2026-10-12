@@ -517,11 +517,11 @@ pub struct GoalOrchestration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_baseline_file: Option<PathBuf>,
 
-    /// True once the harness has populated the session's todo list.
+    /// True once the harness has populated the session's todo list from the published plan (the planner's own list, or the plan body when the planner named nothing).
     #[serde(default)]
     pub plan_todos_seeded: bool,
 
-    /// True once the harness created and squat-verified the scratch root.
+    /// True once the harness created and squat-verified the scratch root AND the implementer subdir, so prompts can honestly say the dir exists.
     #[serde(skip)]
     pub scratch_dir_ready: bool,
 

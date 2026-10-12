@@ -682,7 +682,7 @@ fn handle_browse(state: &mut SettingsModalState, key: &KeyEvent) -> SettingsKeyO
             }
             SettingsKeyOutcome::Unchanged
         }
-        // `i` aliases `/` (vim-nav "press i to search").
+        // `i` aliases `/`.
         KeyCode::Char('/') | KeyCode::Char('i') if key.modifiers.is_empty() => {
             state.focus_filter();
             SettingsKeyOutcome::Changed

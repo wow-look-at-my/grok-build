@@ -516,7 +516,7 @@ impl SamplingError {
     /// The provider's schema rejected a message-level property it does not
     /// define, e.g. Cerebras's `wrong_api_format:
     /// messages.6.assistant.model_id: property
-    ///  'messages.6.assistant.model_id' is unsupported`.
+    /// 'messages.6.assistant.model_id' is unsupported`.
     pub fn is_unsupported_message_property_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -548,8 +548,8 @@ impl SamplingError {
     /// `None` when this is not such an error. The provider packs several
     /// failures into one newline-separated string, e.g.
     /// `messages.6.assistant.model_id: property '...' is unsupported\n
-    ///  messages.6.assistant.reasoning_content: property '...' is unsupported`,
-    /// so this reads every line, not the first.
+    /// messages.6.assistant.reasoning_content: property '...' is
+    /// unsupported`, so this reads every line, not the first.
     fn unsupported_property_names(&self) -> Option<Vec<String>> {
         if !self.is_unsupported_message_property_error() {
             return None;

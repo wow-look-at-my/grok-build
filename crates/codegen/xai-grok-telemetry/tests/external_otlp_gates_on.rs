@@ -1,10 +1,4 @@
-//! Wire test pinning the **build-baseline disabled contract** for the external
-//! OTEL stream on its highest-risk configuration: both content gates ON (prompt
-//! text and tool parameters would leave the process) *and* identity attributes ! set. Because `external::build_handle` returns `None` in this build, even this ! fully-opted-in, gates-on config never activates. `is_active()` stays false, ! `set_identity` / `apply_remote_policy` are inert no-ops, and the ! `MockOtelServer` receives nothing.
-//!
-//! Single sequential test because the `EXTERNAL` registry is a
-//! process-global `OnceLock`, so each init-config scenario is its own test
-//! binary.
+//! Wire test pinning the **build-baseline disabled contract** for the external OTEL stream on its highest-risk configuration.
 
 use std::time::Duration;
 

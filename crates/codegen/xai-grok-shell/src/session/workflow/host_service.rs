@@ -75,7 +75,7 @@ pub(crate) struct WorkflowHostParams {
     pub run_id: String,
     /// The configured cap, kept for logging/telemetry.
     pub max_concurrent_agents: usize,
-    /// Slots shared by every active run in the session.
+    /// Slots shared by every active run.
     pub agent_slots: Arc<tokio::sync::Semaphore>,
     pub cwd: PathBuf,
     pub scratch_dir: PathBuf,
@@ -1084,8 +1084,8 @@ mod tests {
     }
 
     /// Like [`test_host_params`], but the caller supplies the agent-slot
-    /// semaphore, so calls can share one pool the way multiple runs
-    /// launched. From the same `WorkflowManager` do.
+    /// semaphore. Calls can share one pool the way multiple runs
+    /// launched from the same `WorkflowManager` do.
     fn test_host_params_with_slots(
         run_id: &str,
         max_concurrent_agents: usize,

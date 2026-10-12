@@ -220,10 +220,10 @@ fn git_stdout(git_root: &Path, args: &[&str]) -> Vec<String> {
 }
 
 /// Split on `&&` `||` `;` `|` and newlines that are not inside quotes. The
-/// walk is by CHARACTER, never by raw byte index: quotes are ASCII (`'` /
-/// `"`). A multi-byte UTF-8 character is neither a separator nor a quote. It
-/// is skipped whole. That keeps `i` on a char boundary whenever the statement
-/// slices below run.
+/// walk is by CHARACTER, never by raw byte index. The walk quotes are ASCII
+/// (`'` / `"`), and a multi-byte UTF-8 character is neither a separator nor a
+/// quote. It is skipped whole. That keeps `i` on a char boundary whenever the
+/// statement slices below run.
 fn split_statements(command: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0usize;

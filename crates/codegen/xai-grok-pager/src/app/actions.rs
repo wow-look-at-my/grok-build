@@ -443,12 +443,9 @@ pub enum Action {
     /// Set how ` ```mermaid ` code blocks are rendered (auto/on/off).
     /// SHELL-owned: updates the process-wide cache mirror and persists to `[ui].render_mermaid` in config.toml via `Effect::PersistSetting`.
     SetRenderMermaid(crate::appearance::RenderMermaid),
-    /// Toggle vim-style scrollback keybindings (j/k, h/l, g/G, y/Y, etc.).
     /// Delegates to `set_vim_mode` so the new value is persisted to `[ui].vim_mode` in config.toml, the same path as the settings modal.
-    ToggleVimMode,
     /// Set vim-style scrollback keybindings. SHELL-owned: persisted to `[ui].vim_mode` in config.toml via `Effect::PersistSetting`.
     /// Used by the settings modal; the `ToggleVimMode` variant covers the `/vim-mode` slash-command path.
-    SetVimMode(bool),
     /// Toggle the per-tool "Always allow …" prompt options. SHELL-owned; persisted to `[ui].remember_tool_approvals`. Applies to new sessions.
     SetRememberToolApprovals(bool),
     /// Toggle the ask_user_question timeout. SHELL-owned; persisted to `[toolset.ask_user_question].timeout_enabled`. Applies to new sessions.
@@ -527,7 +524,6 @@ pub enum Action {
     /// SHARED-owned: `[ui].follow_up_behavior`.
     SetFollowUpBehavior(crate::appearance::FollowUpBehavior),
     /// Set simple mode (ASCII / minimal glyphs). Persists via `Effect::PersistSetting`.
-    SetSimpleMode(bool),
     /// Set the per-tip contextual-hint user config (`[ui.contextual_hints]`).
     /// Each persists via `Effect::PersistSetting`.
     /// Each also immediately re-resolves and re-propagates the gates to every agent's prompt (runtime live-apply).
@@ -566,6 +562,12 @@ pub enum Action {
     SetOutputRateMaxRetries(i64),
     /// Set `[ui].ttft_timeout_secs`: how long a model call may go without output before it is reissued.
     SetTtftTimeoutSecs(i64),
+    /// Set `[ui].thinking_summary_history_window_secs`: how far back a thinking
+    /// block's summary may look for earlier summaries. `0` drops the time half.
+    SetThinkingSummaryHistoryWindowSecs(i64),
+    /// Set `[ui].thinking_summary_history_min_count`: always include this many
+    /// of the most recent summaries. `0` drops the count half.
+    SetThinkingSummaryHistoryMinCount(i64),
     /// Commit one harness model slot into `[models]`.
     SetHarnessModel(&'static str, String),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
@@ -670,6 +672,8 @@ pub enum Action {
     ShowQueue,
     /// Commit a read-only list of background tasks, subagents, and scheduled tasks as a system block (`/tasks`).
     ShowTasks,
+    /// Toggle the todo pane: show and focus it, focus it, or hide it (`/todo` with no arguments).
+    ToggleTodos,
     /// Show the current plan: preview popover if exists, toast if not.
     ShowPlan,
     /// Enter plan mode. If a description is provided, also start a turn with that text as the prompt.
@@ -1158,7 +1162,9 @@ impl PlanModeKind {
 /// The shell's deny-list treats every gesture value as a stop, so new variants need no shell change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CancelTrigger {
-    /// `Ctrl+C` pressed (the default cancel keybinding). A bare Esc never cancels; it only hints at this key.
+    /// A bare Esc pressed mid-turn.
+    Esc,
+    /// `Ctrl+C` pressed (the default cancel keybinding).
     CtrlC,
     /// The on-screen cancel button was clicked.
     Mouse,
@@ -1169,6 +1175,7 @@ impl CancelTrigger {
     /// Snake_case wire string sent as `_meta.cancelTrigger`.
     pub fn as_wire_str(self) -> &'static str {
         match self {
+            Self::Esc => "esc",
             Self::CtrlC => "ctrl_c",
             Self::Mouse => "mouse",
             Self::DashboardStop => "dashboard_stop",

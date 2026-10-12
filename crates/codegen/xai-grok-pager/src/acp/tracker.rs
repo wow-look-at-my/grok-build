@@ -469,13 +469,13 @@ pub struct AcpUpdateTracker {
     /// Consumed by the caller via `take_pending_acp_commands()`.
     /// The caller is responsible for copying to `AgentSession.available_commands` and bumping `available_commands_generation`.
     pending_acp_commands: Option<Vec<acp::AvailableCommand>>,
-    /// The scrollback entry of the most recently finished.
+    /// The scrollback entry of the most recently finished agent message (the one `finish_turn` finalized from `current_agent_msg`).
     last_finished_agent_entry: Option<EntryId>,
     /// Bounded prompt→entry attribution map for finished turns.
     finished_prompt_costs: Vec<(String, EntryId)>,
     /// Prompts that already had at least one per-response cost attributed to a message block.
     priced_response_prompts: Vec<String>,
-    /// Session-cumulative cost (USD ticks) as last reported.
+    /// Session-cumulative cost (USD ticks) as last reported by the agent's own session ledger — every model call and subagent fold.
     reported_session_cost_usd_ticks: Option<i64>,
     /// A reload replayed at least one message that carries a cost from an earlier run.
     replayed_cost_seen: bool,
@@ -1210,11 +1210,7 @@ impl AcpUpdateTracker {
     /// per `TurnCompleted`, keyed by the turn's prompt. Attribution is
     /// order-independent across both ways a turn ends: - **Driver**
     /// (`attached_as_viewer=false`) finishes on `PromptResponse`
-    ///   (`prompt.rs`), which is usually *after* `TurnCompleted` arrives. At
-    ///   that moment the agent message is still streaming (`current_agent_msg`),
-    ///   so the cost attaches to the running turn — but only when the
-    ///   `TurnCompleted`'s prompt matches the running turn, so a stale
-    ///   notification for a previous prompt is never stamped onto a newer turn.
+    /// (`prompt.rs`), which is usually *after* `TurnCompleted` arrives.
     pub fn set_last_turn_cost(
         &mut self,
         scrollback: &mut ScrollbackState,
@@ -1307,14 +1303,14 @@ impl AcpUpdateTracker {
     }
     /// Attach one model call's prompt cache-read hit rate to the message
     /// block that call produced, from the same `ResponseCompleted` that
-    /// closes it — see. [`Self::set_response_cost`]'s doc comment for why
-    /// per-response attribution (not a turn total) is what puts a rate beside
-    /// every message instead of only the turn's last one. The rate is
-    /// `cache_read_input_tokens / (input_tokens + cache_read_input_tokens +
-    /// cache_creation_input_tokens)`, rounded to the nearest percent. `false`
-    /// when the response reported no usage, or its total prompt tokens were
-    /// zero. A response with nothing to cache has no rate to report, not a
-    /// `0%`.
+    /// closes it. It see [`Self::set_response_cost`]'s doc comment for why
+    /// per-response attribution (not a turn total) is what puts a rate. That
+    /// rate is beside every message instead of only the turn's last one. The
+    /// rate is `cache_read_input_tokens / (input_tokens +
+    /// cache_read_input_tokens + cache_creation_input_tokens)`, rounded to
+    /// the nearest percent. `false` when the response reported no usage, or
+    /// its total prompt tokens were zero. A response with nothing to cache
+    /// has no rate to report, not a `0%`.
     pub fn set_response_cache_hit(
         &mut self,
         scrollback: &mut ScrollbackState,
@@ -1522,7 +1518,7 @@ impl AcpUpdateTracker {
     }
 
     /// The agent-reported session total (USD ticks), or `None` if the agent
-    /// has never reported one — an agent too old to send it, or a session.
+    /// has never reported one.
     pub fn reported_session_cost_usd_ticks(&self) -> Option<i64> {
         self.reported_session_cost_usd_ticks
     }

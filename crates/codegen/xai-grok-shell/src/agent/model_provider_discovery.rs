@@ -56,8 +56,8 @@ impl DiscoveredModel {
 /// Build the catalog entries for what discovery found. A `[model.<id>]` block
 /// that routes to a listed model is merged with it, under the block's own
 /// key. Every field the block sets wins. The listing fills only the fields
-/// the block left unset, so a block that only renames a model still gets the
-/// window. The listing capabilities the runtime reported.
+/// the block left unset. A block that only renames a model still gets the
+/// window and capabilities the runtime reported.
 pub(crate) fn resolve_discovered_models(
     cfg: &config::Config,
     discovered: &IndexMap<String, DiscoveredModel>,

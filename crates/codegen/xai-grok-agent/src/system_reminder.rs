@@ -14,7 +14,7 @@ pub struct ReminderPolicy {
     pub todo_nudge: TodoNudgeConfig,
     /// Configuration for the runtime turn-end TodoGate.
     pub todo_gate: TodoGateConfig,
-    /// Master switch for the built-in todo-stop gate: at the turn-end stop.
+    /// Master switch for the built-in todo-stop gate.
     pub stop_gate_unfinished_todos: bool,
     /// Master switch for the built-in CI-stop gate.
     pub stop_gate_ci_failing: bool,

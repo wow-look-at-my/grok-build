@@ -274,7 +274,8 @@ pub enum SamplingErrorKind {
 
 impl SamplingErrorKind {
     /// Stable, lowercase string form suitable for telemetry tags (e.g.,
-    /// analytics `error_type` columns and signals histograms).
+    /// analytics `error_type` columns and signals histograms). Mirrors the
+    /// classifier so tags stay consistent across surfaces.
     pub fn as_str(self) -> &'static str {
         match self {
             SamplingErrorKind::Auth => "auth",

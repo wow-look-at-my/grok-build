@@ -343,21 +343,25 @@ impl SessionActor {
     /// Put `text` in front of the main agent: now when it is idle, at the
     /// running turn's next safe point otherwise. Never interrupts the turn.
     /// Rides the buffer `flush_pending_skill_reminders` drains, which is what
-    /// makes a mid-turn notice land without a second flush site to keep in
-    /// sync. With the turn loop's safe points.
+    /// makes a mid-turn notice land. Without a second flush site to keep in
+    /// sync with the turn loop's safe points.
     pub(crate) fn deliver_reminder_to_main_agent(&self, text: String) {
         let tag = self.reminder_wrapper_tag();
         let text = text.replace(&format!("</{tag}>"), &format!("<\\/{tag}>"));
         let item = ConversationItem::system_reminder(format!("<{tag}>\n{text}\n</{tag}>"));
-        let turn_running = self.current_prompt_id.lock().map_or_else(
-            |poisoned| poisoned.into_inner().is_some(),
-            |guard| guard.is_some(),
-        );
-        if turn_running {
+        if self.turn_is_running() {
             self.pending_skill_reminders.lock().push(item);
         } else {
             self.chat_state_handle.push_user_message(item);
         }
+    }
+    /// Whether a turn is in flight. A reminder reaches the agent at the running turn's next safe
+    /// point; with no turn running it is only ever a note the next prompt reads.
+    pub(crate) fn turn_is_running(&self) -> bool {
+        self.current_prompt_id.lock().map_or_else(
+            |poisoned| poisoned.into_inner().is_some(),
+            |guard| guard.is_some(),
+        )
     }
 
     #[tracing::instrument(level = "debug", skip_all)]

@@ -1514,7 +1514,7 @@ pub fn apply_sandbox(
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    // Whether a bwrap re-exec follows decides how the worker's fd is handed.
+    // Whether a bwrap re-exec follows decides how the worker's fd is handed over, so it is settled before the worker starts.
     #[cfg(target_os = "linux")]
     let reexec_follows = xai_grok_sandbox::bwrap_reexec_planned(&sandbox_profile, &workspace);
     #[cfg(not(target_os = "linux"))]

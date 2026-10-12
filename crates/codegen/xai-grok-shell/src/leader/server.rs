@@ -1418,14 +1418,15 @@ fn make_version_mismatch_notification(
 }
 /// Run the leader IPC server. The socket_path is where the Unix socket will
 /// be created. Acquiring the leader lock AFTER this function creates the
-/// socket This ordering ensures that: - Clients waiting for socket can
-/// connect as soon as we're ready. The lock acquisition happens after we're
-/// listening # Readiness gating The `ready_rx` watch channel controls
+/// socket. This ordering ensures that: - Clients waiting for socket can
+/// connect as soon as we're ready - The lock acquisition happens after we're
+/// listening #. Readiness gating The `ready_rx` watch channel controls
 /// whether ACP messages are forwarded to the agent. While
 /// `*ready_rx.borrow() == false` (leader still initializing): - Client
-/// connections and IPC registrations are accepted normally. - ACP requests
-/// (messages with an `id`) receive a structured `leader_starting`
-///   JSON-RPC error so the client can retry rather than hang.
+/// connections and IPC registrations are accepted normally. ACP requests
+/// (messages with an `id`) receive a structured `leader_starting` JSON-RPC
+/// error. So the client can retry rather than hang. - ACP notifications (no
+/// `id`) are dropped with a trace log.
 pub async fn run_leader_server(
     socket_path: std::path::PathBuf,
     acp_tx: mpsc::UnboundedSender<String>,

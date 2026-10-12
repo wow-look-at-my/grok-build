@@ -1156,7 +1156,7 @@ mod tests {
     #[test]
     fn bash_turn_still_renders_running_not_waiting() {
         let theme = Theme::current();
-        // A bash (non-inference) turn with no activity keeps.
+        // A bash (non-inference) turn.
         let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, true, None);
         assert_eq!(label, "Running…");
     }

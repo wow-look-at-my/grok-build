@@ -319,7 +319,7 @@ pub(crate) fn uncached_input_tokens(full_input: u64, cached_read: u64) -> u64 {
 }
 
 /// Project usage onto a headless result object. `usage.input_tokens` is uncached (`full − cache_read − cache_creation`), so the three prompt buckets are disjoint.
-/// cache_read + cache_creation + output = total_tokens`. Omits cost floats only when incomplete; a partial cost is shown beside `cost_is_partial`. Incomplete with Incomplete with
+/// `input_tokens + cache_read + cache_creation + output = total_tokens`. Omits cost floats only when incomplete; a partial cost is shown beside `cost_is_partial`. Incomplete with
 /// Incomplete with no tokens emits only `usage_is_incomplete` (no zero usage object). `modelUsage` rows are a reduced external-compat schema (camelCase; no reasoning/duration).
 pub(crate) fn project_result_usage(result: &mut serde_json::Value, usage: &PromptUsage) {
     let Some(result) = result.as_object_mut() else {
@@ -3132,9 +3132,9 @@ mod tests {
     /// (cost_is_partial = true) must still produce a `PromptUsage` with
     /// `cost_usd_ticks = Some(...)` after `project_from_ledger` calls
     /// `scrub_untrustworthy_costs`. This is the exact path that was broken —
-    /// OpenRouter reports `usage.cost` on most but not all streaming chunks, so
-    /// multi-call turns had `cost_missing_calls > 0`, which caused the scrub to
-    /// drop ALL cost. From the `TurnCompleted` notification, hiding it from the
+    /// OpenRouter reports `usage.cost` on most but not all streaming chunks.
+    /// Multi-call turns had `cost_missing_calls > 0`, which caused the scrub to
+    /// drop ALL cost from the `TurnCompleted` notification, hiding it from the
     /// TUI. The fix: `scrub_untrustworthy_costs` only clears on
     /// `usage_is_incomplete`, not `cost_is_partial`.
     #[test]

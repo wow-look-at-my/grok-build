@@ -58,7 +58,7 @@ pub(super) fn set_render_mermaid_inner(kind: crate::appearance::RenderMermaid) {
 }
 
 /// Set how ` ```mermaid ` code blocks render (auto/on/off).
-/// SHELL-OWNED: persisted to `[ui].render_mermaid` via `Effect::PersistSetting` (parity with `vim_mode`).
+/// SHELL-OWNED: persisted to `[ui].render_mermaid` via `Effect::PersistSetting`.
 /// The cache mirror is updated optimistically.
 pub(in crate::app::dispatch) fn set_render_mermaid(
     app: &mut AppView,
@@ -237,40 +237,8 @@ pub(in crate::app::dispatch) fn set_voice_stt_language(
     }]
 }
 
-/// State-only mutation for `vim_mode`.
 /// Propagates to every in-process agent so background subagents and side panes pick up the change without restart.
 /// The cache mirror lets new agents created later read the same value via `cache::load_vim_mode()` in `AgentView::new`.
-pub(super) fn set_vim_mode_inner(app: &mut AppView, new: bool) {
-    for agent in app.agents.values_mut() {
-        // Recursive so open subagent views also pick up the change; otherwise their scrollback j/k stay in the vim-OFF fallback
-        agent.set_vim_mode_recursive(new);
-    }
-    crate::appearance::cache::set_vim_mode(new);
-}
-
-/// Set vim-mode scrollback keybindings (registry-driven path).
-/// SHELL-OWNED: persisted to `[ui].vim_mode` in config.toml via `Effect::PersistSetting`.
-/// Propagates to every in-process agent.
-pub(in crate::app::dispatch) fn set_vim_mode(app: &mut AppView, new: bool) -> Vec<Effect> {
-    let prev = crate::appearance::cache::load_vim_mode();
-    if prev == new && app.agents.values().all(|a| a.vim_mode == new) {
-        return vec![];
-    }
-    set_vim_mode_inner(app, new);
-    refresh_open_settings_modals(app);
-    tracing::info!(
-        target: "settings",
-        key = "vim_mode",
-        value = new,
-        "setting changed",
-    );
-    app.show_toast(&save_success_toast("Vim scrollback", new));
-    vec![Effect::PersistSetting {
-        key: "vim_mode",
-        value: crate::settings::SettingValue::Bool(new),
-        rollback_value: crate::settings::SettingValue::Bool(prev),
-    }]
-}
 
 /// Mirror the user-config layer in `current_ui` so the modal reflects it (the effective gate is resolved shell-side at session spawn).
 pub(super) fn set_remember_tool_approvals_inner(app: &mut AppView, new: bool) {
@@ -1164,43 +1132,9 @@ pub(in crate::app::dispatch) fn set_follow_up_behavior(
     }]
 }
 
-/// State-only mutation for `simple_mode`.
-///
-/// Propagates to every agent's `input_mode` so the toggle takes effect immediately (not just on new agents).
-pub(super) fn set_simple_mode_inner(app: &mut AppView, new: bool) {
-    app.current_ui.simple_mode = Some(new);
-    crate::appearance::cache::set_simple_mode(new);
-
-    // Reconcile every agent's `input_mode`; the toggle is global
-    let target_mode = if new {
-        crate::views::agent::InputMode::Simple
-    } else {
-        crate::views::agent::InputMode::Vim
-    };
-    for agent in app.agents.values_mut() {
-        if agent.input_mode != target_mode {
-            agent.set_input_mode(target_mode);
-        }
-    }
-}
-
-pub(in crate::app::dispatch) fn set_simple_mode(app: &mut AppView, new: bool) -> Vec<Effect> {
-    let prev = app.current_ui.simple_mode.unwrap_or(true);
-    // No idempotency gate: this fans out to every agent's `input_mode`
-    // A newly-inserted agent may have a stale default, so we always propagate
-    // The inner is per-agent idempotent
-    set_simple_mode_inner(app, new);
-    refresh_open_settings_modals(app);
-    tracing::info!(target: "settings", key = "simple_mode", value = new, "setting changed");
-    // Toast label mirrors the renamed registry label ("Disable vim input mode") so the user sees the same name in the modal and the toast
-    app.show_toast(&save_success_toast("Disable vim input mode", new));
-    vec![Effect::PersistSetting {
-        key: "simple_mode",
-        value: crate::settings::SettingValue::Bool(new),
-        rollback_value: crate::settings::SettingValue::Bool(prev),
-    }]
-}
-
+// No idempotency gate: this fans out to every agent's `input_mode`
+// A newly-inserted agent may have a stale default, so we always propagate
+// The inner is per-agent idempotent
 // Contextual-hint tips: the `contextual_hints.*` per-tip toggles.
 // A toggle thus takes effect at runtime, not just on next launch
 // `write` is a non-capturing closure that coerces to `fn` so the tips share one inner
@@ -2051,8 +1985,7 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
 }
 
 // min_output_tokens_per_sec, output_rate_sustained_secs,
-// output_rate_window_secs, output_rate_max_retries, ttft_timeout_secs — the
-// output-rate floor.
+// output_rate_window_secs, output_rate_max_retries, ttft_timeout_secs.
 
 fn clamp_min_output_tokens_per_sec(value: i64) -> i64 {
     value.clamp(
@@ -2247,6 +2180,80 @@ pub(in crate::app::dispatch) fn set_ttft_timeout_secs(app: &mut AppView, new: i6
     }
     vec![Effect::PersistSetting {
         key: "ttft_timeout_secs",
+        value: crate::settings::SettingValue::Int(clamped),
+        rollback_value: crate::settings::SettingValue::Int(prev),
+    }]
+}
+
+fn clamp_thinking_summary_history_window_secs(value: i64) -> i64 {
+    value.clamp(
+        crate::settings::defs::THINKING_SUMMARY_HISTORY_WINDOW_SECS_MIN,
+        crate::settings::defs::THINKING_SUMMARY_HISTORY_WINDOW_SECS_MAX,
+    )
+}
+
+fn clamp_thinking_summary_history_min_count(value: i64) -> i64 {
+    value.clamp(
+        crate::settings::defs::THINKING_SUMMARY_HISTORY_MIN_COUNT_MIN,
+        crate::settings::defs::THINKING_SUMMARY_HISTORY_MIN_COUNT_MAX,
+    )
+}
+
+pub(super) fn set_thinking_summary_history_window_secs_inner(app: &mut AppView, value: i64) {
+    app.current_ui.thinking_summary_history_window_secs =
+        Some(clamp_thinking_summary_history_window_secs(value) as u32);
+}
+
+pub(in crate::app::dispatch) fn set_thinking_summary_history_window_secs(
+    app: &mut AppView,
+    new: i64,
+) -> Vec<Effect> {
+    let prev = i64::from(app.current_ui.thinking_summary_history_window_secs_value());
+    let clamped = clamp_thinking_summary_history_window_secs(new);
+    if prev == clamped {
+        return vec![];
+    }
+    set_thinking_summary_history_window_secs_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = "thinking_summary_history_window_secs",
+        value = clamped,
+        "setting changed",
+    );
+    app.show_toast(&format!("\u{2713} Thinking-summary lookback: {clamped}s"));
+    vec![Effect::PersistSetting {
+        key: "thinking_summary_history_window_secs",
+        value: crate::settings::SettingValue::Int(clamped),
+        rollback_value: crate::settings::SettingValue::Int(prev),
+    }]
+}
+
+pub(super) fn set_thinking_summary_history_min_count_inner(app: &mut AppView, value: i64) {
+    app.current_ui.thinking_summary_history_min_count =
+        Some(clamp_thinking_summary_history_min_count(value) as u32);
+}
+
+pub(in crate::app::dispatch) fn set_thinking_summary_history_min_count(
+    app: &mut AppView,
+    new: i64,
+) -> Vec<Effect> {
+    let prev = i64::from(app.current_ui.thinking_summary_history_min_count_value());
+    let clamped = clamp_thinking_summary_history_min_count(new);
+    if prev == clamped {
+        return vec![];
+    }
+    set_thinking_summary_history_min_count_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = "thinking_summary_history_min_count",
+        value = clamped,
+        "setting changed",
+    );
+    app.show_toast(&format!("\u{2713} Thinking-summary minimum: {clamped}"));
+    vec![Effect::PersistSetting {
+        key: "thinking_summary_history_min_count",
         value: crate::settings::SettingValue::Int(clamped),
         rollback_value: crate::settings::SettingValue::Int(prev),
     }]

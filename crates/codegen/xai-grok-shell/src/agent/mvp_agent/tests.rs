@@ -542,7 +542,7 @@ async fn upload_harness_trace_turns_uploads_disabled_does_not_burn_counter() {
         "uploads-disabled path must not persist a counter",
     );
 }
-/// Guards the hard-disabled trace-upload seam: with trace upload
+/// Guards the hard-disabled trace-upload seam. With trace upload
 /// permanently off, no per-harness-turn trace context (and hence no
 /// manifest) may be created even. With maximally-enabling config.
 #[tokio::test(flavor = "current_thread")]

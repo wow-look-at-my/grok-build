@@ -237,8 +237,8 @@ pub(super) fn assert_prefix_stable(base: &ConversationRequest, extended: &Conver
 }
 
 /// The item list a `/todo` capture sends on its SECOND model call: the same
-/// prepared snapshot `/btw` sends, its instruction, then the first response
-/// echoed. Back verbatim (reasoning included) with the tool result that
+/// prepared snapshot `/btw` sends, its instruction. Then the first response
+/// echoed back verbatim (reasoning included) with the tool result that
 /// answered it. The loop hand-builds this list instead of taking it from chat
 /// state, so each backend's mapping is asserted against the fixture directly
 /// (`todo_capture_*` tests). `strip_reasoning` mirrors the backend gate: only

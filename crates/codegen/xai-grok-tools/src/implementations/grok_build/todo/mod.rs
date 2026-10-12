@@ -40,56 +40,14 @@ pub(crate) fn validate_no_duplicate_ids(updates: &[TodoUpdate]) -> Result<(), To
     Ok(())
 }
 
-/// How many items may be `in_progress` at once.
-const DEFAULT_MAX_IN_PROGRESS: usize = 5;
-
-/// The env var that overrides [`DEFAULT_MAX_IN_PROGRESS`].
-const MAX_IN_PROGRESS_VAR: &str = "GROK_TODO_MAX_IN_PROGRESS";
-
-/// Resolve the cap from the raw env value. A value that is not a positive
-/// number keeps the default and says so.
-fn max_in_progress_cap(raw: Option<&str>) -> usize {
-    let Some(raw) = raw else {
-        return DEFAULT_MAX_IN_PROGRESS;
-    };
-    match raw.trim().parse::<usize>() {
-        Ok(n) if n > 0 => n,
-        _ => {
-            tracing::warn!(
-                value = %raw,
-                "{MAX_IN_PROGRESS_VAR} is not a positive number; using the default"
-            );
-            DEFAULT_MAX_IN_PROGRESS
-        }
-    }
-}
-
-/// The message a write is refused with when it would leave more than `cap`
-/// items `in_progress`, or `None` when the write is within the cap.
-fn in_progress_cap_violation(state: &TodoState, cap: usize) -> Option<String> {
-    let running = state
-        .todo_items()
-        .filter(|item| item.status == TodoStatus::InProgress)
-        .count();
-    (running > cap).then(|| {
-        format!(
-            "{running} items would be in progress at once, over the cap of {cap}. \
-             Keep what you are working on now in progress and leave the rest pending."
-        )
-    })
-}
-
 /// Every write is a merge: updates are folded into the existing state. -
-/// **Existing items**: `content` is optional — if omitted the previous
-///   value is kept. This lets the model mark an item from `in_progress` →
-///   `completed` without echoing the content back.
-/// - **New items** (id not yet in state): if `content` is omitted the `id`
-///   is used as a fallback so the tool never errors on a merge call. This
-///   makes the tool resilient to state being lost between calls.
-/// `prepend` puts new items at the FRONT of the list, in the order given.
-/// Existing items keep their place either way, so a prepend still cannot
-/// reorder or rewrite work already on the list. An id already on the list is
-/// never dropped by a write that omits it.
+/// **Existing items**: `content` is optional — if omitted the value is
+/// kept. This lets the model mark an item from `in_progress` → `completed`
+/// without echoing the content back. **New items** (id not yet in state): if
+/// `content` is omitted the `id` is used as a fallback so the tool never
+/// errors on a merge call. This makes the tool resilient to state being lost
+/// between calls. `prepend` puts new items at the FRONT of the list, in the
+/// order given.
 pub(crate) fn apply_merge(
     state: &mut TodoState,
     updates: &[TodoUpdate],
@@ -583,7 +541,7 @@ const fn default_merge() -> bool {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TodoWriteInput {
-    /// When true (the default), merge the provided todos into the existing.
+    /// When true (the default), merge the provided todos.
     #[serde(
         default = "default_merge",
         deserialize_with = "crate::types::schema::deserialize_lenient_bool"
@@ -789,20 +747,8 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             let mut res = resources.lock().await;
             let todo_state = res.get_or_default::<State<TodoState>>();
 
-            for outcome in &results {
-                if outcome.passed {
-                    todo_state.0.set_verification_passed(&outcome.id, true);
-                } else {
-                    // A blocked verifier takes the completion back: the item
-                    // returns to the status it held before this call.
-                    let previous = previous_statuses
-                        .get(&outcome.id)
-                        .copied()
-                        .flatten()
-                        .unwrap_or(TodoStatus::Pending);
-                    todo_state.0.update(&outcome.id, None, Some(previous));
-                }
-            }
+            // Always a merge.
+            apply_merge(&mut todo_state.0, &input.todos, input.prepend)?;
 
             let mut summary = summarize_todo_state(&todo_state.0);
             for outcome in results.iter().filter(|outcome| !outcome.passed) {

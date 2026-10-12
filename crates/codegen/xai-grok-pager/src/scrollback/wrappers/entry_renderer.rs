@@ -363,11 +363,10 @@ impl<'a> EntryRenderer<'a> {
         if self.should_show_cache_hit() { 1 } else { 0 }
     }
 
-    /// Width reserved on the right side of content lines for the timestamp and
-    /// (when present) the per-message cost indicator.
-    ///
-    /// When > 0, content is wrapped at `content_width - reserved` so text
-    /// never collides with the overlay.
+    /// Width reserved on the right side of content lines for the timestamp
+    /// and (when present) the per-message cost indicator. When > 0, content
+    /// is wrapped at `content_width - reserved` so text never collides with
+    /// the overlay.
     fn timestamp_reserved(&self) -> u16 {
         let cost = self.cost_reserved();
         if self.appearance().show_timestamps && self.should_show_timestamp() {
@@ -577,10 +576,7 @@ impl<'a> EntryRenderer<'a> {
 
 /// Convert an API-reported server cost (in USD ticks, 1e10 per USD) to a
 /// readable display string such as `$0.12` or `$3.42`. # Honesty guarantees -
-/// A missing (`None`) or non-positive. Cost returns `None`, so a caller never
-///   renders a fabricated `$0.00` when the API reported no cost.
-/// - Arithmetic is exact **integer** math (no floats).
-///   never mis-rounded into `$0` the way a `f64` at 4 decimals could.
+/// A missing.
 pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<String> {
     let ticks = cost_usd_ticks?;
     if ticks <= 0 {
@@ -921,8 +917,8 @@ impl Renderable for EntryRenderer<'_> {
             if self.appearance().show_timestamps
                 && let Some(ts) = self.entry.created_at
             {
-                // Check if mouse is hovering the timestamp zone (a later
-                // rightmost cols of the first content row).
+                // Check if mouse is hovering the timestamp zone (rightmost
+                // cols of the first content row).
                 let ts_hovered = self.mouse_pos.is_some_and(|(mx, my)| {
                     my == first_content_y
                         && mx >= content_area.x + content_area.width.saturating_sub(10)
@@ -965,7 +961,7 @@ impl Renderable for EntryRenderer<'_> {
         // Cache-hit-percent line. Painted on its OWN reserved row directly
         // below the content (`cache_hit_reserved_rows`) rather than sharing
         // the first line's already-narrowed gutter with the cost/timestamp.
-        // So wrapped content never loses more width to fit a second label.
+        // Wrapped content never loses more width to fit a second label.
         if content_skip == 0
             && let Some(cache_str) = self.cache_hit_display()
         {
@@ -1589,7 +1585,7 @@ mod tests {
 
     #[test]
     fn cost_indicator_renders_next_to_timestamp_for_reported_cost() {
-        // A message with a reported cost draws the cost token immediately.
+        // A message with a reported cost draws the cost.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
             .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12345

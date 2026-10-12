@@ -230,9 +230,9 @@ impl EndpointsConfig {
         xai_tool_types::Aliases::new("models_list_url", &["models_endpoint"]);
 }
 
-/// `EndpointsConfig` with each list-URL key spelling as its own field, so a
+/// `EndpointsConfig` with each list-URL key spelling as its own field. So a
 /// table naming both folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`]
-/// rather than failing the whole `[endpoints]`. Table as a duplicate field.
+/// rather than failing the whole `[endpoints]` table as a duplicate field.
 /// Every field carries `#[serde(default)]` from the container, which is the
 /// same rule [`EndpointsConfig`] applies on its own: an absent key is unset,
 /// never an error. `external_otel_master_switch` is absent here because it is
@@ -324,8 +324,8 @@ mod endpoints_wire_alias_tests {
 
     /// A `[endpoints]` table naming the list URL under both keys is one URL
     /// stated twice. The table can arrive from a managed-config or campaign
-    /// layer, not only from the user's own file, and a duplicate-field
-    /// rejection here would. Take the whole config down with it.
+    /// layer, not only from the user's own file. And a duplicate-field
+    /// rejection here would take the whole config down with it.
     #[test]
     fn a_table_naming_the_list_url_under_both_keys_under_one_value_parses_once() {
         let cfg = parse(
@@ -3811,8 +3811,7 @@ pub(crate) fn provider_probe_entry(
 }
 
 /// `true` when some configured `[model_providers.<id>]` stands on its own for
-/// authentication -- the same `has_own_credentials` question the catalog is
-/// asked, put.
+/// authentication.
 pub(crate) fn any_provider_has_own_credentials(cfg: &Config) -> bool {
     first_provider_with_own_credentials(cfg).is_some()
 }
@@ -3949,9 +3948,7 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        // Entries that carry a real (non-default) context window, treated as
-        // a per-slug `/v1/models` listing for backfilling entries that were
-        // left. At the silent hardcoded default.
+        // Entries that carry a real (non-default) context window.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)
@@ -4450,7 +4447,7 @@ pub struct ModelEntryConfig {
     /// Defaults to the all-disabled state via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "is_default_laziness_detector")]
     pub laziness_detector: LazinessDetectorPerModelConfig,
-    /// Per-token USD pricing used to derive cost when the backend reports.
+    /// Per-token USD pricing used to derive.
     #[serde(default, skip_serializing_if = "is_default_model_pricing")]
     pub pricing: xai_grok_sampling_types::ModelPricing,
     /// Floor on this model's output tokens/sec.
@@ -4638,7 +4635,7 @@ pub struct ConfigModelOverride {
     /// Extra top-level fields merged into every request body for this model.
     #[serde(default)]
     pub extra_body: IndexMap<String, toml::Value>,
-    /// Suppress the modelinfo price lookup for this model, set by a local.
+    /// Suppress the modelinfo price.
     pub pricing_lookup_enabled: Option<bool>,
     pub reasoning_summary: Option<ReasoningSummary>,
 }

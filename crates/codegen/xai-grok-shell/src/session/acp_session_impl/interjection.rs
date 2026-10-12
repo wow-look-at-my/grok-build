@@ -87,14 +87,14 @@ impl SessionActor {
     /// follow-up typed mid-turn sits in `pending_inputs` until the whole turn
     /// ends. A message aimed at work in flight arrives after that work is
     /// finished. The turn loop calls this immediately before
-    /// `drain_pending_interjections`, which is immediately. This happens
-    /// before each model request — the earliest point the model can see the
-    /// text without cancelling anything. Rows listed in
+    /// `drain_pending_interjections`, which is immediately before each model
+    /// request. The earliest point the model can see the text without
+    /// cancelling anything. Rows listed in
     /// [`SessionActor::queued_at_turn_start`] were next in line before this
     /// turn existed — each is its own task, not a note about this turn's
     /// work. So the turn loop's own harvest (`include_queued_at_turn_start =
     /// false`) leaves them to run as their own turns. The explicit "deliver
-    /// the queue now" gesture passes `true`:. Returns whether anything moved.
+    /// the queue now" gesture passes `true`. Returns whether anything moved.
     pub(super) async fn harvest_queued_prompts_into_interjections(
         &self,
         include_queued_at_turn_start: bool,
@@ -183,14 +183,16 @@ impl SessionActor {
     /// drains `pending_interjections`, and resubmits — instead of waiting out a
     /// stream that can run for minutes. A no-op between requests (inside a tool
     /// call), where the drain happens at the next loop boundary anyway.
-    pub(super) fn cancel_in_flight_stream_for_interjection(&self) {
+    /// Returns whether a stream was cut.
+    pub(super) fn cancel_in_flight_stream_for_interjection(&self) -> bool {
         let Some(req_id) = self.in_flight_sampler_request_id.lock().take() else {
-            return;
+            return false;
         };
         self.interjection_cancel_requested
             .store(true, std::sync::atomic::Ordering::SeqCst);
         self.sampler_handle.cancel(req_id);
         tracing::info!("Cancelled in-flight model stream for asap interjection");
+        true
     }
 
     /// Whether a queued row can be folded into another turn as user text.

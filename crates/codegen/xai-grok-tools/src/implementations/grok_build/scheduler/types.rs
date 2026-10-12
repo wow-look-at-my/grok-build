@@ -277,8 +277,7 @@ impl ScheduledTask {
         fire_immediately: bool,
     ) -> Self {
         let now = Utc::now();
-        // An interval is validated where a task is created, where the create
-        // tool parses one, and where state loads.
+        // An interval is validated where a task is created.
         let cadence = interval_duration(interval_secs)
             .unwrap_or_else(|| panic!("scheduled interval {interval_secs} s has no duration"));
         // When fire_immediately is true, anchor created_at in the past so that

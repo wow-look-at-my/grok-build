@@ -120,7 +120,7 @@ pub fn stream_messages<'a>(
         let mut final_cache_read_input_tokens: u32 = 0;
         let mut final_cache_creation_input_tokens: u32 = 0;
         let mut final_output_tokens: u32 = 0;
-        // Cumulative for the response, so last-write-wins — but a later.
+        // Cumulative for the response.
         let mut final_cost_usd_ticks: Option<i64> = None;
         let mut final_stop_reason: Option<StopReason> = None;
         let mut final_stop_message: Option<String> = None;

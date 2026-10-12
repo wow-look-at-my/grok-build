@@ -405,7 +405,7 @@
 
     #[test]
     fn turn_cost_still_lands_when_no_response_priced_the_turn() {
-        // An agent that prices only whole turns (no per-response cost) must.
+        // An agent that prices only whole turns (no per-response cost) must keep the behavior.
         let mut app = make_app_with_agent("sess-mixed");
         {
             let agent = app.agents.get_mut(&AgentId(0)).unwrap();

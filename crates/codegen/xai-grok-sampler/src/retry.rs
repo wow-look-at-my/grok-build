@@ -23,7 +23,7 @@ pub fn stream_interrupt_budget(transport_budget: u32) -> u32 {
     }
 }
 
-/// Longest single wait on the generic retry path — the exponential-backoff.
+/// Longest single wait on the generic retry path.
 pub const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 
 pub const TRANSPORT_REBUILD_BACKOFF: Duration = Duration::from_millis(200);
@@ -113,7 +113,7 @@ pub enum RetryDecision {
     /// Retry after marking the target reasoning-mandatory and remapping.
     RetryWithReasoningEffortRemap,
 
-    /// Retry after dropping the message-level properties a strict-schema.
+    /// Retry after dropping the message-level properties.
     RetryWithMessagePropertyStrip,
 
     /// Retry after rebuilding the HTTP client with HTTP/1.1 (transport
@@ -179,7 +179,7 @@ pub fn classify_error(
 
     // Shared retry vetoes (`SamplingError::is_retry_vetoed`, also used by
     // one-shot callers like /btw): - x-must-retry: false — trust the
-    // server, it knows if the error is.
+    // server.
     if err.is_retry_vetoed() {
         return RetryDecision::Fatal(clone_error(err));
     }
@@ -404,7 +404,7 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
             SamplingError::EventStreamError(xai_grok_sampling_types::error::error_chain(e))
         }
         SamplingError::Serialization(e) => {
-            // serde_json::Error is not Clone; its Display already carries the line/column exactly once.
+            // serde_json::Error is not Clone; its Display already carries the original line/column exactly once.
             SamplingError::serialization_message(e)
         }
         SamplingError::Api {
@@ -1140,8 +1140,8 @@ mod tests {
     }
 
     /// The guarantee the budget exists for: a stream that dies mid-body is
-    /// retried several times, on backoff that grows, whatever. The model's
-    /// own `max_retries` says.
+    /// retried several times. That guarantee is on backoff that grows,
+    /// whatever the model's own `max_retries` says.
     #[test]
     fn a_stream_interruption_is_retried_ten_times_with_growing_backoff() {
         let err = SamplingError::EventStreamError("error decoding response body".into());

@@ -303,6 +303,8 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         turn_summary_enabled: false,
         title_refresh_enabled: false,
         thinking_summaries_enabled: false,
+        thinking_summary_history: Default::default(),
+        thinking_summary_tail: Default::default(),
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         streaming_turn_capture: parking_lot::Mutex::new(StreamingTurnCapture::default()),
         streaming_tool_titles: parking_lot::Mutex::new(std::collections::HashMap::new()),
@@ -603,8 +605,8 @@ async fn a_streaming_tool_call_is_named_from_the_arguments_so_far() {
         })
         .await;
 }
-/// A tool the registry does not know, a key with no value yet, and bytes that
-/// are not JSON at all each leave the call. Unnamed rather than guess or die.
+/// A tool the registry does not know. A key with no value yet, and bytes that
+/// are not JSON at all each leave the call unnamed rather than guess or die.
 #[tokio::test(flavor = "current_thread")]
 async fn an_unreadable_streaming_call_is_left_unnamed() {
     use xai_grok_sampler::{RequestId, SamplingEvent};

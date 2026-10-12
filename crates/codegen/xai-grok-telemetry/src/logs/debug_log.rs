@@ -696,7 +696,7 @@ mod tests {
 
     /// The sink map is taken on every subscriber callback. What the lock does
     /// after somebody else panicked while holding it is the difference between a
-    /// dropped line and a process that can no longer. Log at all.
+    /// dropped line and a process. That can no longer log at all.
     #[test]
     fn a_panic_while_the_sink_map_is_held_leaves_it_acquirable() {
         let layer = std::sync::Arc::new(RoutingLayer::new(
@@ -1054,7 +1054,7 @@ mod tests {
 
     #[test]
     fn write_session_caps_file_size_and_stops_growing() {
-        // Regression: a session's firehose file.
+        // Regression.
         let _lock = flush_test_lock();
         let dir = tempfile::tempdir().unwrap();
         let layer = RoutingLayer::new(dir.path().to_path_buf(), "agent".to_owned(), 1)

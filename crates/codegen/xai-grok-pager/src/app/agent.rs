@@ -111,8 +111,7 @@ impl QueuedPrompt {
     }
 
     /// Whether the shell may fold this row into a RUNNING turn as steering
-    /// text — the rule `SessionActor::deliverable_mid_turn` enforces
-    /// shell-side, mirrored here.
+    /// text.
     pub fn is_steering_text(&self) -> bool {
         self.kind == QueueEntryKind::Prompt && self.wire_matches_display() && !self.owns_its_turn()
     }

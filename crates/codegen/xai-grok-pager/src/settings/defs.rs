@@ -37,6 +37,12 @@ pub(crate) const OUTPUT_RATE_MAX_RETRIES_MAX: i64 = U32_FIELD_MAX - 1;
 pub(crate) const TTFT_TIMEOUT_SECS_MIN: i64 = 0;
 pub(crate) const TTFT_TIMEOUT_SECS_MAX: i64 = U32_FIELD_MAX;
 
+// Int bounds for the thinking-summary history window and count floor.
+pub(crate) const THINKING_SUMMARY_HISTORY_WINDOW_SECS_MIN: i64 = 0;
+pub(crate) const THINKING_SUMMARY_HISTORY_WINDOW_SECS_MAX: i64 = U32_FIELD_MAX;
+pub(crate) const THINKING_SUMMARY_HISTORY_MIN_COUNT_MIN: i64 = 0;
+pub(crate) const THINKING_SUMMARY_HISTORY_MIN_COUNT_MAX: i64 = U32_FIELD_MAX;
+
 /// The rows of the "Slow output" sub-screen: how slow output is detected and
 /// what is done about it.
 pub(crate) const OUTPUT_RATE_FLOOR_CHILDREN: &[&str] = &[
@@ -817,54 +823,6 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
         },
         SettingMeta {
-            // Persisted key stays `simple_mode`.
-            key: "simple_mode",
-            category: SettingCategory::Appearance,
-            owner: SettingOwner::Shared,
-            label: "Disable vim input mode",
-            description: "Use plain readline-style input instead of vim keys in the prompt. Experimental.",
-            keywords: &[
-                "simple",
-                "ascii",
-                "minimal",
-                "plain",
-                "vim",
-                "readline",
-                "experimental",
-                "editor",
-                "input",
-                "prompt",
-            ],
-            kind: SettingKind::Bool {
-                // `Option<bool>`: `None` is treated as `true`
-                default: ui_default.simple_mode.unwrap_or(true),
-            },
-            restart_required: false,
-        },
-        // SHELL-owned, persisted to `[ui].vim_mode` in config.toml.
-        // Defaults to the same value main's `appearance::persist::VIM_MODE_DEFAULT` shipped with
-        // Bundled next to `simple_mode` because they pair up: simple_mode controls the input editor's vim behaviour, vim_mode controls the scrollback's
-        SettingMeta {
-            key: "vim_mode",
-            category: SettingCategory::Appearance,
-            owner: SettingOwner::Shell,
-            label: "Vim scrollback navigation",
-            description: "Enable vim keys (h/j/k/l, gg/G, /) for navigating the scrollback. Does not affect the input prompt.",
-            keywords: &[
-                "vim",
-                "scrollback",
-                "navigation",
-                "hjkl",
-                "keys",
-                "keybindings",
-                "scroll",
-            ],
-            kind: SettingKind::Bool {
-                default: ui_default.vim_mode.unwrap_or(false),
-            },
-            restart_required: false,
-        },
-        SettingMeta {
             key: "theme",
             category: SettingCategory::Appearance,
             owner: SettingOwner::Shared,
@@ -1215,6 +1173,63 @@ pub fn default_settings() -> Vec<SettingMeta> {
             ],
             kind: SettingKind::Bool {
                 default: ui_default.thinking_summaries_enabled(),
+            },
+            restart_required: true,
+        },
+        // SHARED: `[ui].thinking_summary_history_window_secs`. How far back, in
+        // seconds, a summary call may look for earlier summaries.
+        SettingMeta {
+            key: "thinking_summary_history_window_secs",
+            category: SettingCategory::Appearance,
+            owner: SettingOwner::Shared,
+            label: "Thinking-summary lookback",
+            description: "How far back, in seconds, a thinking block's summary may look \
+                          for earlier summaries, to keep its direction and avoid \
+                          repeating one. A 0 here and a 0 below leave the summary \
+                          stateless. Restart required.",
+            keywords: &[
+                "thinking",
+                "reasoning",
+                "summary",
+                "summaries",
+                "history",
+                "lookback",
+                "window",
+                "direction",
+                "repeat",
+                "seconds",
+            ],
+            kind: SettingKind::Int {
+                default: i64::from(ui_default.thinking_summary_history_window_secs_value()),
+                min: THINKING_SUMMARY_HISTORY_WINDOW_SECS_MIN,
+                max: THINKING_SUMMARY_HISTORY_WINDOW_SECS_MAX,
+            },
+            restart_required: true,
+        },
+        // SHARED: `[ui].thinking_summary_history_min_count`.
+        SettingMeta {
+            key: "thinking_summary_history_min_count",
+            category: SettingCategory::Appearance,
+            owner: SettingOwner::Shared,
+            label: "Thinking-summary minimum",
+            description: "Always include this many of the most recent thinking \
+                          summaries, even when they are older than the lookback \
+                          window. Restart required.",
+            keywords: &[
+                "thinking",
+                "reasoning",
+                "summary",
+                "summaries",
+                "history",
+                "minimum",
+                "count",
+                "direction",
+                "repeat",
+            ],
+            kind: SettingKind::Int {
+                default: i64::from(ui_default.thinking_summary_history_min_count_value()),
+                min: THINKING_SUMMARY_HISTORY_MIN_COUNT_MIN,
+                max: THINKING_SUMMARY_HISTORY_MIN_COUNT_MAX,
             },
             restart_required: true,
         },

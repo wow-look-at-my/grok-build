@@ -143,7 +143,7 @@ impl ToolCallFragment<'_> {
 pub enum OutputRateHealth {
     /// No floor configured, or the rate is comfortably above it.
     Healthy,
-    /// Above the floor but inside [`NEAR_FLOOR_FACTOR`] of it.
+    /// Above the floor but inside [`NEAR_FLOOR_FACTOR`] of it — the reading a collapse passes through on its way down.
     Near,
     /// Under the floor. Sustained for a whole window, this is what the gate reissues the request over.
     Slow,
@@ -212,8 +212,8 @@ impl OutputRateMeter {
         }
     }
 
-    /// The span the current window covers at `now`: the whole window once the
-    /// response has run that long, and the time since its first. Chunk before
+    /// The span the current window covers at `now`. The whole window once the
+    /// response has run that long, and the time since its first chunk before
     /// then.
     pub fn observed_span(&self, now: Instant) -> Duration {
         let Some(first) = self.first_chunk_at else {
@@ -381,7 +381,7 @@ impl OutputRateGate {
     }
 
     /// The instant the meter is read at: frozen at the start of an open
-    /// pause, so a hosted tool call neither decays the rendered.
+    /// pause.
     fn measured_at(&self, now: Instant) -> Instant {
         match self.paused_since {
             Some(since) if since < now => since,
@@ -779,10 +779,9 @@ mod tests {
 
     /// A tool call whose arguments the provider does not stream is the model
     /// generating, invisibly. Every fragment shape that says "this call is
-    /// open and no argument bytes have arrived" holds the measurement. This
-    /// holds for as long as the call takes to write, and the arguments
-    /// arriving in one burst afterwards are credited rather than averaged.
-    /// In as silence.
+    /// open and no argument bytes have arrived" holds the measurement for as
+    /// long as the call takes to write. The arguments arriving in one burst
+    /// afterwards are credited rather than averaged in as silence.
     #[test]
     fn an_unstreamed_tool_call_holds_the_measurement() {
         let policy = collapsed_policy();

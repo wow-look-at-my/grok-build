@@ -1100,7 +1100,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
 
             // Counted over bytes for the same reason as
             // `count_newlines_in_range`: `cp_byte` is a checkpoint offset
-            // that can land mid-character, and '\n'.
+            // that can land mid-character.
             let source_line_at_cp = self
                 .text
                 .as_bytes()

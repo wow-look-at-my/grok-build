@@ -5670,7 +5670,7 @@ fn set_last_turn_cost_keyed_evicted_idle_is_dropped_not_misattributed() {
 
 #[test]
 fn set_last_turn_cost_keyless_finished_attaches_to_last_finished() {
-    // A GENUINELY keyless TurnCompleted.
+    // A GENUINELY keyless TurnCompleted (no prompt key, as a future/other call site might supply) with a finished entry and nothing streaming.
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     finish_one_turn(&mut tracker, &mut sb, "p-solo");
@@ -5698,7 +5698,7 @@ fn set_last_turn_cost_keyless_with_streaming_attaches_to_stream() {
 
 #[test]
 fn set_last_turn_cost_keyed_streaming_matches_running_prompt() {
-    // A keyed TurnCompleted whose prompt EQUALS the running turn attaches.
+    // A keyed TurnCompleted whose prompt EQUALS.
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     // Simulate the running turn: stream once, then a new stream with the running prompt active.

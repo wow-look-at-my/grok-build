@@ -264,11 +264,11 @@ const GOAL_PLANNER_PROMPT_TEMPLATE: &str = include_str!("templates/goal_planner_
 pub(crate) enum GoalPlannerOutcome {
     Planned {
         plan_file: PathBuf,
-        /// Contents of the planner child's own todo list, in order.
+        /// Contents of the planner child's own todo list.
         todos: Vec<String>,
         latency_ms: u64,
     },
-    /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token` is wired to `start_planner_run`.
+    /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token` is wired to `start_planner_run`; when the token fires mid-spawn (a user Stop, or the turn being cancelled) the attempt returns `Interrupted`.
     Interrupted,
     FailClosed {
         reason: GoalPlannerFailClosedReason,

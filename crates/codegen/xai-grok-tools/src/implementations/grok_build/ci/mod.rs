@@ -1,16 +1,30 @@
 //! `ci` — read GitHub CI state for the branch this session is working on.
 
+use crate::notification::types::{MonitorEvent, ToolNotificationHandle};
 use crate::types::requirements::{Expr, ToolRequirement};
+use crate::types::resources::{NotificationHandle, OwnerSessionId};
 use crate::types::tool::{ToolKind, ToolNamespace};
 use xai_grok_sandbox::ci_state::{self, CiStatus};
 
+mod wait;
+use wait::start_background_wait;
+
 pub const CI_TOOL_NAME: &str = "ci";
 
-/// How long one `wait` call may block before reporting what it last saw.
-const DEFAULT_WAIT_SECS: u64 = 300;
-const MAX_WAIT_SECS: u64 = 1800;
+/// How long a background `wait` watches before it reports what it last saw.
+const DEFAULT_WAIT_SECS: u64 = 3600;
+const MAX_WAIT_SECS: u64 = 14_400;
 /// Gap between polls while waiting.
 const WAIT_POLL_SECS: u64 = 15;
+/// Extra life for the waiter's task past the watch budget.
+const WAIT_TASK_MARGIN_SECS: u64 = 120;
+
+/// Exit codes of the background wait's task.
+const WAIT_EXIT_PASSING: i32 = 0;
+const WAIT_EXIT_FAILING: i32 = 1;
+const WAIT_EXIT_STILL_RUNNING: i32 = 2;
+const WAIT_EXIT_NO_RUNS: i32 = 3;
+const WAIT_EXIT_QUERY_FAILED: i32 = 4;
 
 /// How much of a failing log one call returns.
 const LOG_TAIL_BYTES: usize = 24_000;
@@ -18,7 +32,8 @@ const LOG_TAIL_BYTES: usize = 24_000;
 const DEFAULT_RUN_LIMIT: u32 = 10;
 const MAX_RUN_LIMIT: u32 = 50;
 
-// Input schema
+// ---------------------------------------------------------------------------
+// Input schema.
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -29,7 +44,7 @@ pub enum CiAction {
     Status,
     /// List the branch's recent runs with their ids, workflows and states.
     Runs,
-    /// Block until the branch's runs settle, then report the state.
+    /// Watch the branch's runs in the background. The session is woken with the state when they settle.
     Wait,
     /// Return the failing steps' logs for a run.
     Logs,
@@ -40,7 +55,7 @@ pub enum CiAction {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiInput {
     #[schemars(
-        description = "What to ask about CI. `status` folds the branch's runs into one state; `runs` lists them with their ids; `wait` blocks until they settle; `logs` returns the failing steps' output for a run; `checks` reports the pull request's checks."
+        description = "What to ask about CI. `status` folds the branch's runs into one state; `runs` lists them with their ids; `wait` watches them in the background and wakes you with the state when they settle; `logs` returns the failing steps' output for a run; `checks` reports the pull request's checks."
     )]
     pub action: CiAction,
 
@@ -68,12 +83,13 @@ pub struct CiInput {
 
     #[serde(default)]
     #[schemars(
-        description = "How long `wait` may block, in seconds. Defaults to 300, capped at 1800. A wait that runs out reports the state it last saw rather than failing."
+        description = "How long `wait` watches, in seconds. Defaults to 3600, capped at 14400. A wait that runs out reports the state it last saw rather than failing."
     )]
     pub timeout_secs: Option<u64>,
 }
 
-// Output
+// ---------------------------------------------------------------------------
+// Output.
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiRunSummary {
@@ -85,7 +101,7 @@ pub struct CiRunSummary {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiOutput {
-    /// `passing`, `failing`, `in_progress`, or `none`.
+    /// `passing`, `failing`, `in_progress`, `none`, or `pending`.
     pub state: String,
     pub branch: String,
     /// Whether anything on this branch can still change on its own.
@@ -98,11 +114,35 @@ pub struct CiOutput {
     /// Whether the returned text had its head cut off.
     #[serde(default)]
     pub truncated: bool,
+    /// The background task a `wait` started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
     /// What the caller should understand from this answer.
     pub summary: String,
 }
 
 impl xai_tool_runtime::ToolOutput for CiOutput {}
+
+impl CiOutput {
+    /// The handle a background query answers the call with: the request is
+    /// accepted, and the real result will arrive as a notification named by
+    /// `task_id`.
+    fn started(action: CiAction, branch: String, task_id: String) -> Self {
+        Self {
+            state: "pending".to_string(),
+            branch,
+            settled: false,
+            runs: Vec::new(),
+            text: None,
+            truncated: false,
+            task_id: Some(task_id.clone()),
+            summary: format!(
+                "CI `{}` started (task {task_id}). Its result will arrive as a <monitor-event> notification; do not poll for it or block on it.",
+                action_label(action)
+            ),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -177,6 +217,8 @@ fn repo_from_remote_url(url: &str) -> Option<String> {
     valid_repo_token(&repo).then_some(repo)
 }
 
+/// Whether `token` is safe to hand to `gh` as a repository name: non-empty
+/// segments of git-safe characters, no `/` inside either segment.
 fn valid_repo_token(token: &str) -> bool {
     let Some((owner, name)) = token.split_once('/') else {
         return false;
@@ -330,7 +372,7 @@ fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
             "CI is FAILING on {branch}. Read the failing logs (action `logs`), fix the cause, and push again."
         ),
         CiStatus::Yellow => format!(
-            "CI is still running on {branch}. Work on something else, or call `wait` to block until it settles."
+            "CI is still running on {branch}. Call `wait` to watch it in the background, and keep working."
         ),
         CiStatus::Off => match repo {
             Some(repo) => format!(
@@ -343,7 +385,7 @@ fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
     }
 }
 
-// Tool implementation
+// --------------------------------------------------------------------------- Tool implementation.
 
 #[derive(Debug, Default)]
 pub struct CiTool;
@@ -358,7 +400,11 @@ impl crate::types::tool_metadata::ToolMetadata for CiTool {
     }
 
     fn description_template(&self) -> &str {
-        "Read GitHub CI state for the branch you are working on: fold it to one state, list runs, block until they settle, read a failing run's logs, or report a pull request's checks. Read-only, and it works inside the sandbox, where `gh` run from a shell does not."
+        "Read GitHub CI state for the branch you are working on: fold it to one state, list runs, watch them in the background until they settle, read a failing run's logs, or report a pull request's checks. Every query answers immediately, so none of these ever blocks the turn. Read-only, and it works inside the sandbox, where `gh` run from a shell does not. The tool authenticates on its own, so it still answers when `gh` in a shell has no credential, returns 401 or `no oauth token found`, or is pointed at a `GH_HOST` mirror with no token. A failing `gh` is never evidence that CI is unreadable. It replaces `gh wait-ci`, `gh pr checks`, `gh run list`, and reading a failing job's log. Re-implementing those with `gh`, or polling `gh run view` or `gh pr checks` in a loop, is the wrong fallback. Pass `repo` as `owner/name` and `branch` when the working directory is not a checkout of the repository you are asking about.\n\n`wait` starts a background task, and you are woken with the settled state when CI finishes. Every other action answers with a handle and delivers its result later as a notification. Keep working: do not poll, sleep, or call `status` in a loop."
+    }
+
+    fn emitted_notifications(&self) -> &'static [&'static str] {
+        &["MonitorEvent", "BashExecutionBackgrounded", "TaskCompleted"]
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -402,44 +448,206 @@ impl xai_tool_runtime::Tool for CiTool {
         let resources = shared_resources(&ctx)?;
         let cwd = resolve_cwd(&ctx, &resources).await?;
 
-        // Every query shells out, so the whole call runs off the async
-        // executor rather than blocking a reactor thread.
-        tokio::task::spawn_blocking(move || run_blocking(&cwd, input))
-            .await
-            .map_err(|error| {
-                xai_tool_runtime::ToolError::custom(
-                    "ci_join",
-                    format!("ci query panicked: {error}"),
-                )
-            })?
+        // Every query shells out, so each runs off the async executor rather than blocking a reactor thread.
+        let action = input.action;
+        let timeout_secs = input.timeout_secs;
+        let run_id = input.run_id.clone();
+        // Branch and repository come from local git.
+        let query = off_executor(move || resolve_query(&cwd, &input)).await?;
+
+        if action != CiAction::Wait {
+            let (notification_handle, owner_session_id) = {
+                let res = resources.lock().await;
+                let handle = res
+                    .get::<NotificationHandle>()
+                    .map(|h| h.0.clone())
+                    .unwrap_or_default();
+                let owner = res.get::<OwnerSessionId>().map(|o| o.0.clone());
+                (handle, owner)
+            };
+            let task_id = ctx.call_id.as_str().to_owned();
+            let description = format!("ci {} on {}", action_label(action), query.branch);
+            let branch = query.branch.clone();
+            spawn_query(
+                query,
+                action,
+                run_id,
+                task_id.clone(),
+                description,
+                notification_handle,
+                owner_session_id,
+            );
+            return Ok(CiOutput::started(action, branch, task_id));
+        }
+
+        let status_query = query.clone();
+        let output = off_executor(move || status_query.status()).await?;
+        // A wait on a branch that already settled has its answer now.
+        if output.settled {
+            return Ok(output);
+        }
+        start_background_wait(&ctx, &resources, query, timeout_secs, output).await
     }
 }
 
-/// The whole tool, off the executor and free of async: a blocking `gh` call
-/// per poll, which is also what makes it directly testable.
-fn run_blocking(
-    cwd: &std::path::Path,
-    input: CiInput,
-) -> Result<CiOutput, xai_tool_runtime::ToolError> {
-    let branch = match input.branch.clone().or_else(|| current_branch(cwd)) {
-        Some(branch) => branch,
-        None => {
-            return Err(xai_tool_runtime::ToolError::custom(
-                "ci_no_branch",
-                "Could not determine the current branch. Pass `branch` explicitly.",
+/// Run the query off the turn and deliver its outcome - success or failure -
+/// as the notification the caller was told to expect.
+fn spawn_query(
+    query: CiQuery,
+    action: CiAction,
+    run_id: Option<String>,
+    task_id: String,
+    description: String,
+    notification_handle: ToolNotificationHandle,
+    owner_session_id: Option<String>,
+) {
+    #[allow(clippy::disallowed_methods)]
+    tokio::spawn(crate::util::detached::fire_and_forget(
+        "ci query",
+        async move {
+            let outcome = crate::util::detached::guarded("ci blocking query", async {
+                off_executor(move || run_blocking(&query, action, run_id.as_deref())).await
+            })
+            .await;
+            let raw_text = match outcome {
+                Ok(Ok(output)) => render_output(&output),
+                Ok(Err(error)) => format!("CI query failed: {error}"),
+                Err(panic) => format!("CI query panicked: {panic}"),
+            };
+            send_ci_event(
+                &notification_handle,
+                owner_session_id,
+                &task_id,
+                &description,
+                raw_text,
+            );
+        },
+    ));
+}
+
+/// Deliver one background query's outcome as a `<monitor-event>` the bridge
+/// wakes the session with.
+fn send_ci_event(
+    handle: &ToolNotificationHandle,
+    owner_session_id: Option<String>,
+    task_id: &str,
+    description: &str,
+    raw_text: String,
+) {
+    let event_text = crate::implementations::grok_build::monitor::event::wrap_monitor_event(
+        description,
+        &raw_text,
+        task_id,
+    );
+    handle.send_monitor_event(MonitorEvent {
+        task_id: task_id.to_string(),
+        description: description.to_string(),
+        event_text,
+        raw_text,
+        owner_session_id,
+    });
+}
+
+/// Render a finished [`CiOutput`] as the body of its notification.
+fn render_output(output: &CiOutput) -> String {
+    let mut text = format!(
+        "{}\nstate: {} (settled: {})",
+        output.summary, output.state, output.settled
+    );
+    if !output.runs.is_empty() {
+        text.push_str("\nruns:");
+        for run in &output.runs {
+            let id = run
+                .run_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            text.push_str(&format!(
+                "\n  {} {} {} run={id}",
+                run.workflow, run.status, run.conclusion
             ));
         }
+    }
+    if let Some(body) = &output.text {
+        text.push('\n');
+        text.push_str(body);
+    }
+    if output.truncated {
+        text.push_str("\n(log truncated)");
+    }
+    text
+}
+
+fn action_label(action: CiAction) -> &'static str {
+    match action {
+        CiAction::Status => "status",
+        CiAction::Runs => "runs",
+        CiAction::Wait => "wait",
+        CiAction::Logs => "logs",
+        CiAction::Checks => "checks",
+    }
+}
+
+/// The blocking half of one notified query, free of async, which is also
+/// what makes it directly testable.
+fn run_blocking(
+    query: &CiQuery,
+    action: CiAction,
+    run_id: Option<&str>,
+) -> Result<CiOutput, xai_tool_runtime::ToolError> {
+    match action {
+        CiAction::Status | CiAction::Runs | CiAction::Wait => query.status(),
+        CiAction::Logs => logs_output(&query.cwd, &query.branch, query.repo(), run_id),
+        CiAction::Checks => Ok(checks_output(&query.cwd, &query.branch, query.repo())),
+    }
+}
+
+/// Run blocking `gh` work on the blocking pool.
+async fn off_executor<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, xai_tool_runtime::ToolError> + Send + 'static,
+) -> Result<T, xai_tool_runtime::ToolError> {
+    tokio::task::spawn_blocking(work).await.map_err(|error| {
+        xai_tool_runtime::ToolError::custom("ci_join", format!("ci query panicked: {error}"))
+    })?
+}
+
+/// One branch of one repository, as every action asks about it.
+#[derive(Debug, Clone)]
+struct CiQuery {
+    cwd: std::path::PathBuf,
+    branch: String,
+    repo: Option<String>,
+    limit: u32,
+}
+
+impl CiQuery {
+    fn repo(&self) -> Option<&str> {
+        self.repo.as_deref()
+    }
+
+    fn status(&self) -> Result<CiOutput, xai_tool_runtime::ToolError> {
+        status_output(&self.cwd, &self.branch, self.limit, self.repo())
+    }
+}
+
+/// The branch and repository the input names, read from git where it names none.
+fn resolve_query(
+    cwd: &std::path::Path,
+    input: &CiInput,
+) -> Result<CiQuery, xai_tool_runtime::ToolError> {
+    let Some(branch) = input.branch.clone().or_else(|| current_branch(cwd)) else {
+        return Err(xai_tool_runtime::ToolError::custom(
+            "ci_no_branch",
+            "Could not determine the current branch. Pass `branch` explicitly.",
+        ));
     };
-    let limit = input.limit.unwrap_or(DEFAULT_RUN_LIMIT);
     let repo = query_repo(cwd, input.repo.as_deref())
         .map_err(|reason| xai_tool_runtime::ToolError::custom("ci_bad_repo", reason))?;
-    let repo = repo.as_deref();
-    match input.action {
-        CiAction::Status | CiAction::Runs => status_output(cwd, &branch, limit, repo),
-        CiAction::Wait => wait_output(cwd, &branch, limit, repo, input.timeout_secs),
-        CiAction::Logs => logs_output(cwd, &branch, repo, input.run_id.as_deref()),
-        CiAction::Checks => Ok(checks_output(cwd, &branch, repo)),
-    }
+    Ok(CiQuery {
+        cwd: cwd.to_path_buf(),
+        branch,
+        repo,
+        limit: input.limit.unwrap_or(DEFAULT_RUN_LIMIT),
+    })
 }
 
 /// A failed `gh` query is the tool's error, never an empty answer.
@@ -467,40 +675,9 @@ fn status_output(
         runs: summarize(&runs),
         text: None,
         truncated: false,
+        task_id: None,
         summary: state_summary(state, branch, repo),
     })
-}
-
-/// Poll until the branch's runs settle or the budget runs out. A timeout is
-/// not a failure: it answers with the state it last saw. The caller learns
-/// the branch is still moving rather than that the tool broke.
-fn wait_output(
-    cwd: &std::path::Path,
-    branch: &str,
-    limit: u32,
-    repo: Option<&str>,
-    timeout_secs: Option<u64>,
-) -> Result<CiOutput, xai_tool_runtime::ToolError> {
-    let budget = std::time::Duration::from_secs(
-        timeout_secs.unwrap_or(DEFAULT_WAIT_SECS).min(MAX_WAIT_SECS),
-    );
-    let deadline = std::time::Instant::now() + budget;
-    loop {
-        let output = status_output(cwd, branch, limit, repo)?;
-        if output.settled || std::time::Instant::now() >= deadline {
-            if !output.settled {
-                return Ok(CiOutput {
-                    summary: format!(
-                        "Waited {}s and CI is still running on {branch}. Do other work and ask again.",
-                        budget.as_secs()
-                    ),
-                    ..output
-                });
-            }
-            return Ok(output);
-        }
-        std::thread::sleep(std::time::Duration::from_secs(WAIT_POLL_SECS));
-    }
 }
 
 fn logs_output(
@@ -550,6 +727,7 @@ fn logs_output(
         runs: summarize(&runs),
         text: Some(text),
         truncated: cut || response.truncated,
+        task_id: None,
         summary: format!("Failing-step logs for run {run_id} on {branch}."),
     })
 }
@@ -584,6 +762,7 @@ fn checks_output(cwd: &std::path::Path, branch: &str, repo: Option<&str>) -> CiO
         runs: Vec::new(),
         text: Some(text),
         truncated: cut || response.truncated,
+        task_id: None,
         summary: format!("Pull-request checks for {branch}."),
     }
 }
@@ -798,5 +977,125 @@ mod tests {
         let wide = "aaaa\u{1F600}bbbb";
         let (tail_text, _) = tail(wide, 6);
         assert!(wide.ends_with(&tail_text));
+    }
+
+    /// The call is answered before the `gh` it starts has finished, and the
+    /// result arrives later as a notification. The stub `gh` blocks until the
+    /// test releases it. The assertion is against that live signal - the
+    /// subprocess is still running when `run` returns - rather than a
+    /// wall-clock constant.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn run_answers_before_the_gh_subprocess_finishes() {
+        use crate::notification::types::ToolNotification;
+        use crate::types::resources::{Cwd, NotificationHandle, Resources};
+
+        let tmp = tempfile::tempdir().unwrap();
+        let started = tmp.path().join("gh-started");
+        let finished = tmp.path().join("gh-finished");
+        let release = tmp.path().join("gh-release");
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+
+        // A `gh` that announces itself, blocks until released, then reports one
+        // passing run. It is the real subprocess `run_gh` spawns.
+        let script = format!(
+            "#!/bin/sh\n: > '{started}'\nwhile [ ! -e '{release}' ]; do sleep 0.02; done\n: > '{finished}'\necho '[{{\"status\":\"completed\",\"conclusion\":\"success\",\"headBranch\":\"feat/x\",\"workflowName\":\"CI\",\"databaseId\":7}}]'\n",
+            started = started.display(),
+            release = release.display(),
+            finished = finished.display(),
+        );
+        let gh = bin.join("gh");
+        std::fs::write(&gh, script).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&gh).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&gh, perms).unwrap();
+
+        let previous_path = std::env::var_os("PATH").unwrap_or_default();
+        let mut with_stub = bin.into_os_string();
+        with_stub.push(":");
+        with_stub.push(&previous_path);
+        // SAFETY: this test is the only one in the binary that reads or writes PATH.
+        unsafe { std::env::set_var("PATH", &with_stub) };
+        struct PathGuard(std::ffi::OsString);
+        impl Drop for PathGuard {
+            fn drop(&mut self) {
+                // SAFETY: as above; this runs before the test's process is done.
+                unsafe { std::env::set_var("PATH", &self.0) };
+            }
+        }
+        let _guard = PathGuard(previous_path);
+
+        let (handle, mut notifications) = ToolNotificationHandle::channel();
+        let mut resources = Resources::new();
+        resources.insert(Cwd(tmp.path().to_path_buf()));
+        resources.insert(NotificationHandle(handle));
+
+        // A guard, not the assertion: it turns "blocked on the subprocess"
+        // into a test failure instead of a test that hangs. The subprocess is
+        // released only after this call has already returned.
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            xai_tool_runtime::Tool::run(
+                &CiTool,
+                crate::types::tool_metadata::test_ctx_with_call_id(
+                    resources.into_shared(),
+                    "ci-call",
+                ),
+                CiInput {
+                    action: CiAction::Status,
+                    branch: Some("feat/x".into()),
+                    repo: Some("o/r".into()),
+                    run_id: None,
+                    limit: None,
+                    timeout_secs: None,
+                },
+            ),
+        )
+        .await
+        .expect("the call must answer without waiting on its gh subprocess")
+        .expect("the call must be accepted");
+
+        // The handle comes back before the query can finish...
+        assert_eq!(output.task_id.as_deref(), Some("ci-call"));
+
+        // ...the stub process is up...
+        let mut spawned = false;
+        for _ in 0..500 {
+            if started.exists() {
+                spawned = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(spawned, "the tool must have started its gh subprocess");
+
+        // ...and it has not finished: the tool returned without waiting on it.
+        assert!(
+            !finished.exists(),
+            "the call returned only after its gh subprocess completed"
+        );
+
+        // Release the stub; the outcome still arrives, as the notification.
+        std::fs::write(&release, b"go").unwrap();
+        let delivered =
+            tokio::time::timeout(std::time::Duration::from_secs(10), notifications.recv())
+                .await
+                .expect("the query result must arrive as a notification")
+                .expect("the notification channel must stay open");
+        let ToolNotification::MonitorEvent(event) = delivered else {
+            panic!("the ci result must arrive as a monitor event, got {delivered:?}");
+        };
+        assert_eq!(event.task_id, "ci-call");
+        assert!(
+            event.raw_text.contains("passing") && event.raw_text.contains("feat/x"),
+            "the notification must carry the query's result: {}",
+            event.raw_text
+        );
+        assert!(
+            finished.exists(),
+            "the released gh subprocess must have completed"
+        );
     }
 }

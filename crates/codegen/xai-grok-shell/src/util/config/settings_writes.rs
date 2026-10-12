@@ -192,12 +192,6 @@ pub async fn set_follow_up_behavior(value: String) -> Result<()> {
     update_config(|cfg| cfg.ui.follow_up_behavior = Some(value)).await
 }
 
-/// Persist `[ui].simple_mode` via `update_config`.
-/// The `Option<bool>` shape matches `show_timestamps`.
-pub async fn set_simple_mode(value: bool) -> Result<()> {
-    update_config(|cfg| cfg.ui.simple_mode = Some(value)).await
-}
-
 /// Persist `[ui.contextual_hints].undo` via `update_config`.
 /// The nested struct stays out of `config.toml` until a tip is toggled (`skip_serializing_if`).
 pub async fn set_contextual_hint_undo(value: bool) -> Result<()> {
@@ -471,6 +465,19 @@ pub async fn set_ttft_timeout_secs(value: i64) -> Result<()> {
     update_config(|cfg| cfg.ui.ttft_timeout_secs = Some(value)).await
 }
 
+/// Persist `[ui].thinking_summary_history_window_secs`; `0` drops the time half
+/// of the history selection.
+pub async fn set_thinking_summary_history_window_secs(value: i64) -> Result<()> {
+    let value = to_u32_at_least(value, 0);
+    update_config(|cfg| cfg.ui.thinking_summary_history_window_secs = Some(value)).await
+}
+
+/// Persist `[ui].thinking_summary_history_min_count`; `0` drops the count half.
+pub async fn set_thinking_summary_history_min_count(value: i64) -> Result<()> {
+    let value = to_u32_at_least(value, 0);
+    update_config(|cfg| cfg.ui.thinking_summary_history_min_count = Some(value)).await
+}
+
 /// Persist `[ui].scroll_speed` via `update_config`.
 /// Defensively clamps to `[1, 100]` at the shell boundary.
 pub async fn set_scroll_speed(value: i64) -> Result<()> {
@@ -499,11 +506,6 @@ pub async fn set_display_refresh_auto_cadence(value: bool) -> Result<()> {
 pub async fn set_scroll_lines(value: i64) -> Result<()> {
     let clamped = value.clamp(1, 10) as u8;
     update_config(|cfg| cfg.ui.scroll_lines = Some(clamped)).await
-}
-
-/// Persist `[ui].vim_mode` via `update_config`.
-pub async fn set_vim_mode(value: bool) -> Result<()> {
-    update_config(|cfg| cfg.ui.vim_mode = Some(value)).await
 }
 
 /// Persist `[ui].remember_tool_approvals` via `update_config`.

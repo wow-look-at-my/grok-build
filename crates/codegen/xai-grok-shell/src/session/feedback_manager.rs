@@ -1955,7 +1955,7 @@ mod author_identity_tests {
 
     /// End-to-end. An env var (as a device-management launcher would inject)
     /// referenced by `[feedback.user]` with `$VAR` is expanded at config load,
-    /// resolved, carried onto the submission, and retained on the local entry.
+    /// resolved, carried onto the submission. It retained on the local entry.
     #[tokio::test]
     #[serial_test::serial]
     async fn env_var_identity_reaches_the_local_entry_end_to_end() {

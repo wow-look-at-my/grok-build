@@ -1,4 +1,4 @@
-//! ASAP interjection: a mid-turn user message buffered while a tool.
+//! ASAP interjection.
 
 use super::support::*;
 use super::*;
@@ -132,8 +132,8 @@ async fn actor_with_mock_sampler(
 
 /// Consider a mid-turn interjection buffered while a tool call. That
 /// interjection is in flight reaches the model on the turn's *next* request
-/// — between AI messages, after the tool result — rather than waiting.
-/// For the turn to end.
+/// — between AI messages, after the tool result. Rather than waiting for
+/// the turn to end.
 #[tokio::test]
 async fn interjection_buffered_during_tool_call_reaches_next_request() {
     let local = tokio::task::LocalSet::new();
@@ -274,7 +274,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
                 "interjection must not appear on the first request; user blobs: {first_user:?}"
             );
 
-            // The conversation must contain the interjection as a standalone.
+            // The conversation must contain the interjection.
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
@@ -295,7 +295,7 @@ async fn interjection_buffered_during_tool_call_reaches_next_request() {
 /// Consider an interjection buffered while the model. That interjection is
 /// *streaming* (no tool call in flight — the turn loop is blocked on
 /// `submit_and_collect`) must still reach the model on the next request in
-/// the same turn, not wait for a separate prompt. Turn or get silently
+/// the same turn, not wait for a separate prompt turn. It get silently
 /// dropped. This is the "don't wait for stream idle" case: the stream holds
 /// open at its terminal event via `expect_response_blocked`. The interjection
 /// is buffered mid-stream. Then the stream is released. The turn loop
@@ -360,7 +360,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                 .expect("turn must finish within timeout")
             });
 
-            // Wait until the first stream is actively streaming and parked.
+            // Wait until the first stream is actively streaming.
             first.wait_blocked().await;
 
             // Buffer the interjection mid-stream — the user "sends" a message
@@ -402,7 +402,7 @@ async fn interjection_buffered_during_stream_reaches_next_request() {
                 "interjection must not appear on the first request; user blobs: {first_user:?}"
             );
 
-            // The conversation must contain the interjection as a standalone.
+            // The conversation must contain the interjection.
             let conv = actor.chat_state_handle.get_conversation().await;
             let has_interjection = conv.iter().any(|item| {
                 matches!(item, ConversationItem::User(u)
@@ -569,8 +569,8 @@ async fn queued_followup_harvested_into_running_turn_reaches_next_request() {
 
 /// ASAP injection during a model stream. The in-flight stream is CANCELLED
 /// so the turn loop iterates immediately, drains the interjection, and
-/// resubmits — instead of waiting for the (potentially many-minutes-long).
-/// Stream to finish. This holds when an interjection arrives while the model
+/// resubmits. Instead of waiting for the (potentially many-minutes-long)
+/// stream to finish. This holds when an interjection arrives while the model
 /// is actively streaming (the turn loop is blocked on `submit_and_collect`).
 /// The partial text the model had already streamed is preserved as an
 /// assistant message so the resubmitted request sees `partial +
@@ -621,7 +621,7 @@ async fn interjection_during_stream_cancels_and_resubmits_with_partial_preserved
                 tokio::sync::mpsc::unbounded_channel::<TurnCompletionMsg>();
             actor.clone().maybe_start_running_task(completion_tx).await;
 
-            // Wait until the first stream is parked at its terminal-event.
+            // Wait until the first stream is parked.
             first.wait_blocked().await;
 
             // Give the sampler-event drainer task a beat to process the text deltas that arrived before the terminal barrier.

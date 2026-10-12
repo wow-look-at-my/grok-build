@@ -743,7 +743,7 @@ pub(super) fn dispatch_dashboard_open_shortcuts_help(app: &mut AppView) {
     }
     use crate::actions::When;
     let contexts = [When::DashboardFocused, When::Always];
-    let entries = crate::views::shortcuts_help::build_entries(&contexts, &app.registry, false);
+    let entries = crate::views::shortcuts_help::build_entries(&contexts, &app.registry);
     let state = crate::views::shortcuts_help::build_initial_picker_state(&entries);
     d.shortcuts_modal = Some(Box::new(crate::views::dashboard::ShortcutsModalState {
         entries,
@@ -1224,7 +1224,6 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 coding_data_sharing_lock: coding_data_sharing_lock_from_app,
                 plan_mode_active: false,
                 show_tips: show_tips_from_app,
-                vim_mode: crate::appearance::cache::load_vim_mode(),
                 scroll_speed: crate::appearance::cache::load_scroll_speed(),
                 respect_manual_folds: respect_manual_folds_from_app,
                 auto_mode_gate: auto_mode_gate_from_app,

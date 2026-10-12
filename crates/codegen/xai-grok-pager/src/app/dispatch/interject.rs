@@ -163,7 +163,7 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
         let (deliverable, stuck_local): (Vec<u64>, Vec<u64>) = local_ids
             .into_iter()
             .partition(|row| agent.queue_row_prompt_like(*row) == Some(true));
-        // A row whose own `session/prompt` RPC is still in flight may.
+        // A row whose own `session/prompt` RPC is still.
         let awaiting_confirm = !agent.optimistic_queue_ids.is_empty();
         (
             session_id,
@@ -237,7 +237,7 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
 /// dispatch (the arm hides the queue echo; the adoption reuses the block). A
 /// slash invocation this client OWNS (a pager builtin: `/plan`, `/model`,
 /// …) is not a message at all and is routed back through the submit path
-/// instead: the shell has. No such command. Sending the text would hand the
+/// instead. The shell has no such command. Sending the text would hand the
 /// model the literal `/cmd args`. Shell-owned commands (ACP-advertised skills
 /// and builtins) keep the send-now route. The shell resolves those when the
 /// prompt's own turn starts, which is exactly what "now" means for them.

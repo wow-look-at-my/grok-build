@@ -128,8 +128,7 @@ pub struct FileOperationLockGuard {
 impl Drop for FileOperationLockGuard {
     fn drop(&mut self) {
         let kind = std::mem::replace(&mut self.kind, LockKind::Exclusive);
-        // The release runs here rather than in a task of its own: whoever is
-        // queued behind this guard learns the lock is free.
+        // The release runs here rather than in a task of its own.
         let released = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.manager.release(&kind);
         }));

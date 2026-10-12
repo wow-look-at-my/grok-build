@@ -1424,7 +1424,7 @@ mod wire_alias_tests {
 
     /// An idp that writes both the snake_case and the camelCase principal key —
     /// which is what a token relayed through a translating gateway looks like.
-    /// Must still be readable, not rejected as a duplicate field.
+    /// The idp must still be readable, not rejected as a duplicate field.
     #[test]
     fn a_token_naming_the_principal_under_both_spellings_is_readable() {
         let token = token_with(

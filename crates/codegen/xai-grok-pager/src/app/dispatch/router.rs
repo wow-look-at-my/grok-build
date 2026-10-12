@@ -90,22 +90,23 @@ use super::settings::setters::{
     set_output_rate_sustained_secs, set_output_rate_window_secs, set_page_flip_on_send,
     set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
     set_respect_manual_folds, set_scroll_lines, set_scroll_mode, set_scroll_speed,
-    set_show_thinking_blocks, set_show_tips, set_simple_mode, set_stop_gate_ci_failing,
+    set_show_thinking_blocks, set_show_tips, set_stop_gate_ci_failing,
     set_stop_gate_unfinished_todos, set_subagent_model_inheritance, set_theme,
-    set_thinking_summaries, set_timeline, set_timestamps, set_ttft_timeout_secs, set_vim_mode,
+    set_thinking_summaries, set_thinking_summary_history_min_count,
+    set_thinking_summary_history_window_secs, set_timeline, set_timestamps, set_ttft_timeout_secs,
     set_voice_capture_mode, set_voice_keybind_enabled, set_voice_stt_language,
 };
 use super::settings::ui::{
     dispatch_confirm_reset_setting, dispatch_open_command_palette, dispatch_open_howto_guides,
     dispatch_open_reset_confirm, dispatch_open_settings, dispatch_toggle_compact_mode,
     dispatch_toggle_mouse_capture, dispatch_toggle_multiline, dispatch_toggle_timestamps,
-    dispatch_toggle_vim_mode,
 };
 use super::status::{
     dispatch_copy_session_id, dispatch_manage_billing, dispatch_open_gboom, dispatch_open_tutorial,
     dispatch_privacy_banner_opt_in, dispatch_privacy_banner_opt_out, dispatch_share_session,
     dispatch_show_context_info, dispatch_show_queue, dispatch_show_release_notes,
-    dispatch_show_session_info, dispatch_show_tasks, dispatch_show_usage, set_coding_data_sharing,
+    dispatch_show_session_info, dispatch_show_tasks, dispatch_show_usage, dispatch_toggle_todos,
+    set_coding_data_sharing,
 };
 use super::task_result::{dispatch_task_result, unregister_all_active_sessions};
 use super::transcript::{
@@ -393,7 +394,7 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
             vec![]
         }
         Action::SendPrompt(text) => {
-            // Hand any stuck local rows to the shell first, so this prompt.
+            // Hand any stuck local rows to the shell first.
             let mut effects = queue::migrate_local_rows_to_server_queue(app);
             effects.extend(dispatch_send_prompt(app, text));
             effects
@@ -1067,6 +1068,7 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::ManageBilling => dispatch_manage_billing(app),
         Action::ShowQueue => dispatch_show_queue(app),
         Action::ShowTasks => dispatch_show_tasks(app),
+        Action::ToggleTodos => dispatch_toggle_todos(app),
         Action::ShowPlan => dispatch_show_plan(app),
         Action::EnterPlanMode { description } => dispatch_enter_plan_mode(app, description),
         Action::SetPlanMode(kind) => set_plan_mode(app, kind),
@@ -1108,8 +1110,6 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::ToggleYolo => dispatch_toggle_yolo(app),
         Action::ToggleMultiline => dispatch_toggle_multiline(app),
         Action::ToggleCompactMode => dispatch_toggle_compact_mode(app),
-        Action::ToggleVimMode => dispatch_toggle_vim_mode(app),
-        Action::SetVimMode(v) => set_vim_mode(app, v),
         Action::SetRememberToolApprovals(v) => set_remember_tool_approvals(app, v),
         Action::SetAskUserQuestionTimeoutEnabled(v) => {
             set_ask_user_question_timeout_enabled(app, v)
@@ -1149,7 +1149,6 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetStopGateCiFailing(v) => set_stop_gate_ci_failing(app, v),
         Action::SetCombineQueuedPrompts(v) => set_combine_queued_prompts(app, v),
         Action::SetFollowUpBehavior(v) => set_follow_up_behavior(app, v),
-        Action::SetSimpleMode(v) => set_simple_mode(app, v),
         Action::SetContextualHintUndo(v) => set_contextual_hint_undo(app, v),
         Action::SetContextualHintPlanMode(v) => set_contextual_hint_plan_mode(app, v),
         Action::SetContextualHintImageInput(v) => set_contextual_hint_image_input(app, v),
@@ -1170,6 +1169,12 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetOutputRateWindowSecs(v) => set_output_rate_window_secs(app, v),
         Action::SetOutputRateMaxRetries(v) => set_output_rate_max_retries(app, v),
         Action::SetTtftTimeoutSecs(v) => set_ttft_timeout_secs(app, v),
+        Action::SetThinkingSummaryHistoryWindowSecs(v) => {
+            set_thinking_summary_history_window_secs(app, v)
+        }
+        Action::SetThinkingSummaryHistoryMinCount(v) => {
+            set_thinking_summary_history_min_count(app, v)
+        }
         Action::SetShowTips(v) => set_show_tips(app, v),
         Action::SetDisplayRefreshAutoCadence(v) => set_display_refresh_auto_cadence(app, v),
         Action::PreviewTheme(v) => preview_theme(app, v),

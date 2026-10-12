@@ -103,13 +103,13 @@ fn plan_stdio_spawn_non_windows_never_resolves() {
 }
 
 /// The spawn path must map a package runner's caches onto the session's
-/// writable temp storage. This happens whenever the session is
-/// write-confined, because the runner's default caches (`~/.cache/uv`,
-/// `~/.npm`) sit under a `$HOME` no confining profile grants. Which is the
-/// EPERM that made `uvx kagimcp` and `npx tampermonkey-mcp` fail their MCP
-/// handshake with "Broken pipe". Drives the shipped `apply_runner_cache_env`
-/// (the core the spawn site calls) against a real `tokio::process::Command`,
-/// and asserts on what the child would receive.
+/// writable temp storage whenever the session is write-confined. This is
+/// because the runner's default caches (`~/.cache/uv`, `~/.npm`) sit under a
+/// `$HOME` no confining profile grants — which is the EPERM that made `uvx
+/// kagimcp`. And `npx tampermonkey-mcp` fail their MCP handshake with
+/// "Broken pipe". Drives the shipped `apply_runner_cache_env` (the core the
+/// spawn site calls) against a real `tokio::process::Command`, and asserts
+/// on what the child would receive.
 #[tokio::test]
 async fn sandboxed_package_runner_gets_tmp_cache_env() {
     let scratch = std::env::temp_dir().join(format!(
@@ -165,7 +165,7 @@ async fn sandboxed_package_runner_gets_tmp_cache_env() {
             dir.starts_with(&scratch),
             "{name} must be mapped onto the injected scratch root, got {value}"
         );
-        // The whole point of the redirect: never back into the session's own.
+        // The whole point of the redirect.
         let grok_home = xai_grok_tools::util::grok_home();
         assert!(
             !dir.starts_with(&grok_home),

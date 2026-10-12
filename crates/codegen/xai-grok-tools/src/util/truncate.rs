@@ -71,7 +71,7 @@ pub fn truncate_bytes(s: &str, max_bytes: usize) -> &str {
 }
 
 /// Truncate a string to at most `max_bytes` bytes at a valid UTF-8 boundary.
-/// Returns the string if it fits. No truncation marker is added.
+/// Returns the original string if it fits.
 pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
     truncate_bytes(s, max_bytes)
 }

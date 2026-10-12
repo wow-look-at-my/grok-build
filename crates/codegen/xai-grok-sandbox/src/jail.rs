@@ -13,7 +13,7 @@ const SYSTEM_RO_BASE: &[&str] = &[
     "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc", "/opt", "/run", "/var",
 ];
 
-/// Extra read-only system paths macOS needs that the Linux base omits. bwrap binds the whole tree at the VFS layer.
+/// Extra read-only system paths macOS needs that the Linux base.
 #[cfg(target_os = "macos")]
 const SYSTEM_RO_BASE_MACOS: &[&str] = &["/System", "/Library", "/private"];
 
@@ -105,8 +105,8 @@ fn default_key(name: &str) -> Option<DefaultKey> {
 
 impl JailDefaults {
     /// The defaults from one `[jail]` config value. A key that is absent, not a
-    /// string, or holds a string we do not recognize keeps the release default: a
-    /// bad token. Is a no-op rather than a jail that silently grants more (or
+    /// string, or holds a string we do not recognize keeps the release default. A
+    /// bad token is a no-op rather than a jail that silently grants more (or
     /// refuses) than the user wrote meaningful words for. Unknown section keys are
     /// ignored the same way — they may be reserved by `--sandbox` profile config
     /// or written by a newer build.
@@ -227,9 +227,9 @@ pub const PATHBOX_PROFILE: &str = "pathbox";
 /// groups the flags into separate lists and loses it. The path-mount jail is
 /// enabled only when `--sandbox=pathbox` is given, OR any of
 /// `--ro`/`--rw`/`--rn` appears (the jail is then implied). A bare
-/// `--sandbox` with no value is always invalid. A `--sandbox <profile>`
+/// `--sandbox` with no value is always invalid, and a `--sandbox <profile>`
 /// naming anything other than `pathbox` is the built-in profile sandbox (not
-/// a jail) and cannot be combined with path flags. Scanning stops at a bare
+/// a jail). It cannot be combined with path flags. Scanning stops at a bare
 /// `--`, so a prompt is never read as a flag.
 pub fn parse_jail_args<I>(args: I) -> Result<JailRequest, JailError>
 where
@@ -374,7 +374,7 @@ pub struct JailPlan {
     pub ci_host_fd: Option<i32>,
 }
 
-/// Resolve a request into a plan. Every path must exist: a missing bind is a hole the caller cannot see. `defaults` is the config layer (see [`JailDefaults`]) that supplies the per-path access where the command line is silent. The runtime caller loads it via [`JailDefaults::load`], tests pass an explicit value so they never depend on the host's `config.toml`. The working directory is bound read-write by default, so a jail built with the pathbox marker (`--sandbox=pathbox`). Otherwise, a path flag can write in the cwd without an explicit `--rw .`. The effective cwd access is the LAST user mount that contains the cwd (`defaults.cwd` when none does), and that single cwd mount is placed. At the FRONT of `plan.mounts`. Front-placement plus the effective access is what lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`. The Seatbelt profile emits no stale write-allow for the cwd and bwrap binds it read-only. `parse_jail_args` is untouched — the default is a plan-level injection, not a flag.
+/// Resolve a request into a plan. Every path must exist: a missing bind is a hole the caller cannot see. `defaults` is the config layer (see [`JailDefaults`]) that supplies the per-path access where the command line is silent. The runtime caller loads it via [`JailDefaults::load`], tests pass an explicit value so they never depend on the host's `config.toml`. The working directory is bound read-write by default, so a jail built with the pathbox marker (`--sandbox=pathbox`). Otherwise, a path flag can write in the cwd without an explicit `--rw .`. The effective cwd access is the LAST user mount that contains the cwd (`defaults.cwd` when none does). The effective cwd access also is that single cwd mount is placed at the FRONT of `plan.mounts`. Front-placement plus the effective access is what lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`. The Seatbelt profile emits no stale write-allow for the cwd and bwrap binds it read-only. `parse_jail_args` is untouched — the default is a plan-level injection, not a flag.
 pub fn build_plan(
     request: &JailRequest,
     defaults: &JailDefaults,
@@ -463,8 +463,8 @@ impl JailPlan {
     /// with a bare chdir error, which reads as a broken sandbox rather than a
     /// missing `--rw`.
     fn check_cwd_is_bound(&self) -> Result<(), JailError> {
-        // The temp directory is compared exactly. On Linux it is a fresh
-        // tmpfs, so a path under it exists on the host and not in the jail.
+        // The temp directory is compared exactly: on Linux it is a fresh
+        // tmpfs. A path under it exists on the host and not in the jail.
         if self.cwd == self.temp_dir {
             return Ok(());
         }
@@ -513,10 +513,10 @@ fn dedicated_temp_dir() -> Result<PathBuf, JailError> {
 /// them default to the release behavior (ro base, tmpfs `/tmp`, rw
 /// `$GROK_HOME`), so a plan built with [`JailDefaults::default`] produces
 /// byte-identical argv to the jail before config existed. Compiled under
-/// `cfg(test)` off Linux as well, because the emitted argv IS the contract
+/// `cfg(test)` off Linux as well. Because the emitted argv IS the contract
 /// (the option order is what makes a later bind win, and what keeps the CI
 /// host-worker fd an option rather than a program argument) and an ordering
-/// only one host can assert is one. That regresses quietly everywhere else.
+/// only one host can assert is one that regresses quietly everywhere else.
 #[cfg(any(target_os = "linux", test))]
 pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     // No --die-with-parent: it kills the jail when bwrap's parent dies.
@@ -598,17 +598,7 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
 }
 
 /// Build the Seatbelt profile for the plan. Seatbelt confines READS and
-/// WRITES here, mirroring bwrap. `(allow default)` keeps the process's
-/// non-file capabilities (network, process, sysctl) open, then `(deny
-/// file-read*)` and `(deny file-write*)` take every file access away, and the
-/// rules that follow give. Each kind of access back only for the paths the
-/// jail is supposed to expose: - `/dev` (a terminal, a PTY, `/dev/null`) —
-/// read and write. - a `--rw` mount — read. And write. - a `--ro` mount —
-/// read only. - the read-only system base (including the macOS `/System`.
-///   `/private` additions) — read only, or read and write when the config sets
-///   `system = "rw"` (the user's explicit choice to weaken the jail).
-/// - `$GROK_HOME` and the sandbox temp dir — read and write, unless
-///   `grok_home = "ro"` leaves `$GROK_HOME` readable only.
+/// WRITES here, mirroring bwrap.
 #[cfg(target_os = "macos")]
 pub fn seatbelt_profile(plan: &JailPlan) -> String {
     let mut profile = String::from("(version 1)\n(allow default)\n");
@@ -862,7 +852,7 @@ mod tests {
         assert!(parse_jail_args(argv(&["--sandbox="])).is_err());
         assert!(parse_jail_args(argv(&["--sandbox", "--ro", "."])).is_err());
         assert!(parse_jail_args(argv(&["--rn", "/s", "--sandbox"])).is_err());
-        // `--sandbox` followed by a prompt/path token is the profile value, so with path flags it is the invalid profile+path mix.
+        // `--sandbox` followed by a prompt/path token is the profile value.
         assert!(parse_jail_args(argv(&["--sandbox", "strict", "--ro", "."])).is_err());
     }
 
@@ -1055,12 +1045,12 @@ mod tests {
         );
     }
 
-    /// The defect this fixes, on the record. Prints the fixed argv. Beside it the
-    /// argv the pre-fix caller produced: the SAME builder for a plan with no fd,
-    /// with the identical override appended. To the finished command. There it
-    /// sits after `--`, so bwrap hands it to the jailed binary as arguments and
-    /// never sets the variable. Output only — the assertions live in the tests
-    /// above.
+    /// The defect this fixes, on the record. Prints the fixed argv, and beside it
+    /// the argv the pre-fix caller produced: the SAME builder for a plan with no
+    /// fd. That argv is with the identical override appended to the finished
+    /// command. There it sits after `--`, so bwrap hands it to the jailed binary
+    /// as arguments and never sets the variable. Output only — the assertions
+    /// live in the tests above.
     #[test]
     fn capture_ci_fd_argv() {
         let mut with_fd = plan_fixture(vec![]);
@@ -1245,8 +1235,7 @@ mod tests {
     }
 
     // ── cwd rw default
-    // ───────────────────────────────────────────────────── These drive the
-    // shipped functions end to end (`parse_jail_args` → `build_plan` → `bwrap_command` / `seatbelt_profile`) from the real working directory.
+    // ─────────────────────────────────────────────────────.
 
     /// Run the shipped parse + plan against the real cwd, with the release
     /// (no-config) defaults so the assertions are independent of any host
@@ -1711,7 +1700,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "macos")]
     fn seatbelt_system_rw_makes_every_base_path_writable_too() {
-        // system = "rw" emits a write-allow over the whole platform base.
+        // system = "rw" emits a write-allow over the whole platform base (the user's explicit weakening), while keeping the read side present.
         let plan = plan_fixture(Vec::new());
         let ro_profile = seatbelt_profile(&plan);
 

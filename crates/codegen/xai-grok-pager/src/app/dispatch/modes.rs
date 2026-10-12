@@ -105,7 +105,7 @@ pub(super) fn dispatch_enter_plan_mode(
             .slash_controller
             .recognized_token_ranges(&desc, &agent.session.models);
         // Own-turn: when a turn is already running the drain below is blocked
-        // and this row waits for the NEXT turn — which is exactly what.
+        // and this row waits for the NEXT turn.
         agent
             .session
             .enqueue_own_turn_prompt(desc, skill_token_ranges);

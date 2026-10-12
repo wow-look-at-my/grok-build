@@ -102,14 +102,7 @@ impl FeedbackModalState {
         theme: &Theme,
         compact: bool,
     ) -> Option<FeedbackModalRender> {
-        let is_searching = matches!(
-            self.drafts,
-            DraftsState::Browse {
-                search_focused: true,
-                ..
-            }
-        );
-        let mut shortcuts = vec![
+        let shortcuts = vec![
             Shortcut {
                 label: "↑↓/j k move",
                 clickable: false,
@@ -131,7 +124,6 @@ impl FeedbackModalState {
                 id: 0,
             },
         ];
-        modal_window::push_vim_nav_search_hint(&mut shortcuts, is_searching);
         let config = Self::window_config(&shortcuts, compact, false);
         let areas = modal_window::render_modal_window(buf, area, &mut self.window, &config, theme)?;
         let content = areas.content;

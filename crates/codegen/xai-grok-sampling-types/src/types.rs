@@ -2203,8 +2203,8 @@ mod tests {
 
     #[test]
     fn usage_struct_deserializes_bifrost_cost_object() {
-        // The deserializer must accept this shape and expose the same USD
-        // float.
+        // `total_cost` (and optional per-tier breakdown). The deserializer
+        // must accept this shape and expose the same USD float.
         let json = json!({
             "prompt_tokens": 18,
             "completion_tokens": 10,
