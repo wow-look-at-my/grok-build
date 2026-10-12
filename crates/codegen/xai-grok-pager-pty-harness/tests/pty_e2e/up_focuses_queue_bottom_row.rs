@@ -46,7 +46,7 @@ async fn up_focuses_queue_bottom_row() {
 
     // `e` edits whatever row the highlight sits on, so the recalled text names the row Up selected.
     harness.inject_keys(UP).expect("Up into the queue");
-    harness.inject_keys(b"e").expect("edit the highlighted row");
+    edit_highlighted_row(&mut harness);
     harness
         .inject_keys(EDIT_SUFFIX.as_bytes())
         .expect("type into the recalled row");
@@ -69,4 +69,34 @@ async fn up_focuses_queue_bottom_row() {
         harness.screen_contents()
     );
     harness.quit().expect("clean quit");
+}
+
+/// The pager's toast for `e` on a row whose enqueue the shell has not confirmed yet.
+const STILL_QUEUEING: &str = "Still queueing";
+
+/// Press `e` on the highlighted queue row until the composer enters edit mode.
+/// A row on screen can still be the pager's optimistic echo. `e` on it toasts
+/// STILL_QUEUEING and asks for another press once the shell confirms the row,
+/// so the press is repeated after that toast clears.
+fn edit_highlighted_row(harness: &mut PtyHarness) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        harness.inject_keys(b"e").expect("edit the highlighted row");
+        harness
+            .wait_until(
+                "edit mode or the still-queueing toast",
+                Duration::from_secs(10),
+                |h| h.contains_text("editing queued") || h.contains_text(STILL_QUEUEING),
+            )
+            .expect("`e` on the queue row had no effect");
+        if harness.contains_text("editing queued") {
+            return;
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        harness
+            .wait_until("the still-queueing toast to clear", remaining, |h| {
+                !h.contains_text(STILL_QUEUEING)
+            })
+            .expect("the shell never confirmed the queued row");
+    }
 }
