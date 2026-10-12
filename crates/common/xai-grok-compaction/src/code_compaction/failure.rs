@@ -13,6 +13,7 @@ pub fn is_context_length_error(message: &str) -> bool {
         || m.contains("prompt is too long")
         || m.contains("maximum prompt length")
         || m.contains("maximum context length")
+        || m.contains("longer than the model's context length")
         // Provider request-body byte caps.
         || m.contains("maximum allowed number of bytes")
         || (m.contains("current message") && m.contains("exceeds budget"))
@@ -72,6 +73,7 @@ mod tests {
             "prompt is too long: 250000 tokens > 200000 maximum",
             "exceeds the maximum prompt length",
             "This model's maximum context length is 128000 tokens",
+            "The input (262195 tokens) is longer than the model's context length (262144 tokens)",
             "error code: context_length_exceeded",
             "Failed to start sampling: [conversation] Current message (1000000 tokens) exceeds budget (500000 tokens)",
             "compact failed: API error (status 400 Bad Request): invalid-argument: Failed to start sampling: [conversation] Current message (1000000 tokens) exceeds budget (500000 tokens)",

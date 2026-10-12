@@ -122,6 +122,11 @@ pub enum PromptOrigin {
     GoalClassifierNudge,
     /// Scheduled task (`/loop`) prompt fired by the scheduler via the pager.
     SchedulerFired,
+    /// A `/todo` capture that added items while no turn was running. The shell wakes a turn with the
+    /// reminder text so the work begins; the item is already on the list.
+    TodoAdded {
+        capture_id: String,
+    },
     /// The shell re-parked `exit_plan_mode` on resume, the user approved/revised, and the shell injects the follow-up turn.
     /// Synthetic: the user never typed it, so it stays out of prompt history, but it still runs a real turn.
     PlanResume,
@@ -158,6 +163,10 @@ impl PromptOrigin {
             Self::GoalClassifierNudge
         } else if prompt_id.starts_with("scheduler-fired-") {
             Self::SchedulerFired
+        } else if let Some(capture_id) = prompt_id.strip_prefix("todo-added-") {
+            Self::TodoAdded {
+                capture_id: capture_id.to_string(),
+            }
         } else if prompt_id.starts_with("plan-resume-") {
             Self::PlanResume
         } else {
@@ -196,6 +205,7 @@ impl PromptOrigin {
             Self::TaskCompleted { .. }
             | Self::SubagentCompleted { .. }
             | Self::WorkflowCompleted { .. }
+            | Self::TodoAdded { .. }
             | Self::SchedulerFired => InputPolicy {
                 authority: InputAuthority::RuntimeControl,
                 slash: SlashAuthority::Inert,
@@ -231,6 +241,7 @@ impl PromptOrigin {
             Self::TaskCompleted { .. }
                 | Self::SubagentCompleted { .. }
                 | Self::WorkflowCompleted { .. }
+                | Self::TodoAdded { .. }
                 | Self::ParentAgentMessage { .. }
                 | Self::ParentHumanMessage { .. }
                 | Self::NotificationDrain
@@ -248,6 +259,7 @@ impl PromptOrigin {
             Self::TaskCompleted { .. }
             | Self::SubagentCompleted { .. }
             | Self::WorkflowCompleted { .. }
+            | Self::TodoAdded { .. }
             | Self::NotificationDrain
             | Self::GoalSummary
             | Self::GoalClassifierNudge => true,
@@ -265,6 +277,7 @@ impl PromptOrigin {
             | Self::GoalSummary
             | Self::GoalClassifierNudge
             | Self::SchedulerFired
+            | Self::TodoAdded { .. }
             | Self::PlanResume => None,
         }
     }
@@ -293,6 +306,20 @@ mod tests {
         assert!(origin.is_auto_wake());
         assert_eq!(origin.completion_id(), Some("abc-123"));
         assert!(!PromptOrigin::from_prompt_id("my-prompt").is_auto_wake());
+    }
+    #[test]
+    fn from_prompt_id_todo_added() {
+        let origin = PromptOrigin::from_prompt_id("todo-added-cap-9");
+        assert_eq!(
+            origin,
+            PromptOrigin::TodoAdded {
+                capture_id: "cap-9".into()
+            }
+        );
+        assert!(origin.is_synthetic());
+        assert!(origin.is_auto_wake());
+        assert!(origin.hide_user_echo_from_scrollback());
+        assert_eq!(origin.completion_id(), None);
     }
     #[test]
     fn from_prompt_id_parent_message() {
