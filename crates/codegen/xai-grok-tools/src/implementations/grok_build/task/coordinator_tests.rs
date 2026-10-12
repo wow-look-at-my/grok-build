@@ -25,12 +25,26 @@ struct TestControl {
     interjections: mpsc::UnboundedSender<String>,
     admission_gate: Option<AdmissionGate>,
     admitted_messages: Option<mpsc::UnboundedSender<(ActiveAgentMessageOperation, String)>>,
+    /// When set, each `progress()` call advances the counters.
+    progress_steps: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
 }
 
 impl ChildControl for TestControl {
     type ProgressFuture = std::future::Ready<SubagentProgress>;
 
     fn progress(&self) -> Self::ProgressFuture {
+        if let Some(steps) = &self.progress_steps {
+            let step = steps.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            return std::future::ready(SubagentProgress {
+                turn_count: step,
+                tool_call_count: step,
+                tokens_used: u64::from(step) * 100,
+                context_window_tokens: 1_000,
+                context_usage_pct: 10,
+                tools_used: vec!["read_file".to_owned()],
+                error_count: 0,
+            });
+        }
         std::future::ready(SubagentProgress {
             turn_count: 2,
             tool_call_count: 3,
@@ -105,6 +119,8 @@ pub(in crate::implementations::grok_build::task::coordinator) struct RunnerBehav
     /// Type returned for a resume source that is not in the completed map.
     pub(in crate::implementations::grok_build::task::coordinator) durable_resume_type:
         Option<&'static str>,
+    /// `TestControl::progress` advances its counters on every call.
+    pub(in crate::implementations::grok_build::task::coordinator) graduated_progress: bool,
 }
 
 struct TestRunner {
@@ -126,6 +142,9 @@ struct TestRunner {
     wake_runs: mpsc::UnboundedSender<WakeRun>,
     admitted_messages: Option<mpsc::UnboundedSender<(ActiveAgentMessageOperation, String)>>,
     admission_gate: Option<AdmissionGate>,
+    progress_steps: Option<std::sync::Arc<std::sync::atomic::AtomicU32>>,
+    /// Worktrees the coordinator released as disposable at child exit.
+    temporary_worktree_releases: mpsc::UnboundedSender<String>,
 }
 
 impl ChildRunner for TestRunner {
@@ -157,6 +176,7 @@ impl ChildRunner for TestRunner {
         let wake_runs = self.wake_runs.clone();
         let admitted_messages = self.admitted_messages.clone();
         let admission_gate = self.admission_gate.clone();
+        let progress_steps = self.progress_steps.clone();
         let failed_wake_teardown_ready = self.failed_wake_teardown_ready.clone();
         Box::pin(async move {
             let ChildRunRequest {
@@ -252,7 +272,12 @@ impl ChildRunner for TestRunner {
                 persona: None,
                 resumed_from: request.resume_from.clone(),
                 child_cwd: request.cwd.clone().unwrap_or_default(),
-                worktree_path: None,
+                // The fake runtime reports a per-child worktree whenever the
+                // request asks for worktree isolation, so a test can observe
+                // the conflict policy's decision.
+                worktree_path: (request.runtime_overrides.isolation
+                    == Some(xai_tool_types::SubagentIsolationMode::Worktree))
+                .then(|| format!("/worktrees/{}", request.id)),
                 effective_model_id: "test-model".to_owned(),
                 // Mock definition resolution: this type declares background.
                 definition_background: request.subagent_type == "background-default",
@@ -265,6 +290,7 @@ impl ChildRunner for TestRunner {
                     } else {
                         None
                     },
+                    progress_steps: progress_steps.clone(),
                 },
             };
             let rejects_deferred_start = reject_wake_after_deferred_start
@@ -355,6 +381,12 @@ impl ChildRunner for TestRunner {
 
     fn supports_agent_message_sender(&self) -> bool {
         true
+    }
+
+    fn release_temporary_worktree(&self, worktree_path: &str) {
+        let _ = self
+            .temporary_worktree_releases
+            .send(worktree_path.to_owned());
     }
 
     fn on_completed(
@@ -461,6 +493,8 @@ pub(in crate::implementations::grok_build::task::coordinator) struct Harness {
         mpsc::UnboundedReceiver<(ActiveAgentMessageOperation, String)>,
     pub(in crate::implementations::grok_build::task::coordinator) interjections:
         mpsc::UnboundedReceiver<String>,
+    pub(in crate::implementations::grok_build::task::coordinator) temporary_worktree_releases:
+        mpsc::UnboundedReceiver<String>,
     pub(in crate::implementations::grok_build::task::coordinator) actor: tokio::task::JoinHandle<()>,
 }
 
@@ -509,6 +543,10 @@ pub(in crate::implementations::grok_build::task::coordinator) fn harness_with_op
     let (advertise_tx, advertise_targets) = mpsc::unbounded_channel();
     let (wake_run_tx, wake_runs) = mpsc::unbounded_channel();
     let (admitted_message_tx, admitted_messages) = mpsc::unbounded_channel();
+    let progress_steps = behavior
+        .graduated_progress
+        .then(|| std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)));
+    let (temporary_worktree_release_tx, temporary_worktree_releases) = mpsc::unbounded_channel();
     let actor = tokio::spawn(
         SubagentCoordinator::from_channel(
             command_rx,
@@ -529,6 +567,8 @@ pub(in crate::implementations::grok_build::task::coordinator) fn harness_with_op
                 wake_runs: wake_run_tx,
                 admitted_messages: Some(admitted_message_tx),
                 admission_gate: None,
+                progress_steps: progress_steps.clone(),
+                temporary_worktree_releases: temporary_worktree_release_tx,
             },
             config,
         )
@@ -553,6 +593,7 @@ pub(in crate::implementations::grok_build::task::coordinator) fn harness_with_op
         advertise_targets,
         wake_runs,
         admitted_messages,
+        temporary_worktree_releases,
         actor,
     }
 }
@@ -584,6 +625,7 @@ fn harness_with_admission_gate(
     let (interjection_tx, interjections) = mpsc::unbounded_channel();
     let (entered_tx, admission_entered) = mpsc::unbounded_channel();
     let (admission_release, _) = tokio::sync::broadcast::channel(4);
+    let (temporary_worktree_release_tx, temporary_worktree_releases) = mpsc::unbounded_channel();
     let gate = AdmissionGate {
         entered: entered_tx,
         release: admission_release.clone(),
@@ -611,6 +653,8 @@ fn harness_with_admission_gate(
                 admitted_messages: Some(admitted_message_tx),
                 admission_gate: Some(gate),
                 interjections: interjection_tx,
+                progress_steps: None,
+                temporary_worktree_releases: temporary_worktree_release_tx,
             },
             config,
         )
@@ -633,6 +677,7 @@ fn harness_with_admission_gate(
             wake_runs,
             admitted_messages,
             interjections,
+            temporary_worktree_releases,
             actor,
         },
         admission_entered,
@@ -2198,6 +2243,96 @@ async fn completed_resume_source_uses_request_uuid_as_agent_id() {
     let _ = harness.finish.send(());
     resume_spawn.await.unwrap().unwrap();
 
+    harness.actor.abort();
+}
+
+/// A child spawned with `resume_from` is a NEW child whose status must come
+/// from its own live state. It reports running with its own progress while the
+/// finished source stays finished, and that progress moves as it works.
+#[tokio::test]
+async fn a_resumed_child_reports_its_own_live_state_not_the_source() {
+    let mut harness = harness_with_options(
+        RunnerBehavior {
+            graduated_progress: true,
+            ..Default::default()
+        },
+        CoordinatorConfig::default(),
+    );
+    // The source finishes first; the resume then continues its transcript.
+    let source = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move { backend.spawn(request("resume-src", true), None).await }
+    });
+    assert_eq!(harness.started.recv().await.as_deref(), Some("resume-src"));
+    let _ = harness.finish.send(());
+    source.await.unwrap().unwrap();
+
+    let mut resume = request("resume-child", true);
+    resume.resume_from = Some("resume-src".to_owned());
+    let resume_spawn = tokio::spawn({
+        let backend = harness.backend.clone();
+        async move { backend.spawn(resume, None).await }
+    });
+    assert_eq!(
+        harness.started.recv().await.as_deref(),
+        Some("resume-child")
+    );
+
+    let first = harness
+        .backend
+        .query("resume-child", false, None)
+        .await
+        .expect("resumed child is queryable");
+    let SubagentSnapshotStatus::Running {
+        tool_call_count: first_tools,
+        ..
+    } = first.status
+    else {
+        panic!(
+            "a working resumed child must report Running: {:?}",
+            first.status
+        );
+    };
+
+    // A genuinely finished child stays distinguishable from the working one.
+    let source_snapshot = harness
+        .backend
+        .query("resume-src", false, None)
+        .await
+        .expect("source stays queryable");
+    assert!(
+        source_snapshot.status.is_terminal(),
+        "the source stays finished while the resumed child works: {:?}",
+        source_snapshot.status
+    );
+
+    let second = harness
+        .backend
+        .query("resume-child", false, None)
+        .await
+        .expect("resumed child stays queryable");
+    let SubagentSnapshotStatus::Running {
+        tool_call_count: second_tools,
+        ..
+    } = second.status
+    else {
+        panic!("the resumed child is still working: {:?}", second.status);
+    };
+    assert!(
+        second_tools > first_tools,
+        "the resumed child's progress must advance as it works: {first_tools} -> {second_tools}"
+    );
+
+    let inspection = harness
+        .backend
+        .inspect("resume-child")
+        .await
+        .expect("resumed child inspectable");
+    assert_eq!(inspection.resumed_from.as_deref(), Some("resume-src"));
+    assert!(inspection.snapshot.is_running());
+
+    let _ = harness.finish.send(());
+    resume_spawn.await.unwrap().unwrap();
     harness.actor.abort();
 }
 
@@ -4745,10 +4880,11 @@ async fn workflow_spawns_bypass_the_session_concurrent_limit() {
 /// A prompt that makes [`TestRunner`]'s run future unwind.
 const PANICKING_PROMPT: &str = "panic mid-run";
 
-/// A child that dies mid-run has to leave a finished record behind. The
-/// unwinding is caught where the run is pushed. What the coordinator still
-/// owes whoever holds the task id is an answer naming the failure. A bare
-/// "panicked" cannot be told apart from any other way a child can die. The
+/// A child that dies mid-run has to leave a finished record behind.
+///
+/// The unwinding is caught where the run is pushed, so what the coordinator
+/// still owes whoever holds the task id is an answer naming the failure: a bare
+/// "panicked" cannot be told apart from any other way a child can die, and the
 /// caller is the one that has to decide what to do about it.
 #[tokio::test]
 async fn a_panicking_child_reports_what_it_died_of() {
@@ -4786,5 +4922,384 @@ async fn a_panicking_child_reports_what_it_died_of() {
 
     let _ = harness.finish.send(());
     let _ = spawn.await;
+    harness.actor.abort();
+}
+
+// -- Inter-agent resource lock ----------------------------------------------
+
+fn locked_request(id: &str, resource: &str, background: bool) -> SubagentRequest {
+    let mut request = request(id, background);
+    request.runtime_overrides.resource = Some(xai_tool_types::SubagentResource::RepoPath(
+        resource.to_owned(),
+    ));
+    request
+}
+
+fn resource_lock_config(
+    allow_separate_worktree: bool,
+    wait_budget: std::time::Duration,
+) -> CoordinatorConfig {
+    CoordinatorConfig {
+        foreground_budget: std::time::Duration::from_secs(5),
+        resource_lock: crate::implementations::grok_build::task::ResourceLockConfig {
+            enabled: true,
+            allow_separate_worktree,
+            wait_budget,
+        },
+        ..CoordinatorConfig::default()
+    }
+}
+
+/// Concurrent spawns over one resource must not share a working tree. The
+/// first keeps the shared tree and the second is moved into its own worktree.
+#[tokio::test]
+async fn conflicting_spawns_resolve_to_separate_worktrees() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(true, std::time::Duration::from_secs(5)),
+    );
+    let backend = harness.backend.clone();
+
+    let first = {
+        let backend = backend.clone();
+        tokio::spawn(async move {
+            backend
+                .spawn(locked_request("lock-a", "/repo", false), None)
+                .await
+        })
+    };
+    let a = harness.requests.recv().await.expect("first child starts");
+    assert_eq!(a.id, "lock-a");
+    assert_eq!(
+        a.runtime_overrides.isolation, None,
+        "the first holder keeps the shared tree",
+    );
+
+    let second = {
+        let backend = backend.clone();
+        tokio::spawn(async move {
+            backend
+                .spawn(locked_request("lock-b", "/repo", false), None)
+                .await
+        })
+    };
+    let b = harness
+        .requests
+        .recv()
+        .await
+        .expect("colliding child starts");
+    assert_eq!(b.id, "lock-b");
+    assert_eq!(
+        b.runtime_overrides.isolation,
+        Some(xai_tool_types::SubagentIsolationMode::Worktree),
+        "a colliding spawn is isolated instead of sharing the contended resource",
+    );
+
+    // Both children are live at once: the collision did not serialize them.
+    let mut started_ids = Vec::new();
+    for _ in 0..2 {
+        started_ids.push(harness.started.recv().await.expect("child started"));
+    }
+    started_ids.sort();
+    assert_eq!(started_ids, vec!["lock-a".to_owned(), "lock-b".to_owned()]);
+
+    let _ = harness.finish_one.send("lock-a".to_owned());
+    let _ = harness.finish_one.send("lock-b".to_owned());
+    let _ = first.await;
+    let _ = second.await;
+    harness.actor.abort();
+}
+
+/// The worktree the conflict policy created is disposable: the coordinator
+/// releases it when the isolated agent finishes, and only for that agent.
+#[tokio::test]
+async fn temporary_worktree_is_released_when_the_agent_finishes() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(true, std::time::Duration::from_secs(5)),
+    );
+    let backend = harness.backend.clone();
+
+    let first = {
+        let backend = backend.clone();
+        tokio::spawn(async move {
+            backend
+                .spawn(locked_request("lock-a", "/repo", false), None)
+                .await
+        })
+    };
+    harness.requests.recv().await.expect("first child starts");
+
+    let second = {
+        let backend = backend.clone();
+        tokio::spawn(async move {
+            backend
+                .spawn(locked_request("lock-b", "/repo", false), None)
+                .await
+        })
+    };
+    harness
+        .requests
+        .recv()
+        .await
+        .expect("colliding child starts");
+
+    let _ = harness.finish_one.send("lock-b".to_owned());
+    let released = harness
+        .temporary_worktree_releases
+        .recv()
+        .await
+        .expect("the isolated worktree is released at exit");
+    assert_eq!(released, "/worktrees/lock-b");
+
+    // The shared child holds no temporary worktree, so its exit releases nothing.
+    let _ = harness.finish_one.send("lock-a".to_owned());
+    assert!(
+        harness.temporary_worktree_releases.try_recv().is_err(),
+        "a shared-tree child must not release a worktree",
+    );
+
+    let _ = first.await;
+    let _ = second.await;
+    harness.actor.abort();
+}
+
+/// When a separate worktree is not available, the colliding spawn waits for the
+/// holder to release and then runs.
+#[tokio::test]
+async fn conflicting_spawn_waits_when_a_worktree_is_unavailable() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(false, std::time::Duration::from_secs(5)),
+    );
+    let backend = harness.backend.clone();
+
+    let first = {
+        let backend = backend.clone();
+        tokio::spawn(async move {
+            backend
+                .spawn(locked_request("lock-a", "/repo", false), None)
+                .await
+        })
+    };
+    harness.requests.recv().await.expect("first child starts");
+
+    // Background registration fires once the spawn is parked in the wait queue,
+    // so the assertion below is not racing the actor.
+    let (registered, waiter) =
+        spawn_noting_registration(backend.clone(), locked_request("lock-b", "/repo", true));
+    registered.await.expect("parked spawn registers");
+    assert!(
+        harness.requests.try_recv().is_err(),
+        "a waiting spawn must not reach the runner while the holder is live",
+    );
+
+    // Release the holder; the waiter now starts.
+    let _ = harness.finish_one.send("lock-a".to_owned());
+    let _ = first.await;
+    let b = harness
+        .requests
+        .recv()
+        .await
+        .expect("waiter starts once the resource frees");
+    assert_eq!(b.id, "lock-b");
+    assert_eq!(
+        b.runtime_overrides.isolation, None,
+        "the waiter uses the freed resource, not a worktree",
+    );
+
+    let _ = harness.finish_one.send("lock-b".to_owned());
+    let _ = waiter.await;
+    harness.actor.abort();
+}
+
+/// A spawn on `/repo` its caller blocks on until it finishes.
+fn blocking_request(id: &str, caller: &str) -> SubagentRequest {
+    let mut request = request(id, false);
+    request.parent_session_id = caller.to_owned();
+    request.await_to_completion = true;
+    request.cwd = Some("/repo".to_owned());
+    request
+}
+
+/// Spawn `request` on its own task and return the join handle.
+fn spawn_on(
+    backend: &ChannelBackend,
+    request: SubagentRequest,
+) -> tokio::task::JoinHandle<Result<SubagentResult, xai_tool_runtime::ToolError>> {
+    let backend = backend.clone();
+    tokio::spawn(async move { backend.spawn(request, None).await })
+}
+
+/// Children one caller blocks on hold the caller's lock together. A panel of
+/// them on one path all start at once in the shared tree.
+#[tokio::test]
+async fn children_the_caller_blocks_on_share_its_path_lock() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(false, std::time::Duration::from_millis(150)),
+    );
+    let backend = harness.backend.clone();
+
+    let first = spawn_on(&backend, blocking_request("skeptic-1", "parent"));
+    assert_eq!(
+        harness.requests.recv().await.expect("first starts").id,
+        "skeptic-1"
+    );
+    let second = spawn_on(&backend, blocking_request("skeptic-2", "parent"));
+    let started = harness
+        .requests
+        .recv()
+        .await
+        .expect("second starts while the first holds the path");
+    assert_eq!(started.id, "skeptic-2");
+    assert_eq!(started.runtime_overrides.isolation, None);
+
+    let _ = harness.finish_one.send("skeptic-2".to_owned());
+    let _ = harness.finish_one.send("skeptic-1".to_owned());
+    for handle in [first, second] {
+        let result = handle
+            .await
+            .expect("spawn task joined")
+            .expect("coordinator channel open");
+        assert!(
+            result.success,
+            "a sharing child must not time out: {:?}",
+            result.error
+        );
+    }
+    harness.actor.abort();
+}
+
+/// A grandchild its caller blocks on holds for the same owner as that caller,
+/// so the share reaches any depth of blocking calls.
+#[tokio::test]
+async fn a_blocking_grandchild_shares_its_callers_path_lock() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(false, std::time::Duration::from_millis(150)),
+    );
+    let backend = harness.backend.clone();
+
+    let child = spawn_on(&backend, blocking_request("child", "parent"));
+    harness.requests.recv().await.expect("child starts");
+    let sibling = spawn_on(&backend, blocking_request("sibling", "parent"));
+    harness.requests.recv().await.expect("sibling starts");
+    let grandchild = spawn_on(&backend, blocking_request("grandchild", "sibling"));
+    let started = harness
+        .requests
+        .recv()
+        .await
+        .expect("grandchild starts while its caller's owner holds the path");
+    assert_eq!(started.id, "grandchild");
+
+    let _ = harness.finish_one.send("grandchild".to_owned());
+    let result = grandchild
+        .await
+        .expect("spawn task joined")
+        .expect("coordinator channel open");
+    assert!(result.success, "{:?}", result.error);
+    let _ = harness.finish_one.send("sibling".to_owned());
+    let _ = harness.finish_one.send("child".to_owned());
+    let _ = sibling.await;
+    let _ = child.await;
+    harness.actor.abort();
+}
+
+/// Sharing is only between children of one owner: a child its caller blocks
+/// on still waits on a path an independent child holds. An independent
+/// child still waits on a path a blocking child holds.
+#[tokio::test]
+async fn path_lock_excludes_children_of_another_owner() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(false, std::time::Duration::from_millis(150)),
+    );
+    let backend = harness.backend.clone();
+
+    let mut independent = request("independent", false);
+    independent.cwd = Some("/repo".to_owned());
+    let holder = spawn_on(&backend, independent);
+    harness
+        .requests
+        .recv()
+        .await
+        .expect("independent child starts");
+
+    let blocked = spawn_on(&backend, blocking_request("skeptic", "parent"));
+    let result = blocked
+        .await
+        .expect("spawn task joined")
+        .expect("coordinator channel open");
+    assert!(
+        !result.success,
+        "a blocking child of another owner must wait on the holder",
+    );
+    assert!(
+        harness.requests.try_recv().is_err(),
+        "the waiting child never started",
+    );
+    let _ = harness.finish_one.send("independent".to_owned());
+    let _ = holder.await;
+
+    let shared = spawn_on(&backend, blocking_request("skeptic-2", "parent"));
+    harness
+        .requests
+        .recv()
+        .await
+        .expect("blocking child starts");
+    let mut late = request("late", false);
+    late.cwd = Some("/repo".to_owned());
+    let late = spawn_on(&backend, late);
+    let result = late
+        .await
+        .expect("spawn task joined")
+        .expect("coordinator channel open");
+    assert!(
+        !result.success,
+        "an independent child must wait on a blocking child's hold",
+    );
+    assert!(harness.requests.try_recv().is_err());
+    let _ = harness.finish_one.send("skeptic-2".to_owned());
+    let _ = shared.await;
+    harness.actor.abort();
+}
+
+/// When the holder never releases, the bounded wait ends in a clear failure.
+#[tokio::test]
+async fn conflicting_spawn_fails_when_the_holder_never_releases() {
+    let mut harness = harness_with_config(
+        false,
+        resource_lock_config(false, std::time::Duration::from_millis(150)),
+    );
+    let backend = harness.backend.clone();
+
+    let first = {
+        let backend = backend.clone();
+        tokio::spawn(async move {
+            backend
+                .spawn(locked_request("lock-a", "/repo", false), None)
+                .await
+        })
+    };
+    harness.requests.recv().await.expect("first child starts");
+
+    let (registered, waiter) =
+        spawn_noting_registration(backend.clone(), locked_request("lock-b", "/repo", true));
+    registered.await.expect("parked spawn registers");
+
+    let result = waiter
+        .await
+        .expect("spawn task joined")
+        .expect("coordinator channel open");
+    assert!(!result.success, "the waiter must fail, not run");
+    let error = result.error.unwrap_or_default();
+    assert!(
+        error.contains("timed out") && error.contains("lock-a"),
+        "the failure must name the wait and the holder, got {error:?}",
+    );
+
+    let _ = harness.finish_one.send("lock-a".to_owned());
+    let _ = first.await;
     harness.actor.abort();
 }

@@ -1,5 +1,5 @@
 use super::actions::Effect;
-use super::agent_view::{AgentPane, AgentView, InputMode};
+use super::agent_view::{AgentPane, AgentView};
 use super::app_view::{ActiveView, AppView};
 use crate::acp::meta::NotificationMeta;
 use crate::acp::tracker::AcpUpdateTracker;

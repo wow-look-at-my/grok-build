@@ -60,8 +60,8 @@ pub(crate) struct ModelinfoDocument {
 
 impl ModelinfoDocument {
     /// The tiers `ModelPricing` bills on. A document that prices nothing
-    /// gives `None`, which is recorded as a negative answer rather than as an
-    /// all-zero price the cost path would. Read as configured.
+    /// gives `None`, which is recorded as a negative answer rather than as
+    /// an all-zero price the cost path would read as configured.
     pub(crate) fn to_pricing(&self) -> Option<ModelPricing> {
         let pricing = ModelPricing {
             input_per_token_usd: self.input_cost_per_token.unwrap_or(0.0),

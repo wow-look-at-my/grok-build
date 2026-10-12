@@ -1514,7 +1514,14 @@ pub fn apply_sandbox(
         .and_then(|p| dunce::canonicalize(p).ok())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    // Whether a bwrap re-exec follows decides how the worker's fd is handed.
+    // Whether a bwrap re-exec follows decides how the worker's fd is handed
+    // over, so it is settled before the worker starts. Only an exec-surviving
+    // fd reaches the new image, and only an exec takes the fd out of reach of
+    // this process's other children: clearing close-on-exec without an exec
+    // hands every child of the session a live socket to an UNCONFINED `gh`.
+    // The re-exec command cannot be built first to answer this. It snapshots
+    // this process's environment when it sets its own marker, and the fd's
+    // name has to be in that snapshot.
     #[cfg(target_os = "linux")]
     let reexec_follows = xai_grok_sandbox::bwrap_reexec_planned(&sandbox_profile, &workspace);
     #[cfg(not(target_os = "linux"))]

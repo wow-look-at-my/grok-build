@@ -324,7 +324,7 @@ pub(super) fn handle_session_notification_with_origin(
             // for every one of these. Replaying the chunks would build a
             // preview of a call that is already on screen. A delta carries no
             // prompt id, so while a wake turn runs it cannot be told apart
-            // from the wake turn's own output. And is dropped whole.
+            // from the wake turn's own output and is dropped whole.
             if meta.is_replay || agent.session.loading_replay || agent.running_wake_turn.is_some() {
                 false
             } else {
@@ -702,7 +702,6 @@ pub(super) fn handle_session_notification_with_origin(
                 let mut child_scrollback = crate::scrollback::state::ScrollbackState::new();
                 child_scrollback.set_appearance(agent.scrollback.appearance().clone());
                 let mut child_view = AgentView::new(child_session, child_scrollback);
-                child_view.set_input_mode(InputMode::Vim);
                 child_view.set_sharing_enabled(agent.sharing_enabled);
                 child_view.set_billing_surface_visible(agent.billing_surface_visible);
                 child_view.set_usage_command_visible(agent.usage_command_visible);
@@ -1484,7 +1483,9 @@ pub(super) fn handle_session_notification_with_origin(
         } => {
             // Written by a side call that starts when its model call ends, so
             // this arrives after the thinking block it describes has stopped
-            // running.
+            // running, and on a reload it is replayed right behind that block's
+            // own persisted chunks. It finds its block by the call's stream
+            // start, which is why it is not attached to whatever is current.
             agent.session.tracker.set_thinking_summary(
                 &mut agent.scrollback,
                 stream_start_ms,

@@ -86,9 +86,10 @@ pub(super) fn send_ack(
 pub(super) const GOAL_CLASSIFIER_PENDING_QUEUE_CAP: usize = 4;
 
 /// Contents of a session's live todo list, in order. A missing `TodoState`
-/// resource reads as an empty list. Seeding appends onto whatever is there,
-/// and "nothing tracked yet" is the state a fresh goal starts in (and the
-/// state a session with no todo tool stays in).
+///
+/// A missing `TodoState` resource reads as an empty list: seeding appends onto
+/// whatever is there, and "nothing tracked yet" is the state a fresh goal
+/// starts in (and the state a session with no todo tool stays in).
 async fn live_todo_contents(bridge: &xai_grok_tools::bridge::ToolBridge) -> Vec<String> {
     use crate::tools::todo::TodoState;
     use xai_grok_tools::types::resources::State;
@@ -1437,8 +1438,8 @@ impl SessionActor {
     /// the session's todo tool as it plans. A child session keeps its own
     /// `State<TodoState>`, so `run_shell_child` reads that list back into
     /// `SubagentResult.todos` and it arrives here. These are the items the
-    /// planner itself wrote, which is what makes the session's list the
-    /// result of the planner's own `todo_write`. Rather than the harness
+    /// planner itself wrote, which is what makes the session's list the result
+    /// of the planner's own `todo_write` rather than the harness
     /// reading the plan. A planner that named nothing seeds nothing. The plan
     /// prose is never mined for items, so an unfollowed instruction degrades
     /// to "the main agent keeps its own list" instead of the harness
@@ -1666,7 +1667,8 @@ impl SessionActor {
         // The planner is represented by its own turn. No-op when the spawn recorded nothing.
         self.chat_state_handle.flush_harness_trace_turn();
 
-        // Drop the run (and with it the planner's coordinator id): a Send.
+        // Drop the run (and with it the planner's coordinator id): a Send Now
+        // arriving after this point has no live planner to address.
         let _ = self.goal_tracker.lock().take_planner_run();
 
         PlannerAttemptStep::Ran {

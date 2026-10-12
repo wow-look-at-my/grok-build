@@ -171,7 +171,7 @@ const JAILED_CHILD_ENV: &str = "GROK_JAILED_CHILD_BRANCH";
 /// gains stray arguments. Only running real bubblewrap catches it. The answer
 /// is checked for SHAPE, not content: a runner with no `gh` (and no
 /// credentials) is answered by the worker's nothing-usable sentinel, and that
-/// still. Proves the jail carried the connection. This is the claim here.
+/// still proves the jail carried the connection, which is the claim here.
 #[test]
 fn the_jailed_process_reaches_the_host_worker_through_the_bwrap_jail() {
     if !bwrap_is_usable() {

@@ -879,10 +879,9 @@ fn a_tool_call_without_provider_fields_replays_unchanged() {
 
 // Strict-schema message profiles (Cerebras `wrong_api_format`)
 
-/// Consider a two-turn conversation whose assistant items. That conversation
-/// carry both a recorded `model_id` and a replayed reasoning sibling —
-/// exactly the history shape that produced a later cerebras on
-/// `messages.6.assistant`.
+/// A two-turn conversation whose assistant items carry both a recorded
+/// `model_id` and a replayed reasoning sibling — exactly the history shape
+/// that produced the Cerebras 400 on `messages.6.assistant`.
 fn history_with_model_id_and_reasoning() -> Vec<ConversationItem> {
     vec![
         ConversationItem::system("You are helpful."),
@@ -1064,7 +1063,7 @@ fn strict_profile_preserves_tool_calls_and_results() {
 
 /// Only the *serialized body* is narrowed. The stored conversation keeps both
 /// values, which is what lets the Messages backend resolve thinking
-/// signatures and lets a later turn on a tolerant provider. Still send
+/// signatures and lets a later turn on a tolerant provider still send
 /// reasoning.
 #[test]
 fn strict_profile_leaves_stored_history_untouched() {
@@ -1158,7 +1157,7 @@ fn partial_profiles_suppress_independently() {
 
 /// `strip_unsupported_message_properties` drops exactly what the provider
 /// named, and reports whether it changed anything so the retry loop can tell a
-/// productive strip. From a no-op.
+/// productive strip from a no-op.
 #[test]
 fn strip_unsupported_message_properties_narrows_named_fields_only() {
     let mut req = ConversationRequest::from_items(history_with_model_id_and_reasoning());

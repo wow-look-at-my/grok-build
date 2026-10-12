@@ -21,9 +21,6 @@ pub struct UiConfig {
     /// Read by pager, declared here for `serde_ignored`.
     #[serde(default)]
     pub compact_mode: bool,
-    /// Read by pager, declared here for `serde_ignored`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub simple_mode: Option<bool>,
     /// Read by `load_permission_mode()`. Declared for `serde_ignored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
@@ -68,7 +65,10 @@ pub struct UiConfig {
     /// Trailing window the output rate is averaged over. `None` = 10 seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate_window_secs: Option<u32>,
-    /// How many times one model call is reissued for slow output.
+    /// How many times one model call is reissued for slow output before the
+    /// response is accepted at whatever rate it runs. `None` = 2. A legacy
+    /// `[output_rate_floor].max_retries` applies when this is unset.
+    /// (`[ui].output_rate_max_retries`.) `-1` or `"unlimited"` never runs out.
     #[serde(
         default,
         with = "xai_grok_config_types::retry_budget",
@@ -101,9 +101,6 @@ pub struct UiConfig {
     /// Unset keeps the per-terminal scroll profile's values.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scroll_lines: Option<u8>,
-    /// Vim-style scrollback navigation (hjkl, gg/G, /).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vim_mode: Option<bool>,
     /// How ` ```mermaid ` code blocks are rendered (`auto` | `on` | `off`).
     /// Written by the pager's settings modal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -158,6 +155,15 @@ pub struct UiConfig {
     /// Summarize each thinking block and show the summary under its collapsed header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_summaries: Option<bool>,
+    /// How far back, in seconds, the thinking-summary call may look for earlier
+    /// summaries to steer the direction of the new one. `None` = 120. A `0`
+    /// here and a `0` min-count leave the summary call with no history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_summary_history_window_secs: Option<u32>,
+    /// Include at least this many of the most recent summaries even when they
+    /// are older than the window above. `None` = 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_summary_history_min_count: Option<u32>,
     /// Fold runs of consecutive non-destructive tool calls (reads, searches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_tool_verbs: Option<bool>,
@@ -284,7 +290,6 @@ impl Default for UiConfig {
             yolo: false,
             ui_theme: None,
             compact_mode: false,
-            simple_mode: None,
             permission_mode: None,
             approval_mode: None,
             default_selected_permission: None,
@@ -307,7 +312,6 @@ impl Default for UiConfig {
             scroll_mode: None,
             invert_scroll: None,
             scroll_lines: None,
-            vim_mode: None,
             render_mermaid: None,
             hunk_tracker_mode: None,
             voice_capture_mode: None,
@@ -320,6 +324,8 @@ impl Default for UiConfig {
             selection_highlight_duration_ms: None,
             show_thinking_blocks: None,
             thinking_summaries: None,
+            thinking_summary_history_window_secs: None,
+            thinking_summary_history_min_count: None,
             group_tool_verbs: None,
             collapsed_edit_blocks: None,
             prompt_suggestions: None,
@@ -389,6 +395,26 @@ impl UiConfig {
     pub fn thinking_summaries_enabled(&self) -> bool {
         self.thinking_summaries
             .unwrap_or(Self::THINKING_SUMMARIES_DEFAULT)
+    }
+
+    /// Default for [`Self::thinking_summary_history_window_secs`] when unset.
+    /// A rapid-fire burst of model calls is covered by the count floor below;
+    /// this bounds how stale a summary may be when the session has been idle.
+    pub const THINKING_SUMMARY_HISTORY_WINDOW_SECS_DEFAULT: u32 = 120;
+
+    /// Default for [`Self::thinking_summary_history_min_count`] when unset.
+    /// Keeps a few predecessors in view through a slow stretch where the time
+    /// window alone would select nothing.
+    pub const THINKING_SUMMARY_HISTORY_MIN_COUNT_DEFAULT: u32 = 5;
+
+    pub fn thinking_summary_history_window_secs_value(&self) -> u32 {
+        self.thinking_summary_history_window_secs
+            .unwrap_or(Self::THINKING_SUMMARY_HISTORY_WINDOW_SECS_DEFAULT)
+    }
+
+    pub fn thinking_summary_history_min_count_value(&self) -> u32 {
+        self.thinking_summary_history_min_count
+            .unwrap_or(Self::THINKING_SUMMARY_HISTORY_MIN_COUNT_DEFAULT)
     }
 
     /// Default for [`Self::min_output_tokens_per_sec`] when unset.
@@ -582,6 +608,20 @@ mod tests {
             ..Default::default()
         };
         assert!(!off.thinking_summaries_enabled());
+    }
+
+    #[test]
+    fn thinking_summary_history_defaults_are_two_minutes_and_five() {
+        let ui = UiConfig::default();
+        assert_eq!(ui.thinking_summary_history_window_secs_value(), 120);
+        assert_eq!(ui.thinking_summary_history_min_count_value(), 5);
+        let set = UiConfig {
+            thinking_summary_history_window_secs: Some(0),
+            thinking_summary_history_min_count: Some(3),
+            ..Default::default()
+        };
+        assert_eq!(set.thinking_summary_history_window_secs_value(), 0);
+        assert_eq!(set.thinking_summary_history_min_count_value(), 3);
     }
 
     #[test]

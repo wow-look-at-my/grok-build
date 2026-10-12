@@ -1101,14 +1101,6 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
-        "simple_mode" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("simple_mode", "Bool", &value));
-            };
-            xai_grok_shell::util::config::set_simple_mode(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
         "contextual_hints.undo" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("contextual_hints.undo", "Bool", &value));
@@ -1275,14 +1267,6 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
-        "vim_mode" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("vim_mode", "Bool", &value));
-            };
-            xai_grok_shell::util::config::set_vim_mode(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
         "remember_tool_approvals" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("remember_tool_approvals", "Bool", &value));
@@ -1441,6 +1425,30 @@ pub(crate) async fn persist_setting(
                 return Err(kind_mismatch("ttft_timeout_secs", "Int", &value));
             };
             xai_grok_shell::util::config::set_ttft_timeout_secs(i)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "thinking_summary_history_window_secs" => {
+            let SettingValue::Int(i) = value else {
+                return Err(kind_mismatch(
+                    "thinking_summary_history_window_secs",
+                    "Int",
+                    &value,
+                ));
+            };
+            xai_grok_shell::util::config::set_thinking_summary_history_window_secs(i)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "thinking_summary_history_min_count" => {
+            let SettingValue::Int(i) = value else {
+                return Err(kind_mismatch(
+                    "thinking_summary_history_min_count",
+                    "Int",
+                    &value,
+                ));
+            };
+            xai_grok_shell::util::config::set_thinking_summary_history_min_count(i)
                 .await
                 .map_err(|e| e.to_string())
         }

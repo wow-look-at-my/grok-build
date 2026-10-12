@@ -65,7 +65,7 @@ fn settings_save_serializes_against_init_flock_writer() {
             .build()
             .unwrap()
             .block_on(xai_grok_shell::util::config::update_config(|cfg| {
-                cfg.ui.simple_mode = Some(true);
+                cfg.ui.show_thinking_blocks = Some(true);
             }))
     });
 
@@ -110,7 +110,7 @@ fn settings_save_serializes_against_init_flock_writer() {
     assert_eq!(
         merged
             .get("ui")
-            .and_then(|u| u.get("simple_mode"))
+            .and_then(|u| u.get("show_thinking_blocks"))
             .and_then(|v| v.as_bool()),
         Some(true),
         "settings save must survive the flock writer's rename: {merged}"

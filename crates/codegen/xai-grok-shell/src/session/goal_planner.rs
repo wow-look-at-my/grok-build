@@ -264,11 +264,19 @@ const GOAL_PLANNER_PROMPT_TEMPLATE: &str = include_str!("templates/goal_planner_
 pub(crate) enum GoalPlannerOutcome {
     Planned {
         plan_file: PathBuf,
-        /// Contents of the planner child's own todo list, in order.
+        /// Contents of the planner child's own todo list, in order — the steps
+        /// it named with `todo_write` while planning. Empty when the child kept
+        /// no list, in which case the caller falls back to the plan body.
         todos: Vec<String>,
         latency_ms: u64,
     },
-    /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token` is wired to `start_planner_run`.
+    /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token`
+    /// is wired to `start_planner_run`; when the token fires mid-spawn (a user
+    /// Stop, or the turn being cancelled) the attempt returns `Interrupted`.
+    /// A Send Now does NOT cancel the planner — it delivers context to the live
+    /// planner instead (see [`planner_context_message`]). The strategist and
+    /// summarizer spawners pass a fresh, never-cancelled token, so their
+    /// equivalent cancel arms are unreachable in practice.
     Interrupted,
     FailClosed {
         reason: GoalPlannerFailClosedReason,

@@ -130,12 +130,13 @@ fn the_seatbelt_jail_hands_the_host_worker_fd_and_its_env_to_the_jailed_process(
 }
 
 /// The whole point of the fd contract, end to end on macOS: a process inside
-/// the real Seatbelt jail, holding only the fd number. The jail handed it,
+/// the real Seatbelt jail, holding only the fd number the jail handed it,
 /// reaches the real host worker — the shipped worker loop running as a real
-/// unsandboxed child — and gets a framed answer back. The answer is checked
-/// for SHAPE, not content: a runner with no `gh` (and no credentials) is
-/// answered by the worker's nothing-usable sentinel, and that still. Proves
-/// the jail carried the connection. This is the claim here.
+/// unsandboxed child — and gets a framed answer back.
+///
+/// The answer is checked for SHAPE, not content: a runner with no `gh` (and no
+/// credentials) is answered by the worker's nothing-usable sentinel, and that
+/// still proves the jail carried the connection, which is the claim here.
 #[test]
 fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     if !sandbox_exec_is_usable() {
@@ -146,7 +147,9 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     let grok_home = fixture_dir("worker-home");
     std::fs::create_dir_all(grok_home.join("sandbox-tmp")).unwrap();
 
-    // The host side: the shipped worker loop in a real child of this binary.
+    // The host side: the shipped worker loop in a real child of this binary,
+    // its socket end dup2'd onto a known fd — what `spawn_ci_host` does before
+    // a jail exec.
     let (ours, theirs) = UnixStream::pair().expect("socketpair");
     let theirs_fd = theirs.into_raw_fd();
     const WORKER_FD: i32 = 3;

@@ -116,7 +116,7 @@ async fn test_xai_session_notification_storage_roundtrip() {
     }
 }
 
-/// Test that a `TurnCompleted` terminal round-trips through storage — the
+/// Test that a `TurnCompleted` terminal round-trips through storage. The
 /// persistence half of the "stuck on Waiting…" fix, where the durable terminal
 /// must survive `updates.jsonl` and reload. As a replayable
 /// `_x.ai/session/update`.

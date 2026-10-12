@@ -256,7 +256,8 @@ mod tests {
         // Names that sit beside checkouts without being ones.
         checkout_at(&bucket.join(".hidden-wt"), None);
         checkout_at(&bucket.join("claim.ready"), None);
-        // Inside an accepted checkout: a subdirectory, and a nested.
+        // Inside an accepted checkout: a subdirectory, and a nested repository
+        // (a submodule's checkout) with a `.git` of its own.
         std::fs::create_dir_all(depth_one.join("src")).unwrap();
         let nested = depth_one.join("vendor/lib");
         checkout_at(&nested, Some("/elsewhere/.git/worktrees/lib"));

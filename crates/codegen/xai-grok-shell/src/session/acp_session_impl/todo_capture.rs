@@ -26,6 +26,8 @@ pub struct TodoCaptureOutcome {
     pub added: Vec<String>,
     /// Read-only tool calls the capture agent spent getting there.
     pub tools_used: usize,
+    /// The "the user assigned this" text to start a turn with, when no turn was running and nothing was put in front of the agent.
+    pub wake_reminder: Option<String>,
 }
 
 /// Failure surface of a `/todo` capture run. Typed to the ACP boundary so
@@ -131,7 +133,7 @@ const CAPTURE_ID_PREFIX: &str = "capture";
 /// Item id prefix the goal harness mints for the items it copies off the planner's own list.
 pub(super) const PLAN_SEED_ID_PREFIX: &str = "plan";
 
-/// [`add_only_todo_args`] with an explicit id prefix, so callers that append
+/// [`add_only_todo_args`] with an explicit id prefix. So callers that append
 /// their own kind of item (a `/todo` capture, the goal planner's seed) keep
 /// their provenance while sharing one. Append-only argument shape.
 pub(super) fn add_only_todo_args_with_prefix(
@@ -253,9 +255,9 @@ impl CaptureToolOutcome {
 /// the todo tool nor a readable one never reaches dispatch. The refusals are
 /// written to steer the next turn toward the write, because a refusal the
 /// model cannot act on burns the turn budget. `todo_tool` is the name the
-/// todo tool is advertised under in THIS session, which is the name the model
-/// calls it by — not the canonical. `todo_write`, which a `name_override`
-/// can rename out from under both.
+/// todo tool is advertised under in THIS session,
+/// which is the name the model calls it by — not the canonical `todo_write`,
+/// which a `name_override` can rename out from under both.
 fn capture_action(
     name: &str,
     kind: Option<ToolKind>,
@@ -412,8 +414,11 @@ impl SessionActor {
         let conversation = self.chat_state_handle.get_conversation().await;
         // Fit the snapshot to THIS model's window rather than sending the
         // conversation whole: a small-window model would otherwise fail the
-        // capture. With a context-length error. This is deterministic and
-        // never retried.
+        // capture with a context-length error, which is deterministic and
+        // never retried. The helper also strips reasoning where required and
+        // pops a trailing tool run — `/todo` fires mid-turn, so the snapshot
+        // can end with an assistant message whose tool calls have no result
+        // yet.
         let mut items = crate::session::helpers::session_recap::budget_instruction_items(
             conversation,
             self.todo_capture_instruction(&todo_tool, request),
@@ -575,9 +580,21 @@ impl SessionActor {
             %transcript,
             "todo capture appended items"
         );
-        // The list alone does not say who wrote an item.
-        self.deliver_reminder_to_main_agent(captured_todos_reminder(urgent, &todo_tool, &added));
-        Ok(TodoCaptureOutcome { added, tools_used })
+        // The list alone does not say who wrote an item, and the main agent
+        // reads one it did not write as somebody else's suggestion. This is
+        // the message that says the user assigned it.
+        let reminder = captured_todos_reminder(urgent, &todo_tool, &added);
+        let wake_reminder = if self.turn_is_running() {
+            self.deliver_reminder_to_main_agent(reminder);
+            None
+        } else {
+            Some(reminder)
+        };
+        Ok(TodoCaptureOutcome {
+            added,
+            tools_used,
+            wake_reminder,
+        })
     }
 
     /// Push the capture run's new transcript lines to the client's task row
@@ -729,10 +746,17 @@ impl SessionActor {
 
     /// Run the sanitized append through the session's own todo tool. Do this
     /// so the list, its persisted state, and the client's plan view all move
-    /// the way they do when the main agent. Writes a todo. Dispatch is by the
-    /// session's advertised name with canonical parameter names. The registry
-    /// reverse-maps client names onto canonical ones and leaves everything
-    /// else alone, so canonical keys arrive as themselves under any rename.
+    /// the way they do when the main agent writes a todo.
+    ///
+    /// Dispatch is by the session's advertised name with canonical parameter
+    /// names: the registry reverse-maps client names onto canonical ones and
+    /// leaves everything else alone, so canonical keys arrive as themselves
+    /// under any rename.
+    ///
+    /// `pub(super)`: the goal harness
+    /// ([`SessionActor::apply_planner_todos`]) appends through this same
+    /// path, so an item it puts on the list reaches the persisted state and the
+    /// client's `Plan` view exactly as a model-written `todo_write` does.
     pub(super) async fn append_capture_todos(
         &self,
         todo_tool: &str,
@@ -774,7 +798,7 @@ mod tests {
 
     /// `/TODO` differs from `/todo` in exactly one argument. Everything that
     /// holds the one-mutation rule — minted ids, forced pending, merge on —
-    /// is the same at the front of the list. As at the back.
+    /// is the same at the front of the list as at the back.
     #[test]
     fn urgent_args_prepend_and_change_nothing_else() {
         let args = add_only_todo_args(&["ship the fix".to_owned()], true);

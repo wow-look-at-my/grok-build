@@ -186,7 +186,7 @@ async fn a_capture_appends_and_cannot_touch_the_main_agent_s_items() {
 /// The capture's own turns never reach the conversation the main agent is
 /// working in — that is what makes it safe to run mid-turn. The thing it
 /// does add there is the notice that the user assigned these items, without
-/// which the agent reads them as somebody else's idea. And cancels them.
+/// which the agent reads them as somebody else's idea and cancels them.
 #[tokio::test(flavor = "current_thread")]
 async fn a_capture_leaves_the_parent_conversation_alone() {
     let local = tokio::task::LocalSet::new();
@@ -253,11 +253,13 @@ async fn a_capture_leaves_the_parent_conversation_alone() {
             let after = actor.chat_state_handle.get_conversation().await;
             assert_eq!(
                 after.len(),
-                before.len() + 1,
-                "the notice is the only thing a capture adds: \
+                before.len(),
+                "the capture run's own turns never enter the parent conversation: \
                  before={before:#?} after={after:#?}"
             );
-            let notice = format!("{:?}", after.last().expect("the notice"));
+            let notice = outcome
+                .wake_reminder
+                .expect("an idle session gets the reminder its caller starts a turn with");
             assert!(
                 notice.contains("The user has assigned a new todo"),
                 "the notice says whose the item is, and how many: {notice}"
@@ -344,7 +346,7 @@ async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
                 .await
                 .expect("seed todo");
 
-            tokio::time::timeout(
+            let outcome = tokio::time::timeout(
                 Duration::from_secs(60),
                 actor.handle_todo_capture("push to two remotes", true, "cap-urgent"),
             )
@@ -371,15 +373,9 @@ async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
                 assert_eq!(captured.2, crate::tools::todo::TodoStatus::Pending);
             }
 
-            let notice = format!(
-                "{:?}",
-                actor
-                    .chat_state_handle
-                    .get_conversation()
-                    .await
-                    .last()
-                    .expect("the notice")
-            );
+            let notice = outcome
+                .wake_reminder
+                .expect("an idle session gets the reminder its caller starts a turn with");
             assert!(
                 notice.contains("do not interrupt/abandon your current unit of work"),
                 "even an urgent notice must not tell the agent to drop what it is \
@@ -393,9 +389,9 @@ async fn an_urgent_capture_lands_at_the_top_without_disturbing_the_list() {
         .await;
 }
 
-/// Consider a session whose task-list tool. That session cannot address the
-/// item a capture adds is refused before any model call, rather than written
-/// through with semantics. Those semantics cannot express the append.
+/// A session whose task-list tool cannot address the item a capture adds is
+/// refused before any model call, rather than written through with semantics
+/// that cannot express the append.
 #[tokio::test(flavor = "current_thread")]
 async fn a_task_list_tool_without_item_ids_is_refused() {
     let local = tokio::task::LocalSet::new();

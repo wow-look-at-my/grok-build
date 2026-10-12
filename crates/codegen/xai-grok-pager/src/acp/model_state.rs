@@ -34,9 +34,11 @@ pub(crate) enum EffortTokenError {
 pub(crate) struct UnsupportedEffortDiagnosis {
     /// The catalog key the gate looked up — what `[model.<key>]` must be named.
     pub(crate) model_id: String,
-    /// False when the id is not in this session's catalog at all.
+    /// False when the id is not in this session's catalog at all, which is a
+    /// different fault from a model that is there and unflagged.
     pub(crate) in_catalog: bool,
-    /// How many models the session's catalog holds, so an empty catalog.
+    /// How many models the session's catalog holds, so an empty catalog (the
+    /// pre-`session/new` window) is visible as such.
     pub(crate) catalog_len: usize,
     /// What the gate read at `meta.supportsReasoningEffort`.
     pub(crate) meta_state: ReasoningEffortMetaState,

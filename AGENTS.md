@@ -21,23 +21,23 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Verification
 
-[docs/verification-2.md](docs/verification-2.md) holds this section.
+[docs/verification.md](docs/verification.md) holds this section.
 
 ## `--sandbox` jail notes
 
-[docs/sandbox-jail-notes-2.md](docs/sandbox-jail-notes-2.md) holds this section.
+[docs/sandbox-jail-notes.md](docs/sandbox-jail-notes.md) holds this section.
 
 ## The darwin binary is compiled on Linux and linked on macOS
 
-[docs/the-darwin-binary-is-compiled-on-linux-and-linked-on-macos-2.md](docs/the-darwin-binary-is-compiled-on-linux-and-linked-on-macos-2.md) holds this section.
+[docs/the-darwin-binary-is-compiled-on-linux-and-linked-on-macos.md](docs/the-darwin-binary-is-compiled-on-linux-and-linked-on-macos.md) holds this section.
 
 ## Release-number stamping and the shape of ci.yml
 
-[docs/release-number-stamping-and-the-shape-of-ci-yml-2.md](docs/release-number-stamping-and-the-shape-of-ci-yml-2.md) holds this section.
+[docs/release-number-stamping-and-the-shape-of-ci-yml.md](docs/release-number-stamping-and-the-shape-of-ci-yml.md) holds this section.
 
 ## CI-status feature notes
 
-[docs/ci-status-feature-notes-2.md](docs/ci-status-feature-notes-2.md) holds this section.
+[docs/ci-status-feature-notes.md](docs/ci-status-feature-notes.md) holds this section.
 
 ## Branch-stats notes
 
@@ -48,7 +48,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
 
-[docs/ci-pipeline-notes-the-gh-host-worker-the-ci-tool-and-the-ci-stop-gate-2.md](docs/ci-pipeline-notes-the-gh-host-worker-the-ci-tool-and-the-ci-stop-gate-2.md) holds this section.
+[docs/ci-pipeline-notes-the-gh-host-worker-the-ci-tool-and-the-ci-stop-gate.md](docs/ci-pipeline-notes-the-gh-host-worker-the-ci-tool-and-the-ci-stop-gate.md) holds this section.
 
 ## A blocking wait is a gap, in Queue mode too
 
@@ -63,11 +63,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Compaction-failure reporting and mid-turn `/compact`
 
-[docs/compaction-failure-reporting-and-mid-turn-compact-2.md](docs/compaction-failure-reporting-and-mid-turn-compact-2.md) holds this section.
+[docs/compaction-failure-reporting-and-mid-turn-compact.md](docs/compaction-failure-reporting-and-mid-turn-compact.md) holds this section.
 
 ## Harness model-slot notes
 
-[docs/harness-model-slot-notes-2.md](docs/harness-model-slot-notes-2.md) holds this section.
+[docs/harness-model-slot-notes.md](docs/harness-model-slot-notes.md) holds this section.
 
 ## `/debug` feature notes
 
@@ -79,11 +79,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Shift+Tab mode ring notes
 
-[docs/shift-tab-mode-ring-notes-2.md](docs/shift-tab-mode-ring-notes-2.md) holds this section.
+[docs/shift-tab-mode-ring-notes.md](docs/shift-tab-mode-ring-notes.md) holds this section.
 
 ## `/goal` role-model notes
 
-[docs/goal-role-model-notes-2.md](docs/goal-role-model-notes-2.md) holds this section.
+[docs/goal-role-model-notes.md](docs/goal-role-model-notes.md) holds this section.
 
 ## Plan approval starts a goal
 
@@ -93,11 +93,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Goal-plan-to-todos notes
 
-[docs/goal-plan-to-todos-notes-2.md](docs/goal-plan-to-todos-notes-2.md) holds this section.
+[docs/goal-plan-to-todos-notes.md](docs/goal-plan-to-todos-notes.md) holds this section.
 
 ## The run log is the goal verifier's runtime evidence
 
-[docs/the-run-log-is-the-goal-verifier-s-runtime-evidence-2.md](docs/the-run-log-is-the-goal-verifier-s-runtime-evidence-2.md) holds this section.
+[docs/the-run-log-is-the-goal-verifier-s-runtime-evidence.md](docs/the-run-log-is-the-goal-verifier-s-runtime-evidence.md) holds this section.
 
 ## Verification does not widen the goal
 
@@ -113,7 +113,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## `/todo` capture feature notes
 
-[docs/todo-capture-feature-notes-2.md](docs/todo-capture-feature-notes-2.md) holds this section.
+[docs/todo-capture-feature-notes.md](docs/todo-capture-feature-notes.md) holds this section.
 
 ## Thinking-summary notes
 
@@ -139,19 +139,19 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `merge` is still accepted on the wire and ignored. It is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
 - `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.
 - The list only grows, and every `todo_write` echoes all of it. So `summarize_todo_state` echoes a completed or cancelled item as its first line, cut at `FINISHED_ITEM_ECHO_CHARS`. The state keeps the full text. The post-compaction reminder already collapses finished items to counts.
-- opencode's `todowrite` sends a whole list with no ids, so it merges by ITEM TEXT, not by position. Position is not identity: keying on it let a reordered or shorter list write one row's text over another's, which loses work as surely. As a delete.
+- opencode's `todowrite` sends a whole list with no ids, so it merges by ITEM TEXT, not by position. Position is not identity. Keying on it let a reordered or shorter list write one row's text over another's, which loses work as surely as a delete.
 
 ## Cost-indicator feature notes
 
-[docs/cost-indicator-feature-notes-2.md](docs/cost-indicator-feature-notes-2.md) holds this section.
+[docs/cost-indicator-feature-notes.md](docs/cost-indicator-feature-notes.md) holds this section.
 
 ## Output-budget notes
 
-[docs/output-budget-notes-2.md](docs/output-budget-notes-2.md) holds this section.
+[docs/output-budget-notes.md](docs/output-budget-notes.md) holds this section.
 
 ## Model-pricing resolution notes
 
-[docs/model-pricing-resolution-notes-2.md](docs/model-pricing-resolution-notes-2.md) holds this section.
+[docs/model-pricing-resolution-notes.md](docs/model-pricing-resolution-notes.md) holds this section.
 
 ## Stream-timing notes
 
@@ -161,7 +161,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Thinking-replay notes
 
-[docs/thinking-replay-notes-2.md](docs/thinking-replay-notes-2.md) holds this section.
+[docs/thinking-replay-notes.md](docs/thinking-replay-notes.md) holds this section.
 
 ## Tool-schema fallback notes
 
@@ -179,8 +179,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Goal-planner cancellation notes
 
-- Nothing replans. A Send Now delivers its text to the planner already running (`SubagentEvent::Interject`, routed by the coordinator id the spawn publishes on the goal tracker) instead of cancelling it, so an `Interrupted` reaching the loop is a bare. Cancel and is terminal. Retrying one spawned dead planners in 2.3 s before the attempt cap paused the goal.
-- The planner runs off a slash command, not a turn, and a user Stop latches the session's Task spawns closed until a turn. Reopens them (`open_subagent_spawn_admission`). `maybe_run_goal_planner` reopens them itself. Without that, `/goal resume` after a Stop is rejected before a subagent exists, at latency 0, for every message the session has left.
+- Nothing replans. A Send Now delivers its text to the planner already running (`SubagentEvent::Interject`, routed by the coordinator id the spawn publishes on the goal tracker) instead of cancelling it. An `Interrupted` reaching the loop is a bare cancel and is terminal. Retrying one spawned dead planners in 2.3 s before the attempt cap paused the goal.
+- The planner runs off a slash command, not a turn. And a user Stop latches the session's Task spawns closed until a turn reopens them (`open_subagent_spawn_admission`). `maybe_run_goal_planner` reopens them itself. Without that, `/goal resume` after a Stop is rejected before a subagent exists, at latency 0, for every message the session has left.
 - A pause the user asked for says so (`planner_cancelled_pause_message`). "Planning failed" on a cancel sends the reader hunting a broken planner that is doing exactly what it was told.
 
 ## Messages thinking-dialect notes
@@ -192,17 +192,17 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## CI compile-cache notes
 
-[docs/ci-compile-cache-notes-2.md](docs/ci-compile-cache-notes-2.md) holds this section.
+[docs/ci-compile-cache-notes.md](docs/ci-compile-cache-notes.md) holds this section.
 
 ## The dependency tar: one cache entry per dependency set, and why it cannot grow
 
-[docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow-2.md](docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow-2.md) holds this section.
+[docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md](docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md) holds this section.
 
 ## Why build-test is not on the self-hosted runner
 
 Pointing `build-test` at `vars.CI_RUNNER` turns tests red, because they assert on host semantics the org's lean image does not provide. Measured on that runner, with unmodified test sources:
 
-- no PID 1 that reaps orphans and no process-group signal delivery — every `*_grandchild*` case across `xai-grok-shell`, `xai-grok-test-support`, `xai-tty-utils` and the pager PTY harness (`PTY grandchild leaked after controller Drop`), plus. `scope_teardown_kills_a_background_grandchild`, which hangs to the 60s timeout instead of failing.
+- no PID 1 that reaps orphans and no process-group signal delivery — every `*_grandchild*` case across `xai-grok-shell`, `xai-grok-test-support`, `xai-tty-utils` and the pager PTY harness (`PTY grandchild leaked after controller Drop`). Plus `scope_teardown_kills_a_background_grandchild`, which hangs to the 60s timeout instead of failing.
 - overlayfs reports `st_blocks=2` for every file, so `disk_usage_cmd` and `fs_size` measure ~1 KiB for anything.
 - no UTF-8 locale by default, so `xai-grok-sandbox`'s `fails_closed_on_non_utf8_*` hit errno 84.
 
@@ -217,11 +217,11 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## `send_message` notes
 
-[docs/send-message-notes-2.md](docs/send-message-notes-2.md) holds this section.
+[docs/send-message-notes.md](docs/send-message-notes.md) holds this section.
 
 ## History-flattening notes
 
-[docs/history-flattening-notes-2.md](docs/history-flattening-notes-2.md) holds this section.
+[docs/history-flattening-notes.md](docs/history-flattening-notes.md) holds this section.
 
 ## Project-instruction `@import` notes
 
@@ -248,7 +248,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Output-rate floor notes
 
-[docs/output-rate-floor-notes-2.md](docs/output-rate-floor-notes-2.md) holds this section.
+[docs/output-rate-floor-notes.md](docs/output-rate-floor-notes.md) holds this section.
 
 ## `/fork` and running subagents
 
@@ -260,7 +260,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Reasoning-effort support gate notes
 
-[docs/reasoning-effort-support-gate-notes-2.md](docs/reasoning-effort-support-gate-notes-2.md) holds this section.
+[docs/reasoning-effort-support-gate-notes.md](docs/reasoning-effort-support-gate-notes.md) holds this section.
 
 ## Model-request parallelism cap
 
@@ -284,14 +284,14 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## `[model_providers.<id>]` notes
 
-[docs/model-providers-id-notes-2.md](docs/model-providers-id-notes-2.md) holds this section.
+[docs/model-providers-id-notes.md](docs/model-providers-id-notes.md) holds this section.
 
 ## Provider model autodetection and favorites notes
 
-[docs/provider-model-autodetection-and-favorites-notes-2.md](docs/provider-model-autodetection-and-favorites-notes-2.md) holds this section.
+[docs/provider-model-autodetection-and-favorites-notes.md](docs/provider-model-autodetection-and-favorites-notes.md) holds this section.
 
 ## Local-runtime notes: Ollama and LM Studio
 
-[docs/local-runtime-notes-ollama-and-lm-studio-2.md](docs/local-runtime-notes-ollama-and-lm-studio-2.md) holds this section.
+[docs/local-runtime-notes-ollama-and-lm-studio.md](docs/local-runtime-notes-ollama-and-lm-studio.md) holds this section.
 
 # CLAUDE.md

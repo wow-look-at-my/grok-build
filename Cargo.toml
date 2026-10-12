@@ -501,14 +501,14 @@ useless_format = "allow"
 #
 # A crate that still carries hits names the lint in an inner attribute at the top
 # of its crate root (`src/lib.rs`, `src/main.rs`, each `src/bin/*.rs`, `build.rs`,
-# which are separate roots and inherit nothing), with the count it. Is carrying:
+# which are separate roots and inherit nothing), with the count it is carrying:
 # `#![allow(clippy::string_slice)] // 4 hits predate the gate`. That set of lines
-# is the whole exception surface, and deleting one is the whole work item. A
+# is the whole exception surface, and deleting one is the whole work item: a
 # cleared crate cannot keep its exemption quietly, because the deny bites its next
 # build. A package cannot both inherit this table and add its own `[lints.clippy]`
 # ("cannot override `workspace.lints` in `lints`"), which is why the exceptions are
 # attributes and not manifest keys. `xai-grok-markdown` is the one crate that
-# spells its own `[lints.clippy]`, because it already declares `[lints.rust]`. A
+# spells its own `[lints.clippy]`, because it already declares `[lints.rust]`; a
 # lint denied here must be added to that table by hand.
 string_slice = "deny"
 unwrap_used = "deny"

@@ -100,7 +100,10 @@ impl Shell {
                 group: Some(group), ..
             } if group.wants_hangup() => {
                 let _ = group.hangup();
-                // Hand it to the job-control children directly.
+                // Hand it to the job-control children directly rather than
+                // trusting the shell to forward it on the way out. A shell that
+                // exits first leaves them nothing else to hear it from, and
+                // then the group kill cannot reach them either.
                 let _ = group.hangup_session_jobs();
                 true
             }

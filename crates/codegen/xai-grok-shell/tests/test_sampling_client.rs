@@ -380,11 +380,12 @@ async fn chat_completions_collect_synthesizes_reasoning_sibling() {
     );
 }
 
-/// Upgrade path: a legacy chat-completions session on disk — an assistant
-/// carrying inline `reasoning: {text}` — must, when loaded, reconstruct a
-/// sibling Reasoning item, which then folds. Into `reasoning_content` on the
-/// *correct* assistant message in the outgoing chat-completions request body.
-/// This ties the whole chain together: read_chat_history_sync
+/// Upgrade path: a legacy chat-completions session on disk —
+/// an assistant carrying inline `reasoning: {text}` — must, when loaded,
+/// reconstruct a sibling Reasoning item, which then folds into
+/// `reasoning_content` on the *correct* assistant message in the outgoing
+/// chat-completions request body. This ties the whole chain together:
+/// read_chat_history_sync (upgrade_legacy_reasoning) → ConversationRequest →
 /// (upgrade_legacy_reasoning) → ConversationRequest →
 /// `From<ConversationRequest> for ChatCompletionRequest`
 /// (conversation_to_chat_messages) → wire.
@@ -415,6 +416,8 @@ async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
         items
     );
 
+    // 3. Continue the conversation and send it over chat-completions,
+    //    capturing the outgoing request body.
     items.push(ConversationItem::user("q2"));
 
     let server = MockInferenceServer::start().await.unwrap();
@@ -440,11 +443,14 @@ async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
     );
 }
 
-/// Upgrade path, grok-build / Responses API. Consider a legacy session whose
-/// assistant. That session carries inline `reasoning: {text, encrypted, id}`
-/// must, on load, reconstruct a sibling Reasoning item that round-trips back
-/// to the Responses API as a **typed** `reasoning`. Input item — `summary`,
-/// `encrypted_content`, and `id` all preserved — NOT flattened to a string.
+/// Upgrade path, grok-build / Responses API: a legacy session whose
+/// assistant carries inline `reasoning: {text, encrypted, id}` must, on
+/// load, reconstruct a sibling Reasoning item that round-trips back to
+/// the Responses API as a **typed** `reasoning` input item — `summary`,
+/// `encrypted_content`, and `id` all preserved — NOT flattened to a
+/// string. This is the byte-stable SGLang-prefix path; it must not go
+/// through `reasoning_item_text`. The recorded `model_id` is the model the
+/// client sends to: a blob replays verbatim only to the model that minted it.
 /// This is the byte-stable SGLang-prefix path; it must not go through
 /// `reasoning_item_text`. The recorded `model_id` is the model the client
 /// sends to: a blob replays verbatim only to the model that minted it.
@@ -515,12 +521,13 @@ async fn responses_upgrade_roundtrips_reconstructed_reasoning_as_typed_input() {
     );
 }
 
-/// Upgrade path, Anthropic Messages API. A legacy session whose assistant
+/// Upgrade path, Anthropic Messages API: a legacy session whose assistant
 /// carries inline `reasoning: {text, encrypted, id}` (text = thinking,
 /// encrypted = signature) must, on load, reconstruct a sibling Reasoning
-/// item. That item emits a Anthropic Messages `thinking` content block (with
-/// `thinking` + `signature`) on the outgoing `/v1/messages` request. The
-/// assistant records the model the client here calls. This is because a
+/// item that emits a Anthropic Messages `thinking` content block (with `thinking`
+/// + `signature`) on the outgoing `/v1/messages` request.
+///
+/// The legacy assistant records the model the client here calls, because a
 /// signature only replays to the model that minted it — see
 /// `messages_upgrade_drops_a_thinking_block_minted_by_another_model` for the
 /// other half.
@@ -657,9 +664,11 @@ async fn messages_upgrade_drops_a_thinking_block_minted_by_another_model() {
     );
 }
 
-/// End to end on the Messages backend. A gateway that prices the call must
+/// End to end on the Messages backend: a gateway that prices the call must
 /// have that price land on the response, so the shell bills the turn at what
-/// was charged. Instead of an estimate off the model's configured pricing.
+/// was actually charged instead of an estimate off the model's configured
+/// pricing. Anthropic itself sends no price, and the same path must leave the
+/// cost honestly absent rather than reading silence as free.
 /// Anthropic itself sends no price, and the same path must leave the cost
 /// honestly absent rather than reading silence as free.
 #[tokio::test]
@@ -1091,9 +1100,8 @@ async fn test_stream_error_during_streaming() {
 #[tokio::test]
 async fn test_stream_error_during_responses_streaming() {
     // Simulate a stream error mid-response on the Responses API path.
-    // This mirrors test_stream_error_during_streaming but exercises the
-    // Responses API stream-error detection. (the second call site for
-    // the fast-path contains("error") guard).
+    // Responses API stream-error detection (the second call site for the
+    // fast-path contains("error") guard).
     let events = vec![
         SseEvent::with_event(
             "response.output_text.delta",
@@ -1305,10 +1313,10 @@ async fn test_doom_loop_check_enabled_sends_header_and_absorbs_check_event() {
     assert_eq!(window, "1024");
 }
 
-/// With the check disabled no header goes on the wire. Check frames from a
-/// misbehaving server (rollout skew) are dropped instead of failing the typed
-/// stream — a named frame even with a garbage payload. And an unnamed frame
-/// identified only by its payload `type` tag.
+/// With the check disabled no header goes on the wire, and check frames from
+/// a misbehaving server (rollout skew) are dropped instead of failing the
+/// typed stream — a named frame even with a garbage payload, and an unnamed
+/// frame identified only by its payload `type` tag.
 #[tokio::test]
 async fn test_doom_loop_check_disabled_sends_no_header_and_drops_check_frames() {
     use xai_grok_sampling_types::doom_loop::{DOOM_LOOP_CHECK_EVENT_TYPE, SAMPLE_CHECK_EVENT_DATA};

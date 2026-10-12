@@ -1143,6 +1143,7 @@
             "scheduler-fired-019e51a3-abcd-1234"
         ));
         assert!(!should_adopt_running_prompt("task-completed-abc-123"));
+        assert!(!should_adopt_running_prompt("todo-added-abc-123"));
         assert!(!should_adopt_running_prompt("subagent-completed-xyz-789"));
         assert!(!should_adopt_running_prompt(
             "notifications-019e0000-0000-7000-8000-0000000000aa"
@@ -2580,7 +2581,7 @@
 
     /// The local queue's rescue onto the shell's queue used to run only from
     /// a fresh `Action::SendPrompt`, so a row stuck locally before a
-    /// never-idle. Turn (a goal) had no rescue until the user typed something
+    /// never-idle turn (a goal) had no rescue until the user typed something
     /// new. `handle` now runs the same rescue after every inbound message, so
     /// an ordinary session/update carries the row over without a new
     /// submission.

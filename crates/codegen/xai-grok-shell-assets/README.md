@@ -297,9 +297,9 @@ echo "{\"access_token\": \"$TOKEN\", \"expires_in\": 3600}"
 
 Exiting promptly on `GROK_AUTH_EXPIRED=1` is what makes the handover to the sign-in screen fast. A binary that blocks instead pays the whole refresh timeout on every start with an expired token.
 
-One case stays ambiguous, and only in **leader mode** (`--leader`, or `[cli] use_leader = true`. Off by default): with no credential at all, the leader makes one extra try in the background just after startup. That run has the variable unset, like a sign-in. A binary that mints without help (service account, keytab, mounted token) succeeds there and the session heals itself. One that must prompt just sits, up to the 300s sign-in ceiling — nothing waits on it. The sign-in screen is already up, and its stderr goes to `~/.grok/leader.log` rather than to the user.
+One case stays ambiguous, and only in **leader mode** (`--leader`, or `[cli] use_leader = true`; off by default): with no credential at all, the leader makes one extra attempt in the background just after startup, and that run has the variable unset, like a sign-in. A binary that mints without help (service account, keytab, mounted token) succeeds there and the session heals itself. One that must prompt just sits, up to the 300s sign-in ceiling — nothing waits on it, the sign-in screen is already up, and its stderr goes to `~/.grok/leader.log` rather than to the user.
 
-`GROK_AUTH_EXPIRED` is optional — if your binary ignores it, Grok still works. It just runs the same flow for both login and refresh, and a flow that prompts will be killed on the headless run. Before it can finish.
+`GROK_AUTH_EXPIRED` is optional — if your binary ignores it, Grok still works. It just runs the same flow for both login and refresh, and a flow that prompts will be killed on the headless run before it can finish.
 
 ### Automatic Credential Refresh
 
@@ -312,7 +312,7 @@ This is transparent — you do not need to do anything. Grok handles it in the b
 - **Before expiry:** If your binary returned `expires_in` in its JSON output, or you set `auth_token_ttl` in config. Grok re-runs the binary a few minutes before the token expires. You never see an auth error.
 - **On auth error:** If the server rejects a request with 401/403 (e.g. token was revoked or expired), Grok re-runs the binary and retries the request once.
 - **When the refresh run cannot mint:** refreshes are headless (no stdin, short timeout), so a binary that needs you to complete an SSO flow cannot succeed there. Grok then stops treating the stored credential as usable. Grok runs your binary in its interactive mode instead — at startup that is the same sign-in flow a machine with no credentials gets. Mid-session the turn fails with a re-auth prompt and `/login` re-runs the binary.
-- **OIDC:** If you uses OIDC and have a `refresh_token`, Grok silently refreshes via your IdP without re-opening the browser.
+- **OIDC:** If you're using OIDC and have a `refresh_token`, Grok silently refreshes via your IdP without re-opening the browser.
 
 **Tuning the refresh buffer:**
 
@@ -349,7 +349,7 @@ Common log messages:
 
 ### Per-Model Auth Providers
 
-`auth_provider_command` above replaces Grok's *session* auth: it mints the token sent to xAI's backend. Use a named auth provider — the rotating-token analogue of a per-model `api_key`/`env_key`. Do this if you instead want xAI models on normal xAI login. Do this while **other models** route through a gateway (LiteLLM, corporate proxy) whose bearer tokens rotate.
+`auth_provider_command` above replaces Grok's *session* auth: it mints the token sent to xAI's backend. If you instead want xAI models on normal xAI login while **other models** route through a gateway (LiteLLM, corporate proxy) whose bearer tokens rotate, use a named auth provider — the rotating-token analogue of a per-model `api_key`/`env_key`.
 
 ```toml
 # ~/.grok/config.toml
@@ -374,7 +374,7 @@ auth_provider = "litellm"
 
 **Token lifecycle:**
 
-- Every model referencing the provider caches tokens. Nothing is written to disk. The command is a credential helper: it owns durable storage and OAuth2 refresh (keychain, its own dotdir, etc.), exactly like `gcloud auth print-access-token` or a git credential helper. On an in-session re-mint the last credential is handed back via `GROK_AUTH_PROVIDER_ACCESS_TOKEN` (and, when present, `GROK_AUTH_PROVIDER_REFRESH_TOKEN` / `GROK_AUTH_PROVIDER_EXPIRES_AT`), so a refresh-grant command can refresh. Instead of re-authenticating. The command must be non-interactive and fast. Do any interactive login out of band, and Grok re-runs the command on start to re-mint.
+- Tokens are cached in memory per provider and shared by every model referencing the provider; nothing is written to disk. The command is a credential helper: it owns durable storage and OAuth2 refresh (keychain, its own dotdir, etc.), exactly like `gcloud auth print-access-token` or a git credential helper. On an in-session re-mint the last credential is handed back via `GROK_AUTH_PROVIDER_ACCESS_TOKEN` (and, when present, `GROK_AUTH_PROVIDER_REFRESH_TOKEN` / `GROK_AUTH_PROVIDER_EXPIRES_AT`), so a refresh-grant command can refresh instead of re-authenticating. The command must be non-interactive and fast; do any interactive login out of band, and Grok re-runs the command on restart to re-mint.
 - Grok runs the command before a chat turn. This happens when the token is missing or within about a minute of expiring, and once more after the server rejects a token. A token rejected a bounded number of seconds of being fetched is not refetched again. A broken helper surfaces one clear error instead of looping.
 - Token lifetime comes from `expires_in` in the command's JSON output, else `token_ttl_secs`, else the token's own JWT expiry claim. With none of these, tokens are only replaced after the server rejects one.
 - Commands run with a `timeout_secs` bound (default 30, clamped to 1..=600) and are killed on timeout. A turn waits on the run, so keep helpers fast and non-interactive.
@@ -383,13 +383,11 @@ auth_provider = "litellm"
 
 **Interaction with other credentials:** a literal `api_key`/`env_key` on the model wins over its `auth_provider`. Provider-backed models are BYOK: your xAI session token is never sent to their endpoints. A failing provider command fails the request rather than falling back to the session token.
 
-**Security:** provider commands execute code. They are honored only from trusted config layers (`~/.grok/config.toml`, managed config, requirements). A project's `.grok/config.toml` can never define one. Whatever layer sets a model's `base_url` decides where that model's minted token is sent, and `base_url` (unlike the provider table) is not stripped from remote or campaign patches. The same as for a static `env_key`. Keep provider tables and the model `base_url` in layers you trust.
-
-The command inherits Grok's environment (so it sees `PATH`, `HOME`, and any other secrets there), but Grok's own first-party credentials (`XAI_API_KEY` and related keys) are removed so a BYOK helper never receives them. Write helpers that read only what they need, and prefer the `GROK_AUTH_PROVIDER_*` handback for the prior credential.
+**Security:** provider commands execute code, so they are honored only from trusted config layers (`~/.grok/config.toml`, managed config, requirements). A project's `.grok/config.toml` can never define one. Whatever layer sets a model's `base_url` decides where that model's minted token is sent, and `base_url` (unlike the provider table) is not stripped from remote or campaign patches, the same as for a static `env_key`. Keep provider tables and the model `base_url` in layers you trust. The command inherits Grok's environment (so it sees `PATH`, `HOME`, and any other secrets there), but Grok's own first-party credentials (`XAI_API_KEY` and related keys) are removed so a BYOK helper never receives them; write helpers that read only what they need, and prefer the `GROK_AUTH_PROVIDER_*` handback for the prior credential.
 
 ### Using auth.json for API Access
 
-If you authenticated with `grok login`, you can use the stored credentials to call the CLI chat proxy directly via curl. The proxy requires specific headers that mirror what the grok CLI sends internally:
+If you've authenticated with `grok login`, you can use the stored credentials to call the CLI chat proxy directly via curl. The proxy requires specific headers that mirror what the grok CLI sends internally:
 
 ```bash
 curl -s -N -X POST "https://cli-chat-proxy.grok.com/v1/chat/completions" \
@@ -832,7 +830,7 @@ grok ssh -L 8080:localhost:8080 user@host
 grok ssh user@host -- tmux attach
 ```
 
-On macOS, if the terminal does not natively handle OSC 52, `grok ssh` runs SSH inside a local PTY that intercepts clipboard sequences and writes. Them to `pbcopy`. Both plain OSC 52 and tmux DCS passthrough are handled. Terminals with native OSC 52 (iTerm2, Ghostty, Kitty, WezTerm, Alacritty) get a plain `ssh` exec with no wrapper.
+On macOS, if the terminal doesn't natively handle OSC 52, `grok ssh` runs SSH inside a local PTY that intercepts clipboard sequences and writes them to `pbcopy`. Both plain OSC 52 and tmux DCS passthrough are handled. Terminals with native OSC 52 (iTerm2, Ghostty, Kitty, WezTerm, Alacritty) get a plain `ssh` exec with no wrapper.
 
 This runs entirely locally.
 
@@ -1480,7 +1478,8 @@ Most servers work out what to analyze from the workspace folder. A few do not, a
 
 Use `"projects": ["src/App/App.csproj", "src/Lib/Lib.csproj"]` instead of `"solution"` when there is no solution file. Paths may be absolute or relative to the workspace root. Wrappers such as `roslyn-language-server` already send these notifications themselves, in which case `workspaceOpen` can be omitted.
 
-That server requires note that `--logLevel`, and that anything more verbose than `Warning` makes it stream every internal log line to the client.
+Note that `--logLevel` is required by that server, and that anything more
+verbose than `Warning` makes it stream every internal log line to the client.
 
 #### Installing language servers
 
@@ -1496,7 +1495,7 @@ Examples:
 
 #### Notes
 
-- Passive diagnostics do **not** require `GROK_LSP_TOOLS=1`. They run when an applicable server is configured and starts successfully.
+- Passive diagnostics do **not** require `GROK_LSP_TOOLS=1`; they run whenever an applicable server is configured and starts successfully.
 - Passive diagnostics are currently driven by `search_replace` edits. They are not a general watcher for arbitrary shell or git mutations in the workspace.
 - The `lsp` tool is intentionally hidden when disabled or unconfigured so the model does not plan around unavailable capabilities.
 - Same-workspace subagents reuse the parent session's live LSP runtime instead of starting a duplicate server pool.
@@ -2108,7 +2107,10 @@ At the end of each session, Grok saves a **structured metadata summary** to the 
 - File paths that were read or edited
 - Date and session ID
 
-Shell commands are intentionally **not** recorded in automatic saves — command strings frequently embed secrets (tokens, API keys, DSNs) and auto-save runs silently. For command history, use `/flush`, which is user-initiated and produces an LLM-generated summary rather than raw verbatim output.
+Shell commands are intentionally **not** recorded in automatic saves — command
+strings often embed secrets (tokens, API keys, DSNs) and auto-save runs silently.
+For command history, use `/flush`, which is user-initiated and produces an
+LLM-generated summary rather than raw verbatim output.
 
 This summary is searchable in future sessions but does **not** capture full content or reasoning.
 
@@ -2249,7 +2251,11 @@ The sandbox is **irreversible** once applied. This is a security feature — the
 
 - **Platform support**: Sandbox enforcement uses Landlock on Linux (kernel ≥ 5.13) and Seatbelt on macOS. If the sandbox cannot be applied (e.g., unsupported kernel, missing entitlements), Grok logs a warning and continues without enforcement.
 
-- **Network restrictions are partial**. Profiles with `restrict_network` block network in **child processes** (bash commands, scripts) via seccomp, but built-in tools that make HTTP requests in-process (web search, LLM API) are not affected. The agent needs network access to function, so process-level network cannot be blocked.
+- **Network restrictions are partial**: Profiles with `restrict_network` block
+  network in **child processes** (bash commands, scripts) via seccomp, but
+  built-in tools that make HTTP requests in-process (web search, LLM API) are
+  not affected. The agent needs network access to function, so process-level
+  network cannot be blocked.
 
 ### Event Logging
 

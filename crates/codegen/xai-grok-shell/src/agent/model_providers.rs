@@ -13,7 +13,8 @@ use crate::sampling::ApiBackend;
 /// A `[model_providers.<id>]` block: the settings every model behind one
 /// endpoint shares. A `[model.<id>]` that names the provider with
 /// `model_provider = "<id>"` inherits each field it leaves unset, so an
-/// endpoint, a credential, a wire format or a header. Set is written once.
+/// endpoint, a credential, a wire format or a header set is written once.
+///
 /// Every field here is also a `[model.<id>]` field, and the model's own value
 /// always wins. What is NOT here is what identifies one model: `model`,
 /// `name`, `description`.
@@ -80,7 +81,8 @@ pub enum ModelsListDialect {
     /// `GET <base>/models` answering `{ "data": [...] }`.
     #[default]
     Openai,
-    /// `GET <host>/api/tags`, with `POST <host>/api/show` per model.
+    /// `GET <host>/api/tags`, with `POST <host>/api/show` per model for the
+    /// window and capabilities and `GET <host>/api/ps` for residency.
     Ollama,
     /// `GET <host>/api/v1/models`, which carries all of them in one answer.
     Lmstudio,
@@ -421,7 +423,8 @@ impl ConfigModelOverride {
         if merged.reasoning_efforts.is_empty() {
             merged.reasoning_efforts = reasoning_efforts.clone();
         }
-        // Per KEY, not wholesale: a model that sets one header of its own.
+        // Per KEY, not wholesale: a model that sets one header of its own must
+        // not have to restate the provider's others to keep them.
         inherit_headers(&mut merged.extra_headers, extra_headers);
         inherit_headers(&mut merged.env_http_headers, env_http_headers);
         for (k, v) in query_params {

@@ -395,7 +395,7 @@ mod tests {
     use super::{STREAMING_TITLE_ARG_CAP, StreamingToolArgs};
     /// A write streams the whole file. Holding all of it to name the call would
     /// put a second copy of every file the model writes in this session's
-    /// memory. For as long as the write takes.
+    /// memory, for as long as the write takes.
     #[test]
     fn a_large_body_is_dropped_rather_than_held() {
         let mut call = StreamingToolArgs::new("write_file".to_string());

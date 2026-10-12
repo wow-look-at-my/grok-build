@@ -236,15 +236,17 @@ impl xai_tool_runtime::Tool for MonitorTool {
     }
 }
 
-/// Run [`run_monitor_pipeline`] where its death is an event rather than a
-/// silence. Every spawned site drops the handle: the monitor tool has already
-/// answered by the time the pipeline starts. No caller is left to await it.
-/// Consider the reader of a monitor. That reader is waiting on the
-/// `MonitorEvent` notifications this pipeline alone produces, and a task that
-/// died mid-round stops producing them without. Otherwise saying so. The
-/// panic therefore arrives as one more event naming what the pipeline could
-/// not survive. `owner_session_id` is the session the events route to, the
-/// same one the live rounds read off the task snapshot.
+/// Run [`run_monitor_pipeline`] where its death is an event rather than a silence.
+///
+/// Every spawned site drops the handle: the monitor tool has already answered
+/// by the time the pipeline starts, so no caller is left to await it. The
+/// reader of a monitor is waiting on the `MonitorEvent` notifications this
+/// pipeline alone produces, and a task that died mid-round stops producing
+/// them without otherwise saying so. The panic therefore arrives as one more
+/// event naming what the pipeline could not survive.
+///
+/// `owner_session_id` is the session the events route to, the same one the
+/// live rounds read off the task snapshot.
 pub(crate) async fn supervise_monitor_pipeline(
     task_id: &str,
     description: &str,

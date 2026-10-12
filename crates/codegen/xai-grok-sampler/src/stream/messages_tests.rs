@@ -230,10 +230,10 @@ async fn thinking_block_emits_reasoning_channel_and_preserved_in_response() {
 
 /// End-to-end reasoning round-trip on the REAL Messages path. Thinking deltas
 /// (with NO encrypted signature — the Anthropic-compatible third-party case,
-/// e.g. Kimi) streamed by a provider must survive (a) the stream's synthesis
-/// into a `ConversationItem::Reasoning` sibling, (b) the shell turn-loop commit
+/// e.g. Kimi) streamed by a provider must survive (a) the stream's synthesis.
+/// Into a `ConversationItem::Reasoning` sibling, (b) the shell turn-loop commit
 /// order (the sibling rides the `push_tool_result` arm and lands in history as
-/// `[Reasoning, Assistant]`). And (c) the real `build_messages_request` wire
+/// `[Reasoning, Assistant]`), and (c) the real `build_messages_request` wire
 /// conversion for the NEXT turn, where it must appear as a `Thinking` content
 /// block on the following assistant message. This is the regression the goal
 /// guards: real thinking text must be resent, not dropped.
@@ -941,7 +941,8 @@ async fn priced_response(events: Vec<MessageStreamEvent>) -> Option<i64> {
 }
 
 /// The whole point: a gateway that prices the call gets that price onto the
-/// response, instead of the shell falling back to an estimate off. The
+/// response, instead of the shell falling back to an estimate off the model's
+/// configured pricing.
 /// model's configured pricing.
 #[tokio::test]
 async fn a_gateway_reported_price_reaches_the_completed_response() {

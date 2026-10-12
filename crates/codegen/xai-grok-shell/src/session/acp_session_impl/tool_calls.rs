@@ -3111,8 +3111,17 @@ impl SessionActor {
     /// nor the typed inputs a title is read from. A repeat of the current
     /// title is bytes on the wire that redraw the same row. Every step is
     /// allowed to fail and say nothing. A half-written argument that names no
-    /// tool yet, a name the registry does not know, and a body past the size
-    /// cap all leave. The row showing the wire name, which is what it showed
+    /// Name a tool call the model is still writing, from the arguments so far.
+    ///
+    /// Returns a title only when this fragment CHANGED it. The chunk carries
+    /// the answer to the client, which has neither the tool registry nor the
+    /// typed inputs a title is read from, and a repeat of the current title is
+    /// bytes on the wire that redraw the same row.
+    ///
+    /// Every step is allowed to fail and say nothing. A half-written argument
+    /// that names no tool yet, a name the registry does not know, and a body
+    /// past the size cap all leave the row showing the wire name, which is what
+    /// it showed before any of this existed.
     /// before any of this existed.
     pub(super) async fn streaming_tool_title(
         self: &Arc<Self>,
@@ -3297,7 +3306,8 @@ mod ci_tool_title_tests {
 
     #[test]
     fn a_ci_call_about_another_repository_says_which() {
-        // A query that goes to a different repository must not read.
+        // A query that goes to a different repository must not read in the
+        // transcript as a query about the session's own branch.
         let mut ask = input(CiAction::Status, Some("fix/darwin-version-stamp"));
         ask.repo = Some("wow-look-at-my/go-toolchain".to_string());
         assert_eq!(

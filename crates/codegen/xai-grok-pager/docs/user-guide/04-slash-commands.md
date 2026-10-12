@@ -141,10 +141,6 @@ For quick recall, press `↑` on an empty prompt instead. With prompts queued, t
 
 Toggle compact display — less padding and tighter spacing for denser output.
 
-### `/vim-mode`
-
-Toggle vim-style scrollback keys (`j`/`k`, `h`/`l`, `g`/`G`, `y`/`Y`, and so on). With it off (the default), a bare letter or `Shift+letter` in the scrollback just focuses the prompt and types the character. The setting persists to `[ui] vim_mode`.
-
 ### `/plan`
 
 Enter plan mode.
@@ -299,7 +295,7 @@ Type `/workflow` and a space to autocomplete saved workflow names (built-in, pro
 /workflow save review-changes
 ```
 
-`/workflow runs` opens the live **Workflow Runs** dashboard in the fullscreen TUI — active and retained runs, not a catalog of saved definitions. Each row shows the run's display name, phase, agent roster, progress, and result. Inside a run's detail view, `p` pauses, `r` resumes an ordinary pause, and `x` stops. Budget-limited runs cannot bare-resume: `r` returns the shell's rejection (raise the cap with a model/tool resume that passes a higher `agent_budget`), while `x` still stops. `s` saves the run's script. However, it is hidden for known built-ins and numbered duplicate handles — for those, choose a new unique `meta.name` and save the edited script explicitly.
+`/workflow runs` opens the live **Workflow Runs** dashboard in the fullscreen TUI — active and retained runs, not a catalog of saved definitions. Each row shows the run's display name, phase, agent roster, progress, and result. Inside a run's detail view, `p` pauses, `r` resumes an ordinary pause, and `x` stops. Budget-limited runs can't bare-resume: `r` returns the shell's rejection (raise the cap with a model/tool resume that passes a higher `agent_budget`), while `x` still stops. `s` saves the run's script, but it's hidden for known built-ins and numbered duplicate handles — for those, choose a new unique `meta.name` and save the edited script explicitly. In non-TUI clients, `/workflow runs` prints the same text overview as bare `/workflow`.
 
 Project workflows live in `.grok/workflows/*.rhai`; user workflows live in `~/.grok/workflows/*.rhai`. A same-process pause/resume continues the original immutable script, args, and `agent_budget` cap from committed host-call results — to iterate, edit the returned script copy and launch it as a new run.
 
@@ -319,9 +315,7 @@ Switch the color theme. Alias: `/t`.
 
 ### `/feedback [message]`
 
-Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you. `Enter` loads one into Write so you can review, pick a type, and send it. `/feedback <message>` sends the message immediately.
-
-If the send fails, the message is saved to Drafts.
+Report an issue or send feedback. Bare `/feedback` opens the feedback form. Its **Write** tab is a report box: `Enter` sends, `Esc` closes. Its **Drafts** tab (`Ctrl+Tab` switches) holds reports saved for later — failed sends and feedback the agent drafted for you — and `Enter` loads one into Write so you can review, pick a type, and send it. `/feedback <message>` sends the message immediately; if the send fails, the message is saved to Drafts.
 
 ```
 /feedback
@@ -341,7 +335,7 @@ fix the retry loop first. /btw what does WBC stand for?
 
 ### `/todo <what to add>`
 
-Put something on the agent's todo list without interrupting what it does. A separate lightweight agent forks off the session, spends a few read-only tool calls working out what the item must say, and appends it. It shares the session's context but is a different instance. The running turn is untouched.
+Put something on the agent's todo list without interrupting what it is doing. A separate lightweight agent forks off the session, spends a few read-only tool calls working out what the item should say, and appends it. It shares the session's context but is a different instance, so the running turn is untouched.
 
 ```
 /todo add a way to push changes to 2 git repos
@@ -359,7 +353,7 @@ Check the current session for terminal, clipboard, color, input, notification, a
 
 ### `/debug [what is wrong]`
 
-Turn Grok on itself. The question goes to the model along with this session's execution context. The binary that runs and whether it is still the installed one, version and commit, the config directory and every config layer. Consider the debug-log path for this session and whether logging. That path is on, the working directory, the current model. This holds with the context window and reasoning effort it actually resolved, and the `GROK_*`/`XAI_*` environment (credential-shaped values are named but never printed).
+Turn Grok on itself. The question goes to the model along with this session's execution context: the binary that is running and whether it is still the installed one, version and commit, the config directory and every config layer, the debug-log path for this session and whether logging is on, the working directory, the current model with the context window and reasoning effort it actually resolved, and the `GROK_*`/`XAI_*` environment (credential-shaped values are named but never printed).
 
 ```
 /debug why was the context size defaulted to 256k? this model is supposed to be 1m context

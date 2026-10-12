@@ -79,17 +79,21 @@ fn in_progress_cap_violation(state: &TodoState, cap: usize) -> Option<String> {
     })
 }
 
-/// Every write is a merge: updates are folded into the existing state. -
-/// **Existing items**: `content` is optional — if omitted the previous
+/// Every write is a merge: updates are folded into the existing state.
+/// - **Existing items**: `content` is optional — if omitted the previous
 ///   value is kept. This lets the model mark an item from `in_progress` →
 ///   `completed` without echoing the content back.
 /// - **New items** (id not yet in state): if `content` is omitted the `id`
 ///   is used as a fallback so the tool never errors on a merge call. This
 ///   makes the tool resilient to state being lost between calls.
+///
 /// `prepend` puts new items at the FRONT of the list, in the order given.
 /// Existing items keep their place either way, so a prepend still cannot
-/// reorder or rewrite work already on the list. An id already on the list is
-/// never dropped by a write that omits it.
+/// reorder or rewrite work already on the list.
+///
+/// An id already on the list is never dropped by a write that omits it. An
+/// item leaves the actionable set only by becoming `Completed` or
+/// `Cancelled`, which is a status the caller has to ask for by id.
 pub(crate) fn apply_merge(
     state: &mut TodoState,
     updates: &[TodoUpdate],
@@ -583,7 +587,16 @@ const fn default_merge() -> bool {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TodoWriteInput {
-    /// When true (the default), merge the provided todos into the existing.
+    /// When true (the default), merge the provided todos into the existing
+    /// list by id (partial updates are allowed — leave unchanged fields
+    /// undefined). When explicitly set to false, the provided todos replace
+    /// the existing list entirely.
+    /// Accepted for wire compatibility and ignored: every write merges.
+    ///
+    /// Absent from the advertised schema because both values now behave the
+    /// same. It used to select a wholesale replace, which cleared the list and
+    /// dropped every item the call did not resend — the one way the tool could
+    /// destroy work the user put there.
     #[serde(
         default = "default_merge",
         deserialize_with = "crate::types::schema::deserialize_lenient_bool"

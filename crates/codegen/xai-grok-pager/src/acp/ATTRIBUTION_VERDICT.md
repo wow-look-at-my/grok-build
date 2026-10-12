@@ -18,7 +18,12 @@ For a KEYED notification the order of `TurnCompleted` vs. `finish_turn` does not
 Key caveat: the shipped call site always passes `Some(&prompt_id)` from the wire (previously session_notification.rs:347). The keyless path is defensively dead today. If a key is ever absent, order-independence degrades.
 
 ### 2. Keyless fallback (branch 3) ambiguity
-Branch (3) is reached only when branches (1) and (2) miss. Branch (1) requires a streaming block to attach. So in the idle state (nothing streaming) with a map miss, branch (3) is the only path. `last_finished_agent_entry` is cleared when a new agent message starts streaming (`handle_agent_chunk`). Branch (3) is unambiguous iff exactly one turn finished since the last clear. With multiple finished turns its attribution to the older turn is incorrect.
+Branch (3) is reached only when branches (1) and (2) miss. Branch (1) requires a
+streaming block to attach; so in the idle state (nothing streaming) with a map
+miss, branch (3) is the only path. `last_finished_agent_entry` is cleared
+whenever a new agent message starts streaming (`handle_agent_chunk`), so branch
+(3) is unambiguous iff exactly one turn has finished since the last clear; with
+multiple finished turns its attribution to the older turn is wrong.
 
 ### 3. Eviction: the claim UNDERSTATES it (corrected)
 A prompt-keyed notification whose key is older than the 8-entry bounded map (evicted via `len() > 8 → remove(0)` in `finish_turn`):

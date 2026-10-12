@@ -310,18 +310,30 @@ pub(crate) fn validate_details_path_in_root(
     Ok(())
 }
 
-// Terminal-token parse
+// Terminal-verdict parse
 
-/// Parse an adversarial skeptic's terminal response: `Refuted` yields `Some(true)`, `Not Refuted` yields `Some(false)`.
-/// Tolerates code fences/backticks and a trailing `.`/`!` around the token.
-/// The response must contain ONLY the token; any other prose stays `None`.
+/// Parse an adversarial skeptic's terminal response into its verdict.
+/// A JSON verdict object carrying a boolean `refuted` field is a verdict,
+/// and it answers ahead of any wording. `Refuted` yields `Some(true)`,
+/// `Not Refuted` yields `Some(false)`.
+/// Tolerates code fences/backticks around either shape and a trailing `.`/`!` around the token.
 pub(crate) fn parse_skeptic_terminal_response(text: &str) -> Option<bool> {
-    let lines: Vec<&str> = text
+    let unfenced: String = text
         .lines()
         .map(str::trim)
         // Drop fence lines entirely, including language-tagged ones ("```text") that backtick-trimming alone would leave behind
         .filter(|l| !l.starts_with("```"))
-        .map(|l| l.trim_matches('`').trim_end_matches(['.', '!']).trim())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let unfenced = unfenced.trim().trim_matches('`').trim();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(unfenced)
+        && let Some(refuted) = value.get("refuted").and_then(serde_json::Value::as_bool)
+    {
+        return Some(refuted);
+    }
+    let lines: Vec<&str> = unfenced
+        .lines()
+        .map(|l| l.trim_end_matches(['.', '!']).trim())
         .filter(|l| !l.is_empty())
         .collect();
     match lines.as_slice() {
@@ -762,17 +774,19 @@ struct SkepticVerdictRaw {
     findings: Option<Vec<Finding>>,
 }
 
-/// Matches the verdict schema `required: ["refuted", "evidence", "confidence"]`: all three are mandatory.
-/// A missing or empty `evidence` field rejects (`None`); without evidence a skeptic could rubber-stamp, which this contract exists to prevent.
-/// The aggregator prefers the on-disk per-skeptic report and uses this JSON field only when that file is missing/empty.
+/// Parse a skeptic verdict body. The boolean `refuted` field is the verdict and the sole
+/// mandatory key. A JSON object naming it answers even when `evidence` or `confidence`
+/// are missing or empty, which degrade to defaults rather than discarding the vote.
+/// Absent, non-boolean, or unparseable bodies yield `None` so the caller can fall back.
 pub(crate) fn parse_verdict_json(body: &str) -> Option<SkepticVerdict> {
     let raw: SkepticVerdictRaw = serde_json::from_str(body.trim()).ok()?;
     let refuted = raw.refuted?;
-    let evidence = raw.evidence?;
-    if evidence.trim().is_empty() {
-        return None;
-    }
-    let confidence = SkepticConfidence::parse(&raw.confidence?);
+    let evidence = raw.evidence.unwrap_or_default().trim().to_owned();
+    let confidence = raw
+        .confidence
+        .as_deref()
+        .map(SkepticConfidence::parse)
+        .unwrap_or(SkepticConfidence::Unknown);
     let blocking = raw
         .blocking
         .as_deref()
@@ -1329,8 +1343,77 @@ fn skeptic_failure(skeptic_idx: u32, note: String, latency_ms: u64) -> SkepticRe
     }
 }
 
+/// Decide one skeptic's vote from its channels. The JSON verdict body is the
+/// source of truth: a boolean `refuted` inside it answers regardless of the
+/// terminal response's wording. The terminal response is consulted only when
+/// the body is absent or carries no boolean; it may itself be a JSON verdict
+/// (see [`parse_skeptic_terminal_response`]). Only when both channels carry
+/// no verdict does the fail-closed refute apply. Returns the vote and the
+/// JSON `details_md` to persist when the report file is empty.
+pub(crate) fn skeptic_result_from_sources(
+    skeptic_idx: u32,
+    json_body: Option<&str>,
+    terminal: &str,
+    latency_ms: u64,
+) -> (SkepticResult, Option<String>) {
+    if let Some(body) = json_body
+        && let Some(verdict) = parse_verdict_json(body)
+    {
+        let details_md =
+            (!verdict.details_md.trim().is_empty()).then(|| verdict.details_md.clone());
+        let fallback_note = if verdict.evidence.trim().is_empty() && verdict.findings.is_empty() {
+            Some("verdict JSON carried no evidence".to_string())
+        } else {
+            None
+        };
+        return (
+            SkepticResult {
+                skeptic_idx,
+                refuted: verdict.refuted,
+                confidence: verdict.confidence,
+                blocking: verdict.blocking,
+                evidence: verdict.evidence,
+                findings: verdict.findings,
+                fallback_note,
+                latency_ms,
+                cancelled: false,
+            },
+            details_md,
+        );
+    }
+    match parse_skeptic_terminal_response(terminal) {
+        Some(refuted) => (
+            SkepticResult {
+                skeptic_idx,
+                refuted,
+                confidence: SkepticConfidence::Unknown,
+                blocking: SkepticBlocking::None,
+                evidence: String::new(),
+                findings: Vec::new(),
+                fallback_note: Some(
+                    "verdict JSON missing/malformed; used terminal response".into(),
+                ),
+                latency_ms,
+                cancelled: false,
+            },
+            None,
+        ),
+        None => (
+            skeptic_failure(
+                skeptic_idx,
+                format!(
+                    "verdict JSON missing/malformed AND terminal response carried no verdict: {}",
+                    terminal.chars().take(120).collect::<String>()
+                ),
+                latency_ms,
+            ),
+            None,
+        ),
+    }
+}
+
 /// Read skeptic `skeptic_idx`'s verdict after its terminal response.
-/// The JSON verdict file is authoritative; the terminal token is a secondary signal used only when the JSON is missing/malformed.
+/// The JSON verdict file is authoritative; the terminal response is a secondary signal used only when the JSON is missing/malformed.
 async fn read_skeptic_verdict(
     skeptic_idx: u32,
     details_raw: &str,
@@ -1339,59 +1422,23 @@ async fn read_skeptic_verdict(
     started: std::time::Instant,
 ) -> SkepticResult {
     let json_body = tokio::fs::read_to_string(verdict_raw).await.ok();
-    if let Some(body) = json_body.as_deref()
-        && let Some(SkepticVerdict {
-            refuted,
-            evidence,
-            confidence,
-            blocking,
-            details_md: parsed_md,
-            findings,
-        }) = parse_verdict_json(body)
-    {
-        // If the skeptic produced a verdict but never wrote its report, persist the JSON `details_md` fallback to the path the aggregate references
+    let (result, details_md) = skeptic_result_from_sources(
+        skeptic_idx,
+        json_body.as_deref(),
+        terminal,
+        started.elapsed().as_millis() as u64,
+    );
+    // If the skeptic produced a verdict but never wrote its report, persist the JSON `details_md` fallback to the path the aggregate references
+    if let Some(md) = details_md {
         let file_empty = tokio::fs::read_to_string(details_raw)
             .await
             .map(|s| s.trim().is_empty())
             .unwrap_or(true);
-        if file_empty && !parsed_md.trim().is_empty() {
-            let _ = tokio::fs::write(details_raw, &parsed_md).await;
+        if file_empty {
+            let _ = tokio::fs::write(details_raw, &md).await;
         }
-        return SkepticResult {
-            skeptic_idx,
-            refuted,
-            confidence,
-            blocking,
-            evidence,
-            findings,
-            fallback_note: None,
-            latency_ms: started.elapsed().as_millis() as u64,
-            cancelled: false,
-        };
     }
-
-    // JSON missing or malformed: fall back to the terminal token
-    match parse_skeptic_terminal_response(terminal) {
-        Some(refuted) => SkepticResult {
-            skeptic_idx,
-            refuted,
-            confidence: SkepticConfidence::Unknown,
-            blocking: SkepticBlocking::None,
-            evidence: String::new(),
-            findings: Vec::new(),
-            fallback_note: Some("verdict JSON missing/malformed; used terminal token".into()),
-            latency_ms: started.elapsed().as_millis() as u64,
-            cancelled: false,
-        },
-        None => skeptic_failure(
-            skeptic_idx,
-            format!(
-                "verdict JSON missing/malformed AND terminal token unrecognised: {}",
-                terminal.chars().take(120).collect::<String>()
-            ),
-            started.elapsed().as_millis() as u64,
-        ),
-    }
+    result
 }
 
 /// Spawn one skeptic under `spawn_id`, wait for its terminal response, and read the JSON verdict file.
@@ -1888,7 +1935,7 @@ pub(crate) async fn run_verification_stage(
         prior_gaps: inputs.prior_gaps,
     };
 
-    // When N > 1, run skeptic 0 first: a high-confidence refute is decisive and can never yield Achieved.
+    // When N > 1, run the first skeptic alone: any refute it backs with a verdict is decisive and can never yield Achieved. A non-blocking decisive
     // A non-blocking decisive refute skips the rest of the panel; a blocking refute fans out so the panel can distinguish Blocked from NotAchieved.
     // N == 1 never resumes skeptic 0 (a resumed sole judge would be the biased approver), so it stays cold and returns None.
     let (results, decisive_refute, skeptic0_session_id): (
@@ -1909,11 +1956,12 @@ pub(crate) async fn run_verification_stage(
             inputs.inherit_tool_names,
         )
         .await;
-        let high_refute = first.refuted && first.confidence == SkepticConfidence::High;
-        if high_refute && !first.blocking.is_blocking() {
+        // Any refute with a verdict is decisive, whatever its confidence. Only a failed skeptic defers to the cold panel.
+        let decisive = first.refuted && !first.has_no_verdict();
+        if decisive && !first.blocking.is_blocking() {
             (vec![first], true, Some(skeptic0_id))
         } else {
-            // `high_refute` here means skeptic 0 was blocking (the non-blocking case short-circuited above), so its refute remains binding
+            // `decisive` here means the first skeptic was blocking (the non-blocking case short-circuited above), so its refute remains binding
             let cold_ids: Vec<String> = (1..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
             let rest = (1..n).zip(&cold_ids).map(|(idx, id)| {
                 run_skeptic_retrying_no_verdict(
@@ -1934,7 +1982,7 @@ pub(crate) async fn run_verification_stage(
                     .into_iter()
                     .map(|(r, _)| r),
             );
-            (all, high_refute, Some(skeptic0_id))
+            (all, decisive, Some(skeptic0_id))
         }
     } else {
         let cold_ids: Vec<String> = (0..n).map(|_| uuid::Uuid::now_v7().to_string()).collect();
@@ -1967,7 +2015,7 @@ pub(crate) async fn run_verification_stage(
         });
     }
     let (refuted_count, total, quorum_achieved) = aggregate_skeptic_verdicts(&results);
-    // A decisive skeptic-0 refute overrides the quorum: a skeptic 0 that refuted with high confidence can never approve
+    // A decisive refute from the first skeptic overrides the quorum: the cold panel can never approve over it
     // That holds even when the blocking fan-out ran the full panel (the fan-out only chooses Blocked vs NotAchieved)
     let achieved = quorum_achieved && !decisive_refute;
     emit_event(Event::GoalVerifierAggregateVerdict {

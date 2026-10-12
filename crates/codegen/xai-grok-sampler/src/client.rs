@@ -156,9 +156,17 @@ const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
 
 /// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
 /// Reports whether anything changed, so a caller can skip a retry that cannot
-/// differ. Consider a gateway written in Go. That gateway marshals an unset
-/// slice as `null`, so `response.created` -- whose output list is empty by
-/// definition -- arrives as `"output": null` and fails the parse.
+/// differ.
+///
+/// A gateway written in Go marshals an unset slice as `null`, so
+/// `response.created` -- whose output list is empty by definition -- arrives as
+/// `"output": null` and fails the parse. Because serde buffers the internally
+/// tagged event, that failure carries no line or column AND no field path: it
+/// reads as a bare "invalid type: null, expected a sequence" and takes the whole
+/// turn with it.
+///
+/// Only reached after the strict parse already failed, so a well-formed server
+/// never meets this.
 fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
     match value {
         serde_json::Value::Object(map) => {
@@ -218,8 +226,9 @@ fn null_key_paths(value: &serde_json::Value, prefix: &str, out: &mut Vec<String>
 /// Deserialize an SSE payload, naming the field that failed. serde_json alone
 /// renders a rejected payload as "invalid type: null, expected a sequence"
 /// — and for a buffered (internally tagged) event it carries no line/column
-/// either, so the message names. Neither the field nor the offset. That is
+/// either, so the message names neither the field nor the offset. That is
 /// the whole error a user gets, and there is nothing in it to act on.
+///
 /// `serde_path_to_error` supplies the field path on a derived struct
 /// (`choices[0].delta.content`). It cannot on a `#[serde(tag = "type")]`
 /// event, because serde buffers the content before the variant is known. The
@@ -564,7 +573,8 @@ struct ClientDefaults {
     reasoning_summary: Option<xai_grok_sampling_types::ReasoningSummary>,
     extra_response_includes: Vec<String>,
     doom_loop_recovery: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
-    /// Per-model message-schema profile, applied to every conversation.
+    /// Per-model message-schema profile, applied to every conversation request
+    /// this client sends (see [`Self::apply_conversation_defaults`]).
     chat_message_profile: xai_grok_sampling_types::ChatMessageProfile,
 }
 
@@ -2260,7 +2270,13 @@ impl SamplingClient {
             .narrowed_by(self.defaults.chat_message_profile);
 
         // The provider counts the requested output against the same window as
-        // the prompt.
+        // the prompt, so the default applied just above is not free: on a large
+        // conversation it is what carries the request past the window. Every
+        // backend converter reads `max_output_tokens` from here, so this is the
+        // last point that can hold the sum inside the window. The estimate is
+        // the only prompt size this layer has; a caller that tracks the
+        // provider's reported usage fits the budget with that number first, and
+        // this only ever cuts further.
         let usable_window =
             xai_token_estimation::window_less_estimate_slack(self.defaults.context_window);
         if let Some(clamp) =
@@ -2799,7 +2815,7 @@ mod tests {
     use xai_grok_sampling_types::types::ChatRequestMessage;
 
     /// A reset header naming seconds that no `u64` can hold states no wait the
-    /// client can honour, so it parses as absent. Rather than as a saturated
+    /// client can honour, so it parses as absent rather than as a saturated
     /// wait of `u64::MAX` seconds.
     #[test]
     fn a_reset_header_beyond_the_u64_second_range_is_not_a_wait() {

@@ -1045,17 +1045,6 @@ async fn persist_setting_type_mismatch_errors_combine_queued_prompts() {
             "got: {err}",
         );
 }
-/// Type-mismatch for `simple_mode`.
-#[tokio::test]
-async fn persist_setting_type_mismatch_errors_simple_mode() {
-    use crate::settings::SettingValue;
-    let r = persist_setting("simple_mode", SettingValue::Int(42)).await;
-    let err = r.expect_err("simple_mode with Int payload must return Err");
-    assert!(
-            err.contains("persist_setting(simple_mode) expected Bool"),
-            "error message must mention key + expected kind, got: {err}",
-        );
-}
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 /// Spawn a fake ACP agent that counts `x.ai/yolo_mode_changed` notifications.

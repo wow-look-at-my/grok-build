@@ -38,8 +38,9 @@ fn combine_queued_prompts_enabled() -> bool {
 /// **FIFO guard (`pending_prompts.is_empty()`):** a prompt may only jump onto the server queue when the local drip-feed queue is empty.
 ///
 /// **No leader gate:** the shell's queue is what makes a mid-turn prompt arrive
-/// at the next gap between tool calls / model requests. The turn loop harvests
-/// it into the running turn there
+/// **No leader gate:** the shell's queue is what makes a mid-turn prompt
+/// arrive at the next gap between tool calls / model requests — the turn loop
+/// harvests it into the running turn there
 /// (`harvest_queued_prompts_into_interjections`). A prompt held in the local
 /// drip-feed queue instead reaches the model only once the whole turn ends.
 /// Gating this on leader mode meant single-client sessions never got ASAP

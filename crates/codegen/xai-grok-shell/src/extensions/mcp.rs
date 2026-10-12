@@ -743,9 +743,8 @@ pub(crate) async fn build_mcp_status(
     // Once init has finished, a configured server that is in neither set has no
     // client and is not starting: its spawn failed. Reporting nothing for it
     // left the UI with no status to render, which reads as "still starting" —
-    // forever, for a command. That command was never going to run. Before init
-    // finishes there is nothing to conclude, so those servers are still left
-    // out.
+    // forever, for a command that was never going to run. Before init finishes
+    // there is nothing to conclude, so those servers are still left out.
     for config in &configs {
         let cname = crate::session::mcp_servers::mcp_server_name(config);
         if client_statuses.iter().any(|c| c.name == cname) {

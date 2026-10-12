@@ -155,6 +155,9 @@ pub enum SyntheticReason {
     /// Auto-wake synthetic prompt injected when a background subagent completed.
     /// Wakes the agent for a new turn.
     SubagentCompleted,
+    /// Auto-wake synthetic prompt injected when a `/todo` capture added items while the session was idle.
+    /// Wakes the agent so the work the user assigned begins, instead of waiting for the next prompt.
+    TodoAdded,
     /// Idle-gated notification drain: batched monitor events and/or bash task completions drained when the session is idle.
     /// Wakes the agent.
     NotificationDrain,
@@ -220,6 +223,7 @@ impl SyntheticReason {
             | Self::Unknown
             | Self::TaskCompleted
             | Self::SubagentCompleted
+            | Self::TodoAdded
             | Self::NotificationDrain
             | Self::GoalClassifierNudge
             | Self::SchedulerFired => true,
@@ -500,7 +504,9 @@ pub struct ToolCall {
     pub name: String,
     /// JSON-encoded arguments
     pub arguments: Arc<str>,
-    /// The provider's own fields on this call, relayed unread.
+    /// The provider's own fields on this call, relayed unread when it is
+    /// replayed; see [`crate::TOOL_CALL_VENDOR_KEYS`]. A history written before
+    /// this existed, and every provider that sends none, read as empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub vendor: BTreeMap<String, serde_json::Value>,
 }
@@ -579,7 +585,11 @@ impl From<ToolDefinition> for ToolSpec {
 /// dotted key addresses a nested object (`"options.num_ctx"` reaches
 /// `options: { num_ctx }`). This is because TOML cannot spell a nested table
 /// inline beside scalar siblings and an `[extra_body.options]` sub-table is a
-/// different shape from the flat. Map the rest of the config uses.
+/// different shape from the flat map the rest of the config uses.
+///
+/// Objects merge key by key so an extra never wipes out a sibling the builder
+/// set; anything else replaces. `body` must be a JSON object — a body of any
+/// other shape is left alone rather than being overwritten with one.
 pub fn merge_extra_body(
     body: &mut serde_json::Value,
     extras: &serde_json::Map<String, serde_json::Value>,
@@ -1036,8 +1046,14 @@ pub fn reported_cost_ticks(raw: Option<i64>) -> Option<i64> {
 }
 
 /// Per-token USD pricing for a model, used to **derive** cost from token
-/// counts when a backend reports usage but no `cost_in_usd_ticks`. On the
-/// wire (e.g. OpenAI-compatible / third-party endpoints).
+/// counts when a backend reports usage but no `cost_in_usd_ticks` on the wire
+/// (e.g. OpenAI-compatible / third-party endpoints). When **any** tier is
+/// unset (zero), that tier contributes nothing; when the whole struct is
+/// `None` (no pricing configured) the cost stays honestly absent — the view
+/// never fabricates a `$0.00`.
+///
+/// All fields are USD **per single token**. Integer ticks are produced with
+/// `round(usd * 1e10)` (1e10 ticks = $1) via [`compute_cost_ticks`].
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ModelPricing {
     /// USD per uncached input token (the portion of `prompt_tokens` that is neither a cache read nor a cache write).
@@ -1066,7 +1082,21 @@ impl ModelPricing {
 }
 
 /// Derive cost in USD ticks (1e10 per USD) from reported token usage and a
-/// model's per-token pricing.
+/// model's per-token pricing. Returns `None` when `pricing` is unusable
+/// (all tiers zero), `usage` is absent, or the derived tick count does not fit
+/// `i64`, so the caller can fall back to the honest-absence behavior. Pure
+/// integer-arithmetic-at-the-f64 level then rounded to the nearest tick;
+/// deterministic and exactly assertable.
+///
+/// Billing tiers (mirroring [`TokenUsage`]):
+/// - uncached input = `prompt_tokens − cached_prompt_tokens − cache_creation`
+///   × `input_per_token_usd`
+/// - cached reads = `cached_prompt_tokens` × `cached_read_per_token_usd`
+/// - cache writes = `cache_creation_prompt_tokens` × `cache_creation_per_token_usd`
+/// - output = `completion_tokens` × `output_per_token_usd`
+///
+/// `prompt_tokens` always includes cache reads + writes (see [`TokenUsage`]),
+/// so the uncached portion is computed by subtraction and never double-counted.
 pub fn compute_cost_ticks(usage: Option<&TokenUsage>, pricing: &ModelPricing) -> Option<i64> {
     let usage = usage?;
     if pricing.is_unusable() {
@@ -1374,6 +1404,19 @@ impl ConversationItem {
                 text: Arc::<str>::from(content.into()),
             }],
             synthetic_reason: SyntheticReason::TaskCompleted,
+            cwd_generation: None,
+            prior_turn_interrupt: None,
+            prompt_index: None,
+        })
+    }
+
+    /// Auto-wake synthetic prompt for a `/todo` capture that added items while the session was idle.
+    pub fn todo_added(content: impl Into<String>) -> Self {
+        Self::User(UserItem {
+            content: vec![ContentPart::Text {
+                text: Arc::<str>::from(content.into()),
+            }],
+            synthetic_reason: SyntheticReason::TodoAdded,
             cwd_generation: None,
             prior_turn_interrupt: None,
             prompt_index: None,
@@ -5242,9 +5285,9 @@ mod tests {
         assert_eq!(compute_cost_ticks(Some(&usage), &pricing), Some(80_000_000),);
     }
 
-    /// Cache tiers. Cached reads billed at a discount and cache writes at a
+    /// Cache tiers: cached reads billed at a discount and cache writes at a
     /// premium must each contribute their own tier, with the uncached portion
-    /// correctly. Subtracted from `prompt_tokens`.
+    /// correctly subtracted from `prompt_tokens`.
     #[test]
     fn compute_cost_ticks_covers_cache_tiers() {
         // input $2/M, output $8/M, cached read $0.20/M, cache write $2.50/M

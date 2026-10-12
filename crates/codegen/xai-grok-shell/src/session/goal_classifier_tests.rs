@@ -202,6 +202,46 @@ async fn channel_spawner_inherit_index_leaves_model_none() {
     handle.await.unwrap();
 }
 
+/// A skeptic runs in the session cwd and its caller blocks on it, so it holds
+/// the path lock under its caller's ownership.
+#[tokio::test]
+async fn channel_spawner_skeptic_blocks_its_caller_in_the_session_cwd() {
+    use xai_grok_tools::implementations::grok_build::task::types::{SubagentEvent, SubagentResult};
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let spawner = ChannelSpawner {
+        event_tx: tx,
+        foreground_wait: None,
+        parent_session_id: "parent".into(),
+        parent_prompt_id: None,
+        cwd: Some("/Users/someone/repos".into()),
+        trace_sink: None,
+        skeptic_overrides: vec![RoleSpawnOverride::default()],
+        fallback: Default::default(),
+    };
+    let handle = tokio::spawn(async move {
+        let _ = spawner
+            .spawn_classifier(
+                "clf-lock",
+                0,
+                role_prompt("prompt"),
+                Path::new("/tmp/d.md"),
+                None,
+            )
+            .await;
+    });
+    let SubagentEvent::Spawn(request) = rx.recv().await.expect("spawn event") else {
+        panic!("expected Spawn");
+    };
+    assert_eq!(request.cwd.as_deref(), Some("/Users/someone/repos"));
+    assert!(
+        request.blocks_its_caller(),
+        "a skeptic shares its caller's lock only while its caller blocks on it",
+    );
+    assert_eq!(request.parent_session_id, "parent");
+    let _ = request.result_tx.send(SubagentResult::default());
+    handle.await.unwrap();
+}
+
 #[test]
 fn build_subagent_trace_items_shapes_a_task_call_pair() {
     use xai_grok_sampling_types::conversation::ConversationItem;
@@ -380,8 +420,21 @@ fn parse_skeptic_terminal_rejects_lowercase() {
 }
 
 #[test]
-fn parse_skeptic_terminal_rejects_json_and_prose() {
-    assert_eq!(parse_skeptic_terminal_response("{\"refuted\":true}"), None);
+fn parse_skeptic_terminal_accepts_json_and_rejects_prose() {
+    assert_eq!(
+        parse_skeptic_terminal_response("{\"refuted\":true}"),
+        Some(true)
+    );
+    assert_eq!(
+        parse_skeptic_terminal_response("{\n  \"refuted\": false,\n  \"evidence\": \"ok\"\n}"),
+        Some(false),
+        "a JSON verdict answers without any terminal phrase",
+    );
+    assert_eq!(
+        parse_skeptic_terminal_response("```json\n{\"refuted\": false}\n```"),
+        Some(false),
+        "a fence-wrapped JSON verdict must parse, not degrade to a synthetic refute",
+    );
     assert_eq!(
         parse_skeptic_terminal_response("The work is Refuted"),
         None,
@@ -452,7 +505,7 @@ fn parse_verdict_json_parses_findings_and_drops_empty() {
 
 #[test]
 fn parse_verdict_json_omits_details_md_optional_field() {
-    // `details_md` is a harness extension to the literal VERDICT_SCHEMA; only `refuted`, `evidence`, and `confidence` are required
+    // `details_md` is a harness extension to the literal VERDICT_SCHEMA; only the `refuted` boolean decides
     // A clean parse without `details_md` succeeds; the aggregator then falls back to the on-disk per-skeptic details file
     let body = r#"{"refuted":false,"evidence":"src/x.rs:1","confidence":"high"}"#;
     let v = parse_verdict_json(body).expect("parses");
@@ -507,25 +560,109 @@ fn parse_verdict_json_rejects_missing_refuted_field() {
 }
 
 #[test]
-fn parse_verdict_json_rejects_missing_evidence_per_design() {
-    // The schema makes `evidence` mandatory to stop rubber-stamping
-    assert!(parse_verdict_json(r#"{"refuted":false,"confidence":"high"}"#).is_none());
+fn parse_verdict_json_accepts_missing_evidence() {
+    // The boolean `refuted` field is the vote; a thin verdict answers with it
+    let v = parse_verdict_json(r#"{"refuted":false,"confidence":"high"}"#).expect("parses");
+    assert!(!v.refuted);
+    assert!(v.evidence.is_empty());
 }
 
 #[test]
-fn parse_verdict_json_rejects_empty_evidence() {
-    // Stronger than "missing evidence": a whitespace-only or empty string is the same rubber-stamp failure mode
-    assert!(parse_verdict_json(r#"{"refuted":false,"evidence":"","confidence":"high"}"#).is_none());
-    assert!(
-        parse_verdict_json(r#"{"refuted":false,"evidence":"   \n  ","confidence":"high"}"#)
-            .is_none()
-    );
+fn parse_verdict_json_accepts_empty_evidence() {
+    let v = parse_verdict_json(r#"{"refuted":false,"evidence":"","confidence":"high"}"#)
+        .expect("parses");
+    assert!(!v.refuted);
+    let v = parse_verdict_json(r#"{"refuted":false,"evidence":"   \n  ","confidence":"high"}"#)
+        .expect("parses");
+    assert!(!v.refuted);
 }
 
 #[test]
-fn parse_verdict_json_rejects_missing_confidence() {
-    // Matches the verdict schema `required: ["refuted","evidence","confidence"]`.
-    assert!(parse_verdict_json(r#"{"refuted":true,"evidence":"x"}"#).is_none());
+fn parse_verdict_json_missing_confidence_degrades_to_unknown() {
+    // The verdict schema names `confidence`, but a vote without it still votes
+    let v = parse_verdict_json(r#"{"refuted":true,"evidence":"x"}"#).expect("parses");
+    assert!(v.refuted);
+    assert_eq!(v.confidence, SkepticConfidence::Unknown);
+}
+
+/// The shipped channel-resolution path, table-driven: the JSON `refuted` field is the
+/// vote. The terminal response answers only when no JSON verdict exists, and only a
+/// genuinely verdict-free run keeps the fail-closed refute.
+#[test]
+fn json_refuted_field_decides_the_vote_across_channels() {
+    struct Row {
+        label: &'static str,
+        json: Option<&'static str>,
+        terminal: &'static str,
+        want_refuted: bool,
+    }
+    let rows = [
+        Row {
+            label: "json false with no terminal phrase",
+            json: Some(r#"{"refuted":false}"#),
+            terminal: "The plan is satisfied by the diff.",
+            want_refuted: false,
+        },
+        Row {
+            label: "json false with full evidence",
+            json: Some(r#"{"refuted":false,"evidence":"src/x.rs:1","confidence":"high"}"#),
+            terminal: "",
+            want_refuted: false,
+        },
+        Row {
+            label: "json true with no terminal phrase",
+            json: Some(r#"{"refuted":true}"#),
+            terminal: "cannot confirm anything",
+            want_refuted: true,
+        },
+        Row {
+            label: "json true overrides a Not Refuted phrase",
+            json: Some(r#"{"refuted":true,"evidence":"src/x.rs:9","confidence":"low"}"#),
+            terminal: "Not Refuted",
+            want_refuted: true,
+        },
+        Row {
+            label: "terminal json verdict with no verdict file",
+            json: None,
+            terminal: "{\"refuted\":false}",
+            want_refuted: false,
+        },
+        Row {
+            label: "terminal phrase only",
+            json: None,
+            terminal: "Not Refuted",
+            want_refuted: false,
+        },
+        Row {
+            label: "prose only fails closed",
+            json: None,
+            terminal: "hmm, refuted maybe",
+            want_refuted: true,
+        },
+        Row {
+            label: "json without a refuted boolean fails closed",
+            json: Some(r#"{"evidence":"x","confidence":"high"}"#),
+            terminal: "maybe",
+            want_refuted: true,
+        },
+    ];
+    for row in rows {
+        let (result, _details_md) = skeptic_result_from_sources(0, row.json, row.terminal, 10);
+        assert_eq!(result.refuted, row.want_refuted, "{}", row.label);
+    }
+}
+
+/// Clean `{"refuted": false}` verdicts with no terminal phrase carry the panel: the
+/// aggregator sees zero refutes and the goal is achieved.
+#[test]
+fn json_votes_without_phrases_reach_the_aggregate_as_not_refuted() {
+    let votes: Vec<SkepticResult> = [1_u32, 2]
+        .into_iter()
+        .map(|idx| skeptic_result_from_sources(idx, Some(r#"{"refuted":false}"#), "done", 5).0)
+        .collect();
+    let (refuted, total, achieved) = aggregate_skeptic_verdicts(&votes);
+    assert_eq!((refuted, total), (0, 2));
+    assert!(achieved, "two JSON not-refuted votes must achieve");
 }
 
 #[test]
@@ -2419,7 +2556,7 @@ async fn verification_stage_skeptic_terminal_only_fallback_counts() {
         "terminal-only skeptic must surface as confidence=unknown",
     );
     assert!(log.iter().any(|t| t == "skeptic:1:true:unknown"));
-    assert!(body.contains("verdict JSON missing/malformed; used terminal token"));
+    assert!(body.contains("verdict JSON missing/malformed; used terminal response"));
 }
 
 #[tokio::test]
@@ -2516,9 +2653,8 @@ async fn verification_stage_panel_refutes_returns_not_achieved() {
 }
 
 #[tokio::test]
-async fn verification_stage_skeptic0_medium_refute_does_not_short_circuit() {
-    // A medium-confidence refute is NOT decisive: the full panel runs and the 1-of-3 minority refute is overruled
-    // Approval still requires the not-refuted quorum, never one skeptic
+async fn verification_stage_skeptic0_medium_refute_short_circuits() {
+    // A medium-confidence refute is decisive. The cold skeptics would clear it, but they must never run.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::refuted_with("medium", None),
         MockResponse::not_refuted(),
@@ -2536,19 +2672,19 @@ async fn verification_stage_skeptic0_medium_refute_does_not_short_circuit() {
     )
     .await
     .outcome;
-    let GoalClassifierOutcome::Achieved { details_path } = outcome else {
-        panic!("expected Achieved on 1-of-3 minority refute after full panel");
+    let GoalClassifierOutcome::NotAchieved { details_path, .. } = outcome else {
+        panic!("a medium-confidence skeptic-0 refute must go back to the implementer");
     };
     let _ = tokio::fs::remove_file(&details_path).await;
     assert_eq!(
         observed
             .spawn_count
             .load(std::sync::atomic::Ordering::SeqCst),
-        3,
-        "medium-confidence refute must NOT short-circuit the panel",
+        1,
+        "a medium-confidence refute must short-circuit the panel",
     );
     let log = log.lock().unwrap();
-    assert!(log.iter().any(|t| t == "agg:1/3:true"));
+    assert!(log.iter().any(|t| t == "agg:1/1:false"), "{log:?}");
 }
 
 #[tokio::test]
@@ -2584,8 +2720,8 @@ async fn verification_stage_all_blocking_refuters_returns_blocked() {
 
 #[tokio::test]
 async fn verification_stage_mixed_blocking_and_fixable_stays_not_achieved() {
-    // Skeptic 0 refutes medium (so the panel runs) with a contradiction; skeptic 1 refutes with an ordinary fixable gap
-    // A model-fixable gap remains, so the verdict is NotAchieved, NOT Blocked
+    // Skeptic refutes with a contradiction, which is blocking, so the panel still runs. Skeptic
+    // refutes with an ordinary fixable gap, so the verdict is NotAchieved, not Blocked.
     let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
         MockResponse::refuted_with("medium", Some("contradiction")),
         MockResponse::refuted_with("high", None),
@@ -2694,7 +2830,7 @@ async fn verification_stage_multi_refuter_all_blocking_returns_blocked() {
             .spawn_count
             .load(std::sync::atomic::Ordering::SeqCst),
         2,
-        "medium skeptic 0 must fan out the full panel",
+        "a blocking skeptic 0 must fan out the full panel",
     );
     assert!(
         result.skeptic0_session_id.is_some(),
@@ -2718,8 +2854,8 @@ async fn verification_stage_multi_refuter_all_blocking_returns_blocked() {
 #[tokio::test]
 async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
     // A synthetic refute (transport failure, confidence Unknown) is NOT a
-    // high-confidence refute, so it must fan out the full panel rather than
-    // short-circuit. Its retry fails too.
+    // high-confidence refute, so it must fan out the full panel rather
+    // than short-circuit. Its retry fails too. 1-of-3 refute → Achieved.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::transport_error(),
         MockResponse::transport_error(),
@@ -2753,8 +2889,8 @@ async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
 }
 
 #[tokio::test]
-async fn verification_stage_skeptic0_low_refute_does_not_short_circuit() {
-    // A LOW-confidence refute is not decisive, so the panel fans out
+async fn verification_stage_skeptic0_low_refute_short_circuits() {
+    // A LOW-confidence refute is decisive too. The cold skeptic must never run.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::refuted_with("low", None),
         MockResponse::not_refuted(),
@@ -2775,10 +2911,13 @@ async fn verification_stage_skeptic0_low_refute_does_not_short_circuit() {
         observed
             .spawn_count
             .load(std::sync::atomic::Ordering::SeqCst),
-        2,
-        "a low-confidence refute must NOT short-circuit the panel",
+        1,
+        "a low-confidence refute must short-circuit the panel",
     );
-    assert!(matches!(outcome, GoalClassifierOutcome::Achieved { .. }));
+    let GoalClassifierOutcome::NotAchieved { details_path, .. } = outcome else {
+        panic!("a low-confidence skeptic-0 refute must go back to the implementer");
+    };
+    let _ = tokio::fs::remove_file(&details_path).await;
 }
 
 #[tokio::test]

@@ -1119,7 +1119,8 @@ pub(super) fn xai_turn_completed_notif_with_cost(
                 num_turns: 1,
                 usage_is_incomplete: false,
             }),
-            // No agent-reported session total: exercises the turn-level.
+            // No agent-reported session total: exercises the turn-level
+            // attribution an agent that only prices whole turns produces.
             session_cost_usd_ticks: None,
             elapsed_ms: None,
         },

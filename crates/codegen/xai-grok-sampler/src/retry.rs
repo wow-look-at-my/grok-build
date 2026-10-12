@@ -23,7 +23,14 @@ pub fn stream_interrupt_budget(transport_budget: u32) -> u32 {
     }
 }
 
-/// Longest single wait on the generic retry path — the exponential-backoff.
+/// Longest single wait on the generic retry path — the exponential-backoff
+/// ceiling, and the clamp for a server `Retry-After` on every path. Cloudflare
+/// answers 52x with `Retry-After: 60`–`120`; honoring that verbatim across 14
+/// retries would stall a turn ~28 min instead of the ~5.5 min budget above. A
+/// 429 is clamped to the same ceiling and retried up to
+/// [`RATE_LIMIT_RETRY_THRESHOLD`] times, so a header asking for longer is
+/// still waited out across attempts — one of which may find the limit already
+/// clear.
 pub const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 
 pub const TRANSPORT_REBUILD_BACKOFF: Duration = Duration::from_millis(200);
@@ -113,7 +120,10 @@ pub enum RetryDecision {
     /// Retry after marking the target reasoning-mandatory and remapping.
     RetryWithReasoningEffortRemap,
 
-    /// Retry after dropping the message-level properties a strict-schema.
+    /// Retry after dropping the message-level properties a strict-schema
+    /// provider rejected (`wrong_api_format ... is unsupported`). Narrowing
+    /// the request's [`ChatMessageProfile`] makes the wire conversion omit
+    /// them, so the retry body carries only properties the target defines.
     RetryWithMessagePropertyStrip,
 
     /// Retry after rebuilding the HTTP client with HTTP/1.1 (transport
@@ -178,8 +188,18 @@ pub fn classify_error(
     }
 
     // Shared retry vetoes (`SamplingError::is_retry_vetoed`, also used by
-    // one-shot callers like /btw): - x-must-retry: false — trust the
-    // server, it knows if the error is.
+    // one-shot callers like /btw):
+    // - x-should-retry: false — trust the server, it knows if the error is
+    //   request-content-caused (e.g. malformed tool call in history) vs
+    //   transient. x-should-retry: true is intentionally NOT handled — the
+    //   header only suppresses retries; forcing them on non-retryable
+    //   statuses could amplify failures.
+    // - Context-window / size overflow — deterministic, re-sending the same
+    //   (or larger) payload always fails, whatever status the backend used.
+    //
+    // Checked AFTER image-strip guards: image stripping changes the
+    // request payload, so a server "don't retry" on the original
+    // request doesn't apply to the stripped request.
     if err.is_retry_vetoed() {
         return RetryDecision::Fatal(clone_error(err));
     }
@@ -404,7 +424,8 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
             SamplingError::EventStreamError(xai_grok_sampling_types::error::error_chain(e))
         }
         SamplingError::Serialization(e) => {
-            // serde_json::Error is not Clone; its Display already carries the line/column exactly once.
+            // serde_json::Error is not Clone; its Display already carries the
+            // original line/column exactly once.
             SamplingError::serialization_message(e)
         }
         SamplingError::Api {
@@ -1140,7 +1161,7 @@ mod tests {
     }
 
     /// The guarantee the budget exists for: a stream that dies mid-body is
-    /// retried several times, on backoff that grows, whatever. The model's
+    /// retried exactly 10 times, on backoff that grows, whatever the model's
     /// own `max_retries` says.
     #[test]
     fn a_stream_interruption_is_retried_ten_times_with_growing_backoff() {
