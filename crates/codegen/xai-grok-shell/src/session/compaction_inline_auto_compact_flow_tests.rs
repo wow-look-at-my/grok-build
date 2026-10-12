@@ -2268,3 +2268,86 @@ async fn get_transcript_path_returns_some_when_file_exists() {
         })
         .await;
 }
+/// The xAI gateway's a later context-length wording, verbatim, classifies
+/// for the in-turn compact-on-error decision.
+#[tokio::test(flavor = "current_thread")]
+async fn the_xai_context_length_wording_compacts_on_error() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) = mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(150_000, 1_000_000, 85, gateway_tx, persistence_tx).await;
+            let err = api_error_with_message(
+                262_144,
+                "The input (262195 tokens) is longer than the model's context length (262144 tokens)",
+            );
+            assert!(actor.should_compact_on_error(&err).await);
+        })
+        .await;
+}
+/// A goal turn rejected with a context-length compacts in place and stays
+/// Active: the goal's next continuation re-sends the smaller request.
+/// Pausing with the switch-models message would be wrong when compaction is
+/// the remedy.
+#[tokio::test(flavor = "current_thread")]
+async fn goal_turn_context_length_400_compacts_instead_of_pausing() {
+    use crate::session::goal_tracker::GoalStatus;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) =
+                mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _persistence_rx) = mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor =
+                Arc::new(create_test_actor(262_195, 262_144, 85, gateway_tx, persistence_tx).await);
+            let server =
+                route_compaction_to_mock_server(&actor, "Summary of the work so far. ".repeat(20))
+                    .await;
+            let filler = "x".repeat(8_000);
+            actor.chat_state_handle.replace_conversation(vec![
+                ConversationItem::system("sys"),
+                ConversationItem::user(format!("u0 {filler}")),
+                ConversationItem::assistant(format!("a0 {filler}")),
+                ConversationItem::user("keep going"),
+            ]);
+            actor.goal_tracker.lock().create_goal(
+                "goal-compact-400".to_string(),
+                "finish the task".to_string(),
+                None,
+                0,
+                "2026-10-12T00:00:00Z".to_string(),
+                None,
+            );
+            let paused = actor
+                .apply_infra_pause_after_turn_err(
+                    "Turn failed: The input (262195 tokens) is longer than the model's context \
+                     length (262144 tokens)"
+                        .to_string(),
+                    false,
+                )
+                .await;
+            assert!(!paused, "a context-length 400 must compact, not pause");
+            assert_eq!(
+                actor.goal_tracker.lock().status(),
+                Some(GoalStatus::Active),
+                "the goal must stay Active so the continuation re-drives the turn"
+            );
+            assert!(
+                !server.request_bodies().is_empty(),
+                "compaction must have sampled the summarizer"
+            );
+            let paused = actor
+                .apply_infra_pause_after_turn_err(
+                    "Turn failed: invalid_request_error: bad tool schema".to_string(),
+                    false,
+                )
+                .await;
+            assert!(paused, "a non-size 400 must still pause the goal");
+            assert_eq!(
+                actor.goal_tracker.lock().status(),
+                Some(GoalStatus::InfraPaused)
+            );
+        })
+        .await;
+}
