@@ -153,6 +153,12 @@ impl SubagentRequest {
         !self.run_in_background && !self.await_to_completion
     }
 
+    /// The caller is blocked until this child finishes: it is neither
+    /// backgrounded nor able to be auto-backgrounded.
+    pub fn blocks_its_caller(&self) -> bool {
+        !self.run_in_background && self.await_to_completion
+    }
+
     /// Resolve the foreground deadline for this request. Positive internal
     /// overrides take precedence; all ordinary requests use the host default.
     pub fn foreground_wait_budget(&self, default: std::time::Duration) -> std::time::Duration {
