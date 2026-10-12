@@ -562,11 +562,9 @@ pub enum Action {
     SetOutputRateMaxRetries(i64),
     /// Set `[ui].ttft_timeout_secs`: how long a model call may go without output before it is reissued.
     SetTtftTimeoutSecs(i64),
-    /// Set `[ui].thinking_summary_history_window_secs`: how far back a thinking
-    /// block's summary may look for earlier summaries. `0` drops the time half.
+    /// Set `[ui].thinking_summary_history_window_secs`.
     SetThinkingSummaryHistoryWindowSecs(i64),
-    /// Set `[ui].thinking_summary_history_min_count`: always include this many
-    /// of the most recent summaries. `0` drops the count half.
+    /// Set `[ui].thinking_summary_history_min_count`: always include this many of the most recent summaries.
     SetThinkingSummaryHistoryMinCount(i64),
     /// Commit one harness model slot into `[models]`.
     SetHarnessModel(&'static str, String),

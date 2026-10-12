@@ -38,8 +38,7 @@ impl SessionActor {
 
     async fn generate_thinking_summary(&self, thinking: String, stream_start_ms: i64) {
         use crate::session::helpers::thinking_summary as helpers;
-        // Snapshot the session's earlier summaries before this call's own is
-        // recorded, so the block never contains the summary it is writing.
+        // Snapshot the session's earlier summaries before this call's own is recorded.
         let prior = self.thinking_summary_history.prior_for(stream_start_ms);
         let setup = match self.prepare_side_call("thinking_summary").await {
             Ok(setup) => setup,
@@ -83,7 +82,7 @@ impl SessionActor {
             tracing::warn!("thinking summary: the model returned no text");
             return;
         }
-        // Record BEFORE the broadcast: the next call may draw on this one.
+        // Record BEFORE the broadcast: the next call may draw on this.
         self.thinking_summary_history
             .record(stream_start_ms, summary.clone());
         self.send_xai_notification(XaiSessionUpdate::ThinkingSummary {
