@@ -1,6 +1,4 @@
 //! `/todo` -- show the todo list, or capture a request as todo items without interrupting the agent.
-//!
-//! With no arguments it toggles the todo pane, the same pane `Ctrl-T` shows.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
@@ -37,7 +35,7 @@ impl SlashCommand for TodoCommand {
     }
 
     /// The capture agent appends through the session's own `todo_write`; an
-    /// agent without it has no list to append to. The pane toggle needs no tool.
+    /// agent without it has no list to append to.
     fn required_tools(&self) -> &[&str] {
         &["todo_write"]
     }

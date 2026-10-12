@@ -26,8 +26,7 @@ pub struct TodoCaptureOutcome {
     pub added: Vec<String>,
     /// Read-only tool calls the capture agent spent getting there.
     pub tools_used: usize,
-    /// The "the user assigned this" text to start a turn with, when no turn was running and nothing
-    /// was put in front of the agent. `None` when the text already went to a running turn.
+    /// The "the user assigned this" text to start a turn with, when no turn was running and nothing was put in front of the agent.
     pub wake_reminder: Option<String>,
 }
 
@@ -578,10 +577,7 @@ impl SessionActor {
             %transcript,
             "todo capture appended items"
         );
-        // The list alone does not say who wrote an item. With a turn running
-        // the reminder rides that turn's next safe point. With none, the
-        // caller starts a turn with it, so the work begins instead of waiting
-        // for the next prompt to notice the list.
+        // The list alone does not say who wrote an item.
         let reminder = captured_todos_reminder(urgent, &todo_tool, &added);
         let wake_reminder = if self.turn_is_running() {
             self.deliver_reminder_to_main_agent(reminder);
