@@ -2002,6 +2002,29 @@ fn show_tasks_no_active_agent_is_noop() {
     assert!(effects.is_empty(), "ShowTasks without an agent is a no-op");
 }
 #[test]
+fn toggle_todos_flips_the_active_agents_pane() {
+    let mut app = test_app_with_agent();
+    let pane_visible = |app: &AppView| app.agents.get(&AgentId(0)).unwrap().todo.overlay.visible;
+    assert!(!pane_visible(&app), "the todo pane starts hidden");
+    let effects = dispatch(Action::ToggleTodos, &mut app);
+    assert!(effects.is_empty(), "got: {effects:?}");
+    assert!(pane_visible(&app), "the first toggle shows the pane");
+    dispatch(Action::ToggleTodos, &mut app);
+    assert!(
+        !pane_visible(&app),
+        "a second toggle hides the pane it just focused"
+    );
+}
+#[test]
+fn toggle_todos_no_active_agent_is_noop() {
+    let mut app = test_app();
+    let effects = dispatch(Action::ToggleTodos, &mut app);
+    assert!(
+        effects.is_empty(),
+        "ToggleTodos without an agent is a no-op"
+    );
+}
+#[test]
 fn classify_top_level_branches() {
     use crate::views::dashboard::{RowState, classify_top_level};
     let mut app = test_app_with_agent();
