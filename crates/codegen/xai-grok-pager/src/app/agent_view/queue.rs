@@ -107,10 +107,9 @@ impl AgentView {
     /// intentional single-row semantics. Returns `None` when there is nothing
     /// queued to send. Exceptions keep the older cancel-and-send route for
     /// the top row: - A **sendable wait**: the turn is parked in a blocking
-    /// tool call.
-    ///   there is no model stream to interrupt and an interjection would sit in
-    ///   the buffer until the wait ends. Send-now aborts the wait, which is
-    ///   what "now" means while parked.
+    /// tool call. there is no model stream to interrupt and an interjection
+    /// would sit in the buffer until the wait ends. Send-now aborts the wait,
+    /// which is what "now" means while parked.
     pub(in crate::app) fn try_interrupt_with_queued_from_prompt(&mut self) -> Option<InputOutcome> {
         if !self.session.state.is_turn_running() {
             return None;
@@ -408,13 +407,12 @@ impl AgentView {
             .find(|entry| entry.id == server_id)
             .map(|entry| ServerRowCapabilities::for_pane(&entry.kind, mutation))
     }
-    /// `Some(is_prompt_like)` for a resolvable merged-queue row; `None` when it
-    /// can't be resolved. Prompt-like rows may interject: plain prompts, plus
-    /// raw skill slash rows (`/find-session args`) whose wire payload IS the
-    /// display text. The shell expands those at the interjection drain. Rows
-    /// with a client-expanded payload (`/imagine`, `/loop`) and non-prompt
-    /// kinds stay queued: interjecting them would send the display text, not
-    /// the payload. So does a row that owns its own turn — a slash invocation
+    /// Prompt-like rows may interject: plain prompts, plus raw skill slash
+    /// rows (`/find-session args`) whose wire payload IS the display text.
+    /// The shell expands those at the interjection drain. Rows with a
+    /// client-expanded payload (`/imagine`, `/loop`) and non-prompt kinds
+    /// stay queued: interjecting them would send the display text, not the
+    /// payload. So does a row that owns its own turn — a slash invocation
     /// (`is_steering_text`), whose text the shell's drain would deliver
     /// unresolved.
     pub(in crate::app) fn queue_row_prompt_like(&self, id: u64) -> Option<bool> {

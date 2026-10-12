@@ -794,9 +794,7 @@ pub fn maybe_reexec_into_jail() {
         Ok(request) => request,
         Err(e) => fail(&e.to_string()),
     };
-    // Honor `GROK_SANDBOX=pathbox` (clap reads the same env into `--sandbox`,
-    // but the raw job must re-exec before clap runs, so it reads the env
-    // too).
+    // Honor `GROK_SANDBOX=pathbox` (clap reads the same env into `--sandbox`, but the raw job must re-exec before clap runs, so it reads the env too).
     let env_pathbox = std::env::var("GROK_SANDBOX").ok().as_deref() == Some(PATHBOX_PROFILE);
     if !request.enabled && !env_pathbox {
         return;
