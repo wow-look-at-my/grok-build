@@ -28,7 +28,7 @@ permissions:
 jobs:
   leg:
     name: ${{ inputs.phase }} ${{ inputs.technique }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-latest' || vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 120
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
