@@ -1628,8 +1628,10 @@ fn atomic_replace_string_replaces_project_config_symlink() {
 #[cfg(unix)]
 #[test]
 fn no_home_cwd_config_resolves_slot_not_follow() {
-    let dir = tempfile::tempdir().unwrap();
-    let (link, outside) = project_slot_symlink(dir.path());
+    let tmp = tempfile::tempdir().unwrap();
+    // Both bind policies resolve the parent chain.
+    let dir = std::fs::canonicalize(tmp.path()).unwrap();
+    let (link, outside) = project_slot_symlink(&dir);
     let followed = bind_user_config_dest_with(&link, true, true).unwrap();
     let slot = bind_user_config_dest_with(&link, true, false).unwrap();
     assert_eq!(
