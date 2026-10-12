@@ -562,6 +562,12 @@ pub enum Action {
     SetOutputRateMaxRetries(i64),
     /// Set `[ui].ttft_timeout_secs`: how long a model call may go without output before it is reissued.
     SetTtftTimeoutSecs(i64),
+    /// Set `[ui].thinking_summary_history_window_secs`: how far back a thinking
+    /// block's summary may look for earlier summaries. `0` drops the time half.
+    SetThinkingSummaryHistoryWindowSecs(i64),
+    /// Set `[ui].thinking_summary_history_min_count`: always include this many
+    /// of the most recent summaries. `0` drops the count half.
+    SetThinkingSummaryHistoryMinCount(i64),
     /// Commit one harness model slot into `[models]`.
     SetHarnessModel(&'static str, String),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
@@ -666,6 +672,8 @@ pub enum Action {
     ShowQueue,
     /// Commit a read-only list of background tasks, subagents, and scheduled tasks as a system block (`/tasks`).
     ShowTasks,
+    /// Toggle the todo pane: show and focus it, focus it, or hide it (`/todo` with no arguments).
+    ToggleTodos,
     /// Show the current plan: preview popover if exists, toast if not.
     ShowPlan,
     /// Enter plan mode. If a description is provided, also start a turn with that text as the prompt.

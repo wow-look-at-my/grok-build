@@ -1495,6 +1495,30 @@ pub(crate) async fn write_setting_in_process(
                 .await
                 .map_err(|e| e.to_string())
         }
+        "thinking_summary_history_window_secs" => {
+            let SettingValue::Int(i) = value else {
+                return Err(kind_mismatch(
+                    "thinking_summary_history_window_secs",
+                    "Int",
+                    &value,
+                ));
+            };
+            xai_grok_shell::util::config::set_thinking_summary_history_window_secs(i)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "thinking_summary_history_min_count" => {
+            let SettingValue::Int(i) = value else {
+                return Err(kind_mismatch(
+                    "thinking_summary_history_min_count",
+                    "Int",
+                    &value,
+                ));
+            };
+            xai_grok_shell::util::config::set_thinking_summary_history_min_count(i)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "show_tips" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("show_tips", "Bool", &value));
