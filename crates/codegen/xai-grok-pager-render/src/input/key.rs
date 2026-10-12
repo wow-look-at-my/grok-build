@@ -233,19 +233,6 @@ impl KeyShortcut {
         });
         parts.join("+")
     }
-
-    /// True iff this shortcut is a bare ASCII letter (no modifiers other than SHIFT).
-    /// The vim-mode gate in `ActionRegistry::lookup_with_mode` uses this to suppress `When::ScrollbackFocused` bindings when vim mode is off.
-    pub fn is_letter_or_shift_letter(&self) -> bool {
-        let KeyCode::Char(c) = self.code else {
-            return false;
-        };
-        if !c.is_ascii_alphabetic() {
-            return false;
-        }
-        let mods = self.modifiers;
-        mods.is_empty() || mods == KeyModifiers::SHIFT
-    }
 }
 
 pub fn is_paste_key(key: &KeyEvent) -> bool {

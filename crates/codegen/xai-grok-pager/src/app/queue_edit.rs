@@ -479,14 +479,9 @@ impl AgentView {
         if !self.session.state.is_turn_running() {
             return self.save_edited_queued_row(id, server_id, true);
         }
-        // The EDITED text is what goes out, so it is what must be classified:
+        // The EDITED text is what goes out. It is what must be classified:
         // `queue_row_prompt_like` below reads the STORED row, which can be
-        // steering text while the composer holds a command. An interjection (or
-        // a `newText` override) reaches the running turn as ordinary user text —
-        // only a prompt's LEADING token is ever resolved as a command — so the
-        // model would read the literal `/cmd args` and the command would never
-        // run. Save the edit instead: the row keeps its own turn, and the shell
-        // resolves the command when that turn starts.
+        // steering text while the composer holds a command.
         if xai_prompt_queue::is_slash_invocation(&text) {
             self.show_toast("Can't send this mid-turn — it runs when the current turn ends");
             return self.save_edited_queued_row(id, server_id, true);
@@ -1615,11 +1610,11 @@ mod tests {
         assert_eq!(agent.prompt.text(), "draft");
     }
 
-    /// The edit-interject chord classifies the STORED row, but the EDITED text
-    /// is what would go out — so a row that was steering text when it was queued
-    /// can be edited into a command. Interjecting that reaches the running turn
-    /// as ordinary user text (only a prompt's LEADING token is ever resolved as
-    /// a command), so the model reads the literal `/cmd args` and the command
+    /// The edit-interject chord classifies the STORED row. However, the EDITED
+    /// text is what would go out — so a row. That was steering text when it was
+    /// queued can be edited into a command. Interjecting that reaches the running
+    /// turn as ordinary user text (only a prompt's LEADING token is ever resolved
+    /// as a command), so the model reads the literal `/cmd args` and the command
     /// never runs. The edit is saved instead: the row keeps its own turn, where
     /// the shell resolves it.
     #[test]
@@ -1665,9 +1660,9 @@ mod tests {
         assert!(toast.contains("runs when the current turn ends"), "{toast}");
     }
 
-    /// The same classification for a SERVER row: its `newText` would be folded
+    /// The same classification for a SERVER row. Its `newText` would be folded
     /// into the running turn by the shell's interject handler on an active goal
-    /// turn, so the edit must be saved rather than interjected.
+    /// turn. The edit must be saved rather than interjected.
     #[test]
     fn edit_interject_into_a_command_saves_the_server_row_instead() {
         let mut agent = make_running_agent();

@@ -39,8 +39,7 @@ pub(crate) struct CompactConversationRequest {
 }
 
 impl CompactConversationRequest {
-    /// The keys [`session_id`](Self::session_id) is read under. ACP params are
-    /// camelCase; the snake_case spelling arrives from in-process callers.
+    /// The keys [`session_id`](Self::session_id) is read under.
     pub(crate) const SESSION_ID_KEYS: xai_tool_types::Aliases =
         xai_tool_types::Aliases::new("session_id", &["sessionId"]);
     /// The keys [`user_context`](Self::user_context) is read under. `/compact
@@ -49,9 +48,10 @@ impl CompactConversationRequest {
         xai_tool_types::Aliases::new("user_context", &["userContext"]);
 }
 
-/// `CompactConversationRequest` as it arrives over ACP, with each key spelling
-/// its own field, so a request naming both folds them instead of tripping
-/// serde's duplicate-field check.
+/// `CompactConversationRequest` as it arrives over ACP. That
+/// `CompactConversationRequest` is with each key spelling its own field, so a
+/// request naming both folds them instead of tripping serde's duplicate-field
+/// check.
 #[derive(Debug, Default, serde::Deserialize)]
 struct CompactConversationRequestWire {
     #[serde(default)]
@@ -280,11 +280,6 @@ impl TryFrom<ClientFeedbackInputWire> for ClientFeedbackInput {
 }
 
 impl ClientFeedbackInput {
-    /// Clamp rating value to valid range based on rating type.
-    ///
-    /// - thumbs: -1 to 1
-    /// - stars: 1 to 5
-    /// - nps: 0 to 10
     fn clamp_rating_value(
         rating_type: Option<prod_mc_cli_chat_proxy_types::feedback_types::RatingType>,
         rating_value: Option<i32>,
@@ -1147,8 +1142,8 @@ mod wire_alias_tests {
         assert_eq!(request.user_context.as_deref(), Some("x"));
     }
 
-    /// Two different instructions decide what the summary keeps, and two session
-    /// ids decide which session is compacted.
+    /// Different instructions decide what the summary keeps, and session ids
+    /// decide which session is compacted.
     #[test]
     fn a_compact_request_whose_spellings_disagree_errors_naming_the_field() {
         for (json, field) in [

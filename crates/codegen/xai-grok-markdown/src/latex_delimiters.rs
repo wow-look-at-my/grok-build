@@ -755,8 +755,7 @@ enum EnvScan {
 }
 
 /// Match `\begin{equation}` / `\end{equation}` (and starred variants) at `i`.
-///
-/// `i` is the offset of the `\` byte the caller just inspected.
+/// `i` is the offset of the `\` byte the caller inspected.
 fn match_env(buf: &str, i: usize, final_flush: bool) -> EnvScan {
     let Some(rest) = buf.get(i..) else {
         return EnvScan::No;

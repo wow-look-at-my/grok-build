@@ -2230,7 +2230,7 @@ fn dispatch_cycle_mode_and_sync_always_approve_with_nudge_takes_ring_to_orchestr
 }
 
 /// Always-Approve → Orchestrator switches WHO the agent is and nothing else.
-/// The permission mode rides through: revoking always-approve here re-armed
+/// The permission mode rides through. Revoking always-approve here re-armed
 /// the approval prompt on an unattended session, under a banner that said
 /// "Orchestrator" and never mentioned approvals.
 #[test]
@@ -2274,8 +2274,8 @@ fn dispatch_cycle_mode_always_approve_to_orchestrator_keeps_yolo() {
 }
 
 /// The whole ring with always-approve on: Orchestrator and Explore both carry
-/// it, and closing the ring back to Plan drops it, so the next press resolves
-/// to Auto through the `(true, false, false)` arm rather than falling into the
+/// it, and closing the ring back to Plan drops it. The next press resolves to
+/// Auto through the `(true, false, false)` arm rather than falling into the
 /// mixed-state catch-all and landing on Normal.
 #[test]
 fn dispatch_cycle_mode_ring_carries_yolo_then_clears_it_on_close() {
@@ -2530,7 +2530,7 @@ fn set_plan_mode_idempotency_uses_pending_over_active() {
 }
 
 /// The ring's stop order is the documented one, and the fix neither reorders
-/// nor drops a stop: Normal -> Plan -> Auto -> Always-Approve -> Orchestrator
+/// nor drops a stop. Normal -> Plan -> Auto -> Always-Approve -> Orchestrator
 /// -> Explore -> Plan, one step per press.
 #[test]
 fn the_ring_keeps_its_stop_order_across_a_full_cycle() {
@@ -2566,9 +2566,6 @@ fn the_ring_keeps_its_stop_order_across_a_full_cycle() {
     );
 }
 
-/// Rapid Shift+Tab presses land on the Nth ring stop and keep it: two presses
-/// with no confirmation in between leave the effective mode on Auto (the 2nd
-/// stop), with the plan and auto signals agreeing.
 #[test]
 fn rapid_cycle_presses_land_on_and_keep_the_last_stop() {
     use crate::app::agent_view::ModeRequest;

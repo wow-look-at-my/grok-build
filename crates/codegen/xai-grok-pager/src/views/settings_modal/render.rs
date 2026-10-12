@@ -2682,8 +2682,6 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                 clickable: false,
                 id: 0,
             });
-            // Browse is nav mode (filter inactive), so append `i search` last (matching the shared pickers)
-            modal_window::push_vim_nav_search_hint(&mut shortcuts, false);
             shortcuts
         }
         SettingsMode::FilterFocused => vec![

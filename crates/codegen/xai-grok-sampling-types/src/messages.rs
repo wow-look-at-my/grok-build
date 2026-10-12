@@ -130,8 +130,7 @@ pub enum ContentBlock {
     },
     Thinking {
         thinking: String,
-        // Some Anthropic-compatible providers (e.g. Synthetic) omit the
-        // encrypted `signature` on thinking blocks; tolerate its absence.
+        // Some Anthropic-compatible providers (e.g. Synthetic) omit the encrypted `signature` on thinking blocks.
         #[serde(default)]
         signature: String,
     },
@@ -161,13 +160,12 @@ pub struct ToolParam {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub input_schema: serde_json::Value,
-    /// Always `true`. Off, the API holds each parameter until it is whole, so
-    /// a file body is minutes of silence that the rate gate reads as a collapse.
+    /// Always `true`.
     #[serde(default, skip_deserializing)]
     pub eager_input_streaming: True,
 }
 
-/// The one value `ToolParam::eager_input_streaming` can hold.
+/// The value `ToolParam::eager_input_streaming` can hold.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct True;
 
@@ -227,10 +225,7 @@ pub struct MessagesResponse {
     #[serde(rename = "type")]
     pub r#type: String, // "message"
     pub role: String, // "assistant"
-    /// `null` reads as no content blocks. `message_start` carries an empty
-    /// content list by definition, and a gateway written in Go marshals that
-    /// unset slice as `null` -- which would fail the opening event of every
-    /// stream it relays.
+    /// `null` reads as no content blocks.
     #[serde(default, deserialize_with = "crate::serde_helpers::null_as_default")]
     pub content: Vec<ContentBlock>,
     pub model: String,
@@ -281,11 +276,6 @@ pub struct MessagesUsage {
     pub cache_creation_input_tokens: u32,
     #[serde(default)]
     pub cache_read_input_tokens: u32,
-    /// What the call cost, in USD ticks (1 USD = 1e10). Anthropic itself
-    /// reports no price; a gateway speaking this protocol does, and without
-    /// these two fields its real number is thrown away for an estimate off
-    /// the model's configured pricing. Ticks win over the float when a
-    /// gateway sends both.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_in_usd_ticks: Option<i64>,
     /// The same price as a USD float, the shape OpenRouter and Bifrost use.
@@ -295,13 +285,13 @@ pub struct MessagesUsage {
 
 impl MessagesUsage {
     /// The keys [`cost_in_usd_ticks`](Self::cost_in_usd_ticks) is read under.
-    /// The first is what this type writes; the rest are accepted on input only.
     pub const COST_KEYS: Aliases = Aliases::new("cost_in_usd_ticks", &["cost_usd_ticks"]);
 }
 
-/// `MessagesUsage` as it arrives on the wire, with each cost-key spelling its
-/// own field, so a gateway naming both folds them instead of tripping serde's
-/// duplicate-field check. See [`MessagesUsage::COST_KEYS`].
+/// `MessagesUsage` as it arrives on the wire. That `MessagesUsage` is with
+/// each cost-key spelling its own field, so a gateway naming both folds them
+/// instead of tripping serde's duplicate-field check. See
+/// [`MessagesUsage::COST_KEYS`].
 #[derive(Debug, Default, Deserialize)]
 struct MessagesUsageWire {
     input_tokens: u32,
@@ -403,8 +393,7 @@ pub struct MessageDeltaUsage {
     pub cache_read_input_tokens: Option<u32>,
     #[serde(default)]
     pub cache_creation_input_tokens: Option<u32>,
-    /// The terminal delta is where a gateway settles the price of the call —
-    /// see [`MessagesUsage::cost_in_usd_ticks`].
+    /// The terminal delta is where a gateway settles the price of the call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_in_usd_ticks: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -412,8 +401,7 @@ pub struct MessageDeltaUsage {
 }
 
 impl MessageDeltaUsage {
-    /// The keys [`cost_in_usd_ticks`](Self::cost_in_usd_ticks) is read under;
-    /// the same two spellings [`MessagesUsage::COST_KEYS`] folds.
+    /// The keys [`cost_in_usd_ticks`](Self::cost_in_usd_ticks) is read under.
     pub const COST_KEYS: Aliases = MessagesUsage::COST_KEYS;
 }
 
@@ -473,7 +461,7 @@ pub struct StreamError {
 mod tests {
     use super::*;
 
-    /// `message_start` opens every stream with an empty content list, so a
+    /// `message_start` opens every stream with an empty content list. A
     /// gateway that writes an unset slice as `null` puts this shape on the
     /// wire for every turn it relays. The event is internally tagged, so serde
     /// buffers it and the failure arrives without a line/column -- exactly the
@@ -650,8 +638,8 @@ mod tests {
     }
 
     /// Every wire shape a gateway prices a call with has to parse, and an
-    /// Anthropic response that prices nothing has to stay priceless rather
-    /// than read as free.
+    /// Anthropic response. That prices nothing has to stay priceless
+    /// rather than read as free.
     #[test]
     fn usage_parses_every_cost_shape_a_gateway_sends() {
         let cases = [
@@ -738,10 +726,11 @@ mod tests {
         );
     }
 
-    /// Every cost-spelling assertion, run against both usage shapes. A gateway
-    /// prices the call on `message_start` and settles it on `message_delta`, so
-    /// either one can carry both keys. Both JSON bodies name `input_tokens` and
-    /// `output_tokens`, the two keys the stricter of the two structs requires.
+    /// Every cost-spelling assertion, run against both usage shapes. A
+    /// gateway prices the call on `message_start` and settles it on
+    /// `message_delta`, so either can carry both keys. Both JSON bodies name
+    /// `input_tokens` and `output_tokens`, both keys the stricter of the
+    /// structs requires.
     fn assert_cost_key_folding<T>(
         read: impl Fn(&T) -> Option<i64>,
         build: impl Fn(Option<i64>) -> T,

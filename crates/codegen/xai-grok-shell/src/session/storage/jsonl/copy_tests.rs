@@ -236,7 +236,7 @@ async fn seed_session_with_one_live_subagent(adapter: &JsonlStorageAdapter, sid:
 
 /// A fork takes the main thread's conversation. An agent the parent is still
 /// running keeps reporting to the parent, so its spawn record must not reach
-/// the child: replay would open the child with a row that can never resolve.
+/// the child. Replay would open the child with a row that can never resolve.
 /// A subagent that already finished is history, and rides along.
 #[tokio::test]
 async fn copy_session_data_leaves_a_running_subagent_behind() {
@@ -297,7 +297,7 @@ async fn copy_session_data_carries_a_running_subagent_when_asked() {
 }
 
 /// The cut decides what counts as running: a subagent whose finish is cut
-/// away is a spawn with no finish in the child, which is exactly the row the
+/// away is a spawn with no finish in the child. This is exactly the row the
 /// default drops. Keying the drop on the whole source file instead would
 /// leave it.
 #[tokio::test]

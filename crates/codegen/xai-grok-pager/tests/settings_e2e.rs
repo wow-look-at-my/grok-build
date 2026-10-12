@@ -31,8 +31,6 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "stop_gate_ci_failing",
     "combine_queued_prompts",
     "follow_up_behavior",
-    "simple_mode",
-    "vim_mode",
     "remember_tool_approvals",
     "toolset.ask_user_question.timeout_enabled",
     "subagent_model_inheritance",
@@ -79,7 +77,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "contextual_hints.word_select",
     "contextual_hints.export_copy",
     "contextual_hints.ssh_wrap",
-    // The "Slow output" group; its four Int children are listed above.
+    // The "Slow output" group; its Int children are listed above.
     "output_rate_floor",
 ];
 
@@ -89,11 +87,7 @@ fn every_registered_setting_is_exercised() {
     let mut missing: Vec<&str> = Vec::new();
     for meta in reg.all() {
         // Harness model slots are built from one table, so the keyboard and
-        // mouse tests below WALK that table and cover every slot rather than
-        // naming each key here. See
-        // `harness_model_slot_picker_commits_the_catalog_model_for_every_slot`,
-        // `harness_model_slot_picker_row_zero_clears_the_slot` and
-        // `mouse_click_on_a_harness_model_slot_row_opens_the_picker`.
+        // mouse tests below WALK that table and cover.
         if xai_grok_models::slot_for_setting_key(meta.key).is_some() {
             continue;
         }
@@ -249,15 +243,8 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
                 "SetCombineQueuedPrompts value differs from expected"
             )
         }
-
-        ("simple_mode", Action::SetSimpleMode(b)) => {
-            assert_eq!(b, expected, "SetSimpleMode value differs from expected")
-        }
         ("multiline_mode", Action::SetMultilineMode(b)) => {
             assert_eq!(b, expected, "SetMultilineMode value differs from expected")
-        }
-        ("vim_mode", Action::SetVimMode(b)) => {
-            assert_eq!(b, expected, "SetVimMode value differs from expected")
         }
         ("remember_tool_approvals", Action::SetRememberToolApprovals(b)) => {
             assert_eq!(
@@ -346,7 +333,7 @@ fn f2_closes_modal_from_any_browse_position() {
 
     // Same expectation when focus is on a later row.
     let mut s = make_state();
-    navigate_to(&mut s, "simple_mode");
+    navigate_to(&mut s, "remember_tool_approvals");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::F(2)));
     assert!(matches!(outcome, SettingsKeyOutcome::Close));
 }
@@ -513,14 +500,6 @@ fn follow_up_behavior_picker_enter_dispatches_set_commit() {
         }
         other => panic!("expected SetFollowUpBehavior(Steer), got {other:?}"),
     }
-}
-
-#[test]
-fn space_on_simple_mode_dispatches_typed_setter() {
-    let mut s = make_state();
-    navigate_to(&mut s, "simple_mode");
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
-    assert_set_bool_action(outcome, "simple_mode", false);
 }
 
 #[test]
@@ -980,22 +959,6 @@ fn mouse_click_on_ask_user_question_timeout_indicator_toggles_in_one_click() {
     assert_set_bool_action(outcome, "toolset.ask_user_question.timeout_enabled", false);
 }
 
-/// Click on the value column toggles in one click regardless of selection.
-#[test]
-fn mouse_click_on_simple_mode_indicator_toggles_in_one_click() {
-    let mut s = make_state();
-    synth_rects(&mut s);
-    let row_y = row_idx_for(&s, "simple_mode") as u16;
-
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        72,
-        row_y,
-    );
-    assert_set_bool_action(outcome, "simple_mode", false);
-}
-
 /// Click on the already-selected row body toggles.
 #[test]
 fn mouse_click_on_already_selected_row_body_toggles() {
@@ -1360,10 +1323,10 @@ fn filter_with_multiple_matches_navigates_between_settings() {
     let _ = handle_settings_key(&mut s, &press(KeyCode::Char('/')));
     // "compact" is a keyword on compact_mode; "simple" on simple_mode. We instead use two distinct keyword matches
     // that aren't in the theme catalog.
-    for c in "ascii minimal".chars() {
+    for c in "mermaid flowchart".chars() {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Char(c)));
     }
-    // Both keywords are on simple_mode, so exactly one setting matches
+    // Both keywords are on render_mermaid, so exactly one setting matches
     let filtered = s.filtered_indices();
     let setting_keys: Vec<&str> = filtered
         .iter()
@@ -1372,29 +1335,29 @@ fn filter_with_multiple_matches_navigates_between_settings() {
             _ => None,
         })
         .collect();
-    assert_eq!(setting_keys, vec!["simple_mode"]);
+    assert_eq!(setting_keys, vec!["render_mermaid"]);
 
     // Selection should snap to the only visible setting.
-    let simple_idx = row_idx_for(&s, "simple_mode");
-    assert_eq!(s.selected, simple_idx);
+    let mermaid_idx = row_idx_for(&s, "render_mermaid");
+    assert_eq!(s.selected, mermaid_idx);
 
     // Down at the only visible setting is Unchanged.
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Down));
     assert!(matches!(outcome, SettingsKeyOutcome::Unchanged));
-    assert_eq!(s.selected, simple_idx);
+    assert_eq!(s.selected, mermaid_idx);
 
     // Up at the only visible setting is Unchanged (headers are not selectable)
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Up));
     assert!(matches!(outcome, SettingsKeyOutcome::Unchanged));
-    assert_eq!(s.selected, simple_idx);
+    assert_eq!(s.selected, mermaid_idx);
 
     // Drop the second keyword (Backspace x8 to remove "minimal": 7 chars + 1 space)
     // Now "ascii" alone still matches only simple_mode but we're back to a single-keyword filter that doesn't ambiguously broaden
     // Asserts the "filter still narrows correctly when one keyword drops out" property
-    for _ in 0..8 {
+    for _ in 0.." flowchart".len() {
         let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace));
     }
-    assert_eq!(s.query(), "ascii");
+    assert_eq!(s.query(), "mermaid");
     let filtered_after_pop = s.filtered_indices();
     let after_pop_keys: Vec<&str> = filtered_after_pop
         .iter()
@@ -1403,7 +1366,7 @@ fn filter_with_multiple_matches_navigates_between_settings() {
             _ => None,
         })
         .collect();
-    assert_eq!(after_pop_keys, vec!["simple_mode"]);
+    assert_eq!(after_pop_keys, vec!["render_mermaid"]);
 }
 
 /// Enter in FilterFocused exits filter focus and preserves the query.
@@ -1653,7 +1616,7 @@ fn filter_pageup_pagedown_navigates_in_filter_mode() {
 fn g_jumps_to_first_visible_setting() {
     let mut s = make_state();
     // Move to the last row first so g actually has to navigate.
-    navigate_to(&mut s, "simple_mode");
+    navigate_to(&mut s, "remember_tool_approvals");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char('g')));
     assert!(matches!(outcome, SettingsKeyOutcome::Changed));
     let first_setting_idx = row_idx_for(&s, "compact_mode");
@@ -1718,11 +1681,11 @@ fn shift_g_jumps_to_last_filtered_row_under_active_filter() {
     let outcome = handle_settings_key(&mut s, &press_with(KeyCode::Char('G'), KeyModifiers::SHIFT));
     let show_ts_idx = row_idx_for(&s, "show_timestamps");
     assert_eq!(s.selected, show_ts_idx);
-    // G must NOT land on compact_mode or simple_mode (both hidden).
+    // G must NOT land on compact_mode or remember_tool_approvals (both hidden).
     let compact_idx = row_idx_for(&s, "compact_mode");
-    let simple_idx = row_idx_for(&s, "simple_mode");
+    let remember_idx = row_idx_for(&s, "remember_tool_approvals");
     assert_ne!(s.selected, compact_idx, "G must not land on hidden row");
-    assert_ne!(s.selected, simple_idx, "G must not land on hidden row");
+    assert_ne!(s.selected, remember_idx, "G must not land on hidden row");
     // Outcome is Unchanged because show_timestamps is already last.
     assert!(matches!(outcome, SettingsKeyOutcome::Unchanged));
 }
@@ -1764,16 +1727,15 @@ fn filter_multi_word_with_one_unmatched_word_shows_zero_settings() {
 #[test]
 fn filter_and_semantics_narrow_strictly() {
     let reg = SettingsRegistry::defaults();
-    // "ascii" matches only simple_mode (keyword).
-    let single = reg.search("ascii");
+    // "flowchart" matches only render_mermaid (keyword).
+    let single = reg.search("flowchart");
     assert_eq!(single.len(), 1);
-    assert_eq!(single[0].key, "simple_mode");
+    assert_eq!(single[0].key, "render_mermaid");
     // "ascii minimal": both simple_mode keywords. Still 1 match.
-    let conjunction = reg.search("ascii minimal");
+    let conjunction = reg.search("flowchart mermaid");
     assert_eq!(conjunction.len(), 1);
-    assert_eq!(conjunction[0].key, "simple_mode");
-    // Adding an unmatched word must yield 0.
-    let with_unmatched = reg.search("ascii xyzzy");
+    assert_eq!(conjunction[0].key, "render_mermaid");
+    let with_unmatched = reg.search("flowchart xyzzy");
     assert!(
         with_unmatched.is_empty(),
         "AND with unmatched word must yield empty, got {:?}",
@@ -2021,8 +1983,6 @@ fn registry_kind_membership_through_pr_14() {
             "stop_gate_unfinished_todos",
             "stop_gate_ci_failing",
             "combine_queued_prompts",
-            "simple_mode",
-            "vim_mode",
             "remember_tool_approvals",
             "toolset.ask_user_question.timeout_enabled",
             "subagent_model_inheritance",
@@ -2074,8 +2034,7 @@ fn registry_kind_membership_through_pr_14() {
         "String kind membership drift: {string_keys:?}",
     );
 
-    // Every harness model slot is a DynamicEnum too. They come from their own
-    // table rather than a literal list, so adding a slot cannot drift here.
+    // Every harness model slot is a DynamicEnum too.
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
     let mut expected_dynamic: Vec<&str> = vec!["default_model"];
     expected_dynamic.extend(
@@ -2197,8 +2156,6 @@ fn defaults_round_trip_through_registry() {
             "stop_gate_ci_failing" => SettingValue::Bool(true),
             "combine_queued_prompts" => SettingValue::Bool(false),
             "follow_up_behavior" => SettingValue::Enum("queue"),
-            "simple_mode" => SettingValue::Bool(true),
-            "vim_mode" => SettingValue::Bool(false),
             "remember_tool_approvals" => SettingValue::Bool(true),
             "toolset.ask_user_question.timeout_enabled" => SettingValue::Bool(true),
             "subagent_model_inheritance" => SettingValue::Bool(false),
@@ -2312,9 +2269,7 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetStopGateUnfinishedTodos(_))
             | SettingsKeyOutcome::Action(Action::SetStopGateCiFailing(_))
             | SettingsKeyOutcome::Action(Action::SetCombineQueuedPrompts(_))
-            | SettingsKeyOutcome::Action(Action::SetSimpleMode(_))
             | SettingsKeyOutcome::Action(Action::SetMultilineMode(_))
-            | SettingsKeyOutcome::Action(Action::SetVimMode(_))
             | SettingsKeyOutcome::Action(Action::SetRememberToolApprovals(_))
             | SettingsKeyOutcome::Action(Action::SetAskUserQuestionTimeoutEnabled(_))
             | SettingsKeyOutcome::Action(Action::SetSubagentModelInheritance(_))
@@ -2965,7 +2920,7 @@ fn pr5_space_on_multiline_mode_dispatches_typed_setter() {
     assert_set_bool_action(outcome, "multiline_mode", true);
 }
 
-/// Enter on the multiline row also toggles (same Bool behavior as compact_mode / show_timestamps / simple_mode).
+/// Enter on the multiline row also toggles (same Bool behavior as compact_mode / show_timestamps).
 /// Pins the contract that Bool row Enter and Space behave identically across both SHELL/SHARED and PAGER-owned settings.
 #[test]
 fn pr5_enter_on_multiline_mode_dispatches_typed_setter() {
@@ -4505,9 +4460,8 @@ fn pr15_int_stepper_rejects_text_input_keys() {
         .to_owned();
     assert_eq!(initial_buffer, "120", "buffer seeds from default");
 
-    // Digits append to the in-place buffer (Changed); Backspace drops the last
-    // digit. These were previously rejected but are now accepted so a user can
-    // type a number directly.
+    // Digits append to the in-place buffer (Changed); Backspace drops the
+    // last digit.
     let accept_keys: &[(KeyCode, &str)] = &[
         (KeyCode::Char('5'), "1205"),
         // Backspace undoes the appended digit, restoring the seed.
@@ -4526,9 +4480,10 @@ fn pr15_int_stepper_rejects_text_input_keys() {
         );
     }
 
-    // The stepper is still NOT a free-form text input: letters, sign/decimal
-    // punctuation, Space, and navigation/edit keys other than Backspace are
-    // silently dropped, leaving the buffer untouched (back at the seed).
+    // The stepper is still NOT a free-form text input. The stepper letters,
+    // sign/decimal punctuation, Space, and navigation/edit keys other than
+    // Backspace are silently dropped, leaving the buffer untouched (back at
+    // the seed).
     let reject_keys = &[
         KeyCode::Char('a'),
         KeyCode::Char('-'),
@@ -6241,7 +6196,7 @@ fn pr14_string_settings_use_known_model_validator() {
 // with no working row fails here.
 // ---------------------------------------------------------------------------
 
-/// Every slot has a picker row, and each one is a `KnownModel`-style
+/// Every slot has a picker row, and each is a `KnownModel`-style
 /// `DynamicEnum` under Models whose empty default means "inherit".
 #[test]
 fn harness_model_slot_rows_are_registered_model_pickers() {
@@ -6321,10 +6276,9 @@ fn harness_model_slot_rows_are_discoverable_via_search() {
     }
 }
 
-/// Build a modal whose catalog carries one model, focused on `key`.
-///
-/// The slot rows sit deep in the Models category, past `navigate_to`'s
-/// keystroke guard, so the focus is placed directly.
+/// Build a modal whose catalog carries one model, focused on `key`. The slot
+/// rows sit deep in the Models category, past `navigate_to`'s keystroke
+/// guard, so the focus is placed directly.
 fn slot_modal_focused_on(key: &str) -> SettingsModalState {
     let snapshot = PagerLocalSnapshot {
         available_models: vec![(
@@ -6361,7 +6315,6 @@ fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
             s.mode()
         );
 
-        // Row 0 is "(no override)"; row 1 is the one catalog model.
         let outcome = handle_settings_key(&mut s, &press(KeyCode::Down));
         assert!(
             matches!(outcome, SettingsKeyOutcome::Changed),
@@ -6385,7 +6338,6 @@ fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
     }
 }
 
-/// Row 0 of the picker clears the slot back to inheriting the session model.
 #[test]
 fn harness_model_slot_picker_row_zero_clears_the_slot() {
     for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
@@ -6444,101 +6396,13 @@ fn mouse_click_on_a_harness_model_slot_row_opens_the_picker() {
     }
 }
 
-// ---------------------------------------------------------------------------
 // vim_mode (scrollback navigation) — PAGER-owned, paired with simple_mode
-// ---------------------------------------------------------------------------
 
-/// Keyboard Space on the vim_mode row dispatches the typed setter
-/// with the inverted snapshot value (default false → true). Same
-/// shape as the `multiline_mode` test above; both rows are
-/// PAGER-owned Bool settings.
-#[test]
-fn vim_mode_space_dispatches_typed_setter() {
-    let mut s = make_state();
-    navigate_to(&mut s, "vim_mode");
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
-    assert_set_bool_action(outcome, "vim_mode", true);
-}
-
-#[test]
-fn vim_mode_enter_dispatches_typed_setter() {
-    let mut s = make_state();
-    navigate_to(&mut s, "vim_mode");
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
-    assert_set_bool_action(outcome, "vim_mode", true);
-}
-
-#[test]
-fn vim_mode_mouse_click_two_stage_toggles() {
-    let mut s = make_state();
-    synth_rects(&mut s);
-    let row_y = row_idx_for(&s, "vim_mode") as u16;
-
-    // First click: select-only.
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        10,
-        row_y,
-    );
-    assert!(
-        matches!(outcome, SettingsKeyOutcome::Changed),
-        "first click on a different row body should only select, got: {outcome:?}"
-    );
-    assert_eq!(s.selected, row_y as usize);
-
-    // Second click: toggle.
-    let outcome = handle_settings_mouse(
-        &mut s,
-        MouseEventKind::Down(crossterm::event::MouseButton::Left),
-        10,
-        row_y,
-    );
-    assert_set_bool_action(outcome, "vim_mode", true);
-}
-
-#[test]
-fn vim_mode_snapshot_on_dispatches_off() {
-    let snapshot = PagerLocalSnapshot {
-        vim_mode: true,
-        ..PagerLocalSnapshot::default()
-    };
-    let mut s = SettingsModalState::new(
-        Arc::new(SettingsRegistry::defaults()),
-        UiConfig::default(),
-        snapshot,
-    );
-    navigate_to(&mut s, "vim_mode");
-    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
-    assert_set_bool_action(outcome, "vim_mode", false);
-}
-
-#[test]
-fn vim_mode_renders_under_appearance_category_pager_owned() {
-    let reg = SettingsRegistry::defaults();
-    let meta = reg.find("vim_mode").expect("vim_mode must be registered");
-    assert_eq!(
-        meta.category,
-        SettingCategory::Appearance,
-        "vim_mode lives under Appearance (paired with simple_mode)"
-    );
-    assert_eq!(meta.owner, SettingOwner::Shell, "vim_mode is SHELL-owned");
-}
-
-#[test]
-fn simple_mode_label_distinguishes_input_from_scrollback() {
-    // The pair (`simple_mode`, `vim_mode`) controls vim behaviour in two different parts of the UI
-    // The labels name which part each row controls so neither is ambiguous when both are shown
-    let reg = SettingsRegistry::defaults();
-    let simple = reg.find("simple_mode").expect("simple_mode registered");
-    let vim = reg.find("vim_mode").expect("vim_mode registered");
-    assert_eq!(simple.label, "Disable vim input mode");
-    assert_eq!(vim.label, "Vim scrollback navigation");
-    // Keyword sanity-check so search('vim') still finds both.
-    assert!(simple.keywords.contains(&"vim"));
-    assert!(vim.keywords.contains(&"vim"));
-}
-
+/// Keyboard Space on the vim_mode row dispatches the typed setter with the inverted snapshot
+/// value (default false → true). Same shape as the `multiline_mode` test above; both rows
+/// are PAGER-owned Bool settings. The pair (`simple_mode`, `vim_mode`) controls vim behaviour
+/// in different parts of the UI The labels name which part each row controls so neither is
+/// ambiguous. This happens when both are shown
 #[test]
 fn keep_text_selection_renders_under_mouse_shell_owned() {
     let reg = SettingsRegistry::defaults();
@@ -7226,8 +7090,7 @@ fn show_thinking_blocks_cache_on_dispatches_off() {
 
 #[test]
 fn thinking_summaries_space_dispatches_typed_setter() {
-    // The shipped modal key handler, driven on the row by key. `thinking_summaries`
-    // has no process cache, so the value the row reads is the `[ui]` mirror.
+    // The shipped modal key handler, driven on the row by key.
     let mut s = make_state();
     navigate_to(&mut s, "thinking_summaries");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
@@ -7259,10 +7122,7 @@ fn thinking_summaries_renders_under_appearance_category_shared_owned_restart_req
         SettingKind::Bool { default } => assert!(*default, "default must be true"),
         other => panic!("expected Bool kind for thinking_summaries, got {other:?}"),
     }
-    // Sits directly below collapsed_edit_blocks. The four rows above it are
-    // pinned into one adjacency chain by their own order asserts
-    // (show_thinking_blocks / respect_manual_folds / group_tool_verbs /
-    // collapsed_edit_blocks), so a new Appearance row cannot go between them.
+    // Sits directly below collapsed_edit_blocks.
     let keys: Vec<&str> = reg
         .all()
         .iter()

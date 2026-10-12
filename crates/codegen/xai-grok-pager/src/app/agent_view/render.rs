@@ -348,7 +348,7 @@ impl AgentView {
             .scrollback
             .selected()
             .is_some_and(|idx| self.scrollback.entry_content_hidden_by_group(idx));
-        let (selected_supports_copy, selected_meta_label, selected_supports_fullscreen) =
+        let (selected_supports_copy, selected_supports_fullscreen) =
             if self.active_pane == ActivePane::Tasks {
                 let has_selected = self.tasks.selected_task_id().is_some_and(|tid| {
                     self.session
@@ -357,7 +357,7 @@ impl AgentView {
                         .is_some_and(|t| !t.stdout.is_empty())
                 });
                 let has_any_selected = self.tasks.selected_task_id().is_some();
-                (has_selected, None, has_any_selected)
+                (has_selected, has_any_selected)
             } else if self.active_pane == ActivePane::Scrollback {
                 let is_bg_task = selected_entry.is_some_and(|e| {
                     matches!(e.block, crate::scrollback::block::RenderBlock::BgTask(_))
@@ -377,7 +377,7 @@ impl AgentView {
                                 .get(tid)
                                 .is_some_and(|t| !t.stdout.is_empty())
                         });
-                    (has_stdout, None, true)
+                    (has_stdout, true)
                 } else {
                     let is_viewable_subagent = selected_entry.is_some_and(|e| {
                         if let crate::scrollback::block::RenderBlock::Subagent(ref sb) = e.block {
@@ -389,9 +389,6 @@ impl AgentView {
                     (
                         !selected_is_group_header
                             && selected_entry.is_some_and(|e| e.block.supports_copy()),
-                        selected_entry
-                            .and_then(|e| e.block.copy_meta_label())
-                            .filter(|_| !selected_is_group_header),
                         selected_entry.is_some_and(|e| e.block.supports_fullscreen())
                             || is_viewable_subagent,
                     )
@@ -400,9 +397,6 @@ impl AgentView {
                 (
                     !selected_is_group_header
                         && selected_entry.is_some_and(|e| e.block.supports_copy()),
-                    selected_entry
-                        .and_then(|e| e.block.copy_meta_label())
-                        .filter(|_| !selected_is_group_header),
                     selected_entry.is_some_and(|e| e.block.supports_fullscreen()),
                 )
             };
@@ -467,12 +461,10 @@ impl AgentView {
                 self.todo.show_done()
             },
             selected_supports_copy,
-            selected_meta_label,
             selected_supports_fullscreen,
             can_demote,
             selected_can_kill,
             self.multiline_mode,
-            self.vim_mode,
             self.surface(),
             (self.session.state.is_turn_running() || self.wake_turn_active())
                 && !self.renders_parked(),
@@ -1360,15 +1352,7 @@ impl AgentView {
                 status.push_front("link_url", Line::from(Span::styled(display, link_style)));
             }
         }
-        // Top-right: this run's total cost. The agent's own session ledger is
-        // the source of truth — it counts every model call and subagent fold,
-        // including spend behind a message that was rewound or never rendered,
-        // which a sum over the scrollback cannot see. The scrollback sum is the
-        // fallback for an agent too old to report the total, and only while it
-        // measures the same run: after a reload replays priced messages it
-        // measures an earlier run instead, and showing that would mean the
-        // number FALLS at the next live call. Absent until something reports a
-        // cost — never a fabricated `$0.00`.
+        // Top-right: this run's total cost.
         let session_cost_ticks = self
             .session
             .tracker
@@ -1437,11 +1421,11 @@ impl AgentView {
             .current_branch
             .clone()
             .or_else(|| lazy_git.as_ref().and_then(|i| i.branch.clone()));
-        // Realtime CI-status dot (issue #40): a colored dot beside the branch
-        // whose state is polled from the `gh` CLI. The poll is throttled and
-        // off-thread (see `ci_status::ci_status_lazy`), so this render call is
-        // cheap; absent a real branch (detached/empty) or any CI signal, no
-        // dot is drawn — a graceful "no CI status" state.
+        // Realtime CI-status dot: a colored dot beside the branch whose state
+        // is polled from the `gh` CLI. The poll is throttled and off-thread
+        // (see `ci_status::ci_status_lazy`). This render call is cheap.
+        // Absent a real branch (detached/empty) or any CI signal, no dot is
+        // drawn — a graceful "no CI status" state.
         if let Some(b) = branch.as_deref()
             && !b.is_empty()
             && let Some(dot_span) =
@@ -1450,12 +1434,7 @@ impl AgentView {
                         crate::ci_status::CiStatus::Red => Some(theme.accent_error),
                         crate::ci_status::CiStatus::Yellow => {
                             // While CI is running, pulse the yellow dot's HSV
-                            // value so it visibly "thinks". The phase is wall-clock
-                            // time, not the animation tick: the tick cadence
-                            // follows whatever else the UI is doing (Slow on an
-                            // idle session, ~30 fps while streaming), so a
-                            // tick-counted pulse breathes at a different speed
-                            // depending on how busy the screen is.
+                            // value so it visibly "thinks".
                             let dyn_col =
                                 crate::ci_status::in_progress_dot_color(rgb_of(theme.warning));
                             Some(ratatui::style::Color::Rgb(dyn_col.0, dyn_col.1, dyn_col.2))
@@ -2369,8 +2348,8 @@ impl AgentView {
         let mut flags: Vec<PromptFlag> =
             mode_flags(plan_label, self.session.permission_label(), &theme);
         // Shift+Tab agent-identity ring stop (Orchestrator/Explore): the
-        // mode-switch banner only shows for a few seconds, so the flag row
-        // is what persists to remind the user they're off the base agent.
+        // mode-switch banner only shows for a few seconds. The flag row is
+        // what persists to remind the user they're off the base agent.
         if let Some(idx) = self.shift_tab_ring_agent_index {
             use xai_grok_agent::config::BuiltinAgentName;
             let text = match BuiltinAgentName::shift_tab_variants().get(idx as usize) {
@@ -3420,9 +3399,6 @@ impl AgentView {
                     h.push(HintItem::new(key!('a'), "approve"));
                 }
                 h.push(HintItem::new(key!('q'), "quit plan"));
-                if self.vim_mode {
-                    h.push(HintItem::paired(key!('j'), key!('k'), "nav"));
-                }
                 h.push(HintItem::new(key!('v'), "select"));
                 h.push(HintItem::new(key!(Tab), "prompt"));
                 h
@@ -3450,9 +3426,6 @@ impl AgentView {
                 if has_plan_comments {
                     h.push(HintItem::new(key!('s'), "send"));
                 }
-                if self.vim_mode {
-                    h.push(HintItem::paired(key!('j'), key!('k'), "nav"));
-                }
                 h.push(HintItem::new(key!('v'), "select"));
                 h.push(HintItem::new(key!('f', CONTROL), "fullscreen"));
                 h.push(HintItem::new(key!('/'), "search"));
@@ -3460,15 +3433,8 @@ impl AgentView {
                 h
             } else {
                 let mut h = vec![HintItem::new(key!(Enter), "confirm")];
-                if self.vim_mode {
-                    h.push(HintItem::paired(key!('j'), key!('k'), "nav"));
-                }
                 h.push(HintItem::new(key!('v'), "select"));
                 h.push(HintItem::new(key!('x'), "clear"));
-                if self.vim_mode {
-                    h.push(HintItem::new(key!('y'), "copy"));
-                    h.push(HintItem::new(key!('Y'), "filename"));
-                }
                 h.push(HintItem::new(key!(':'), "goto"));
                 h.push(HintItem::new(key!('/'), "search"));
                 h.push(HintItem::new(key!(Esc), "cancel"));
@@ -4972,29 +4938,28 @@ fn rgb_of(color: ratatui::style::Color) -> (u8, u8, u8) {
 /// Map a 256-color palette index to approximate RGB (the common xterm cube).
 fn indexed_to_rgb(i: u8) -> (u8, u8, u8) {
     if i < 16 {
-        // Standard 16 colors; built-in grayscale + base palette, approximated.
+        // Standard colors; built-in grayscale + base palette, approximated.
         const BASE: [(u8, u8, u8); 16] = [
-            (0, 0, 0),       // 0 black
-            (128, 0, 0),     // 1 red
-            (0, 128, 0),     // 2 green
-            (128, 128, 0),   // 3 yellow
-            (0, 0, 128),     // 4 blue
-            (128, 0, 128),   // 5 magenta
-            (0, 128, 128),   // 6 cyan
-            (192, 192, 192), // 7 white
-            (128, 128, 128), // 8 bright black
-            (255, 0, 0),     // 9 bright red
-            (0, 255, 0),     // 10 bright green
-            (255, 255, 0),   // 11 bright yellow
-            (0, 0, 255),     // 12 bright blue
-            (255, 0, 255),   // 13 bright magenta
-            (0, 255, 255),   // 14 bright cyan
-            (255, 255, 255), // 15 bright white
+            (0, 0, 0),
+            (128, 0, 0),
+            (0, 128, 0),
+            (128, 128, 0),
+            (0, 0, 128),
+            (128, 0, 128),
+            (0, 128, 128),
+            (192, 192, 192),
+            (128, 128, 128),
+            (255, 0, 0),
+            (0, 255, 0),
+            (255, 255, 0),
+            (0, 0, 255),
+            (255, 0, 255),
+            (0, 255, 255),
+            (255, 255, 255),
         ];
         return BASE.get(usize::from(i)).copied().unwrap_or_default();
     }
     if i < 232 {
-        // 6×6×6 color cube starting at 16.
         let n = (i - 16) as u16;
         let r = n / 36;
         let g = (n % 36) / 6;
@@ -5002,7 +4967,6 @@ fn indexed_to_rgb(i: u8) -> (u8, u8, u8) {
         let chan = |v: u16| -> u8 { (if v == 0 { 0 } else { 55 + v * 40 }) as u8 };
         return (chan(r), chan(g), chan(b));
     }
-    // Grayscale ramp 232..=255.
     let g = 8 + (i - 232) * 10;
     (g, g, g)
 }

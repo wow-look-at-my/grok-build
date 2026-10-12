@@ -85,11 +85,14 @@ async fn edit_interject_lone_queued_row_keeps_tui_alive() {
     harness.inject_keys(CTRL_ENTER).expect("interject the edit");
 
     harness
-        .wait_for_text("Interjection sent", Duration::from_secs(10))
-        .expect("step 5: interjection toast");
-    harness
         .wait_for_text("STEPTWO", Duration::from_secs(40))
-        .expect("step 6: interjection drained into turn 1");
+        .expect("step 5: the edited row reached the model");
+    assert!(
+        all_user_message_blobs(&content)
+            .iter()
+            .any(|m| m.contains("EDITED")),
+        "step 6: the edited text never reached the wire"
+    );
 
     // THE regression assertion: the liveness probe. On a broken binary the modal eats the Space as
     // well, so the probe below never echoes.

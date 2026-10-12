@@ -197,12 +197,6 @@ pub async fn set_follow_up_behavior(value: String) -> Result<()> {
     update_config(|cfg| cfg.ui.follow_up_behavior = Some(value)).await
 }
 
-/// Persist `[ui].simple_mode` via `update_config`.
-/// The `Option<bool>` shape matches `show_timestamps`.
-pub async fn set_simple_mode(value: bool) -> Result<()> {
-    update_config(|cfg| cfg.ui.simple_mode = Some(value)).await
-}
-
 /// Persist `[ui.contextual_hints].undo` via `update_config`.
 /// The nested struct stays out of `config.toml` until a tip is toggled (`skip_serializing_if`).
 pub async fn set_contextual_hint_undo(value: bool) -> Result<()> {
@@ -346,14 +340,11 @@ pub(super) fn write_feature_override(
     })
 }
 
-/// Persist one harness model slot into `[models]` via `update_config`.
-///
-/// An empty `value` clears the slot, and the slot goes back to what it
-/// falls back to. `slot_id` must be one
-/// [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists; any other id is an
-/// error rather than a silently ignored write.
-///
-/// The caller validates the model against the catalog.
+/// Persist one harness model slot into `[models]` via `update_config`. An
+/// empty `value` clears the slot, and the slot goes back to what it falls
+/// back to. `slot_id` must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`]
+/// lists; any other id is an error rather than a silently ignored write. The
+/// caller validates the model against the catalog.
 pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
     if value.len() > MAX_DEFAULT_MODEL_LEN {
         anyhow::bail!(
@@ -365,9 +356,7 @@ pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
     if xai_grok_models::slot_by_id(slot_id).is_none() {
         anyhow::bail!("unknown harness model slot '{slot_id}'");
     }
-    // Clearing a slot has to REMOVE its key. Setting the field to `None`
-    // only stops it serializing, and the merge then keeps the model already
-    // on disk — the modal would report "cleared" over an unchanged pin.
+    // Clearing a slot has to REMOVE its key.
     let removals: Vec<(&str, &str)> = if value.is_empty() {
         vec![("models", slot_id)]
     } else {
@@ -381,11 +370,10 @@ pub async fn set_harness_model(slot_id: &str, value: String) -> Result<()> {
     .await
 }
 
-/// Write one slot's model into `[models]`. `None` clears the field.
-///
-/// Split out of [`set_harness_model`] so the writer is exercised without
-/// the disk: a test walks the slot table through this and reads the result
-/// back with `Config::resolve_harness_model`.
+/// Write one slot's model into `[models]`. `None` clears the field. Split out
+/// of [`set_harness_model`] so the writer is exercised without the disk. A
+/// test walks the slot table through this and reads the result back with
+/// `Config::resolve_harness_model`.
 pub(crate) fn apply_harness_model(
     m: &mut crate::agent::config::ModelsConfig,
     slot_id: &str,
@@ -510,11 +498,6 @@ pub async fn set_display_refresh_auto_cadence(value: bool) -> Result<()> {
 pub async fn set_scroll_lines(value: i64) -> Result<()> {
     let clamped = value.clamp(1, 10) as u8;
     update_config(|cfg| cfg.ui.scroll_lines = Some(clamped)).await
-}
-
-/// Persist `[ui].vim_mode` via `update_config`.
-pub async fn set_vim_mode(value: bool) -> Result<()> {
-    update_config(|cfg| cfg.ui.vim_mode = Some(value)).await
 }
 
 /// Persist `[ui].remember_tool_approvals` via `update_config`.

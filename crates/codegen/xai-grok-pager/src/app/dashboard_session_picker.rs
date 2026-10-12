@@ -68,7 +68,6 @@ impl AppView {
             disable_search: false,
             compact_bottom_bar: false,
             search_only_on_slash: false,
-            vim_normal_first: crate::appearance::cache::load_vim_mode(),
         };
         let outcome = handle_picker_input(ev, &mut surface.state, entry_map.len(), &config);
         Some(match outcome {

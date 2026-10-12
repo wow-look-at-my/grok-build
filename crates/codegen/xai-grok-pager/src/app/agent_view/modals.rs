@@ -950,7 +950,6 @@ impl AgentView {
             // Require explicit `/` (or click) to activate search there
             search_only_on_slash: state.active_tab
                 == crate::views::extensions_modal::ExtensionsTab::Skills,
-            vim_normal_first: crate::appearance::cache::load_vim_mode(),
         };
 
         let ev = crossterm::event::Event::Key(*key);
@@ -1333,7 +1332,6 @@ impl AgentView {
             // Same gate as the keyboard handler, so a mouse-driven tab switch doesn't change how typing behaves on Skills
             search_only_on_slash: state.active_tab
                 == crate::views::extensions_modal::ExtensionsTab::Skills,
-            vim_normal_first: crate::appearance::cache::load_vim_mode(),
         };
 
         let ev = crossterm::event::Event::Mouse(*mouse);
@@ -2623,7 +2621,6 @@ mod extensions_action_target_tests {
     /// reads the renderer-published entry vectors). Vim mode is pinned off so a boundary Down moves
     /// focus to the tab bar regardless of the developer's on-disk `[ui].vim_mode`.
     fn pipeline_agent(modal: ExtensionsModalState) -> super::AgentView {
-        crate::appearance::cache::set_vim_mode(false);
         let mut agent = super::test_fixtures::make_agent();
         agent.extensions_modal = Some(modal);
         render_modal(&mut agent);
@@ -3677,8 +3674,6 @@ mod extensions_modal_search_key_tests {
 
     #[test]
     fn esc_with_typed_query_exits_search_keeps_modal_open() {
-        // Pin vim-mode off; this test asserts the non-vim picker path.
-        crate::appearance::cache::set_vim_mode(false);
         let mut agent = super::test_fixtures::make_agent();
         agent.extensions_modal = Some(ExtensionsModalState::new(ExtensionsTab::Plugins));
 

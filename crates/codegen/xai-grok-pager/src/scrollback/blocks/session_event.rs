@@ -192,9 +192,8 @@ pub enum SessionEvent {
         /// Why, in the user's words; the shell's wire reason when it sent none.
         why: String,
     },
-    /// A session recap — a short "where was I" summary of the session so far.
-    /// Surfaced on demand via `/recap` (`auto = false`) or automatically when
-    /// the user returns to the terminal after being away (`auto = true`).
+    /// A session recap — a short "where was I" summary of the session so
+    /// far.
     Recap {
         /// The one-line recap text.
         summary: String,

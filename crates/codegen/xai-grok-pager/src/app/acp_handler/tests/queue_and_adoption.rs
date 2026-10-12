@@ -2579,11 +2579,10 @@
     }
 
     /// The local queue's rescue onto the shell's queue used to run only from
-    /// a fresh `Action::SendPrompt`, so a row stuck locally before a
-    /// never-idle turn (a goal) had no rescue until the user typed something
-    /// new. `handle` now runs the same rescue after every inbound message, so
-    /// an ordinary session/update carries the row over without a new
-    /// submission.
+    /// a fresh `Action::SendPrompt`. A row stuck locally before a never-idle
+    /// turn (a goal) had no rescue until the user typed something new.
+    /// `handle` now runs the same rescue after every inbound message, so an
+    /// ordinary session/update carries the row over without a new submission.
     #[test]
     fn inbound_session_update_migrates_a_stuck_local_row_without_a_new_prompt() {
         let mut app = make_app_with_agent("sess-1");

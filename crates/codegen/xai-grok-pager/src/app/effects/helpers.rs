@@ -460,13 +460,6 @@ pub(crate) fn sanitize_user_error(raw: &str) -> String {
     result
 }
 /// Per-session gates that serialize mode-change requests.
-///
-/// Every mode change is its own spawned task, so two rapid Shift+Tab presses
-/// put two `session/set_mode` requests on the wire at once, and the shell is
-/// free to apply them in either order, which is how a burst can settle on the
-/// mode one press back. Holding the session's gate across a request's round
-/// trip keeps consecutive requests in press order: the next one goes out only
-/// after the previous one has been answered.
 static MODE_REQUEST_GATES: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>,
 > = std::sync::OnceLock::new();
@@ -1116,14 +1109,6 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
-        "simple_mode" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("simple_mode", "Bool", &value));
-            };
-            xai_grok_shell::util::config::set_simple_mode(b)
-                .await
-                .map_err(|e| e.to_string())
-        }
         "contextual_hints.undo" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("contextual_hints.undo", "Bool", &value));
@@ -1287,14 +1272,6 @@ pub(crate) async fn persist_setting(
             xai_grok_shell::util::config::set_cancel_subagents_on_turn_cancel(
                     s.to_string(),
                 )
-                .await
-                .map_err(|e| e.to_string())
-        }
-        "vim_mode" => {
-            let SettingValue::Bool(b) = value else {
-                return Err(kind_mismatch("vim_mode", "Bool", &value));
-            };
-            xai_grok_shell::util::config::set_vim_mode(b)
                 .await
                 .map_err(|e| e.to_string())
         }

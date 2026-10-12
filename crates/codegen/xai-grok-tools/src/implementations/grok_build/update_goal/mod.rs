@@ -127,8 +127,7 @@ pub enum RejectReason {
     /// In-flight short-circuit but the orchestration snapshot
     /// vanished mid-flight.
     InFlightOrchestrationVanished,
-    /// A lite goal's completion check judged the goal not met, or could
-    /// not reach a verdict. `detail` carries the reason.
+    /// A lite goal's completion check judged the goal not met, or could not reach a verdict.
     LiteCheckNotMet,
 }
 

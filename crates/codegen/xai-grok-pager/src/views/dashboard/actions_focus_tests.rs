@@ -141,9 +141,7 @@ fn arrows_walk_actions_row_from_empty_input_but_not_over_a_draft() {
     press(&mut state, Left);
     assert_eq!(state.actions_focus, Some(ActionsFocus::NewAgent));
 
-    crate::appearance::cache::set_vim_mode(true);
     press(&mut state, Char('l'));
-    crate::appearance::cache::set_vim_mode(false);
     assert_eq!(
         state.actions_focus,
         Some(ActionsFocus::NewAgent),
