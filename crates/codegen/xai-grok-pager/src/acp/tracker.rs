@@ -1625,6 +1625,10 @@ impl AcpUpdateTracker {
         if text.is_empty() {
             return false;
         }
+        // Text that follows this thought is a new message below it, not more of the one above.
+        if let Some(agent_id) = self.current_agent_msg.take() {
+            scrollback.finish_running(agent_id);
+        }
         let is_replay = meta.is_replay;
         let id = *self.current_thinking.get_or_insert_with(|| {
             let block = if is_replay {
