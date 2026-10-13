@@ -4416,6 +4416,69 @@ mod tests {
         );
     }
 
+    /// A message typed while a real `task` tool call (`run_in_background: false`) runs is sent, not held in the local queue.
+    #[test]
+    fn message_typed_during_a_foreground_task_call_is_sent() {
+        use std::sync::Arc;
+
+        use crate::acp::tracker::{TurnActivity, WaitingReason};
+
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        dispatch(Action::SendPrompt("first".into()), &mut app);
+        let agent = app.agents.get_mut(&id).unwrap();
+        let meta = crate::acp::meta::NotificationMeta::default();
+        agent.session.handle_update(
+            agent_client_protocol::SessionUpdate::ToolCall(
+                agent_client_protocol::ToolCall::new(
+                    agent_client_protocol::ToolCallId::new(Arc::from("task-fg")),
+                    "task",
+                )
+                .kind(agent_client_protocol::ToolKind::Other)
+                .status(agent_client_protocol::ToolCallStatus::Pending)
+                .content(vec![])
+                .locations(vec![]),
+            ),
+            &meta,
+            &mut agent.scrollback,
+        );
+        agent.session.handle_update(
+            agent_client_protocol::SessionUpdate::ToolCallUpdate(
+                agent_client_protocol::ToolCallUpdate::new(
+                    agent_client_protocol::ToolCallId::new(Arc::from("task-fg")),
+                    agent_client_protocol::ToolCallUpdateFields::new().raw_input(Some(
+                        serde_json::json!({
+                            "variant": "Task",
+                            "task_id": "t-1",
+                            "prompt": "explore",
+                            "run_in_background": false
+                        }),
+                    )),
+                ),
+            ),
+            &meta,
+            &mut agent.scrollback,
+        );
+        assert!(
+            matches!(
+                agent.resolve_turn_activity(),
+                Some(TurnActivity::Waiting(WaitingReason::Subagent { .. }))
+            ),
+            "a foreground task call is a subagent wait"
+        );
+
+        let effects = dispatch(Action::SendPrompt("second".into()), &mut app);
+
+        assert!(
+            !effects.is_empty(),
+            "typing during a foreground task call must produce an effect that reaches the shell"
+        );
+        assert!(
+            test_agent(&app, id).session.pending_prompts.is_empty(),
+            "the typed message must not stay held in the local queue"
+        );
+    }
+
     /// A plain mid-turn interjection needs no suppression state for a later park in the same turn.
     #[test]
     fn interjection_then_later_park_still_renders_parked() {
