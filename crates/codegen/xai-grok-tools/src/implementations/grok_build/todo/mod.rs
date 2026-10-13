@@ -143,6 +143,19 @@ pub(crate) fn in_progress_cap_violation(state: &TodoState, cap: usize) -> Option
     })
 }
 
+/// `state` as `input` would leave it. `state` itself is not touched.
+fn project_merge(state: &TodoState, input: &TodoWriteInput) -> Result<TodoState, TodoError> {
+    let mut projected = state.clone();
+    apply_merge(&mut projected, &input.todos, input.prepend)?;
+    Ok(projected)
+}
+
+/// The cap refusal for `projected`. The cap comes from the environment.
+fn cap_violation_message(projected: &TodoState) -> Option<String> {
+    let cap = max_in_progress_cap(std::env::var(MAX_IN_PROGRESS_VAR).ok().as_deref());
+    in_progress_cap_violation(projected, cap)
+}
+
 /// Subagent type a todo verifier runs as.
 pub const VERIFIER_SUBAGENT_TYPE: &str = "general-purpose";
 
@@ -668,47 +681,28 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
 
         // Items this call marks `completed` whose verifier has not passed run
         // an independent verifier subagent BEFORE the completion stands. The
-        // merge is applied first so a condition sent on the same call is the
-        // one verified; a failed verifier then reverts that item's status.
-        let (
-            pending_verifications,
-            previous_statuses,
-            backend,
-            parent_session_id,
-            parent_prompt_id,
-            depth,
-            max_depth,
-        ) = {
+        // verifiers judge the list as this call would leave it, so a condition
+        // sent on the same call is the one verified. The live list changes once,
+        // after they return. The client learns of a change from the plan update
+        // that follows the call. A change made earlier would show on the agent's
+        // side alone while the verifiers run, and for good if the call is
+        // cancelled meanwhile.
+        let (pending_verifications, backend, parent_session_id, parent_prompt_id, depth, max_depth) = {
             let mut res = resources.lock().await;
             let todo_state = res.get_or_default::<State<TodoState>>();
 
-            let mut previous_statuses: std::collections::HashMap<TodoId, Option<TodoStatus>> =
-                std::collections::HashMap::new();
-            for update in &input.todos {
-                if update.status == Some(TodoStatus::Completed) {
-                    previous_statuses
-                        .entry(update.id.clone())
-                        .or_insert_with(|| todo_state.0.item(&update.id).map(|item| item.status));
-                }
-            }
-
             // Refuse a write that would put more items in progress than the cap allows, before any of it lands.
-            let cap = max_in_progress_cap(std::env::var(MAX_IN_PROGRESS_VAR).ok().as_deref());
-            let mut projected = todo_state.0.clone();
-            apply_merge(&mut projected, &input.todos, input.prepend)?;
-            if let Some(message) = in_progress_cap_violation(&projected, cap) {
+            let projected = project_merge(&todo_state.0, &input)?;
+            if let Some(message) = cap_violation_message(&projected) {
                 return Ok(TodoWriteOutput::TooManyInProgress(message));
             }
-
-            // Always a merge.
-            apply_merge(&mut todo_state.0, &input.todos, input.prepend)?;
 
             let mut pending = Vec::new();
             for update in &input.todos {
                 if update.status != Some(TodoStatus::Completed) {
                     continue;
                 }
-                let Some(item) = todo_state.0.item(&update.id) else {
+                let Some(item) = projected.item(&update.id) else {
                     continue;
                 };
                 if item.verification_passed {
@@ -744,7 +738,6 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
 
             (
                 pending,
-                previous_statuses,
                 backend,
                 parent_session_id,
                 parent_prompt_id,
@@ -775,11 +768,27 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             let mut res = resources.lock().await;
             let todo_state = res.get_or_default::<State<TodoState>>();
 
+            // Another write may have landed while the verifiers ran, so the cap is checked again against the list as it is now.
+            let projected = project_merge(&todo_state.0, &input)?;
+            if let Some(message) = cap_violation_message(&projected) {
+                return Ok(TodoWriteOutput::TooManyInProgress(message));
+            }
+
+            // A blocked item goes back to the status it had before this call.
+            let previous_statuses: std::collections::HashMap<TodoId, Option<TodoStatus>> = results
+                .iter()
+                .map(|outcome| {
+                    (
+                        outcome.id.clone(),
+                        todo_state.0.item(&outcome.id).map(|item| item.status),
+                    )
+                })
+                .collect();
+
             // Always a merge.
             apply_merge(&mut todo_state.0, &input.todos, input.prepend)?;
 
-            // A blocked item goes back to the status it had before this call.
-            // It never stays completed.
+            // A blocked item never stays completed.
             for outcome in &results {
                 if outcome.passed {
                     todo_state.0.set_verification_passed(&outcome.id, true);
@@ -1932,6 +1941,94 @@ mod tests {
             "the verifier's reason must reach the model: {}",
             success.summary_for_prompt
         );
+    }
+
+    /// The status of item `id` in the live list.
+    fn live_status(shared: &SharedResources, id: &str) -> TodoStatus {
+        let mut res = shared.try_lock().expect("the tool holds no lock while a verifier runs");
+        let state = res.get_or_default::<State<TodoState>>();
+        get_item(&state.0, id).status
+    }
+
+    /// The client hears of a change from the plan update after the call, so
+    /// the live list must not move before then.
+    #[tokio::test]
+    async fn the_live_list_is_unchanged_while_a_verifier_runs() {
+        let seen = Arc::new(Mutex::new(None));
+        let observed = Arc::clone(&seen);
+        let shared_cell: Arc<Mutex<Option<SharedResources>>> = Arc::new(Mutex::new(None));
+        let cell = Arc::clone(&shared_cell);
+        let harness = verifier_backend(move |_| {
+            let shared = cell.lock().unwrap().clone().unwrap();
+            *observed.lock().unwrap() = Some(live_status(&shared, "1"));
+            passed_result()
+        });
+        let shared = verifier_resources(&harness);
+        *shared_cell.lock().unwrap() = Some(shared.clone());
+        seed_verifying_item(&shared, "1", "cargo test -p parser passes").await;
+
+        let success = complete_item(&shared, "1", None).await;
+
+        assert_eq!(
+            *seen.lock().unwrap(),
+            Some(TodoStatus::Pending),
+            "the verifier ran against a list that already held the completion"
+        );
+        assert_eq!(
+            item_named(&success, "Ship the parser").status,
+            TodoStatus::Completed
+        );
+    }
+
+    /// A call cancelled during verification drops its future. The client gets
+    /// no plan update for it, so the list must read as it did before the call.
+    #[tokio::test]
+    async fn a_call_cancelled_during_verification_leaves_the_list_alone() {
+        let (raw_tx, mut raw_rx) = mpsc::unbounded_channel::<SubagentEvent>();
+        let backend = crate::implementations::grok_build::task::backend::SubagentBackendResource(
+            Arc::new(ChannelBackend::new(raw_tx)),
+        );
+        let (spawned_tx, mut spawned_rx) = mpsc::unbounded_channel::<()>();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Some(event) = raw_rx.recv().await {
+                match event {
+                    SubagentEvent::ValidateType(req) => {
+                        let _ = req.respond_to.send(SubagentValidateTypeOutcome::Ok);
+                    }
+                    SubagentEvent::Spawn(req) => {
+                        held.push(req);
+                        let _ = spawned_tx.send(());
+                    }
+                    _ => {}
+                }
+            }
+        });
+        let harness = VerifierHarness {
+            backend,
+            requests: Arc::new(Mutex::new(Vec::new())),
+        };
+        let shared = verifier_resources(&harness);
+        seed_verifying_item(&shared, "1", "cargo test -p parser passes").await;
+
+        let input = TodoWriteInput {
+            merge: true,
+            prepend: false,
+            todos: vec![TodoUpdate {
+                id: "1".to_string(),
+                content: None,
+                status: Some(TodoStatus::Completed),
+                verification: None,
+                verification_context: None,
+            }],
+        };
+        let call = xai_tool_runtime::Tool::run(&TodoWriteTool, test_ctx(shared.clone()), input);
+        tokio::select! {
+            _ = call => panic!("the call finished with its verifier unanswered"),
+            _ = spawned_rx.recv() => {}
+        }
+
+        assert_eq!(live_status(&shared, "1"), TodoStatus::Pending);
     }
 
     #[tokio::test]
