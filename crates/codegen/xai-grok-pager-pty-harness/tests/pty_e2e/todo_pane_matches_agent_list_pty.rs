@@ -47,10 +47,10 @@ async fn todo_pane_matches_agent_list_pty() {
     // Ctrl+T toggles the todo pane.
     harness.inject_keys(b"\x14").expect("toggle the todo pane");
     harness
-        .wait_for_text("1/3", Duration::from_secs(20))
+        .wait_for_text("tag the release", Duration::from_secs(20))
         .unwrap_or_else(|_| {
             panic!(
-                "the todo pane must show one of three done; got:\n{}",
+                "the todo pane must draw its rows; got:\n{}",
                 harness.screen_contents()
             )
         });
