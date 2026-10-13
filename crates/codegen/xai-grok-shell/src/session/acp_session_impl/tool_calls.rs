@@ -778,12 +778,10 @@ impl SessionActor {
                 let display_cwd = display_cwd.clone();
                 let interruptible =
                     is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments());
-                let task_handoff = is_foreground_task_call(
-                    &prepared.tool_name,
-                    prepared.authored_arguments(),
-                )
-                .then(|| subagent_event_tx.clone().zip(running_prompt_id.clone()))
-                .flatten();
+                let task_handoff =
+                    is_foreground_task_call(&prepared.tool_name, prepared.authored_arguments())
+                        .then(|| subagent_event_tx.clone().zip(running_prompt_id.clone()))
+                        .flatten();
                 let prepared = {
                     let mut dispatch_prepared = prepared.clone();
                     if interruptible
@@ -965,8 +963,7 @@ impl SessionActor {
                         .await
                     } else if let Some((event_tx, prompt_id)) = task_handoff {
                         // A queued message cuts a foreground subagent short: it moves to the background before the call is dropped.
-                        let backend =
-                            ChannelBackend::for_session(event_tx, session_id.to_string());
+                        let backend = ChannelBackend::for_session(event_tx, session_id.to_string());
                         (
                             async {
                                 tokio::select! {

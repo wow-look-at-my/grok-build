@@ -233,9 +233,21 @@ async fn queued_message_leaves_a_background_task_call_alone() {
 fn foreground_task_call_predicate_reads_the_flag_leniently() {
     use super::tool_calls::is_foreground_task_call;
     let call = |name: &str, args: serde_json::Value| is_foreground_task_call(name, &args);
-    assert!(call("task", serde_json::json!({"run_in_background": false})));
-    assert!(call("Task", serde_json::json!({"run_in_background": "false"})));
-    assert!(!call("task", serde_json::json!({"run_in_background": true})));
+    assert!(call(
+        "task",
+        serde_json::json!({"run_in_background": false})
+    ));
+    assert!(call(
+        "Task",
+        serde_json::json!({"run_in_background": "false"})
+    ));
+    assert!(!call(
+        "task",
+        serde_json::json!({"run_in_background": true})
+    ));
     assert!(!call("task", serde_json::json!({})));
-    assert!(!call("bash", serde_json::json!({"run_in_background": false})));
+    assert!(!call(
+        "bash",
+        serde_json::json!({"run_in_background": false})
+    ));
 }
