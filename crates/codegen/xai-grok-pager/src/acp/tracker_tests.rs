@@ -5939,3 +5939,50 @@ fn a_stale_streaming_tool_row_is_not_adopted_by_the_next_request() {
         "the live call gets its own row below the text that came before it"
     );
 }
+
+/// A backend-hosted web search arrives as an in-progress call with `backend: true`, then an update with the result.
+#[test]
+fn text_around_a_backend_web_search_reaches_the_screen_in_order() {
+    for same_stream in [true, false] {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        let search = acp::SessionUpdate::ToolCall(
+            acp::ToolCall::new(
+                acp::ToolCallId::new(Arc::from("ws1")),
+                "Web search".to_string(),
+            )
+            .kind(acp::ToolKind::Search)
+            .status(acp::ToolCallStatus::InProgress)
+            .content(vec![])
+            .locations(vec![])
+            .raw_input(Some(
+                serde_json::json!({ "variant": "WebSearch", "backend": "true" }),
+            ))
+            .meta(serde_json::json!({ "backend": true }).as_object().cloned()),
+        );
+        let done = acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
+            acp::ToolCallId::new(Arc::from("ws1")),
+            acp::ToolCallUpdateFields::new()
+                .status(Some(acp::ToolCallStatus::Completed))
+                .raw_output(Some(serde_json::json!({
+                    "status": "completed",
+                    "action": { "type": "search", "query": "weather tomorrow", "sources": [] }
+                }))),
+        ));
+        let steps = [
+            agent_chunk("let me check"),
+            search,
+            done,
+            agent_chunk("sunny and 72"),
+        ];
+        for (i, update) in steps.into_iter().enumerate() {
+            let stream = if same_stream { 1 } else { 1 + i as i64 };
+            tracker.handle_update(update, &meta_stream(stream), &mut sb);
+        }
+        assert_eq!(
+            screen(&sb),
+            ["A:let me check", "C", "A:sunny and 72"],
+            "one stream: {same_stream}"
+        );
+    }
+}
