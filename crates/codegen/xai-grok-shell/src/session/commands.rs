@@ -718,8 +718,8 @@ pub enum SessionCommand {
         respond_to: Option<oneshot::Sender<()>>,
         pending: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     },
-    /// Put a `CurrentModeUpdate` on the ordered event pipeline, behind the text chunks the turn already queued.
-    /// A direct forward gets a higher event id than a chunk still in the replay buffer, so the client drops that chunk as stale.
+    /// Put a `CurrentModeUpdate` on the ordered event pipeline, behind the
+    /// text chunks the turn already queued.
     EnqueueCurrentModeUpdate {
         mode_id: String,
     },

@@ -336,7 +336,8 @@ pub(super) fn dispatch_manage_billing(app: &mut AppView) -> Vec<Effect> {
 }
 
 /// `/queue`: commit a read-only list of the queued prompts as a system block.
-/// The text is built by [`crate::app::status_blocks::queue_block_text`]; this just resolves the active agent and pushes it.
+/// The text is built by [`crate::app::status_blocks::queue_block_text`]; this
+/// resolves the active agent and pushes it.
 pub(super) fn dispatch_show_queue(app: &mut AppView) -> Vec<Effect> {
     if let ActiveView::Agent(id) = app.active_view
         && let Some(agent) = app.agents.get_mut(&id)

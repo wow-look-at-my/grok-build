@@ -27,7 +27,11 @@ A harness or ACP client that launches `grok agent stdio` can inject settings wit
 - **`GROK_CONFIG`**: an inline JSON object overlay.
 - **`GROK_CONFIG_PATH`**: an *additional* file overlay (not a replacement for `config.toml`), a JSON or TOML file read by its extension (`.json` → JSON, else TOML). `GROK_CONFIG` wins if both are set. An empty `GROK_CONFIG` is treated as unset, and a malformed one logs a warning and falls through to `GROK_CONFIG_PATH`.
 
-The overlay is **deep-merged** on top of your `config.toml` (it overrides only the keys it sets), placed above the user/managed layers but **below** `requirements.toml` / MDM. As a result, an enterprise pin still wins. A malformed blob is ignored with a warning. This mirrors `CODEX_CONFIG` from the `codex-acp` adapter (a JSON object merged into the session config). Grok is ACP-native. As a result, the overlay lives in the agent itself. It only affects settings read from the merged config. It is **not** a permission-escalation path. The overlay is confined, fail-closed, to an **allowlist** of soft settings (`models`, `features`, a narrowed `toolset`, and a `shell_environment_policy` limited to its filter fields, which select among env names the launcher already controls and cannot inject an env value into tool subprocesses). Every other table is dropped at the choke point. As a result, the overlay cannot spawn commands, set auth policy, redirect network traffic, elevate trust, or add a discovery source. Even on the allowlisted settings, a specific set of security gates read the raw disk layers rather than the overlay. The `ConfigLayers::env_overlay` rustdoc is the canonical list of what the overlay can and cannot reach and which gates read it overlay-free. See also the [internal environment-variables reference](../internal/22-environment-variables.md). Use `GROK_DEFAULT_SELECTED_PERMISSION` for headless permission control. For example, to set the default reasoning effort:
+The overlay is **deep-merged** on top of your `config.toml` (it overrides only the keys it sets), placed above the user/managed layers but **below** `requirements.toml` / MDM. As a result, an enterprise pin still wins. A malformed blob is ignored with a warning. This mirrors `CODEX_CONFIG` from the `codex-acp` adapter (a JSON object merged into the session config). Grok is ACP-native. As a result, the overlay lives in the agent itself.
+
+It only affects settings read from the merged config. It is **not** a permission-escalation path. The overlay is confined, fail-closed, to an **allowlist** of soft settings (`models`, `features`, a narrowed `toolset`, and a `shell_environment_policy` limited to its filter fields, which select among env names the launcher already controls and cannot inject an env value into tool subprocesses). Every other table is dropped at the choke point. As a result, the overlay cannot spawn commands, set auth policy, redirect network traffic, elevate trust, or add a discovery source. Even on the allowlisted settings, a specific set of security gates read the raw disk layers rather than the overlay.
+
+The `ConfigLayers::env_overlay` rustdoc is the canonical list of what the overlay can and cannot reach and which gates read it overlay-free. See also the [internal environment-variables reference](../internal/22-environment-variables.md). Use `GROK_DEFAULT_SELECTED_PERMISSION` for headless permission control. For example, to set the default reasoning effort:
 
 ```bash
 GROK_CONFIG='{"models": {"default_reasoning_effort": "high"}}' grok agent stdio
@@ -151,7 +155,7 @@ When the agent asks to run a command (or take some other tool action), the appro
 default_selected_permission = "allow_once"
 ```
 
-After you answer the first prompt the cursor turns **sticky**: each later prompt preselects whatever you last confirmed (pick "No" once and subsequent prompts start on their reject row), carrying across edit / bash / MCP prompts. This is until you restart. So this setting only picks the starting point.
+After you answer the first prompt the cursor turns **sticky**: each later prompt preselects whatever you last confirmed (pick "No" once and subsequent prompts start on their reject row), carrying across edit / bash / MCP prompts. This is until you start. So this setting only picks the starting point.
 
 Values match case-insensitively. An unset or unrecognized value falls back to `always_allow_all_sessions`. The `allow_command_always` row is always scoped to the specific action being approved (command / tool / domain / edit-session), not a global allow-everything — that is what `always_allow_all_sessions` is for. Note the per-command "Always allow" rows appear while `[ui] remember_tool_approvals` is enabled (the default. Set it to `false` to hide them). See [22-permissions-and-safety.md](22-permissions-and-safety.md).
 
@@ -231,7 +235,9 @@ allowed_domains = ["docs.x.ai", "arxiv.org"]
 
 `allow_local` is off by default (SSRF fail-closed). Turn it on (or set `GROK_WEB_FETCH_ALLOW_LOCAL=1`) and `web_fetch` may reach **explicit** loopback hosts only — private, link-local, and cloud-metadata ranges stay blocked. Resolution: TOML > env > default off.
 
-`[toolset.web_search]` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**. If you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model. The model's own per-call `allowed_domains` is ignored whenever you have set `allowed_domains` or `excluded_domains` here (so a blocklist is a real block). The model's per-call allowlist only applies when you have configured nothing. Resolution: requirements → user `config.toml` → managed → default (unset). Config is read at session start, so edit it before starting a session — changes do not apply mid-session.
+`[toolset.web_search]` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**. If you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model.
+
+The model's own per-call `allowed_domains` is ignored when you set `allowed_domains` or `excluded_domains` here (so a blocklist is a real block). The model's per-call allowlist only applies when you configured nothing. Resolution: requirements → user `config.toml` → managed → default (unset). Config is read at session start, so edit it before starting a session — changes do not apply mid-session.
 
 `[toolset.ask_user_question]` is honored across **requirements.toml**, **managed config**, and your user **`config.toml`**. Precedence: requirements → env (`GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED` / `GROK_ASK_USER_QUESTION_TIMEOUT_SECS`) → user config → managed → defaults. Set `timeout_enabled = false` in your user config to disable the automatic questionnaire timeout for yourself. `timeout_secs` must be a positive integer. You can also toggle `timeout_enabled` from `/settings` → **Ask-Question timeout** (under Agent & Approval). Changes apply to newly started sessions.
 
@@ -505,7 +511,7 @@ fork_worktree_mode = "ask"             # /fork worktree prompt: "ask" | "always"
 
 ### Notifications
 
-Fire terminal notifications when the agent finishes a turn or needs approval. They use terminal-native protocols (OSC 9, OSC 99, OSC 777, or BEL) and are focus-gated by default, so they only fire when you are not looking at the terminal.
+Fire terminal notifications when the agent finishes a turn or needs approval. They use terminal-native protocols (OSC 9, OSC 99, OSC 777, or default focus-gates BEL) and, so they only fire when you are not looking at the terminal.
 
 ```toml
 [ui.notifications]
@@ -749,7 +755,9 @@ highlight_overlays_border = false     # highlight extends over selection box bor
 dim_accent = 0.5                      # dimming factor for collapsed accents (0.0-1.0)
 ```
 
-`respect_manual_folds` is off by default. Turn it on and a block you fold by hand is pinned: streaming updates. Finish events (a thinking block ending, say) leave its fold state alone, and expanding a block while follow-mode is tailing new content stops the auto-scroll. As a result, the view stays put. Follow resumes via `Shift+G`, `j` at the last entry, scrolling past the bottom, or sending a new prompt. `Shift+E` clears all pins. `Ctrl+E` clears pins on thinking blocks.
+`respect_manual_folds` is off by default. Turn it on and a block you fold by hand is pinned: streaming updates. Finish events (a thinking block ending, say) leave its fold state alone, and expanding a block while follow-mode tails new content stops the auto-scroll. As a result, the view stays put. Follow resumes via `Shift+G`, `j` at the last entry, scrolling past the bottom, or sending a new prompt. `Shift+E` clears all pins.
+
+`Ctrl+E` clears pins on thinking blocks.
 
 ### Block configuration
 
@@ -904,7 +912,7 @@ A `[model.<id>] pricing` table you write always wins over the catalog.
 
 ### How Grok saves `config.toml`
 
-Writes to **`~/.grok/config.toml`** (`/settings` and other user-config saves) follow a leaf symlink. The atomic rename writes the referent (a file in your dotfiles repo). The link stays a link. If the link is dangling, the write creates the referent as a regular file.
+Writes to **`~/.grok/config.toml`** (`/settings` and other user-config saves) follow a leaf symlink. The atomic rename writes the referent (a file in your dotfiles repo). The link stays a link. If the link dangls, the write creates the referent as a regular file.
 
 Writes to a **project** `.grok/config.toml` (MCP / plugin / permission edits) **replace** a leaf symlink with a regular file. That keeps a later save from following the link out of the repository.
 
@@ -946,4 +954,4 @@ When the same server name comes from more than one source, it resolves highest-p
 2. **User** — `~/.grok/lsp.json`
 3. **Plugins** — file-based `.lsp.json`, then inline `lspServers`, in plugin load order
 
-Project and user entries replace lower-priority ones of the same name. Plugin entries only add servers whose names are not already defined by a local file, so a local `lsp.json` always wins over a plugin. Plugin LSP servers load only after the plugin is trusted (see [Plugins](09-plugins.md)).
+Project and user entries replace lower-priority ones of the same name. Plugin entries only add servers whose names are not already defined by a local file. Do this so a local `lsp.json` always wins over a plugin. Plugin LSP servers load only after the plugin is trusted (see [Plugins](09-plugins.md)).

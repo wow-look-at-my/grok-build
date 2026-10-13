@@ -61,7 +61,6 @@ pub fn available() -> bool {
 }
 
 /// The argument vector that reads one progress snapshot of a command's log.
-///
 /// The command is not wrapped: a shell pipeline runs its elements in
 /// subshells. A wrapped command would leave the shell whose state the
 /// executor replays. `analyze` reports on the log as it stands.

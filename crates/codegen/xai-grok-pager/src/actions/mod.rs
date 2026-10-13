@@ -323,11 +323,8 @@ impl ActionRegistry {
         Self::new(actions)
     }
 
-    // Contexts where a bare letter is also a typeable input key, so the vim-off suppression applies
-    // Both views own a text prompt that `j`/`k` must reach when vim-mode is off
-    // When vim_mode is off, also suppress any alt key that is itself a bare letter
-    // Example: the `j`/`k` alts on the dashboard's SelectNext/SelectPrev
-    // Non-letter alts (arrows, Tab, Space) always match
+    // Contexts where a bare letter is also a typeable input key, so the
+    // vim-off suppression applies.
     pub fn find(&self, id: ActionId) -> Option<&ActionDef> {
         self.actions.iter().find(|d| d.id == id)
     }
