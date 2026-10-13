@@ -452,3 +452,41 @@ async fn text_before_a_shell_call_reaches_the_screen_inline() {
     )
     .await;
 }
+
+fn narration_before(call: MockToolCall, tag: &str) -> (MockToolCall, String) {
+    let narration = format!("NARRATION_{tag}");
+    (
+        call.narrated(&format!("{narration} looking into it")),
+        narration,
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn text_before_a_read_or_search_call_reaches_the_screen() {
+    let cases = [
+        (
+            "READ",
+            MockToolCall::new(Tool::Read, json!({ "target_file": "/etc/hostname" })),
+        ),
+        (
+            "GREP",
+            MockToolCall::new(
+                Tool::Grep,
+                json!({ "pattern": "root", "path": "/etc/passwd" }),
+            ),
+        ),
+    ];
+    for (tag, call) in cases {
+        let (call, narration) = narration_before(call, tag);
+        for over_messages in [false, true] {
+            narration_reaches_the_screen(
+                call.clone(),
+                &narration,
+                &format!("{tag}_DONE"),
+                over_messages,
+            )
+            .await;
+        }
+    }
+}
