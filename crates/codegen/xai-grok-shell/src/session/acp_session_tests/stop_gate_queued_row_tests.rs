@@ -1,7 +1,7 @@
 //! A queued user message ends a turn that the todo stop gate would extend.
 
 use super::support::*;
-use super::todo_capture_e2e_tests::{drain_gateway, drain_persistence};
+use super::rate_limit_backoff_tests::{SessionKind, actor_under_test};
 use super::*;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,25 +12,15 @@ const IN_PROGRESS_TODO: &str =
 
 /// A session with one unfinished todo and a running front row, against `server`.
 async fn actor_with_unfinished_todo(server: &MockInferenceServer) -> Arc<SessionActor> {
-    let (gateway_tx, gateway_rx) =
-        tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
-    drain_gateway(gateway_rx);
-    let (persistence_tx, persistence_rx) =
-        tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-    drain_persistence(persistence_rx);
-
-    let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+    let (actor, _retries) = actor_under_test(
+        server,
+        SessionKind::Main,
+        xai_grok_sampler::RetryPolicy::default(),
+        true,
+    )
+    .await;
     *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
-    let mut cfg = actor
-        .chat_state_handle
-        .get_sampling_config()
-        .await
-        .expect("test actor has sampling config");
-    cfg.base_url = server.url();
-    cfg.api_backend = xai_grok_sampling_types::ApiBackend::Responses;
-    cfg.model = "test".to_string();
-    actor.chat_state_handle.update_sampling_config(cfg);
     let mut creds = actor.chat_state_handle.get_credentials().await;
     creds.api_key = Some("test-key".to_string());
     actor.chat_state_handle.update_credentials(creds);
@@ -65,7 +55,7 @@ async fn actor_with_unfinished_todo(server: &MockInferenceServer) -> Arc<Session
         .current_prompt_id
         .lock()
         .expect("current_prompt_id mutex poisoned") = Some("running".into());
-    Arc::new(actor)
+    actor
 }
 
 async fn run_running_turn(actor: &Arc<SessionActor>) {
