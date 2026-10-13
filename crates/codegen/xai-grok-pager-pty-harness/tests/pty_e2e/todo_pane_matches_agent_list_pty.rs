@@ -4,8 +4,9 @@ use super::common::*;
 
 const DONE_SENTINEL: &str = "TODO_PANE_SYNC_DONE";
 
-/// PTY: after the model writes its todo list twice, the todo pane on screen lists the same
-/// items with the same statuses as the list the agent reads back in its next request.
+/// PTY. The todo pane on screen lists the same items with the same statuses as the list
+/// the agent reads back in its next request. This happens after the model writes its todo
+/// list twice.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
 async fn todo_pane_matches_agent_list_pty() {
