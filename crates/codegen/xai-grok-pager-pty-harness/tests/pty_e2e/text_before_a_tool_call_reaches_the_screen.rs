@@ -53,6 +53,7 @@ async fn narration_reaches_the_screen_in(
     if over_messages {
         use_messages_model(&content);
     }
+    content.server().set_keep_requests(true);
     content.server().set_conversations(conversations);
     let binary = pager_binary().expect("resolve pager binary");
     let mut harness = PtyHarness::spawn_with_content_env_ops_in_dir(
@@ -78,6 +79,16 @@ async fn narration_reaches_the_screen_in(
     assert!(
         screen.contains(narration),
         "the text written before the tool call never reached the screen:\n{screen}"
+    );
+    let follow_up_carries_it = content
+        .server()
+        .request_bodies()
+        .iter()
+        .skip(1)
+        .any(|body| body.to_string().contains(narration));
+    assert!(
+        follow_up_carries_it,
+        "the request after the tool call did not carry the text the model wrote before it"
     );
     if over_messages {
         assert!(
