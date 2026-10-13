@@ -27,8 +27,19 @@ async fn narration_reaches_the_screen(
     done: &str,
     over_messages: bool,
 ) {
+    narration_reaches_the_screen_with(call, narration, done, over_messages, &[]).await;
+}
+
+async fn narration_reaches_the_screen_with(
+    call: MockToolCall,
+    narration: &str,
+    done: &str,
+    over_messages: bool,
+    extra_args: &[&str],
+) {
     let conversations = vec![Conversation::nth(1).calls([call]).reply(done)];
-    narration_reaches_the_screen_in(conversations, narration, done, over_messages).await;
+    narration_reaches_the_screen_in(conversations, narration, done, over_messages, extra_args)
+        .await;
 }
 
 async fn narration_reaches_the_screen_in(
@@ -36,6 +47,7 @@ async fn narration_reaches_the_screen_in(
     narration: &str,
     done: &str,
     over_messages: bool,
+    extra_args: &[&str],
 ) {
     let content = ContentController::start().await.expect("start content");
     if over_messages {
@@ -48,7 +60,7 @@ async fn narration_reaches_the_screen_in(
         DEFAULT_ROWS,
         DEFAULT_COLS,
         &content,
-        &["--yolo", "--trust"],
+        &pager_args(extra_args),
         &[],
         Some(content.home()),
     )
@@ -73,6 +85,13 @@ async fn narration_reaches_the_screen_in(
             "the turn never used the Messages endpoint"
         );
     }
+}
+
+/// The flags every test runs the pager with, then the mode under test.
+fn pager_args<'a>(extra: &[&'a str]) -> Vec<&'a str> {
+    let mut args = vec!["--yolo", "--trust"];
+    args.extend_from_slice(extra);
+    args
 }
 
 fn shell_call() -> MockToolCall {
@@ -173,6 +192,7 @@ async fn text_before_a_blocking_subagent_call_reaches_the_screen() {
         "NARRATION_BEFORE_SUBAGENT",
         "SUBAGENT_TURN_DONE",
         false,
+        &[],
     )
     .await;
 }
@@ -324,7 +344,7 @@ async fn text_stays_when_a_prompt_interrupts_the_stream_before_the_tool_call() {
 }
 
 /// Each narration is before its own call and after the call before it, so those read top to bottom in the order written.
-async fn successive_narrations_read_in_order(over_messages: bool) {
+async fn successive_narrations_read_in_order(over_messages: bool, extra_args: &[&str]) {
     let content = ContentController::start().await.expect("start content");
     if over_messages {
         use_messages_model(&content);
@@ -353,7 +373,7 @@ async fn successive_narrations_read_in_order(over_messages: bool) {
         DEFAULT_ROWS,
         DEFAULT_COLS,
         &content,
-        &["--yolo", "--trust"],
+        &pager_args(extra_args),
         &[],
         Some(content.home()),
     )
@@ -381,13 +401,19 @@ async fn successive_narrations_read_in_order(over_messages: bool) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn successive_narrations_read_in_order_over_chat_completions() {
-    successive_narrations_read_in_order(false).await;
+    successive_narrations_read_in_order(false, &[]).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn successive_narrations_read_in_order_over_messages_with_thinking() {
-    successive_narrations_read_in_order(true).await;
+    successive_narrations_read_in_order(true, &[]).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn successive_narrations_read_in_order_inline() {
+    successive_narrations_read_in_order(true, &["--no-alt-screen"]).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -399,6 +425,19 @@ async fn markdown_text_before_a_shell_call_reaches_the_screen() {
         "NARRATION_MARKDOWN_END",
         "MARKDOWN_TURN_DONE",
         false,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn text_before_a_shell_call_reaches_the_screen_inline() {
+    narration_reaches_the_screen_with(
+        shell_call().narrated("NARRATION_INLINE checking now"),
+        "NARRATION_INLINE",
+        "INLINE_TURN_DONE",
+        false,
+        &["--no-alt-screen"],
     )
     .await;
 }
