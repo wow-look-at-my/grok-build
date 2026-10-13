@@ -54,3 +54,5 @@ mod permission_prompt_hook_chimes_only_on_real_wait;
 mod send_subagent_message_row;
 #[path = "pty_e2e/send_subagent_message_row_opens_child.rs"]
 mod send_subagent_message_row_opens_child;
+#[path = "pty_e2e/todo_pane_matches_agent_list_pty.rs"]
+mod todo_pane_matches_agent_list_pty;
