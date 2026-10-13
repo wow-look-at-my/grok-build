@@ -71,7 +71,10 @@ fn task_call(id: &str, run_in_background: bool) -> crate::sampling::types::ToolC
 
 /// Runs one `task` call on a backend that never finishes. A message is queued while the call runs.
 /// Returns the hand-off requests the coordinator saw and whether the call returned.
-async fn run_task_call_with_queued_message(run_in_background: bool) -> (Vec<String>, bool, String) {
+async fn run_task_call_with_queued_message(
+    run_in_background: bool,
+    queue_before: bool,
+) -> (Vec<String>, bool, String) {
     let (gateway_tx, _gateway_rx) =
         tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
     let (persistence_tx, _persistence_rx) =
@@ -141,6 +144,16 @@ async fn run_task_call_with_queued_message(run_in_background: bool) -> (Vec<Stri
     }
     let actor = Arc::new(actor);
 
+    let (respond_to, _prx) = tokio::sync::oneshot::channel();
+    let mut queue_request = Some(queue_input_request(
+        vec![acp::ContentBlock::Text(acp::TextContent::new("hello"))],
+        "queued",
+        respond_to,
+    ));
+    if queue_before && let Some(request) = queue_request.take() {
+        let _ = actor.queue_input(request).await;
+    }
+
     let call_actor = actor.clone();
     let call = tokio::task::spawn_local(async move {
         call_actor
@@ -155,14 +168,9 @@ async fn run_task_call_with_queued_message(run_in_background: bool) -> (Vec<Stri
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    let (respond_to, _prx) = tokio::sync::oneshot::channel();
-    let _ = actor
-        .queue_input(queue_input_request(
-            vec![acp::ContentBlock::Text(acp::TextContent::new("hello"))],
-            "queued",
-            respond_to,
-        ))
-        .await;
+    if let Some(request) = queue_request.take() {
+        let _ = actor.queue_input(request).await;
+    }
 
     let returned = tokio::time::timeout(Duration::from_secs(5), call)
         .await
@@ -190,26 +198,33 @@ async fn run_task_call_with_queued_message(run_in_background: bool) -> (Vec<Stri
     (seen, returned, result_text)
 }
 
+/// Every follow-up mode and queue timing: the row arrives during the call, or sat queued before it began.
 #[tokio::test(flavor = "current_thread")]
 async fn queued_message_backgrounds_a_foreground_task_call() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            crate::util::config::set_follow_up_steer_cache(true);
-            let (handed_off, returned, result) = run_task_call_with_queued_message(false).await;
-            assert!(
-                returned,
-                "the foreground task call must return once a message is queued"
-            );
-            assert_eq!(
-                handed_off,
-                vec!["running".to_string()],
-                "the subagent must be handed off for the running prompt; the call's result was: {result:?}"
-            );
-            assert!(
-                result.contains("moved to the background"),
-                "the model must be told the subagent moved: {result:?}"
-            );
+            for steer in [true, false] {
+                for queue_before in [false, true] {
+                    crate::util::config::set_follow_up_steer_cache(steer);
+                    let (handed_off, returned, result) =
+                        run_task_call_with_queued_message(false, queue_before).await;
+                    let case = format!("steer={steer} queue_before={queue_before}");
+                    assert!(
+                        returned,
+                        "the foreground task call must return once a message is queued ({case})"
+                    );
+                    assert_eq!(
+                        handed_off,
+                        vec!["running".to_string()],
+                        "the subagent must be handed off for the running prompt ({case}); the call's result was: {result:?}"
+                    );
+                    assert!(
+                        result.contains("moved to the background"),
+                        "the model must be told the subagent moved ({case}): {result:?}"
+                    );
+                }
+            }
         })
         .await;
 }
@@ -219,12 +234,15 @@ async fn queued_message_leaves_a_background_task_call_alone() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            crate::util::config::set_follow_up_steer_cache(true);
-            let (handed_off, _returned, _result) = run_task_call_with_queued_message(true).await;
-            assert!(
-                handed_off.is_empty(),
-                "a background call has no foreground wait to cut short: {handed_off:?}"
-            );
+            for steer in [true, false] {
+                crate::util::config::set_follow_up_steer_cache(steer);
+                let (handed_off, _returned, _result) =
+                    run_task_call_with_queued_message(true, false).await;
+                assert!(
+                    handed_off.is_empty(),
+                    "a background call has no foreground wait to cut short (steer={steer}): {handed_off:?}"
+                );
+            }
         })
         .await;
 }
