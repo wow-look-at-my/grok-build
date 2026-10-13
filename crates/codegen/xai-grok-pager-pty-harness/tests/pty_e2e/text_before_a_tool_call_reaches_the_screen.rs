@@ -1,6 +1,5 @@
-//! PTY: text the model writes in the same response as a tool call reaches the screen.
-//! The mock streams the text and then the call. The plan-mode call also changes the session mode,
-//! an update the shell must deliver after the text it follows.
+//! PTY: text the model writes in the same response as a tool call reaches the
+//! screen. The mock streams the text and then the call.
 #![cfg(unix)]
 #[allow(unused_imports)]
 use super::common::*;
