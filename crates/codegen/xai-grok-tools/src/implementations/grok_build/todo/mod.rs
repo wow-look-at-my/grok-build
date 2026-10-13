@@ -1945,7 +1945,9 @@ mod tests {
 
     /// The status of item `id` in the live list.
     fn live_status(shared: &SharedResources, id: &str) -> TodoStatus {
-        let mut res = shared.try_lock().expect("the tool holds no lock while a verifier runs");
+        let mut res = shared
+            .try_lock()
+            .expect("the tool holds no lock while a verifier runs");
         let state = res.get_or_default::<State<TodoState>>();
         get_item(&state.0, id).status
     }
