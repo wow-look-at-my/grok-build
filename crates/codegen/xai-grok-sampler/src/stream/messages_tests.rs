@@ -1010,3 +1010,292 @@ async fn the_terminal_delta_settles_the_price() {
     ];
     assert_eq!(priced_response(events).await, Some(7_000_000));
 }
+
+// ---- Content-block orderings: any sequence of thinking, text and tool_use blocks is valid ----
+
+#[derive(Clone, Copy)]
+enum Blk {
+    Think(&'static str, &'static str),
+    Text(&'static str),
+    Tool(&'static str, &'static str),
+}
+
+fn block_events(index: u32, blk: Blk) -> Vec<Result<MessageStreamEvent, SamplingError>> {
+    match blk {
+        Blk::Think(text, sig) => vec![
+            Ok(MessageStreamEvent::ContentBlockStart {
+                index,
+                content_block: ContentBlock::Thinking {
+                    thinking: String::new(),
+                    signature: String::new(),
+                },
+            }),
+            Ok(MessageStreamEvent::ContentBlockDelta {
+                index,
+                delta: StreamDelta::ThinkingDelta {
+                    thinking: text.into(),
+                },
+            }),
+            Ok(MessageStreamEvent::ContentBlockDelta {
+                index,
+                delta: StreamDelta::SignatureDelta {
+                    signature: sig.into(),
+                },
+            }),
+            Ok(block_stop(index)),
+        ],
+        Blk::Text(text) => vec![
+            Ok(text_block_start(index)),
+            Ok(text_delta(index, text)),
+            Ok(block_stop(index)),
+        ],
+        Blk::Tool(id, args) => vec![
+            Ok(MessageStreamEvent::ContentBlockStart {
+                index,
+                content_block: ContentBlock::ToolUse {
+                    id: id.into(),
+                    name: "do_thing".into(),
+                    input: serde_json::json!({}),
+                    cache_control: None,
+                },
+            }),
+            Ok(MessageStreamEvent::ContentBlockDelta {
+                index,
+                delta: StreamDelta::InputJsonDelta {
+                    partial_json: args.into(),
+                },
+            }),
+            Ok(block_stop(index)),
+        ],
+    }
+}
+
+async fn run_blocks(blocks: &[Blk]) -> Vec<SamplingEvent> {
+    let mut events: Vec<Result<MessageStreamEvent, SamplingError>> = vec![Ok(message_start())];
+    for (i, blk) in blocks.iter().enumerate() {
+        events.extend(block_events(i as u32, *blk));
+    }
+    events.push(Ok(message_delta_with_stop(messages::StopReason::ToolUse)));
+    events.push(Ok(MessageStreamEvent::MessageStop));
+    collect(stream_messages(
+        stream::iter(events).boxed(),
+        None,
+        rid(),
+        Duration::from_secs(60),
+    ))
+    .await
+}
+
+/// The live channel, in the order the screen sees it: `T` thinking, `M` text, `C` tool call.
+fn live_order(evs: &[SamplingEvent]) -> String {
+    evs.iter()
+        .filter_map(|e| match e {
+            SamplingEvent::ChannelToken {
+                channel: SamplingChannel::Reasoning,
+                text,
+                ..
+            } => Some(format!("T:{text}")),
+            SamplingEvent::ChannelToken {
+                channel: SamplingChannel::Text,
+                text,
+                ..
+            } => Some(format!("M:{text}")),
+            SamplingEvent::ToolCallDelta {
+                id: Some(id),
+                name: Some(_),
+                ..
+            } => Some(format!("C:{id}")),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn completed(evs: &[SamplingEvent]) -> &ConversationResponse {
+    match evs.last() {
+        Some(SamplingEvent::Completed { response, .. }) => response,
+        other => panic!("expected Completed, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn every_block_ordering_streams_in_wire_order_and_loses_nothing() {
+    use Blk::*;
+    let orderings: Vec<(&str, Vec<Blk>, &str, &str, usize, usize)> = vec![
+        // (name, blocks, live order, assistant text, tool calls, reasoning items)
+        (
+            "text then tool",
+            vec![Text("hi"), Tool("c1", "{}")],
+            "M:hi C:c1",
+            "hi",
+            1,
+            0,
+        ),
+        (
+            "tool then text",
+            vec![Tool("c1", "{}"), Text("after")],
+            "C:c1 M:after",
+            "after",
+            1,
+            0,
+        ),
+        (
+            "text around a tool",
+            vec![Text("before"), Tool("c1", "{}"), Text("after")],
+            "M:before C:c1 M:after",
+            "before\nafter",
+            1,
+            0,
+        ),
+        (
+            "thinking text tool",
+            vec![Think("t", "s"), Text("hi"), Tool("c1", "{}")],
+            "T:t M:hi C:c1",
+            "hi",
+            1,
+            1,
+        ),
+        (
+            "tool then thinking then text",
+            vec![Tool("c1", "{}"), Think("t", "s"), Text("hi")],
+            "C:c1 T:t M:hi",
+            "hi",
+            1,
+            1,
+        ),
+        (
+            "interleaved thinking and tools",
+            vec![
+                Think("t1", "s1"),
+                Tool("c1", "{}"),
+                Think("t2", "s2"),
+                Tool("c2", "{}"),
+            ],
+            "T:t1 C:c1 T:t2 C:c2",
+            "",
+            2,
+            2,
+        ),
+        (
+            "two texts then two tools",
+            vec![Text("a"), Text("b"), Tool("c1", "{}"), Tool("c2", "{}")],
+            "M:a M:b C:c1 C:c2",
+            "a\nb",
+            2,
+            0,
+        ),
+        (
+            "text between parallel tools",
+            vec![Tool("c1", "{}"), Text("mid"), Tool("c2", "{}")],
+            "C:c1 M:mid C:c2",
+            "mid",
+            2,
+            0,
+        ),
+    ];
+    for (name, blocks, live, text, calls, reasoning) in orderings {
+        let evs = run_blocks(&blocks).await;
+        assert_eq!(live_order(&evs), live, "{name}: live order");
+        let resp = completed(&evs);
+        assert_eq!(resp.assistant_text(), text, "{name}: assistant text");
+        assert_eq!(resp.tool_calls().len(), calls, "{name}: tool calls");
+        let reasoning_items = resp
+            .items
+            .iter()
+            .filter(|i| matches!(i, ConversationItem::Reasoning(_)))
+            .count();
+        assert_eq!(reasoning_items, reasoning, "{name}: reasoning items");
+        assert!(
+            matches!(resp.items.last(), Some(ConversationItem::Assistant(_))),
+            "{name}: the trailing item is the assistant"
+        );
+        let streamed_text_chunks = evs
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    SamplingEvent::ChannelToken {
+                        channel: SamplingChannel::Text,
+                        ..
+                    }
+                )
+            })
+            .count() as u64;
+        assert_eq!(
+            resp.message_chunks_emitted, streamed_text_chunks,
+            "{name}: the chunk count matches what was streamed, so no fallback re-emits it"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_text_block_that_opens_with_text_streams_it() {
+    let events: Vec<Result<MessageStreamEvent, SamplingError>> = vec![
+        Ok(message_start()),
+        Ok(MessageStreamEvent::ContentBlockStart {
+            index: 0,
+            content_block: ContentBlock::Text {
+                text: "opening ".into(),
+                cache_control: None,
+            },
+        }),
+        Ok(text_delta(0, "rest")),
+        Ok(block_stop(0)),
+        Ok(MessageStreamEvent::MessageStop),
+    ];
+    let evs = collect(stream_messages(
+        stream::iter(events).boxed(),
+        None,
+        rid(),
+        Duration::from_secs(60),
+    ))
+    .await;
+    assert_eq!(live_order(&evs), "M:opening  M:rest");
+    assert_eq!(completed(&evs).assistant_text(), "opening rest");
+    assert_eq!(completed(&evs).message_chunks_emitted, 2);
+}
+
+#[tokio::test]
+async fn every_thinking_block_reaches_the_response_in_order() {
+    use Blk::*;
+    let evs = run_blocks(&[
+        Think("one", "s1"),
+        Tool("c1", "{}"),
+        Think("two", "s2"),
+        Tool("c2", "{}"),
+    ])
+    .await;
+    let sigs: Vec<String> = completed(&evs)
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            ConversationItem::Reasoning(r) => r.encrypted_content.clone(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sigs, vec!["s1", "s2"]);
+}
+
+#[tokio::test]
+async fn an_unknown_delta_kind_does_not_fail_the_stream() {
+    let delta: MessageStreamEvent = serde_json::from_str(
+        r#"{"type":"content_block_delta","index":0,"delta":{"type":"citations_delta","citation":{"type":"char_location"}}}"#,
+    )
+    .expect("an unknown delta kind must parse");
+    let events: Vec<Result<MessageStreamEvent, SamplingError>> = vec![
+        Ok(message_start()),
+        Ok(text_block_start(0)),
+        Ok(text_delta(0, "cited")),
+        Ok(delta),
+        Ok(block_stop(0)),
+        Ok(MessageStreamEvent::MessageStop),
+    ];
+    let evs = collect(stream_messages(
+        stream::iter(events).boxed(),
+        None,
+        rid(),
+        Duration::from_secs(60),
+    ))
+    .await;
+    assert_eq!(completed(&evs).assistant_text(), "cited");
+}

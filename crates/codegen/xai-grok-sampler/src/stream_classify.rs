@@ -119,7 +119,7 @@ fn message_event_has_content(event: &messages::MessageStreamEvent) -> bool {
             StreamDelta::TextDelta { text } => !text.is_empty(),
             StreamDelta::ThinkingDelta { thinking } => !thinking.is_empty(),
             StreamDelta::InputJsonDelta { partial_json } => !partial_json.is_empty(),
-            StreamDelta::SignatureDelta { .. } => false,
+            StreamDelta::SignatureDelta { .. } | StreamDelta::Unknown => false,
         },
         MessageStreamEvent::ContentBlockStart { content_block, .. } => match content_block {
             ContentBlock::ToolUse { .. } => true,

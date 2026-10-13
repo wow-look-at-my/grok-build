@@ -444,10 +444,21 @@ impl TryFrom<MessageDeltaUsageWire> for MessageDeltaUsage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamDelta {
-    TextDelta { text: String },
-    InputJsonDelta { partial_json: String },
-    ThinkingDelta { thinking: String },
-    SignatureDelta { signature: String },
+    TextDelta {
+        text: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
+    },
+    ThinkingDelta {
+        thinking: String,
+    },
+    SignatureDelta {
+        signature: String,
+    },
+    /// Any delta kind this client does not read. Parsed so the event does not fail the stream.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -5797,3 +5797,86 @@ fn the_label_tick_redraws_only_when_the_text_changes() {
     assert!(tracker.tick_cache_invalidated_label(t0 + CACHE_INVALIDATED_LABEL_TTL));
     assert!(!tracker.tick_cache_invalidated_label(t0 + CACHE_INVALIDATED_LABEL_TTL * 2));
 }
+#[derive(Clone, Copy)]
+enum Step {
+    Think(&'static str),
+    Say(&'static str),
+    Tool(&'static str),
+}
+
+/// What the screen shows, top to bottom: `T:` thinking, `A:` agent text, `C:` tool call. Empty thinking is not shown.
+fn screen(sb: &ScrollbackState) -> Vec<String> {
+    sb.entries_in_range(0..sb.len())
+        .iter()
+        .filter_map(|e| match &e.block {
+            RenderBlock::AgentMessage(b) => Some(format!("A:{}", b.text())),
+            RenderBlock::Thinking(b) if !b.text().is_empty() => Some(format!("T:{}", b.text())),
+            RenderBlock::ToolCall(_) => Some("C".to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_block_ordering_reaches_the_screen_in_order() {
+    use Step::*;
+    crate::appearance::cache::set_show_thinking_blocks(true);
+    let cases: Vec<(&str, Vec<Step>, Vec<&str>)> = vec![
+        (
+            "text then tool",
+            vec![Say("hi"), Tool("c1")],
+            vec!["A:hi", "C"],
+        ),
+        (
+            "tool then text",
+            vec![Tool("c1"), Say("after")],
+            vec!["C", "A:after"],
+        ),
+        (
+            "text around a tool",
+            vec![Say("before"), Tool("c1"), Say("after")],
+            vec!["A:before", "C", "A:after"],
+        ),
+        (
+            "thinking text tool",
+            vec![Think("t"), Say("hi"), Tool("c1")],
+            vec!["T:t", "A:hi", "C"],
+        ),
+        (
+            "tool thinking text",
+            vec![Tool("c1"), Think("t"), Say("hi")],
+            vec!["C", "T:t", "A:hi"],
+        ),
+        (
+            "interleaved thinking and tools",
+            vec![Think("t1"), Tool("c1"), Think("t2"), Tool("c2")],
+            vec!["T:t1", "C", "T:t2", "C"],
+        ),
+        (
+            "text between parallel tools",
+            vec![Tool("c1"), Say("mid"), Tool("c2")],
+            vec!["C", "A:mid", "C"],
+        ),
+        (
+            "text thinking text",
+            vec![Say("a"), Think("t"), Say("b")],
+            vec!["A:a", "T:t", "A:b"],
+        ),
+    ];
+    for (name, steps, want) in cases {
+        for same_stream in [true, false] {
+            let mut sb = ScrollbackState::new();
+            let mut tracker = AcpUpdateTracker::new();
+            for (i, step) in steps.iter().enumerate() {
+                let m = meta_stream(if same_stream { 1 } else { 1 + i as i64 });
+                let update = match step {
+                    Think(t) => thought_chunk(t),
+                    Say(t) => agent_chunk(t),
+                    Tool(id) => tool_call(id, acp::ToolKind::Other, "tool"),
+                };
+                tracker.handle_update(update, &m, &mut sb);
+            }
+            assert_eq!(screen(&sb), want, "{name} (one stream: {same_stream})");
+        }
+    }
+}

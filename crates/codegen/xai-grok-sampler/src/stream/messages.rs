@@ -135,7 +135,7 @@ pub fn stream_messages<'a>(
         // It is emitted as a sibling `ConversationItem::Reasoning` before the trailing Assistant
         let mut assistant_text = String::new();
         let mut assistant_tool_calls: Vec<ToolCall> = Vec::new();
-        let mut assistant_reasoning: Option<rs::ReasoningItem> = None;
+        let mut assistant_reasoning: Vec<rs::ReasoningItem> = Vec::new();
 
         // Index counters
         let mut chunk_index: u64 = 0;
@@ -231,6 +231,16 @@ pub fn stream_messages<'a>(
                                 request_id: request_id.clone(),
                             };
                         }
+                        // A block may open with text already in it; that text is output like any delta
+                        if !thinking.is_empty() {
+                            chunk_index += 1;
+                            yield SamplingEvent::ChannelToken {
+                                request_id: request_id.clone(),
+                                channel: SamplingChannel::Reasoning,
+                                text: thinking,
+                                chunk_index,
+                            };
+                        }
                     }
                     ContentBlock::Text { text, .. } => {
                         blocks.insert(
@@ -249,6 +259,18 @@ pub fn stream_messages<'a>(
                             first_token_emitted = true;
                             yield SamplingEvent::FirstToken {
                                 request_id: request_id.clone(),
+                            };
+                        }
+                        // A block may open with text already in it; without this chunk it would never reach the screen
+                        if !text.is_empty() {
+                            chunk_timestamps.push(Instant::now());
+                            chunk_index += 1;
+                            message_chunk_count += 1;
+                            yield SamplingEvent::ChannelToken {
+                                request_id: request_id.clone(),
+                                channel: SamplingChannel::Text,
+                                text,
+                                chunk_index,
                             };
                         }
                     }
@@ -313,6 +335,8 @@ pub fn stream_messages<'a>(
                             StreamDelta::SignatureDelta { signature } => {
                                 state.signature = signature;
                             }
+                            // A delta kind this client does not read (e.g. `citations_delta`) carries no text to show
+                            StreamDelta::Unknown => {}
                             StreamDelta::TextDelta { text } => {
                                 if !text.is_empty() {
                                     state.text_acc.push_str(&text);
@@ -387,7 +411,7 @@ pub fn stream_messages<'a>(
                                     } else {
                                         Some(state.signature)
                                     };
-                                    assistant_reasoning = Some(rs::ReasoningItem {
+                                    assistant_reasoning.push(rs::ReasoningItem {
                                         id: String::new(),
                                         summary,
                                         content: None,
@@ -554,10 +578,10 @@ pub fn stream_messages<'a>(
             reasoning_effort: None,
         });
 
-        let mut items: Vec<ConversationItem> = Vec::new();
-        if let Some(r) = assistant_reasoning {
-            items.push(ConversationItem::Reasoning(r));
-        }
+        let mut items: Vec<ConversationItem> = assistant_reasoning
+            .into_iter()
+            .map(ConversationItem::Reasoning)
+            .collect();
         items.push(assistant_item);
 
         let stream_end = Instant::now();
