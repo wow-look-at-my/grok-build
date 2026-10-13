@@ -5911,3 +5911,31 @@ fn a_tool_call_finishes_the_agent_message_above_it() {
         assert_eq!(b.copy_text(false).trim(), "No trailing newline");
     }
 }
+
+fn tool_delta(tracker: &mut AcpUpdateTracker, sb: &mut ScrollbackState, index: u32, id: &str) {
+    tracker.handle_tool_call_delta(Some(id), index, Some("grep"), Some("{\"p\":"), None, sb);
+}
+
+/// A tool call whose request was cancelled before its real call arrived leaves no row behind,
+/// and the next request's call at the same index starts a row of its own below the text between them.
+#[test]
+fn a_stale_streaming_tool_row_is_not_adopted_by_the_next_request() {
+    crate::appearance::cache::set_show_thinking_blocks(true);
+    let mut sb = ScrollbackState::new();
+    let mut tracker = AcpUpdateTracker::new();
+    tracker.handle_update(agent_chunk("first"), &meta_stream(1), &mut sb);
+    tool_delta(&mut tracker, &mut sb, 0, "dead-call");
+    // The request is cancelled here: no ToolCall ever arrives for "dead-call".
+    tracker.handle_update(agent_chunk("second"), &meta_stream(2), &mut sb);
+    tool_delta(&mut tracker, &mut sb, 0, "live-call");
+    tracker.handle_update(
+        tool_call("live-call", acp::ToolKind::Other, "grep"),
+        &meta_stream(2),
+        &mut sb,
+    );
+    assert_eq!(
+        screen(&sb),
+        vec!["A:first", "A:second", "C"],
+        "one row for the live call, below the text that came before it"
+    );
+}
