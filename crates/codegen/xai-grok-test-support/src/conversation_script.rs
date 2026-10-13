@@ -68,6 +68,8 @@ pub struct MockToolCall {
     pub(crate) result_check: Option<TextCheck>,
     /// Text the model writes in the same response, ahead of the call.
     pub(crate) narration: Option<String>,
+    /// A thinking block the model writes ahead of its narration.
+    pub(crate) reasoning: Option<String>,
 }
 
 impl MockToolCall {
@@ -77,12 +79,19 @@ impl MockToolCall {
             arguments,
             result_check: None,
             narration: None,
+            reasoning: None,
         }
     }
 
     /// The model writes `text` before the call, in the same response. Served on Chat Completions and Messages.
     pub fn narrated(mut self, text: impl Into<String>) -> Self {
         self.narration = Some(text.into());
+        self
+    }
+
+    /// The model thinks before it writes its narration. Needs `narrated`, and is served on Messages only.
+    pub fn thinking(mut self, text: impl Into<String>) -> Self {
+        self.reasoning = Some(text.into());
         self
     }
 

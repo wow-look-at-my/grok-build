@@ -410,20 +410,22 @@ pub(crate) fn responses_api_tool_call_events(turn: ToolCallTurn<'_>) -> Vec<SseE
 
 /// Messages API: one `tool_use` block, its input in one `input_json_delta`; stops with `tool_use`.
 pub(crate) fn messages_api_tool_use_events(turn: ToolCallTurn<'_>) -> Vec<SseEvent> {
-    messages_api_tool_use_events_after(turn, None)
+    messages_api_tool_use_events_after(turn, None, None)
 }
 
-/// Messages API: a text block, then the `tool_use` block, in one response.
+/// Messages API: an optional thinking block, a text block, then the `tool_use` block, in one response.
 pub(crate) fn messages_api_narrated_tool_use_events(
     turn: ToolCallTurn<'_>,
     narration: &str,
+    reasoning: Option<&str>,
 ) -> Vec<SseEvent> {
-    messages_api_tool_use_events_after(turn, Some(narration))
+    messages_api_tool_use_events_after(turn, Some(narration), reasoning)
 }
 
 fn messages_api_tool_use_events_after(
     turn: ToolCallTurn<'_>,
     narration: Option<&str>,
+    reasoning: Option<&str>,
 ) -> Vec<SseEvent> {
     let ToolCallTurn {
         call_id,
@@ -432,13 +434,43 @@ fn messages_api_tool_use_events_after(
         model,
     } = turn;
     let mut events = vec![messages_api_message_start(model)];
-    let tool_index = if narration.is_some() { 1 } else { 0 };
+    let mut tool_index = 0;
+    if let Some(thinking) = reasoning {
+        events.extend([
+            SseEvent::data(
+                json!({
+                    "type": "content_block_start",
+                    "index": tool_index,
+                    "content_block": {"type": "thinking", "thinking": "", "signature": ""}
+                })
+                .to_string(),
+            ),
+            SseEvent::data(
+                json!({
+                    "type": "content_block_delta",
+                    "index": tool_index,
+                    "delta": {"type": "thinking_delta", "thinking": thinking}
+                })
+                .to_string(),
+            ),
+            SseEvent::data(
+                json!({
+                    "type": "content_block_delta",
+                    "index": tool_index,
+                    "delta": {"type": "signature_delta", "signature": "sig-mock"}
+                })
+                .to_string(),
+            ),
+            SseEvent::data(json!({"type": "content_block_stop", "index": tool_index}).to_string()),
+        ]);
+        tool_index += 1;
+    }
     if let Some(text) = narration {
         events.extend([
             SseEvent::data(
                 json!({
                     "type": "content_block_start",
-                    "index": 0,
+                    "index": tool_index,
                     "content_block": {"type": "text", "text": ""}
                 })
                 .to_string(),
@@ -446,13 +478,14 @@ fn messages_api_tool_use_events_after(
             SseEvent::data(
                 json!({
                     "type": "content_block_delta",
-                    "index": 0,
+                    "index": tool_index,
                     "delta": {"type": "text_delta", "text": text}
                 })
                 .to_string(),
             ),
-            SseEvent::data(json!({"type": "content_block_stop", "index": 0}).to_string()),
+            SseEvent::data(json!({"type": "content_block_stop", "index": tool_index}).to_string()),
         ]);
+        tool_index += 1;
     }
     events.extend([
         SseEvent::data(

@@ -27,6 +27,7 @@ pub(crate) enum ModelReply {
     /// A tool call the model writes text ahead of, in the same response.
     NarratedToolCall {
         narration: String,
+        reasoning: Option<String>,
         call_id: String,
         call: PickedToolCall,
     },
@@ -75,6 +76,7 @@ impl ModelReply {
             }
             ModelReply::NarratedToolCall {
                 narration,
+                reasoning,
                 call_id,
                 call,
             } => {
@@ -86,10 +88,16 @@ impl ModelReply {
                     model,
                 };
                 match endpoint {
-                    InferenceEndpoint::Messages => {
-                        messages_api_narrated_tool_use_events(turn, &narration)
-                    }
+                    InferenceEndpoint::Messages => messages_api_narrated_tool_use_events(
+                        turn,
+                        &narration,
+                        reasoning.as_deref(),
+                    ),
                     InferenceEndpoint::ChatCompletions => {
+                        assert!(
+                            reasoning.is_none(),
+                            "a thinking block is scripted for the Messages endpoint only"
+                        );
                         chat_completion_narrated_tool_call_events(turn, &narration)
                     }
                     InferenceEndpoint::Responses => {
