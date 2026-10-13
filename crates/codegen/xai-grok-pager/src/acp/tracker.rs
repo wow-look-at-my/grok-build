@@ -1101,8 +1101,8 @@ impl AcpUpdateTracker {
                 if let Some(agent_id) = self.current_agent_msg.take() {
                     scrollback.finish_running(agent_id);
                 }
-                // A call the previous request left mid-argument never gets its `ToolCall`.
-                // Tool indexes restart at zero per request, so it must not be adopted by this request's call.
+                // A call the request left mid-argument never gets its
+                // `ToolCall`.
                 for (_, streaming) in self.streaming_tools.drain() {
                     scrollback.finish_running(streaming.entry_id);
                 }

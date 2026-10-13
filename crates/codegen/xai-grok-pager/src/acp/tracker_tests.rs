@@ -5916,8 +5916,8 @@ fn tool_delta(tracker: &mut AcpUpdateTracker, sb: &mut ScrollbackState, index: u
     tracker.handle_tool_call_delta(Some(id), index, Some("grep"), Some("{\"p\":"), None, sb);
 }
 
-/// A call whose request was cancelled before its real call arrived keeps its interrupted row,
-/// and the next request's call at the same index starts a row of its own below the text between them.
+/// A call whose request was cancelled before its real call arrived keeps its interrupted row. The
+/// next request's call at the same index starts a row of its own below the text between them.
 #[test]
 fn a_stale_streaming_tool_row_is_not_adopted_by_the_next_request() {
     crate::appearance::cache::set_show_thinking_blocks(true);
