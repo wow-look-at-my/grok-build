@@ -432,3 +432,85 @@ async fn a_task_list_tool_without_item_ids_is_refused() {
         })
         .await;
 }
+
+/// `(content, status)` of each item in the plan update the client receives
+/// for `output`, read back the way the pager reads it.
+fn pane_list(
+    output: &xai_grok_tools::types::output::ToolOutput,
+) -> Vec<(String, crate::tools::todo::TodoStatus)> {
+    crate::session::acp_conversion::acp_plan_update(output)
+        .expect("a todo write must produce a plan update")
+        .entries
+        .into_iter()
+        .map(crate::tools::todo::todo_item_from_plan_entry)
+        .map(|item| (item.content, item.status))
+        .collect()
+}
+
+/// The list the todo pane holds after each write equals the agent's own list,
+/// including a completion a verifier refuses.
+#[tokio::test(flavor = "current_thread")]
+async fn the_pane_list_matches_the_agent_list_after_every_write() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, gateway_rx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            drain_gateway(gateway_rx);
+            let (persistence_tx, persistence_rx) =
+                tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            drain_persistence(persistence_rx);
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+            actor
+                .workspace_ops
+                .bind_local_session(
+                    &actor.session_id_string(),
+                    actor.tool_context.cwd.as_path().to_path_buf(),
+                    actor.tool_context.hunk_tracker_handle.clone(),
+                    actor.agent.borrow().tool_bridge().toolset(),
+                    None,
+                )
+                .expect("bind_local_session");
+
+            let writes = [
+                r#"{"merge":true,"todos":[{"id":"1","content":"ship the parser","status":"in_progress","verification":"cargo test -p parser passes"},{"id":"2","content":"write the docs","status":"pending"}]}"#,
+                r#"{"merge":true,"todos":[{"id":"2","status":"completed"}]}"#,
+                r#"{"merge":true,"todos":[{"id":"1","status":"completed"}]}"#,
+            ];
+            for (n, args) in writes.iter().enumerate() {
+                let result = actor
+                    .workspace_ops
+                    .call_tool(
+                        "todo_write",
+                        serde_json::from_str(args).unwrap(),
+                        &format!("write-{n}"),
+                        Some(&actor.session_info.id.0),
+                    )
+                    .await
+                    .expect("todo_write");
+                let agent: Vec<_> = todo_list(&actor)
+                    .await
+                    .into_iter()
+                    .map(|(_, content, status)| (content, status))
+                    .collect();
+                assert_eq!(
+                    pane_list(&result.output),
+                    agent,
+                    "the pane list differs from the agent list after write {n}"
+                );
+            }
+
+            let agent = todo_list(&actor).await;
+            let verified = agent
+                .iter()
+                .find(|(id, _, _)| id == "1")
+                .expect("item 1 is on the list");
+            assert_ne!(
+                verified.2,
+                crate::tools::todo::TodoStatus::Completed,
+                "the refused completion must not stand on either side: {agent:?}"
+            );
+        })
+        .await;
+}
