@@ -11,15 +11,22 @@ use crate::sse::{
     responses_api_script_exact,
 };
 use crate::tool_call_turn::{
-    ToolCallTurn, chat_completion_tool_call_events, content_filter_events, cut_reply_events,
-    looping_reply_events, messages_api_tool_use_events, responses_api_tool_call_events,
-    stream_error_events,
+    ToolCallTurn, chat_completion_narrated_tool_call_events, chat_completion_tool_call_events,
+    content_filter_events, cut_reply_events, looping_reply_events,
+    messages_api_narrated_tool_use_events, messages_api_tool_use_events,
+    responses_api_tool_call_events, stream_error_events,
 };
 use crate::tools::PickedToolCall;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ModelReply {
     ToolCall {
+        call_id: String,
+        call: PickedToolCall,
+    },
+    /// A tool call the model writes text ahead of, in the same response.
+    NarratedToolCall {
+        narration: String,
         call_id: String,
         call: PickedToolCall,
     },
@@ -64,6 +71,30 @@ impl ModelReply {
                     InferenceEndpoint::ChatCompletions => chat_completion_tool_call_events(turn),
                     InferenceEndpoint::Responses => responses_api_tool_call_events(turn),
                     InferenceEndpoint::Messages => messages_api_tool_use_events(turn),
+                }
+            }
+            ModelReply::NarratedToolCall {
+                narration,
+                call_id,
+                call,
+            } => {
+                let arguments = call.arguments.to_string();
+                let turn = ToolCallTurn {
+                    call_id: &call_id,
+                    name: &call.name,
+                    arguments: &arguments,
+                    model,
+                };
+                match endpoint {
+                    InferenceEndpoint::Messages => {
+                        messages_api_narrated_tool_use_events(turn, &narration)
+                    }
+                    InferenceEndpoint::ChatCompletions => {
+                        chat_completion_narrated_tool_call_events(turn, &narration)
+                    }
+                    InferenceEndpoint::Responses => {
+                        panic!("narrated tool calls are not scripted for the Responses endpoint")
+                    }
                 }
             }
             ModelReply::Text(text) => match endpoint {

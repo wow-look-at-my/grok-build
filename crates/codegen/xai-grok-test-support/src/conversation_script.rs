@@ -66,6 +66,8 @@ pub struct MockToolCall {
     pub(crate) tool: Tool,
     pub(crate) arguments: Value,
     pub(crate) result_check: Option<TextCheck>,
+    /// Text the model writes in the same response, ahead of the call.
+    pub(crate) narration: Option<String>,
 }
 
 impl MockToolCall {
@@ -74,7 +76,14 @@ impl MockToolCall {
             tool,
             arguments,
             result_check: None,
+            narration: None,
         }
+    }
+
+    /// The model writes `text` before the call, in the same response. Served on Chat Completions and Messages.
+    pub fn narrated(mut self, text: impl Into<String>) -> Self {
+        self.narration = Some(text.into());
+        self
     }
 
     /// Pin what the model is shown for this call after hooks or permissions acted on it.

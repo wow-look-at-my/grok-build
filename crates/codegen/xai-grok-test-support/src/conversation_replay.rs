@@ -150,6 +150,7 @@ enum NextStep {
         call_id: String,
         pending_check: Option<TextCheck>,
         picked: PickedToolCall,
+        narration: Option<String>,
     },
     Reply {
         entry_index: usize,
@@ -215,11 +216,21 @@ fn render(
             (reply, Some(observed), violation.into_iter().collect())
         }
         NextStep::Call {
-            call_id, picked, ..
+            call_id,
+            picked,
+            narration,
+            ..
         } => (
-            ModelReply::ToolCall {
-                call_id,
-                call: picked,
+            match narration {
+                Some(narration) => ModelReply::NarratedToolCall {
+                    narration,
+                    call_id,
+                    call: picked,
+                },
+                None => ModelReply::ToolCall {
+                    call_id,
+                    call: picked,
+                },
             },
             held,
             Vec::new(),
@@ -395,6 +406,7 @@ impl ReplayingScript {
                 call_id,
                 pending_check: call.result_check.clone(),
                 picked,
+                narration: call.narration.clone(),
             },
             None => NextStep::NotOffered {
                 entry_index: index,

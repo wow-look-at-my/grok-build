@@ -303,6 +303,30 @@ pub(crate) fn chat_completion_tool_call_events(turn: ToolCallTurn<'_>) -> Vec<Ss
     ]
 }
 
+/// Chat Completions: a content chunk, then the tool-call chunks of one response.
+pub(crate) fn chat_completion_narrated_tool_call_events(
+    turn: ToolCallTurn<'_>,
+    narration: &str,
+) -> Vec<SseEvent> {
+    let content = SseEvent::data(
+        json!({
+            "id": "chatcmpl-test",
+            "object": "chat.completion.chunk",
+            "created": 1234567890,
+            "model": turn.model,
+            "choices": [{
+                "index": 0,
+                "delta": { "role": "assistant", "content": narration },
+                "finish_reason": null
+            }]
+        })
+        .to_string(),
+    );
+    std::iter::once(content)
+        .chain(chat_completion_tool_call_events(turn))
+        .collect()
+}
+
 /// Responses API: the `function_call` item is added before its arguments delta, its arguments are
 /// whole in `function_call_arguments.done`, and the item closes before `response.completed`.
 pub(crate) fn responses_api_tool_call_events(turn: ToolCallTurn<'_>) -> Vec<SseEvent> {
@@ -386,18 +410,55 @@ pub(crate) fn responses_api_tool_call_events(turn: ToolCallTurn<'_>) -> Vec<SseE
 
 /// Messages API: one `tool_use` block, its input in one `input_json_delta`; stops with `tool_use`.
 pub(crate) fn messages_api_tool_use_events(turn: ToolCallTurn<'_>) -> Vec<SseEvent> {
+    messages_api_tool_use_events_after(turn, None)
+}
+
+/// Messages API: a text block, then the `tool_use` block, in one response.
+pub(crate) fn messages_api_narrated_tool_use_events(
+    turn: ToolCallTurn<'_>,
+    narration: &str,
+) -> Vec<SseEvent> {
+    messages_api_tool_use_events_after(turn, Some(narration))
+}
+
+fn messages_api_tool_use_events_after(
+    turn: ToolCallTurn<'_>,
+    narration: Option<&str>,
+) -> Vec<SseEvent> {
     let ToolCallTurn {
         call_id,
         name,
         arguments,
         model,
     } = turn;
-    vec![
-        messages_api_message_start(model),
+    let mut events = vec![messages_api_message_start(model)];
+    let tool_index = if narration.is_some() { 1 } else { 0 };
+    if let Some(text) = narration {
+        events.extend([
+            SseEvent::data(
+                json!({
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "text", "text": ""}
+                })
+                .to_string(),
+            ),
+            SseEvent::data(
+                json!({
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": text}
+                })
+                .to_string(),
+            ),
+            SseEvent::data(json!({"type": "content_block_stop", "index": 0}).to_string()),
+        ]);
+    }
+    events.extend([
         SseEvent::data(
             json!({
                 "type": "content_block_start",
-                "index": 0,
+                "index": tool_index,
                 "content_block": {"type": "tool_use", "id": call_id, "name": name, "input": {}}
             })
             .to_string(),
@@ -405,12 +466,12 @@ pub(crate) fn messages_api_tool_use_events(turn: ToolCallTurn<'_>) -> Vec<SseEve
         SseEvent::data(
             json!({
                 "type": "content_block_delta",
-                "index": 0,
+                "index": tool_index,
                 "delta": {"type": "input_json_delta", "partial_json": arguments}
             })
             .to_string(),
         ),
-        SseEvent::data(json!({"type": "content_block_stop", "index": 0}).to_string()),
+        SseEvent::data(json!({"type": "content_block_stop", "index": tool_index}).to_string()),
         SseEvent::data(
             json!({
                 "type": "message_delta",
@@ -420,7 +481,8 @@ pub(crate) fn messages_api_tool_use_events(turn: ToolCallTurn<'_>) -> Vec<SseEve
             .to_string(),
         ),
         SseEvent::data(json!({"type": "message_stop"}).to_string()),
-    ]
+    ]);
+    events
 }
 
 #[cfg(test)]
