@@ -62,6 +62,7 @@ async fn and_skips_after_a_failure_and_semicolon_runs_on() {
                         ("a_split2", true),
                         ("a_split3", false),
                     ])],
+                    None,
                 )
                 .await
                 .expect("execute_tool_calls_with_chains must not error");
@@ -105,6 +106,7 @@ async fn a_chain_runs_after_its_predecessor_and_beside_other_calls() {
                 .execute_tool_calls_with_chains(
                     vec![todo_call("x"), todo_call("x_split2"), todo_call("other")],
                     vec![chain(&[("x", false), ("x_split2", true)])],
+                    None,
                 )
                 .await
                 .expect("execute_tool_calls_with_chains must not error");
