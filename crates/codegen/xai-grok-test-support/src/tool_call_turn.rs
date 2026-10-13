@@ -303,26 +303,30 @@ pub(crate) fn chat_completion_tool_call_events(turn: ToolCallTurn<'_>) -> Vec<Ss
     ]
 }
 
-/// Chat Completions: a content chunk, then the tool-call chunks of one response.
+/// Chat Completions: the text one word per chunk, then the tool-call chunks of one response.
 pub(crate) fn chat_completion_narrated_tool_call_events(
     turn: ToolCallTurn<'_>,
     narration: &str,
 ) -> Vec<SseEvent> {
-    let content = SseEvent::data(
-        json!({
-            "id": "chatcmpl-test",
-            "object": "chat.completion.chunk",
-            "created": 1234567890,
-            "model": turn.model,
-            "choices": [{
-                "index": 0,
-                "delta": { "role": "assistant", "content": narration },
-                "finish_reason": null
-            }]
+    let model = turn.model;
+    narration
+        .split_inclusive(' ')
+        .map(|word| {
+            SseEvent::data(
+                json!({
+                    "id": "chatcmpl-test",
+                    "object": "chat.completion.chunk",
+                    "created": 1234567890,
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": { "role": "assistant", "content": word },
+                        "finish_reason": null
+                    }]
+                })
+                .to_string(),
+            )
         })
-        .to_string(),
-    );
-    std::iter::once(content)
         .chain(chat_completion_tool_call_events(turn))
         .collect()
 }
