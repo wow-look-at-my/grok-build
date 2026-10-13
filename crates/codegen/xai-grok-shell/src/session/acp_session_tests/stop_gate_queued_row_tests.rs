@@ -69,7 +69,7 @@ async fn actor_with_unfinished_todo(server: &MockInferenceServer) -> Arc<Session
 }
 
 async fn run_running_turn(actor: &Arc<SessionActor>) {
-    tokio::time::timeout(
+    let result = tokio::time::timeout(
         Duration::from_secs(60),
         actor.handle_prompt(
             "running",
@@ -88,6 +88,7 @@ async fn run_running_turn(actor: &Arc<SessionActor>) {
     )
     .await
     .expect("the turn must finish within the timeout");
+    eprintln!("TURN RESULT: {result:?}");
 }
 
 #[tokio::test(flavor = "current_thread")]
