@@ -3921,6 +3921,82 @@ mod tests {
         );
     }
 
+    /// A running background command does not hold the queue once the turn is idle.
+    #[test]
+    fn idle_pane_with_a_running_background_task_drains_the_queued_row() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent
+            .session
+            .bg_tasks
+            .insert("bg-1".into(), running_bg_task("bg-1"));
+        enqueue_local(&mut app, id, "queued row");
+
+        let agent = app.agents.get_mut(&id).unwrap();
+        let drain = maybe_drain_queue(agent, &mut app.pending_image_notices);
+
+        assert!(
+            matches!(drain.effects.as_slice(), [Effect::SendPrompt { .. }]),
+            "the queued row must be sent while a background task runs: {:?}",
+            drain.effects
+        );
+        assert!(test_agent(&app, id).session.pending_prompts.is_empty());
+    }
+
+    /// A running background subagent does not hold the queue once the turn is idle.
+    #[test]
+    fn idle_pane_with_a_running_subagent_drains_the_queued_row() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent
+            .subagent_sessions
+            .insert("child-1".into(), running_subagent_info("child-1"));
+        enqueue_local(&mut app, id, "queued row");
+
+        let agent = app.agents.get_mut(&id).unwrap();
+        let drain = maybe_drain_queue(agent, &mut app.pending_image_notices);
+
+        assert!(
+            matches!(drain.effects.as_slice(), [Effect::SendPrompt { .. }]),
+            "the queued row must be sent while a subagent runs: {:?}",
+            drain.effects
+        );
+        assert!(test_agent(&app, id).session.pending_prompts.is_empty());
+    }
+
+    /// A task-completion wake turn holds the queue only while it runs. The row goes out the moment it ends.
+    #[test]
+    fn queued_row_drains_once_a_task_wake_turn_ends() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.running_wake_turn = Some(crate::app::agent_view::RunningWakeTurn {
+            prompt_id: "task-completed-bg1".into(),
+            cancel_sent: false,
+        });
+        enqueue_local(&mut app, id, "queued row");
+
+        let agent = app.agents.get_mut(&id).unwrap();
+        let held = maybe_drain_queue(agent, &mut app.pending_image_notices);
+        assert!(
+            held.effects.is_empty(),
+            "a running wake turn holds the row: {:?}",
+            held.effects
+        );
+        assert_eq!(test_agent(&app, id).session.pending_prompts.len(), 1);
+
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.running_wake_turn = None;
+        let drain = maybe_drain_queue(agent, &mut app.pending_image_notices);
+        assert!(
+            matches!(drain.effects.as_slice(), [Effect::SendPrompt { .. }]),
+            "the row must go out once the wake turn ends: {:?}",
+            drain.effects
+        );
+    }
+
     /// A foreground-subagent wait is sendable but never parks (parent blocked, not completed).
     #[test]
     fn subagent_wait_holds_queue_but_never_parks() {
