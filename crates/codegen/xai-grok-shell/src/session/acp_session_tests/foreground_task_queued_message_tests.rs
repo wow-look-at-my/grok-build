@@ -145,11 +145,14 @@ async fn run_task_call_with_queued_message(
     let actor = Arc::new(actor);
 
     let (respond_to, _prx) = tokio::sync::oneshot::channel();
-    let mut queue_request = Some(queue_input_request(
+    let mut request = queue_input_request(
         vec![acp::ContentBlock::Text(acp::TextContent::new("hello"))],
         "queued",
         respond_to,
-    ));
+    );
+    // Promotion only takes rows owned by the running turn's client, which `user_item` sets to "A".
+    request.client_identifier = Some("A".to_string());
+    let mut queue_request = Some(request);
     if queue_before && let Some(request) = queue_request.take() {
         let _ = actor.queue_input(request).await;
     }
