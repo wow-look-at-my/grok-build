@@ -5884,3 +5884,30 @@ fn every_block_ordering_reaches_the_screen_in_order() {
         }
     }
 }
+
+/// The agent message above a tool call is complete: it is finished, not left running, and all its text is rendered.
+#[test]
+fn a_tool_call_finishes_the_agent_message_above_it() {
+    for call in [
+        tool_call("c1", acp::ToolKind::Other, "tool"),
+        tool_call_completed("c1", acp::ToolKind::Read, "file.rs"),
+    ] {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_update(agent_chunk("No trailing newline"), &meta(), &mut sb);
+        tracker.handle_update(call, &meta(), &mut sb);
+        let entries = sb.entries_in_range(0..sb.len());
+        let msg = entries
+            .iter()
+            .find(|e| matches!(e.block, RenderBlock::AgentMessage(_)))
+            .expect("the agent message is on screen");
+        assert!(
+            !msg.is_running,
+            "the message above a tool call is not still streaming"
+        );
+        let RenderBlock::AgentMessage(b) = &msg.block else {
+            unreachable!()
+        };
+        assert_eq!(b.copy_text(false).trim(), "No trailing newline");
+    }
+}
