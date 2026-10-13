@@ -2097,6 +2097,9 @@ mod session_thread_tests;
 #[path = "acp_session_tests/status_line_payload_tests.rs"]
 mod status_line_payload_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/foreground_task_queued_message_tests.rs"]
+mod foreground_task_queued_message_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/todo_capture_e2e_tests.rs"]
 mod todo_capture_e2e_tests;
 #[cfg(test)]
