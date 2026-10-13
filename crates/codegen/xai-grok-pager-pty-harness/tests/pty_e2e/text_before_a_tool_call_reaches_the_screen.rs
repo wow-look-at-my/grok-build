@@ -273,3 +273,52 @@ async fn text_before_a_running_tool_stays_after_ctrl_c_and_a_new_prompt() {
         "the text written before the tool call is gone after the new prompt, even scrolled up:\n{screen}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn text_stays_when_a_prompt_interrupts_the_stream_before_the_tool_call() {
+    let content = ContentController::start().await.expect("start content");
+    content.set_chunk_delay(Some(Duration::from_secs(3)));
+    let narration = "NARRATION_BEFORE_INTERRUPT looking into it";
+    let conversation = Conversation::nth(1)
+        .calls([shell_call().narrated(narration)])
+        .reply("FINAL_DONE");
+    content.server().set_conversations(vec![conversation]);
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_env_ops_in_dir(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        &[],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text(narration, TURN_TIMEOUT)
+        .expect("the text must stream in");
+    harness
+        .inject_keys(b"the same question again\r")
+        .expect("interrupt the stream with a second prompt");
+    content.set_chunk_delay(None);
+    harness
+        .wait_for_text("FINAL_DONE", TURN_TIMEOUT)
+        .unwrap_or_else(|error| panic!("{error}\n{}", harness.screen_contents()));
+    harness.inject_keys(b"\t").expect("focus the scrollback");
+    for _ in 0..4 {
+        harness.inject_keys(keys::PGUP).expect("page up");
+        harness.update(Duration::from_millis(300));
+    }
+    let screen = harness.screen_contents();
+    assert!(
+        screen.contains(narration),
+        "the text vanished when a prompt interrupted the stream:\n{screen}"
+    );
+}
