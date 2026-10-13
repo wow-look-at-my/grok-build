@@ -81,6 +81,12 @@ async fn run_task_call_with_queued_message(run_in_background: bool) -> (Vec<Stri
         xai_grok_tools::registry::types::ToolConfig::for_tool::<
             xai_grok_tools::implementations::grok_build::task::TaskTool,
         >(),
+        xai_grok_tools::registry::types::ToolConfig::for_tool::<
+            xai_grok_tools::implementations::grok_build::task_output::TaskOutputTool,
+        >(),
+        xai_grok_tools::registry::types::ToolConfig::for_tool::<
+            xai_grok_tools::implementations::grok_build::kill_task::KillTaskTool,
+        >(),
     ])
     .await;
     actor
