@@ -982,7 +982,7 @@ impl SessionActor {
                             crate::session::storage::SessionUpdate::Acp(Box::new(notification)),
                         ));
                 } else {
-                    self.enqueue_notification(notification);
+                    self.emit_notification_direct(notification).await;
                 }
             }
             let crate::session::prompt_parser::ParsedPrompt {

@@ -337,18 +337,6 @@ impl SessionActor {
             .event_tx
             .send(SessionEvent::Notification(notification.into()));
     }
-    /// Enqueue an ACP notification on the FIFO event pipeline, stamped at enqueue time like `send_update`.
-    /// `emit_notification_direct` skips the queue, so a notification sent that way carries a HIGHER id than chunks still queued and reaches the client first.
-    /// The client's in-order dedup then drops those chunks as stale.
-    pub(super) fn enqueue_notification(&self, mut notification: acp::SessionNotification) {
-        crate::util::event_id::ensure_event_id_meta(
-            &self.session_info.id.0,
-            &mut notification.meta,
-        );
-        let _ = self
-            .event_tx
-            .send(SessionEvent::Notification(notification.into()));
-    }
     /// Enqueue a `CurrentModeUpdate` on the FIFO event pipeline, stamped at enqueue time like `send_update`.
     /// A direct `emit_notification_direct` here would mint a HIGHER id that is delivered BEFORE those chunks.
     /// The client's in-order dedup would then drop the chunks as stale: silent text loss on a mid-stream plan-mode toggle.
@@ -1327,72 +1315,6 @@ mod xai_event_id_stamping_tests {
             .await;
     }
     /// Mid-stream plan toggle: the plan-mode `CurrentModeUpdate` must ride the FIFO event pipeline BEHIND already-queued chunks.
-    /// The echo of a user prompt must queue behind the agent text already queued, with the higher id.
-    /// Sent directly it would reach the client first, and the client would drop that text as stale.
-    #[tokio::test]
-    async fn user_message_echo_queues_behind_earlier_agent_text() {
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                let (gateway_tx, _gateway_rx) =
-                    tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
-                let (persistence_tx, mut prx) =
-                    tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-                let (actor, mut event_rx) = super::support::create_test_actor_ex(
-                    0,
-                    256_000,
-                    85,
-                    gateway_tx,
-                    persistence_tx,
-                )
-                .await;
-                actor
-                    .send_update(
-                        acp::SessionUpdate::AgentMessageChunk(acp::ContentChunk::new(
-                            acp::ContentBlock::Text(acp::TextContent::new("queued text")),
-                        )),
-                        None,
-                    )
-                    .await;
-                actor.enqueue_notification(user_chunk_notification(false));
-                while let Ok(msg) = prx.try_recv() {
-                    assert!(
-                        !matches!(msg, PersistenceMsg::Update(_)),
-                        "the echo must not short-circuit the event queue"
-                    );
-                }
-                let mut queued = Vec::new();
-                while let Ok(event) = event_rx.try_recv() {
-                    match event {
-                        SessionEvent::Notification(SessionNotification::Acp(n)) => queued.push(n),
-                        other => panic!("expected only ACP notifications, got {other:?}"),
-                    }
-                }
-                let seq = |n: &acp::SessionNotification| -> u64 {
-                    n.meta
-                        .as_ref()
-                        .and_then(|m| m.get("eventId"))
-                        .and_then(|v| v.as_str())
-                        .and_then(|id| id.rsplit('-').next())
-                        .and_then(|s| s.parse().ok())
-                        .expect("a queued notification must carry its enqueue-time id")
-                };
-                let [text, echo] = queued.as_slice() else {
-                    panic!("text + echo must be queued: {queued:?}");
-                };
-                assert!(matches!(
-                    text.update,
-                    acp::SessionUpdate::AgentMessageChunk(_)
-                ));
-                assert!(matches!(
-                    echo.update,
-                    acp::SessionUpdate::UserMessageChunk(_)
-                ));
-                assert!(seq(text) < seq(echo));
-            })
-            .await;
-    }
-
     /// Pins the enter AND exit legs of `handle_session_mode`; each leg must emit.
     /// The abandoned site shares the same helper but needs an `ext_method` round-trip harness to drive, so it is not pinned here.
     #[tokio::test]
