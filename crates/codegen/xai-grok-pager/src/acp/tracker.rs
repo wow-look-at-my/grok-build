@@ -1570,6 +1570,12 @@ impl AcpUpdateTracker {
         self.skip_next_user_echo
     }
     /// Handle an agent message chunk (streaming text).
+    /// Ends the open agent message so its renderer finishes and the next text starts a new message.
+    fn finish_agent_message(&mut self, scrollback: &mut ScrollbackState) {
+        if let Some(agent_id) = self.current_agent_msg.take() {
+            scrollback.finish_running(agent_id);
+        }
+    }
     fn handle_agent_chunk(
         &mut self,
         chunk: acp::ContentChunk,
@@ -1626,9 +1632,7 @@ impl AcpUpdateTracker {
             return false;
         }
         // Text that follows this thought is a new message below it, not more of the one above.
-        if let Some(agent_id) = self.current_agent_msg.take() {
-            scrollback.finish_running(agent_id);
-        }
+        self.finish_agent_message(scrollback);
         let is_replay = meta.is_replay;
         let id = *self.current_thinking.get_or_insert_with(|| {
             let block = if is_replay {
@@ -1666,7 +1670,7 @@ impl AcpUpdateTracker {
     ) -> bool {
         // A call is the model's next act.
         self.finish_thinking(scrollback);
-        self.current_agent_msg = None;
+        self.finish_agent_message(scrollback);
         if let Some(streaming) = self.streaming_tools.get_mut(&tool_index) {
             if let Some(id) = tool_call_id {
                 streaming.tool_call_id = Some(id.to_string());
@@ -1753,7 +1757,7 @@ impl AcpUpdateTracker {
         is_replay: bool,
     ) -> bool {
         self.finish_thinking(scrollback);
-        self.current_agent_msg = None;
+        self.finish_agent_message(scrollback);
         if is_todo_tool(&tc)
             || is_bg_plumbing_tool(&tc)
             || is_task_tool(&tc)
