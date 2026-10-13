@@ -176,3 +176,94 @@ async fn text_before_a_blocking_subagent_call_reaches_the_screen() {
     )
     .await;
 }
+
+fn slow_shell_call(seconds: u32) -> MockToolCall {
+    MockToolCall::new(
+        Tool::Shell,
+        json!({ "command": format!("sleep {seconds}"), "description": "wait" }),
+    )
+}
+
+async fn spawn_on_narrated_slow_call(
+    content: &ContentController,
+    narration: &str,
+    replies: &[&str],
+    seconds: u32,
+) -> PtyHarness {
+    let mut conversation =
+        Conversation::nth(1).calls([slow_shell_call(seconds).narrated(narration)]);
+    for reply in replies {
+        conversation = conversation.reply(*reply);
+    }
+    content.server().set_conversations(vec![conversation]);
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_env_ops_in_dir(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        content,
+        &["--yolo", "--trust"],
+        &[],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn text_before_a_running_tool_stays_when_a_second_prompt_is_sent() {
+    let content = ContentController::start().await.expect("start content");
+    let narration = "NARRATION_BEFORE_SLOW_CALL looking into it";
+    let mut harness = spawn_on_narrated_slow_call(&content, narration, &["TURN_DONE"], 4).await;
+    harness
+        .wait_for_text(narration, TURN_TIMEOUT)
+        .expect("the text must show while the tool runs");
+    harness
+        .inject_keys(b"the same question again\r")
+        .expect("send a second prompt mid-turn");
+    harness
+        .wait_for_text("TURN_DONE", TURN_TIMEOUT)
+        .unwrap_or_else(|error| panic!("{error}\n{}", harness.screen_contents()));
+    let screen = harness.screen_contents();
+    assert!(
+        screen.contains(narration),
+        "the text written before the tool call vanished once a second prompt was sent:\n{screen}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn text_before_a_running_tool_stays_after_ctrl_c_and_a_new_prompt() {
+    let content = ContentController::start().await.expect("start content");
+    let narration = "NARRATION_BEFORE_SLOW_CALL looking into it";
+    let mut harness =
+        spawn_on_narrated_slow_call(&content, narration, &["AFTER_CANCEL_DONE"], 30).await;
+    harness
+        .wait_for_text(narration, TURN_TIMEOUT)
+        .expect("the text must show while the tool runs");
+    harness.inject_keys(keys::CTRL_C).expect("cancel the turn");
+    harness.update(Duration::from_secs(2));
+    let after_cancel = harness.screen_contents();
+    assert!(
+        after_cancel.contains(narration),
+        "the text written before the tool call vanished when the turn was cancelled:\n{after_cancel}"
+    );
+    harness
+        .inject_keys(b"answer me now\r")
+        .expect("send a new prompt");
+    harness
+        .wait_for_text("AFTER_CANCEL_DONE", TURN_TIMEOUT)
+        .unwrap_or_else(|error| panic!("{error}\n{}", harness.screen_contents()));
+    let screen = harness.screen_contents();
+    assert!(
+        screen.contains(narration),
+        "the text written before the tool call vanished after the new prompt:\n{screen}"
+    );
+}
