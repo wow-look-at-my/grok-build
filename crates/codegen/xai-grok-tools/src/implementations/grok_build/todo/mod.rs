@@ -40,45 +40,6 @@ pub(crate) fn validate_no_duplicate_ids(updates: &[TodoUpdate]) -> Result<(), To
     Ok(())
 }
 
-/// How many items may be `in_progress` at once.
-const DEFAULT_MAX_IN_PROGRESS: usize = 5;
-
-/// The env var that overrides [`DEFAULT_MAX_IN_PROGRESS`].
-const MAX_IN_PROGRESS_VAR: &str = "GROK_TODO_MAX_IN_PROGRESS";
-
-/// Resolve the cap from the raw env value. A value that is not a positive
-/// number keeps the default and says so.
-fn max_in_progress_cap(raw: Option<&str>) -> usize {
-    let Some(raw) = raw else {
-        return DEFAULT_MAX_IN_PROGRESS;
-    };
-    match raw.trim().parse::<usize>() {
-        Ok(n) if n > 0 => n,
-        _ => {
-            tracing::warn!(
-                value = %raw,
-                "{MAX_IN_PROGRESS_VAR} is not a positive number; using the default"
-            );
-            DEFAULT_MAX_IN_PROGRESS
-        }
-    }
-}
-
-/// The message a write is refused with when it would leave more than `cap`
-/// items `in_progress`, or `None` when the write is within the cap.
-fn in_progress_cap_violation(state: &TodoState, cap: usize) -> Option<String> {
-    let running = state
-        .todo_items()
-        .filter(|item| item.status == TodoStatus::InProgress)
-        .count();
-    (running > cap).then(|| {
-        format!(
-            "{running} items would be in progress at once, over the cap of {cap}. \
-             Keep what you are working on now in progress and leave the rest pending."
-        )
-    })
-}
-
 /// Every write is a merge: updates are folded into the existing state. -
 /// **Existing items**: `content` is optional — if omitted the value is
 /// kept. This lets the model mark an item from `in_progress` → `completed`
@@ -816,20 +777,8 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
             let mut res = resources.lock().await;
             let todo_state = res.get_or_default::<State<TodoState>>();
 
-            for outcome in &results {
-                if outcome.passed {
-                    todo_state.0.set_verification_passed(&outcome.id, true);
-                } else {
-                    // A blocked verifier takes the completion back: the item
-                    // returns to the status it held before this call.
-                    let previous = previous_statuses
-                        .get(&outcome.id)
-                        .copied()
-                        .flatten()
-                        .unwrap_or(TodoStatus::Pending);
-                    todo_state.0.update(&outcome.id, None, Some(previous));
-                }
-            }
+            // Always a merge.
+            apply_merge(&mut todo_state.0, &input.todos, input.prepend)?;
 
             // A blocked item goes back to the status it had before this call.
             // It never stays completed.
