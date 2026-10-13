@@ -389,3 +389,16 @@ async fn successive_narrations_read_in_order_over_chat_completions() {
 async fn successive_narrations_read_in_order_over_messages_with_thinking() {
     successive_narrations_read_in_order(true).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn markdown_text_before_a_shell_call_reaches_the_screen() {
+    let narration = "\n\nForecast: **sunny**, high of $72 and low of $58.\n\n| day | high |\n|-----|------|\n| tue | 72 |\n\n```\nraw block\n```\n\n- first\n- NARRATION_MARKDOWN_END";
+    narration_reaches_the_screen(
+        shell_call().narrated(narration),
+        "NARRATION_MARKDOWN_END",
+        "MARKDOWN_TURN_DONE",
+        false,
+    )
+    .await;
+}
