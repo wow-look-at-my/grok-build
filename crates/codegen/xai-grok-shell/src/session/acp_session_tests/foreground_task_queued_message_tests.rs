@@ -71,7 +71,7 @@ fn task_call(id: &str, run_in_background: bool) -> crate::sampling::types::ToolC
 
 /// Runs one `task` call on a backend that never finishes. A message is queued while the call runs.
 /// Returns the hand-off requests the coordinator saw and whether the call returned.
-async fn run_task_call_with_queued_message(run_in_background: bool) -> (Vec<String>, bool) {
+async fn run_task_call_with_queued_message(run_in_background: bool) -> (Vec<String>, bool, String) {
     let (gateway_tx, _gateway_rx) =
         tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
     let (persistence_tx, _persistence_rx) =
@@ -171,7 +171,23 @@ async fn run_task_call_with_queued_message(run_in_background: bool) -> (Vec<Stri
     while let Ok(prompt_id) = seen_rx.try_recv() {
         seen.push(prompt_id);
     }
-    (seen, returned)
+    let snapshot = actor
+        .chat_state_handle
+        .snapshot()
+        .await
+        .expect("chat state alive");
+    let result_text = snapshot
+        .conversation
+        .iter()
+        .filter_map(|item| match item {
+            ConversationItem::ToolResult(tr) if tr.tool_call_id == "task-1" => {
+                Some(tr.content.to_string())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (seen, returned, result_text)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -180,7 +196,7 @@ async fn queued_message_backgrounds_a_foreground_task_call() {
     local
         .run_until(async {
             crate::util::config::set_follow_up_steer_cache(true);
-            let (handed_off, returned) = run_task_call_with_queued_message(false).await;
+            let (handed_off, returned, result) = run_task_call_with_queued_message(false).await;
             assert!(
                 returned,
                 "the foreground task call must return once a message is queued"
@@ -188,7 +204,11 @@ async fn queued_message_backgrounds_a_foreground_task_call() {
             assert_eq!(
                 handed_off,
                 vec!["running".to_string()],
-                "the subagent must be handed off for the running prompt"
+                "the subagent must be handed off for the running prompt; the call's result was: {result:?}"
+            );
+            assert!(
+                result.contains("moved to the background"),
+                "the model must be told the subagent moved: {result:?}"
             );
         })
         .await;
@@ -200,7 +220,7 @@ async fn queued_message_leaves_a_background_task_call_alone() {
     local
         .run_until(async {
             crate::util::config::set_follow_up_steer_cache(true);
-            let (handed_off, _returned) = run_task_call_with_queued_message(true).await;
+            let (handed_off, _returned, _result) = run_task_call_with_queued_message(true).await;
             assert!(
                 handed_off.is_empty(),
                 "a background call has no foreground wait to cut short: {handed_off:?}"
