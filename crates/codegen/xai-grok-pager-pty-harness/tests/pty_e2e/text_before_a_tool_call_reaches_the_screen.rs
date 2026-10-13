@@ -261,9 +261,15 @@ async fn text_before_a_running_tool_stays_after_ctrl_c_and_a_new_prompt() {
     harness
         .wait_for_text("AFTER_CANCEL_DONE", TURN_TIMEOUT)
         .unwrap_or_else(|error| panic!("{error}\n{}", harness.screen_contents()));
+    // The new turn is anchored at the top, so the earlier turn sits above the viewport: scroll up to it.
+    harness.inject_keys(b"\t").expect("focus the scrollback");
+    for _ in 0..4 {
+        harness.inject_keys(keys::PGUP).expect("page up");
+        harness.update(Duration::from_millis(300));
+    }
     let screen = harness.screen_contents();
     assert!(
         screen.contains(narration),
-        "the text written before the tool call vanished after the new prompt:\n{screen}"
+        "the text written before the tool call is gone after the new prompt, even scrolled up:\n{screen}"
     );
 }
