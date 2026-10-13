@@ -515,8 +515,8 @@ fn plan_updates(
 
 /// A seeded item is a todo like any other. The seed dispatches through the
 /// session's own `todo_write`, so the same `Plan` session update a
-/// model-written list produces is enqueued for the client, carrying the items
-/// the planner listed.
+/// model-written list produces is enqueued for the client. That seed is
+/// carrying the items the planner listed.
 #[tokio::test(flavor = "current_thread")]
 async fn the_seed_reaches_the_client_as_a_plan_update() {
     let local = tokio::task::LocalSet::new();
@@ -587,9 +587,9 @@ async fn a_lite_goal_never_spawns_the_planner() {
 }
 
 /// path hands the planner a prompt that tells it to list the plan's work with
-/// the session's own todo tool — the instruction the whole feature rests on,
-/// asserted on the prompt the coordinator was actually given rather than on a
-/// template rendered in isolation.
+/// the session's own todo tool. The instruction the whole feature rests on,
+/// asserted on the prompt the coordinator was given rather than on a template
+/// rendered in isolation.
 #[tokio::test(flavor = "current_thread")]
 async fn the_planner_is_spawned_with_the_todo_instruction() {
     let local = tokio::task::LocalSet::new();
@@ -632,7 +632,7 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
 /// This is the shipped reader that carries a planner child's items back
 /// ([`crate::agent::subagent::session_todo_contents`]). The shipped reader is
 /// driven against a real bound session whose list was written through the real
-/// tool — and against an id that was never bound, which is the proxy-mode /
+/// tool. And against an id that was never bound. This is the proxy-mode /
 /// no-child case.
 #[tokio::test(flavor = "current_thread")]
 async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
@@ -669,7 +669,7 @@ async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
 }
 
 /// The gate for the objective's first criteria: one `setup_goal` call — with no
-/// with no model turn of its own — leaves the session's LIVE todo list carrying
+/// with no model turn of its own. It leaves the session's LIVE todo list carrying
 /// planner's items, each a fresh pending harness-minted item.
 #[tokio::test(flavor = "current_thread")]
 async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {
@@ -1473,11 +1473,11 @@ async fn planner_runtime_failure_pauses_goal_with_canonical_message() {
 
 /// Regression: after a user Stop (ESC / Ctrl-C) the real coordinator latches
 /// the session in `spawn_blocked_sessions`, and every Task spawn — the goal
-/// planner included — is rejected as cancelled until an `OpenSpawnAdmission`
-/// arrives. The only reopen site runs after the goal-slash dispatch, and the
-/// resume path early-returns before it, which wedged goals until restart.
-/// Setting/resuming a goal is user re-engagement, so the planner must open
-/// admission itself before spawning.
+/// planner included. The goal planner is rejected as cancelled until an
+/// `OpenSpawnAdmission` arrives. The only reopen site runs after the
+/// goal-slash dispatch, and the resume path early-returns before it, which
+/// wedged goals until restart. Setting/resuming a goal is user re-engagement,
+/// so the planner must open admission itself before spawning.
 #[tokio::test(flavor = "current_thread")]
 async fn planner_reopens_spawn_admission_blocked_by_prior_cancel() {
     let local = tokio::task::LocalSet::new();

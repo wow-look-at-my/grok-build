@@ -14,8 +14,7 @@ use xai_grok_tools::types::SessionMode;
 /// optimistically when the user asks for it, but the shell's confirmation
 /// names only a mode. This ordered log is what attributes a confirmation to
 /// the request that caused it. A confirmation belonging to an earlier press
-/// cannot rewind the state a later press set. See
-/// `AgentView::mode_confirmation_is_stale`.
+/// cannot rewind the state a later press set.
 pub(super) fn record_mode_change_requests(app: &mut AppView, effects: &[Effect]) {
     for effect in effects {
         let (session_id, mode_ids): (&acp::SessionId, Vec<&str>) = match effect {
@@ -105,11 +104,7 @@ pub(super) fn dispatch_enter_plan_mode(
             .slash_controller
             .recognized_token_ranges(&desc, &agent.session.models);
         // Own-turn: when a turn is already running the drain below is blocked
-        // and this row waits for the NEXT turn — which is exactly what was
-        // asked for, since the plan mode this submit switched on applies to
-        // that turn. Marking it keeps every mid-turn delivery path (queue
-        // migration, interrupt-with-queue) from folding the description into
-        // the running turn as steering text.
+        // and this row waits for the NEXT turn.
         agent
             .session
             .enqueue_own_turn_prompt(desc, skill_token_ranges);

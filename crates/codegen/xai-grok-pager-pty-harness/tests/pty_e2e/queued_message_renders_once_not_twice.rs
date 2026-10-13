@@ -97,8 +97,7 @@ async fn queued_message_renders_once_not_twice() {
     });
 
     // Queue the follow-up while the id-hold tool is still running: the turn
-    // is inside a tool, so nothing has been sent to the model since it was
-    // typed.
+    // is inside a tool.
     harness
         .inject_keys(format!("{QUEUED_TEXT}\r").as_bytes())
         .expect("queue follow-up mid-turn");

@@ -823,9 +823,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: false,
         },
         SettingMeta {
-            // Persisted key stays `simple_mode`; the user-facing label
-            // distinguishes the PROMPT vim-mode (this setting) from the
-            // scrollback `vim_mode` keybindings below.
+            // Persisted key stays `simple_mode`.
             key: "simple_mode",
             category: SettingCategory::Appearance,
             owner: SettingOwner::Shared,

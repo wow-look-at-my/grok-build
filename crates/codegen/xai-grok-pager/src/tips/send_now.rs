@@ -14,7 +14,7 @@ const SEND_NOW_TIP_SEEN_CAP: u32 = 3;
 /// [`SEND_NOW_TIP_SEEN_CAP`] shows per session (in-memory). The queued
 /// follow-up already reaches the model at the running turn's next gap. This
 /// advertises the harder gesture: after a mid-turn queue the composer is
-/// empty, so a second Enter cuts the model off mid-response and hands it the
+/// empty. A second Enter cuts the model off mid-response and hands it the
 /// queue immediately — no special chord to learn.
 pub fn send_now_tip() -> EphemeralTip {
     let theme = Theme::current();

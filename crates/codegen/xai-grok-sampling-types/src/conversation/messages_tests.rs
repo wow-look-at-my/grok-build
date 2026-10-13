@@ -644,7 +644,7 @@ fn thinking_without_a_recorded_origin_is_replayed() {
     assert_eq!(thinking_blocks(&req).len(), 1);
 }
 
-/// The recovery the sampler applies when the server rejects a signature the
+/// The recovery the sampler applies when the server rejects a signature. The
 /// table let through: the level steps to `TextOnly`, and the block that was
 /// the model's own stops being thinking. Its words stay as assistant text. One
 /// more step and nothing of it reaches the wire.
@@ -764,9 +764,9 @@ fn a_tool_loop_that_kept_its_thinking_keeps_thinking_on() {
     assert_eq!(thinking_blocks(&req).len(), 1);
 }
 
-/// A closed loop — its results answered and the user back with a follow-up —
-/// is not the turn the model is being asked to continue, so the foreign
-/// thinking stops being a thinking block; thinking stays on for the new turn.
+/// A closed loop — its results answered and the user back with a follow-up. It
+/// is not the turn the model is being asked to continue. The foreign thinking
+/// stops being a thinking block, thinking stays on for the new turn.
 #[test]
 fn a_closed_tool_loop_leaves_thinking_on() {
     let mut req = ConversationRequest::from_items(vec![

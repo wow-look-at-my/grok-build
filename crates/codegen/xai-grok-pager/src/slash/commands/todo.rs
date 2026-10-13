@@ -1,9 +1,5 @@
-//! `/todo` -- show the todo list, or capture a request as todo items without interrupting the agent.
-//!
-//! Returns `CommandResult::Action(Action::SendTodo { .. })` so the dispatch layer
-//! fires it as an ACP ext method (`x.ai/todo`) that bypasses the prompt queue.
-//! The shell forks a short-lived side agent that may read, and may append to
-//! the todo list, and may do nothing else.
+//! `/todo` -- show the todo list, or capture a request as todo items without
+//! interrupting the agent.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};

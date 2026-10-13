@@ -324,7 +324,7 @@ pub(super) fn handle_session_notification_with_origin(
             // for every one of these. Replaying the chunks would build a
             // preview of a call that is already on screen. A delta carries no
             // prompt id, so while a wake turn runs it cannot be told apart
-            // from the wake turn's own output and is dropped whole.
+            // from the wake turn's own output. It is dropped whole.
             if meta.is_replay || agent.session.loading_replay || agent.running_wake_turn.is_some() {
                 false
             } else {
@@ -1481,11 +1481,7 @@ pub(super) fn handle_session_notification_with_origin(
             stream_start_ms,
             summary,
         } => {
-            // Written by a side call that starts when its model call ends, so
-            // this arrives after the thinking block it describes has stopped
-            // running, and on a reload it is replayed right behind that block's
-            // own persisted chunks. It finds its block by the call's stream
-            // start, which is why it is not attached to whatever is current.
+            // Written by a side call that starts when its model call ends.
             agent.session.tracker.set_thinking_summary(
                 &mut agent.scrollback,
                 stream_start_ms,

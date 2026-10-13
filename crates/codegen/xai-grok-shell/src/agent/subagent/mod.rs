@@ -63,8 +63,7 @@ pub(crate) use child_runtime::{
 };
 pub(crate) use handle_request::run_shell_child;
 /// Re-exported for the goal e2e suite, which drives it against a real bound
-/// session: it is the hop that carries a planner child's own todo items back to
-/// the session that spawned it.
+/// session.
 pub(crate) use handle_request::session_todo_contents;
 pub(crate) use prompt_turn_receipt::PromptTurnReceipt;
 /// Clamp for a resolved sampling-limit override; `Semaphore::new` panics past `Semaphore::MAX_PERMITS`.
@@ -299,9 +298,7 @@ pub(crate) struct SubagentSpawnContext {
     pub available_models: indexmap::IndexMap<String, crate::agent::config::ModelEntry>,
     /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
     pub subagent_model_overrides: std::collections::HashMap<String, String>,
-    /// `[models] subagent_default`: the model a subagent runs on when
-    /// neither `[subagents.models]` nor its definition pins one. `None`
-    /// inherits the parent session's model.
+    /// `[models] subagent_default`.
     pub subagent_default_model: Option<String>,
     /// Per-subagent enable/disable toggles from config.toml `[subagents.toggle]`.
     /// Omitted agents default to enabled (`true`).

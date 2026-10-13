@@ -6,7 +6,7 @@ A breach does not cancel the slow call. The code is `drive_l2` in `crates/codege
 
 ## The race
 
-On a breach, `BackupLauncher::launch` starts a second attempt of the same request. The slow original keeps streaming to the caller. The backup streams into a buffer that the caller does not see.
+On a breach, `BackupLauncher::launch` starts a second try of the same request. The slow original keeps streaming to the caller. The backup streams into a buffer that the caller does not see.
 
 The event that comes first decides the result:
 
@@ -21,7 +21,7 @@ A takeover sends `SamplingEvent::Retrying` with kind `OutputRateCollapsed` and n
 
 Output bytes count text deltas and tool-call argument deltas. A takeover on overtake therefore never shows the user less output than the slow stream had.
 
-Spans are not judged at all, because the model is generating in one and waiting for the server in the other. A backend-hosted tool call pauses the gate. So does a streamed tool-call fragment that carries no argument bytes, which is how a provider says it is writing the call without showing that work. The reading holds where it was. The gap leaves the timeline when the arguments land.
+Spans are not judged at all, because the model is generating in one and waiting for the server in the other. A backend-hosted tool call pauses the gate. So does a streamed tool-call fragment that carries no argument bytes. This is which is how a provider says it is writing the call without showing that work. The reading holds where it was. The gap leaves the timeline when the arguments land.
 
 See "Output-rate floor notes" in `AGENTS.md`.
 
@@ -29,7 +29,7 @@ See "Output-rate floor notes" in `AGENTS.md`.
 
 Each backup spends one unit of the rate budget (`output_rate_max_retries`). The transport retry budget is separate. When the budget is spent, a breach keeps the slow response and logs `output_rate_backup_budget_spent`.
 
-A backup does not start a backup of its own. After a takeover, a breach of the backup's floor ends the attempt. The retry loop then reissues the request, while budget remains.
+A backup does not start a backup of its own. After a takeover, a breach of the backup's floor ends the try. The retry loop then reissues the request, while budget remains.
 
 A caller with `retry_only_before_output` gets no backup. A takeover replaces output that the caller already took.
 
@@ -54,7 +54,9 @@ This is checked against vLLM source (V1 engine, automatic prefix caching):
 - The backup recomputes one block at most. That is the partial last block, or the whole last block when the prompt fills it exactly.
 - When the loser is cancelled, its blocks keep their hashes on an LRU free list. The shared prompt blocks stay pinned by the survivor.
 
-The alternative is to send the prompt plus the partial output. vLLM caches generated blocks too. So this can hit. But a hit needs identical token ids. The chat template closes the assistant turn, BPE can merge differently at the cut. And a reasoning parser moves thinking text out of the content. Any of these misses from the first different block. The reliable form sends token ids to `/v1/completions`, which is a different API from the one this client uses.
+The alternative is to send the prompt plus the partial output. vLLM caches generated blocks too. So this can hit. But a hit needs same token ids. The chat template closes the assistant turn, BPE can merge differently at the cut. And a reasoning parser moves thinking text out of the content. Any of these misses from the first different block.
+
+The reliable form sends token ids to `/v1/completions`, which is a different API from the one this client uses.
 
 A backup misses the cache in these cases:
 

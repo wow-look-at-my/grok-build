@@ -2854,8 +2854,8 @@ async fn verification_stage_multi_refuter_all_blocking_returns_blocked() {
 #[tokio::test]
 async fn verification_stage_skeptic0_failure_does_not_short_circuit() {
     // A synthetic refute (transport failure, confidence Unknown) is NOT a
-    // high-confidence refute, so it must fan out the full panel rather
-    // than short-circuit. Its retry fails too. 1-of-3 refute → Achieved.
+    // high-confidence refute, so it must fan out the full panel rather than
+    // short-circuit. Its retry fails too.
     let spawner = Arc::new(MockSpawner::new([
         MockResponse::transport_error(),
         MockResponse::transport_error(),

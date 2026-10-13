@@ -85,9 +85,8 @@ pub(super) fn send_ack(
 
 pub(super) const GOAL_CLASSIFIER_PENDING_QUEUE_CAP: usize = 4;
 
-/// Contents of a session's live todo list, in order. A missing `TodoState`
-///
-/// A missing `TodoState` resource reads as an empty list: seeding appends onto
+/// Contents of a session's live todo list, in order. A missing `TodoState` A
+/// missing `TodoState` resource reads as an empty list. Seeding appends onto
 /// whatever is there, and "nothing tracked yet" is the state a fresh goal
 /// starts in (and the state a session with no todo tool stays in).
 async fn live_todo_contents(bridge: &xai_grok_tools::bridge::ToolBridge) -> Vec<String> {
@@ -1438,15 +1437,14 @@ impl SessionActor {
     /// the session's todo tool as it plans. A child session keeps its own
     /// `State<TodoState>`, so `run_shell_child` reads that list back into
     /// `SubagentResult.todos` and it arrives here. These are the items the
-    /// planner itself wrote, which is what makes the session's list the result
-    /// of the planner's own `todo_write` rather than the harness
-    /// reading the plan. A planner that named nothing seeds nothing. The plan
-    /// prose is never mined for items, so an unfollowed instruction degrades
-    /// to "the main agent keeps its own list" instead of the harness
-    /// inventing work. Runs once per goal. `plan_todos_seeded` is claimed
-    /// under the tracker lock before any I/O. The append is additionally
-    /// deduped by content, so a retry, a resume, or a re-entry cannot add a
-    /// second copy of an item.
+    /// planner itself wrote. This is what makes the session's list the result
+    /// of the planner's own `todo_write` rather than the harness reading the
+    /// plan. A planner that named nothing seeds nothing. The plan prose is
+    /// never mined for items, so an unfollowed instruction degrades to "the
+    /// main agent keeps its own list" instead of the harness inventing work.
+    /// Runs once per goal. `plan_todos_seeded` is claimed under the tracker
+    /// lock before any I/O. The append is additionally deduped by content, so
+    /// a retry, a resume, or a re-entry cannot add a second copy of an item.
     pub(super) async fn apply_planner_todos(
         &self,
         goal_id: &str,
@@ -1667,8 +1665,7 @@ impl SessionActor {
         // The planner is represented by its own turn. No-op when the spawn recorded nothing.
         self.chat_state_handle.flush_harness_trace_turn();
 
-        // Drop the run (and with it the planner's coordinator id): a Send Now
-        // arriving after this point has no live planner to address.
+        // Drop the run (and with it the planner's coordinator id).
         let _ = self.goal_tracker.lock().take_planner_run();
 
         PlannerAttemptStep::Ran {

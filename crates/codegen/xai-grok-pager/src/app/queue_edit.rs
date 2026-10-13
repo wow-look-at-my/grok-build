@@ -1611,15 +1611,15 @@ mod tests {
     }
 
     /// The edit-interject chord classifies the STORED row. However, the EDITED
-    /// The edit-interject chord classifies the STORED row, but the EDITED text
-    /// is what would go out — so a row that was steering text when it was queued
-    /// can be edited into a command. Interjecting that reaches the running turn
-    /// as ordinary user text (only a prompt's LEADING token is ever resolved as
-    /// a command), so the model reads the literal `/cmd args` and the command
-    /// turn as ordinary user text (only a prompt's LEADING token is ever resolved
-    /// as a command), so the model reads the literal `/cmd args` and the command
-    /// never runs. The edit is saved instead: the row keeps its own turn, where
-    /// the shell resolves it.
+    /// The edit-interject chord classifies the STORED row. However, the EDITED
+    /// text is what would go out. This is so a row that was steering text when it
+    /// was queued can be edited into a command. Interjecting that reaches the
+    /// running turn as ordinary user text (only a prompt's LEADING token is ever
+    /// resolved as a command). The model reads the literal `/cmd args` and the
+    /// command turn as ordinary user text (only a prompt's LEADING token is ever
+    /// resolved as a command). The model reads the literal `/cmd args` and the
+    /// command never runs. The edit is saved instead: the row keeps its own turn,
+    /// where the shell resolves it.
     #[test]
     fn edit_interject_into_a_command_saves_the_local_row_instead() {
         let mut agent = make_running_agent();

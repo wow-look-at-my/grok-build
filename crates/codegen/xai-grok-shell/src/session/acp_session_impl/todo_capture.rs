@@ -251,13 +251,13 @@ impl CaptureToolOutcome {
     }
 }
 
-/// Classify one tool call. This is the enforcement: a call that is neither
-/// the todo tool nor a readable one never reaches dispatch. The refusals are
+/// Classify one tool call. This is the enforcement: a call that is neither the
+/// todo tool nor a readable one never reaches dispatch. The refusals are
 /// written to steer the next turn toward the write, because a refusal the
-/// model cannot act on burns the turn budget. `todo_tool` is the name the
-/// todo tool is advertised under in THIS session,
-/// which is the name the model calls it by — not the canonical `todo_write`,
-/// which a `name_override` can rename out from under both.
+/// model cannot act on burns the turn budget. `todo_tool` is the name the todo
+/// tool is advertised under in THIS session, which is the name. The model
+/// calls it by — not the canonical `todo_write`, which a `name_override` can
+/// rename out from under both.
 fn capture_action(
     name: &str,
     kind: Option<ToolKind>,
@@ -413,12 +413,9 @@ impl SessionActor {
         let tag = self.reminder_wrapper_tag();
         let conversation = self.chat_state_handle.get_conversation().await;
         // Fit the snapshot to THIS model's window rather than sending the
-        // conversation whole: a small-window model would otherwise fail the
-        // capture with a context-length error, which is deterministic and
-        // never retried. The helper also strips reasoning where required and
-        // pops a trailing tool run — `/todo` fires mid-turn, so the snapshot
-        // can end with an assistant message whose tool calls have no result
-        // yet.
+        // conversation whole. A small-window model would otherwise fail the
+        // capture with a context-length error. This is deterministic and
+        // never retried.
         let mut items = crate::session::helpers::session_recap::budget_instruction_items(
             conversation,
             self.todo_capture_instruction(&todo_tool, request),
@@ -580,9 +577,7 @@ impl SessionActor {
             %transcript,
             "todo capture appended items"
         );
-        // The list alone does not say who wrote an item, and the main agent
-        // reads one it did not write as somebody else's suggestion. This is
-        // the message that says the user assigned it.
+        // The list alone does not say who wrote an item.
         let reminder = captured_todos_reminder(urgent, &todo_tool, &added);
         let wake_reminder = if self.turn_is_running() {
             self.deliver_reminder_to_main_agent(reminder);
@@ -745,18 +740,11 @@ impl SessionActor {
     }
 
     /// Run the sanitized append through the session's own todo tool. Do this
-    /// so the list, its persisted state, and the client's plan view all move
-    /// the way they do when the main agent writes a todo.
-    ///
-    /// Dispatch is by the session's advertised name with canonical parameter
-    /// names: the registry reverse-maps client names onto canonical ones and
-    /// leaves everything else alone, so canonical keys arrive as themselves
-    /// under any rename.
-    ///
-    /// `pub(super)`: the goal harness
-    /// ([`SessionActor::apply_planner_todos`]) appends through this same
-    /// path, so an item it puts on the list reaches the persisted state and the
-    /// client's `Plan` view exactly as a model-written `todo_write` does.
+    /// so the list, its persisted state. And the client's plan view all move
+    /// the way they do when the main agent writes a todo. Dispatch is by the
+    /// session's advertised name with canonical parameter names. The registry
+    /// reverse-maps client names onto canonical ones and leaves everything
+    /// else alone, so canonical keys arrive as themselves under any rename.
     pub(super) async fn append_capture_todos(
         &self,
         todo_tool: &str,
@@ -797,7 +785,7 @@ mod tests {
     }
 
     /// `/TODO` differs from `/todo` in exactly one argument. Everything that
-    /// holds the one-mutation rule — minted ids, forced pending, merge on —
+    /// holds the one-mutation rule — minted ids, forced pending, merge on. It
     /// is the same at the front of the list as at the back.
     #[test]
     fn urgent_args_prepend_and_change_nothing_else() {

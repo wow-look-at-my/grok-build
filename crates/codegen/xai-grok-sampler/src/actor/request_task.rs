@@ -1026,18 +1026,15 @@ fn tee_errors<'a, T: Send + 'a>(
 
 /// Drive an L2 event stream: forward non-terminal events to `event_tx` and watch `cancel_token`.
 /// `doom_check`, when set, turns a completed response carrying confident doom-loop signals into a retryable failure.
-///
 /// The output-rate meter runs here rather than inside a backend transform:
-/// every backend's tokens and tool-call arguments pass through this loop, so
-/// one meter covers all three and the gate and the published rate are the same
-/// measurement. `rate_check`, when set, turns a full window under its floor
-/// into a slow response. With a `backup` launcher the slow response keeps
-/// streaming and another generation starts beside it, hidden. The earliest
-/// of these to happen decides the race:
-///
+/// every backend's tokens and tool-call arguments pass through this loop.
+/// One meter covers all of them and the gate and the published rate are the
+/// same measurement. `rate_check`, when set, turns a full window under its
+/// floor into a slow response. With a `backup` launcher the slow response
+/// keeps streaming and another generation starts beside it, hidden. The
+/// earliest of these to happen decides the race:
 /// - The original recovers above the floor or finishes: the backup stops.
 /// - The backup overtakes or finishes, or the original fails: it takes over.
-///
 /// Dropping this future drops the L2 stream, which cancels the HTTP request.
 /// The `ttft` deadline fails an attempt with no output, on the same tick.
 #[allow(clippy::too_many_arguments)]
@@ -1585,9 +1582,9 @@ impl Backup<'_> {
 }
 
 /// Publish the gate's current rate. The event's whole job is to change what a
-/// client renders, so an unchanged reading is not sent — with a single exception:
-/// while the rate is under the floor the event also carries how long that has
-/// lasted, and that number moves even when the rate does not.
+/// client renders. An unchanged reading is not sent — with a single exception.
+/// The event also carries how long that has lasted, and that number moves even when
+/// the rate does not. This happens while the rate is under the floor.
 fn publish_rate(
     gate: &OutputRateGate,
     now: std::time::Instant,

@@ -434,16 +434,7 @@ impl SessionActor {
             ..ConversationRequest::default()
         };
 
-        // Invisibility-critical: build a fresh `SamplingClient` via
-        // `prepare_chat_completion` and call `conversation_collect`
-        // directly. This is the same side-channel pattern
-        // `run_memory_flush`, `run_dream_model_call`, and
-        // `image_describe` use. The per-session `sampler_handle`
-        // would forward streaming events on the shared sampler
-        // channel — every `ChannelToken { Text }` becomes an ACP
-        // `AgentMessageChunk` → the pager UI renders mid-classifier
-        // reasoning + text deltas. `conversation_collect` does NOT
-        // publish on that channel, so the client sees nothing.
+        // Invisibility-critical.
         let slot_sampler = self.resolve_slot_sampler("laziness_classifier").await;
         // The model has to come from whichever client ends up carrying the
         // request.

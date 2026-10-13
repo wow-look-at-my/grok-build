@@ -28,10 +28,7 @@ type CiCacheEntry = (Option<CiStatus>, Instant);
 static CI_CACHE: LazyLock<Mutex<HashMap<CiCacheKey, CiCacheEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Nudged by an off-thread poll that lands on a *different* color, so a
-/// session with no input and no animation still repaints the moment CI goes
-/// red or green. Registered once by the event loop; `None` in tests and in
-/// any headless caller, where the send is simply skipped.
+/// Nudged by an off-thread poll that lands on a *different* color.
 static CI_CHANGE_TX: LazyLock<Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>> =
     LazyLock::new(|| Mutex::new(None));
 
@@ -159,11 +156,11 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
 
 /// Talk to the unsandboxed CI-status host worker for a sandboxed session,
 /// returning an [`Output`] shaped like a `gh` run's stdout. It is
-/// authoritative. We hand the caller an `Output` whose body attenuates to
-/// It is authoritative: when the worker replies with the nothing-usable
-/// sentinel, we hand the caller an `Output` whose body attenuates to "no
-/// runs", so the dot degrades to the "off" state rather than falling through
-/// to an in-jail `gh` spawn. Only a genuinely absent/unusable worker
+/// authoritative. We hand the caller an `Output` whose body attenuates to It
+/// is authoritative. We hand the caller an `Output` whose body attenuates to
+/// "no ru. The dot degrades to the "off" state rather than falling through
+/// to an in-jail `gh` spawn. This happens when the worker replies with the
+/// nothing-usable sentinel. Only a genuinely absent/unusable worker
 /// connection returns `None`.
 fn run_gh_via_ci_host(repo_root: &Path, args: &[&str], fd: i32) -> Option<std::process::Output> {
     #[cfg(unix)]
@@ -246,11 +243,7 @@ fn run_gh_direct(repo_root: &Path, args: &[&str]) -> Option<std::process::Output
     Some(output)
 }
 
-/// Read the cached CI status for `(repo_root, branch)`, scheduling a
-/// throttled off-thread `gh` refresh when the entry is missing or stale, so
-/// the dot reflects fresh CI state rather than a startup capture. Never
-/// blocks and never spawns `gh` synchronously on the render path — call this
-/// from render code.
+/// Read the cached CI status for `(repo_root, branch)`.
 pub fn ci_status_lazy(repo_root: &Path, branch: &str) -> Option<CiStatus> {
     let cached = ci_status_peek(repo_root, branch);
     refresh_ci_status(repo_root, branch);
@@ -299,9 +292,7 @@ pub fn refresh_ci_status(repo_root: &Path, branch: &str) {
     if !needs_refresh {
         return;
     }
-    // Reserve the slot with a fresh timestamp BEFORE spawning so this frame's
-    // other reads (and the next few frames) don't spawn duplicate refreshes
-    // until this one lands or the TTL elapses.
+    // Reserve the slot with a fresh timestamp BEFORE spawning so this frame's other reads (and the next few frames) don't spawn duplicate refreshes until this lands.
     cache.insert(key.clone(), (cached, Instant::now()));
     drop(cache);
     spawn_ci_refresh(key, cached);
@@ -604,9 +595,8 @@ mod tests {
     /// Publish an in-process peer speaking the worker's protocol over
     /// `CI_HOST_FD_ENV`, exactly the way the jail boundary hands the fd to
     /// the jailed pager. Answer one `gh-status <branch>` request with `json`.
-    ///
-    /// The peer asserts the request shape, so a caller that reached `gh` some
-    /// other way, or asked for the wrong thing, fails here rather than
+    /// The peer asserts the request shape, so a caller that reached `gh`.
+    /// Some other way, or asked for the wrong thing, fails here rather than
     /// silently reading whatever the peer felt like sending. Callers hold
     /// [`ci_env_lock`] for as long as the variable must stay set.
     #[cfg(unix)]
@@ -677,8 +667,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn the_shipped_ci_status_degrades_to_off_on_the_worker_sentinel() {
-        // The worker's nothing-usable sentinel (`gh` failed, or the branch has
-        // no runs): the dot goes dark rather than inventing a color.
+        // The worker's nothing-usable sentinel (`gh` failed, or the branch has no runs).
         let _env = ci_env_lock();
         let _fd = publish_ci_host_peer(b".");
         let (runs, status) = gh_ci_status(Path::new("/no/such/repo"), "master");

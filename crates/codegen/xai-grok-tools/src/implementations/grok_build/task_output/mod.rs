@@ -588,10 +588,7 @@ pub(crate) async fn wait_any_event_driven(
         #[allow(clippy::disallowed_methods)]
         let wait = tokio::spawn(async move {
             // Guarded, because `done` is the only thing this caller can be
-            // woken by: a round that died mid-flight would leave the tool
-            // parked until its deadline on a wait that no longer exists.
-            // The panic is logged against the task and the caller is woken
-            // to re-read the real task state.
+            // woken by: a round that died mid-flight will leave.
             let round = crate::util::detached::guarded(
                 "task output bash wait",
                 terminal.wait_for_completion(&id, Some(timeout)),
@@ -1811,9 +1808,9 @@ mod tests {
     }
 
     /// The caller of a multi-task wait is parked on one `Notify` that only
-    /// these spawned rounds can wake, so a round that died has to wake it
-    /// anyway: otherwise the tool sits out the whole wait budget on a wait that
-    /// no longer exists, with the turn stopped in front of it.
+    /// these spawned rounds can wake. A round that died has to wake it anyway:
+    /// otherwise the tool sits out the whole wait budget on a wait that no
+    /// longer exists. That round is with the turn stopped in front of it.
     #[tokio::test(start_paused = true)]
     async fn a_panicking_bash_wait_still_releases_the_waiter() {
         let terminal: Arc<dyn TerminalBackend> = Arc::new(PanickingWaitTerminal);

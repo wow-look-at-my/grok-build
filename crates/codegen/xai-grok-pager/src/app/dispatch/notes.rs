@@ -875,8 +875,7 @@ fn begin_todo_capture_ui(agent: &mut AgentView, request: &str, capture_id: &str)
             ))),
         ));
     agent.pending_todo_entry = Some(entry_id);
-    // Tasks pane sits at the top of the agent view and auto-opens on a new
-    // live running task — that is the "in-flight at the top" surface.
+    // Tasks pane sits at the top of the agent.
     let task_id = todo_capture_task_id(capture_id);
     agent.session.bg_tasks.insert(
         task_id.clone(),

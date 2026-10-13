@@ -517,21 +517,11 @@ pub struct GoalOrchestration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_baseline_file: Option<PathBuf>,
 
-    /// True once the harness has populated the session's todo list from the
-    /// published plan (the planner's own list, or the plan body when the
-    /// planner named nothing). Seeding happens at plan publication only, so
-    /// this is the guard that keeps a retry / resume / re-entry from adding a
-    /// second copy of every step. Persisted, so the guard survives a restart;
-    /// the append is additionally deduped by content, so a lost flag cannot
-    /// duplicate either.
+    /// True once the harness has populated the session's todo list from the published plan (the planner's own list, or the plan body when the planner named nothing).
     #[serde(default)]
     pub plan_todos_seeded: bool,
 
-    /// True once the harness created and squat-verified the scratch root AND
-    /// the implementer subdir, so prompts can honestly say the dir exists.
-    /// `#[serde(skip)]`: recomputed by `from_snapshot` on every reload (the
-    /// sole reload path), so a persisted value would be dead-on-read — same as
-    /// the recomputed/transient `live_*` fields below.
+    /// True once the harness created and squat-verified the scratch root AND the implementer subdir, so prompts can honestly say the dir exists.
     #[serde(skip)]
     pub scratch_dir_ready: bool,
 

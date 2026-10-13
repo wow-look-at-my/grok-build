@@ -218,16 +218,7 @@ impl AgentView {
                         self.prompt.slash_close();
                         slash_accepted_send = true;
                     } else {
-                        // Whether to wait for an argument is the registry's
-                        // two-bit contract, not the trailing space: insert_text
-                        // gets one whenever a command ACCEPTS args, so keying
-                        // off it also stalls on `/login` and `/compact`, whose
-                        // args are optional and which run fine without them.
-                        //
-                        // Ask that of the LINE the accept produced, never of
-                        // the row on its own: an argument row's insert_text is
-                        // a bare value (`cursor-model`), which parses as no
-                        // command at all and reads as forever-incomplete.
+                        // Whether to wait for an argument is the registry's two-bit contract, not the trailing space.
                         let had_selection = snap.selection().is_some();
                         self.prompt.slash_commit_preview();
                         self.prompt.accept_slash_completion(&self.session.models);

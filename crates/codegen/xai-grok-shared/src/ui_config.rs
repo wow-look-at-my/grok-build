@@ -65,10 +65,7 @@ pub struct UiConfig {
     /// Trailing window the output rate is averaged over. `None` = 10 seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_rate_window_secs: Option<u32>,
-    /// How many times one model call is reissued for slow output before the
-    /// response is accepted at whatever rate it runs. `None` = 2. A legacy
-    /// `[output_rate_floor].max_retries` applies when this is unset.
-    /// (`[ui].output_rate_max_retries`.) `-1` or `"unlimited"` never runs out.
+    /// How many times one model.
     #[serde(
         default,
         with = "xai_grok_config_types::retry_budget",

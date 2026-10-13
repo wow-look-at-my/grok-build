@@ -89,11 +89,7 @@ fn every_registered_setting_is_exercised() {
     let mut missing: Vec<&str> = Vec::new();
     for meta in reg.all() {
         // Harness model slots are built from one table, so the keyboard and
-        // mouse tests below WALK that table and cover every slot rather than
-        // naming each key here. See
-        // `harness_model_slot_picker_commits_the_catalog_model_for_every_slot`,
-        // `harness_model_slot_picker_row_zero_clears_the_slot` and
-        // `mouse_click_on_a_harness_model_slot_row_opens_the_picker`.
+        // mouse tests below WALK that table and cover.
         if xai_grok_models::slot_for_setting_key(meta.key).is_some() {
             continue;
         }
@@ -4491,9 +4487,10 @@ fn pr15_int_stepper_rejects_text_input_keys() {
         );
     }
 
-    // The stepper is still NOT a free-form text input: letters, sign/decimal
-    // punctuation, Space, and navigation/edit keys other than Backspace are
-    // silently dropped, leaving the buffer untouched (back at the seed).
+    // The stepper is still NOT a free-form text input. The stepper letters,
+    // sign/decimal punctuation, Space, and navigation/edit keys other than
+    // Backspace are silently dropped, leaving the buffer untouched (back at
+    // the seed).
     let reject_keys = &[
         KeyCode::Char('a'),
         KeyCode::Char('-'),

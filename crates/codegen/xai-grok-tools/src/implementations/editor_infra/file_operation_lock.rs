@@ -128,14 +128,7 @@ pub struct FileOperationLockGuard {
 impl Drop for FileOperationLockGuard {
     fn drop(&mut self) {
         let kind = std::mem::replace(&mut self.kind, LockKind::Exclusive);
-        // The release runs here rather than in a task of its own: whoever is
-        // queued behind this guard learns the lock is free from this call
-        // returning, and there is no detached failure for them to outlive.
-        //
-        // The unwind is still caught, because a guard dropped while another
-        // panic is unwinding would otherwise take the process with it. A failed
-        // release is the one state a waiter cannot recover from on its own, so
-        // it is withdrawn again and, if that fails too, said out loud.
+        // The release runs here rather than in a task of its own.
         let released = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.manager.release(&kind);
         }));

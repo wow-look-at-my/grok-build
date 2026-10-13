@@ -11,9 +11,7 @@ use std::sync::atomic::Ordering;
 
 /// Auto-compaction is gated whenever `auto_compact_suppressed` is not [`SUPPRESS_NONE`].
 pub(crate) const SUPPRESS_NONE: u8 = 0;
-/// Resolvable failure (`other`, `schema`): suppressed for the current turn,
-/// then cleared at the next turn start so compaction self-heals once the cause
-/// clears.
+/// Resolvable failure (`other`, `schema`).
 pub(crate) const SUPPRESS_TURN: u8 = 1;
 /// Fatal failure (size) retrying can never fix: survives turn boundaries, cleared only when the context budget changes — a successful compaction, a rewind (context shrank).
 pub(crate) const SUPPRESS_STICKY: u8 = 2;
@@ -190,8 +188,7 @@ pub(crate) struct CompactionConfig {
     pub force_compact: Arc<AtomicBool>,
     /// See [`PendingManualCompact`]. `Cell` because `SessionActor` is `!Send`.
     pub pending_manual_compact: Cell<Option<PendingManualCompact>>,
-    /// Auto-compaction suppression state (`SUPPRESS_*`) after a deterministic
-    /// failure; the gates early-return unless `SUPPRESS_NONE`. Manual `/compact` ignores it.
+    /// Auto-compaction suppression state (`SUPPRESS_*`) after a deterministic failure; the gates early-return unless `SUPPRESS_NONE`.
     pub auto_compact_suppressed: AtomicU8,
     /// Locks the context window when `GROK_DEBUG_CONTEXT_WINDOW` is set.
     pub context_window_override: Option<std::num::NonZeroU64>,

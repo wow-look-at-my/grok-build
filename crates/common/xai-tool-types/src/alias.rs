@@ -391,13 +391,7 @@ pub const WIRED: &[WireAlias] = &[
 ];
 
 /// A field that reads more than one key spelling and stays on a bare
-/// `#[serde(alias)]`, because every byte it reads came out of a file this
-/// program or the user wrote.
-///
-/// The duplicate-field failure needs two spellings of one field in one object.
-/// A file this program writes names its field once, so only a human typing both
-/// --- or a merge of two editors' config --- can produce the pair, and the file's
-/// owner sees the error and the file side by side.
+/// `#[serde(alias)]`.
 #[derive(Debug, Clone, Copy)]
 pub struct LocalAlias {
     /// Crate-relative path of the file that declares the alias.
@@ -723,7 +717,7 @@ mod tests {
     }
 
     /// Case one of the drift this table guards: a field that went back to a bare
-    /// `#[serde(alias)]` - its `Aliases` declaration gone, or the shadow no
+    /// `#[serde(alias)]`. Its `Aliases` declaration gone, or the shadow no
     /// longer folding every key it names.
     #[test]
     fn every_wired_alias_is_folded_in_the_file_that_declares_it() {
@@ -1200,13 +1194,12 @@ pub struct Late {
 
     /// Every string an `alias` key names in one attribute's text. Whitespace
     /// is collapsed first, so a key rustfmt split across lines is still read.
-    /// Requiring a separator before `alias` is what keeps clap's
-    /// Every string an `alias` key names in one attribute's text.
-    ///
-    /// Whitespace is collapsed first, so a key rustfmt split across lines is
-    /// still read. Requiring a separator before `alias` is what keeps clap's
-    /// `visible_alias` and `alias` args out of the read even if one ever sat
-    /// inside a `#[serde(` line.
+    /// Requiring a separator before `alias` is what keeps clap's Every string
+    /// an `alias` key names in one attribute's text. Whitespace is collapsed
+    /// first, so a key rustfmt split across lines is still read. Requiring a
+    /// separator before `alias` is what keeps clap's `visible_alias`. And
+    /// `alias` args out of the read even if one ever sat inside a `#[serde(`
+    /// line.
     fn alias_sites_in(attribute: &str) -> Vec<String> {
         const KEY: &str = "alias=\"";
         let flat: String = attribute.chars().filter(|c| !c.is_whitespace()).collect();

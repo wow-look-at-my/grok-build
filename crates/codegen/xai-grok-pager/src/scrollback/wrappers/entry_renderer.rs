@@ -575,19 +575,7 @@ impl<'a> EntryRenderer<'a> {
 }
 
 /// Convert an API-reported server cost (in USD ticks, 1e10 per USD) to a
-/// readable display string such as `$0.12` or `$3.42`.
-///
-/// # Honesty guarantees
-///
-/// - A missing (`None`) or non-positive cost returns `None`, so a caller never
-///   renders a fabricated `$0.00` when the API reported no cost.
-/// - Arithmetic is exact **integer** math (no floats), so a reported cost is
-///   never mis-rounded into `$0` the way a `f64` at 4 decimals could.
-/// - Up to 6 significant fractional digits are shown (trailing zeros trimmed),
-///   so even a tiny-but-real reported cost renders as non-zero.
-///
-/// Pure — no terminal/theme/IO deps — so it is exactly assertable in unit
-/// tests.
+/// readable display string such as `$0.12` or `$3.42`. # Honesty guarantees.
 pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<String> {
     let ticks = cost_usd_ticks?;
     if ticks <= 0 {
@@ -928,7 +916,7 @@ impl Renderable for EntryRenderer<'_> {
             if self.appearance().show_timestamps
                 && let Some(ts) = self.entry.created_at
             {
-                // Check if mouse is hovering the timestamp zone (rightmost 10
+                // Check if mouse is hovering the timestamp zone (rightmost
                 // cols of the first content row).
                 let ts_hovered = self.mouse_pos.is_some_and(|(mx, my)| {
                     my == first_content_y
@@ -1596,8 +1584,7 @@ mod tests {
 
     #[test]
     fn cost_indicator_renders_next_to_timestamp_for_reported_cost() {
-        // A message with a reported cost draws the cost token immediately to
-        // the LEFT of the timestamp on the first content line.
+        // A message with a reported cost draws the cost.
         let theme = Theme::current();
         let entry = ScrollbackEntry::new(RenderBlock::agent_message("hello"))
             .with_cost_usd_ticks(Some(1_234_500_000)); // $0.12345

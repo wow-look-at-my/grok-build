@@ -518,7 +518,7 @@
     }
 
     /// Test that a subagent's `model` field in `SubagentSpawned` — a raw model
-    /// *id* — is resolved through the parent session's model catalog (`ModelId
+    /// *id*. It is resolved through the parent session's model catalog (`ModelId
     /// (`ModelId -> ModelInfo.name`) at ingestion, so the displayed model is the
     /// friendly name (e.g. "openrouter/deepseek/... than the raw id
     /// "agent-host", on both the `SubagentInfo` (tasks pane / title bar) and the

@@ -1608,10 +1608,10 @@ async fn responses_doom_loop_does_not_resample_after_output_when_retry_only_befo
 // Output-rate floor
 // ---------------------------------------------------------------------------
 
-/// The output-rate floor's coverage, in one module so `cargo test --test
-/// test_actor output_rate` runs the whole of it, the new cases and the
-/// existing ones together, since what a widened hold must not do is break the
-/// detection the floor exists for.
+/// The output-rate floor's coverage. That coverage is in one module so `cargo
+/// test --test test_actor output_rate` runs the whole of it. The new cases
+/// and the existing ones together, since what a widened hold must not do is
+/// break the detection the floor exists for.
 mod output_rate {
     use super::*;
 
@@ -2208,8 +2208,7 @@ mod output_rate {
                     let arguments = arguments.clone();
                     async move {
                         counter.fetch_add(1, Ordering::SeqCst);
-                        // 39 bytes every 100 ms is 97 tok/s, near five times the
-                        // floor below, for the two seconds before the call opens.
+                        // Many bytes every 100 ms is tok/s.
                         let word = "0".repeat(39);
                         let mut events: Vec<(u64, Event)> = (0..20)
                             .map(|_| (100, text_chunk_event(&word, false)))

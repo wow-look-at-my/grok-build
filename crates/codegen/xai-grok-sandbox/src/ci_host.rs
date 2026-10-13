@@ -53,7 +53,7 @@ const ALLOWED_COMMANDS: &[(&str, &str)] = &[
 const ALLOWED_BARE_COMMANDS: &[&str] = &["api"];
 
 /// Every flag a request may carry. An allowlist rather than a deny-list
-/// because the flags that matter are the ones that turn a read into a write:
+/// because the flags that matter are the ones that turn a read into a write.
 /// `-X POST`, `--method`, `--field`, `--input`.
 const ALLOWED_FLAGS: &[&str] = &[
     "--json",
@@ -132,26 +132,10 @@ fn resolve_fd(published: Option<i32>, from_env: Option<&str>) -> Option<i32> {
 static SESSION_CI_HOST_FD: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
 
 /// Start the host worker for a session that is confined in place, before the
-/// confinement is installed, and publish its fd to this process.
-///
-/// A confining profile sandbox (`--sandbox=workspace`, `read-only`, `strict`, a
-/// custom profile) is applied to the running session by `sandbox_init`. The
-/// macOS profile it installs denies the keychain mach services, so a `gh` that
-/// runs under it finds its account but no token and answers `401`; the same
-/// `gh` outside the confinement works. Forking the worker first is what puts an
-/// unconfined `gh` behind the session's queries, which is what the pathbox jail
-/// does with [`spawn_ci_host`].
-///
-/// `survives_exec` says whether an `exec` follows the hand-off (the Linux
-/// bwrap re-exec for a deny-carrying profile). Where one does, the fd is made
-/// exec-surviving and its NUMBER is exported as [`CI_HOST_FD_ENV`] for the
-/// re-executed image. Where none does (macOS, and Linux profiles that need no
-/// bwrap), the fd stays close-on-exec and the number moves through
-/// [`SESSION_CI_HOST_FD`] alone, so no child of the session inherits it.
-///
-/// Returns the fd, or `None` when a worker is not this process's to start: this
-/// process IS the worker, one is already published, or the process is already
-/// inside a jail that started its own.
+/// confinement is installed, and publish its fd to this process. The macOS
+/// profile it installs denies the keychain mach services. A `gh` that runs
+/// under it finds its account but no token and answers `401`. The same `gh`
+/// outside the confinement works.
 pub fn start_ci_host_for_session(repo_root: &Path, survives_exec: bool) -> Option<i32> {
     if is_ci_host_subprocess() || ci_host_fd().is_some() || crate::is_jailed() {
         return None;
@@ -244,7 +228,7 @@ pub fn reclaim_from_failed_exec(fd: std::os::unix::io::RawFd) {
     // SAFETY: fcntl on an fd this process owns; F_GETFD and F_SETFD only touch its flags.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
     if flags >= 0 {
-        // SAFETY: see above.
+        // SAFETY.
         unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
     }
     // SAFETY: this runs on the startup path, before the session exists.
@@ -437,11 +421,9 @@ fn query_branch(branch: &str) -> Option<Vec<u8>> {
     bounded_json(stdout)
 }
 
-/// Run the fixed PR/checks query for `branch`: the branch's pull request
-/// (`gh pr view`) and its check runs (`gh pr checks`), combined into a single
-/// JSON object on one line:
-///   `{"state":"OPEN","merged":false,"isDraft":false,"url":..,"number":..,"title":..,"checks":[...]}`
-///
+/// Run the fixed PR/checks query for `branch`. The branch's pull request (`gh pr view`) and its
+/// check runs (`gh pr checks`), combined into a single JSON object on one line:
+/// `{"state":"OPEN","merged":false,"isDraft":false,"url":..,"number":..,"title":..,"checks":[...]}`
 /// Returns `None` when `gh` is unavailable, the branch has no pull request
 /// (`gh pr view` exits non-zero), or the combined document overflows the cap.
 /// The caller maps `None` to the `.` nothing-usable sentinel, and the jailed
@@ -510,9 +492,7 @@ fn run_gh_safely(args: &[&str], ok_codes: &[i32]) -> Option<Vec<u8>> {
     Some(output.stdout)
 }
 
-/// Keep a raw `gh` stdout body only when it is within the response cap and
-/// not empty, so a misbehaving `gh` cannot grow the jail's memory without
-/// bound or hand back an unusable blank line.
+/// Keep a raw `gh` stdout body only when it is within the response cap.
 fn bounded_json(stdout: Vec<u8>) -> Option<Vec<u8>> {
     (stdout.len() <= MAX_RESPONSE_BYTES && !stdout.is_empty()).then_some(stdout)
 }
@@ -648,7 +628,7 @@ pub fn query_gh_host(fd: i32, args: &[&str]) -> Option<GhHostResponse> {
 /// the host worker when sandboxed, by spawning it directly otherwise. The
 /// host worker is authoritative once it exists. A sandboxed session never
 /// falls back to an in-jail spawn, where `gh` reaches neither the host
-/// credentials nor the network and would answer with a misleading failure.
+/// credentials nor the network. It would answer with a misleading failure.
 pub fn run_gh(cwd: &Path, args: &[&str]) -> Option<GhHostResponse> {
     #[cfg(unix)]
     if let Some(fd) = ci_host_fd() {
@@ -734,11 +714,8 @@ mod tests {
         );
     }
 
-    /// The hand-off starts a worker only where one is this process's to start.
-    /// Each of these is a process that must NOT fork another: the worker itself
-    /// re-entering `main`, a session a jail already handed a worker, and
-    /// a process already inside the pathbox jail.
-    /// process already inside the pathbox jail.
+    /// The hand-off starts a worker only where one is this process's to
+    /// start.
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn the_hand_off_starts_no_worker_where_one_is_not_this_processes_to_start() {

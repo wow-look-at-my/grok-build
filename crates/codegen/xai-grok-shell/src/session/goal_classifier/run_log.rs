@@ -30,8 +30,7 @@ pub(crate) struct RunLog {
     pub calls: usize,
     /// Older calls dropped to fit [`RUN_LOG_MAX_BYTES`].
     pub elided_calls: usize,
-    /// A compaction summary sits inside the goal's span, so calls before it
-    /// are gone from the conversation and therefore from the log.
+    /// A compaction summary sits inside the goal's span, so calls before it are gone from the conversation and therefore from the log.
     pub compacted: bool,
     /// Calls whose result was replaced because it showed the implementer's own words back (see [`AuthoredFiles`]).
     pub withheld: usize,
@@ -60,8 +59,7 @@ pub(crate) fn build_run_log(
         match item {
             ConversationItem::User(u) => {
                 if u.synthetic_reason == SyntheticReason::CompactionMeta {
-                    // The summary sits at or after the goal start when the
-                    // goal is active, so what follows it is the goal's.
+                    // The summary sits at or after the goal start when the goal is active, so what follows it is the goal's.
                     compacted |= in_goal;
                     in_goal = true;
                 } else if let (Some(idx), Some(start)) = (u.prompt_index, start_prompt_index) {

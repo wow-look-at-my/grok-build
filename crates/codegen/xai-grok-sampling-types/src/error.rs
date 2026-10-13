@@ -516,17 +516,7 @@ impl SamplingError {
     /// The provider's schema rejected a message-level property it does not
     /// define, e.g. Cerebras's `wrong_api_format:
     /// messages.6.assistant.model_id: property
-    ///  'messages.6.assistant.model_id' is unsupported`.
-    ///
-    /// This is a request-content error, not a transient one: the property
-    /// lives in conversation *history*, so re-sending the same body fails
-    /// identically on every turn and every retry. The recovery is to drop the
-    /// named properties from the serialized body and retry, which this
-    /// classifier enables by identifying the error.
-    ///
-    /// Narrow on purpose: the provider's own `wrong_api_format` code AND an
-    /// "is unsupported" phrase must both appear, so an unrelated 400 that
-    /// merely mentions a property name is not mistaken for this.
+    /// 'messages.6.assistant.model_id' is unsupported`.
     pub fn is_unsupported_message_property_error(&self) -> bool {
         let SamplingError::Api {
             status, message, ..
@@ -558,8 +548,8 @@ impl SamplingError {
     /// `None` when this is not such an error. The provider packs several
     /// failures into one newline-separated string, e.g.
     /// `messages.6.assistant.model_id: property '...' is unsupported\n
-    ///  messages.6.assistant.reasoning_content: property '...' is unsupported`,
-    /// so this reads every line, not just the first.
+    /// messages.6.assistant.reasoning_content: property '...' is
+    /// unsupported`, so this reads every line, not the first.
     fn unsupported_property_names(&self) -> Option<Vec<String>> {
         if !self.is_unsupported_message_property_error() {
             return None;

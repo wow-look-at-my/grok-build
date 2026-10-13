@@ -16,10 +16,7 @@ See the [MCP specification](https://modelcontextprotocol.io) for protocol detail
 
 ## MCP servers under a sandbox profile
 
-A stdio MCP server is often launched through a **package runner** — `uvx kagimcp`,
-`npx -y some-server`, `bunx`. The runner downloads the package into a cache of its
-own before the server starts, and every one of those caches defaults under your
-home directory (`~/.cache/uv`, `~/.npm`, `~/.bun/install`).
+A stdio MCP server is frequently launched through a **package runner** — `uvx kagimcp`, `npx -y some-server`, `bunx`. The runner downloads the package into a cache of its own. This happens before the server starts, and every one of those caches defaults under your home directory (`~/.cache/uv`, `~/.npm`, `~/.bun/install`).
 
 No write-confining sandbox profile grants your home directory. `workspace`, `read-only` and `strict` allow writes only to the working directory, `~/.grok/` and the temp dirs. So under any of them the runner cannot create its cache, exits during startup, and the MCP client reports only a closed pipe:
 
@@ -263,12 +260,7 @@ From the modal you can:
 - Authenticate an OAuth server with `i`
 - Add a server with `a`, or remove a local server with `x` (the modal asks for confirmation; press lowercase `y` to remove, or any other key to cancel)
 
-A server that could not be started shows `[unavailable]` with the reason on the
-row — expand it to read the whole message. The common one is a `command` that is
-not installed: `uvx`/`npx` servers report
-`No such file or directory (os error 2)`. `initializing` means the handshake is
-still running; it is bounded by `startup_timeout_sec` (30s by default), so a row
-that stays there is a slow server, not a stuck one.
+A server that can not be started shows `[unavailable]` with the reason on the row — expand it to read the whole message. The common one is a `command` that is not installed: `uvx`/`npx` servers report `No such file or directory (os error 2)`. `initializing` means the handshake is still running. `startup_timeout_sec` bounds it (30s by default), so a row that stays there is a slow server, not a stuck one.
 
 ### Tool Discovery
 

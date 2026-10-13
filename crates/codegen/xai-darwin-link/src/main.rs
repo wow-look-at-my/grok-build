@@ -1,18 +1,5 @@
-//! Stands in for the macOS linker during a Linux cross build.
-//!
-//! Compiling for `aarch64-apple-darwin` on Linux works. Linking does not: the
-//! Apple frameworks and `libSystem` come from an SDK, and every cross-linker
-//! that reads that SDK also rewrites the search paths rustc passes, which
-//! drops each build script's own static library out of the link.
-//!
-//! So this binary records the link instead of performing it. rustc calls it as
-//! the linker, and it copies every input the command names into one bundle and
-//! writes the argument list beside them. A macOS runner replays that list with
-//! its own `cc` (`ci/darwin-relink.sh`), which is a step of seconds against a
-//! full build of tens of minutes.
-//!
-//! Paths inside the bundle are written as `@BUNDLE@`, and the output as
-//! `@OUT@`, because the replay host mounts the bundle somewhere else.
+//! Stands in for the macOS linker during a Linux cross build. Compiling for
+//! `aarch64-apple-darwin` on Linux works.
 
 use std::collections::HashSet;
 use std::ffi::OsString;

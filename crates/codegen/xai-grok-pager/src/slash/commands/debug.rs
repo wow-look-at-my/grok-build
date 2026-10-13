@@ -1,37 +1,4 @@
-//! `/debug <what is wrong>` — a self-debugging skill: hand the model this
-//! process's execution context (binary, config, log, model) and turn it loose
-//! on the user's question.
-//!
-//! `/debug why was the context size defaulted to 256k?` injects the question
-//! together with the answers the model would otherwise have to guess at:
-//!
-//! - The debug-log file the firehose writes for this session. `/debug` turns
-//!   the firehose on first (`debug_log::enable_firehose`), in this process and,
-//!   through `ENABLE_FIREHOSE_META` on the prompt block, in the agent process.
-//!   The file is `<grok_home>/debug/<session_id>.txt`, or the one file that
-//!   `GROK_LOG_FILE` / `GROK_DEBUG_LOG=<path>` names. It is created if it does
-//!   not exist.
-//! - Whether the firehose ran since launch or only since this `/debug`.
-//! - The rest of the execution context — running binary vs installed binary
-//!   (staleness), version and commit, config layers, model id, context window,
-//!   effort, `GROK_*`/`XAI_*` environment — assembled by
-//!   [`super::debug_context::DebugContext`].
-//!
-//! Delivery is [`CommandResult::InjectSkill`], the same path skills and `/loop`
-//! use, so the injected prompt reaches the model as the next turn's content.
-//!
-//! Args that are not one of the reserved overlay keywords are the user's
-//! question, verbatim. The overlay toggles keep their keywords:
-//! - `/debug` bare / `/debug on` — inject the context with no question; the
-//!   model debugs whatever the user says next.
-//! - `/debug scroll` — the scroll-diagnostics HUD; same
-//!   [`Action::ToggleScrollDebugHud`] as `/scroll-debug`, which stays
-//!   registered as the hidden long-form alias.
-//! - `/debug fps` — the release-safe FPS HUD
-//!   ([`crate::views::fps_hud`]).
-//! - `/debug log` — the scroll flight recorder
-//!   ([`crate::input::scroll_log`]), runtime-constructed to a fresh
-//!   timestamped path.
+//! `/debug <what is wrong>` — a self-debugging skill.
 
 use std::path::{Path, PathBuf};
 
@@ -193,8 +160,9 @@ fn inject(ctx: &mut CommandExecCtx, request: &str) -> CommandResult {
     }
 }
 
-/// The model rows of the execution context, read from the pager's own state so
-/// they match what this session is acting on rather than the catalog default.
+/// The model rows of the execution context, read from the pager's own state.
+/// So they match what this session is acting on rather than the catalog
+/// default.
 fn model_facts(ctx: &CommandExecCtx) -> ModelFacts {
     ModelFacts {
         name: ctx.models.current_model_name(),

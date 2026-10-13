@@ -1985,13 +1985,7 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
 }
 
 // min_output_tokens_per_sec, output_rate_sustained_secs,
-// ---------------------------------------------------------------------------
-// min_output_tokens_per_sec, output_rate_sustained_secs, output_rate_window_secs,
-// output_rate_max_retries, ttft_timeout_secs — the output-rate floor and the
-// time-to-first-token limit. `Option<u32>` in UiConfig,
-// `i64` on the registry surface. The config watcher tells every running
-// session to re-read the floor, so a change applies to its next model call.
-// ---------------------------------------------------------------------------
+// output_rate_window_secs, output_rate_max_retries, ttft_timeout_secs.
 
 fn clamp_min_output_tokens_per_sec(value: i64) -> i64 {
     value.clamp(

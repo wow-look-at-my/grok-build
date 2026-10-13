@@ -163,9 +163,7 @@ pub(super) fn dispatch_interrupt_with_queued_prompts(app: &mut AppView) -> Vec<E
         let (deliverable, stuck_local): (Vec<u64>, Vec<u64>) = local_ids
             .into_iter()
             .partition(|row| agent.queue_row_prompt_like(*row) == Some(true));
-        // A row whose own `session/prompt` RPC is still in flight may not exist
-        // shell-side yet, so a deliver-now fired now could harvest nothing. Park
-        // it for the confirming broadcast (see `deliver_now_awaiting_confirm`).
+        // A row whose own `session/prompt` RPC is still.
         let awaiting_confirm = !agent.optimistic_queue_ids.is_empty();
         (
             session_id,

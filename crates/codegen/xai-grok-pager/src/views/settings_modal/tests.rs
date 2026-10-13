@@ -726,10 +726,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         })
         .collect();
     // The harness model slots are spliced in from their own table below. What this
-    // The harness model slots are spliced in from their own table below.
-    // What this pins is WHERE they sit — under Models, after
-    // `subagent_model_inheritance` — and a literal list of them would go stale the
-    // moment a slot is added.
+    // The harness model slots are spliced in from their own table below. What this
+    // pins is WHERE they sit — under Models, after `subagent_model_inheritance`.
+    // And a literal list of them would go stale the moment a slot is added.
     let mut expected: Vec<SettingKey> = vec![
         // Booleans.
         "compact_mode",
@@ -739,8 +738,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         // PAGER-owned page_flip_on_send (Appearance).
         "page_flip_on_send",
         "simple_mode",
-        // PAGER-owned vim_mode (Appearance,
-        // paired with simple_mode).
+        // PAGER-owned vim_mode (Appearance, paired with simple_mode).
         "vim_mode",
         // Theme enums.
         "theme",
@@ -758,11 +756,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "group_tool_verbs",
         // SHELL-owned collapsed_edit_blocks (Appearance; live cache, default OFF rollout flag).
         "collapsed_edit_blocks",
-        // SHARED-owned thinking_summaries (Appearance; below collapsed_edit_blocks,
-        // because the four rows above it are pinned into one adjacency chain).
+        // SHARED-owned thinking_summaries (Appearance; below collapsed_edit_blocks, because those rows above it are pinned into one adjacency chain).
         "thinking_summaries",
-        // SHARED-owned thinking-summary history window and count floor
-        // (Appearance; registered directly after thinking_summaries).
+        // SHARED-owned thinking-summary history window and count floor (Appearance; registered directly after thinking_summaries).
         "thinking_summary_history_window_secs",
         "thinking_summary_history_min_count",
         // SHELL-owned display_refresh_auto_cadence (Appearance).
@@ -1957,14 +1953,14 @@ fn int_stepper_buffer(s: &SettingsModalState) -> String {
 fn int_step_sizes_table_pins_range_policy() {
     // (min, max, expected_small, expected_large)
     let cases = [
-        (1, 10, 1, 1),                       // scroll_lines (span 9)
-        (1, 100, 1, 5),                      // scroll_speed (span 99)
-        (40, 500, 5, 10),                    // max_thoughts_width (span 460)
-        (0, 0, 1, 1),                        // degenerate span
-        (1, 21, 1, 4),                       // span 20 still narrow: large = span/5
-        (1, 22, 1, 5),                       // span 21 → mid band
-        (1, 101, 1, 5),                      // span 100 still mid
-        (1, 102, 5, 10),                     // span 101 → wide band
+        (1, 10, 1, 1),    // scroll_lines (a later span)
+        (1, 100, 1, 5),   // scroll_speed (a later span)
+        (40, 500, 5, 10), // max_thoughts_width (a later span)
+        (0, 0, 1, 1),     // degenerate span
+        (1, 21, 1, 4),    // A later span still narrow: large = span/5
+        (1, 22, 1, 5),    // A later span → mid band
+        (1, 101, 1, 5),   // A later span still mid
+        (1, 102, 5, 10),  // A later span → wide band
         (1, 1_000_001, 5, 10),
         (-1, i64::from(u32::MAX) - 1, 1, 5), // an uncapped field keeps unit steps
     ];

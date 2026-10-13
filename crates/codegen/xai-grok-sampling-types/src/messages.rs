@@ -288,9 +288,10 @@ impl MessagesUsage {
     pub const COST_KEYS: Aliases = Aliases::new("cost_in_usd_ticks", &["cost_usd_ticks"]);
 }
 
-/// `MessagesUsage` as it arrives on the wire, with each cost-key spelling its
-/// own field, so a gateway naming both folds them instead of tripping serde's
-/// duplicate-field check. See [`MessagesUsage::COST_KEYS`].
+/// `MessagesUsage` as it arrives on the wire. That `MessagesUsage` is with
+/// each cost-key spelling its own field, so a gateway naming both folds them
+/// instead of tripping serde's duplicate-field check. See
+/// [`MessagesUsage::COST_KEYS`].
 #[derive(Debug, Default, Deserialize)]
 struct MessagesUsageWire {
     input_tokens: u32,
@@ -638,8 +639,8 @@ mod tests {
     }
 
     /// Every wire shape a gateway prices a call with has to parse, and an
-    /// Anthropic response that prices nothing has to stay priceless rather
-    /// than read as free.
+    /// Anthropic response. That prices nothing has to stay priceless
+    /// rather than read as free.
     #[test]
     fn usage_parses_every_cost_shape_a_gateway_sends() {
         let cases = [

@@ -1,12 +1,4 @@
 //! OpenCode `todowrite` tool — task list management.
-//!
-//! Follows the opencode convention that every call sends the **complete** todo
-//! list. Items carry `content`, `status`, and `priority` — no caller-supplied
-//! IDs, so an item is matched by its position.
-//!
-//! The list it writes to is the user's, shared with the grok_build todo
-//! infrastructure, so a write here is a merge by position and never deletes.
-//! A call carrying fewer items than the list holds leaves the tail alone.
 
 use std::fmt::Write;
 

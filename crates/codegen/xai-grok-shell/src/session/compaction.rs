@@ -466,8 +466,7 @@ pub(crate) enum SuppressReason {
     Other,
 }
 impl SuppressReason {
-    /// `size` gets [`SUPPRESS_STICKY`]: cleared only on a context-budget change.
-    /// `schema` and `other` get [`SUPPRESS_TURN`]: the next turn sends a different request, so it retries then.
+    /// `size` gets [`SUPPRESS_STICKY`]: cleared only on a context-budget change. `schema` and `other` get [`SUPPRESS_TURN`]: the next turn sends a different request, so it retries then.
     /// `credit_block` gets [`SUPPRESS_UNTIL_SUCCESS`]: wait for a model `200`.
     /// `auth` gets [`SUPPRESS_AUTH`]: cleared on login/token refresh, not on a `200` (an over-window session never gets one).
     fn suppress_state(self) -> u8 {
@@ -1091,11 +1090,8 @@ impl SessionActor {
                 self.reconstruct_full_config().await,
             ),
         };
-        // The summary needs none of the thinking. It stays only where it
-        // buys a prompt-cache hit: the same model, on a backend that takes a
-        // block it did not mint as text. A Messages target rejects a block
-        // whose text the tool-message step mutated. Another model reads
-        // none of the blobs, and its own summary is the whole point.
+        // The summary needs none of the thinking. It stays only where it buys a prompt-cache hit: the same model. That hit is on a backend that
+        // takes a block it did not mint as text.
         let summary_strips_reasoning = sampling_config.api_backend == ApiBackend::Messages
             || !xai_grok_sampling_types::same_model(&model_id, &sampling_config.model);
         let compaction = xai_grok_telemetry::events::CompactionScope::begin(
@@ -2342,14 +2338,8 @@ impl SessionActor {
             None
         }
     }
-    /// Returns true if the error response indicates tokens exceed the model's
     /// Returns true if the error response indicates tokens exceed the
-    /// model's context window: the session's tracked token estimate against
-    /// the `context_window` the [`SamplingErrorInfo`] metadata carries, or
-    /// the server's own message saying as much.
-    ///
-    /// Called from `handle_sampling_failure` with the
-    /// `SamplingErrorInfo` the sampler hands back.
+    /// model's.
     pub(crate) async fn should_compact_on_error(
         &self,
         err: &xai_grok_sampler::SamplingErrorInfo,
@@ -2440,8 +2430,8 @@ impl SessionActor {
         None
     }
     /// Returns `Some` when tool call outputs have pushed the estimated token
-    /// count past what the context window holds alongside an answer,
-    /// indicating pre-emptive compaction is needed.
+    /// count past what the context window holds alongside an answer. That
+    /// `Some` is indicating pre-emptive compaction is needed.
     pub(crate) async fn check_preflight_overflow(&self) -> Option<AutoCompactTriggerInfo> {
         if self.compaction.is_suppressed() {
             return None;

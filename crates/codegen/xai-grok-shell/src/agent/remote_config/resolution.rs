@@ -592,13 +592,11 @@ pub(crate) fn resolve_model_catalog(
 /// Force the effort gate on for every model
 /// `[models].force_reasoning_effort_models` matches. This runs on the
 /// FINISHED catalog. It is the knob that does not need a `[model.<key>]`
-/// Force the effort gate on for every model `[models].force_reasoning_effort_models`
-/// matches. This runs on the FINISHED catalog, so it is the one knob that does not
-/// need a `[model.<key>]` table name to equal the catalog key — which is what makes
-/// it usable against a server catalog that omits `supports_reasoning_effort`.
-///
-/// A forced model with no menu of its own falls back to the built-in low..xhigh
-/// menu, the same one any flagged model with no server list gets.
+/// Force the effort gate on for every model
+/// `[models].force_reasoning_effort_models` matches. This runs on the
+/// FINISHED catalog. It is the knob that does not need a `[model.<key>]`
+/// table name to equal the catalog key. This is which is what makes it
+/// usable against a server catalog that omits `supports_reasoning_effort`.
 pub(crate) fn force_reasoning_effort_support(
     cfg: &config::Config,
     catalog: &mut IndexMap<String, ModelEntry>,

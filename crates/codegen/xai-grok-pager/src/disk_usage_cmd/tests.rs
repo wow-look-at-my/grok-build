@@ -171,8 +171,7 @@ fn one_sized_row_per_checkout_at_either_old_location_depth() {
     let depth_one = root.join("go-toolchain-dats-sandbox");
     let bucket = root.join("repos-buildhost");
     let depth_two = bucket.join("2026-09-14-reclaim");
-    // A directory in the bucket that was never a checkout -- on the real
-    // machine this is a 208 MB go build cache beside two real checkouts.
+    // A directory in the bucket that was never a checkout.
     let leftover = bucket.join("2026-09-14-gocache");
     for dir in [
         &depth_one,

@@ -233,7 +233,6 @@ impl EndpointsConfig {
 /// `EndpointsConfig` with each list-URL key spelling as its own field. So a
 /// table naming both folds under [`EndpointsConfig::MODELS_LIST_URL_KEYS`]
 /// rather than failing the whole `[endpoints]` table as a duplicate field.
-///
 /// Every field carries `#[serde(default)]` from the container, which is the
 /// same rule [`EndpointsConfig`] applies on its own: an absent key is unset,
 /// never an error. `external_otel_master_switch` is absent here because it is
@@ -325,7 +324,7 @@ mod endpoints_wire_alias_tests {
 
     /// A `[endpoints]` table naming the list URL under both keys is one URL
     /// stated twice. The table can arrive from a managed-config or campaign
-    /// layer, not only from the user's own file, and a duplicate-field
+    /// layer, not only from the user's own file. And a duplicate-field
     /// rejection here would take the whole config down with it.
     #[test]
     fn a_table_naming_the_list_url_under_both_keys_under_one_value_parses_once() {
@@ -3813,15 +3812,6 @@ pub(crate) fn provider_probe_entry(
 
 /// authentication -- the same `has_own_credentials` question the catalog is
 /// asked, put to the provider block instead of to a model.
-///
-/// This is what makes a Grok sign-in OPTIONAL for a session pointed at another
-/// endpoint. It reads the PROVIDER blocks rather than the catalog because
-/// autodetection runs off the startup path
-/// (`model_provider_discovery::discover_provider_models`, spawned by
-/// `initialize` and never awaited): at the moment the auth methods are built
-/// the provider's models are not in the catalog yet. A user who declared a
-/// provider and wrote no `[model.<id>]` block of their own was therefore sent
-/// to the login screen for an endpoint that grok.com never sees.
 pub(crate) fn any_provider_has_own_credentials(cfg: &Config) -> bool {
     first_provider_with_own_credentials(cfg).is_some()
 }
@@ -3958,12 +3948,7 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        // Entries that carry a real (non-default) context window, treated as a
-        // per-slug `/v1/models` listing for backfilling entries that were left
-        // at the silent hardcoded default. Resolution is per exact routing
-        // slug (each model answers for its OWN window — never a max or
-        // first-match value), via the same `resolve_context_window` lookup the
-        // prefetch resolution path uses.
+        // Entries that carry a real (non-default) context window.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)
@@ -4462,10 +4447,7 @@ pub struct ModelEntryConfig {
     /// Defaults to the all-disabled state via `#[serde(default)]`.
     #[serde(default, skip_serializing_if = "is_default_laziness_detector")]
     pub laziness_detector: LazinessDetectorPerModelConfig,
-    /// Per-token USD pricing used to derive cost when the backend reports
-    /// token usage but no wire cost (no `cost_in_usd_ticks` and no `cost`
-    /// float). All four fields default to 0 (no pricing → no computation →
-    /// cost stays honestly absent).
+    /// Per-token USD pricing used to derive.
     #[serde(default, skip_serializing_if = "is_default_model_pricing")]
     pub pricing: xai_grok_sampling_types::ModelPricing,
     /// Floor on this model's output tokens/sec.
@@ -4653,8 +4635,7 @@ pub struct ConfigModelOverride {
     /// Extra top-level fields merged into every request body for this model.
     #[serde(default)]
     pub extra_body: IndexMap<String, toml::Value>,
-    /// Suppress the modelinfo price lookup for this model; set by a local
-    /// provider, whose models are free and are in no catalog.
+    /// Suppress the modelinfo price.
     pub pricing_lookup_enabled: Option<bool>,
     pub reasoning_summary: Option<ReasoningSummary>,
 }

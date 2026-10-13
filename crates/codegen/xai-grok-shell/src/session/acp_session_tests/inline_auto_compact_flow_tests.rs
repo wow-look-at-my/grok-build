@@ -1007,10 +1007,10 @@ async fn test_compact_on_error_no_trigger_when_tokens_within_new_window() {
         .await;
 }
 /// The server's tokenizer is the one that counts. Our own estimate saying
-/// The server's tokenizer is the one that counts. When it says the context
-/// length is the problem, our own estimate saying the prompt fits is not a
-/// reason to hand the turn back to the user: the overflow ladder takes it,
-/// and that ladder is what bounds the retries.
+/// The server's tokenizer is the one that counts. Our own estimate saying
+/// the prompt fits is not a reason to hand the turn back to the user. The
+/// overflow ladder takes it, and that ladder is what bounds the retries.
+/// This applies when it says the context length is the problem.
 #[tokio::test(flavor = "current_thread")]
 async fn a_context_length_rejection_compacts_even_when_our_own_count_fits() {
     let local = tokio::task::LocalSet::new();
@@ -1124,7 +1124,7 @@ async fn third_consecutive_overflow_gives_up_instead_of_looping() {
         .await;
 }
 /// A successful sample must clear `context_overflow_recovery` back to
-/// `None` so a later, unrelated overflow gets its own fresh compaction
+/// `None` so a later. Unrelated overflow gets its own fresh compaction
 /// attempt rather than skipping straight to the reduce fallback.
 #[tokio::test(flavor = "current_thread")]
 async fn successful_sample_resets_context_overflow_recovery() {

@@ -831,8 +831,7 @@ impl SessionActor {
             .map(|c| c.model)
             .unwrap_or_default();
         // `[auto_mode] classifier_model` is the older, narrower spelling and
-        // stays ahead of the `[models] permission_classifier` slot, so a
-        // config that already sets it keeps the model it named.
+        // stays ahead of the `[models] permission_classifier` slot.
         let classifier_slug = auto_cfg.classifier_model.clone().or_else(|| {
             self.harness_models
                 .get("permission_classifier")
@@ -1348,12 +1347,12 @@ impl SessionActor {
                 self.chat_state_handle.update_sampling_config(cfg);
             }
             // A context-window-exceeded error can recur immediately after a
-            // compaction (the very next resubmit overflows again) when
-            // whatever made the conversation too big survives compaction —
-            // e.g. a single recent item that alone is near the window size.
+            // compaction (the next resubmit overflows again) when whatever
+            // made the conversation too big survives compaction. E.g. a
+            // single recent item that alone is near the window size.
             // Compacting a SECOND time in a row cannot fix that (there is
             // nothing further for the summarizer to reduce), so the ladder
-            // below only ever compacts once per overflow: the next attempt
+            // below only ever compacts once per overflow. The next attempt
             // deterministically shrinks the sent conversation instead, and a
             // third gives up rather than retrying forever.
             match self.compaction.context_overflow_recovery.get() {
@@ -2418,8 +2417,8 @@ impl SessionActor {
             self.chat_state_handle.record_last_turn_usage(u.clone());
             // Cost priority. Server-reported ticks → server-reported USD float
             // (both already resolved by the sampler into `cost_usd_ticks`) →
-            // computed cost from token usage × the model's per-token pricing,
-            // which `model_pricing::resolve` takes from config or the catalog.
+            // computed cost from token usage × the model's per-token pricing.
+            // Which `model_pricing::resolve` takes from config or the catalog.
             let cost_ticks = response.cost_usd_ticks.or_else(|| {
                 let model_id = response.assistant().and_then(|a| a.model_id.clone());
                 let model_id = model_id.as_deref().unwrap_or("");

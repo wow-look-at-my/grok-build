@@ -9,8 +9,7 @@ const MODE_ENV: &str = "GROK_PROFILE_CI_HOST_MODE";
 /// The session workspace: what the worker runs `gh` in, and what the child confines itself to.
 #[cfg(target_os = "macos")]
 const WORKSPACE_ENV: &str = "GROK_PROFILE_CI_HOST_WORKSPACE";
-/// The directory the child names as the query's cwd, instead of the session
-/// workspace, so the answer says which side ran `gh`.
+/// The directory the child names as the query's cwd, instead of the session workspace, so the answer says which side ran `gh`.
 #[cfg(target_os = "macos")]
 const QUERY_CWD_ENV: &str = "GROK_PROFILE_CI_HOST_QUERY_CWD";
 /// The branch every query asks about.
@@ -110,12 +109,7 @@ fn parent() {
     let direct = query(&workspace, &branch);
     println!("{REPORT}unsandboxed={}", direct.summary());
 
-    // The same query from the directory the child names, still with no worker
-    // anywhere: this is what a `gh` INSIDE the confinement answers. Where it
-    // differs from the workspace answer, the child's own answer says which side
-    // ran `gh`. Where it does not, this host's `gh` refuses before it ever looks
-    // at its working directory - an unauthenticated one asks for `GH_TOKEN` and
-    // stops - and no answer can tell the two sides apart here.
+    // The same query from the directory the child names, still with no worker anywhere.
     let direct_from_query_cwd = query(&query_cwd, &branch);
     let cwd_tells_the_sides_apart = direct_from_query_cwd.answer != direct.answer;
     println!(
@@ -180,10 +174,7 @@ fn parent() {
     );
 
     // Where the child's `gh` ran is what tells the paths apart: the worker
-    // answers from the session workspace, and a `gh` spawned inside the
-    // confinement answers from the directory the query named. The child's
-    // answer must therefore be the worker's own answer to the same query,
-    // whatever that answer is on this host.
+    // answers from the session workspace.
     assert_eq!(
         with_worker.answer, via_worker.answer,
         "the confined child's query must be answered by the worker, exactly as \
@@ -365,9 +356,7 @@ struct ChildReport {
     runs: String,
     /// The exit code of the child's answer, or `-1` when no `gh` ran at all.
     answer_code: String,
-    /// Whether the keychain was already unreachable BEFORE the child applied
-    /// anything: a host that is confined already cannot nest a second profile,
-    /// and that is how this child says it inherited one.
+    /// Whether the keychain was already unreachable BEFORE the child applied anything.
     keychain_before: String,
     /// Whatever the child printed on stderr, so a refused confinement says why.
     stderr: String,
@@ -406,8 +395,8 @@ impl std::fmt::Display for ChildReport {
     }
 }
 
-/// Re-enter this binary in `mode`, with the workspace, the query's directory,
-/// the branch, and (when `fd` is given) the worker's fd named in the env var
+/// Re-enter this binary in `mode`, with the workspace, the query's directory.
+/// The branch, and (when `fd` is given) the worker's fd named in the env var
 /// the jail boundary uses.
 #[cfg(target_os = "macos")]
 fn run_child(

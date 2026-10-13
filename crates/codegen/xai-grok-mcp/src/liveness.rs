@@ -170,18 +170,7 @@ async fn watch_transport(
                             server = %server_name_for_task,
                             "transport liveness watcher detected closed transport",
                         );
-                        // Clear our own slot before exiting so a
-                        // subsequent `arm_liveness_watcher` can
-                        // install a fresh handle.
-                        //
-                        // Self-cancel-by-drop: clearing the slot
-                        // drops the taken `TransportLivenessHandle`,
-                        // whose `DropGuard` cancels the very
-                        // `CancellationToken` this task is
-                        // `select!`ing on. Benign because we
-                        // `return` immediately — but DO NOT add any
-                        // post-`return` work that re-enters the
-                        // `select!`; it would race this self-cancel.
+                        // Clear our own slot before exiting so a subsequent `arm_liveness_watcher` can install a fresh handle.
                         clear_liveness_slot(&liveness_slot);
 
                         if on_event

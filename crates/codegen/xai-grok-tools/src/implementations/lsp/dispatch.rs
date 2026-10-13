@@ -165,9 +165,7 @@ impl super::LspBackend for LspBackendAdapter {
         };
         handle.spawn(async move {
             // Guarded, because this is the round that leaves the state
-            // `Starting` for the bootstrap to replace: a `Starting` nobody
-            // moves is the one state `ensure_ready` parks on forever, so the
-            // failure has to move it too.
+            // `Starting` for the bootstrap to replace.
             let started = crate::util::detached::guarded(
                 "lsp start",
                 LspBackendAdapter::ensure_started_with_state(lsp_manager, startup.clone()),
@@ -641,7 +639,7 @@ mod tests {
 
     /// A bootstrap that ends in failure still answers whoever is waiting.
     /// `ensure_ready` parks on the coordinator's `notify` for as long as the
-    /// state reads `Starting`, so a bootstrap that stopped without moving the
+    /// state reads `Starting`. So a bootstrap that stopped without moving the
     /// state leaves every later LSP tool call waiting on a task that already
     /// ended. A manager with no servers configured is that ending, with
     /// nothing injected.
@@ -664,8 +662,9 @@ mod tests {
     /// `ensure_started_background` is a warm-up, so a caller with no runtime to
     /// run it on loses the warm-up and nothing else. Spawning unconditionally
     /// made every synchronous `WorkspaceHandle` construction panic the moment
-    /// the caller had any LSP server in `~/.grok/lsp.json`, which is a plain
-    /// test with no Tokio runtime and a machine-dependent one besides.
+    /// the caller had any LSP server in `~/.grok/lsp.json`. The caller also had
+    /// which is a plain test with no Tokio runtime and a machine-dependent one
+    /// besides.
     #[test]
     fn ensure_started_background_without_a_runtime_skips_the_warmup() {
         assert!(

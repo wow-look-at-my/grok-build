@@ -39,14 +39,10 @@ impl CiStatus {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GhRun {
-    /// GitHub `status` of the run: `queued`, `in_progress`, `completed`,
-    /// `requested`, `waiting`, `pending` … — `""` when unknown.
+    /// GitHub `status` of the run.
     #[serde(default)]
     pub status: String,
-    /// GitHub `conclusion` of a completed run: `success`, `failure`,
-    /// `cancelled`, `neutral`, `skipped`, `timed_out`, `action_required`,
-    /// `stale`, `startup_failure` … — empty (`""`) or null while the run is
-    /// still in progress.
+    /// GitHub `conclusion` of a completed run.
     #[serde(default)]
     pub conclusion: String,
     /// Branch this run was triggered against.
