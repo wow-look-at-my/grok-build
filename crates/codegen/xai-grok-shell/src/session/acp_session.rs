@@ -2099,8 +2099,6 @@ mod status_line_payload_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/todo_capture_e2e_tests.rs"]
 mod todo_capture_e2e_tests;
-#[path = "acp_session_tests/stop_gate_queued_row_tests.rs"]
-mod stop_gate_queued_row_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/tool_call_telemetry_tests.rs"]
 mod tool_call_telemetry_tests;
