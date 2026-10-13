@@ -322,3 +322,70 @@ async fn text_stays_when_a_prompt_interrupts_the_stream_before_the_tool_call() {
         "the text vanished when a prompt interrupted the stream:\n{screen}"
     );
 }
+
+/// Each narration is before its own call and after the call before it, so the three read top to bottom in the order written.
+async fn successive_narrations_read_in_order(over_messages: bool) {
+    let content = ContentController::start().await.expect("start content");
+    if over_messages {
+        use_messages_model(&content);
+    }
+    let call = |narration: &str| {
+        let call = shell_call().narrated(narration);
+        if over_messages {
+            call.thinking("deciding the next step")
+        } else {
+            call
+        }
+    };
+    let narrations = [
+        "NARRATION_ONE first look",
+        "NARRATION_TWO second look",
+        "NARRATION_THREE third look",
+    ];
+    content.server().set_conversations(vec![
+        Conversation::nth(1)
+            .calls(narrations.map(call))
+            .reply("ALL_CALLS_DONE"),
+    ]);
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_env_ops_in_dir(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        &[],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text("ALL_CALLS_DONE", TURN_TIMEOUT)
+        .unwrap_or_else(|error| panic!("{error}\n{}", harness.screen_contents()));
+    let screen = harness.screen_contents();
+    let positions: Vec<Option<usize>> = narrations
+        .iter()
+        .map(|narration| screen.find(&narration[..13]))
+        .collect();
+    assert!(
+        positions.iter().all(Option::is_some) && positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "the narrations must all show, top to bottom in the order written ({positions:?}):\n{screen}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn successive_narrations_read_in_order_over_chat_completions() {
+    successive_narrations_read_in_order(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn successive_narrations_read_in_order_over_messages_with_thinking() {
+    successive_narrations_read_in_order(true).await;
+}
