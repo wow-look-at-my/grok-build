@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 
-# A push to a branch cancels that branch's running build; runs on master each get their own group and complete.
+# A push to a branch cancels that branch's running build. Runs on master each get their own group and complete.
 concurrency:
   group: gha_${{ github.repository }}_${{ github.workflow }}_${{ github.ref != 'refs/heads/master' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
