@@ -275,10 +275,7 @@ impl MessagesReducer {
                 _ => None,
             })
             .collect();
-        // A response that only calls a tool has no text and must not blank the answer before it.
-        if !text.is_empty() {
-            self.last_text = text;
-        }
+        self.last_text = text;
         let id = pending
             .message_id
             .clone()
