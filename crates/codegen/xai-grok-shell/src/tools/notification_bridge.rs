@@ -224,17 +224,12 @@ async fn emit_current_mode_update(
     config: &NotificationBridgeConfig,
     mode: xai_grok_tools::types::SessionMode,
 ) {
-    let mut notification = acp::SessionNotification::new(
-        config.session_id.clone(),
-        acp::SessionUpdate::CurrentModeUpdate(acp::CurrentModeUpdate::new(
-            acp::SessionModeId::new(mode.as_id()),
-        )),
-    );
-    stamp_event_id(config, &mut notification.meta);
-    let _ = config.persistence.tx.send(PersistenceMsg::Update(
-        crate::session::storage::SessionUpdate::Acp(Box::new(notification.clone())),
-    ));
-    config.gateway.forward_fire_and_forget(notification);
+    // Never forward this directly: the session persists and forwards it in order, behind the model's text before the tool call.
+    let _ = config
+        .session_cmd_tx
+        .send(SessionCommand::EnqueueCurrentModeUpdate {
+            mode_id: mode.as_id().to_string(),
+        });
 }
 async fn handle_notification(
     config: &NotificationBridgeConfig,

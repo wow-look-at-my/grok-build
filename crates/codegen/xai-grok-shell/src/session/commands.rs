@@ -718,6 +718,11 @@ pub enum SessionCommand {
         respond_to: Option<oneshot::Sender<()>>,
         pending: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     },
+    /// Put a `CurrentModeUpdate` on the ordered event pipeline, behind the text chunks the turn already queued.
+    /// A direct forward gets a higher event id than a chunk still in the replay buffer, so the client drops that chunk as stale.
+    EnqueueCurrentModeUpdate {
+        mode_id: String,
+    },
     /// Query whether the session has work in flight: a running turn
     /// (`running_task.is_some()`) **or** queued inputs
     /// (`pending_inputs` non-empty). Used by the leader's idle-unload decision

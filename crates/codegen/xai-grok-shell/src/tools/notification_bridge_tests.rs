@@ -1287,30 +1287,40 @@ async fn task_completed_persisted_line_is_stamped() {
     }
 }
 
+/// The mode ids the session was asked to enqueue; the bridge never forwards a mode update itself.
+fn enqueued_modes(cmd_rx: &mut mpsc::UnboundedReceiver<SessionCommand>) -> Vec<String> {
+    let mut modes = Vec::new();
+    while let Ok(cmd) = cmd_rx.try_recv() {
+        if let SessionCommand::EnqueueCurrentModeUpdate { mode_id } = cmd {
+            modes.push(mode_id);
+        }
+    }
+    modes
+}
+
 #[tokio::test]
-async fn current_mode_update_persisted_line_is_stamped() {
-    let (config, _gateway_rx, mut persistence_rx, _cmd_rx) = make_test_config_full();
+async fn current_mode_update_rides_the_ordered_pipeline() {
+    let (config, mut gateway_rx, mut persistence_rx, mut cmd_rx) = make_test_config_full();
 
     emit_current_mode_update(&config, xai_grok_tools::types::SessionMode::Plan).await;
 
-    match persistence_rx.try_recv().expect("must persist") {
-        PersistenceMsg::Update(crate::session::storage::SessionUpdate::Acp(notif)) => {
-            assert!(matches!(
-                notif.update,
-                acp::SessionUpdate::CurrentModeUpdate(_)
-            ));
-            assert!(
-                notif
-                    .meta
-                    .as_ref()
-                    .and_then(|m| m.get("eventId"))
-                    .and_then(|v| v.as_str())
-                    .is_some(),
-                "the persisted mode line must be stamped"
-            );
+    match cmd_rx
+        .try_recv()
+        .expect("the session must be asked to enqueue it")
+    {
+        SessionCommand::EnqueueCurrentModeUpdate { mode_id } => {
+            assert_eq!(mode_id, xai_grok_tools::types::SessionMode::Plan.as_id());
         }
-        _ => panic!("expected Acp update"),
+        _ => panic!("expected EnqueueCurrentModeUpdate"),
     }
+    assert!(
+        gateway_rx.try_recv().is_err(),
+        "a direct forward gets a higher event id than the text still buffered ahead of it, so the client drops that text"
+    );
+    assert!(
+        persistence_rx.try_recv().is_err(),
+        "the session persists it in order, after the buffered text"
+    );
 }
 
 #[test]
@@ -1739,7 +1749,7 @@ fn extract_current_mode_id(notification: &acp::SessionNotification) -> Option<&s
 /// Without this, agent-driven plan approvals leave the TUI stuck in plan mode.
 #[tokio::test]
 async fn plan_mode_exited_emits_current_mode_update_default() {
-    let (config, mut gateway_rx, mut persistence_rx, _cmd_rx) = make_test_config_full();
+    let (config, mut gateway_rx, mut persistence_rx, mut cmd_rx) = make_test_config_full();
 
     // Pre-condition: agent path requires plan mode to be Active first so `deactivate_approved` actually flips state and triggers the emit
     {
@@ -1759,35 +1769,24 @@ async fn plan_mode_exited_emits_current_mode_update_default() {
     let mut offsets = HashMap::new();
     handle_notification(&config, notification, &mut offsets).await;
 
-    // Gateway: one CurrentModeUpdate("default").
-    let mut gateway_modes = Vec::new();
-    while let Ok(msg) = gateway_rx.try_recv() {
-        if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg
-            && let Some(id) = extract_current_mode_id(&args.request)
-        {
-            gateway_modes.push(id.to_string());
-        }
-    }
     assert_eq!(
-        gateway_modes,
+        enqueued_modes(&mut cmd_rx),
         vec!["default".to_string()],
-        "PlanModeExited should emit exactly one CurrentModeUpdate(default) to the gateway"
+        "PlanModeExited should ask the session to enqueue exactly one CurrentModeUpdate(default)"
     );
-
-    // Persistence: same notification persisted so replay re-applies the exit.
-    let mut persisted_modes = Vec::new();
+    assert!(
+        gateway_rx.try_recv().is_err(),
+        "a direct forward would outrun the model's buffered text and get that text dropped"
+    );
     while let Ok(msg) = persistence_rx.try_recv() {
-        if let PersistenceMsg::Update(crate::session::storage::SessionUpdate::Acp(notif)) = msg
-            && let Some(id) = extract_current_mode_id(&notif)
-        {
-            persisted_modes.push(id.to_string());
-        }
+        assert!(
+            !matches!(
+                msg,
+                PersistenceMsg::Update(crate::session::storage::SessionUpdate::Acp(_))
+            ),
+            "the session, not the bridge, persists the mode update"
+        );
     }
-    assert_eq!(
-        persisted_modes,
-        vec!["default".to_string()],
-        "PlanModeExited should persist exactly one CurrentModeUpdate(default)"
-    );
 
     // Session-level prompt mode was reset.
     assert!(matches!(
@@ -1883,7 +1882,7 @@ async fn plan_mode_exited_arms_exit_reminder_when_gated() {
 /// Symmetric to the exit test: `PlanModeEntered` emits `CurrentModeUpdate("plan")`.
 #[tokio::test]
 async fn plan_mode_entered_emits_current_mode_update_plan() {
-    let (config, mut gateway_rx, mut persistence_rx, _cmd_rx) = make_test_config_full();
+    let (config, mut gateway_rx, _persistence_rx, mut cmd_rx) = make_test_config_full();
 
     let notification =
         ToolNotification::PlanModeEntered(xai_grok_tools::notification::types::PlanModeEntered {
@@ -1893,25 +1892,11 @@ async fn plan_mode_entered_emits_current_mode_update_plan() {
     let mut offsets = HashMap::new();
     handle_notification(&config, notification, &mut offsets).await;
 
-    let mut gateway_modes = Vec::new();
-    while let Ok(msg) = gateway_rx.try_recv() {
-        if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg
-            && let Some(id) = extract_current_mode_id(&args.request)
-        {
-            gateway_modes.push(id.to_string());
-        }
-    }
-    assert_eq!(gateway_modes, vec!["plan".to_string()]);
-
-    let mut persisted_modes = Vec::new();
-    while let Ok(msg) = persistence_rx.try_recv() {
-        if let PersistenceMsg::Update(crate::session::storage::SessionUpdate::Acp(notif)) = msg
-            && let Some(id) = extract_current_mode_id(&notif)
-        {
-            persisted_modes.push(id.to_string());
-        }
-    }
-    assert_eq!(persisted_modes, vec!["plan".to_string()]);
+    assert_eq!(enqueued_modes(&mut cmd_rx), vec!["plan".to_string()]);
+    assert!(
+        gateway_rx.try_recv().is_err(),
+        "a direct forward would outrun the model's buffered text and get that text dropped"
+    );
 }
 
 /// Build a completed-bash `TaskSnapshot` whose `output` is large enough to trip the inline-completion truncation cap.
