@@ -1299,3 +1299,40 @@ async fn an_unknown_delta_kind_does_not_fail_the_stream() {
     .await;
     assert_eq!(completed(&evs).assistant_text(), "cited");
 }
+
+#[tokio::test]
+async fn an_unmodelled_block_kind_between_text_blocks_does_not_fail_or_reorder() {
+    let wire = |json: &str| -> Result<MessageStreamEvent, SamplingError> {
+        Ok(serde_json::from_str(json).expect("the spec shape must parse"))
+    };
+    let mut events: Vec<Result<MessageStreamEvent, SamplingError>> = vec![Ok(message_start())];
+    events.extend(block_events(0, Blk::Text("before")));
+    events.push(wire(
+        r#"{"type":"content_block_start","index":1,"content_block":{"type":"server_tool_use","id":"srv_1","name":"web_search","input":{}}}"#,
+    ));
+    events.push(wire(
+        r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"weather\"}"}}"#,
+    ));
+    events.push(Ok(block_stop(1)));
+    events.push(wire(
+        r#"{"type":"content_block_start","index":2,"content_block":{"type":"web_search_tool_result","tool_use_id":"srv_1","content":[]}}"#,
+    ));
+    events.push(Ok(block_stop(2)));
+    events.extend(block_events(3, Blk::Text("after")));
+    events.extend(block_events(4, Blk::Tool("c1", "{}")));
+    events.push(Ok(message_delta_with_stop(messages::StopReason::ToolUse)));
+    events.push(Ok(MessageStreamEvent::MessageStop));
+
+    let evs = collect(stream_messages(
+        stream::iter(events).boxed(),
+        None,
+        rid(),
+        Duration::from_secs(60),
+    ))
+    .await;
+
+    assert_eq!(live_order(&evs), "M:before M:after C:c1");
+    let resp = completed(&evs);
+    assert_eq!(resp.assistant_text(), "before\nafter");
+    assert_eq!(resp.tool_calls().len(), 1);
+}

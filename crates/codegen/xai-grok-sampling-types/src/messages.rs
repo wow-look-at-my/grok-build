@@ -137,6 +137,10 @@ pub enum ContentBlock {
     /// Encrypted reasoning the model chose to redact: an opaque `data` blob, never plaintext.
     /// Parsed so a stream carrying one deserializes instead of failing the whole event parse; request-building and the sampler never construct one.
     RedactedThinking { data: String },
+    /// Any block kind this client does not model (e.g. `server_tool_use`). Parsed so one such block does not fail the whole response.
+    /// Request building never constructs one.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
