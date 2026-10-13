@@ -156,7 +156,7 @@ async fn run_task_call_with_queued_message(run_in_background: bool) -> (Vec<Stri
     }
 
     let (respond_to, _prx) = tokio::sync::oneshot::channel();
-    actor
+    let _ = actor
         .queue_input(queue_input_request(
             vec![acp::ContentBlock::Text(acp::TextContent::new("hello"))],
             "queued",
