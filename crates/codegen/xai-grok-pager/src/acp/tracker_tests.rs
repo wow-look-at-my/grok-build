@@ -291,8 +291,12 @@ fn finish_turn_clears_state() {
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     tracker.handle_update(agent_chunk("text"), &meta(), &mut sb);
-    tracker.handle_update(thought_chunk("thinking"), &meta(), &mut sb);
     assert!(tracker.current_agent_msg.is_some());
+    tracker.handle_update(thought_chunk("thinking"), &meta(), &mut sb);
+    assert!(
+        tracker.current_agent_msg.is_none(),
+        "a thought closes the agent message above it"
+    );
     assert!(tracker.current_thinking.is_some());
     tracker.handle_update(tool_update_completed("tc-orphan"), &meta(), &mut sb);
     assert_eq!(tracker.orphan_updates.len(), 1);
