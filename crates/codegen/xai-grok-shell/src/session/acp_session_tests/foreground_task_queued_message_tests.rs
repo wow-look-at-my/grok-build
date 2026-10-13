@@ -39,7 +39,7 @@ impl SubagentBackend for NeverFinishesBackend {
     }
 
     async fn validate_type(&self, _: &str, _: &str) -> SubagentValidateTypeOutcome {
-        SubagentValidateTypeOutcome::ValidationUnavailable
+        SubagentValidateTypeOutcome::Ok
     }
 
     async fn describe_subagent_type(
