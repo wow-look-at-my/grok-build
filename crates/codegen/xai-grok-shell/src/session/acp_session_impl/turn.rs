@@ -1402,16 +1402,16 @@ impl SessionActor {
                     .await
                 {
                     StopGateDecision::AllowStop => {
+                        // A queued user message outranks the built-in gates: it runs as its own turn.
+                        if self.has_runnable_queued_user_row().await {
+                            break round;
+                        }
                         // The built-in todo-stop gate is another stop hook.
                         // It fires after the user hooks allowed the stop,
                         // consumes the SAME continuation budget (a model that
                         // never engages its todos still stops after
                         // MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
                         // continuations).
-                        // A queued user message outranks the built-in gates: it runs as its own turn.
-                        if self.has_runnable_queued_user_row().await {
-                            break round;
-                        }
                         if let Some(feedback) = self
                             .ci_stop_gate_feedback(prompt_id, stop_continuations_this_turn)
                             .await
