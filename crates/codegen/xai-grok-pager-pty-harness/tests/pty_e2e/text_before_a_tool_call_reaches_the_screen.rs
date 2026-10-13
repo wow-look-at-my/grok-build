@@ -323,7 +323,7 @@ async fn text_stays_when_a_prompt_interrupts_the_stream_before_the_tool_call() {
     );
 }
 
-/// Each narration is before its own call and after the call before it, so the three read top to bottom in the order written.
+/// Each narration is before its own call and after the call before it, so those read top to bottom in the order written.
 async fn successive_narrations_read_in_order(over_messages: bool) {
     let content = ContentController::start().await.expect("start content");
     if over_messages {
