@@ -1101,11 +1101,6 @@ impl AcpUpdateTracker {
                 if let Some(agent_id) = self.current_agent_msg.take() {
                     scrollback.finish_running(agent_id);
                 }
-                // A call the request left mid-argument never gets its
-                // `ToolCall`.
-                for (_, streaming) in self.streaming_tools.drain() {
-                    scrollback.finish_running(streaming.entry_id);
-                }
                 if !meta.is_replay
                     && self.current_thinking.is_none()
                     && self.activity_known_blocking_wait().is_none()
@@ -1676,6 +1671,17 @@ impl AcpUpdateTracker {
         // A call is the model's next act.
         self.finish_thinking(scrollback);
         self.finish_agent_message(scrollback);
+        // Tool indexes restart per request. A call opened under a new id at an index still held by an older call replaces it.
+        if let Some(id) = tool_call_id
+            && self
+                .streaming_tools
+                .get(&tool_index)
+                .and_then(|s| s.tool_call_id.as_deref())
+                .is_some_and(|held| held != id)
+            && let Some(stale) = self.streaming_tools.remove(&tool_index)
+        {
+            scrollback.finish_running(stale.entry_id);
+        }
         if let Some(streaming) = self.streaming_tools.get_mut(&tool_index) {
             if let Some(id) = tool_call_id {
                 streaming.tool_call_id = Some(id.to_string());
