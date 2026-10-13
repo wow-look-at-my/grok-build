@@ -1,6 +1,35 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
     use super::*;
 
+    /// Compaction leaves the agent's todo list alone and shows it again in the post-compaction
+    /// reminder. The todo pane must keep showing the same list.
+    #[test]
+    fn auto_compaction_leaves_the_todo_pane_alone() {
+        let mut app = make_app_with_agent("sess-todo");
+        let _ = handle(
+            make_plan_message("sess-todo", &["write the docs", "ship the parser"]),
+            &mut app,
+        );
+        let before = todo_contents(&app, AgentId(0));
+        assert_eq!(before, vec!["write the docs", "ship the parser"]);
+
+        let completed = XaiSessionUpdate::AutoCompactCompleted {
+            tokens_before: Some(120_000),
+            tokens_after: 20_000,
+            elapsed_ms: Some(900),
+            summary_preview: None,
+            breakdown: None,
+            report_path: None,
+        };
+        let _ = handle(make_ext_session_notification("sess-todo", completed), &mut app);
+
+        assert_eq!(
+            todo_contents(&app, AgentId(0)),
+            before,
+            "the pane lost the list the agent still holds"
+        );
+    }
+
     // ── apply_session_event ────────────────────────────────────────────
 
     #[test]
