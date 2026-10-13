@@ -3899,6 +3899,28 @@ mod tests {
         assert_eq!(agent.session.pending_prompts.len(), 1);
     }
 
+    /// A queued row is sent while a foreground subagent (`task` call) runs, not held until it returns.
+    #[test]
+    fn foreground_subagent_wait_releases_the_queued_row() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        dispatch(Action::SendPrompt("first".into()), &mut app);
+        enqueue_local(&mut app, id, "queued row");
+        simulate_subagent_wait(app.agents.get_mut(&id).unwrap());
+        assert!(test_agent(&app, id).is_parked_on_sendable_wait());
+
+        let effects = flush_held_local_queue_into_wait(&mut app, Some(id));
+
+        assert!(
+            !effects.is_empty(),
+            "the flush must interject the queued row into the running turn"
+        );
+        assert!(
+            test_agent(&app, id).session.pending_prompts.is_empty(),
+            "the released row leaves the local queue"
+        );
+    }
+
     /// A foreground-subagent wait is sendable but never parks (parent blocked, not completed).
     #[test]
     fn subagent_wait_holds_queue_but_never_parks() {
