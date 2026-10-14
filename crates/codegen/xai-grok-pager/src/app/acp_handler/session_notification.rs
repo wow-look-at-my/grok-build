@@ -303,11 +303,7 @@ pub(super) fn handle_session_notification_with_origin(
         | XaiSessionUpdate::MemoryCaptureActivity { .. }
         | XaiSessionUpdate::MemoryDreamCompleted { .. }
         | XaiSessionUpdate::MemorySessionSaved { .. }) => {
-            let changed = apply_compaction_or_retry_update(agent, update, is_api_key_auth);
-            if let XaiSessionUpdate::AutoCompactCompleted { .. } = update {
-                agent.todo.update_todos(Vec::new());
-            }
-            changed
+            apply_compaction_or_retry_update(agent, update, is_api_key_auth)
         }
         XaiSessionUpdate::ImageCompressed {
             ref images,
