@@ -2,6 +2,8 @@
 #![allow(dead_code)]
 
 use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 
 use anyhow::Result;
 
@@ -39,14 +41,88 @@ pub(crate) fn dest_path_contains(parent: &Path, child: &Path) -> bool {
     child.len() >= parent.len() && child[..parent.len()] == parent[..]
 }
 
-#[cfg(not(windows))]
+/// macOS exposes `/tmp`, `/var`, `/etc` and `/tftpboot` as symlinks into `/private/`.
+#[cfg(target_os = "macos")]
+const PRIVATE_ALIAS_DIRS: [&str; 4] = ["tmp", "var", "etc", "tftpboot"];
+
+/// Rewrites a leading `/private/<alias>` to `/<alias>`. Both spellings of a
+/// macOS alias land on the same lexical form.
+#[cfg(target_os = "macos")]
+fn fold_private_alias(path: &Path) -> PathBuf {
+    let mut components = path.components();
+    let (Some(std::path::Component::RootDir), Some(first), Some(second)) =
+        (components.next(), components.next(), components.next())
+    else {
+        return path.to_path_buf();
+    };
+    if first.as_os_str() != "private"
+        || !PRIVATE_ALIAS_DIRS.contains(&second.as_os_str().to_string_lossy().as_ref())
+    {
+        return path.to_path_buf();
+    }
+    let mut folded = PathBuf::from("/");
+    folded.push(second.as_os_str());
+    folded.extend(components);
+    folded
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn dest_paths_equivalent(a: &Path, b: &Path) -> bool {
+    fold_private_alias(a) == fold_private_alias(b)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn dest_path_contains(parent: &Path, child: &Path) -> bool {
+    fold_private_alias(child).starts_with(fold_private_alias(parent))
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub(crate) fn dest_paths_equivalent(a: &Path, b: &Path) -> bool {
     a == b
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 pub(crate) fn dest_path_contains(parent: &Path, child: &Path) -> bool {
     child.starts_with(parent)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn dest_paths_match_across_the_private_alias() {
+        assert!(dest_path_contains(
+            Path::new("/tmp/nfs-wt"),
+            Path::new("/private/tmp/nfs-wt/sub")
+        ));
+        assert!(dest_path_contains(
+            Path::new("/private/var/lib/wt"),
+            Path::new("/var/lib/wt/inner")
+        ));
+        assert!(dest_paths_equivalent(
+            Path::new("/tmp/nfs-wt"),
+            Path::new("/private/tmp/nfs-wt")
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn private_alias_folding_stays_within_the_named_directory() {
+        assert!(!dest_path_contains(
+            Path::new("/private/tmp/wt"),
+            Path::new("/private/tmp/wt2/sub")
+        ));
+        assert!(!dest_path_contains(
+            Path::new("/tmp/wt"),
+            Path::new("/private/tmpfoo/wt/sub")
+        ));
+        assert!(!dest_paths_equivalent(
+            Path::new("/tmp/wt"),
+            Path::new("/private/home/wt")
+        ));
+    }
 }
 
 #[derive(Debug, Clone)]

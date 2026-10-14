@@ -779,6 +779,7 @@ mod tests {
 
     /// A tool call whose arguments the provider does not stream is the model
     /// generating, invisibly. Every fragment shape that says "this call is
+    /// generating, just invisibly. Every fragment shape that says "this call is
     /// open and no argument bytes have arrived" holds the measurement for as
     /// long as the call takes to write. The arguments arriving in one burst
     /// afterwards are credited rather than averaged in as silence.

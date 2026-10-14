@@ -3899,6 +3899,104 @@ mod tests {
         assert_eq!(agent.session.pending_prompts.len(), 1);
     }
 
+    /// A queued row is sent while a foreground subagent (`task` call) runs, not held until it returns.
+    #[test]
+    fn foreground_subagent_wait_releases_the_queued_row() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        dispatch(Action::SendPrompt("first".into()), &mut app);
+        enqueue_local(&mut app, id, "queued row");
+        simulate_subagent_wait(app.agents.get_mut(&id).unwrap());
+        assert!(test_agent(&app, id).is_parked_on_sendable_wait());
+
+        let effects = flush_held_local_queue_into_wait(&mut app, Some(id));
+
+        assert!(
+            !effects.is_empty(),
+            "the flush must interject the queued row into the running turn"
+        );
+        assert!(
+            test_agent(&app, id).session.pending_prompts.is_empty(),
+            "the released row leaves the local queue"
+        );
+    }
+
+    /// A running background command does not hold the queue once the turn is idle.
+    #[test]
+    fn idle_pane_with_a_running_background_task_drains_the_queued_row() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent
+            .session
+            .bg_tasks
+            .insert("bg-1".into(), running_bg_task("bg-1"));
+        enqueue_local(&mut app, id, "queued row");
+
+        let agent = app.agents.get_mut(&id).unwrap();
+        let drain = maybe_drain_queue(agent, &mut app.pending_image_notices);
+
+        assert!(
+            matches!(drain.effects.as_slice(), [Effect::SendPrompt { .. }]),
+            "the queued row must be sent while a background task runs: {:?}",
+            drain.effects
+        );
+        assert!(test_agent(&app, id).session.pending_prompts.is_empty());
+    }
+
+    /// A running background subagent does not hold the queue once the turn is idle.
+    #[test]
+    fn idle_pane_with_a_running_subagent_drains_the_queued_row() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent
+            .subagent_sessions
+            .insert("child-1".into(), running_subagent_info("child-1"));
+        enqueue_local(&mut app, id, "queued row");
+
+        let agent = app.agents.get_mut(&id).unwrap();
+        let drain = maybe_drain_queue(agent, &mut app.pending_image_notices);
+
+        assert!(
+            matches!(drain.effects.as_slice(), [Effect::SendPrompt { .. }]),
+            "the queued row must be sent while a subagent runs: {:?}",
+            drain.effects
+        );
+        assert!(test_agent(&app, id).session.pending_prompts.is_empty());
+    }
+
+    /// A task-completion wake turn holds the queue only while it runs. The row goes out the moment it ends.
+    #[test]
+    fn queued_row_drains_once_a_task_wake_turn_ends() {
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.running_wake_turn = Some(crate::app::agent_view::RunningWakeTurn {
+            prompt_id: "task-completed-bg1".into(),
+            cancel_sent: false,
+        });
+        enqueue_local(&mut app, id, "queued row");
+
+        let agent = app.agents.get_mut(&id).unwrap();
+        let held = maybe_drain_queue(agent, &mut app.pending_image_notices);
+        assert!(
+            held.effects.is_empty(),
+            "a running wake turn holds the row: {:?}",
+            held.effects
+        );
+        assert_eq!(test_agent(&app, id).session.pending_prompts.len(), 1);
+
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.running_wake_turn = None;
+        let drain = maybe_drain_queue(agent, &mut app.pending_image_notices);
+        assert!(
+            matches!(drain.effects.as_slice(), [Effect::SendPrompt { .. }]),
+            "the row must go out once the wake turn ends: {:?}",
+            drain.effects
+        );
+    }
+
     /// A foreground-subagent wait is sendable but never parks (parent blocked, not completed).
     #[test]
     fn subagent_wait_holds_queue_but_never_parks() {
@@ -4315,6 +4413,69 @@ mod tests {
             ),
             "an omitted run_in_background field means background: the provisional \
              foreground wait must clear"
+        );
+    }
+
+    /// A message typed while a real `task` tool call (`run_in_background: false`) runs is sent, not held in the local queue.
+    #[test]
+    fn message_typed_during_a_foreground_task_call_is_sent() {
+        use std::sync::Arc;
+
+        use crate::acp::tracker::{TurnActivity, WaitingReason};
+
+        let mut app = test_app_with_agent();
+        let id = AgentId(0);
+        dispatch(Action::SendPrompt("first".into()), &mut app);
+        let agent = app.agents.get_mut(&id).unwrap();
+        let meta = crate::acp::meta::NotificationMeta::default();
+        agent.session.handle_update(
+            agent_client_protocol::SessionUpdate::ToolCall(
+                agent_client_protocol::ToolCall::new(
+                    agent_client_protocol::ToolCallId::new(Arc::from("task-fg")),
+                    "task",
+                )
+                .kind(agent_client_protocol::ToolKind::Other)
+                .status(agent_client_protocol::ToolCallStatus::Pending)
+                .content(vec![])
+                .locations(vec![]),
+            ),
+            &meta,
+            &mut agent.scrollback,
+        );
+        agent.session.handle_update(
+            agent_client_protocol::SessionUpdate::ToolCallUpdate(
+                agent_client_protocol::ToolCallUpdate::new(
+                    agent_client_protocol::ToolCallId::new(Arc::from("task-fg")),
+                    agent_client_protocol::ToolCallUpdateFields::new().raw_input(Some(
+                        serde_json::json!({
+                            "variant": "Task",
+                            "task_id": "t-1",
+                            "prompt": "explore",
+                            "run_in_background": false
+                        }),
+                    )),
+                ),
+            ),
+            &meta,
+            &mut agent.scrollback,
+        );
+        assert!(
+            matches!(
+                agent.resolve_turn_activity(),
+                Some(TurnActivity::Waiting(WaitingReason::Subagent { .. }))
+            ),
+            "a foreground task call is a subagent wait"
+        );
+
+        let effects = dispatch(Action::SendPrompt("second".into()), &mut app);
+
+        assert!(
+            !effects.is_empty(),
+            "typing during a foreground task call must produce an effect that reaches the shell"
+        );
+        assert!(
+            test_agent(&app, id).session.pending_prompts.is_empty(),
+            "the typed message must not stay held in the local queue"
         );
     }
 

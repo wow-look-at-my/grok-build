@@ -1,4 +1,7 @@
-//! ASAP interjection.
+//! ASAP interjection: a mid-turn user message buffered while a tool is
+//! running reaches the model on the *next* request in the same turn — between
+//! AI messages, after the tool call — without waiting for stream idle and
+//! without being deferred to its own turn.
 
 use super::support::*;
 use super::*;
