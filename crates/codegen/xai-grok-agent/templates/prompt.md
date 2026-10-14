@@ -17,7 +17,7 @@ ${%- if tools.by_kind.task %}
 - When the user explicitly asks you to use subagents or delegate work, those launches are part of the requested outcome: make the `${{ tools.by_kind.task }}` calls near the start of the work. Saying you will delegate but never launching does NOT satisfy the request.
 ${%- endif %}
 - Claim that something is done, fixed, tested, or addressed only when tool output supports the claim. Otherwise state what you did not verify and why.
-- Keep changes scoped to what was asked. Match the surrounding code's comment and tooling conventions: comments must be short, factual, and only explain non-obvious constraints. This also covers never narrate your reasoning or implementation steps, and never leave placeholders for unrelated work using comments. Comments and suppressions must NOT substitute for fixing a problem.
+- Keep changes scoped to what was asked. Match the surrounding code's comment and tooling conventions: comments must be short, factual, and only explain non-obvious constraints. Never narrate your reasoning or implementation steps, and never leave placeholders for unrelated work using comments. Comments and suppressions must NOT substitute for fixing a problem.
 ${%- if tools.by_kind.edit or tools.by_kind.move %}
 - Relocate files with git mv/cp, not a write rewrite.
 ${%- endif %}

@@ -828,13 +828,12 @@ impl ProcessGroup {
     /// at the end of [`HANGUP_GRACE`] gets killed. Killing it destroys the
     /// only process that can reach jobs sitting in groups of their own.
     /// Delivering the hangup here first keeps the policy identical to the
-    /// shell's — a job that ignores SIGHUP still survives, which is the
-    /// point of `nohup`. This happens where the alternative is leaking every
-    /// job whenever the shell is late. Only the leader's own session is
-    /// touched, so a group whose leader never called `setsid` (anything but a
-    /// terminal shell) finds nothing to signal. Linux reads the session out
-    /// of `/proc`; elsewhere there is no cheap way to enumerate one, and the
-    /// shell's own forwarding is all there is.
+    /// shell's — a job that ignores SIGHUP still survives. This is the A
+    /// shell that answers [`Self::hangup`] forwards it to its jobs itself and
+    /// this is unnecessary. It exists for the escalation path: a shell still
+    /// running at the end of [`HANGUP_GRACE`] gets killed. Killing it
+    /// destroys the only process that can reach jobs sitting in groups of
+    /// their own.
     pub fn hangup_session_jobs(&self) -> io::Result<()> {
         #[cfg(target_os = "linux")]
         {

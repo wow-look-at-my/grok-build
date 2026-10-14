@@ -323,7 +323,7 @@ base_url = "https://gateway.example/v1"
 favorite_models = ["*-sonnet-*", "*-opus-*"]
 ```
 
-`/model` opens on the favorites plus the model the session is running. The moment you type, it searches the whole catalog, so a model nobody marked is still one search away and `-m` still reaches it.
+`/model` opens on the favorites plus the model the session runs. The moment you type, it searches the whole catalog, so a model nobody marked is still one search away and `-m` still reaches it.
 
 The lists are joined: `[models].favorite_models` matches any model, and a provider's own list matches only that provider's models. A pattern matches the catalog key or the routing slug, case-sensitive. When nothing is marked, the picker lists every model as before.
 
@@ -462,9 +462,9 @@ context_window_source = "loaded"   # "loaded" (default) or "max"
 favorite_models = ["qwen3-coder*"]
 ```
 
-**Why this matters.** Asked through the OpenAI-compatible `/v1/models`, a local runtime reports an id and nothing else, so every model gets the client's default 256k window. Ollama actually loads a runner at whatever your VRAM allowed — often 4k — and then silently drops the oldest messages once the prompt overflows. The harness never compacts, and the conversation loses its head with no error. Reading the runtime's own listing is what makes the number true.
+**Why this matters.** Asked through the OpenAI-compatible `/v1/models`, a local runtime reports an id and nothing else, so every model gets the client's default 256k window. Ollama actually loads a runner at whatever your VRAM allowed — frequently 4k — and then silently drops the oldest messages once the prompt overflows. The harness never compacts, and the conversation loses its head with no error. Reading the runtime's own listing is what makes the number true.
 
-The green dot beside a model in `/model` means it is resident in VRAM. A dim dot means it is on disk and will have to load first. Models that are not from a local runtime have no dot at all. The dot keeps up with the runtime on its own: a model that loads on its first request, or that LM Studio's idle TTL unloads. Changes colour within a few seconds without a restart.
+The green dot beside a model in `/model` means it is resident in VRAM. A dim dot means it is on disk and will have to load first. Models that are not from a local runtime have no dot at all. The dot keeps up with the runtime on its own: a model that loads on its first request, or that LM Studio's idle TTL unloads. Changes colour within a few seconds without a start.
 
 #### Pinning the window and keeping the model warm
 
@@ -490,7 +490,7 @@ ttl = 1800   # unload after 30 idle minutes
 
 `extra_body` also works on a single `[model.<id>]` block, and a model's own value wins over its provider's key by key.
 
-Make sure the runtime is running (`ollama serve`, or LM Studio's server tab) and the model is pulled (`ollama pull qwen3-coder:30b`).
+Make sure the runtime runs (`ollama serve`, or LM Studio's server tab) and the model is pulled (`ollama pull qwen3-coder:30b`).
 
 ### Together AI
 

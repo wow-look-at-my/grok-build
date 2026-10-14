@@ -30,10 +30,7 @@ fn test_profile_capability_set_construction() {
 // ── CI host worker: real end-to-end across an inherited socketpair ──────────
 //
 // The unsandboxed `gh` CI-status worker is the only code that must run on the
-// host side of a `--sandbox` session. This suite drives the shipped worker
-// entry (`run_ci_host_worker`) as a REAL child process re-entering this same
-// binary in worker mode. With its stdin/stdout pointed at a socketpair the
-// exact fd handoff `spawn_ci_host` performs before the jail exec.
+// host side of a `--sandbox` session.
 
 /// Run by the parent: spawn the current binary as the worker child. Prove a
 /// request round-trips through the real shipped worker loop to a real client.
