@@ -896,9 +896,6 @@ fn blanking_a_free_text_answer_unmarks_it_from_the_nav_buttons_too() {
 // The Tab/Esc contract is mode-independent: card intercepts run ahead of the scrollback's vim letter bindings
 // These go through `handle_input` so the full router (not just the card handlers) is under test
 
-// Two options and a freeform row, so Tab from option 1 lands on the freeform row (2)
-// Leave freeform with an arrow (a letter would enter InputMode), then `l` must still switch questions under vim mode
-// Parked j is scrollback nav; it must not walk or answer the options
 fn open_elicitation(agent: &mut AgentView) {
     use crate::views::elicitation_view::ElicitationViewState;
     use xai_grok_tools::mcp_elicitation::{McpElicitExtRequest, McpElicitModeFields};

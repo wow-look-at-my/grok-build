@@ -4,7 +4,7 @@ Guidelines for autonomous coding agents working in this repository.
 
 ## Push-first workflow (most important)
 
-CI is the source of truth and builds every pushed branch. A branch that is only built locally is not production-real, and holding work back while you verify serially wastes time. This applies when a parallel CI build can be running.
+CI is the source of truth and builds every pushed branch. A branch that is only built locally is not production-real, and holding work back while you verify serially wastes time. This applies when a parallel CI build can runs.
 
 **PUSH FIRST, VERIFY AFTER.**
 
@@ -102,12 +102,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## Verification does not widen the goal
 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
-- The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier attempt added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
+- The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier try added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
 ## Lite `/goal` mode
 
 - `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
-- The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is final.
+- The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is last.
 - Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
 - On the legacy driver, a lite `update_goal(completed: true)` makes one evaluator call and is refused with `LiteCheckNotMet` unless the verdict is `candidate_complete`.
 
@@ -166,7 +166,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## Tool-schema fallback notes
 
 - Every tool schema goes out as the tool published it (`ToolSchemaForm::Native`). A top-level `oneOf`/`anyOf`/`allOf` is valid JSON Schema. Anthropic's Messages API still rejects it with a 400, and MCP servers publish that shape.
-- The sampler answers that 400 with `RetryDecision::RetryWithToolSchemaFallback`: `ConversationRequest::degrade_tool_schemas` moves the request to `NoTopLevelCombinators` and sends it again. Every builder reads the form (`tool_parameters`), so the fallback covers every backend. A schema with no top-level combinator is identical in both forms.
+- The sampler answers that 400 with `RetryDecision::RetryWithToolSchemaFallback`: `ConversationRequest::degrade_tool_schemas` moves the request to `NoTopLevelCombinators` and sends it again. Every builder reads the form (`tool_parameters`), so the fallback covers every backend. A schema with no top-level combinator is same in both forms.
 - The fallback merges the branches into one `type: object` (`conversation/tool_schema.rs`). `allOf` keeps every required field. `anyOf`/`oneOf` keep only the fields that every branch requires, and the description lists each branch's required set. The tool still validates its input against its own schema.
 - `ModelRejections::tool_schemas` remembers the model. Later requests start in the fallback form instead of paying the same 400 first. The fallback runs one time per request: a second rejection is the real error.
 - A provider names a bad tool by index (`tools.16.custom.input_schema`). `name_tool_indices` adds the tool's name to that path in the error text for the Messages, Chat Completions and Ollama clients. Responses is not covered, because its wire `tools` array also holds hosted tools.
@@ -179,14 +179,14 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Goal-planner cancellation notes
 
-- Nothing replans. A Send Now delivers its text to the planner already running (`SubagentEvent::Interject`, routed by the coordinator id the spawn publishes on the goal tracker) instead of cancelling it. An `Interrupted` reaching the loop is a bare cancel and is terminal. Retrying one spawned dead planners in 2.3 s before the attempt cap paused the goal.
-- The planner runs off a slash command, not a turn. And a user Stop latches the session's Task spawns closed until a turn reopens them (`open_subagent_spawn_admission`). `maybe_run_goal_planner` reopens them itself. Without that, `/goal resume` after a Stop is rejected before a subagent exists, at latency 0, for every message the session has left.
-- A pause the user asked for says so (`planner_cancelled_pause_message`). "Planning failed" on a cancel sends the reader hunting a broken planner that is doing exactly what it was told.
+- Nothing replans. A Send Now delivers its text to the planner already running (`SubagentEvent::Interject`, routed by the coordinator id the spawn publishes on the goal tracker) instead of cancelling it. An `Interrupted` reaching the loop is a bare cancel and is terminal. Retrying one spawned dead planners in 2.3 s before the try cap paused the goal.
+- The planner runs off a slash command, not a turn. And a user Stop latches the session's Task spawns closed until a turn reopens them (`open_subagent_spawn_admission`). `maybe_run_goal_planner` reopens them itself. Without that, `/goal resume` after a Stop is rejected before a subagent exists, at latency 0, for every message the session left.
+- A pause the user asked for says so (`planner_cancelled_pause_message`). "Planning failed" on a cancel sends the reader hunting a broken planner that does exactly what it was told.
 
 ## Messages thinking-dialect notes
 
 - Claude 4.6 replaced `thinking: {type:"adaptive"}` for `{type:"enabled", budget_tokens:N}`, and each generation rejects the other's spelling outright ("Input tag 'adaptive' ... does not match any of the expected tags"), so `build_messages_request` picks by model id (`speaks_adaptive_thinking`).
-- The generation is parsed off the id itself (`claude_version`), because nothing else in the request carries it. Both spellings the family has used are read (`claude-haiku-4-5`, `claude-3-7-sonnet`), through a gateway prefix and a snapshot stamp. A name that is not a Claude is a gateway's own model and keeps the adaptive request it has always been sent.
+- The generation is parsed off the id itself (`claude_version`), because nothing else in the request carries it. Both spellings the family used are read (`claude-haiku-4-5`, `claude-3-7-sonnet`), through a gateway prefix and a snapshot stamp. A name that is not a Claude is a gateway's own model and keeps the adaptive request it has always been sent.
 - `output_config.effort` is 4.6-and-later too. So the older dialect sends the effort as `budget_tokens` instead and nothing beside it. `output_config.format` is untouched — structured outputs are not what 4.6 changed.
 - A budget must clear the API's 1024 floor and stay under `max_tokens`. One that cannot do both leaves thinking off with a warning, rather than sending a request the API answers with a 400.
 
@@ -200,7 +200,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Why build-test is not on the self-hosted runner
 
-Pointing `build-test` at `vars.CI_RUNNER` turns tests red, because they assert on host semantics the org's lean image does not provide. Measured on that runner, with unmodified test sources:
+Pointing `build-test` at `vars.CI_RUNNER` turns tests red, because they assert on host semantics the org's lean image does not give. Measured on that runner, with unmodified test sources:
 
 - no PID 1 that reaps orphans and no process-group signal delivery — every `*_grandchild*` case across `xai-grok-shell`, `xai-grok-test-support`, `xai-tty-utils` and the pager PTY harness (`PTY grandchild leaked after controller Drop`). Plus `scope_teardown_kills_a_background_grandchild`, which hangs to the 60s timeout instead of failing.
 - overlayfs reports `st_blocks=2` for every file, so `disk_usage_cmd` and `fs_size` measure ~1 KiB for anything.
@@ -242,9 +242,9 @@ Every one of those is the test doing its job. Making them pass there means weake
 - A retry says what failed and how long the wait is. `SamplingEvent::Retrying` already carried `reason`, which is the error's own `Display`. It now also carries `retry_in_ms`, the backoff the actor is about to sleep.
 - Both ride `RetryState::Retrying` to the pager. It renders `Retrying in 27s (1/5): <reason>…` and drops the countdown once the wait is over. The retried request is then in flight. See `retry_label` in `views/turn_status.rs`.
 - `retry_in_ms` is `None` for a retry that sleeps nothing. An image strip, a reasoning strip and a message-property strip are those. A shell older than the field also sends `None`.
-- The countdown needs no tick source of its own. `tick_demand` already reports Fast for a session whose turn is running, which a retry always is.
-- A server `Retry-After` is clamped to `MAX_RETRY_BACKOFF` on the 429 path too, not just the generic one. A per-minute bucket answers `Retry-After: 60`, and one attempt then sat idle for the whole minute. The limit had often cleared sooner.
-- `RATE_LIMIT_RETRY_THRESHOLD` covers the wait the server asked for across several attempts. So the turn fails no earlier than before, and an attempt in between can find the limit clear.
+- The countdown needs no tick source of its own. `tick_demand` already reports Fast for a session whose turn runs, which a retry always is.
+- A server `Retry-After` is clamped to `MAX_RETRY_BACKOFF` on the 429 path too, not just the generic one. A per-minute bucket answers `Retry-After: 60`, and one try then sat idle for the whole minute. The limit had frequently cleared sooner.
+- `RATE_LIMIT_RETRY_THRESHOLD` covers the wait the server asked for across several attempts. So the turn fails no earlier than before, and an try in between can find the limit clear.
 
 ## Stream-interruption retry notes
 
@@ -275,7 +275,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 - The actor takes its slot in `run_one_attempt` BEFORE `FirstTokenDeadline::start`, and runs the send under `with_slot_held` so the client takes no second one. The TTFT limit, the idle timeout and the rate gate therefore all start after the queue.
 - A caller's own deadline around a model call uses `timeout_excluding_queue`, not `tokio::time::timeout`. It moves the deadline by the time spent queued. The clock is a task-local, and `Submit` carries it to the actor's task by hand.
 - A rate-floor backup takes its own slot. With every slot in use it waits, and the slow original keeps streaming.
-- A queued attempt says so: `SamplingEvent::Queued`/`Dequeued` → transient `XaiSessionUpdate::RequestQueued`/`RequestDequeued` → `AcpUpdateTracker::request_queued`. The status row then reads `Queued: 7 model requests already running…` (`WaitingReason::Queued`) in place of "Waiting for response". Without it a queued turn looks like a stalled model.
+- A queued try says so: `SamplingEvent::Queued`/`Dequeued` → transient `XaiSessionUpdate::RequestQueued`/`RequestDequeued` → `AcpUpdateTracker::request_queued`. The status row then reads `Queued: 7 model requests already running…` (`WaitingReason::Queued`) in place of "Waiting for response". Without it a queued turn looks like a stalled model.
 
 ## Workflow agent-concurrency notes
 

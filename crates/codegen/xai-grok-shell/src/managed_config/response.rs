@@ -1,4 +1,4 @@
-//! The managed-config fetch/response contract: its errors, response parsing, and envelope picking.
+//! The managed-config fetch/response contract: its errors, response parsing,
 //! Also holds fetched-envelope verification and the apply outcome the sync orchestration consumes.
 
 use serde::{Deserialize, Serialize};
