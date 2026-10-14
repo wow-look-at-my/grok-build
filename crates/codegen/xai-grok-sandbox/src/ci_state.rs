@@ -138,6 +138,117 @@ where
         .collect()
 }
 
+/// One step of a job, as `gh run view --json jobs` reports it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhStep {
+    /// Step name shown in the Actions UI.
+    #[serde(default)]
+    pub name: String,
+    /// GitHub `conclusion` of a finished step (`""` while it is running).
+    #[serde(default)]
+    pub conclusion: String,
+}
+
+impl GhStep {
+    /// A step that ended in a failing state.
+    pub fn is_failure(&self) -> bool {
+        matches!(
+            self.conclusion.as_str(),
+            "failure" | "timed_out" | "action_required" | "startup_failure"
+        )
+    }
+}
+
+/// One job of a run, as `gh run view --json jobs` reports it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhJob {
+    /// The job's numeric id, which is also its check-run id.
+    #[serde(default)]
+    pub database_id: Option<u64>,
+    /// Job name, and the check-run name a branch protection report shows.
+    #[serde(default)]
+    pub name: String,
+    /// GitHub `conclusion` of a completed job.
+    #[serde(default)]
+    pub conclusion: String,
+    /// The job's steps, in order.
+    #[serde(default)]
+    pub steps: Vec<GhStep>,
+}
+
+impl GhJob {
+    /// A job that ended in a failing state. A job the fail-fast action stopped
+    /// reads `cancelled`, so only its own steps say whether it failed.
+    pub fn is_failure(&self) -> bool {
+        matches!(
+            self.conclusion.as_str(),
+            "failure" | "timed_out" | "action_required" | "startup_failure"
+        )
+    }
+
+    /// The steps inside this job that failed.
+    pub fn failed_steps(&self) -> Vec<&GhStep> {
+        self.steps.iter().filter(|step| step.is_failure()).collect()
+    }
+}
+
+/// The `--json` field list that populates every [`GhJob`] field.
+pub const JOB_JSON_FIELDS: &str = "databaseId,conclusion,name,jobs";
+
+/// Parse the raw stdout of `gh run view --json jobs`. The body is one object,
+/// not a list. No usable body yields an empty vec, so a caller still answers.
+pub fn parse_gh_jobs(stdout: &[u8]) -> Vec<GhJob> {
+    #[derive(Deserialize)]
+    struct JobList {
+        #[serde(default)]
+        jobs: Vec<GhJob>,
+    }
+    let body = strip_ansi_csi(stdout);
+    match serde_json::from_slice::<JobList>(&body) {
+        Ok(list) => list.jobs,
+        Err(error) => {
+            tracing::debug!(error = %error, "gh run view job output did not parse as JSON");
+            Vec::new()
+        }
+    }
+}
+
+/// What failed inside a run, in the words a model acts on. A run GitHub
+/// labels `cancelled` often holds one genuinely failed job, because a
+/// fail-fast action cancels the siblings of the job that broke. The job and
+/// step names are the answer. `None` when no job failed, which is a cancel
+/// with no build error of its own.
+pub fn run_failure_text(run: &GhRun, jobs: &[GhJob]) -> Option<String> {
+    let failed: Vec<&GhJob> = jobs.iter().filter(|job| job.is_failure()).collect();
+    if failed.is_empty() {
+        return None;
+    }
+    let mut lines = vec![format!(
+        "Run {} ({}) has failed jobs:",
+        run.database_id.unwrap_or_default(),
+        run.conclusion
+    )];
+    for job in failed {
+        let steps = job.failed_steps();
+        if steps.is_empty() {
+            lines.push(format!(
+                "  {name} - no step is marked failed",
+                name = job.name
+            ));
+            continue;
+        }
+        let names: Vec<&str> = steps.iter().map(|step| step.name.as_str()).collect();
+        lines.push(format!(
+            "  {} - failed step: {}",
+            job.name,
+            names.join(", ")
+        ));
+    }
+    Some(lines.join("\n"))
+}
+
 /// Parse the raw stdout of `gh run list --json` into runs. Pure and
 /// headless-safe. Returns `None` when `gh` produced no usable JSON (or the
 /// output decodes to empty), so callers degrade to "no CI status" instead of
@@ -239,5 +350,98 @@ mod tests {
         assert_eq!(ci_from_runs(runs), CiStatus::Green);
         assert!(parse_gh_runs(b"[]").is_none());
         assert!(parse_gh_runs(b"not json").is_none());
+    }
+
+    fn job(id: u64, name: &str, conclusion: &str, steps: &[(&str, &str)]) -> GhJob {
+        GhJob {
+            database_id: Some(id),
+            name: name.to_string(),
+            conclusion: conclusion.to_string(),
+            steps: steps
+                .iter()
+                .map(|(step, outcome)| GhStep {
+                    name: step.to_string(),
+                    conclusion: outcome.to_string(),
+                })
+                .collect(),
+        }
+    }
+
+    /// The case that costs a whole day of guessing: the run reads `cancelled`,
+    /// one job genuinely failed, and a fail-fast action stopped the rest.
+    #[test]
+    fn a_cancelled_run_with_a_failed_job_names_the_job_and_the_step() {
+        let run = run_in("CI", "completed", "cancelled");
+        let jobs = vec![
+            job(11, "Rustfmt", "success", &[("Run rustfmt", "success")]),
+            job(
+                12,
+                "Build & test",
+                "failure",
+                &[
+                    ("Set up job", "success"),
+                    ("Build the dependencies", "failure"),
+                    ("Run tests (workspace)", "skipped"),
+                ],
+            ),
+            job(13, "Slopfix", "cancelled", &[("Run slopfix", "cancelled")]),
+        ];
+        let text = run_failure_text(&run, &jobs).expect("a job failed");
+        assert!(text.contains("Build & test"), "{text}");
+        assert!(text.contains("Build the dependencies"), "{text}");
+        assert!(!text.contains("Rustfmt"), "{text}");
+        assert!(!text.contains("Run tests"), "{text}");
+    }
+
+    /// A cancel before any job failed is not a build error, and the answer
+    /// must not invent one.
+    #[test]
+    fn a_cancel_with_no_failed_job_has_no_build_cause() {
+        let cases = [
+            vec![],
+            vec![job(
+                21,
+                "Slopfix",
+                "cancelled",
+                &[("Run slopfix", "cancelled")],
+            )],
+            vec![job(22, "Build & test", "skipped", &[])],
+        ];
+        for jobs in cases {
+            let run = run_in("CI", "completed", "cancelled");
+            assert!(
+                run_failure_text(&run, &jobs).is_none(),
+                "no job failed here: {jobs:?}"
+            );
+        }
+    }
+
+    /// A failed job whose steps carry no verdict still gets named, because the
+    /// job name is what a check-run report shows.
+    #[test]
+    fn a_failed_job_without_a_failed_step_is_named_alone() {
+        let run = run_in("CI", "completed", "failure");
+        let jobs = vec![job(31, "Build release", "failure", &[])];
+        let text = run_failure_text(&run, &jobs).expect("a job failed");
+        assert!(text.contains("Build release"), "{text}");
+        assert!(text.contains("no step is marked failed"), "{text}");
+    }
+
+    #[test]
+    fn parse_reads_the_job_object_gh_run_view_emits() {
+        let json = br#"{"databaseId":99,"conclusion":"cancelled","name":"CI","jobs":[{"databaseId":4242,"conclusion":"failure","name":"Build & test","steps":[{"name":"Build the dependencies","conclusion":"failure"},{"name":"Run tests","conclusion":"skipped"}]}]}"#;
+        let jobs = parse_gh_jobs(json);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].database_id, Some(4242));
+        assert!(jobs[0].is_failure());
+        assert_eq!(
+            jobs[0]
+                .failed_steps()
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Build the dependencies"]
+        );
+        assert!(parse_gh_jobs(b"not json").is_empty());
     }
 }
