@@ -171,6 +171,93 @@ fn push_repo<'a>(args: &mut Vec<&'a str>, repo: Option<&'a str>) {
     }
 }
 
+/// The `gh` argv for one run's jobs. A job carries its own conclusion and its
+/// steps, which is what answers "what failed" on a run whose conclusion is
+/// only `cancelled`.
+pub fn run_jobs_args<'a>(run_id: &'a str, repo: Option<&'a str>) -> Vec<&'a str> {
+    let mut args = vec!["run", "view", run_id, "--json", ci_state::JOB_JSON_FIELDS];
+    push_repo(&mut args, repo);
+    args
+}
+
+/// The `gh api` path holding a job's check-run annotations. A job's id is its
+/// check-run id.
+fn annotation_path(repo: &str, job_id: u64) -> String {
+    format!("repos/{repo}/check-runs/{job_id}/annotations")
+}
+
+/// One annotation GitHub attached to a job.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Annotation {
+    #[serde(default)]
+    level: String,
+    #[serde(default)]
+    message: String,
+}
+
+/// The annotations of one job, deduped in the order GitHub sent them. `None`
+/// when the repository is unnamed or `gh api` could not answer. The host
+/// worker's `gh` process makes this request. It reaches the API with the
+/// credential and host that worker has, the way every other query here does.
+fn fetch_annotations(cwd: &std::path::Path, repo: Option<&str>, job_id: u64) -> Option<String> {
+    let path = annotation_path(repo?, job_id);
+    let response = xai_grok_sandbox::ci_host::run_gh(cwd, &["api", path.as_str()])?;
+    if !response.success() {
+        return None;
+    }
+    render_annotations(&response.stdout)
+}
+
+/// The annotation body as indented lines, one per distinct message. An empty
+/// body, a body that is not a list, and a list of blanks all answer `None`.
+fn render_annotations(body: &str) -> Option<String> {
+    let annotations = serde_json::from_str::<Vec<Annotation>>(body).ok()?;
+    let mut seen = std::collections::HashSet::new();
+    let lines: Vec<String> = annotations
+        .iter()
+        .filter(|a| !a.message.trim().is_empty())
+        .filter(|a| seen.insert(a.message.clone()))
+        .map(|a| format!("  {}: {}", a.level, a.message.trim()))
+        .collect();
+    (!lines.is_empty()).then_some(lines.join("\n"))
+}
+
+/// Why a run is red, read off its jobs and their annotations. A run whose
+/// failed jobs are named says so. A cancel that took a healthy run down says
+/// that instead, so a reader stops hunting a build error that is not there.
+fn failure_detail(cwd: &std::path::Path, run: &ci_state::GhRun, repo: Option<&str>) -> String {
+    let run_id = run.database_id.unwrap_or_default().to_string();
+    let jobs = fetch_jobs(cwd, &run_id, repo);
+    let Some(text) = ci_state::run_failure_text(run, &jobs) else {
+        return format!(
+            "Run {run_id} ended {} with no failed job inside it. A newer push to this branch, a manual cancel, or the workflow's own concurrency group took it down. Nothing in this tree failed to build.",
+            run.conclusion
+        );
+    };
+    let failed_job_id = jobs
+        .iter()
+        .find(|job| job.is_failure())
+        .and_then(|job| job.database_id);
+    let mut body = text;
+    if let Some(job_id) = failed_job_id {
+        if let Some(annotations) = fetch_annotations(cwd, repo, job_id) {
+            body.push_str("\nAnnotations on the failed job:\n");
+            body.push_str(&annotations);
+        }
+    }
+    body
+}
+
+/// Read one run's jobs. A `gh` that cannot answer yields no jobs, which the
+/// caller reports as "nothing failed" rather than as a query error.
+fn fetch_jobs(cwd: &std::path::Path, run_id: &str, repo: Option<&str>) -> Vec<ci_state::GhJob> {
+    xai_grok_sandbox::ci_host::run_gh(cwd, &run_jobs_args(run_id, repo))
+        .filter(|response| response.success())
+        .map(|response| ci_state::parse_gh_jobs(response.stdout.as_bytes()))
+        .unwrap_or_default()
+}
+
 /// The `owner/name` of the repository at `cwd`, read from its `origin`
 /// remote. One local `git` call, so naming the repository costs no API
 /// request.
@@ -327,12 +414,12 @@ pub fn current_branch(cwd: &std::path::Path) -> Option<String> {
 }
 
 /// The newest run that failed, which is the one whose logs answer "why is this
-/// branch red".
-fn newest_failing_run(runs: &[ci_state::GhRun]) -> Option<u64> {
-    ci_state::newest_run_per_workflow(runs.iter().cloned().collect::<Vec<_>>())
-        .iter()
-        .find(|run| run.is_terminal_failure())
-        .and_then(|run| run.database_id)
+/// branch red". Only the newest run of each workflow is judged, so a run a
+/// later push superseded does not answer for the branch.
+fn newest_failing_run(runs: &[ci_state::GhRun]) -> Option<&ci_state::GhRun> {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    runs.iter()
+        .find(|run| seen.insert(run.workflow_name.clone()) && run.is_terminal_failure())
 }
 
 fn summarize(runs: &[ci_state::GhRun]) -> Vec<CiRunSummary> {
@@ -664,15 +751,27 @@ fn status_output(
 ) -> Result<CiOutput, xai_tool_runtime::ToolError> {
     let runs = fetch_runs(cwd, branch, limit, repo).map_err(query_error)?;
     let state = ci_state::ci_from_runs(runs.iter().cloned().collect::<Vec<_>>());
+    // A run GitHub labels `cancelled` can hold one job that genuinely failed.
+    let detail = match state {
+        CiStatus::Red => newest_failing_run(&runs).map(|run| failure_detail(cwd, run, repo)),
+        _ => None,
+    };
+    let summary = match &detail {
+        Some(text) => format!(
+            "CI is FAILING on {branch}. {}",
+            text.lines().next().unwrap_or_default().trim()
+        ),
+        None => state_summary(state, branch, repo),
+    };
     Ok(CiOutput {
         state: state.as_str().to_string(),
         branch: branch.to_string(),
         settled: state.is_terminal(),
         runs: summarize(&runs),
-        text: None,
+        text: detail,
         truncated: false,
         task_id: None,
-        summary: state_summary(state, branch, repo),
+        summary,
     })
 }
 
@@ -686,7 +785,7 @@ fn logs_output(
     let state = ci_state::ci_from_runs(runs.iter().cloned().collect::<Vec<_>>());
     let run_id = match run_id {
         Some(id) => id.to_string(),
-        None => match newest_failing_run(&runs) {
+        None => match newest_failing_run(&runs).and_then(|run| run.database_id) {
             Some(id) => id.to_string(),
             None => {
                 return Err(xai_tool_runtime::ToolError::custom(
@@ -716,6 +815,29 @@ fn logs_output(
         response.stdout.clone()
     };
     let (text, cut) = tail(&body, LOG_TAIL_BYTES);
+    if !text.trim().is_empty() {
+        return Ok(CiOutput {
+            state: state.as_str().to_string(),
+            branch: branch.to_string(),
+            settled: state.is_terminal(),
+            runs: summarize(&runs),
+            text: Some(text),
+            truncated: cut || response.truncated,
+            task_id: None,
+            summary: format!("Failing-step logs for run {run_id} on {branch}."),
+        });
+    }
+    // GitHub keeps no job log for a run cancelled mid-step or a mirror that
+    // serves no log archive. Name the job and step that died instead of
+    // handing back an empty body.
+    let detail = run_with_id(&runs, &run_id)
+        .map(|run| failure_detail(cwd, run, repo))
+        .unwrap_or_else(|| {
+            format!(
+                "GitHub returned no log body for run {run_id}. Nothing has written a step log to it, so the run may have been cancelled before a step finished."
+            )
+        });
+    let (text, cut) = tail(&detail, LOG_TAIL_BYTES);
     Ok(CiOutput {
         state: state.as_str().to_string(),
         branch: branch.to_string(),
@@ -724,8 +846,16 @@ fn logs_output(
         text: Some(text),
         truncated: cut || response.truncated,
         task_id: None,
-        summary: format!("Failing-step logs for run {run_id} on {branch}."),
+        summary: format!(
+            "No log body for run {run_id} on {branch}. The failed job and step are named in `text`."
+        ),
     })
+}
+
+/// The run a caller named by id, from the list already fetched for it.
+fn run_with_id<'a>(runs: &'a [ci_state::GhRun], run_id: &str) -> Option<&'a ci_state::GhRun> {
+    runs.iter()
+        .find(|run| run.database_id.map(|id| id.to_string()).as_deref() == Some(run_id))
 }
 
 fn checks_output(cwd: &std::path::Path, branch: &str, repo: Option<&str>) -> CiOutput {
@@ -917,10 +1047,11 @@ mod tests {
             run("CI", "completed", "failure", 2),
             run("CI", "completed", "success", 1),
         ];
-        assert_eq!(newest_failing_run(&runs), Some(2));
+        let id = newest_failing_run(&runs).and_then(|run| run.database_id);
+        assert_eq!(id, Some(2));
         // Nothing failing: the caller is told to name a run instead.
         let green = vec![run("CI", "completed", "success", 9)];
-        assert_eq!(newest_failing_run(&green), None);
+        assert!(newest_failing_run(&green).is_none());
     }
 
     #[test]
@@ -931,7 +1062,66 @@ mod tests {
             run("CI", "in_progress", "", 5),
             run("CI", "completed", "failure", 4),
         ];
-        assert_eq!(newest_failing_run(&runs), None);
+        assert!(newest_failing_run(&runs).is_none());
+    }
+
+    /// The job query and the annotation query both go through the host worker,
+    /// which refuses any argv outside its allowlist. A rejected shape answers
+    /// nothing, so the tool would report "no failed job" for a red branch.
+    #[test]
+    fn the_worker_accepts_the_job_and_annotation_queries() {
+        let jobs: Vec<String> = run_jobs_args("1234", Some("o/r"))
+            .iter()
+            .map(|arg| arg.to_string())
+            .collect();
+        assert!(
+            jobs.windows(2)
+                .any(|w| w == ["--json", ci_state::JOB_JSON_FIELDS]),
+            "{jobs:?}"
+        );
+        assert!(
+            xai_grok_sandbox::ci_host::gh_args_allowed(&jobs),
+            "{jobs:?}"
+        );
+
+        let path = annotation_path("o/r", 4242);
+        assert_eq!(path, "repos/o/r/check-runs/4242/annotations");
+        let api: Vec<String> = vec!["api".to_string(), path];
+        assert!(xai_grok_sandbox::ci_host::gh_args_allowed(&api), "{api:?}");
+    }
+
+    /// GitHub repeats an annotation across the jobs of one run. The reader
+    /// wants each distinct line once, and only the lines that say something.
+    #[test]
+    fn annotations_render_once_per_distinct_message() {
+        let body = r#"[{"level":"failure","message":"Process completed with exit code 101."},
+                        {"level":"failure","message":"Process completed with exit code 101."},
+                        {"level":"notice","message":"  "},
+                        {"level":"notice","message":"The run was canceled by @github-actions[bot]."}]"#;
+        let rendered = render_annotations(body).expect("two distinct messages");
+        assert_eq!(
+            rendered.lines().filter(|line| !line.is_empty()).count(),
+            2,
+            "{rendered}"
+        );
+        assert!(rendered.contains("exit code 101"), "{rendered}");
+        assert!(rendered.contains("canceled by"), "{rendered}");
+        assert!(rendered.starts_with("  failure: "), "{rendered}");
+        assert_eq!(render_annotations("[]"), None);
+        assert_eq!(render_annotations("not json"), None);
+    }
+
+    #[test]
+    fn a_run_named_by_id_is_found_in_the_list_already_fetched() {
+        let runs = vec![
+            run("CI", "completed", "cancelled", 7),
+            run("CI", "completed", "cancelled", 8),
+        ];
+        assert_eq!(
+            run_with_id(&runs, "8").and_then(|run| run.database_id),
+            Some(8)
+        );
+        assert!(run_with_id(&runs, "99").is_none());
     }
 
     #[test]
