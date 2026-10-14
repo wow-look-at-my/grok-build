@@ -95,13 +95,13 @@ impl SessionActor {
     /// fixed config value with no relation to how full the context window
     /// already is. A single large result (e.g. a `run_terminal_cmd`
     /// `grep`/`cat` over a multi-GB file) can be appended to the transcript
+    /// `TruncationCfg` resource to match. A tool's byte cap is otherwise a
+    /// fixed config value with no relation to how full the context window
+    /// already is. A single large result (e.g. a `run_terminal_cmd`
+    /// `grep`/`cat` over a multi-GB file) can be appended to the transcript
     /// at its full configured size even when there is nowhere near enough.
     /// Context left for the *next* model request to include it —
-    /// overflowing the window outright. Auto-compact does not catch this. It
-    /// compacts *prior* history, and cannot shrink the tool result the model
-    /// is about to receive in the current step. Called before each
-    /// tool-dispatch step (`turn.rs`), mirroring
-    /// [`Self::reseed_mcp_output_cap`]'s field-level `TruncationCfg` update.
+    /// overflowing the window outright. Auto-compact does not catch this.
     pub(crate) async fn reseed_context_budget_output_cap(&self) {
         let estimated_total = self.chat_state_handle.get_estimated_total_tokens().await;
         let Some(sampling_cfg) = self.chat_state_handle.get_sampling_config().await else {

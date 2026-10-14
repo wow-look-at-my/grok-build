@@ -14,8 +14,7 @@ use xai_grok_tools::types::SessionMode;
 /// optimistically when the user asks for it, but the shell's confirmation
 /// names only a mode. This ordered log is what attributes a confirmation to
 /// the request that caused it. A confirmation belonging to an earlier press
-/// cannot rewind the state a later press set. See
-/// `AgentView::mode_confirmation_is_stale`.
+/// cannot rewind the state a later press set.
 pub(super) fn record_mode_change_requests(app: &mut AppView, effects: &[Effect]) {
     for effect in effects {
         let (session_id, mode_ids): (&acp::SessionId, Vec<&str>) = match effect {

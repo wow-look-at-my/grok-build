@@ -942,7 +942,7 @@ async fn priced_response(events: Vec<MessageStreamEvent>) -> Option<i64> {
 
 /// The whole point. A gateway that prices the call gets that price onto the
 /// response, instead of the shell falling back to an estimate. Off the
-/// model's configured pricing.
+/// model's configured pricing. model's configured pricing.
 #[tokio::test]
 async fn a_gateway_reported_price_reaches_the_completed_response() {
     for (ticks, cost, expected, what) in [

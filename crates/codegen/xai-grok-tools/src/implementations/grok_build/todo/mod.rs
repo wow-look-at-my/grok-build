@@ -47,7 +47,9 @@ pub(crate) fn validate_no_duplicate_ids(updates: &[TodoUpdate]) -> Result<(), To
 /// `content` is omitted the `id` is used as a fallback so the tool never
 /// errors on a merge call. This makes the tool resilient to state being lost
 /// between calls. `prepend` puts new items at the FRONT of the list, in the
-/// order given.
+/// order given. Existing items keep their place either way, so a prepend
+/// still cannot reorder or rewrite work already on the list. An id already on
+/// the list is never dropped by a write that omits it.
 pub(crate) fn apply_merge(
     state: &mut TodoState,
     updates: &[TodoUpdate],

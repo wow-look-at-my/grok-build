@@ -904,9 +904,12 @@ fn merge_section_cli_only_updates_set_fields_preserves_unmodeled() {
 /// modal's writer sets the field, `merge_section` serializes `[models]`. The
 /// file is re-read, and the session's own resolver answers with the model
 /// that was picked. Both halves are written independently — one match on
-/// the slot id in `settings_writes`, another in
-/// `Config::harness_model_from_config`. So nothing else catches a pair that
-/// names different fields.
+/// the slot id in `settings_writes`, another in modal's writer sets the
+/// field, `merge_section` serializes `[models]`. The file is re-read, and the
+/// session's own resolver answers with the model that was picked. Both halves
+/// are written independently — one match on the slot id in
+/// `settings_writes`, another in `Config::harness_model_from_config`. So
+/// nothing else catches a pair that names different fields.
 #[test]
 fn every_harness_model_slot_round_trips_from_the_settings_write_to_the_resolver() {
     for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
@@ -1628,8 +1631,10 @@ fn atomic_replace_string_replaces_project_config_symlink() {
 #[cfg(unix)]
 #[test]
 fn no_home_cwd_config_resolves_slot_not_follow() {
-    let dir = tempfile::tempdir().unwrap();
-    let (link, outside) = project_slot_symlink(dir.path());
+    let tmp = tempfile::tempdir().unwrap();
+    // Both bind policies resolve the parent chain.
+    let dir = std::fs::canonicalize(tmp.path()).unwrap();
+    let (link, outside) = project_slot_symlink(&dir);
     let followed = bind_user_config_dest_with(&link, true, true).unwrap();
     let slot = bind_user_config_dest_with(&link, true, false).unwrap();
     assert_eq!(
