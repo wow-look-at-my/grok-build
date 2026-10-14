@@ -3134,8 +3134,8 @@ mod tests {
     /// `scrub_untrustworthy_costs`. This is the exact path that was broken —
     /// OpenRouter reports `usage.cost` on most but not all streaming chunks.
     /// Multi-call turns had `cost_missing_calls > 0`, which caused the scrub to
-    /// drop ALL cost from the `TurnCompleted` notification, hiding it from the
-    /// TUI. The fix: `scrub_untrustworthy_costs` only clears on
+    /// drop ALL cost from the `TurnCompleted` notification, hiding it from TUI.
+    /// The fix: `scrub_untrustworthy_costs` only clears on
     /// `usage_is_incomplete`, not `cost_is_partial`.
     #[test]
     fn project_from_ledger_preserves_partial_cost_through_scrub() {

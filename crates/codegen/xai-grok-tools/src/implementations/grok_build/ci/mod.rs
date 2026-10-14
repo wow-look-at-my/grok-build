@@ -32,8 +32,7 @@ const LOG_TAIL_BYTES: usize = 24_000;
 const DEFAULT_RUN_LIMIT: u32 = 10;
 const MAX_RUN_LIMIT: u32 = 50;
 
-// ---------------------------------------------------------------------------
-// Input schema.
+// Input schema
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -88,8 +87,7 @@ pub struct CiInput {
     pub timeout_secs: Option<u64>,
 }
 
-// ---------------------------------------------------------------------------
-// Output.
+// Output
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiRunSummary {
@@ -101,7 +99,7 @@ pub struct CiRunSummary {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiOutput {
-    /// `passing`, `failing`, `in_progress`, `none`, or `pending`.
+    /// `passing`, `failing`, `in_progress`, or `none`.
     pub state: String,
     pub branch: String,
     /// Whether anything on this branch can still change on its own.
@@ -217,8 +215,6 @@ fn repo_from_remote_url(url: &str) -> Option<String> {
     valid_repo_token(&repo).then_some(repo)
 }
 
-/// Whether `token` is safe to hand to `gh` as a repository name: non-empty
-/// segments of git-safe characters, no `/` inside either segment.
 fn valid_repo_token(token: &str) -> bool {
     let Some((owner, name)) = token.split_once('/') else {
         return false;
@@ -385,7 +381,7 @@ fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
     }
 }
 
-// --------------------------------------------------------------------------- Tool implementation.
+// Tool implementation
 
 #[derive(Debug, Default)]
 pub struct CiTool;

@@ -156,7 +156,8 @@ fn gh_run_list(repo_root: &Path, branch: &str) -> Option<Vec<GhRun>> {
 
 /// Talk to the unsandboxed CI-status host worker for a sandboxed session,
 /// returning an [`Output`] shaped like a `gh` run's stdout. It is
-/// authoritative. We hand the caller an `Output` whose body attenuates to
+/// authoritative. We hand the caller an `Output` whose body attenuates to It
+/// is authoritative. We hand the caller an `Output` whose body attenuates to
 /// "no ru. The dot degrades to the "off" state rather than falling through
 /// to an in-jail `gh` spawn. This happens when the worker replies with the
 /// nothing-usable sentinel. Only a genuinely absent/unusable worker

@@ -878,8 +878,7 @@ fn managed_worktrees_boundary_in(grok_home: &Path, path: &Path) -> Option<std::p
 }
 
 /// Resolves the worktree base directory (`<main checkout
-/// root>/.grok/worktrees`) for a given source path. managed root that holds
-/// it.
+/// root>/.grok/worktrees`) for a given source path.
 pub fn worktree_base_dir_for_source(source_path: &Path) -> Result<std::path::PathBuf> {
     worktree_base_dir_for_source_in(&grok_home(), source_path)
 }

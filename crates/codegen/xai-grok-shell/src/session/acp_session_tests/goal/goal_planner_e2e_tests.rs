@@ -632,7 +632,7 @@ async fn the_planner_is_spawned_with_the_todo_instruction() {
 /// This is the shipped reader that carries a planner child's items back
 /// ([`crate::agent::subagent::session_todo_contents`]). The shipped reader is
 /// driven against a real bound session whose list was written through the real
-/// tool. And against an id that was never bound, which is the proxy-mode /
+/// tool. And against an id that was never bound. This is the proxy-mode /
 /// no-child case.
 #[tokio::test(flavor = "current_thread")]
 async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
@@ -669,7 +669,7 @@ async fn the_child_todo_reader_reads_a_bound_sessions_live_list() {
 }
 
 /// The gate for the objective's first criteria: one `setup_goal` call — with no
-/// model turn of its own. It leaves the session's LIVE todo list carrying the
+/// with no model turn of its own. It leaves the session's LIVE todo list carrying
 /// planner's items, each a fresh pending harness-minted item.
 #[tokio::test(flavor = "current_thread")]
 async fn setup_goal_seeds_the_planners_own_items_without_a_model_turn() {

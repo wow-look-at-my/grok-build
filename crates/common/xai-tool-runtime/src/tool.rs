@@ -204,10 +204,10 @@ impl ContentBlock {
     pub const MIME_TYPE_KEYS: Aliases = Aliases::new("mime_type", &["mimeType"]);
 }
 
-/// `ContentBlock` as it arrives on the wire. That `ContentBlock` is with each
-/// MIME key spelling its own field. A block naming both folds them under
-/// [`ContentBlock::MIME_TYPE_KEYS`] instead of tripping serde's duplicate-field
-/// check.
+/// `ContentBlock` as it arrives on the wire. That `ContentBlock` is with
+/// each MIME key spelling its own field. A block naming both folds them
+/// under [`ContentBlock::MIME_TYPE_KEYS`] instead of tripping serde's
+/// duplicate-field check.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ContentBlockWire {

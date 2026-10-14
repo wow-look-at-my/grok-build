@@ -1007,6 +1007,7 @@ async fn test_compact_on_error_no_trigger_when_tokens_within_new_window() {
         .await;
 }
 /// The server's tokenizer is the one that counts. Our own estimate saying
+/// The server's tokenizer is the one that counts. Our own estimate saying
 /// the prompt fits is not a reason to hand the turn back to the user. The
 /// overflow ladder takes it, and that ladder is what bounds the retries.
 /// This applies when it says the context length is the problem.

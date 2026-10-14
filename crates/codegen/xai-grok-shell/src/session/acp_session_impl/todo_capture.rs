@@ -251,13 +251,13 @@ impl CaptureToolOutcome {
     }
 }
 
-/// Classify one tool call. This is the enforcement: a call that is neither
-/// the todo tool nor a readable one never reaches dispatch. The refusals are
+/// Classify one tool call. This is the enforcement: a call that is neither the
+/// todo tool nor a readable one never reaches dispatch. The refusals are
 /// written to steer the next turn toward the write, because a refusal the
-/// model cannot act on burns the turn budget. `todo_tool` is the name the
-/// todo tool is advertised under in THIS session, which is the name. The
-/// model calls it by — not the canonical `todo_write`, which a
-/// `name_override` can rename out from under both.
+/// model cannot act on burns the turn budget. `todo_tool` is the name the todo
+/// tool is advertised under in THIS session, which is the name. The model
+/// calls it by — not the canonical `todo_write`, which a `name_override` can
+/// rename out from under both.
 fn capture_action(
     name: &str,
     kind: Option<ToolKind>,

@@ -3810,8 +3810,8 @@ pub(crate) fn provider_probe_entry(
     entry_for_provider_model(cfg, provider_id, provider_id, provider, &probe)
 }
 
-/// `true` when some configured `[model_providers.<id>]` stands on its own for
-/// authentication.
+/// authentication -- the same `has_own_credentials` question the catalog is
+/// asked, put to the provider block instead of to a model.
 pub(crate) fn any_provider_has_own_credentials(cfg: &Config) -> bool {
     first_provider_with_own_credentials(cfg).is_some()
 }

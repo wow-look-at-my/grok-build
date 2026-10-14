@@ -296,7 +296,7 @@ fn bwrap_worker_self_entry() {
     xai_grok_sandbox::ci_host::run_ci_host_worker_on(stream);
 }
 
-/// Delegate the parent jails. Find the worker the way the shipped pager does,
+/// Delegate the parent jails: find the worker the way the shipped pager does,
 /// ask it one fixed-shape question. Write what came back where the parent can
 /// read it (the jailed cwd is a granted mount).
 #[test]
