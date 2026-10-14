@@ -78,6 +78,21 @@ impl SlashCommand for ModelCommand {
             return CommandResult::Action(Action::SetDefaultModel(id));
         }
 
+        // `/model <name> <provider>` picks one of several providers serving a
+        // name. It sits before the effort phase, so a name the catalog shares
+        // reaches the provider split instead of the ambiguity error.
+        if let Some((name, provider)) = trimmed.rsplit_once(char::is_whitespace) {
+            let (name, provider) = (name.trim_end(), provider.trim());
+            if !name.is_empty()
+                && ctx.models.route_label_for(provider).is_some()
+                && let Some(id) = ctx
+                    .models
+                    .resolve_by_name_or_id_with_provider(name, provider)
+            {
+                return CommandResult::Action(Action::SetDefaultModel(id));
+            }
+        }
+
         // Trailing effort token + reasoning model → session-scoped switch
         // (not persisted as default).
         if let Some((prefix, _)) = trimmed.rsplit_once(char::is_whitespace)
@@ -913,6 +928,53 @@ mod tests {
                 assert_eq!(effort, Some(ReasoningEffort::Xhigh));
             }
             other => panic!("expected SwitchModel with effort, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_selects_a_provider_for_a_name_several_serve() {
+        // `/model <name> <provider>` picks the model a named provider serves.
+        let mut state = ModelState::default();
+        for (id, info) in [
+            routed_model("local/m", "m", Some("local"), "localhost:18080"),
+            routed_model("relay/m", "m", Some("relay"), "relay.example"),
+        ] {
+            state.available.insert(id, info);
+        }
+        let mut ctx = dummy_exec_ctx(&state);
+        match ModelCommand.run(&mut ctx, "m relay") {
+            CommandResult::Action(Action::SetDefaultModel(id)) => {
+                assert_eq!(id.0.as_ref(), "relay/m");
+            }
+            other => panic!("expected the relay route, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_prefers_a_full_name_over_a_provider_split() {
+        // "M Local" is a model's own name and "local" is also a provider, but the full name resolves.
+        let mut state = ModelState::default();
+        let (full, full_info) = plain_model("m-local", "M Local");
+        state.available.insert(full.clone(), full_info);
+        state.available.insert(
+            acp::ModelId::new(Arc::from("local/other")),
+            acp::ModelInfo::new(
+                acp::ModelId::new(Arc::from("local/other")),
+                "Other".to_string(),
+            )
+            .meta(Some(
+                serde_json::json!({ "provider": "local" })
+                    .as_object()
+                    .cloned()
+                    .unwrap(),
+            )),
+        );
+        let mut ctx = dummy_exec_ctx(&state);
+        match ModelCommand.run(&mut ctx, "M Local") {
+            CommandResult::Action(Action::SetDefaultModel(id)) => {
+                assert_eq!(id.0.as_ref(), "m-local");
+            }
+            other => panic!("expected SetDefaultModel(m-local), got {other:?}"),
         }
     }
 
