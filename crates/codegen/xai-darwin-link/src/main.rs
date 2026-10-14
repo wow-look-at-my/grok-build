@@ -1,4 +1,5 @@
-//! Stands in for the macOS linker during a Linux cross build. Compiling for `aarch64-apple-darwin` on Linux works.
+//! Stands in for the macOS linker during a Linux cross build. Compiling for
+//! `aarch64-apple-darwin` on Linux works.
 
 use std::collections::HashSet;
 use std::ffi::OsString;

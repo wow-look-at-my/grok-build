@@ -62,7 +62,8 @@ pub(crate) use child_runtime::{
     await_session_thread_exit,
 };
 pub(crate) use handle_request::run_shell_child;
-/// Re-exported for the goal e2e suite, which drives it against a real bound session.
+/// Re-exported for the goal e2e suite, which drives it against a real bound
+/// session.
 pub(crate) use handle_request::session_todo_contents;
 pub(crate) use prompt_turn_receipt::PromptTurnReceipt;
 /// Clamp for a resolved sampling-limit override; `Semaphore::new` panics past `Semaphore::MAX_PERMITS`.

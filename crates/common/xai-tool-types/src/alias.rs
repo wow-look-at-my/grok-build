@@ -1194,9 +1194,12 @@ pub struct Late {
 
     /// Every string an `alias` key names in one attribute's text. Whitespace
     /// is collapsed first, so a key rustfmt split across lines is still read.
-    /// Requiring a separator before `alias` is what keeps clap's
-    /// `visible_alias`. And `alias` args out of the read even if one ever sat
-    /// inside a `#[serde(` line.
+    /// Requiring a separator before `alias` is what keeps clap's Every string
+    /// an `alias` key names in one attribute's text. Whitespace is collapsed
+    /// first, so a key rustfmt split across lines is still read. Requiring a
+    /// separator before `alias` is what keeps clap's `visible_alias`. And
+    /// `alias` args out of the read even if one ever sat inside a `#[serde(`
+    /// line.
     fn alias_sites_in(attribute: &str) -> Vec<String> {
         const KEY: &str = "alias=\"";
         let flat: String = attribute.chars().filter(|c| !c.is_whitespace()).collect();

@@ -1062,9 +1062,8 @@ fn strict_profile_preserves_tool_calls_and_results() {
 }
 
 /// Only the *serialized body* is narrowed. The stored conversation keeps both
-/// values, which is what lets the Messages backend resolve thinking
-/// signatures. It lets a later turn on a tolerant provider still send
-/// reasoning.
+/// values. This is what lets the Messages backend resolve thinking signatures
+/// and lets a later turn on a tolerant provider still send reasoning.
 #[test]
 fn strict_profile_leaves_stored_history_untouched() {
     let items = history_with_model_id_and_reasoning();

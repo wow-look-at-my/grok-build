@@ -1402,6 +1402,10 @@ impl SessionActor {
                     .await
                 {
                     StopGateDecision::AllowStop => {
+                        // A queued user message outranks the built-in gates: it runs as its own turn.
+                        if self.has_runnable_queued_user_row().await {
+                            break round;
+                        }
                         // The built-in todo-stop gate is another stop hook.
                         // It fires after the user hooks allowed the stop,
                         // consumes the SAME continuation budget (a model that

@@ -5,6 +5,7 @@ use super::*;
 use futures::StreamExt;
 use tracing::Instrument;
 use xai_grok_hooks::result::HookDecision;
+use xai_grok_tools::implementations::grok_build::task::backend::ChannelBackend;
 #[path = "wait_interrupt.rs"]
 mod wait_interrupt;
 use wait_interrupt::{
@@ -71,6 +72,31 @@ fn is_interruptible_wait_tool(tool_name: &str, args: &serde_json::Value) -> bool
         "wait_tasks" | "wait_commands_or_subagents" | "wait_tasks_or_subagents" => true,
         "Await" | "AwaitShell" => true,
         _ => false,
+    }
+}
+/// A `task` call that blocks the turn on its subagent. An omitted `run_in_background` means background.
+pub(super) fn is_foreground_task_call(tool_name: &str, args: &serde_json::Value) -> bool {
+    xai_grok_tools::implementations::grok_build::task::is_task_tool_id(tool_name)
+        && match args.get("run_in_background") {
+            Some(serde_json::Value::Bool(flag)) => !flag,
+            Some(serde_json::Value::String(flag)) => flag.trim().eq_ignore_ascii_case("false"),
+            _ => false,
+        }
+}
+/// Model-facing result of a foreground `task` call that a queued user message cut short.
+fn backgrounded_task_tool_result() -> ToolRunResult {
+    let text = "The subagent was moved to the background because the user sent a message. \
+                It keeps running and its result arrives when it finishes."
+        .to_string();
+    ToolRunResult {
+        output: xai_grok_tools::types::output::ToolOutput::Text(
+            xai_grok_tools::types::output::TextOutput {
+                text: text.clone(),
+                consumed_completion_task_id: None,
+            },
+        ),
+        prompt_text: text,
+        effective_tool_name: None,
     }
 }
 fn should_flush_held_queue_before_wait(
@@ -802,6 +828,7 @@ impl SessionActor {
         ));
         let has_interruptible_wait = approved.iter().any(|prepared| {
             is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments())
+                || is_foreground_task_call(&prepared.tool_name, prepared.authored_arguments())
         });
         if should_flush_held_queue_before_wait(
             has_interruptible_wait,
@@ -814,13 +841,15 @@ impl SessionActor {
             self.harvest_queued_prompts_into_interjections(false).await;
         }
         let pending_interjections = self.pending_interjections.clone();
-        let (parent_interject, running_turn) = {
+        let (parent_interject, running_turn, running_prompt_id) = {
             let state = self.state.lock().await;
             (
                 state.message_delivery.interject_signal(),
                 state.running_task.as_ref().map(|task| task.epoch),
+                state.running_prompt_id().map(str::to_string),
             )
         };
+        let subagent_event_tx = self.tool_context.subagent_event_tx.clone();
         let session_id: Arc<str> = Arc::from(&*self.session_info.id.0);
         let session_cwd = self.session_info.cwd.clone();
         let turn = i64::try_from(self.current_turn_number.get()).ok();
@@ -848,6 +877,10 @@ impl SessionActor {
                 let display_cwd = display_cwd.clone();
                 let interruptible =
                     is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments());
+                let task_handoff =
+                    is_foreground_task_call(&prepared.tool_name, prepared.authored_arguments())
+                        .then(|| subagent_event_tx.clone().zip(running_prompt_id.clone()))
+                        .flatten();
                 let prepared = {
                     let mut dispatch_prepared = prepared.clone();
                     if interruptible
@@ -1027,6 +1060,33 @@ impl SessionActor {
                         }
                         .instrument(tool_span)
                         .await
+                    } else if let Some((event_tx, prompt_id)) = task_handoff {
+                        // A queued message cuts a foreground subagent short: it moves to the background before the call is dropped.
+                        let backend = ChannelBackend::for_session(event_tx, session_id.to_string());
+                        (
+                            async {
+                                tokio::select! {
+                                    biased;
+                                    result = call_with_auth_retry(
+                                        am.as_ref(),
+                                        Some(&shared_recovery),
+                                        &prepared.tool_name,
+                                        run_tool,
+                                    ) => result,
+                                    () = async {
+                                        wait_for_wait_interrupt(
+                                            &pending_interjections,
+                                            &parent_interject,
+                                        )
+                                        .await;
+                                        backend.hand_off_foreground_for_prompt(&prompt_id).await;
+                                    } => Ok(backgrounded_task_tool_result()),
+                                }
+                            }
+                            .instrument(tool_span)
+                            .await,
+                            false,
+                        )
                     } else {
                         (
                             call_with_auth_retry(
@@ -3254,9 +3314,12 @@ impl SessionActor {
     /// nor the typed inputs a title is read from. A repeat of the current
     /// title is bytes on the wire that redraw the same row. Every step is
     /// allowed to fail and say nothing. A half-written argument that names no
-    /// tool yet. A name the registry does not know. A body past the size cap
-    /// all leave the row showing the wire name, which is what it showed
-    /// before any of this existed.
+    /// Name a tool call the model is still writing, from the arguments so
+    /// far. Returns a title only when this fragment CHANGED it. The chunk
+    /// carries the answer to the client, which has neither the tool registry
+    /// nor the typed inputs a title is read from. A repeat of the current
+    /// title is bytes on the wire that redraw the same row. Every step is
+    /// allowed to fail and say nothing.
     pub(super) async fn streaming_tool_title(
         self: &Arc<Self>,
         tool_index: u32,

@@ -2036,6 +2036,9 @@ mod disk_full_tests;
 #[path = "acp_session_tests/feedback_turn_lookup_tests.rs"]
 mod feedback_turn_lookup_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/foreground_task_queued_message_tests.rs"]
+mod foreground_task_queued_message_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/history_flatten_tests.rs"]
 mod history_flatten_tests;
 #[cfg(test)]

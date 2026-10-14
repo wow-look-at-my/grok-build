@@ -41,7 +41,7 @@ Control how entries are displayed in the scrollback.
 | `Right` | Expand selected entry |
 | `Ctrl+E` | Expand/collapse all thinking blocks |
 
-Setting `respect_manual_folds = true` under `[scrollback.scroll]` in `pager.toml` (opt-in, off by default — see [Configuration](05-configuration.md)) makes a hand-folded block pinned: streaming updates. Finish events (for example a thinking block ending) leave it alone instead of resetting it, and expanding a block while auto-scroll is following the tail stops following. As a result, you can read. Resume with `Down` at the last entry, scrolling past the bottom, or sending a new prompt. `Ctrl+E` clears pins on thinking blocks.
+Setting `respect_manual_folds = true` under `[scrollback.scroll]` in `pager.toml` (opt-in, off by default — see [Configuration](05-configuration.md)) makes a hand-folded block pinned: streaming updates. Finish events (for example a thinking block ending) leave it alone instead of resetting it, and expanding a block while auto-scroll follows the tail stops following. As a result, you can read. Resume with `Down` at the last entry, scrolling past the bottom, or sending a new prompt. `Ctrl+E` clears pins on thinking blocks.
 
 ### Block Content
 
@@ -68,14 +68,14 @@ Switch between the prompt input and scrollback pane.
 
 ## Blocking cards
 
-Surfaces block the agent on your answer and take over the keyboard while they are open: the **question card** (`ask_user_question`). This is the **MCP elicitation card** (`x.ai/mcp/elicit`), the **permission prompt**, and the **cancel-turn panel**. When more than one is open the permission prompt has the keyboard first, then the cancel-turn panel, then question, then elicitation. The shortcuts bar always shows the keys of whichever one is receiving them.
+Surfaces block the agent on your answer and take over the keyboard while they are open: the **question card** (`ask_user_question`). This is the **MCP elicitation card** (`x.ai/mcp/elicit`), the **permission prompt**, and the **cancel-turn panel**. When more than one is open the permission prompt has the keyboard first, then the cancel-turn panel, then question, then elicitation. The shortcuts bar always shows the keys of whichever one receivs them.
 
 They share one contract:
 
 - `Tab` / `Shift+Tab` walk that card's rows and wrap at both ends. They never move focus out of the card. As a result, the cursor is always somewhere you can see.
 - `Esc` steps back out, one rung at a time. It clears whatever the card has pending first, and only once there is nothing left to clear does it leave. Where it leaves to is the thing that differs per card — the question card and the permission prompt park the keyboard in the scrollback. As a result, you can scroll up and read the context behind them (the card stays on screen), while the cancel-turn panel's "keep running" closes the panel. You leaves the turn (and any subagents) running. Enter or `1`–`4` still pick a cancel-and-subagent choice.
 - With the keyboard parked, the shortcuts bar shows the scrollback's own keys, and its focus hint names the card rather than the prompt: `Tab/Space: question`. That hint is pinned. As a result, a narrow bar can never trim away the only route back.
-- Inside the dashboard's session overlay there is one more rung: once the keyboard is parked, the next `Esc` returns to the dashboard. This is leaving the card pending. (`Ctrl+\` still leaves from any state.)
+- Inside the dashboard's session overlay there is one more rung: once the keyboard is parked, the next `Esc` returns to the dashboard. This leaves the card pending. (`Ctrl+\` still leaves from any state.)
 
 ### MCP elicitation card (`x.ai/mcp/elicit`)
 
@@ -177,7 +177,7 @@ Typing on the "No" row starts a message back to the agent instead. `Enter` sends
 
 **Steal-Esc (runs before the mid-turn hint and clear / rewind):** overlays, modals, slash/file/completion dropdowns, history search, scrollback search, text selection, link highlight, voice, and **Bash / Remember mode exit**. This is when the prompt is empty (Esc leaves `!` / `#` mode and returns to the normal prompt, even while a turn is running). Bare `/feedback` opens the feedback form. Esc closes it.
 
-**Ctrl+C vs Esc:** with a non-empty draft while a turn is running, Ctrl+C clears the draft and keeps the turn. A second Ctrl+C on an empty prompt cancels. Mid-turn, Esc cancels in one press and leaves the draft alone. Idle non-empty Ctrl+C clears in one press. Esc requires presses within 800ms. The clears differ in what they leave behind: `Esc Esc` stashes the draft, so `Ctrl+S` (or `Ctrl+Z` pressed right after) brings it back, while `Ctrl+C` discards it (`Ctrl+Z` still undoes that clear, text only).
+**Ctrl+C vs Esc:** with a non-empty draft while a turn runs, Ctrl+C clears the draft and keeps the turn. A second Ctrl+C on an empty prompt cancels. Mid-turn, Esc cancels in one press and leaves the draft alone. Idle non-empty Ctrl+C clears in one press. Esc requires presses within 800ms. The clears differ in what they leave behind: `Esc Esc` stashes the draft, so `Ctrl+S` (or `Ctrl+Z` pressed right after) brings it back, while `Ctrl+C` discards it (`Ctrl+Z` still undoes that clear, text only).
 
 ---
 
@@ -246,8 +246,8 @@ Over SSH, the remote Grok process usually cannot access the terminal's local X11
 
 While the agent is generating:
 
-- **Plain `Enter`** (with text in the composer) **queues** a follow-up. The running turn takes it at its next model request — nothing is stopped and you do not wait for the turn to end. So the note arrives while the work it steers is still in flight. Rows that own a turn are not folded in this way and run after the current turn instead: `!bash` rows. This also covers a row you are editing, and a row promoted with **send now**. Queued follow-ups also deliberately **hold** while the agent is blocked waiting on background tasks or a subagent (a hint explains the hold and how to send one now).
-- **`Enter` again on the emptied composer** (double-Enter) **interrupts**. The model is cut off mid-response and handed everything you have queued at once, instead of finishing what it was saying. Rows that own a turn (`!bash`, a row you are editing) stay queued and run after the current turn. So the same key sends the **top** queued row now, which ends the wait. This happens while the agent is **blocked waiting** there is no response to cut off.
+- **Plain `Enter`** (with text in the composer) **queues** a follow-up. The running turn takes it at its next model request — nothing is stopped and you do not wait for the turn to end. So the note arrives while the work it steers is still in flight. Rows that own a turn are not folded in this way and run after the current turn instead: `!bash` rows. This also covers a row you edits, and a row promoted with **send now**. Queued follow-ups also deliberately **hold** while the agent is blocked waiting on background tasks or a subagent (a hint explains the hold and how to send one now).
+- **`Enter` again on the emptied composer** (double-Enter) **interrupts**. The model is cut off mid-response and handed everything you queued at once, instead of finishing what it was saying. Rows that own a turn (`!bash`, a row you are editing) stay queued and run after the current turn. Which ends the wait. This happens while the agent is **blocked waiting** there is no response to cut off, so the same key sends the **top** queued row now.
 - The **send now** chord is **cancel-and-send**: it stops the current turn (background tasks, subagents, and the rest of the queue keep running) and sends your message as the next turn, so it always appears at the bottom of the transcript:
   - **Non-empty composer** → cancel and send that text now.
   - **Empty composer** + a queued follow-up → same as bare `Enter`: interrupt the response and hand over the whole queue (no need to focus the queue pane). On the queue pane, the same chord (or the **[Send now]** button) is still cancel-and-send for the **selected** row.
@@ -282,7 +282,7 @@ Actions available from any screen.
 | `Ctrl+\` | | Open or toggle the [Agent Dashboard](23-dashboard.md) | No |
 | `Ctrl+Q` | `Ctrl+D` | Quit the application | Yes (double-press within 1000ms) |
 
-**VS Code family terminal** (VS Code, Cursor, Windsurf, Zed integrated terminals): `Ctrl+Q` is captured by the host, so Grok makes **`Ctrl+D` the sole quit key** (`Ctrl+Q` is not bound). Half-page-down is rebound to bare **`Shift+D`**. Mid-turn interject uses **`Ctrl+L`** (no alternates) because `Ctrl+Enter` / `Ctrl+I` do not reliably reach the PTY. Extensions are opened via `/plugins` instead of `Ctrl+L`.
+**The host captures VS Code family terminal (VS Code, Cursor, Windsurf, Zed integrated terminals): `Ctrl+Q`**, so Grok makes **`Ctrl+D` the sole quit key** (`Ctrl+Q` is not bound). Half-page-down is rebound to bare **`Shift+D`**. Mid-turn interject uses **`Ctrl+L`** (no alternates) because `Ctrl+Enter` / `Ctrl+I` do not reliably reach the PTY. Extensions are opened via `/plugins` instead of `Ctrl+L`.
 
 > **Returning to the welcome screen has no key binding** — use the `/home` slash command (alias `/welcome`) from inside a session. See [Slash Commands](04-slash-commands.md).
 
@@ -346,7 +346,7 @@ Type to filter, then press `Enter` to execute the selected action.
 The bottom of the TUI displays a contextual shortcuts bar showing the most relevant key bindings for the current state. The hints change based on:
 
 - Which pane is focused (scrollback vs. prompt)
-- Whether the agent is running
+- Whether the agent runs
 - What type of entry is selected
 
 ---
@@ -397,7 +397,9 @@ Rewind (idle):    Esc Esc within 800ms (empty prompt + messages)
 
 The composer footer shows the newline chord next to `Enter:send` (or `Enter:queue` while a turn is running) once the draft is non-empty (including `/btw` and other arg-required slash commands). Over SSH, old tmux, or terminals that cannot tell Shift+Enter from Enter, the footer prefers `Alt+Enter`.
 
-`Cmd+Enter` is not an advertised send or newline chord. Many terminals bind it to fullscreen, so `SUPER` is excluded from the Shift/Alt newline matcher and from the agent's bare-Enter send binding. When a terminal that speaks the Kitty keyboard protocol delivers `SUPER+Enter`, the composer still inserts a newline. The key misses send and lands in the textarea, which treats any Enter as a line break. Apple Terminal is a separate local path: CoreGraphics rescue treats held Cmd as modified Enter and inserts a newline on what arrives as bare Enter. Over SSH the Cmd/`SUPER` modifier never arrives (iTerm2 + tmux included). As a result, the chord looks like bare Enter and sends. Remotely, use `Alt+Enter`, a trailing `\` then Enter, or `/ml`.
+`Cmd+Enter` is not an advertised send or newline chord. Many terminals bind it to fullscreen, so `SUPER` is excluded from the Shift/Alt newline matcher and from the agent's bare-Enter send binding. When a terminal that speaks the Kitty keyboard protocol delivers `SUPER+Enter`, the composer still inserts a newline. The key misses send and lands in the textarea, which treats any Enter as a line break. Apple Terminal is a separate local path: CoreGraphics rescue treats held Cmd as modified Enter and inserts a newline on what arrives as bare Enter. Over SSH the Cmd/`SUPER` modifier never arrives (iTerm2 + tmux included).
+
+As a result, the chord looks like bare Enter and sends. Remotely, use `Alt+Enter`, a trailing `\` then Enter, or `/ml`.
 
 With a selection active, typing / `Enter` / paste replace it, delete and word-kill chords delete just the selection, arrows collapse it. This is to the matching edge (word/line moves continue from that edge), and `Esc` or `Tab` drop the highlight while still performing their normal action. Note `Shift+←/→` only selects while the **prompt** is focused. With scrollback focused the same chords jump between turns (see Navigation above).
 

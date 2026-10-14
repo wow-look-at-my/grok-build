@@ -2639,7 +2639,7 @@ async fn a_per_agent_pin_wins_over_the_subagent_default_slot() {
     assert_eq!(config.model, "pinned-model");
 }
 
-/// A slot naming a model the catalog does not carry falls through to the
+/// A slot naming a model the catalog does not carry falls through to the the
 /// parent model rather than sending a request to a model. That model is not
 /// there.
 #[tokio::test]
