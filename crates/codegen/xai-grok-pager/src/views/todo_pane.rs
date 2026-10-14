@@ -648,6 +648,48 @@ mod tests {
         );
     }
 
+    /// The rows on screen are the plan entries the agent sent, in order, with the
+    /// status each carries. A completion the agent's verifier refused arrives as
+    /// `in_progress`, and the pane must draw it unfinished and out of the count.
+    #[test]
+    fn the_drawn_rows_are_the_plan_entries_the_agent_sent() {
+        use agent_client_protocol as acp;
+        let entry = |content: &str, status: acp::PlanEntryStatus| {
+            acp::PlanEntry::new(content, acp::PlanEntryPriority::Medium, status)
+        };
+        let plan = acp::Plan::new(vec![
+            entry("write the docs", acp::PlanEntryStatus::Completed),
+            entry("ship the parser", acp::PlanEntryStatus::InProgress),
+            entry("tag the release", acp::PlanEntryStatus::Pending),
+        ]);
+        let mut pane = TodoPane::new();
+        pane.update_todos(
+            plan.entries
+                .into_iter()
+                .map(xai_grok_shell::tools::todo::todo_item_from_plan_entry)
+                .collect(),
+        );
+
+        let lines = render_pane(&mut pane, 60, 8);
+
+        assert!(lines[0].contains("1/3"), "one of three done: {lines:?}");
+        for (row, content) in [
+            (1, "write the docs"),
+            (2, "ship the parser"),
+            (3, "tag the release"),
+        ] {
+            assert!(
+                lines[row].contains(content),
+                "row {row} should draw {content:?}: {lines:?}"
+            );
+        }
+        assert_eq!(
+            pane.counts().completed,
+            1,
+            "the refused item must not count as done"
+        );
+    }
+
     /// The header line is part of what the pane asks the layout for.
     #[test]
     fn desired_height_reserves_the_header_line() {

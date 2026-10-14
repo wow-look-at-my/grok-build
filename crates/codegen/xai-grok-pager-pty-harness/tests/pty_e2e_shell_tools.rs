@@ -56,3 +56,7 @@ mod send_subagent_message_row;
 mod send_subagent_message_row_opens_child;
 #[path = "pty_e2e/text_before_a_tool_call_reaches_the_screen.rs"]
 mod text_before_a_tool_call_reaches_the_screen;
+#[path = "pty_e2e/todo_pane_after_cancelled_verification_pty.rs"]
+mod todo_pane_after_cancelled_verification_pty;
+#[path = "pty_e2e/todo_pane_matches_agent_list_pty.rs"]
+mod todo_pane_matches_agent_list_pty;
