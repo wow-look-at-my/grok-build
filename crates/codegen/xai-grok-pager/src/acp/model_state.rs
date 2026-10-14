@@ -2,8 +2,9 @@ use agent_client_protocol as acp;
 use indexmap::IndexMap;
 use xai_grok_shell::sampling::types::{
     REASONING_EFFORTS_META_KEY, ReasoningEffort, ReasoningEffortMetaState, ReasoningEffortOption,
-    parse_canonical_effort_token, parse_reasoning_effort_meta, parse_reasoning_efforts_meta,
-    reasoning_effort_meta_state, supports_reasoning_effort_meta,
+    endpoint_meta, parse_canonical_effort_token, parse_reasoning_effort_meta,
+    parse_reasoning_efforts_meta, provider_meta, reasoning_effort_meta_state,
+    supports_reasoning_effort_meta,
 };
 
 use crate::slash::commands::effort_levels::legacy_effort_options;
@@ -144,6 +145,13 @@ impl ModelState {
     /// Machine-readable model ID string for the current model (e.g. "grok-4.5").
     pub fn current_model_id_str(&self) -> Option<&str> {
         Some(self.current.as_ref()?.0.as_ref())
+    }
+
+    /// The `[model_providers.<id>]` the current model routes through, if the
+    /// shell tagged it with one.
+    pub fn current_model_provider(&self) -> Option<&str> {
+        let current = self.current.as_ref()?;
+        provider_meta(self.available.get(current)?.meta.as_ref())
     }
 
     /// Total context window tokens for the current model (if available).
@@ -360,11 +368,50 @@ impl ModelState {
             .cloned()
     }
 
+    /// Resolve `name` against one provider, the `/model <name> <provider>`
+    /// form. An id still wins outright, so a unique catalog id names its model
+    /// regardless of what tag that model carries. A name shared by several
+    /// models otherwise picks the one routed through `provider`.
+    pub fn resolve_by_name_or_id_with_provider(
+        &self,
+        query: &str,
+        provider: &str,
+    ) -> Option<acp::ModelId> {
+        self.available
+            .keys()
+            .find(|id| id.0.as_ref().eq_ignore_ascii_case(query))
+            .or_else(|| {
+                self.available
+                    .iter()
+                    .find(|(_, info)| {
+                        info.name.eq_ignore_ascii_case(query)
+                            && provider_meta(info.meta.as_ref())
+                                .is_some_and(|tag| tag.eq_ignore_ascii_case(provider))
+                    })
+                    .map(|(id, _)| id)
+            })
+            .cloned()
+    }
+
     pub fn display_name_for(&self, id: &acp::ModelId) -> String {
         self.available
             .get(id)
             .map(|info| info.name.clone())
             .unwrap_or_else(|| id.0.to_string())
+    }
+
+    /// The route label of some model whose provider or endpoint host matches
+    /// `query`. `/model <name> <provider>` uses it to tell a real provider
+    /// token from a model name that happens to end in the same word.
+    pub fn route_label_for(&self, query: &str) -> Option<&acp::ModelId> {
+        self.available
+            .iter()
+            .find(|(_, info)| {
+                let meta = info.meta.as_ref();
+                provider_meta(meta).is_some_and(|p| p.eq_ignore_ascii_case(query))
+                    || endpoint_meta(meta).is_some_and(|h| h.eq_ignore_ascii_case(query))
+            })
+            .map(|(id, _)| id)
     }
 
     /// Cycle to the next model.
@@ -432,6 +479,19 @@ mod tests {
     fn test_current_model_name() {
         let state = sample_models();
         assert_eq!(state.current_model_name(), Some("Model A".to_string()));
+    }
+
+    #[test]
+    fn current_model_provider_reads_the_meta_tag() {
+        // A model tagged with a provider reports it; one with no `provider` meta
+        // and a state with no current model both report none.
+        assert_eq!(
+            state_with_meta(Some(serde_json::json!({ "provider": "pazer" })))
+                .current_model_provider(),
+            Some("pazer")
+        );
+        assert_eq!(state_with_meta(None).current_model_provider(), None);
+        assert_eq!(ModelState::default().current_model_provider(), None);
     }
 
     #[test]
