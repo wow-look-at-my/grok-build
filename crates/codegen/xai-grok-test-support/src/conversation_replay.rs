@@ -150,6 +150,8 @@ enum NextStep {
         call_id: String,
         pending_check: Option<TextCheck>,
         picked: PickedToolCall,
+        narration: Option<String>,
+        reasoning: Option<String>,
     },
     Reply {
         entry_index: usize,
@@ -215,11 +217,26 @@ fn render(
             (reply, Some(observed), violation.into_iter().collect())
         }
         NextStep::Call {
-            call_id, picked, ..
+            call_id,
+            picked,
+            narration,
+            reasoning,
+            ..
         } => (
-            ModelReply::ToolCall {
-                call_id,
-                call: picked,
+            match narration {
+                Some(narration) => ModelReply::NarratedToolCall {
+                    narration,
+                    reasoning,
+                    call_id,
+                    call: picked,
+                },
+                None if reasoning.is_some() => {
+                    panic!("a tool call that thinks must also be narrated")
+                }
+                None => ModelReply::ToolCall {
+                    call_id,
+                    call: picked,
+                },
             },
             held,
             Vec::new(),
@@ -395,6 +412,8 @@ impl ReplayingScript {
                 call_id,
                 pending_check: call.result_check.clone(),
                 picked,
+                narration: call.narration.clone(),
+                reasoning: call.reasoning.clone(),
             },
             None => NextStep::NotOffered {
                 entry_index: index,

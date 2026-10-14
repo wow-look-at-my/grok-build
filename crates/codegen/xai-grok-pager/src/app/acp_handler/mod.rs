@@ -209,13 +209,28 @@ fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
                     let mut plan_mode_modal_refresh_needed = false;
                     let mut workflows_modal_refresh = false;
                     let mutated = if dedup_drop {
-                        tracing::debug!(
-                            session_id = notif.request.session_id.0.as_ref(),
-                            event_seq = meta.event_seq,
-                            last_applied = agent.last_applied_event_seq,
-                            is_replay = meta.is_replay,
-                            "load-race: session/update DROPPED by dedup highwater (event_seq <= last_applied)"
-                        );
+                        // A dropped chunk is text the user never sees, so it must leave a trace at warn level
+                        if matches!(
+                            notif.request.update,
+                            acp::SessionUpdate::AgentMessageChunk(_)
+                                | acp::SessionUpdate::AgentThoughtChunk(_)
+                        ) {
+                            tracing::warn!(
+                                session_id = notif.request.session_id.0.as_ref(),
+                                event_seq = meta.event_seq,
+                                last_applied = agent.last_applied_event_seq,
+                                prompt_id = meta.prompt_id.as_deref(),
+                                "agent text DROPPED by dedup highwater: it arrived after an update with a higher event id"
+                            );
+                        } else {
+                            tracing::debug!(
+                                session_id = notif.request.session_id.0.as_ref(),
+                                event_seq = meta.event_seq,
+                                last_applied = agent.last_applied_event_seq,
+                                is_replay = meta.is_replay,
+                                "load-race: session/update DROPPED by dedup highwater (event_seq <= last_applied)"
+                            );
+                        }
                         false
                     } else if let acp::SessionUpdate::Plan(plan) = notif.request.update {
                         let items: Vec<_> = plan

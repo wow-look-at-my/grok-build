@@ -105,7 +105,7 @@ fn messages_text_then_tool_led_response_split_into_frames() {
 }
 
 #[test]
-fn messages_result_reflects_final_text_not_earlier_response() {
+fn messages_result_keeps_the_last_answer_when_the_final_response_has_no_text() {
     let mut r = messages(false);
     let mut out = Vec::new();
     out.extend(r.reduce(StreamEvent::AgentMessage("hi".into())));
@@ -119,7 +119,7 @@ fn messages_result_reflects_final_text_not_earlier_response() {
     out.extend(r.finish(&turn_end("end_turn", "hi")));
     let result = out.last().expect("result line");
     assert_eq!(at(result, "/subtype"), "success");
-    assert_eq!(at(result, "/result"), "", "{result:?}");
+    assert_eq!(at(result, "/result"), "hi", "{result:?}");
     let frames: Vec<&Value> = out
         .iter()
         .filter(|m| at(m, "/type") == "assistant")

@@ -6,7 +6,7 @@ release builds embed prebuilt third-party tool binaries listed under
 [Bundled tool binaries](#bundled-tool-binaries). The original license terms
 are reproduced below, as required by those licenses.
 
-Ported files have been modified from their originals (translated between languages, adapted to this crate's `Tool` trait and runtime, and extended).
+Ported files was modified from their originals (translated between languages, adapted to this crate's `Tool` trait and runtime, and extended).
 
 ## Ported source code
 

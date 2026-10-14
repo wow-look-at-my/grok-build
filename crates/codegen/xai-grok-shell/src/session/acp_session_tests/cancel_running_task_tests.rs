@@ -1453,6 +1453,64 @@ async fn cancel_records_mid_turn_abort_interrupt_marker() {
         })
         .await;
 }
+/// Text streamed before an Esc is text the user saw. It must stay in history and arm the interrupt reminder.
+#[tokio::test(flavor = "current_thread")]
+async fn cancel_mid_stream_keeps_the_streamed_text_in_history() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _gateway_rx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _persistence_rx) =
+                tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("running".to_string());
+            actor
+                .chat_state_handle
+                .push_user_message(ConversationItem::user("what is the forecast"));
+            {
+                let mut cap = actor.streaming_turn_capture.lock();
+                cap.begin_turn(Some("running".to_string()), 1);
+                cap.append(false, "Sunny, 21C.");
+            }
+            {
+                let mut state = actor.state.lock().await;
+                state.running_task = Some(AgentTask::new(
+                    "running",
+                    tokio::task::spawn_local(async {
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    })
+                    .abort_handle(),
+                ));
+                state.pending_inputs.push_back(user_item("running", "test"));
+            }
+            let _ = actor
+                .cancel_running_task(crate::session::CancelOptions {
+                    cancel_subagents: true,
+                    trigger: Some(crate::session::CancelTrigger::Esc),
+                    user_initiated: true,
+                    ..Default::default()
+                })
+                .await;
+            assert_eq!(
+                actor
+                    .chat_state_handle
+                    .get_last_assistant_text_in_turn()
+                    .await
+                    .as_deref(),
+                Some("Sunny, 21C."),
+                "text streamed before the cancel must be committed to history"
+            );
+            assert!(
+                actor.events.take_pending_interrupt_reminder(),
+                "committed text must arm the interrupt reminder"
+            );
+        })
+        .await;
+}
 /// With no assistant text, the cancel does not arm the interrupt reminder.
 #[tokio::test(flavor = "current_thread")]
 async fn cancel_without_assistant_text_skips_interrupt_reminder() {

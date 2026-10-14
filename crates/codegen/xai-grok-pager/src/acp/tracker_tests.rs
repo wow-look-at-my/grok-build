@@ -291,8 +291,12 @@ fn finish_turn_clears_state() {
     let mut sb = ScrollbackState::new();
     let mut tracker = AcpUpdateTracker::new();
     tracker.handle_update(agent_chunk("text"), &meta(), &mut sb);
-    tracker.handle_update(thought_chunk("thinking"), &meta(), &mut sb);
     assert!(tracker.current_agent_msg.is_some());
+    tracker.handle_update(thought_chunk("thinking"), &meta(), &mut sb);
+    assert!(
+        tracker.current_agent_msg.is_none(),
+        "a thought closes the agent message above it"
+    );
     assert!(tracker.current_thinking.is_some());
     tracker.handle_update(tool_update_completed("tc-orphan"), &meta(), &mut sb);
     assert_eq!(tracker.orphan_updates.len(), 1);
@@ -5796,4 +5800,189 @@ fn the_label_tick_redraws_only_when_the_text_changes() {
     assert!(tracker.tick_cache_invalidated_label(t0 + std::time::Duration::from_secs(1)));
     assert!(tracker.tick_cache_invalidated_label(t0 + CACHE_INVALIDATED_LABEL_TTL));
     assert!(!tracker.tick_cache_invalidated_label(t0 + CACHE_INVALIDATED_LABEL_TTL * 2));
+}
+#[derive(Clone, Copy)]
+enum Step {
+    Think(&'static str),
+    Say(&'static str),
+    Tool(&'static str),
+}
+
+/// What the screen shows, top to bottom: `T:` thinking, `A:` agent text, `C:` tool call. Empty thinking is not shown.
+fn screen(sb: &ScrollbackState) -> Vec<String> {
+    sb.entries_in_range(0..sb.len())
+        .iter()
+        .filter_map(|e| match &e.block {
+            RenderBlock::AgentMessage(b) => Some(format!("A:{}", b.text())),
+            RenderBlock::Thinking(b) if !b.text().is_empty() => Some(format!("T:{}", b.text())),
+            RenderBlock::ToolCall(_) => Some("C".to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_block_ordering_reaches_the_screen_in_order() {
+    use Step::*;
+    crate::appearance::cache::set_show_thinking_blocks(true);
+    let cases: Vec<(&str, Vec<Step>, Vec<&str>)> = vec![
+        (
+            "text then tool",
+            vec![Say("hi"), Tool("c1")],
+            vec!["A:hi", "C"],
+        ),
+        (
+            "tool then text",
+            vec![Tool("c1"), Say("after")],
+            vec!["C", "A:after"],
+        ),
+        (
+            "text around a tool",
+            vec![Say("before"), Tool("c1"), Say("after")],
+            vec!["A:before", "C", "A:after"],
+        ),
+        (
+            "thinking text tool",
+            vec![Think("t"), Say("hi"), Tool("c1")],
+            vec!["T:t", "A:hi", "C"],
+        ),
+        (
+            "tool thinking text",
+            vec![Tool("c1"), Think("t"), Say("hi")],
+            vec!["C", "T:t", "A:hi"],
+        ),
+        (
+            "interleaved thinking and tools",
+            vec![Think("t1"), Tool("c1"), Think("t2"), Tool("c2")],
+            vec!["T:t1", "C", "T:t2", "C"],
+        ),
+        (
+            "text between parallel tools",
+            vec![Tool("c1"), Say("mid"), Tool("c2")],
+            vec!["C", "A:mid", "C"],
+        ),
+        (
+            "text thinking text",
+            vec![Say("a"), Think("t"), Say("b")],
+            vec!["A:a", "T:t", "A:b"],
+        ),
+    ];
+    for (name, steps, want) in cases {
+        for same_stream in [true, false] {
+            let mut sb = ScrollbackState::new();
+            let mut tracker = AcpUpdateTracker::new();
+            for (i, step) in steps.iter().enumerate() {
+                let m = meta_stream(if same_stream { 1 } else { 1 + i as i64 });
+                let update = match step {
+                    Think(t) => thought_chunk(t),
+                    Say(t) => agent_chunk(t),
+                    Tool(id) => tool_call(id, acp::ToolKind::Other, "tool"),
+                };
+                tracker.handle_update(update, &m, &mut sb);
+            }
+            assert_eq!(screen(&sb), want, "{name} (one stream: {same_stream})");
+        }
+    }
+}
+
+/// The agent message above a tool call is complete: it is finished, not left running, and all its text is rendered.
+#[test]
+fn a_tool_call_finishes_the_agent_message_above_it() {
+    for call in [
+        tool_call("c1", acp::ToolKind::Other, "tool"),
+        tool_call_completed("c1", acp::ToolKind::Read, "file.rs"),
+    ] {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        tracker.handle_update(agent_chunk("No trailing newline"), &meta(), &mut sb);
+        tracker.handle_update(call, &meta(), &mut sb);
+        let entries = sb.entries_in_range(0..sb.len());
+        let msg = entries
+            .iter()
+            .find(|e| matches!(e.block, RenderBlock::AgentMessage(_)))
+            .expect("the agent message is on screen");
+        assert!(
+            !msg.is_running,
+            "the message above a tool call is not still streaming"
+        );
+        let RenderBlock::AgentMessage(b) = &msg.block else {
+            unreachable!()
+        };
+        assert_eq!(b.copy_text(false).trim(), "No trailing newline");
+    }
+}
+
+fn tool_delta(tracker: &mut AcpUpdateTracker, sb: &mut ScrollbackState, index: u32, id: &str) {
+    tracker.handle_tool_call_delta(Some(id), index, Some("grep"), Some("{\"p\":"), None, sb);
+}
+
+/// A call whose request was cancelled before its real call arrived keeps its interrupted row. The
+/// next request's call at the same index starts a row of its own below the text between them.
+#[test]
+fn a_stale_streaming_tool_row_is_not_adopted_by_the_next_request() {
+    crate::appearance::cache::set_show_thinking_blocks(true);
+    let mut sb = ScrollbackState::new();
+    let mut tracker = AcpUpdateTracker::new();
+    tracker.handle_update(agent_chunk("first"), &meta_stream(1), &mut sb);
+    tool_delta(&mut tracker, &mut sb, 0, "dead-call");
+    // The request is cancelled here: no ToolCall ever arrives for "dead-call".
+    tracker.handle_update(agent_chunk("second"), &meta_stream(2), &mut sb);
+    tool_delta(&mut tracker, &mut sb, 0, "live-call");
+    tracker.handle_update(
+        tool_call("live-call", acp::ToolKind::Other, "grep"),
+        &meta_stream(2),
+        &mut sb,
+    );
+    assert_eq!(
+        screen(&sb),
+        vec!["A:first", "C", "A:second", "C"],
+        "the live call gets its own row below the text that came before it"
+    );
+}
+
+/// A backend-hosted web search arrives as an in-progress call with `backend: true`, then an update with the result.
+#[test]
+fn text_around_a_backend_web_search_reaches_the_screen_in_order() {
+    for same_stream in [true, false] {
+        let mut sb = ScrollbackState::new();
+        let mut tracker = AcpUpdateTracker::new();
+        let search = acp::SessionUpdate::ToolCall(
+            acp::ToolCall::new(
+                acp::ToolCallId::new(Arc::from("ws1")),
+                "Web search".to_string(),
+            )
+            .kind(acp::ToolKind::Search)
+            .status(acp::ToolCallStatus::InProgress)
+            .content(vec![])
+            .locations(vec![])
+            .raw_input(Some(
+                serde_json::json!({ "variant": "WebSearch", "backend": "true" }),
+            ))
+            .meta(serde_json::json!({ "backend": true }).as_object().cloned()),
+        );
+        let done = acp::SessionUpdate::ToolCallUpdate(acp::ToolCallUpdate::new(
+            acp::ToolCallId::new(Arc::from("ws1")),
+            acp::ToolCallUpdateFields::new()
+                .status(Some(acp::ToolCallStatus::Completed))
+                .raw_output(Some(serde_json::json!({
+                    "status": "completed",
+                    "action": { "type": "search", "query": "weather tomorrow", "sources": [] }
+                }))),
+        ));
+        let steps = [
+            agent_chunk("let me check"),
+            search,
+            done,
+            agent_chunk("sunny and 72"),
+        ];
+        for (i, update) in steps.into_iter().enumerate() {
+            let stream = if same_stream { 1 } else { 1 + i as i64 };
+            tracker.handle_update(update, &meta_stream(stream), &mut sb);
+        }
+        assert_eq!(
+            screen(&sb),
+            ["A:let me check", "C", "A:sunny and 72"],
+            "one stream: {same_stream}"
+        );
+    }
 }
