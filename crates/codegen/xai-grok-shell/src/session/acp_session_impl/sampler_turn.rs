@@ -2495,7 +2495,7 @@ impl SessionActor {
 
     /// Build a partial assistant `ConversationItem` from the text the model had already streamed. Do this so a resubmit after an asap-injection cancel or a max-tokens truncation sees the streamed text instead of silently losing it. Returns `None` when the model streamed nothing yet (clean resubmit, nothing to preserve). Only the text channel is preserved. A tool call the model was still emitting arguments for never completed (the
     /// sampler returns no `Completed` on cancel), so there is nothing well-formed to commit.
-    async fn partial_assistant_from_capture(&self) -> Option<ConversationItem> {
+    pub(super) async fn partial_assistant_from_capture(&self) -> Option<ConversationItem> {
         let capture = self.streaming_turn_capture.lock();
         let text = capture.response_text.clone();
         if text.trim().is_empty() {

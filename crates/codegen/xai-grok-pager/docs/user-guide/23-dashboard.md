@@ -36,7 +36,9 @@ Set `GROK_AGENT_DASHBOARD=0` or `[dashboard].enabled = false` to disable.
 
 The **header** shows where a new agent will run — the git branch and the working directory — with state-count chips on the right (the same glyph and colour as the rows, plus a label). Click the location (or press `Ctrl+L`) to **choose** another directory. `/cd <path>` does the same from the dispatch box.
 
-The **actions row** below it holds `+ New Agent` (the default cursor target when no row is selected) and, on the right, `Open Previous` (the session picker. Workspace dashboard only) and the **worktree toggle**. `→` / `←` move the cursor along the row in that order, stopping at either end. Like every arrow on the dashboard, they navigate while the list has focus (`Tab`) or while the dispatch box is empty. They edit the draft once you have typed something. In search mode the empty box is still the query, so they edit. `Enter` acts like a click on the focused item — create, open the picker, or toggle worktree mode — and `Esc` steps back to `+ New Agent`. The same actions are always a click or `/resume` / `Ctrl+W` away. With worktree mode on inside a git repo, the row reads `+ New Agent in Worktree` / `Disable Worktree`, and the next dispatch creates the agent in a fresh git worktree.
+The **actions row** below it holds `+ New Agent` (the default cursor target when no row is selected) and, on the right, `Open Previous` (the session picker. Workspace dashboard only) and the **worktree toggle**. `→` / `←` move the cursor along the row in that order, stopping at either end. Like every arrow on the dashboard, they navigate while the list focus (`Tab`) or while the dispatch box is empty. They edit the draft once you typed something. In search mode the empty box is still the query, so they edit.
+
+`Enter` acts like a click on the focused item — create, open the picker, or toggle worktree mode — and `Esc` steps back to `+ New Agent`. The same actions are always a click or `/resume` / `Ctrl+W` away. With worktree mode on inside a git repo, the row reads `+ New Agent in Worktree` / `Disable Worktree`, and the next dispatch creates the agent in a fresh git worktree.
 
 Each row is a top-level agent. Sort by state (Needs input → Working → Idle → Inactive → Completed → Failed) so same-state rows sit together, or by working directory (`Ctrl+G` toggles). **Inactive** is roster-only sessions owned by other pager processes that this process has not loaded — background noise, so the section **starts collapsed** (expand with `→` / click).
 
@@ -54,7 +56,9 @@ A row stays **Working** while it has live background work even if its turn has f
 
 There are no inline group headers. Sort order keeps same-state rows adjacent, and the per-row dot + color shows the group.
 
-**Dashboard preview** is under **Appearance** in `/settings` (search for "preview"). The list gains space when you turn off the preview and reply panel. You must open a session to reply or answer permissions with the preview off. The new-agent prompt stays available. The setting persists across restarts. You can turn it back on in the same place. `[ui] dashboard_preview = true` in `config.toml` also enables it.
+**Dashboard preview** is under **Appearance** in `/settings` (search for "preview"). The list gains space when you turn off the preview and reply panel. You must open a session to reply or answer permissions with the preview off. The new-agent prompt stays available. The setting persists across restarts. You can turn it back on in the same place.
+
+`[ui] dashboard_preview = true` in `config.toml` also enables it.
 
 The dispatch input uses the same prompt chrome as the agent view. Press `Ctrl+/` to flip it into **search mode**: the `❯` prefix becomes a yellow `Search:` and typing live-filters the list instead of dispatching.
 
@@ -84,13 +88,19 @@ The dispatch input uses the same prompt chrome as the agent view. Press `Ctrl+/`
 | `Ctrl+\` | Return from details view, or exit dashboard |
 | `Ctrl+.` (alt: `?`) | Keyboard shortcuts cheatsheet. Footer shows `?` when `Ctrl+.` cannot be delivered. Bare `?` opens help when list-focused or the draft is empty |
 
-When grouping by state, each group has a **section title** (for example `Working`, `Idle`) with a `▸`/`▾` marker. Select a title and press `→` / `←` to expand or collapse. Click toggles. Hover brightens. Collapse state is remembered while the dashboard stays open. **Inactive** starts collapsed each time the pager starts. Expanding it sticks until you quit.
+When grouping by state, each group has a **section title** (for example `Working`, `Idle`) with a `▸`/`▾` marker. Select a title and press `→` / `←` to expand or collapse. Click toggles. Hover brightens. Collapse state is remembered while the dashboard stays open. **Inactive** starts collapsed each time the pager starts.
 
-Opening a row shows the agent's conversation in the **details view**. The session's own header row does the work — no extra title band: the agent's name leads it (`name │ main ~/xai`. Omitted for an unnamed session), and on the right, after the usual chips, sit `‹ 2/5 ›` (your position among the dashboard's agents. Hidden when there is only one) and `[Dashboard]`. Keys go to the attached agent. `Esc` / `Ctrl+\` (or `[Dashboard]`) return to the dashboard. `‹` / `›` cycle agents. The shortcuts bar shows `Ctrl+\: back to dashboard`. Gotcha: `Esc` only returns. `/exit` inside the agent closes the session (dashboard toast: "Session closed").
+Expanding it sticks until you quit.
+
+Opening a row shows the agent's conversation in the **details view**. The session's own header row does the work — no extra title band: the agent's name leads it (`name │ main ~/xai`. Omitted for an unnamed session), and on the right, after the usual chips, sit `‹ 2/5 ›` (your position among the dashboard's agents. Hidden when there is only one) and `[Dashboard]`. Keys go to the attached agent. `Esc` / `Ctrl+\` (or `[Dashboard]`) return to the dashboard.
+
+`‹` / `›` cycle agents. The shortcuts bar shows `Ctrl+\: back to dashboard`. Gotcha: `Esc` only returns. `/exit` inside the agent closes the session (dashboard toast: "Session closed").
 
 Every session with the dashboard enabled shows `[Dashboard]` in its header, not just ones opened from the dashboard. Clicking it is the same as `Ctrl+\`. Disabling the dashboard (see the top of this page) removes the button too.
 
-`Ctrl+X` in the details view is state-dependent. While a **turn is running** it cancels the turn (same as `Ctrl+C`, including the keep-subagents prompt) and never closes the session. Otherwise — **idle**, a slash command in flight, or a cancel still pending — `Ctrl+X` arms a confirmation: press again a bounded number of seconds. This is to close the session. This is return to the dashboard. Any other key cancels the confirmation. A turn that starts inside the window turns the confirmed press into a cancel instead. (If `Ctrl+X` is also the cheatsheet binding on your terminal, use `Ctrl+.` inside the details view.)
+`Ctrl+X` in the details view is state-dependent. While a **turn runs** it cancels the turn (same as `Ctrl+C`, including the keep-subagents prompt) and never closes the session. Otherwise — **idle**, a slash command in flight, or a cancel still pending — `Ctrl+X` arms a confirmation: press again a bounded number of seconds. This is to close the session. This is return to the dashboard. Any other key cancels the confirmation.
+
+A turn that starts inside the window turns the confirmed press into a cancel instead. (If `Ctrl+X` is also the cheatsheet binding on your terminal, use `Ctrl+.` inside the details view.)
 
 See [Keyboard Shortcuts](03-keyboard-shortcuts.md#agent-dashboard).
 
@@ -147,7 +157,7 @@ Unlike dispatch (new sessions only), peek reply **talks to the selected agent**:
 
 - **Type into `❯ reply`, then `Enter`** to send. Idle agents start immediately. Busy agents **queue** the message (same as the agent view prompt). `Ctrl+S` replies and opens the detail view. `Shift+Enter` / `Alt+Enter` insert a newline (reply grows with the draft).
 - Empty reply + `Enter` opens the agent.
-- **`↑`/`↓` move the caret** once the reply has content. While empty (or unfocused via `Tab`), `↑`/`↓` **switch the selected agent** — the panel follows. A half-typed draft is cleared so it cannot land on the wrong agent. (`Tab` to the list to navigate while a draft is in the reply.)
+- **`↑`/`↓` move the caret** once the reply has content. While empty (or unfocused via `Tab`), `↑`/`↓` **switch the selected agent** — the panel follows. A half-typed draft is cleared so it cannot land on the incorrect agent. (`Tab` to the list to navigate while a draft is in the reply.)
 - **`Esc` unselects**: clear a typed reply first, then deselect and focus `+ New Agent`.
 - **`Tab`** toggles focus between reply and row list. A printable key re-focuses the reply.
 - Full prompt editor (same as dispatch / agent prompt): multi-line paste chips, mouse select, word navigation, `Ctrl+A`/`Ctrl+E`, `Alt+Backspace`, `Ctrl+W`/`Ctrl+U`/`Ctrl+K`, undo, Shift+arrow selection, `Ctrl+Shift+V` inline paste. **`@`** opens the file picker rooted at the **peeked agent's** working directory. The dropdown floats above the panel. Dashboard chords (`Ctrl+X` stop, `Ctrl+T` pin, `Shift+↑/↓` reorder, …) still win while the panel is open.

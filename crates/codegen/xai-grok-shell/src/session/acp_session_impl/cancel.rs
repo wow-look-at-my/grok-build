@@ -731,6 +731,14 @@ impl SessionActor {
         if tore_down_task {
             self.cancel_active_sampling_requests();
             if rewound_input.is_none() {
+                // Text the model streamed before the stop is text the user saw. Keep it, so the model knows it already said it.
+                let streamed_for_this_turn =
+                    self.streaming_turn_capture.lock().prompt_id == cancelled_prompt_id;
+                if streamed_for_this_turn
+                    && let Some(partial) = self.partial_assistant_from_capture().await
+                {
+                    self.record_assistant_response(partial, false).await;
+                }
                 // Handoff answers must exist before the repair below writes its halt text.
                 let answers =
                     if !cancel_subagents && let Some(prompt_id) = cancelled_prompt_id.as_deref() {

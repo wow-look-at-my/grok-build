@@ -137,6 +137,9 @@ pub enum ContentBlock {
     /// Encrypted reasoning the model chose to redact: an opaque `data` blob, never plaintext.
     /// Parsed so a stream carrying one deserializes instead of failing the whole event parse; request-building and the sampler never construct one.
     RedactedThinking { data: String },
+    /// Any block kind this client does not model (e.g. `server_tool_use`).
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -444,10 +447,21 @@ impl TryFrom<MessageDeltaUsageWire> for MessageDeltaUsage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamDelta {
-    TextDelta { text: String },
-    InputJsonDelta { partial_json: String },
-    ThinkingDelta { thinking: String },
-    SignatureDelta { signature: String },
+    TextDelta {
+        text: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
+    },
+    ThinkingDelta {
+        thinking: String,
+    },
+    SignatureDelta {
+        signature: String,
+    },
+    /// Any delta kind this client does not read. Parsed so the event does not fail the stream.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
