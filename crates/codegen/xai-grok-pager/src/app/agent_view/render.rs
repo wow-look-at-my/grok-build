@@ -675,6 +675,12 @@ impl AgentView {
             .models
             .current_model_name()
             .unwrap_or_else(|| "unknown".to_string());
+        // The provider id tells apart catalog entries that share a display
+        // name and differ only in where they route.
+        let model_id = match self.session.models.current_model_provider() {
+            Some(provider) => format!("{model_id} [{provider}]"),
+            None => model_id,
+        };
         let effective_plan = self.plan_mode_pending.unwrap_or(self.plan_mode_active);
         let casual_commenting = self.is_casual_commenting();
         let prompt_focused = if self.plan_approval_view.is_some() {
