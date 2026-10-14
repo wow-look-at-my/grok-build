@@ -21,7 +21,7 @@ Agents and personas both customize behavior, but they operate at different level
 
 An agent defines the session itself. A persona shapes how a subagent behaves within a session. A subagent always runs as an agent type (for example, `general-purpose`), and resolution can layer a persona on top.
 
-Manage both in the agents modal. Open it with `/config-agents` (alias `/agents`), or open the Personas tab directly with `/personas`. The modal has tabs: **Agents** and **Personas**.
+Manage both in the agents modal. Open it with `/config-agents` (alias `/agents`), or open the Personas tab directly with `/personas`. The modal tabs: **Agents** and **Personas**.
 
 ---
 
@@ -67,7 +67,7 @@ usage_frequency = "often"
 export GROK_SUBAGENTS_USAGE_FREQUENCY=explicit-only   # env var takes precedence over config.toml
 ```
 
-Even at `explicit-only`, the `spawn_subagent` tool stays available -- the model can still use it once the user asks. To remove the tool entirely, use `enabled = false` above instead.
+Even at `explicit-only`, the `spawn_subagent` tool stays available -- the model can still use it once the user asks. To remove the tool fully, use `enabled = false` above instead.
 
 ---
 
@@ -194,7 +194,7 @@ The root session can send a follow-up to a subagent it owns. When the flag is on
 
 A child whose parent is the root session cannot message the root. Curated harness toolsets never receive the tool. A capability mode that excludes this kind also removes it.
 
-Child senders are bounded: in-flight messages per sender-target pair, and outbound messages per sender attempt. A send over the limit returns `QuotaExceeded`.
+Child senders are bounded: in-flight messages per sender-target pair, and outbound messages per sender try. A send over the limit returns `QuotaExceeded`.
 
 An inactive subagent always wakes with the message as its next turn. For an active subagent, the optional `delivery` parameter controls how the message lands:
 
@@ -309,7 +309,9 @@ Per-type model overrides apply for any parent. Without an override, a subagent i
 
 ### Model Selection by the Agent
 
-The `spawn_subagent` tool offers the agent a `model` argument. Its description lists the models you can pick, for when you explicitly ask for a subagent on a different model. With `[features] subagent_model_inheritance = true` (or `GROK_SUBAGENT_MODEL_INHERITANCE=1`), both are hidden whenever every model in your picker is an xAI model. Subagents then always inherit the parent's model, and a spawn that still names one fails with a message asking the agent to retry without it. Catalogs with a third-party model, a model with no declared family, or a catalog still loading keep the argument. `[subagents.models]` pins, roles, and personas are unaffected. Read when a session starts. Changing it requires a restart. Precedence: a `requirements.toml`/MDM pin, then the environment variable, then `config.toml`, then remote settings, then the default (off).
+The `spawn_subagent` tool offers the agent a `model` argument. Its description lists the models you can pick, for when you explicitly ask for a subagent on a different model. With `[features] subagent_model_inheritance = true` (or `GROK_SUBAGENT_MODEL_INHERITANCE=1`), both are hidden when every model in your picker is an xAI model. Subagents then always inherit the parent's model, and a spawn that still names one fails with a message asking the agent to retry without it. Catalogs with a third-party model, a model with no declared family, or a catalog still loading keep the argument. `[subagents.models]` pins, roles, and personas are unaffected.
+
+Read when a session starts. Changing it requires a start. Precedence: a `requirements.toml`/MDM pin, then the environment variable, then `config.toml`, then remote settings, then the default (off).
 
 You can also toggle it from `/settings` → Models → **Subagent model inheritance**:
 
@@ -317,7 +319,7 @@ You can also toggle it from `/settings` → Models → **Subagent model inherita
 - Off: Grok may choose a different model for a subagent. Takes effect after restart.
 - NOTE: This setting only applies when all models are xAI "model_family". You likely do not need to configure this setting.
 
-The row shows the value that applies after restart. Toggling writes `[features] subagent_model_inheritance = true` or `= false` (an explicit `false` overrides a remote `true`). `d` (reset) deletes the key so `managed_config.toml`, remote settings, or the default apply again. Agents already running keep the mode they started with. When a layer your `config.toml` cannot override decides the value — a `requirements.toml`/MDM pin, the environment variable, the `GROK_CONFIG` overlay, or an active campaign. This is both the toggle and the reset are refused with a toast that names that layer.
+The row shows the value that applies after start. Toggling writes `[features] subagent_model_inheritance = true` or `= false` (an explicit `false` overrides a remote `true`). `d` (reset) deletes the key so `managed_config.toml`, remote settings, or the default apply again. Agents already running keep the mode they started with. When a layer your `config.toml` cannot override decides the value — a `requirements.toml`/MDM pin, the environment variable, the `GROK_CONFIG` overlay, or an active campaign. This is both the toggle and the reset are refused with a toast that names that layer.
 
 ### Custom Roles and Personas
 

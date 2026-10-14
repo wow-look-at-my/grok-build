@@ -30,7 +30,7 @@ pub(super) fn half_page_down() -> ActionDef {
     }
 }
 
-/// Build the default action definitions.
+/// Build the default action definitions. `mouse_reporting_toggle_enabled`
 ///
 /// `mouse_reporting_toggle_enabled` gates the opt-in `ToggleMouseCapture` shortcut (see below); pass `false` for the standard set.
 pub(super) fn default_actions(mouse_reporting_toggle_enabled: bool) -> Vec<ActionDef> {

@@ -464,3 +464,30 @@ fn messages_late_response_completed_for_flushed_response_is_dropped() {
         "A's late usage must not land on B"
     );
 }
+
+/// The answer is written in one response and the run ends on a response that only calls a tool.
+/// The result is that answer, not an empty string.
+#[test]
+fn messages_result_keeps_the_answer_written_before_a_final_tool_only_response() {
+    let mut r = messages(false);
+    r.reduce(StreamEvent::AgentMessage("ANSWER_BEFORE_THE_CALL".into()));
+    r.reduce(StreamEvent::ToolCall(tool_call_ev()));
+    r.reduce(response_completed("msg_a", "tool_use"));
+    r.reduce(StreamEvent::ToolCallUpdate(tool_update(
+        "completed",
+        json!("done"),
+    )));
+    let mut second = tool_call_ev();
+    second.tool_call_id = "t2".into();
+    r.reduce(StreamEvent::ToolCall(second));
+    r.reduce(response_completed("msg_b", "tool_use"));
+    let out = r.finish(&end_turn());
+    let Some(result) = out.iter().find(|m| msg_type(m) == Some("result")) else {
+        panic!("expected a result line: {out:?}");
+    };
+    assert_eq!(
+        json_str(result, "/result"),
+        Some("ANSWER_BEFORE_THE_CALL"),
+        "a response with no text must not blank the answer written before it: {result:?}"
+    );
+}

@@ -31,7 +31,7 @@ CORS opens Prefer artifacts that work when the page. As a result, a modules/impo
 
 ## Entry-point launch check — all runnable deliverables
 
-Unit tests of internals do NOT prove the deliverable starts. A missing import map, a crashing `main()`, or a bad entry script all pass unit tests and fail the user on first launch. The verification plan MUST include one GATING launch of that entry point. That plan uses the command a user will type (the CLI invocation, the server's start command, the project's own run or test script), asserting that its PRIMARY OBSERVABLE is CORRECT (present and non-empty is INSUFFICIENT). This is a CLI's output CONTENT, not just that it ran. This happens when the deliverable has a launchable entry point and the environment can run it.
+Unit tests of internals do NOT prove the deliverable starts. A missing import map, a crashing `main()`, or a bad entry script all pass unit tests and fail the user on first launch. The verification plan MUST include one GATING launch of that entry point. That plan uses the command a user will type (the CLI invocation, the server's start command, the project's own run or test script), asserting that its PRIMARY OBSERVABLE is CORRECT (present and non-empty is INSUFFICIENT). A CLI's output CONTENT, not just that it ran. This happens when the deliverable has a launchable entry point and the environment can run it.
 
 A server's response BODY, not an HTTP 200. The harness records the command and its output for the verifier. The step names what that output must show, not a file to save it to. A launch that fails is an APP-side defect to FIX, not something to cherry-pick a success past.
 
