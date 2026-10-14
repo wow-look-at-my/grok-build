@@ -386,6 +386,7 @@ async fn chat_completions_collect_synthesizes_reasoning_sibling() {
 /// *correct* assistant message. That message is in the outgoing chat-completions
 /// request body. This ties the whole chain together: read_chat_history_sync
 /// (upgrade_legacy_reasoning) → ConversationRequest →
+/// (upgrade_legacy_reasoning) → ConversationRequest →
 /// `From<ConversationRequest> for ChatCompletionRequest`
 /// (conversation_to_chat_messages) → wire.
 #[tokio::test]
@@ -441,12 +442,15 @@ async fn chat_completions_upgrade_folds_reconstructed_reasoning_into_request() {
     );
 }
 
-/// Upgrade path, grok-build / Responses API. A legacy session whose assistant
-/// carries inline `reasoning: {text, encrypted, id}` must. That session is on
-/// load, reconstruct a sibling Reasoning item that round-trips back to the
-/// Responses API as a **typed** `reasoning` input item. `summary`,
+/// Upgrade path, grok-build / Responses API: a legacy session whose assistant
+/// carries inline `reasoning: {text, encrypted, id}` must and on load. This
+/// also covers reconstruct a sibling Reasoning item that round-trips back to
+/// the Responses API as a **typed** `reasoning` input item. `summary`,
 /// `encrypted_content`, and `id` all preserved. It NOT flattened to a string.
 /// This is the byte-stable SGLang-prefix path; it must not go through
+/// `reasoning_item_text`. The recorded `model_id` is the model the client
+/// sends to: a blob replays verbatim only to the model that minted it. This
+/// is the byte-stable SGLang-prefix path; it must not go through
 /// `reasoning_item_text`. The recorded `model_id` is the model the client
 /// sends to: a blob replays verbatim only to the model that minted it.
 #[tokio::test]
@@ -662,7 +666,9 @@ async fn messages_upgrade_drops_a_thinking_block_minted_by_another_model() {
 /// have that price land on the response. The shell bills the turn at what
 /// was charged instead of an estimate off the model's configured pricing.
 /// Anthropic itself sends no price, and the same path must leave the cost
-/// honestly absent rather than reading silence as free.
+/// honestly absent rather than reading silence as free. Anthropic itself
+/// sends no price, and the same path must leave the cost honestly absent
+/// rather than reading silence as free.
 #[tokio::test]
 async fn messages_backend_receives_a_gateway_reported_cost() {
     for (ticks, expected) in [(Some(4_160_000_i64), Some(4_160_000_i64)), (None, None)] {
@@ -1092,9 +1098,8 @@ async fn test_stream_error_during_streaming() {
 #[tokio::test]
 async fn test_stream_error_during_responses_streaming() {
     // Simulate a stream error mid-response on the Responses API path.
-    // This mirrors test_stream_error_during_streaming but exercises the
-    // Responses. API stream-error detection (the second call site for
-    // the fast-path contains("error") guard).
+    // Responses API stream-error detection (the second call site for the
+    // fast-path contains("error") guard).
     let events = vec![
         SseEvent::with_event(
             "response.output_text.delta",
@@ -1306,9 +1311,9 @@ async fn test_doom_loop_check_enabled_sends_header_and_absorbs_check_event() {
     assert_eq!(window, "1024");
 }
 
-/// With the check disabled no header goes on the wire. It check frames. From
-/// a misbehaving server (rollout skew) are dropped instead of failing the
-/// typed stream. A named frame even with a garbage payload, and an unnamed
+/// With the check disabled no header goes on the wire. It check frames from a
+/// misbehaving server (rollout skew) are dropped instead of failing the typed
+/// stream. This is a named frame even with a garbage payload, and an unnamed
 /// frame identified only by its payload `type` tag.
 #[tokio::test]
 async fn test_doom_loop_check_disabled_sends_no_header_and_drops_check_frames() {

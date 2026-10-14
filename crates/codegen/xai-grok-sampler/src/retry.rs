@@ -178,8 +178,7 @@ pub fn classify_error(
     }
 
     // Shared retry vetoes (`SamplingError::is_retry_vetoed`, also used by
-    // one-shot callers like /btw): - x-must-retry: false — trust the
-    // server.
+    // one-shot callers like /btw): - x-must-retry.
     if err.is_retry_vetoed() {
         return RetryDecision::Fatal(clone_error(err));
     }

@@ -1517,8 +1517,7 @@ impl AcpUpdateTracker {
         self.request_queued
     }
 
-    /// The agent-reported session total (USD ticks), or `None` if the agent
-    /// has never reported one.
+    /// The agent-reported session total (USD ticks), or `None` if the agent.
     pub fn reported_session_cost_usd_ticks(&self) -> Option<i64> {
         self.reported_session_cost_usd_ticks
     }

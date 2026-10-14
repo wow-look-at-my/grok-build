@@ -200,8 +200,10 @@ fn resolve_fd(published: Option<i32>, from_env: Option<&str>) -> Option<i32> {
 static SESSION_CI_HOST_FD: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
 
 /// Start the host worker for a session that is confined in place, before the
-/// confinement is installed, and publish its fd to this process. A confining
-/// profile sandbox (`--sandbox=workspace`, `read-only`, `strict`, a custom
+/// confinement is installed, and publish its fd to this process. The macOS
+/// profile it installs denies the keychain mach services. A `gh` that runs
+/// under it finds its account but no token and answers `401`. The same `gh`
+/// outside the confinement works.
 pub fn start_ci_host_for_session(repo_root: &Path, survives_exec: bool) -> Option<i32> {
     if is_ci_host_subprocess() || ci_host_fd().is_some() || crate::is_jailed() {
         return None;
@@ -948,10 +950,8 @@ mod tests {
         );
     }
 
-    /// The hand-off starts a worker only where one is this process's to start.
-    /// Each of these is a process that must NOT fork another: the worker itself
-    /// re-entering `main`. A session a jail already handed a worker, and a
-    /// process already inside the pathbox jail.
+    /// The hand-off starts a worker only where one is this process's to
+    /// start.
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn the_hand_off_starts_no_worker_where_one_is_not_this_processes_to_start() {

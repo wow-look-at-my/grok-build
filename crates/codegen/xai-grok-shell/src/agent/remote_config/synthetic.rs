@@ -8,12 +8,14 @@ fn get_u64(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Optio
 }
 
 /// True when a `/v1/models` entry is shaped by Synthetic's schema.
+///
 /// An entry is considered Synthetic when it carries any of the Synthetic-only
 /// markers:
 /// * a `provider` of `synthetic`,
 /// * a `reasoning_parameters` object with an `efforts` array,
 /// * a `context_length` field,
 /// * a `syn:`-prefixed routing slug (e.g. `syn:large:text`).
+///
 /// This is intentionally narrow (none of these appear on standard xAI/OpenAI
 /// or Anthropic-style listings), so a Synthetic entry is routed through
 /// [`parse_synthetic_model_entry`] while ordinary entries are left to the

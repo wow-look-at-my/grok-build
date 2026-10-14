@@ -1,4 +1,5 @@
-//! `/todo` -- show the todo list, or capture a request as todo items without interrupting the agent.
+//! `/todo` -- show the todo list, or capture a request as todo items without
+//! interrupting the agent.
 
 use crate::app::actions::Action;
 use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};

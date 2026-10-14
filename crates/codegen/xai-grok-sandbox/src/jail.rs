@@ -104,12 +104,13 @@ fn default_key(name: &str) -> Option<DefaultKey> {
 }
 
 impl JailDefaults {
-    /// The defaults from one `[jail]` config value. A key that is absent, not a
-    /// string, or holds a string we do not recognize keeps the release default. A
-    /// bad token is a no-op rather than a jail that silently grants more (or
-    /// refuses) than the user wrote meaningful words for. Unknown section keys are
-    /// ignored the same way — they may be reserved by `--sandbox` profile config
-    /// or written by a newer build.
+    /// The defaults from one `[jail]` config value. A key that is absent, not
+    /// a The defaults from one `[jail]` config value. A key that is absent,
+    /// not a string, or holds a string we do not recognize keeps the release
+    /// default. A bad token is a no-op rather than a jail that silently
+    /// grants more (or refuses) than the user wrote meaningful words for.
+    /// Unknown section keys are ignored the same way — they may be reserved
+    /// by `--sandbox` profile config or written by a newer build.
     pub fn from_config(config: &toml::Value) -> JailDefaults {
         let mut defaults = JailDefaults::default();
         let Some(table) = config.get("jail").and_then(toml::Value::as_table) else {
@@ -226,11 +227,11 @@ pub const PATHBOX_PROFILE: &str = "pathbox";
 /// raw line is what carries the order of the visible mounts; a parsed struct
 /// groups the flags into separate lists and loses it. The path-mount jail is
 /// enabled only when `--sandbox=pathbox` is given, OR any of
-/// `--ro`/`--rw`/`--rn` appears (the jail is then implied). A bare
-/// `--sandbox` with no value is always invalid, and a `--sandbox <profile>`
-/// naming anything other than `pathbox` is the built-in profile sandbox (not
-/// a jail). It cannot be combined with path flags. Scanning stops at a bare
-/// `--`, so a prompt is never read as a flag.
+/// `--ro`/`--rw`/`--rn` appears (the jail is then implied). A bare `--sandbox`
+/// with no value is always invalid, and a `--sandbox <profile>` naming
+/// anything other than `pathbox` is the built-in profile sandbox (not a jail).
+/// It cannot be combined with path flags. Scanning stops at a bare `--`, so a
+/// prompt is never read as a flag.
 pub fn parse_jail_args<I>(args: I) -> Result<JailRequest, JailError>
 where
     I: IntoIterator<Item = OsString>,
@@ -1234,8 +1235,7 @@ mod tests {
         assert_eq!(sbpl_escape(Path::new("/a\"b")), "/a\\\"b");
     }
 
-    // ── cwd rw default
-    // ─────────────────────────────────────────────────────.
+    // ── cwd rw default.
 
     /// Run the shipped parse + plan against the real cwd, with the release
     /// (no-config) defaults so the assertions are independent of any host
