@@ -2338,8 +2338,8 @@ impl SessionActor {
             None
         }
     }
-    /// Returns true if the error response indicates tokens exceed the model's
-    /// context window.
+    /// Returns true if the error response indicates tokens exceed the
+    /// model's.
     pub(crate) async fn should_compact_on_error(
         &self,
         err: &xai_grok_sampler::SamplingErrorInfo,

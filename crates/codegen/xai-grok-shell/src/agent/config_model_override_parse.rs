@@ -1065,6 +1065,8 @@ mod tests {
 
     /// Drift guard across both user-facing model structs. A `[model.<id>]`
     /// table in `config.toml` is parsed into [`ConfigModelOverride`], not
+    /// Drift guard across both user-facing model structs. A `[model.<id>]`
+    /// table in `config.toml` is parsed into [`ConfigModelOverride`], not
     /// into `ModelEntryConfig`. When a field exists on `ModelEntryConfig` but
     /// not on `ConfigModelOverride`, the key parses as an **unknown field**.
     /// It is silently discarded: the setting appears to work. However, the
@@ -1073,9 +1075,7 @@ mod tests {
     /// still came out permissive, so the provider rejected every replayed
     /// message. The field list is read from the `ModelEntryConfig`
     /// declaration in the source itself. It cannot drift from the struct the
-    /// way a hand-kept list would. Each name is then fed through the real
-    /// parser — the same `parse_model_overrides` the config loader calls
-    /// — and must not come back as an unknown field.
+    /// way a hand-kept list would.
     #[test]
     fn every_user_settable_model_entry_field_is_accepted_by_the_override() {
         // `loaded_in_vram` is runtime state, not config.

@@ -24,7 +24,12 @@ pub struct ForkArgs {
 /// the start; everything after the last flag is the directive. Unknown flags
 /// are deliberately treated as the start of the directive (so `/fork --foo
 /// bar` becomes a directive `--foo bar`) -- the parser is conservative. This
-/// is because the args are user-typed text and we do not want to reject
+/// is because the args are user-typed text and we do not want to reject Parse
+/// the raw argument string after `/fork`. Recognised flags appear at the
+/// start; everything after the last flag is the directive. Unknown flags are
+/// deliberately treated as the start of the directive (so `/fork --foo bar`
+/// becomes a directive `--foo bar`) -- the parser is conservative. This is
+/// because the args are user-typed text and we do not want to reject
 /// directives that happen to begin with `--`.
 pub fn parse_fork_args(args: &str) -> Result<ForkArgs, String> {
     let mut worktree_override: Option<bool> = None;

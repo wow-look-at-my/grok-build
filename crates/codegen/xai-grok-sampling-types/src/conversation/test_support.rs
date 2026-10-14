@@ -241,6 +241,8 @@ pub(super) fn assert_prefix_stable(base: &ConversationRequest, extended: &Conver
 /// echoed back verbatim (reasoning included) with the tool result that
 /// answered it. The loop hand-builds this list instead of taking it from chat
 /// state, so each backend's mapping is asserted against the fixture directly
+/// answered it. The loop hand-builds this list instead of taking it from chat
+/// state, so each backend's mapping is asserted against the fixture directly
 /// (`todo_capture_*` tests). `strip_reasoning` mirrors the backend gate: only
 /// the Messages API drops reasoning.
 pub(super) fn todo_capture_loop_items(strip_reasoning: bool) -> Vec<ConversationItem> {

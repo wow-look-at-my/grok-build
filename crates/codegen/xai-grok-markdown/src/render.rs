@@ -1099,8 +1099,7 @@ impl<'a, 'b> ParsedMarkdown<'a, 'b> {
             // line_source_map[i] is the source line at which output line i was created; source_line_at_cp is the source line containing cp_byte
 
             // Counted over bytes for the same reason as
-            // `count_newlines_in_range`: `cp_byte` is a checkpoint offset
-            // that can land mid-character.
+            // `count_newlines_in_range`: `cp_byte` is a checkpoint offset.
             let source_line_at_cp = self
                 .text
                 .as_bytes()

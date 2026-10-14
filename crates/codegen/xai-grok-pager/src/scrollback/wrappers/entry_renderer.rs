@@ -575,8 +575,7 @@ impl<'a> EntryRenderer<'a> {
 }
 
 /// Convert an API-reported server cost (in USD ticks, 1e10 per USD) to a
-/// readable display string such as `$0.12` or `$3.42`. # Honesty guarantees -
-/// A missing.
+/// readable display string such as `$0.12` or `$3.42`. # Honesty guarantees.
 pub(crate) fn cost_ticks_to_display(cost_usd_ticks: Option<i64>) -> Option<String> {
     let ticks = cost_usd_ticks?;
     if ticks <= 0 {
@@ -961,7 +960,7 @@ impl Renderable for EntryRenderer<'_> {
         // Cache-hit-percent line. Painted on its OWN reserved row directly
         // below the content (`cache_hit_reserved_rows`) rather than sharing
         // the first line's already-narrowed gutter with the cost/timestamp.
-        // Wrapped content never loses more width to fit a second label.
+        // so wrapped content never loses more width to fit a second label.
         if content_skip == 0
             && let Some(cache_str) = self.cache_hit_display()
         {
