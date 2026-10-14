@@ -1999,8 +1999,8 @@ fn peek_tab_toggles_focus_and_typing_refocuses() {
     assert_eq!(state.peek_reply.text(), "y");
 }
 
-// Fixture pins vim off; re-enable and rebuild so the panel is
-// born unfocused under vim.
+// Fixture pins vim off; re-enable and rebuild so the panel is born unfocused
+// under vim. Non-registry editing chords reach the reply widget while the
 /// Non-registry editing chords reach the reply widget while the peek is focused: Ctrl+A moves the
 /// caret to the start and. CtrlCtrl+K kills to end-of-line — the full `PromptWidget` editing surface,
 /// not the old bare-char-only editor.

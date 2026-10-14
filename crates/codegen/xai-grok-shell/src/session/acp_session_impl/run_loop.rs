@@ -1009,6 +1009,9 @@ pub(super) async fn run_session(
                                 let _ = respond_to.send(());
                             }
                         }
+                        SessionCommand::EnqueueCurrentModeUpdate { mode_id } => {
+                            session.enqueue_current_mode_update(acp::SessionModeId::new(mode_id));
+                        }
                         SessionCommand::GetHooksList { respond_to } => {
                             let hooks = crate::extensions::hooks::current_hook_infos(
                                 session.hook_registry.borrow().as_deref(),

@@ -13,7 +13,7 @@ Correct sequence:
 1. `copy_file` / `move_file`, or `cp` / `git mv` in the shell
 2. A **minimal** edit for package name, flags, or imports
 
-`write` and `search_replace` descriptions forbid using those tools as a relocate mechanism. A write whose content is substantially identical to another repo file is rejected and names the similar file.
+`write` and `search_replace` descriptions forbid using those tools as a relocate mechanism. A write whose content is substantially same to another repo file is rejected and names the similar file.
 
 ## Never `rm` a non-ignored git-repo file
 

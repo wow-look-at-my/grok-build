@@ -61,11 +61,9 @@ impl WaitVerdict {
     }
 }
 
-/// Poll until the runs settle or the budget runs out.
-///
-/// `None` means `stopped` said yes: nobody is left to read a verdict. A failed
-/// query is tried again on the same cadence.
-/// the last answer before the budget ends.
+/// Poll until the runs settle or the budget runs out. `None` means `stopped`
+/// said yes: nobody is left to read a verdict. A failed query is tried again
+/// on the same cadence. the last answer before the budget ends.
 pub(super) async fn watch_until_settled<P, PF, S, SF>(
     mut poll: P,
     mut stopped: S,
@@ -283,9 +281,8 @@ async fn run_wait_poller(
     run_poll_and_publish(&task_id, &terminal, &files, poll, stopped, budget, interval).await;
 }
 
-/// The poller's body, with the poll and the stop check given as arguments.
-///
-/// A poll loop that panics still writes a verdict. A verdict that cannot be
+/// The poller's body, with the poll and the stop check given as arguments. A
+/// poll loop that panics still writes a verdict. A verdict that cannot be
 /// written kills the task. Either way the task ends and the session wakes.
 async fn run_poll_and_publish<P, PF, S, SF>(
     task_id: &str,
