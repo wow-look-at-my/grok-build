@@ -4,10 +4,30 @@ use agent_client_protocol as acp;
 use xai_grok_sampler::SamplerConfig;
 use xai_grok_sampling_types::ReasoningEffort;
 
+use crate::agent::reasoning_policy::{EffortSupport, ReasoningNeed, resolve_reasoning_effort};
 use crate::agent::remote_config::ModelsManager;
 use crate::sampling::EffortTarget;
 
 impl ModelsManager {
+    /// The effort tiers the catalog publishes for `model_id`, for
+    /// [`resolve_reasoning_effort`]. Only a published menu counts.
+    pub(crate) fn effort_support(&self, model_id: &str) -> EffortSupport {
+        let menu = self.model_reasoning_efforts(model_id);
+        if menu.is_empty() {
+            return EffortSupport::Unlisted;
+        }
+        EffortSupport::Menu(menu)
+    }
+
+    /// The effort a call for `need` carries on `model_id`.
+    pub(crate) fn reasoning_effort_for(
+        &self,
+        need: ReasoningNeed,
+        model_id: &str,
+    ) -> ReasoningEffort {
+        resolve_reasoning_effort(need, &self.effort_support(model_id))
+    }
+
     pub(crate) fn apply_supported_effort(
         &self,
         sampling: &mut SamplerConfig,

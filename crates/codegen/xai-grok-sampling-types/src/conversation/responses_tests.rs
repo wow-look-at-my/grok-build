@@ -907,6 +907,33 @@ fn test_responses_request_omits_effort_when_unset() {
     );
 }
 
+/// A resolved no-thinking effort reaches the wire as an explicit non-default
+/// tier. This is the body a summarization call sends for a model whose
+/// provider publishes no reasoning metadata. A null effort there inherits the
+/// provider's own thinking, which is the cost the resolution exists to avoid.
+#[test]
+fn a_resolved_no_thinking_effort_is_never_null_on_the_wire() {
+    use crate::ReasoningEffort;
+    use crate::conversation::LOWEST_ENABLED_REASONING_EFFORT;
+
+    let req = ConversationRequest {
+        reasoning_effort: Some(LOWEST_ENABLED_REASONING_EFFORT),
+        ..ConversationRequest::from_items(vec![ConversationItem::user("hi")]).with_model("test")
+    };
+    let resp: crate::rs::CreateResponse = (&req).into();
+    let json = serde_json::to_value(&resp).unwrap();
+    let sent = json
+        .pointer("/reasoning/effort")
+        .and_then(|v| v.as_str())
+        .expect("the resolved effort must reach the wire");
+    assert_eq!(sent, "low");
+    assert_ne!(
+        sent,
+        ReasoningEffort::Medium.as_ref(),
+        "the default tier must never stand in for a resolved no-thinking effort"
+    );
+}
+
 /// The Responses backend is subject to the same invariant. A reasoning-
 /// mandatory target must carry a non-disabled `reasoning.effort`, so
 /// None/Minimal/unset are remapped to the lowest enabled tier.

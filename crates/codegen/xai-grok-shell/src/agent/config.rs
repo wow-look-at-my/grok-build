@@ -4165,20 +4165,6 @@ pub(crate) fn effective_classifier_supports_re(
         .map(|e| e.info().supports_reasoning_effort)
         .unwrap_or(false)
 }
-/// The effort that turns thinking off for `model_id`. Only a model whose effort
-/// menu lists `none` qualifies: some models reject every explicit effort.
-pub(crate) fn thinking_off_effort(
-    models: &IndexMap<String, ModelEntry>,
-    model_id: &str,
-) -> Option<ReasoningEffort> {
-    let info = find_model_by_id(models, model_id)?.info();
-    let offers_off = info.supports_reasoning_effort
-        && info
-            .reasoning_efforts
-            .iter()
-            .any(|o| o.value == ReasoningEffort::None);
-    offers_off.then_some(ReasoningEffort::None)
-}
 /// One reasoning effort, and the model id that reaches it.
 /// Most models leave this list empty and send one id at every effort.
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
