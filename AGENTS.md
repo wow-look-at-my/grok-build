@@ -57,8 +57,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## `/context` Messages breakdown
 
-- Messages is itemized by kind: user, assistant text, reasoning, tool-call arguments, tool results (`estimate_messages_breakdown` in `xai-chat-state`, carried on `ContextInfo::message_breakdown`). The parts sum to `message_tokens`.
-- Overhead is a remainder: occupancy minus system minus the Messages estimate. It is not reasoning, and it is hidden when the estimate meets occupancy. The sub-rows scale to the capped Messages count.
+- Kind itemizes messages: user, assistant text, reasoning, tool-call arguments, tool results (`estimate_messages_breakdown` in `xai-chat-state`, carried on `ContextInfo::message_breakdown`). The parts sum to `message_tokens`.
+- Overhead is a remainder: occupancy minus system minus the Messages estimate. It is not reasoning. It is hidden when the estimate meets occupancy. The sub-rows scale to the capped Messages count.
 
 ## Compaction report
 

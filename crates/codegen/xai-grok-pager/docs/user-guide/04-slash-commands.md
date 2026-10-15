@@ -37,8 +37,7 @@ Grok also auto-compacts once the context window hits 85% (tune it with `[session
 
 ### `/context`
 
-Show the context window split into System prompt, Messages, Overhead, and Free. Messages is itemized into user, assistant, reasoning, tool-call and tool-result rows.
-Rows for Tool definitions, Skills, and MCP servers are already counted in those totals.
+Show the context window split into System prompt, Messages, Overhead, and Free. Messages is itemized into user, assistant, reasoning, tool-call and tool-result rows. Rows for Tool definitions, Skills, and MCP servers are already counted in those totals.
 
 ### `/session-info`
 
