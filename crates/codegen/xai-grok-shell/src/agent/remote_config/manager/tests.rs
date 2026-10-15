@@ -789,6 +789,75 @@ fn reasoning_effort_helpers_resolve_wire_name_to_catalog_key() {
     assert!(mgr.model_reasoning_efforts("missing-model").is_empty());
 }
 
+/// The no-thinking ladder against the catalog shapes that produce it. An
+/// autodetected gateway alias publishes no reasoning metadata at all, which
+/// is the case.
+#[test]
+fn a_no_thinking_call_resolves_through_the_ladder_for_every_catalog_shape() {
+    use crate::agent::reasoning_policy::{EffortSupport, ReasoningNeed};
+
+    let mgr = test_manager();
+
+    let mut offers_none = make_model_entry("offers-none");
+    offers_none.info.supports_reasoning_effort = true;
+    offers_none.info.reasoning_efforts = vec![
+        ReasoningEffortOption {
+            id: "none".into(),
+            value: ReasoningEffort::None,
+            label: "None".into(),
+            description: None,
+            default: false,
+        },
+        ReasoningEffortOption {
+            id: "high".into(),
+            value: ReasoningEffort::High,
+            label: "High".into(),
+            description: None,
+            default: true,
+        },
+    ];
+    mgr.insert_test_entry("offers-none", offers_none);
+
+    let mut enabled_only = make_model_entry("enabled-only");
+    enabled_only.info.supports_reasoning_effort = true;
+    enabled_only.info.reasoning_efforts = vec![ReasoningEffortOption {
+        id: "high".into(),
+        value: ReasoningEffort::High,
+        label: "High".into(),
+        description: None,
+        default: true,
+    }];
+    mgr.insert_test_entry("enabled-only", enabled_only);
+
+    // In the catalog, carrying the flag a listing parses for a provider that published nothing. No menu reaches it.
+    let bare = make_model_entry("bare-entry");
+    mgr.insert_test_entry("bare-entry", bare);
+
+    assert_eq!(
+        mgr.effort_support("offers-none"),
+        EffortSupport::Menu(mgr.model_reasoning_efforts("offers-none"))
+    );
+    assert_eq!(mgr.effort_support("bare-entry"), EffortSupport::Unlisted);
+    assert_eq!(mgr.effort_support("never-seen"), EffortSupport::Unlisted);
+
+    assert_eq!(
+        mgr.reasoning_effort_for(ReasoningNeed::Off, "offers-none"),
+        ReasoningEffort::None
+    );
+    assert_eq!(
+        mgr.reasoning_effort_for(ReasoningNeed::Off, "enabled-only"),
+        ReasoningEffort::High
+    );
+    assert_eq!(
+        mgr.reasoning_effort_for(ReasoningNeed::Off, "never-seen"),
+        ReasoningEffort::Low
+    );
+    assert_eq!(
+        mgr.reasoning_effort_for(ReasoningNeed::Off, "bare-entry"),
+        ReasoningEffort::Low
+    );
+}
+
 #[test]
 fn default_model_honors_allowlist_when_no_default_set() {
     let cfg = config_from_toml(
