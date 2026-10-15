@@ -164,9 +164,10 @@ const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
     "vector_store_ids",
 ];
 
-/// Keys the wire schemas type as a required struct.
-const NULL_TOLERANT_OBJECT_KEYS: &[(&str, &str)] =
-    &[("output_tokens_details", r#"{"reasoning_tokens":0}"#)];
+/// Keys the wire schemas type as a required sub-object, where a gateway sends
+/// `null` for one it never filled in.
+const NULL_TOLERANT_OBJECT_KEYS: &[(&str, &[(&str, u64)])] =
+    &[("output_tokens_details", &[("reasoning_tokens", 0)])];
 
 /// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
 /// Reports whether anything changed, so a caller can skip a retry that cannot
@@ -182,12 +183,18 @@ fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
                     *child = serde_json::Value::Array(Vec::new());
                     changed = true;
                 } else if child.is_null()
-                    && let Some((_, replacement)) = NULL_TOLERANT_OBJECT_KEYS
+                    && let Some((_, fields)) = NULL_TOLERANT_OBJECT_KEYS
                         .iter()
                         .find(|(name, _)| *name == key.as_str())
                 {
-                    *child = serde_json::from_str(replacement)
-                        .expect("a hard-coded replacement must parse");
+                    *child = serde_json::Value::Object(
+                        fields
+                            .iter()
+                            .map(|(name, value)| {
+                                (name.to_string(), serde_json::Value::from(*value))
+                            })
+                            .collect(),
+                    );
                     changed = true;
                 } else {
                     changed |= null_lists_as_empty(child);
