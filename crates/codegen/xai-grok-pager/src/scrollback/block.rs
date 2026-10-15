@@ -1440,6 +1440,7 @@ mod searchable_text_tests {
             tool_call_count: 1,
             message_count: 1,
             message_tokens: 30,
+            message_breakdown: Default::default(),
             free_tokens: 900,
             usage_pct: 10,
             auto_compact_threshold_percent: 85,
