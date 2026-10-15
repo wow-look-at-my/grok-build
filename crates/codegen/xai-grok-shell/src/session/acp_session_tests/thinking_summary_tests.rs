@@ -626,3 +626,58 @@ async fn a_held_summary_leaves_the_caller_free_and_the_queue_closed() {
         })
         .await;
 }
+
+/// The summary call asks for reasoning off, and what reaches the wire names a
+/// tier rather than omitting the field. An omitted effort is not neutral: the
+/// provider answers it with its own default thinking. This is what a
+/// five-word summary must not pay for. The mock's model publishes no effort
+/// menu, so this also pins the unlisted rung.
+#[tokio::test]
+async fn a_summary_call_asks_for_reasoning_off_on_the_wire() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, mut grx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            actor.thinking_summaries_enabled = true;
+            let actor = std::sync::Arc::new(actor);
+
+            let server = MockInferenceServer::start().await.unwrap();
+            server.set_response("Reads the parser first");
+            aim_at(&actor, &server).await;
+
+            actor.spawn_thinking_summary(
+                &response_carrying_thinking(&long_reasoning()),
+                Some(1_000),
+            );
+            take_thinking_summary(&mut grx)
+                .await
+                .expect("the summary must be broadcast");
+
+            let bodies = server.request_bodies();
+            assert_eq!(
+                bodies.len(),
+                1,
+                "one thinking block is one summary call: {}",
+                server.request_log_summary()
+            );
+            let effort = bodies[0]
+                .pointer("/reasoning/effort")
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "the summary call must name a reasoning tier; an omitted one \
+                         inherits the provider default: {}",
+                        bodies[0]
+                    )
+                });
+            assert_ne!(
+                effort, "medium",
+                "a summary must never land on the default tier: {}",
+                bodies[0]
+            );
+        })
+        .await;
+}

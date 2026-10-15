@@ -19,6 +19,7 @@ pub mod mvp_agent;
 pub(crate) mod otel_gate;
 pub(crate) mod proxy;
 pub(crate) mod proxy_headers;
+pub(crate) mod reasoning_policy;
 pub mod relay;
 pub mod remote_config;
 pub(crate) mod restore_code;
