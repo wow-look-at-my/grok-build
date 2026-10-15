@@ -104,9 +104,11 @@ pub(crate) fn deserialize_response_event(data: &str) -> Result<rs::ResponseStrea
     let mut event = match from_sse_payload::<rs::ResponseStreamEvent>(data) {
         Ok(event) => event,
         Err(first_err) => {
-            // Try sanitizing: parse as Value, strip unknown tools, retry.
+            // Try sanitizing: parse as Value, repair the shapes a gateway
+            // leaves out, strip unknown tools, retry.
             if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) {
                 null_lists_as_empty(&mut value);
+                synthesized_fields_filled(&mut value);
                 // Strip tools that async_openai's rs::Tool can't deserialize (e.g., xAI-specific "x_search")
                 // Instead of maintaining a hardcoded allowlist, try deserializing each tool entry; if it fails, drop it
                 if let Some(tools) = value
@@ -118,6 +120,14 @@ pub(crate) fn deserialize_response_event(data: &str) -> Result<rs::ResponseStrea
                 if let Ok(mut event) = serde_json::from_value::<rs::ResponseStreamEvent>(value) {
                     apply_terminal_event_overrides(&mut event, data);
                     return Ok(event);
+                } else {
+                    // The strict error names the nulls it saw; the rescue's own
+                    // error names what is still missing after the repair.
+                    tracing::debug!(
+                        target: crate::sampling_log::TARGET,
+                        event = "response_rescue_failed",
+                        "the repair pass did not produce a parseable event"
+                    );
                 }
             }
             tracing::error!(
@@ -154,6 +164,13 @@ const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
     "vector_store_ids",
 ];
 
+/// Keys the wire schemas type as a required sub-object, where a gateway sends
+/// `null` for one it never filled in.
+const NULL_TOLERANT_OBJECT_KEYS: &[(&str, &[(&str, u64)])] = &[
+    ("input_tokens_details", &[("cached_tokens", 0)]),
+    ("output_tokens_details", &[("reasoning_tokens", 0)]),
+];
+
 /// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
 /// Reports whether anything changed, so a caller can skip a retry that cannot
 /// differ. A gateway written in Go marshals an unset slice as `null`, so
@@ -167,6 +184,20 @@ fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
                 if child.is_null() && NULL_TOLERANT_LIST_KEYS.contains(&key.as_str()) {
                     *child = serde_json::Value::Array(Vec::new());
                     changed = true;
+                } else if child.is_null()
+                    && let Some((_, fields)) = NULL_TOLERANT_OBJECT_KEYS
+                        .iter()
+                        .find(|(name, _)| *name == key.as_str())
+                {
+                    *child = serde_json::Value::Object(
+                        fields
+                            .iter()
+                            .map(|(name, value)| {
+                                (name.to_string(), serde_json::Value::from(*value))
+                            })
+                            .collect(),
+                    );
+                    changed = true;
                 } else {
                     changed |= null_lists_as_empty(child);
                 }
@@ -178,6 +209,136 @@ fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
             .fold(false, |changed, item| null_lists_as_empty(item) || changed),
         _ => false,
     }
+}
+
+/// Whether `value` looks like a Responses API response object: it carries the
+/// identity fields an object of that kind always has.
+fn is_response_object(value: &serde_json::Value) -> bool {
+    let serde_json::Value::Object(map) = value else {
+        return false;
+    };
+    map.contains_key("id") && map.contains_key("created_at") && map.contains_key("model")
+}
+
+/// The `status` an event's own type implies. `None` leaves the payload alone:
+/// an unknown type states nothing about the outcome, and a status the payload
+/// carries is never overwritten.
+fn status_for_event_type(event_type: Option<&str>) -> Option<&'static str> {
+    match event_type {
+        Some("response.created" | "response.in_progress" | "response.output_item.added") => {
+            Some("in_progress")
+        }
+        Some("response.completed") => Some("completed"),
+        Some("response.failed") => Some("failed"),
+        Some("response.incomplete") => Some("incomplete"),
+        _ => None,
+    }
+}
+
+/// Fill in the fields a synthesized frame omits, so the frame parses. A
+/// gateway that speaks the streaming subset builds these frames itself rather
+/// than forwarding the provider's. It fills in only what it has deciphered by
+/// then. Omissions each kill the stream on the frame that carries them,
+/// because `async_openai` types every one as required: * `response.status`.
+/// Those Omissions are on the frames that open the stream. * a reasoning
+/// item's `summary`, which arrives as a sibling event stream and is not yet
+/// on the item when the item is announced. * a message item's `status`, which
+/// appears only once the item is done. An omission is filled only where the
+/// payload's own event type says what the value is, and a value the payload
+/// carries is left alone.
+fn synthesized_fields_filled(value: &mut serde_json::Value) -> bool {
+    let serde_json::Value::Object(map) = value else {
+        return false;
+    };
+    let event_type = map.get("type").and_then(|t| t.as_str()).map(str::to_owned);
+    let status = status_for_event_type(event_type.as_deref());
+
+    let mut changed = false;
+    if let Some(response) = map.get_mut("response").filter(|v| is_response_object(v)) {
+        changed |= insert_if_absent(response, "status", status);
+        changed |= fill_output_items(response, status);
+    }
+    if let Some(item) = map.get_mut("item") {
+        changed |= fill_output_item(item, status);
+    }
+    if let Some(output) = map.get_mut("output").and_then(|v| v.as_array_mut()) {
+        for item in output {
+            changed |= fill_output_item(item, status);
+        }
+    }
+    changed |= fill_event_fields(map);
+    changed
+}
+
+/// Top-level index fields an event omits, keyed by the event's own type. A
+/// reasoning summary streams one part per reasoning item, and the item is
+/// what the event identifies. The part index is therefore always the first
+/// one, and the event carries no other reading.
+fn fill_event_fields(map: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let Some(event_type) = map.get("type").and_then(|t| t.as_str()).map(str::to_owned) else {
+        return false;
+    };
+    let field = match event_type.as_str() {
+        "response.reasoning_summary_text.delta" | "response.reasoning_summary_text.done" => {
+            "summary_index"
+        }
+        _ => return false,
+    };
+    if map.contains_key(field) {
+        return false;
+    }
+    map.insert(field.to_string(), serde_json::Value::from(0));
+    true
+}
+
+/// Fill the fields of every item in a response object's `output` list.
+fn fill_output_items(response: &mut serde_json::Value, status: Option<&'static str>) -> bool {
+    let Some(output) = response.get_mut("output").and_then(|v| v.as_array_mut()) else {
+        return false;
+    };
+    let mut changed = false;
+    for item in output {
+        changed |= fill_output_item(item, status);
+    }
+    changed
+}
+
+/// Fill the fields one output item omits, keyed by the item's own `type`.
+fn fill_output_item(item: &mut serde_json::Value, status: Option<&'static str>) -> bool {
+    let Some(kind) = item.get("type").and_then(|t| t.as_str()).map(str::to_owned) else {
+        return false;
+    };
+    match kind.as_str() {
+        // A reasoning item's summary arrives as its own event stream, so the item is announced before it has one.
+        "reasoning" => insert_if_absent(item, "summary", Some("")),
+        "message" => insert_if_absent(item, "status", status),
+        _ => false,
+    }
+}
+
+/// Insert `key` as an empty list or as `value`, unless the object already
+/// carries the key. An absent key with nothing to insert changes nothing.
+fn insert_if_absent(
+    object: &mut serde_json::Value,
+    key: &str,
+    value: Option<&'static str>,
+) -> bool {
+    let serde_json::Value::Object(map) = object else {
+        return false;
+    };
+    if map.contains_key(key) {
+        return false;
+    }
+    let Some(value) = value else {
+        return false;
+    };
+    let replacement = if value.is_empty() {
+        serde_json::Value::Array(Vec::new())
+    } else {
+        serde_json::Value::String(value.to_string())
+    };
+    map.insert(key.to_string(), replacement);
+    true
 }
 
 /// Dotted paths of every `null` in the payload, for a failure that named no
@@ -256,11 +417,22 @@ fn parse_sse_event<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
         Ok(event) => return Ok(event),
         Err(err) => err,
     };
-    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data)
-        && null_lists_as_empty(&mut value)
-        && let Ok(event) = serde_json::from_value::<T>(value)
-    {
-        return Ok(event);
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) else {
+        return Err(strict);
+    };
+    // Both repairs run: each sees a different kind of omission.
+    let lists = null_lists_as_empty(&mut value);
+    let synthesized = synthesized_fields_filled(&mut value);
+    if lists || synthesized {
+        match serde_json::from_value::<T>(value) {
+            Ok(event) => return Ok(event),
+            Err(rescue) => {
+                tracing::debug!(
+                    error = %rescue,
+                    "the rescue pass did not produce a parseable event"
+                );
+            }
+        }
     }
     Err(strict)
 }
@@ -2958,6 +3130,276 @@ mod tests {
             start,
             messages::MessageStreamEvent::MessageStart { .. }
         ));
+    }
+
+    /// Every field a synthesized frame may omit must round-trip. A Go gateway
+    /// builds these frames itself rather than forwarding the provider's. It
+    /// carries every unset slice as `null`, leaves `status` off the response
+    /// object, announces a reasoning item before its `summary` exists. It
+    /// stamps a message item's `status` only once the item is done.
+    #[test]
+    fn a_synthesized_frame_missing_required_fields_is_rescued() {
+        let created = parse_sse_event::<rs::ResponseStreamEvent>(
+            r#"{"type":"response.created","sequence_number":0,"response":{
+                "id":"chatcmpl-x","object":"","created_at":1792078655,
+                "completed_at":null,"error":null,"incomplete_details":null,
+                "instructions":null,"max_output_tokens":null,"max_tool_calls":null,
+                "metadata":null,"model":"","output":null,"previous_response_id":null,
+                "prompt_cache_key":null,"reasoning":null,"safety_identifier":null,
+                "service_tier":null,"tools":null,"usage":null,
+                "extra_fields":{"request_type":"","routing_info":{},"latency":0}}}"#,
+        )
+        .expect("a statusless created frame must be rescued");
+        assert!(matches!(
+            created,
+            rs::ResponseStreamEvent::ResponseCreated(_)
+        ));
+
+        let reasoning = parse_sse_event::<rs::ResponseStreamEvent>(
+            r#"{"type":"response.output_item.added","sequence_number":2,"output_index":0,
+                "item":{"id":"msg_x_reasoning","type":"reasoning","role":"assistant",
+                        "content":[]}}"#,
+        )
+        .expect("a reasoning item with no summary must be rescued");
+        assert!(matches!(
+            reasoning,
+            rs::ResponseStreamEvent::ResponseOutputItemAdded(_)
+        ));
+
+        let message = parse_sse_event::<rs::ResponseStreamEvent>(
+            r#"{"type":"response.output_item.added","sequence_number":3,"output_index":1,
+                "item":{"id":"msg_x_item_1","type":"message","role":"assistant",
+                        "content":[]}}"#,
+        )
+        .expect("a message item with no status must be rescued");
+        assert!(matches!(
+            message,
+            rs::ResponseStreamEvent::ResponseOutputItemAdded(_)
+        ));
+
+        // The summary streams one part per reasoning item, so the part index
+        // is the first one and the event names only the item.
+        for (event_type, data) in [
+            (
+                "response.reasoning_summary_text.delta",
+                r#"{"type":"response.reasoning_summary_text.delta","sequence_number":3,
+                    "output_index":0,"item_id":"msg_x_reasoning","delta":"The"}"#,
+            ),
+            (
+                "response.reasoning_summary_text.done",
+                r#"{"type":"response.reasoning_summary_text.done","sequence_number":4,
+                    "output_index":0,"item_id":"msg_x_reasoning","text":"The gist"}"#,
+            ),
+        ] {
+            parse_sse_event::<rs::ResponseStreamEvent>(data)
+                .unwrap_or_else(|e| panic!("{event_type} with no summary_index: {e}"));
+        }
+    }
+
+    /// One frame of each shape a gateway synthesizes, repaired end to end.
+    /// Each fixture is a real frame trimmed to the fields that matter: one
+    /// `null` where a list belongs, one missing `status`, one reasoning item.
+    /// This holds before its `summary` exists, one summary event with no part
+    /// index, and one `null` where a required sub-object belongs. Together
+    /// they are every omission a captured 1779-frame stream from the gateway
+    /// contained.
+    #[test]
+    fn every_synthesized_omission_is_repaired() {
+        for (label, data) in [
+            (
+                "created with null lists and no status",
+                r#"{"type":"response.created","sequence_number":0,"response":{
+                    "id":"r","object":"","created_at":1,"completed_at":null,
+                    "error":null,"incomplete_details":null,"instructions":null,
+                    "max_output_tokens":null,"max_tool_calls":null,"metadata":null,
+                    "model":"","output":null,"previous_response_id":null,
+                    "prompt_cache_key":null,"reasoning":null,"safety_identifier":null,
+                    "service_tier":null,"tools":null,"usage":null}}"#,
+            ),
+            (
+                "reasoning item announced before its summary",
+                r#"{"type":"response.output_item.added","sequence_number":2,"output_index":0,
+                    "item":{"id":"r1","type":"reasoning","role":"assistant","content":[]}}"#,
+            ),
+            (
+                "message item before its status",
+                r#"{"type":"response.output_item.added","sequence_number":3,"output_index":1,
+                    "item":{"id":"m1","type":"message","role":"assistant","content":[]}}"#,
+            ),
+            (
+                "summary delta with no part index",
+                r#"{"type":"response.reasoning_summary_text.delta","sequence_number":4,
+                    "output_index":0,"item_id":"r1","delta":"The"}"#,
+            ),
+            (
+                "completed with a nested item and a null details object",
+                r#"{"type":"response.completed","sequence_number":5,"response":{
+                    "id":"r","object":"","created_at":1,"model":"m","status":"completed",
+                    "output":[{"id":"r1","type":"reasoning","role":"assistant","content":[]}],
+                    "completed_at":null,"error":null,"incomplete_details":null,
+                    "instructions":null,"max_output_tokens":null,"max_tool_calls":null,
+                    "metadata":null,"previous_response_id":null,"prompt_cache_key":null,
+                    "reasoning":null,"safety_identifier":null,"service_tier":null,
+                    "tools":null,
+                    "usage":{"input_tokens":1,
+                             "input_tokens_details":{"cached_tokens":0},
+                             "output_tokens":1,"output_tokens_details":null,
+                             "total_tokens":2}}}"#,
+            ),
+        ] {
+            deserialize_response_event(data)
+                .unwrap_or_else(|e| panic!("{label} must be rescued: {e}"));
+        }
+    }
+
+    /// A sub-object the schema types as required, and the gateway sends as
+    /// `null`, is replaced by the object it stands for. The replacement
+    /// carries the sub-object's own required fields, or the parse still fails.
+    /// Both usage breakdowns are covered: the gateway omits either.
+    #[test]
+    fn a_null_required_object_becomes_the_empty_one() {
+        let mut value = serde_json::json!({
+            "usage": {
+                "input_tokens": 297,
+                "input_tokens_details": null,
+                "output_tokens": 100,
+                "output_tokens_details": null,
+                "total_tokens": 397
+            }
+        });
+        assert!(null_lists_as_empty(&mut value));
+        assert_eq!(
+            value.pointer("/usage/input_tokens_details/cached_tokens"),
+            Some(&serde_json::json!(0))
+        );
+        assert_eq!(
+            value.pointer("/usage/output_tokens_details/reasoning_tokens"),
+            Some(&serde_json::json!(0))
+        );
+    }
+
+    /// An index the event states is its own.
+    #[test]
+    fn a_stated_index_is_never_overwritten() {
+        let mut value = serde_json::json!({
+            "type": "response.reasoning_summary_text.delta",
+            "sequence_number": 3,
+            "output_index": 0,
+            "item_id": "r",
+            "summary_index": 2,
+            "delta": "x"
+        });
+        assert!(!synthesized_fields_filled(&mut value));
+        assert_eq!(
+            value.pointer("/summary_index").and_then(|v| v.as_u64()),
+            Some(2)
+        );
+    }
+
+    /// A terminal frame carries its items inside `response.output`, not on a
+    /// top-level `item`, so a repair keyed only on the latter would miss them.
+    #[test]
+    fn nested_output_items_are_filled_too() {
+        let mut value = serde_json::json!({
+            "type": "response.incomplete",
+            "response": {
+                "id": "chatcmpl-x", "created_at": 1, "model": "m",
+                "status": "incomplete",
+                "output": [
+                    {"id": "r", "type": "reasoning", "role": "assistant", "content": []},
+                    {"id": "m", "type": "message", "role": "assistant", "content": []}
+                ]
+            }
+        });
+        assert!(synthesized_fields_filled(&mut value));
+        assert_eq!(
+            value.pointer("/response/output/0/summary"),
+            Some(&serde_json::json!([]))
+        );
+        assert_eq!(
+            value
+                .pointer("/response/output/1/status")
+                .and_then(|v| v.as_str()),
+            Some("incomplete")
+        );
+    }
+
+    /// A status the payload carries is its own, and an unknown event type
+    /// states nothing about the response.
+    #[test]
+    fn a_response_status_is_never_overwritten() {
+        let mut stated = serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "r", "created_at": 1, "model": "m", "status": "incomplete"}
+        });
+        assert!(!synthesized_fields_filled(&mut stated));
+        assert_eq!(
+            stated.pointer("/response/status"),
+            Some(&serde_json::json!("incomplete"))
+        );
+
+        let mut unknown = serde_json::json!({
+            "type": "response.some_future_event",
+            "response": {"id": "r", "created_at": 1, "model": "m"}
+        });
+        assert!(!synthesized_fields_filled(&mut unknown));
+        assert!(unknown.pointer("/response/status").is_none());
+    }
+
+    #[test]
+    fn a_terminal_frame_states_its_own_outcome() {
+        for (event_type, expected) in [
+            ("response.completed", "completed"),
+            ("response.failed", "failed"),
+            ("response.incomplete", "incomplete"),
+            ("response.in_progress", "in_progress"),
+        ] {
+            let mut value = serde_json::json!({
+                "type": event_type,
+                "response": {"id": "r", "created_at": 1, "model": "m"}
+            });
+            assert!(
+                synthesized_fields_filled(&mut value),
+                "{event_type} must be filled in"
+            );
+            assert_eq!(
+                value.pointer("/response/status").and_then(|v| v.as_str()),
+                Some(expected),
+                "{event_type} must resolve to {expected}"
+            );
+        }
+    }
+
+    /// A value the payload states is kept, on both an item and the response.
+    #[test]
+    fn a_stated_item_field_is_never_overwritten() {
+        let mut value = serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "id": "m", "type": "message", "role": "assistant",
+                "content": [], "status": "completed"
+            }
+        });
+        assert!(!synthesized_fields_filled(&mut value));
+        assert_eq!(
+            value.pointer("/item/status").and_then(|v| v.as_str()),
+            Some("completed")
+        );
+
+        let mut reasoning = serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "id": "r", "type": "reasoning", "role": "assistant",
+                "content": [], "summary": [{"type": "summary_text", "text": "done"}]
+            }
+        });
+        assert!(!synthesized_fields_filled(&mut reasoning));
+        assert_eq!(
+            reasoning
+                .pointer("/item/summary/0/text")
+                .and_then(|v| v.as_str()),
+            Some("done")
+        );
     }
 
     #[test]
