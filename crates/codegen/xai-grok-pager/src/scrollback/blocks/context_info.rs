@@ -940,6 +940,31 @@ mod tests {
         assert!(!all.contains("Overhead"), "{all}");
     }
 
+    /// The reported session: 176k of 1.0m used, 2.1k of system prompt, and an estimate that fills the rest.
+    /// Reasoning and tool calls must render as their own rows.
+    #[test]
+    fn legend_shows_reasoning_when_the_estimate_fills_occupancy() {
+        let mut snap = snapshot();
+        snap.used = 176_000;
+        snap.total = 1_000_000;
+        snap.system_prompt_tokens = 2_100;
+        snap.message_breakdown = MessageTokenBreakdown {
+            user: 6_000,
+            assistant: 9_000,
+            tool_calls: 21_000,
+            tool_results: 98_000,
+            reasoning: 46_000,
+        };
+        snap.message_tokens = snap.message_breakdown.total();
+
+        let block = ContextInfoBlock::new(snap, "openrouter/deepseek/deepseek-v4.1-flash");
+        let all = all_text(&block.build_lines(&test_theme(), BarLayout::WIDE));
+        println!("{all}");
+        for label in ["Reasoning", "Tool calls", "Tool results"] {
+            assert!(all.contains(label), "{label} row missing:\n{all}");
+        }
+    }
+
     #[test]
     fn message_parts_sum_to_the_shown_total() {
         let b = MessageTokenBreakdown {
