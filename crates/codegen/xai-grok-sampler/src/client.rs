@@ -104,9 +104,11 @@ pub(crate) fn deserialize_response_event(data: &str) -> Result<rs::ResponseStrea
     let mut event = match from_sse_payload::<rs::ResponseStreamEvent>(data) {
         Ok(event) => event,
         Err(first_err) => {
-            // Try sanitizing: parse as Value, strip unknown tools, retry.
+            // Try sanitizing: parse as Value, repair the shapes a gateway
+            // leaves out, strip unknown tools, retry.
             if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) {
                 null_lists_as_empty(&mut value);
+                status_from_event_type(&mut value);
                 // Strip tools that async_openai's rs::Tool can't deserialize (e.g., xAI-specific "x_search")
                 // Instead of maintaining a hardcoded allowlist, try deserializing each tool entry; if it fails, drop it
                 if let Some(tools) = value
@@ -178,6 +180,60 @@ fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
             .fold(false, |changed, item| null_lists_as_empty(item) || changed),
         _ => false,
     }
+}
+
+/// Whether `value` is a Responses API `response` object that omits its
+/// `status`. The Responses schema requires `status` on the response object,
+/// and `async_openai` types it as a non-optional enum.
+fn is_statusless_response_object(value: &serde_json::Value) -> bool {
+    let serde_json::Value::Object(map) = value else {
+        return false;
+    };
+    map.contains_key("id")
+        && map.contains_key("created_at")
+        && map.contains_key("model")
+        && !map.contains_key("status")
+}
+
+/// The `status` an event's own type implies, for a response object that omits
+/// it. `None` leaves the payload alone: an unknown type states nothing about
+/// the response, and a status the payload carries is never overwritten.
+fn status_for_event_type(event_type: Option<&str>) -> Option<&'static str> {
+    match event_type {
+        Some("response.created" | "response.in_progress" | "response.output_item.added") => {
+            Some("in_progress")
+        }
+        Some("response.completed") => Some("completed"),
+        Some("response.failed") => Some("failed"),
+        Some("response.incomplete") => Some("incomplete"),
+        _ => None,
+    }
+}
+
+/// Fill in the `status` a synthesized response frame omits, so the frame
+/// parses. Reports whether anything changed.
+fn status_from_event_type(value: &mut serde_json::Value) -> bool {
+    let serde_json::Value::Object(map) = value else {
+        return false;
+    };
+    let event_type = map.get("type").and_then(|t| t.as_str()).map(str::to_owned);
+    let Some(status) = status_for_event_type(event_type.as_deref()) else {
+        return false;
+    };
+    let Some(response) = map.get_mut("response") else {
+        return false;
+    };
+    if !is_statusless_response_object(response) {
+        return false;
+    }
+    let serde_json::Value::Object(response) = response else {
+        return false;
+    };
+    response.insert(
+        "status".to_string(),
+        serde_json::Value::String(status.to_string()),
+    );
+    true
 }
 
 /// Dotted paths of every `null` in the payload, for a failure that named no
@@ -256,11 +312,14 @@ fn parse_sse_event<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
         Ok(event) => return Ok(event),
         Err(err) => err,
     };
-    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data)
-        && null_lists_as_empty(&mut value)
-        && let Ok(event) = serde_json::from_value::<T>(value)
-    {
-        return Ok(event);
+    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) {
+        let lists = null_lists_as_empty(&mut value);
+        let status = status_from_event_type(&mut value);
+        if (lists || status)
+            && let Ok(event) = serde_json::from_value::<T>(value)
+        {
+            return Ok(event);
+        }
     }
     Err(strict)
 }
@@ -2958,6 +3017,75 @@ mod tests {
             start,
             messages::MessageStreamEvent::MessageStart { .. }
         ));
+    }
+
+    /// Every list a gateway may leave unset must round-trip, not only those the minimal fixture happens to carry.
+    #[test]
+    /// Every list a gateway may leave unset must round-trip, and so must the
+    /// `status` it omits. A Go gateway marshals every unset slice as `null`,
+    /// so the bare `created` frame of a real stream carries some of them at
+    /// once. It synthesizes that frame itself rather than forwarding one the
+    /// provider sent - so `status` never appears.
+    #[test]
+    fn a_created_frame_with_every_null_list_is_rescued() {
+        let event = parse_sse_event::<rs::ResponseStreamEvent>(
+            r#"{"type":"response.created","sequence_number":0,"response":{
+                "id":"chatcmpl-x","object":"","created_at":1792078655,
+                "completed_at":null,"error":null,"incomplete_details":null,
+                "instructions":null,"max_output_tokens":null,"max_tool_calls":null,
+                "metadata":null,"model":"","output":null,"previous_response_id":null,
+                "prompt_cache_key":null,"reasoning":null,"safety_identifier":null,
+                "service_tier":null,"tools":null,"usage":null,
+                "extra_fields":{"request_type":"","routing_info":{},"latency":0}}}"#,
+        )
+        .expect("a real gateway created frame must be rescued");
+        assert!(matches!(event, rs::ResponseStreamEvent::ResponseCreated(_)));
+    }
+
+    /// A status the payload carries is its own, and an unknown event type
+    /// states nothing about the response.
+    #[test]
+    fn a_response_status_is_never_overwritten() {
+        let mut stated = serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "r", "created_at": 1, "model": "m", "status": "incomplete"}
+        });
+        assert!(!status_from_event_type(&mut stated));
+        assert_eq!(
+            stated.pointer("/response/status"),
+            Some(&serde_json::json!("incomplete"))
+        );
+
+        let mut unknown = serde_json::json!({
+            "type": "response.some_future_event",
+            "response": {"id": "r", "created_at": 1, "model": "m"}
+        });
+        assert!(!status_from_event_type(&mut unknown));
+        assert!(unknown.pointer("/response/status").is_none());
+    }
+
+    #[test]
+    fn a_terminal_frame_states_its_own_outcome() {
+        for (event_type, expected) in [
+            ("response.completed", "completed"),
+            ("response.failed", "failed"),
+            ("response.incomplete", "incomplete"),
+            ("response.in_progress", "in_progress"),
+        ] {
+            let mut value = serde_json::json!({
+                "type": event_type,
+                "response": {"id": "r", "created_at": 1, "model": "m"}
+            });
+            assert!(
+                status_from_event_type(&mut value),
+                "{event_type} must be filled in"
+            );
+            assert_eq!(
+                value.pointer("/response/status").and_then(|v| v.as_str()),
+                Some(expected),
+                "{event_type} must resolve to {expected}"
+            );
+        }
     }
 
     #[test]
