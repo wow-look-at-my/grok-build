@@ -166,8 +166,10 @@ const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
 
 /// Keys the wire schemas type as a required sub-object, where a gateway sends
 /// `null` for one it never filled in.
-const NULL_TOLERANT_OBJECT_KEYS: &[(&str, &[(&str, u64)])] =
-    &[("output_tokens_details", &[("reasoning_tokens", 0)])];
+const NULL_TOLERANT_OBJECT_KEYS: &[(&str, &[(&str, u64)])] = &[
+    ("input_tokens_details", &[("cached_tokens", 0)]),
+    ("output_tokens_details", &[("reasoning_tokens", 0)]),
+];
 
 /// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
 /// Reports whether anything changed, so a caller can skip a retry that cannot
@@ -3251,20 +3253,25 @@ mod tests {
     }
 
     /// A sub-object the schema types as required, and the gateway sends as
-    /// `null`, is replaced by the empty object it stands for. The replacement
+    /// `null`, is replaced by the object it stands for. The replacement
     /// carries the sub-object's own required fields, or the parse still fails.
+    /// Both usage breakdowns are covered: the gateway omits either.
     #[test]
     fn a_null_required_object_becomes_the_empty_one() {
         let mut value = serde_json::json!({
             "usage": {
                 "input_tokens": 297,
-                "input_tokens_details": {"cached_tokens": 256},
+                "input_tokens_details": null,
                 "output_tokens": 100,
                 "output_tokens_details": null,
                 "total_tokens": 397
             }
         });
         assert!(null_lists_as_empty(&mut value));
+        assert_eq!(
+            value.pointer("/usage/input_tokens_details/cached_tokens"),
+            Some(&serde_json::json!(0))
+        );
         assert_eq!(
             value.pointer("/usage/output_tokens_details/reasoning_tokens"),
             Some(&serde_json::json!(0))
