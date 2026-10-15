@@ -120,6 +120,14 @@ pub(crate) fn deserialize_response_event(data: &str) -> Result<rs::ResponseStrea
                 if let Ok(mut event) = serde_json::from_value::<rs::ResponseStreamEvent>(value) {
                     apply_terminal_event_overrides(&mut event, data);
                     return Ok(event);
+                } else {
+                    // The strict error names the nulls it saw; the rescue's own
+                    // error names what is still missing after the repair.
+                    tracing::debug!(
+                        target: crate::sampling_log::TARGET,
+                        event = "response_rescue_failed",
+                        "the repair pass did not produce a parseable event"
+                    );
                 }
             }
             tracing::error!(
@@ -156,6 +164,10 @@ const NULL_TOLERANT_LIST_KEYS: &[&str] = &[
     "vector_store_ids",
 ];
 
+/// Keys the wire schemas type as a required struct.
+const NULL_TOLERANT_OBJECT_KEYS: &[(&str, &str)] =
+    &[("output_tokens_details", r#"{"reasoning_tokens":0}"#)];
+
 /// Rewrite `null` to `[]` at [`NULL_TOLERANT_LIST_KEYS`], recursively.
 /// Reports whether anything changed, so a caller can skip a retry that cannot
 /// differ. A gateway written in Go marshals an unset slice as `null`, so
@@ -168,6 +180,14 @@ fn null_lists_as_empty(value: &mut serde_json::Value) -> bool {
             for (key, child) in map.iter_mut() {
                 if child.is_null() && NULL_TOLERANT_LIST_KEYS.contains(&key.as_str()) {
                     *child = serde_json::Value::Array(Vec::new());
+                    changed = true;
+                } else if child.is_null()
+                    && let Some((_, replacement)) = NULL_TOLERANT_OBJECT_KEYS
+                        .iter()
+                        .find(|(name, _)| *name == key.as_str())
+                {
+                    *child = serde_json::from_str(replacement)
+                        .expect("a hard-coded replacement must parse");
                     changed = true;
                 } else {
                     changed |= null_lists_as_empty(child);
@@ -227,7 +247,7 @@ fn synthesized_fields_filled(value: &mut serde_json::Value) -> bool {
     let mut changed = false;
     if let Some(response) = map.get_mut("response").filter(|v| is_response_object(v)) {
         changed |= insert_if_absent(response, "status", status);
-        changed |= fill_output_items(response);
+        changed |= fill_output_items(response, status);
     }
     if let Some(item) = map.get_mut("item") {
         changed |= fill_output_item(item, status);
@@ -263,13 +283,13 @@ fn fill_event_fields(map: &mut serde_json::Map<String, serde_json::Value>) -> bo
 }
 
 /// Fill the fields of every item in a response object's `output` list.
-fn fill_output_items(response: &mut serde_json::Value) -> bool {
+fn fill_output_items(response: &mut serde_json::Value, status: Option<&'static str>) -> bool {
     let Some(output) = response.get_mut("output").and_then(|v| v.as_array_mut()) else {
         return false;
     };
     let mut changed = false;
     for item in output {
-        changed |= fill_output_item(item, None);
+        changed |= fill_output_item(item, status);
     }
     changed
 }
@@ -394,10 +414,16 @@ fn parse_sse_event<T: serde::de::DeserializeOwned>(data: &str) -> Result<T> {
     // Both repairs run: each sees a different kind of omission.
     let lists = null_lists_as_empty(&mut value);
     let synthesized = synthesized_fields_filled(&mut value);
-    if (lists || synthesized)
-        && let Ok(event) = serde_json::from_value::<T>(value)
-    {
-        return Ok(event);
+    if lists || synthesized {
+        match serde_json::from_value::<T>(value) {
+            Ok(event) => return Ok(event),
+            Err(rescue) => {
+                tracing::debug!(
+                    error = %rescue,
+                    "the rescue pass did not produce a parseable event"
+                );
+            }
+        }
     }
     Err(strict)
 }
@@ -3161,6 +3187,83 @@ mod tests {
         }
     }
 
+    /// One frame of each shape a gateway synthesizes, repaired end to end.
+    /// Each fixture is a real frame trimmed to the fields that matter: one
+    /// `null` where a list belongs, one missing `status`, one reasoning item.
+    /// This holds before its `summary` exists, one summary event with no part
+    /// index, and one `null` where a required sub-object belongs. Together
+    /// they are every omission a captured 1779-frame stream from the gateway
+    /// contained.
+    #[test]
+    fn every_synthesized_omission_is_repaired() {
+        for (label, data) in [
+            (
+                "created with null lists and no status",
+                r#"{"type":"response.created","sequence_number":0,"response":{
+                    "id":"r","object":"","created_at":1,"completed_at":null,
+                    "error":null,"incomplete_details":null,"instructions":null,
+                    "max_output_tokens":null,"max_tool_calls":null,"metadata":null,
+                    "model":"","output":null,"previous_response_id":null,
+                    "prompt_cache_key":null,"reasoning":null,"safety_identifier":null,
+                    "service_tier":null,"tools":null,"usage":null}}"#,
+            ),
+            (
+                "reasoning item announced before its summary",
+                r#"{"type":"response.output_item.added","sequence_number":2,"output_index":0,
+                    "item":{"id":"r1","type":"reasoning","role":"assistant","content":[]}}"#,
+            ),
+            (
+                "message item before its status",
+                r#"{"type":"response.output_item.added","sequence_number":3,"output_index":1,
+                    "item":{"id":"m1","type":"message","role":"assistant","content":[]}}"#,
+            ),
+            (
+                "summary delta with no part index",
+                r#"{"type":"response.reasoning_summary_text.delta","sequence_number":4,
+                    "output_index":0,"item_id":"r1","delta":"The"}"#,
+            ),
+            (
+                "completed with a nested item and a null details object",
+                r#"{"type":"response.completed","sequence_number":5,"response":{
+                    "id":"r","object":"","created_at":1,"model":"m","status":"completed",
+                    "output":[{"id":"r1","type":"reasoning","role":"assistant","content":[]}],
+                    "completed_at":null,"error":null,"incomplete_details":null,
+                    "instructions":null,"max_output_tokens":null,"max_tool_calls":null,
+                    "metadata":null,"previous_response_id":null,"prompt_cache_key":null,
+                    "reasoning":null,"safety_identifier":null,"service_tier":null,
+                    "tools":null,
+                    "usage":{"input_tokens":1,
+                             "input_tokens_details":{"cached_tokens":0},
+                             "output_tokens":1,"output_tokens_details":null,
+                             "total_tokens":2}}}"#,
+            ),
+        ] {
+            deserialize_response_event(data)
+                .unwrap_or_else(|e| panic!("{label} must be rescued: {e}"));
+        }
+    }
+
+    /// A sub-object the schema types as required, and the gateway sends as
+    /// `null`, is replaced by the empty object it stands for. The replacement
+    /// carries the sub-object's own required fields, or the parse still fails.
+    #[test]
+    fn a_null_required_object_becomes_the_empty_one() {
+        let mut value = serde_json::json!({
+            "usage": {
+                "input_tokens": 297,
+                "input_tokens_details": {"cached_tokens": 256},
+                "output_tokens": 100,
+                "output_tokens_details": null,
+                "total_tokens": 397
+            }
+        });
+        assert!(null_lists_as_empty(&mut value));
+        assert_eq!(
+            value.pointer("/usage/output_tokens_details/reasoning_tokens"),
+            Some(&serde_json::json!(0))
+        );
+    }
+
     /// An index the event states is its own.
     #[test]
     fn a_stated_index_is_never_overwritten() {
@@ -3176,6 +3279,34 @@ mod tests {
         assert_eq!(
             value.pointer("/summary_index").and_then(|v| v.as_u64()),
             Some(2)
+        );
+    }
+
+    /// A terminal frame carries its items inside `response.output`, not on a
+    /// top-level `item`, so a repair keyed only on the latter would miss them.
+    #[test]
+    fn nested_output_items_are_filled_too() {
+        let mut value = serde_json::json!({
+            "type": "response.incomplete",
+            "response": {
+                "id": "chatcmpl-x", "created_at": 1, "model": "m",
+                "status": "incomplete",
+                "output": [
+                    {"id": "r", "type": "reasoning", "role": "assistant", "content": []},
+                    {"id": "m", "type": "message", "role": "assistant", "content": []}
+                ]
+            }
+        });
+        assert!(synthesized_fields_filled(&mut value));
+        assert_eq!(
+            value.pointer("/response/output/0/summary"),
+            Some(&serde_json::json!([]))
+        );
+        assert_eq!(
+            value
+                .pointer("/response/output/1/status")
+                .and_then(|v| v.as_str()),
+            Some("incomplete")
         );
     }
 
