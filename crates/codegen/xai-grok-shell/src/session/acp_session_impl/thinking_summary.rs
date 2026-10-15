@@ -48,15 +48,17 @@ impl SessionActor {
             }
         };
         let session_id = self.session_info.id.to_string();
-        // Thinking goes off where the catalog says the model allows it.
-        let reasoning_effort =
-            crate::agent::config::thinking_off_effort(&self.models_manager.models(), &setup.model);
+        // A summary is a fragment of an answer's cost, not a reasoning task.
+        let reasoning_effort = self.models_manager.reasoning_effort_for(
+            crate::agent::reasoning_policy::ReasoningNeed::Off,
+            &setup.model,
+        );
         let request = ConversationRequest {
             items: vec![ConversationItem::user(
                 helpers::thinking_summary_instruction(&thinking, &prior),
             )],
             model: Some(setup.model.clone()),
-            reasoning_effort,
+            reasoning_effort: Some(reasoning_effort),
             max_output_tokens: Some(helpers::THINKING_SUMMARY_MAX_OUTPUT_TOKENS),
             x_grok_conv_id: Some(format!("thinking-summary-{}", uuid::Uuid::new_v4())),
             x_grok_session_id: Some(session_id),
