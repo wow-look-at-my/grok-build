@@ -55,6 +55,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The turn loop harvests queued follow-ups before each model request (`harvest_queued_prompts_into_interjections`). A turn parked in an interruptible wait tool (`get_task_output` with a wait, `wait_tasks`, `Await`) makes no request until the task ends. As a result, Queue mode held the row behind a task that can run for minutes.
 - The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. An active goal and a pending send-now are exempt.
 
+## `/context` Messages breakdown
+
+- Kind itemizes messages: user, assistant text, reasoning, tool-call arguments, tool results (`estimate_messages_breakdown` in `xai-chat-state`, carried on `ContextInfo::message_breakdown`). The parts sum to `message_tokens`.
+- Overhead is a remainder: occupancy minus system minus the Messages estimate. It is not reasoning. It is hidden when the estimate meets occupancy. The sub-rows scale to the capped Messages count.
+
 ## Compaction report
 
 - Every successful compaction writes `{session_dir}/compaction_reports/<checkpoint id>.md` (`helpers/compaction_report.rs`). It lists every item of the compacted history with its kind, bytes/4 estimate and a preview. It also holds the largest items, the full summary text, and the reseed arithmetic.

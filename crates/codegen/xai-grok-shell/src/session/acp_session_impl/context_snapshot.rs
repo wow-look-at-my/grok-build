@@ -363,6 +363,7 @@ mod tests {
                 tool_call_count: 0,
                 message_count: 1,
                 message_tokens: 2_000,
+                message_breakdown: Default::default(),
                 free_tokens: 960_000,
                 usage_pct: 4,
                 auto_compact_threshold_percent: 85,
