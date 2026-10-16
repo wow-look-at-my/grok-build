@@ -1925,7 +1925,9 @@ fn main() {
     // spawn an unsandboxed `gh` CI-status worker and hand its stream fd into
     // the jail.
     if xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
-        xai_grok_sandbox::ci_host::run_ci_host_worker();
+        xai_grok_sandbox::ci_host::run_ci_host_worker_with(
+            xai_grok_pager::host_settings::handle_worker_request,
+        );
         std::process::exit(0);
     }
     // Before anything else.
