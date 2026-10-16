@@ -516,6 +516,8 @@ pub enum Action {
     SetStopGateUnfinishedTodos(bool),
     /// Set `[ui].stop_gate_ci_failing` (default ON). Persists via `Effect::PersistSetting`.
     SetStopGateCiFailing(bool),
+    /// Set `[ui].split_and_tee_commands` (default OFF). Persists via `Effect::PersistSetting`.
+    SetSplitAndTeeCommands(bool),
     /// Set whether the drain call site merges the run of leading queued `Prompt` entries into one turn instead of sending them one by one.
     /// SHARED-owned: updates the process-wide cache mirror (read by the drain site).
     /// Persists to `[ui].combine_queued_prompts` via `Effect::PersistSetting`.

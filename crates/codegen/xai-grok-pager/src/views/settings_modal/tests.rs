@@ -776,6 +776,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         // voice_keybind_enabled + voice_capture_mode + voice_stt_language hidden when the voice gate is off.
         "stop_gate_unfinished_todos",
         "stop_gate_ci_failing",
+        "split_and_tee_commands",
         // The "Slow output" group. Its rows show only inside its sheet.
         "output_rate_floor",
         "permission_mode",
