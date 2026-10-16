@@ -263,7 +263,9 @@ pub enum ChatStateCommand {
     GetEstimatedTotalTokens { reply: oneshot::Sender<u64> },
 
     /// Bytes/4 estimate of all non-system conversation items.
-    GetEstimatedMessagesTokens { reply: oneshot::Sender<u64> },
+    GetEstimatedMessagesTokens {
+        reply: oneshot::Sender<crate::actor::state::MessageTokenBreakdown>,
+    },
 
     /// Get sampling config.
     GetSamplingConfig {

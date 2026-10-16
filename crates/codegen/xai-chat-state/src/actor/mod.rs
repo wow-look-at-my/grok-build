@@ -510,7 +510,7 @@ impl ChatStateActor {
                 let _ = reply.send(self.get_system_message());
             }
             ChatStateCommand::GetEstimatedMessagesTokens { reply } => {
-                let _ = reply.send(state::estimate_messages_tokens(&self.state.conversation));
+                let _ = reply.send(state::estimate_messages_breakdown(&self.state.conversation));
             }
         }
     }

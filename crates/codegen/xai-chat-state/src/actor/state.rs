@@ -89,6 +89,47 @@ pub fn estimate_messages_tokens(items: &[ConversationItem]) -> u64 {
         .sum()
 }
 
+/// [`estimate_messages_tokens`] split by item kind. The parts sum to that total.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MessageTokenBreakdown {
+    pub user: u64,
+    /// Assistant text, without the tool-call arguments.
+    pub assistant: u64,
+    /// Tool-call arguments and backend tool calls.
+    pub tool_calls: u64,
+    pub tool_results: u64,
+    pub reasoning: u64,
+}
+
+impl MessageTokenBreakdown {
+    pub fn total(&self) -> u64 {
+        self.user + self.assistant + self.tool_calls + self.tool_results + self.reasoning
+    }
+}
+
+/// Split the bytes/4 estimate of every non-system item in `items` by item kind.
+pub fn estimate_messages_breakdown(items: &[ConversationItem]) -> MessageTokenBreakdown {
+    let mut b = MessageTokenBreakdown::default();
+    for item in items {
+        let tokens = estimate_item_tokens(item);
+        match item {
+            ConversationItem::System(_) => {}
+            ConversationItem::User(_) => b.user += tokens,
+            ConversationItem::Assistant(a) => {
+                let args: usize = a.tool_calls.iter().map(|tc| tc.arguments.len()).sum();
+                let calls = (args as u64 / xai_token_estimation::BYTES_PER_TOKEN).min(tokens);
+                b.tool_calls += calls;
+                b.assistant += tokens - calls;
+            }
+            ConversationItem::ToolResult(_) => b.tool_results += tokens,
+            ConversationItem::BackendToolCall(_) => b.tool_calls += tokens,
+            ConversationItem::Reasoning(_) => b.reasoning += tokens,
+        }
+    }
+    b
+}
+
 /// Internal mutable state for the ChatStateActor.
 ///
 /// All fields are owned exclusively by the actor task — no locks needed.
@@ -315,6 +356,44 @@ mod tests {
         assert_eq!(estimate_system_message_tokens(&asst), 0);
         let tr = ConversationItem::tool_result("call-1", "x".repeat(4000).as_str());
         assert_eq!(estimate_system_message_tokens(&tr), 0);
+    }
+
+    #[test]
+    fn messages_breakdown_splits_by_kind_and_sums_to_the_estimate() {
+        let mut call = ConversationItem::assistant("a".repeat(400));
+        if let ConversationItem::Assistant(a) = &mut call {
+            a.tool_calls.push(xai_grok_sampling_types::ToolCall {
+                id: "call_1".into(),
+                name: "read_file".into(),
+                arguments: "b".repeat(800).into(),
+                vendor: Default::default(),
+            });
+        }
+        let items = vec![
+            ConversationItem::system("s".repeat(4000)),
+            ConversationItem::user("u".repeat(40)),
+            ConversationItem::Reasoning(xai_grok_sampling_types::rs::ReasoningItem {
+                id: "r1".into(),
+                summary: vec![],
+                content: None,
+                encrypted_content: Some("e".repeat(1600)),
+                status: None,
+            }),
+            call,
+            ConversationItem::tool_result("call_1", "t".repeat(1200)),
+        ];
+        let b = estimate_messages_breakdown(&items);
+        assert_eq!(
+            MessageTokenBreakdown {
+                user: 10,
+                assistant: 100,
+                tool_calls: 200,
+                tool_results: 300,
+                reasoning: 300,
+            },
+            b
+        );
+        assert_eq!(estimate_messages_tokens(&items), b.total());
     }
 
     #[test]
