@@ -310,6 +310,48 @@ async fn build_session_info_used_reflects_recorded_response() {
         .await;
 }
 
+/// A session that holds reasoning and tool calls reports them in `/context`, not only inside the Messages total.
+#[tokio::test(flavor = "current_thread")]
+async fn build_session_info_itemizes_reasoning_and_tool_calls() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(0, 1_000_000, 85, gateway_tx, persistence_tx).await;
+            let chat = &actor.chat_state_handle;
+            chat.push_user_message_and_ack(ConversationItem::user("u".repeat(4_000)))
+                .await;
+            chat.push_assistant_response(ConversationItem::Reasoning(rs::ReasoningItem {
+                id: "r1".into(),
+                summary: vec![],
+                content: None,
+                encrypted_content: Some("e".repeat(80_000)),
+                status: None,
+            }));
+            chat.push_assistant_response(ConversationItem::assistant_tool_calls(vec![
+                xai_grok_sampling_types::ToolCall {
+                    id: "call-1".into(),
+                    name: "read_file".into(),
+                    arguments: "a".repeat(8_000).into(),
+                    vendor: Default::default(),
+                },
+            ]));
+            chat.push_tool_result(ConversationItem::tool_result("call-1", "t".repeat(40_000)));
+            actor.record_response_token_usage(&response_with_usage(30_000), None);
+
+            let ctx = actor.build_session_info().await.context;
+            let b = ctx.message_breakdown;
+            assert_eq!(1_000, b.user);
+            assert_eq!(15_000, b.reasoning);
+            assert_eq!(2_000, b.tool_calls);
+            assert_eq!(10_000, b.tool_results);
+            assert_eq!(ctx.message_tokens, b.total());
+        })
+        .await;
+}
+
 /// `build_session_info` must populate `SessionInfoData.show_model_fingerprint` from the catalog entry for the session's current model.
 /// `build_session_info` reads the slug from the sampling config, so a direct `.get(slug)` would miss the entry and wrongly yield false.
 /// The flag is the sole control (the client keeps no built-in per-slug default), so this is the only thing that can turn checkpoint identity on.

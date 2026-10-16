@@ -13,7 +13,7 @@ use crate::render::wrapping::word_wrap_lines;
 use crate::scrollback::block::BlockContent;
 use crate::scrollback::types::{AccentStyle, BlockContext, BlockLine, BlockOutput};
 use crate::theme::{Theme, quantize};
-use xai_grok_shell::session::{ContextInfo, count_detail};
+use xai_grok_shell::session::{ContextInfo, MessageTokenBreakdown, count_detail};
 
 /// Categorical bar: each cell uses its category's glyph and color, filled left-to-right in legend order; free capacity is muted outlines.
 /// The informational rows never enter the bar.
@@ -281,8 +281,31 @@ impl ContextInfoBlock {
         for _ in 0..system_cells {
             cells.push((system_glyph, system_color));
         }
-        for _ in 0..messages_cells {
-            cells.push((messages_glyph, messages_color));
+        // Each kind gets its share of the Messages cells. Cumulative rounding keeps the sum exact.
+        let parts = message_parts(theme, &snapshot.message_breakdown, message_tokens);
+        if parts.is_empty() {
+            for _ in 0..messages_cells {
+                cells.push((messages_glyph, messages_color));
+            }
+        } else {
+            let mut acc = 0u64;
+            let mut placed = 0usize;
+            for part in &parts {
+                acc += part.tokens;
+                let end = if message_tokens == 0 {
+                    0
+                } else {
+                    ((acc as f64 / message_tokens as f64) * messages_cells as f64).round() as usize
+                };
+                let end = end.min(messages_cells);
+                for _ in placed..end {
+                    cells.push((messages_glyph, part.color));
+                }
+                placed = placed.max(end);
+            }
+            for _ in placed..messages_cells {
+                cells.push((messages_glyph, messages_color));
+            }
         }
         for _ in 0..overhead_cells {
             cells.push((overhead_glyph, overhead_color));
@@ -309,7 +332,7 @@ impl ContextInfoBlock {
             bar_lines.push(Line::from(spans));
         }
 
-        // Tool definitions are already in Reasoning/overhead
+        // Tool definitions are already in Overhead
         // Usage categories are already in Messages
         let mut legend_rows = vec![
             LegendRow {
@@ -327,11 +350,18 @@ impl ContextInfoBlock {
                 detail: None,
             },
         ];
+        legend_rows.extend(parts.iter().map(|p| LegendRow {
+            glyph: messages_glyph,
+            color: p.color,
+            label: format!("  {}", p.label),
+            tokens: p.tokens,
+            detail: None,
+        }));
         if overhead_tokens > 0 {
             legend_rows.push(LegendRow {
                 glyph: overhead_glyph,
                 color: overhead_color,
-                label: "Reasoning/overhead".to_string(),
+                label: "Overhead".to_string(),
                 tokens: overhead_tokens,
                 detail: None,
             });
@@ -504,6 +534,43 @@ fn window_tokens(used: u64, total: u64, system_tokens: u64, message_tokens: u64)
     }
 }
 
+/// One kind of message item inside the Messages row.
+struct MessagePart {
+    label: &'static str,
+    color: Color,
+    tokens: u64,
+}
+
+/// The nonzero kinds of `breakdown`, scaled so they sum to `shown`, the Messages count after the cap to occupancy.
+/// Empty when the snapshot carries no breakdown.
+fn message_parts(theme: &Theme, breakdown: &MessageTokenBreakdown, shown: u64) -> Vec<MessagePart> {
+    let estimate = breakdown.total();
+    if estimate == 0 {
+        return Vec::new();
+    }
+    let mut parts: Vec<MessagePart> = [
+        ("User", theme.accent_user, breakdown.user),
+        ("Assistant", theme.accent_assistant, breakdown.assistant),
+        ("Reasoning", theme.accent_thinking, breakdown.reasoning),
+        ("Tool calls", theme.accent_tool, breakdown.tool_calls),
+        ("Tool results", theme.command, breakdown.tool_results),
+    ]
+    .into_iter()
+    .filter(|&(_, _, tokens)| tokens > 0)
+    .map(|(label, color, tokens)| MessagePart {
+        label,
+        color: quantize(color),
+        tokens: ((tokens as u128 * shown as u128) / estimate as u128) as u64,
+    })
+    .collect();
+    // Floor division loses a few tokens. Give them to the largest part so the rows sum to `shown`.
+    let lost = shown - parts.iter().map(|p| p.tokens).sum::<u64>();
+    if let Some(largest) = parts.iter_mut().max_by_key(|p| p.tokens) {
+        largest.tokens += lost;
+    }
+    parts
+}
+
 /// Format a category's share of the total context window as a percentage.
 fn percent_of_window(part: u64, total: u64) -> String {
     if total == 0 {
@@ -603,6 +670,7 @@ mod tests {
             tool_call_count: 12,
             message_count: 8,
             message_tokens: 29_900,
+            message_breakdown: Default::default(),
             free_tokens: 963_300,
             usage_pct: 4,
             auto_compact_threshold_percent: 85,
@@ -839,6 +907,80 @@ mod tests {
     }
 
     #[test]
+    fn legend_itemizes_messages_and_scales_rows_to_the_capped_total() {
+        let mut snap = snapshot();
+        snap.used = 100_000;
+        snap.total = 1_000_000;
+        snap.system_prompt_tokens = 0;
+        snap.message_breakdown = MessageTokenBreakdown {
+            user: 10_000,
+            assistant: 20_000,
+            tool_calls: 30_000,
+            tool_results: 60_000,
+            reasoning: 80_000,
+        };
+        snap.message_tokens = snap.message_breakdown.total();
+
+        let block = ContextInfoBlock::new(snap, "grok-build");
+        let lines = block.build_lines(&test_theme(), BarLayout::WIDE);
+        let all = all_text(&lines);
+        // 200k of estimate shown as 100k of occupancy: each kind is halved.
+        for (label, tokens) in [
+            ("User", "5.0k"),
+            ("Assistant", "10.0k"),
+            ("Reasoning", "40.0k"),
+            ("Tool calls", "15.0k"),
+            ("Tool results", "30.0k"),
+        ] {
+            assert!(
+                all.lines().any(|l| l.contains(label) && l.contains(tokens)),
+                "{label} row should read {tokens}:\n{all}"
+            );
+        }
+        assert!(!all.contains("Overhead"), "{all}");
+    }
+
+    /// The reported session: 176k of 1.0m used, 2.1k of system prompt, and an estimate that fills the rest.
+    /// Reasoning and tool calls must render as their own rows.
+    #[test]
+    fn legend_shows_reasoning_when_the_estimate_fills_occupancy() {
+        let mut snap = snapshot();
+        snap.used = 176_000;
+        snap.total = 1_000_000;
+        snap.system_prompt_tokens = 2_100;
+        snap.message_breakdown = MessageTokenBreakdown {
+            user: 6_000,
+            assistant: 9_000,
+            tool_calls: 21_000,
+            tool_results: 98_000,
+            reasoning: 46_000,
+        };
+        snap.message_tokens = snap.message_breakdown.total();
+
+        let block = ContextInfoBlock::new(snap, "openrouter/deepseek/deepseek-v4.1-flash");
+        let all = all_text(&block.build_lines(&test_theme(), BarLayout::WIDE));
+        println!("{all}");
+        for label in ["Reasoning", "Tool calls", "Tool results"] {
+            assert!(all.contains(label), "{label} row missing:\n{all}");
+        }
+    }
+
+    #[test]
+    fn message_parts_sum_to_the_shown_total() {
+        let b = MessageTokenBreakdown {
+            user: 1,
+            assistant: 1,
+            tool_calls: 1,
+            tool_results: 0,
+            reasoning: 1,
+        };
+        let parts = message_parts(&test_theme(), &b, 7);
+        assert_eq!(4, parts.len(), "zero kinds get no row");
+        assert_eq!(7, parts.iter().map(|p| p.tokens).sum::<u64>());
+        assert!(message_parts(&test_theme(), &MessageTokenBreakdown::default(), 7).is_empty());
+    }
+
+    #[test]
     fn legend_caps_messages_when_estimate_exceeds_used() {
         let mut snap = snapshot();
         snap.used = 206_000;
@@ -857,7 +999,7 @@ mod tests {
             "Messages should show capped occupancy, not the 380k estimate:\n{all}"
         );
         assert!(
-            !all.contains("Reasoning/overhead"),
+            !all.contains("Overhead"),
             "overhead is zero when messages eat remaining occupancy:\n{all}"
         );
         assert!(
@@ -975,6 +1117,7 @@ mod tests {
             tool_call_count: 0,
             message_count: 4,
             message_tokens: 25_000,
+            message_breakdown: Default::default(),
             free_tokens: 400_000,
             usage_pct: 20,
             auto_compact_threshold_percent: 65,
@@ -986,7 +1129,7 @@ mod tests {
 
         let all = all_text(&lines);
         assert!(
-            all.contains("Reasoning/overhead") && all.contains("70.0k"),
+            all.contains("Overhead") && all.contains("70.0k"),
             "overhead row (70.0k) missing:\n{all}"
         );
         assert!(
@@ -1249,7 +1392,7 @@ mod tests {
         let categories = [
             ("System prompt", "1.2k"),
             ("Messages", "29.9k"),
-            ("Reasoning/overhead", "5.6k"),
+            ("Overhead", "5.6k"),
             ("Free", "963k"),
         ];
         let mut idx = 16;
@@ -1319,8 +1462,8 @@ mod tests {
         );
         let l13 = row_text(13);
         assert!(
-            l13.contains("Reasoning/overhead") && l13.contains("5.6k"),
-            "wide legend should show reasoning/overhead on one line, got: {l13:?}"
+            l13.contains("Overhead") && l13.contains("5.6k"),
+            "wide legend should show overhead on one line, got: {l13:?}"
         );
         let l14 = row_text(14);
         assert!(

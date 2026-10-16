@@ -595,6 +595,8 @@ impl TokenUsageCategory {
     }
 }
 
+pub use xai_chat_state::MessageTokenBreakdown;
+
 /// Formats a count with a naively pluralized noun: `"1 skill"`, `"21 skills"`.
 pub fn count_detail(count: u64, noun: &str) -> String {
     let suffix = if count == 1 { "" } else { "s" };
@@ -617,6 +619,8 @@ pub struct ContextInfo {
     pub message_count: u64,
     /// Bytes/4 estimate of all non-system conversation items.
     pub message_tokens: u64,
+    /// `message_tokens` split by item kind. All zero on partial snapshots.
+    pub message_breakdown: xai_chat_state::MessageTokenBreakdown,
     pub free_tokens: u64,
     pub usage_pct: u8,
     /// The resolved auto-compact threshold percent (0-100) for the active model at the time this snapshot was captured.

@@ -521,11 +521,16 @@ impl ChatStateHandle {
 
     /// Bytes/4 estimate of all non-system conversation items.
     pub async fn get_estimated_messages_tokens(&self) -> u64 {
+        self.get_messages_breakdown().await.total()
+    }
+
+    /// [`Self::get_estimated_messages_tokens`] split by item kind.
+    pub async fn get_messages_breakdown(&self) -> crate::MessageTokenBreakdown {
         self.query("GetEstimatedMessagesTokens", |reply| {
             ChatStateCommand::GetEstimatedMessagesTokens { reply }
         })
         .await
-        .unwrap_or(0)
+        .unwrap_or_default()
     }
 
     /// Get sampling config.
