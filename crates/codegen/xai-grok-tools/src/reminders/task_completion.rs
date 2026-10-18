@@ -59,7 +59,7 @@ fn collapse_carriage_returns(text: &str) -> String {
 /// Cap `text` to its first `max_lines` lines; `true` when lines were cut.
 fn cap_lines(text: &str, max_lines: usize) -> (&str, bool) {
     match text.match_indices('\n').nth(max_lines.saturating_sub(1)) {
-        Some((at, _)) if at + 1 < text.len() => (&text[..at], true),
+        Some((at, _)) if at + 1 < text.len() => (text.split_at(at).0, true),
         _ => (text, false),
     }
 }
