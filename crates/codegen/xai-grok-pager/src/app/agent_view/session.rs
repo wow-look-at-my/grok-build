@@ -43,6 +43,7 @@ impl AgentView {
             self.last_seen_event_seq = None;
             self.last_applied_event_seq = None;
             self.last_applied_xai_event_seq = None;
+            self.applied_text_seqs.clear();
             self.deferred_subagent_finishes.clear();
             self.clear_kept_plan();
         }
@@ -167,6 +168,7 @@ impl AgentView {
             rewound_prompt_ids: VecDeque::new(),
             last_applied_event_seq: None,
             last_applied_xai_event_seq: None,
+            applied_text_seqs: Default::default(),
             last_seen_event_id: None,
             last_seen_event_seq: None,
             deferred_subagent_finishes: Default::default(),
@@ -708,6 +710,7 @@ impl AgentView {
             last_seen_event_seq: self.last_seen_event_seq,
             last_applied_event_seq: self.last_applied_event_seq,
             last_applied_xai_event_seq: self.last_applied_xai_event_seq,
+            applied_text_seqs: self.applied_text_seqs.clone(),
             saw_replay: false,
             saw_todo_update: false,
             replayed_expiry_notices: Vec::new(),
@@ -1031,6 +1034,7 @@ impl AgentView {
             self.last_seen_event_seq = reload.last_seen_event_seq;
             self.last_applied_event_seq = reload.last_applied_event_seq;
             self.last_applied_xai_event_seq = reload.last_applied_xai_event_seq;
+            self.applied_text_seqs = reload.applied_text_seqs;
             dropped_heavy = true;
         }
         self.session.loading_replay = false;

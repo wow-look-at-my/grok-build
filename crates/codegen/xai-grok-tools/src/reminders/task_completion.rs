@@ -42,6 +42,27 @@ fn user_killed_notice(task: &TaskSnapshot) -> &'static str {
 /// Inline preview cap applied ONLY to bash completion reminders that ship
 /// with a disk-pointer footer.
 const MAX_INLINE_COMPLETION_BYTES: usize = 4_000;
+/// Line cap on the same inline preview. A log of short lines fits the byte cap and still fills the screen.
+const MAX_INLINE_COMPLETION_LINES: usize = 80;
+
+/// Keep only the last carriage-return segment of each line, which is what a terminal shows for a progress row.
+fn collapse_carriage_returns(text: &str) -> String {
+    text.split('\n')
+        .map(|line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            line.rsplit('\r').next().unwrap_or(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Cap `text` to its first `max_lines` lines; `true` when lines were cut.
+fn cap_lines(text: &str, max_lines: usize) -> (&str, bool) {
+    match text.match_indices('\n').nth(max_lines.saturating_sub(1)) {
+        Some((at, _)) if at + 1 < text.len() => (&text[..at], true),
+        _ => (text, false),
+    }
+}
 /// Byte cap for the child's final text inlined next to a polling tool; the rest is one poll away.
 pub const INLINE_SUBAGENT_OUTPUT_BYTES: usize = 16_000;
 /// Tags model-authored text could use to close the reminder wrapper; `<\/tag` matches the shell's
@@ -172,12 +193,13 @@ pub fn format_bash_completion(
              itself, or upstream sources of SIGTERM/SIGHUP.\n",
         );
     }
-    let disk_pointer_footer = read_tool_name.map(|name| {
-        format!(
+    let disk_pointer_footer = Some(match read_tool_name {
+        Some(name) => format!(
             "Use {} on {} for full content",
             name,
             task.output_file.display()
-        )
+        ),
+        None => format!("Full output: {}", task.output_file.display()),
     });
     render_completion_output_delivery(
         &mut msg,
@@ -357,8 +379,16 @@ pub fn render_completion_output_delivery(
         }
         None => match disk_pointer_footer {
             Some(footer) => {
+                let collapsed = collapse_carriage_returns(output.text());
+                let (kept, lines_cut) = cap_lines(&collapsed, MAX_INLINE_COMPLETION_LINES);
+                let total_bytes = if lines_cut || collapsed.len() != output.text().len() {
+                    // The footer always reports the real size, and a cut must always print it.
+                    output.total_bytes().max(kept.len() + 1)
+                } else {
+                    output.total_bytes()
+                };
                 let (output, _) = truncate_with_preview(
-                    output,
+                    PartialOutput::part_of(kept, total_bytes),
                     MAX_INLINE_COMPLETION_BYTES,
                     PREVIEW_SIZE,
                     Some(footer),

@@ -1222,6 +1222,17 @@ impl ScrollbackState {
         self.push(entry)
     }
 
+    /// Whether the open turn has an agent text entry. The walk stops at the turn's prompt or at the previous turn's terminal marker.
+    pub fn open_turn_has_agent_text(&self) -> bool {
+        self.entries
+            .values()
+            .rev()
+            .take_while(|e| {
+                !matches!(e.block, RenderBlock::UserPrompt(_)) && !e.block.is_turn_terminal_marker()
+            })
+            .any(|e| e.block.is_agent_message())
+    }
+
     /// Get an entry by index (immutable).
     pub fn entry(&self, index: usize) -> Option<&ScrollbackEntry> {
         self.entries.get_index(index).map(|(_, v)| v)
