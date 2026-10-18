@@ -184,8 +184,7 @@ fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         .filter(|_| is_text_chunk && below_highwater)
                         .map(|seq| agent.applied_text_seqs.status(seq));
                     let dedup_drop = below_highwater
-                        && text_status
-                            != Some(crate::app::agent_view::TextSeqStatus::Unseen);
+                        && text_status != Some(crate::app::agent_view::TextSeqStatus::Unseen);
                     if text_status == Some(crate::app::agent_view::TextSeqStatus::Unseen) {
                         tracing::warn!(
                             session_id = notif.request.session_id.0.as_ref(),
@@ -239,8 +238,7 @@ fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
                     let mut workflows_modal_refresh = false;
                     let mutated = if dedup_drop {
                         // A chunk below the window cannot be told from a duplicate. The scrollback says it was discarded, so the loss is visible.
-                        if text_status == Some(crate::app::agent_view::TextSeqStatus::BelowWindow)
-                        {
+                        if text_status == Some(crate::app::agent_view::TextSeqStatus::BelowWindow) {
                             agent.scrollback.push_block(RenderBlock::system(
                                 "… agent text discarded: it arrived out of order …",
                             ));

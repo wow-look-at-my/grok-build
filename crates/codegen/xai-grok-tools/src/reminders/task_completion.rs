@@ -1414,7 +1414,10 @@ mod tests {
         task.output = log;
         task.output_file = std::path::PathBuf::from("/tmp/bg.log");
         let msg = format_bash_completion(&task, None, Some("read_file"));
-        assert!(msg.contains("response:\n100%\n"), "progress row must collapse: {msg}");
+        assert!(
+            msg.contains("response:\n100%\n"),
+            "progress row must collapse: {msg}"
+        );
         assert!(!msg.contains("10%"));
         assert!(msg.contains("l78\n"));
         assert!(!msg.contains("l79\n"), "line cap must cut the log: {msg}");
