@@ -169,13 +169,41 @@ fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         .agents
                         .get_mut(&id)
                         .expect("find_session_match returned an existing AgentId");
-                    let dedup_drop = !meta.is_replay
+                    let is_text_chunk = matches!(
+                        notif.request.update,
+                        acp::SessionUpdate::AgentMessageChunk(_)
+                            | acp::SessionUpdate::AgentThoughtChunk(_)
+                    );
+                    let below_highwater = !meta.is_replay
                         && meta.event_seq.is_some_and(|seq| {
                             agent.last_applied_event_seq.is_some_and(|last| seq <= last)
                         });
+                    // A text chunk below the highwater is a duplicate only when this view applied its id. Otherwise it is late, and it still renders.
+                    let text_status = meta
+                        .event_seq
+                        .filter(|_| is_text_chunk && below_highwater)
+                        .map(|seq| agent.applied_text_seqs.status(seq));
+                    let dedup_drop = below_highwater
+                        && text_status != Some(crate::app::agent_view::TextSeqStatus::Unseen);
+                    if text_status == Some(crate::app::agent_view::TextSeqStatus::Unseen) {
+                        tracing::warn!(
+                            session_id = notif.request.session_id.0.as_ref(),
+                            event_seq = meta.event_seq,
+                            last_applied = agent.last_applied_event_seq,
+                            "agent text arrived out of order: applied below the dedup highwater"
+                        );
+                    }
+                    if is_text_chunk
+                        && !meta.is_replay
+                        && !dedup_drop
+                        && let Some(seq) = meta.event_seq
+                    {
+                        agent.applied_text_seqs.insert(seq);
+                    }
                     if let Some(seq) = meta.event_seq
                         && !meta.is_replay
                         && !dedup_drop
+                        && !below_highwater
                     {
                         agent.last_applied_event_seq = Some(seq);
                     }
@@ -189,7 +217,7 @@ fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         notif.response_tx.send(Ok(())).ok();
                         return false;
                     }
-                    if !dedup_drop
+                    if !below_highwater
                         && !meta.is_replay
                         && let Some(notif_pid) = meta.prompt_id.as_deref()
                         && agent.session.current_prompt_id.as_deref() != Some(notif_pid)
@@ -197,7 +225,7 @@ fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
                     {
                         agent.attached_as_viewer = !agent.is_self_originated_prompt(notif_pid);
                     }
-                    if !dedup_drop {
+                    if !below_highwater {
                         if let Some(tokens) = meta.total_tokens {
                             confirm_context_used(agent, tokens);
                         }
@@ -209,12 +237,11 @@ fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
                     let mut plan_mode_modal_refresh_needed = false;
                     let mut workflows_modal_refresh = false;
                     let mutated = if dedup_drop {
-                        // A dropped chunk is text the user never sees, so it must leave a trace at warn level
-                        if matches!(
-                            notif.request.update,
-                            acp::SessionUpdate::AgentMessageChunk(_)
-                                | acp::SessionUpdate::AgentThoughtChunk(_)
-                        ) {
+                        // A chunk below the window cannot be told from a duplicate. The scrollback says it was discarded, so the loss is visible.
+                        if text_status == Some(crate::app::agent_view::TextSeqStatus::BelowWindow) {
+                            agent.scrollback.push_block(RenderBlock::system(
+                                "… agent text discarded: it arrived out of order …",
+                            ));
                             tracing::warn!(
                                 session_id = notif.request.session_id.0.as_ref(),
                                 event_seq = meta.event_seq,

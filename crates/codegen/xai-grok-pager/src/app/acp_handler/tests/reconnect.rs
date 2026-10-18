@@ -82,13 +82,20 @@
         assert!(!a2, "a duplicate eventId must be dropped");
         assert_eq!(app.agents.get(&id).unwrap_or_else(|| panic!("missing map entry")).last_applied_event_seq, Some(5));
 
-        // A stale lower eventId is dropped
+        // A lower eventId this view never applied is a late chunk, not a duplicate: it renders, and the highwater stays put
         let a3 = handle(
-            make_agent_chunk_with_event("sess-dedup", "hello", "p1", Some("sess-dedup-3")),
+            make_agent_chunk_with_event("sess-dedup", " late", "p1", Some("sess-dedup-3")),
             &mut app,
         );
-        assert!(!a3, "a lower (already-passed) eventId must be dropped");
+        assert!(a3, "a late text chunk below the highwater must still render");
         assert_eq!(app.agents.get(&id).unwrap_or_else(|| panic!("missing map entry")).last_applied_event_seq, Some(5));
+
+        // The same late id a second time is a duplicate
+        let a3b = handle(
+            make_agent_chunk_with_event("sess-dedup", " late", "p1", Some("sess-dedup-3")),
+            &mut app,
+        );
+        assert!(!a3b, "a replayed late chunk must be dropped once applied");
 
         // A new higher eventId applies and the highwater advances
         let a4 = handle(

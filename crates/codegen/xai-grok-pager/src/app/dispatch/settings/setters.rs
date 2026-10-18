@@ -1134,7 +1134,7 @@ pub(in crate::app::dispatch) fn set_follow_up_behavior(
 
 // No idempotency gate: this fans out to every agent's `input_mode` A
 // newly-inserted agent may have a stale default. We always propagate The
-// inner is per-agent idempotent Contextual-hint tips: the
+// inner is per-agent idempotent Contextual-hint tips: the Contextual-hint
 // Contextual-hint tips: the `contextual_hints.*` per-tip toggles.
 // A toggle thus takes effect at runtime, not just on next launch
 // `write` is a non-capturing closure that coerces to `fn` so the tips share one inner

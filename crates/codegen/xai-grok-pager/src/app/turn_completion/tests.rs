@@ -1182,6 +1182,36 @@ fn last_marker_block(agent: &AgentView) -> &SessionEventBlock {
 }
 
 #[test]
+fn completed_turn_without_text_marks_no_message() {
+    let mut agent = running_driver("p1");
+    push_turn_terminal_marker(
+        &mut agent,
+        Some(SessionEvent::TurnCompleted {
+            elapsed: Some(std::time::Duration::from_secs(2)),
+        }),
+    );
+    assert!(
+        last_marker_block(&agent).no_message,
+        "a turn that wrote no text must say so on its marker"
+    );
+
+    let mut agent = running_driver("p2");
+    agent
+        .scrollback
+        .push_block(RenderBlock::agent_message("answer"));
+    push_turn_terminal_marker(
+        &mut agent,
+        Some(SessionEvent::TurnCompleted {
+            elapsed: Some(std::time::Duration::from_secs(2)),
+        }),
+    );
+    assert!(
+        !last_marker_block(&agent).no_message,
+        "a turn with text keeps the plain marker"
+    );
+}
+
+#[test]
 fn real_end_marker_stays_plain_with_running_work() {
     let mut agent = running_driver("p1");
     insert_bg_task(&mut agent, "bg-1", false);

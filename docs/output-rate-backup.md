@@ -54,7 +54,9 @@ This is checked against vLLM source (V1 engine, automatic prefix caching):
 - The backup recomputes one block at most. That is the partial last block, or the whole last block when the prompt fills it exactly.
 - When the loser is cancelled, its blocks keep their hashes on an LRU free list. The shared prompt blocks stay pinned by the survivor.
 
-The alternative is to send the prompt plus the partial output. vLLM caches generated blocks too. So this can hit. But a hit needs same token ids. The chat template closes the assistant turn, BPE can merge differently at the cut. And a reasoning parser moves thinking text out of the content. Any of these misses from the first different block.
+The alternative is to send the prompt plus the partial output. vLLM caches generated blocks too. So this can hit. But a hit needs same token ids. The chat template closes the assistant turn, BPE can merge differently at the cut. And a reasoning parser moves thinking text out of the content.
+
+Any of these misses from the first different block.
 
 The reliable form sends token ids to `/v1/completions`, which is a different API from the one this client uses.
 
