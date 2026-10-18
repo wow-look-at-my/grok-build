@@ -645,11 +645,24 @@ fn format_tokens(tokens: u64) -> String {
 #[derive(Debug, Clone)]
 pub struct SessionEventBlock {
     pub event: SessionEvent,
+    /// The turn this marker closes wrote no text. The marker says so, so a silent turn never reads as a lost answer.
+    pub no_message: bool,
 }
+
+/// Suffix of a terminal marker whose turn wrote no assistant text.
+pub const NO_MESSAGE_SUFFIX: &str = " · no message";
 
 impl SessionEventBlock {
     pub fn new(event: SessionEvent) -> Self {
-        Self { event }
+        Self {
+            event,
+            no_message: false,
+        }
+    }
+
+    pub fn with_no_message(mut self) -> Self {
+        self.no_message = true;
+        self
     }
 
     /// A recap with real body content, i.e. not the empty loading spinner or a stray empty recap.
@@ -753,7 +766,10 @@ impl BlockContent for SessionEventBlock {
             theme.muted()
         };
 
-        let text = self.event.message();
+        let mut text = self.event.message();
+        if self.no_message {
+            text.push_str(NO_MESSAGE_SUFFIX);
+        }
         let wrapped = if text.contains('\n') {
             let input_lines = text
                 .split('\n')

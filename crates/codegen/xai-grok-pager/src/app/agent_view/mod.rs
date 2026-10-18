@@ -81,6 +81,7 @@ use ratatui::text::Line;
 use ratatui::widgets::Widget;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
+mod applied_text_seqs;
 mod child_action_filter;
 mod cta;
 mod elicitation;
@@ -97,6 +98,7 @@ mod notices;
 pub(crate) use notices::ImagesDroppedBy;
 mod panes;
 mod paste;
+pub(crate) use applied_text_seqs::TextSeqStatus;
 pub(crate) use kept_plan::KeptPlan;
 mod plan;
 #[cfg(test)]
@@ -524,6 +526,7 @@ pub(crate) struct SessionReload {
     /// Live dedup highwaters (ACP and xAI) as of window open (same restore rationale).
     last_applied_event_seq: Option<u64>,
     last_applied_xai_event_seq: Option<u64>,
+    applied_text_seqs: applied_text_seqs::AppliedTextSeqs,
     /// Whether any `isReplay` update applied during this window.
     saw_replay: bool,
     /// Whether a Plan update applied during this window.
@@ -672,6 +675,8 @@ pub struct AgentView {
     pub last_applied_event_seq: Option<u64>,
     /// xAI-stream sibling of [`Self::last_applied_event_seq`] (see there for why the highwaters are split).
     pub last_applied_xai_event_seq: Option<u64>,
+    /// Event ids of the agent text chunks this view applied, so a late chunk below the highwater is told apart from a duplicate.
+    pub(crate) applied_text_seqs: applied_text_seqs::AppliedTextSeqs,
     /// Raw `eventId` of the most recent update APPLIED to this root session, replay or live, on both the ACP and xAI paths.
     pub last_seen_event_id: Option<String>,
     /// Parsed counter for [`Self::last_seen_event_id`], kept in lockstep by [`Self::advance_last_seen_event_id`].

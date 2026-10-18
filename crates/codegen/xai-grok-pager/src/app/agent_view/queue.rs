@@ -387,7 +387,14 @@ impl AgentView {
 
     /// Shared tail of every turn-end marker push (`push_turn_terminal_marker`).
     pub(crate) fn push_end_marker_block(&mut self, event: crate::scrollback::blocks::SessionEvent) {
-        let block = crate::scrollback::blocks::SessionEventBlock::new(event);
+        let silent = matches!(
+            event,
+            crate::scrollback::blocks::SessionEvent::TurnCompleted { .. }
+        ) && !self.scrollback.open_turn_has_agent_text();
+        let mut block = crate::scrollback::blocks::SessionEventBlock::new(event);
+        if silent {
+            block = block.with_no_message();
+        }
         self.scrollback
             .push_block(crate::scrollback::block::RenderBlock::SessionEvent(block));
     }

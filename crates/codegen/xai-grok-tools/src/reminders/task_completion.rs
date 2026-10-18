@@ -42,6 +42,27 @@ fn user_killed_notice(task: &TaskSnapshot) -> &'static str {
 /// Inline preview cap applied ONLY to bash completion reminders that ship
 /// with a disk-pointer footer.
 const MAX_INLINE_COMPLETION_BYTES: usize = 4_000;
+/// Line cap on the same inline preview. A log of short lines fits the byte cap and still fills the screen.
+const MAX_INLINE_COMPLETION_LINES: usize = 80;
+
+/// Keep only the last carriage-return segment of each line, which is what a terminal shows for a progress row.
+fn collapse_carriage_returns(text: &str) -> String {
+    text.split('\n')
+        .map(|line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            line.rsplit('\r').next().unwrap_or(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Cap `text` to its first `max_lines` lines; `true` when lines were cut.
+fn cap_lines(text: &str, max_lines: usize) -> (&str, bool) {
+    match text.match_indices('\n').nth(max_lines.saturating_sub(1)) {
+        Some((at, _)) if at + 1 < text.len() => (text.split_at(at).0, true),
+        _ => (text, false),
+    }
+}
 /// Byte cap for the child's final text inlined next to a polling tool; the rest is one poll away.
 pub const INLINE_SUBAGENT_OUTPUT_BYTES: usize = 16_000;
 /// Tags model-authored text could use to close the reminder wrapper; `<\/tag` matches the shell's
@@ -137,8 +158,8 @@ fn duration_line(description: Option<&str>, duration_secs: f64) -> String {
     }
 }
 /// Format a model-facing message from a [`TaskSnapshot`]. `task_output_name` controls the pointer-vs-inline rendering of the output section
-/// (see [`render_completion_output_delivery`]). When the inline branch fires and `read_tool_name` is set, the output is truncated and followed
-/// by a footer pointing the model at `task.output_file` so the full log is still recoverable from disk.
+/// (see [`render_completion_output_delivery`]). The inline branch caps the output and adds a footer that points at `task.output_file`.
+/// `read_tool_name`, when set, names the tool in that footer.
 pub fn format_bash_completion(
     task: &TaskSnapshot,
     task_output_name: Option<&str>,
@@ -172,12 +193,13 @@ pub fn format_bash_completion(
              itself, or upstream sources of SIGTERM/SIGHUP.\n",
         );
     }
-    let disk_pointer_footer = read_tool_name.map(|name| {
-        format!(
+    let disk_pointer_footer = Some(match read_tool_name {
+        Some(name) => format!(
             "Use {} on {} for full content",
             name,
             task.output_file.display()
-        )
+        ),
+        None => format!("Full output: {}", task.output_file.display()),
     });
     render_completion_output_delivery(
         &mut msg,
@@ -357,8 +379,16 @@ pub fn render_completion_output_delivery(
         }
         None => match disk_pointer_footer {
             Some(footer) => {
+                let collapsed = collapse_carriage_returns(output.text());
+                let (kept, lines_cut) = cap_lines(&collapsed, MAX_INLINE_COMPLETION_LINES);
+                let total_bytes = if lines_cut || collapsed.len() != output.text().len() {
+                    // The footer always reports the real size, and a cut must always print it.
+                    output.total_bytes().max(kept.len() + 1)
+                } else {
+                    output.total_bytes()
+                };
                 let (output, _) = truncate_with_preview(
-                    output,
+                    PartialOutput::part_of(kept, total_bytes),
                     MAX_INLINE_COMPLETION_BYTES,
                     PREVIEW_SIZE,
                     Some(footer),
@@ -1359,22 +1389,40 @@ mod tests {
         assert!(msg.contains(r#"get_command_or_subagent_output("big-bg")"#));
         assert!(!msg.contains(&"x".repeat(100)));
     }
-    /// Without a polling tool AND without a Read-tool fallback, there is no disk-pointer footer to
-    /// anchor a truncated preview against, so the full output text is inlined verbatim. The bash
-    /// truncation cap only fires when the caller supplies a disk-pointer footer.
+    /// Without a Read tool the body is still capped, and the footer names the output file.
     #[test]
-    fn format_bash_completion_inline_form_without_footer_is_verbatim() {
+    fn format_bash_completion_inline_form_without_read_tool_is_capped() {
         let mut task = make_completed("big-bg");
-        let large_output = "x".repeat(5_000_000);
-        task.output = large_output.clone();
+        task.output = "x".repeat(5_000_000);
+        task.output_file = std::path::PathBuf::from("/tmp/bg.log");
         let msg = format_bash_completion(&task, None, None);
         assert!(msg.contains("response:\n"));
+        assert!(msg.len() < 4_500, "inline reminder was {} bytes", msg.len());
         assert!(
-            msg.contains(&large_output),
-            "expected full output verbatim, got len={}",
-            msg.len()
+            msg.contains("Full output: /tmp/bg.log"),
+            "expected output-file pointer: {msg}"
         );
-        assert!(!msg.contains("[Output truncated"));
+    }
+    /// A log of short lines fits the byte cap, so the line cap must cut it. Progress rows keep their last frame.
+    #[test]
+    fn format_bash_completion_caps_lines_and_collapses_progress_rows() {
+        let mut task = make_completed("log-bg");
+        let mut log = String::from("10%\r50%\r100%\n");
+        for i in 0..500 {
+            log.push_str(&format!("l{i}\n"));
+        }
+        task.output = log;
+        task.output_file = std::path::PathBuf::from("/tmp/bg.log");
+        let msg = format_bash_completion(&task, None, Some("read_file"));
+        assert!(
+            msg.contains("response:\n100%\n"),
+            "progress row must collapse: {msg}"
+        );
+        assert!(!msg.contains("10%"));
+        assert!(msg.contains("l78\n"));
+        assert!(!msg.contains("l79\n"), "line cap must cut the log: {msg}");
+        assert!(msg.contains("[Output truncated"));
+        assert!(msg.contains("Use read_file on /tmp/bg.log for full content"));
     }
     #[test]
     fn format_bash_completion_inline_points_at_output_file_when_available() {
