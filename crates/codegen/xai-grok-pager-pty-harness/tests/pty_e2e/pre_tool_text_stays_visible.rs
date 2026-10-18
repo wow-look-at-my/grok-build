@@ -173,19 +173,8 @@ async fn tool_only_turn_marks_no_message() {
     let content = ContentController::start().await.expect("start content");
     let noop = json!({ "command": "true", "description": "no-op" }).to_string();
     let _tool = expect_tool_turn(&content, "call_silent", "run_terminal_command", noop);
-    // The turn ends on thinking alone. An empty reply is retried as an empty response.
-    let _end = content.expect_agent_turn_with_responses(
-        "ends on thinking alone",
-        ScriptedResponse::sse(sse::responses_api_reasoning_only_events(
-            "nothing to add",
-            "test-model",
-        )),
-        ScriptedResponse::sse(sse::chat_completion_script_with_reasoning(
-            "nothing to add",
-            "",
-            "test-model",
-        )),
-    );
+    // The sampler retries an empty or thinking-only reply. Whitespace ends the turn, and the pager draws no text row for it.
+    let _end = content.expect_agent_turn("ends on whitespace", "\n\n");
 
     let binary = pager_binary().expect("resolve pager binary");
     let mut harness = PtyHarness::spawn_with_content_in_dir(
