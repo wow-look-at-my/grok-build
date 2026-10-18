@@ -40,6 +40,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      id-token: write # the slopfix action fetches its binary with an OIDC token
       actions: write # fail-fast cancels this run
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
@@ -56,6 +57,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      id-token: write # the slopfix action fetches its binary with an OIDC token
       actions: write # fail-fast cancels this run
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
