@@ -218,7 +218,7 @@ fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         notif.response_tx.send(Ok(())).ok();
                         return false;
                     }
-                    if !dedup_drop
+                    if !below_highwater
                         && !meta.is_replay
                         && let Some(notif_pid) = meta.prompt_id.as_deref()
                         && agent.session.current_prompt_id.as_deref() != Some(notif_pid)
@@ -226,7 +226,7 @@ fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {
                     {
                         agent.attached_as_viewer = !agent.is_self_originated_prompt(notif_pid);
                     }
-                    if !dedup_drop {
+                    if !below_highwater {
                         if let Some(tokens) = meta.total_tokens {
                             confirm_context_used(agent, tokens);
                         }
