@@ -1222,7 +1222,8 @@ impl ScrollbackState {
         self.push(entry)
     }
 
-    /// Whether the open turn has an agent text entry. The walk stops at the turn's prompt or at the previous turn's terminal marker.
+    /// Whether the open turn has an agent text entry. The walk stops at the
+    /// turn's prompt or at the turn's terminal marker.
     pub fn open_turn_has_agent_text(&self) -> bool {
         self.entries
             .values()
