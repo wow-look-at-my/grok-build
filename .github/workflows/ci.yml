@@ -39,12 +39,13 @@ jobs:
     runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     timeout-minutes: 10
     permissions:
+      id-token: write
       contents: read
       actions: write # fail-fast cancels this run
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
-      - uses: wow-look-at-my/slopfix@master
+      - uses: wow-look-at-my/slopfix@lkgb
 
       - uses: wow-look-at-my/actions@fail-fast#latest
         if: failure()
@@ -55,6 +56,7 @@ jobs:
     # Its own job, not a step of build-test: rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build it would otherwise sit behind.
     timeout-minutes: 10
     permissions:
+      id-token: write
       contents: read
       actions: write # fail-fast cancels this run
     steps:
@@ -71,7 +73,7 @@ jobs:
             fi
           done
 
-      - uses: wow-look-at-my/slopfix@master
+      - uses: wow-look-at-my/slopfix@lkgb
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
@@ -88,6 +90,7 @@ jobs:
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
     runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     permissions:
+      id-token: write
       contents: read
       actions: write # fail-fast cancels this run
     # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s. A job past this is broken, not slow.
@@ -181,6 +184,7 @@ jobs:
     name: Build release (${{ matrix.name }})
     runs-on: ${{ (github.event.repository.visibility == 'public' || !contains(fromJSON('["ubuntu-22.04"]'), matrix.runs-on)) && matrix.runs-on || vars.CI_RUNNER || matrix.runs-on }}
     permissions:
+      id-token: write
       contents: read
       actions: write # fail-fast cancels this run
     timeout-minutes: 45
@@ -358,7 +362,7 @@ jobs:
 
       - name: Create release
         id: rel
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@lkgb
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
@@ -370,8 +374,10 @@ jobs:
   link-darwin:
     name: Link darwin/arm64 (macOS)
     needs: build-release
+    if: github.event.repository.visibility == 'public'
     runs-on: macos-14
     permissions:
+      id-token: write
       contents: read
       actions: write # fail-fast cancels this run
     timeout-minutes: 15
@@ -400,8 +406,10 @@ jobs:
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
+    if: github.event.repository.visibility == 'public'
     runs-on: macos-14
     permissions:
+      id-token: write
       contents: read
       actions: write # fail-fast cancels this run
     timeout-minutes: 25
@@ -477,7 +485,7 @@ jobs:
 
       # Each upload is the org action, not the CLI. buildhost publishes its CLI as one APE, so `?os=linux` serves the same MZ file a Mac gets. This runner's binfmt handler claims that magic: `run-detectors: unable to find an interpreter`. The action is TypeScript, mints its own OIDC bearer, and chunks a body past the edge's cap by itself.
       - name: Upload the linux binary
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@lkgb
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
@@ -487,7 +495,7 @@ jobs:
           path: dist/grok-linux-amd64
 
       - name: Upload the darwin binary
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@lkgb
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
@@ -497,7 +505,7 @@ jobs:
           path: dist/grok-darwin-arm64
 
       - name: Publish release
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@lkgb
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}

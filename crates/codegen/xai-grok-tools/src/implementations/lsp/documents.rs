@@ -280,8 +280,8 @@ mod tests {
 
     /// The revision is written down before the notification goes out. A
     /// versionless push that arrives while the send is still running is
-    /// credited with the text the server was just given. A send that fails
-    /// takes it back: what is recorded describes the text the server has.
+    /// credited with the text the server was given. A send that fails takes
+    /// it back: what is recorded describes the text the server has.
     #[test]
     fn a_failed_send_leaves_the_document_where_it_was() {
         let documents = Documents::new();
