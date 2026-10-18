@@ -747,6 +747,102 @@ pub(crate) fn expect_tool_turn(
     )
 }
 
+/// One model response that writes `text` and then calls one tool, on both pager backends.
+pub(crate) fn expect_text_then_tool_turn(
+    content: &ContentController,
+    text: &str,
+    call_id: &str,
+    name: &str,
+    args: String,
+) -> AgentTurnExpectation {
+    let responses = vec![
+        SseEvent::data(
+            json!({
+                "type": "response.created",
+                "sequence_number": 0,
+                "response": {
+                    "id": "resp_text_tool", "object": "response", "created_at": 1234567890,
+                    "model": "test-model", "status": "in_progress", "output": []
+                }
+            })
+            .to_string(),
+        ),
+        SseEvent::data(
+            json!({
+                "type": "response.output_text.delta",
+                "sequence_number": 1,
+                "item_id": "msg_text_tool",
+                "output_index": 0,
+                "content_index": 0,
+                "delta": text
+            })
+            .to_string(),
+        ),
+        SseEvent::data(
+            json!({
+                "type": "response.function_call_arguments.delta",
+                "sequence_number": 2,
+                "item_id": call_id,
+                "output_index": 1,
+                "delta": args
+            })
+            .to_string(),
+        ),
+        SseEvent::data(
+            json!({
+                "type": "response.completed",
+                "sequence_number": 3,
+                "response": {
+                    "id": "resp_text_tool", "object": "response", "created_at": 1234567890,
+                    "model": "test-model", "status": "completed",
+                    "output": [
+                        {
+                            "type": "message", "id": "msg_text_tool", "role": "assistant",
+                            "status": "completed",
+                            "content": [{ "type": "output_text", "text": text, "annotations": [] }]
+                        },
+                        { "type": "function_call", "call_id": call_id, "name": name, "arguments": args }
+                    ],
+                    "usage": {
+                        "input_tokens": 10, "output_tokens": 20, "total_tokens": 30,
+                        "input_tokens_details": { "cached_tokens": 0 },
+                        "output_tokens_details": { "reasoning_tokens": 0 }
+                    }
+                }
+            })
+            .to_string(),
+        ),
+        SseEvent::data("[DONE]".to_string()),
+    ];
+    let chunk = |delta: serde_json::Value, finish: serde_json::Value| {
+        SseEvent::data(
+            json!({
+                "id": "chatcmpl-text-tool", "object": "chat.completion.chunk",
+                "created": 1234567890, "model": "test-model",
+                "choices": [{ "index": 0, "delta": delta, "finish_reason": finish }]
+            })
+            .to_string(),
+        )
+    };
+    let chat = vec![
+        chunk(json!({ "role": "assistant", "content": text }), json!(null)),
+        chunk(
+            json!({ "tool_calls": [{
+                "index": 0, "id": call_id, "type": "function",
+                "function": { "name": name, "arguments": args }
+            }] }),
+            json!(null),
+        ),
+        chunk(json!({}), json!("tool_calls")),
+        SseEvent::data("[DONE]".to_string()),
+    ];
+    content.expect_agent_turn_with_responses(
+        format!("text then tool turn {call_id}"),
+        ScriptedResponse::sse(responses),
+        ScriptedResponse::sse(chat),
+    )
+}
+
 /// Responses API SSE stream whose `response.completed` output carries one `function_call` item per entry of `calls`.
 /// That is a single model turn invoking parallel tool calls.
 /// Each entry is `(call_id, name, arguments)`; ids must be distinct or history bookkeeping aliases the calls.
