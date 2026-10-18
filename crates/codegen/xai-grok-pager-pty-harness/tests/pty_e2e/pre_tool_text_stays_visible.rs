@@ -1,5 +1,4 @@
 //! PTY: text the model writes before a tool call stays on screen.
-//! The cases cover a live turn, the same turn after `--continue`, a completion wake, and a turn that writes no text.
 #[allow(unused_imports)]
 use super::common::*;
 
