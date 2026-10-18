@@ -158,8 +158,8 @@ fn duration_line(description: Option<&str>, duration_secs: f64) -> String {
     }
 }
 /// Format a model-facing message from a [`TaskSnapshot`]. `task_output_name` controls the pointer-vs-inline rendering of the output section
-/// (see [`render_completion_output_delivery`]). When the inline branch fires and `read_tool_name` is set, the output is truncated and followed
-/// by a footer pointing the model at `task.output_file` so the full log is still recoverable from disk.
+/// (see [`render_completion_output_delivery`]). The inline branch caps the output and adds a footer that points at `task.output_file`.
+/// `read_tool_name`, when set, names the tool in that footer.
 pub fn format_bash_completion(
     task: &TaskSnapshot,
     task_output_name: Option<&str>,
@@ -1389,22 +1389,37 @@ mod tests {
         assert!(msg.contains(r#"get_command_or_subagent_output("big-bg")"#));
         assert!(!msg.contains(&"x".repeat(100)));
     }
-    /// Without a polling tool AND without a Read-tool fallback, there is no disk-pointer footer to
-    /// anchor a truncated preview against, so the full output text is inlined verbatim. The bash
-    /// truncation cap only fires when the caller supplies a disk-pointer footer.
+    /// Without a Read tool the body is still capped, and the footer names the output file.
     #[test]
-    fn format_bash_completion_inline_form_without_footer_is_verbatim() {
+    fn format_bash_completion_inline_form_without_read_tool_is_capped() {
         let mut task = make_completed("big-bg");
-        let large_output = "x".repeat(5_000_000);
-        task.output = large_output.clone();
+        task.output = "x".repeat(5_000_000);
+        task.output_file = std::path::PathBuf::from("/tmp/bg.log");
         let msg = format_bash_completion(&task, None, None);
         assert!(msg.contains("response:\n"));
+        assert!(msg.len() < 4_500, "inline reminder was {} bytes", msg.len());
         assert!(
-            msg.contains(&large_output),
-            "expected full output verbatim, got len={}",
-            msg.len()
+            msg.contains("Full output: /tmp/bg.log"),
+            "expected output-file pointer: {msg}"
         );
-        assert!(!msg.contains("[Output truncated"));
+    }
+    /// A log of short lines fits the byte cap, so the line cap must cut it. Progress rows keep their last frame.
+    #[test]
+    fn format_bash_completion_caps_lines_and_collapses_progress_rows() {
+        let mut task = make_completed("log-bg");
+        let mut log = String::from("10%\r50%\r100%\n");
+        for i in 0..500 {
+            log.push_str(&format!("l{i}\n"));
+        }
+        task.output = log;
+        task.output_file = std::path::PathBuf::from("/tmp/bg.log");
+        let msg = format_bash_completion(&task, None, Some("read_file"));
+        assert!(msg.contains("response:\n100%\n"), "progress row must collapse: {msg}");
+        assert!(!msg.contains("10%"));
+        assert!(msg.contains("l78\n"));
+        assert!(!msg.contains("l79\n"), "line cap must cut the log: {msg}");
+        assert!(msg.contains("[Output truncated"));
+        assert!(msg.contains("Use read_file on /tmp/bg.log for full content"));
     }
     #[test]
     fn format_bash_completion_inline_points_at_output_file_when_available() {
