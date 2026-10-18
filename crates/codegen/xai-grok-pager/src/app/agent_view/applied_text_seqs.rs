@@ -1,5 +1,4 @@
 //! The event ids of the agent text chunks this view applied.
-//! The scalar dedup highwater cannot tell a duplicate from a chunk that arrived late. This set can.
 
 use std::collections::BTreeSet;
 
