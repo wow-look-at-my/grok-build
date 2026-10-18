@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
-      - uses: wow-look-at-my/slopfix@master
+      - uses: wow-look-at-my/slopfix@lkgb
 
       - uses: wow-look-at-my/actions@fail-fast#latest
         if: failure()
@@ -73,7 +73,7 @@ jobs:
             fi
           done
 
-      - uses: wow-look-at-my/slopfix@master
+      - uses: wow-look-at-my/slopfix@lkgb
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
@@ -362,7 +362,7 @@ jobs:
 
       - name: Create release
         id: rel
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-create-release@lkgb
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
@@ -485,7 +485,7 @@ jobs:
 
       # Each upload is the org action, not the CLI. buildhost publishes its CLI as one APE, so `?os=linux` serves the same MZ file a Mac gets. This runner's binfmt handler claims that magic: `run-detectors: unable to find an interpreter`. The action is TypeScript, mints its own OIDC bearer, and chunks a body past the edge's cap by itself.
       - name: Upload the linux binary
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@lkgb
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
@@ -495,7 +495,7 @@ jobs:
           path: dist/grok-linux-amd64
 
       - name: Upload the darwin binary
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-upload-artifact@lkgb
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
@@ -505,7 +505,7 @@ jobs:
           path: dist/grok-darwin-arm64
 
       - name: Publish release
-        uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@master
+        uses: wow-look-at-my/buildhost/.github/actions/buildhost-publish-release@lkgb
         with:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
