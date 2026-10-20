@@ -26,9 +26,10 @@ pub(crate) fn count_lines(path: &Path) -> Option<FileCounts> {
         if n == 0 {
             break;
         }
-        lines += buf[..n].iter().filter(|&&b| b == b'\n').count() as u64;
+        let chunk = buf.get(..n)?;
+        lines += chunk.iter().filter(|&&b| b == b'\n').count() as u64;
         bytes += n as u64;
-        last = buf[n - 1];
+        last = chunk.last().copied().unwrap_or(last);
     }
     if last != b'\n' {
         lines += 1;

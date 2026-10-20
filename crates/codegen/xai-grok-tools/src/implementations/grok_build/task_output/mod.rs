@@ -1167,17 +1167,17 @@ impl TaskOutputTool {
         }
 
         if input.wants_view() {
-            if ids.len() != 1 {
+            let [id] = ids.as_slice() else {
                 return Err(xai_tool_runtime::ToolError::invalid_arguments(
                     "stage, head, tail and grep read one task at a time. Pass a single id."
                         .to_string(),
                 ));
-            }
+            };
             if input.waits() {
                 // Wait first, so the view reads the finished log.
                 let _ = self
                     .run_single_task(
-                        &ids[0],
+                        id,
                         input.timeout_ms,
                         &ctx,
                         resources.clone(),
@@ -1185,7 +1185,7 @@ impl TaskOutputTool {
                     )
                     .await?;
             }
-            return self.run_view(&ids[0], &input, resources).await;
+            return self.run_view(id, &input, resources).await;
         }
 
         if ids.len() == 1 {

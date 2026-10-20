@@ -163,7 +163,7 @@ impl<'a> Lexer<'a> {
         let end_i = self.i.min(self.chars.len());
         let (start, end) = (self.byte(start_i), self.byte(end_i));
         Some(Word {
-            text: self.src[start..end].to_string(),
+            text: self.src.get(start..end)?.to_string(),
             start,
             end,
         })
@@ -324,10 +324,15 @@ fn is_assignment(word: &str) -> bool {
     if name_len == 0 {
         return false;
     }
-    let rest = &word[name_len..];
+    let Some(rest) = word.get(name_len..) else {
+        return false;
+    };
     let rest = if rest.starts_with('[') {
         match rest.find(']') {
-            Some(close) => &rest[close + 1..],
+            Some(close) => match rest.get(close + 1..) {
+                Some(after) => after,
+                None => return false,
+            },
             None => return false,
         }
     } else {
@@ -354,7 +359,7 @@ impl Stage {
     fn text<'s>(&self, src: &'s str) -> &'s str {
         let start = self.words.first().map_or(0, |w| w.start);
         let end = self.words.last().map_or(0, |w| w.end);
-        &src[start..end]
+        src.get(start..end).unwrap_or_default()
     }
 }
 
@@ -375,7 +380,7 @@ impl Segment {
             .last()
             .and_then(|s| s.words.last())
             .map_or(0, |w| w.end);
-        &src[start..end]
+        src.get(start..end).unwrap_or_default()
     }
 }
 
@@ -518,7 +523,7 @@ impl TailView {
             TailView::From(n) => n.saturating_sub(1),
         };
         match lines.get(start_line) {
-            Some(&at) => &text[at..],
+            Some(&at) => text.get(at..).unwrap_or_default(),
             None => "",
         }
     }
@@ -658,9 +663,13 @@ pub fn plan_pipeline_capture(command: &str, log_file: &Path) -> Option<CapturePl
         ));
     }
 
+    let final_stage = stages
+        .get(last)
+        .map(|stage| stage.text(command).to_string())
+        .unwrap_or_default();
     Some(CapturePlan {
         command: out,
-        final_stage: stages[last].text(command).to_string(),
+        final_stage,
         stages: captures,
         tail_view: tail,
         status_file,
