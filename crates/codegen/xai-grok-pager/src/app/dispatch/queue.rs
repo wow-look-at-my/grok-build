@@ -35,7 +35,7 @@ fn combine_queued_prompts_enabled() -> bool {
 
 /// We must also not be mid-edit, mid-model-switch, or mid-replay.
 /// **Server-busy (`is_turn_running() || !shared_queue.is_empty()`):** the immediate-send path is for prompts that must queue server-side rather than start a turn locally.
-/// **FIFO guard:** a prompt may only jump onto the server queue when no local plain row waits to migrate there. A local row that owns its turn (`/compact`, `/loop`) does not hold text typed after it. That text reaches the running turn first.
+/// **FIFO guard (`pending_prompts.is_empty()`):** a prompt may only jump onto the server queue when the local drip-feed queue is empty.
 ///
 /// **No leader gate:** the shell's queue is what makes a mid-turn prompt arrive
 /// at the next gap between tool calls / model requests. The shell's queue the
@@ -53,11 +53,7 @@ pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
         agent.session.state.is_turn_running() || wake_running || !agent.shared_queue.is_empty();
     server_busy
         && agent.session.session_id.is_some()
-        && !agent
-            .session
-            .pending_prompts
-            .iter()
-            .any(row_may_be_migrated)
+        && agent.session.pending_prompts.is_empty()
         && !matches!(agent.prompt_mode, PromptMode::EditingQueued { .. })
         && !agent.session.model_switch_pending
         && !agent.session.loading_replay
