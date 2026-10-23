@@ -119,6 +119,129 @@ async fn goal_round_shows_check_and_directive() {
     harness.quit().expect("reap pager");
 }
 
+/// Every skeptic answers "not refuted", so verification passes and the summarizer runs. Its run has a row after the verifier's.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn passed_verification_shows_summarizer_row() {
+    let content = ContentController::start().await.expect("start content");
+    let _first = content.expect_agent_turn("first round", ROUND_ONE);
+    expect_verdict(
+        &content,
+        "complete",
+        &json!({
+            "decision": "candidate_complete",
+            "evidence": "done",
+            "next_step": "none",
+            "blocker_key": ""
+        }),
+    );
+    content.set_response(
+        json!({ "refuted": false, "evidence": "the markers exist", "confidence": "high" })
+            .to_string(),
+    );
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_env_in_dir(
+        &binary,
+        160,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        &[("GROK_GOAL", "1"), ("GROK_GOAL_PLANNER", "0")],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(b"/goal write two markers")
+        .expect("type goal");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\r").expect("submit goal");
+    let shown = wait_until(Duration::from_secs(60), || {
+        harness.update(Duration::from_millis(100));
+        harness.screen_contents().contains("Goal summarizer:")
+    });
+    let screen = harness.screen_contents();
+    assert!(
+        shown,
+        "the summarizer run must have a row; screen:\n{screen}"
+    );
+    assert!(
+        row_of(&screen, "Goal verification:") < row_of(&screen, "Goal summarizer:"),
+        "the summarizer row must follow the verifier row; screen:\n{screen}"
+    );
+
+    harness.update(Duration::from_millis(500));
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(200));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    harness.quit().expect("reap pager");
+}
+
+/// With the strategist set to fire on the first failed verification, its run has a row after the verifier's.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn failed_verification_shows_strategist_row() {
+    let content = ContentController::start().await.expect("start content");
+    let _first = content.expect_agent_turn("first round", ROUND_ONE);
+    expect_verdict(
+        &content,
+        "complete",
+        &json!({
+            "decision": "candidate_complete",
+            "evidence": "done",
+            "next_step": "none",
+            "blocker_key": ""
+        }),
+    );
+    content.set_response("ROLE_FALLBACK");
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_env_in_dir(
+        &binary,
+        160,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        &[
+            ("GROK_GOAL", "1"),
+            ("GROK_GOAL_PLANNER", "0"),
+            ("GROK_GOAL_STRATEGIST_EVERY", "1"),
+        ],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(b"/goal write two markers")
+        .expect("type goal");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\r").expect("submit goal");
+    let shown = wait_until(Duration::from_secs(60), || {
+        harness.update(Duration::from_millis(100));
+        harness.screen_contents().contains("Goal strategist:")
+    });
+    let screen = harness.screen_contents();
+    assert!(
+        shown,
+        "the strategist run must have a row; screen:\n{screen}"
+    );
+    assert!(
+        row_of(&screen, "Goal verification:") < row_of(&screen, "Goal strategist:"),
+        "the strategist row must follow the verifier row; screen:\n{screen}"
+    );
+
+    harness.update(Duration::from_millis(500));
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(200));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    harness.quit().expect("reap pager");
+}
+
 /// A full goal whose round the evaluator calls complete runs the verifier subagents. That run has a row, above the directive its verdict sends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
