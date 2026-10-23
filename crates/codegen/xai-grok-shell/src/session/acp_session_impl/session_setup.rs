@@ -336,7 +336,7 @@ impl SessionActor {
         if turn_running {
             self.pending_skill_reminders.lock().push(item);
         } else {
-            self.chat_state_handle.push_user_message(item);
+            self.push_model_input(item);
             self.persist_announcement_state().await;
         }
     }
@@ -352,7 +352,7 @@ impl SessionActor {
         if self.turn_is_running() {
             self.pending_skill_reminders.lock().push(item);
         } else {
-            self.chat_state_handle.push_user_message(item);
+            self.push_model_input(item);
         }
     }
     /// Whether a turn is in flight. A reminder reaches the agent at the running turn's next safe
@@ -368,8 +368,7 @@ impl SessionActor {
     pub(super) async fn flush_pending_skill_reminders(&self) {
         let activation = self.plan_mode.lock().take_pending_activation();
         if let Some(text) = activation {
-            self.chat_state_handle
-                .push_user_message(ConversationItem::system_reminder(text));
+            self.push_model_input(ConversationItem::system_reminder(text));
             self.plan_mode.lock().record_reminder_injected();
             self.persist_plan_mode_state();
         }
@@ -379,7 +378,7 @@ impl SessionActor {
             return;
         }
         for item in items {
-            self.chat_state_handle.push_user_message(item);
+            self.push_model_input(item);
         }
         self.persist_announcement_state().await;
     }

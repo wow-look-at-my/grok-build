@@ -1570,6 +1570,12 @@ impl AcpUpdateTracker {
     }
     /// Handle an agent message chunk (streaming text).
     /// Ends the open agent message so its renderer finishes and the next text starts a new message.
+    /// Close the open thought and agent message before a row the shell writes between them and the next reply.
+    /// Without it, the reply text appends to the message above that row, and the spinner reads "Responding…" while no reply streams.
+    pub(crate) fn end_streaming_output(&mut self, scrollback: &mut ScrollbackState) {
+        self.finish_thinking(scrollback);
+        self.finish_agent_message(scrollback);
+    }
     fn finish_agent_message(&mut self, scrollback: &mut ScrollbackState) {
         if let Some(agent_id) = self.current_agent_msg.take() {
             scrollback.finish_running(agent_id);
