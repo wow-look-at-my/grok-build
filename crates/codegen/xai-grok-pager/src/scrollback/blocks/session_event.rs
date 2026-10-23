@@ -163,6 +163,10 @@ pub enum SessionEvent {
     HookAnnotation { message: String },
     /// A hook's verdict on the tool call above it (deny, failure, timeout); this block draws the tool-row bullet.
     HookOutcome { message: String },
+    /// A user-role message the shell sent to the model on its own. The model answers it, so the row shows all of it.
+    ModelInput { source: String, text: String },
+    /// The shell started a model call of its own that streams nothing here, for example the goal evaluator.
+    SideModelCall { purpose: String },
     /// The session's persisted model is no longer available after re-auth.
     /// Both IDs are empty when re-shown on blocked prompt attempts.
     ModelUnavailable {
@@ -529,6 +533,10 @@ impl SessionEvent {
                     summary.clone()
                 }
             }
+            SessionEvent::ModelInput { source, text } => {
+                format!("{}\n{text}", model_input_header(source))
+            }
+            SessionEvent::SideModelCall { purpose } => format!("{purpose}…"),
             SessionEvent::HookAnnotation { message } | SessionEvent::HookOutcome { message } => {
                 message.clone()
             }
@@ -588,12 +596,16 @@ impl SessionEvent {
         }
     }
 
-    /// The recap summary text when this is a [`SessionEvent::Recap`].
-    /// Recap events render in the tool-call visual style (bullet, bold "Recap" header, muted body); other variants stay plain informational lines.
-    /// This accessor is the single branch point the `SessionEventBlock` trait methods use to opt the recap into that style.
-    fn recap_summary(&self) -> Option<&str> {
+    /// The header and body of an event drawn in the tool-call style: a
+    /// bullet, a bold header and a muted body that folds. Only
+    /// [`SessionEvent::Recap`] and [`SessionEvent::ModelInput`] use that
+    /// style. Other variants stay plain informational lines.
+    fn folded(&self) -> Option<(String, &str)> {
         match self {
-            SessionEvent::Recap { summary, .. } => Some(summary.as_str()),
+            SessionEvent::Recap { summary, .. } => Some(("Recap".to_string(), summary.as_str())),
+            SessionEvent::ModelInput { source, text } => {
+                Some((model_input_header(source), text.as_str()))
+            }
             _ => None,
         }
     }
@@ -631,6 +643,11 @@ impl SessionEvent {
     }
 }
 
+/// The header of a [`SessionEvent::ModelInput`] row.
+fn model_input_header(source: &str) -> String {
+    format!("Sent to the model · {source}")
+}
+
 /// Format a token count with "k" suffix for thousands.
 fn format_tokens(tokens: u64) -> String {
     if tokens >= 1000 {
@@ -665,23 +682,23 @@ impl SessionEventBlock {
         self
     }
 
-    /// A recap with real body content, i.e. not the empty loading spinner or a stray empty recap.
-    /// Gates the interactive affordances (folding and j/k selection) so navigation never lands on a recap that can't fold.
-    fn recap_has_body(&self) -> bool {
+    /// A folded event with real body content, i.e. not the empty loading
+    /// spinner or a stray empty recap.
+    fn folded_has_body(&self) -> bool {
         self.event
-            .recap_summary()
-            .is_some_and(|s| !s.trim().is_empty())
+            .folded()
+            .is_some_and(|(_, body)| !body.trim().is_empty())
     }
 
-    /// Render a recap event in the tool-call visual style. While the recap is still being generated the entry is
+    /// Render a folded event in the tool-call visual style. While a recap is still being generated the entry is
     /// `is_running`, so only the header is shown. [`BlockLine::separator`] / [`Selectable::None`] keep drag-highlight
-    /// and copy on the summary body, never the chrome label.
-    fn recap_output(&self, ctx: &BlockContext, summary: &str) -> BlockOutput {
+    /// and copy on the body, never the chrome label.
+    fn folded_output(&self, ctx: &BlockContext, header: &str, summary: &str) -> BlockOutput {
         let theme = Theme::current();
         let muted_collapsed =
             ctx.mute_when_collapsed(ctx.appearance.scrollback.blocks.tool.muted_collapsed);
 
-        // "Recap" header: bold, neutral primary text (like a tool-call header)
+        // Header: bold, neutral primary text (like a tool-call header)
         // Dimmed to muted gray while collapsed-and-unselected.
         let header_text_style = if muted_collapsed {
             theme.muted()
@@ -691,7 +708,7 @@ impl SessionEventBlock {
         let header_style = header_text_style.add_modifier(Modifier::BOLD);
         // Non-selectable chrome (same as Thinking / tool label prefixes).
         let header_line =
-            || BlockLine::separator(Line::from(Span::styled("Recap".to_string(), header_style)));
+            || BlockLine::separator(Line::from(Span::styled(header.to_string(), header_style)));
 
         // Loading: header only; the animated gray sidebar is the feedback.
         if ctx.is_running {
@@ -702,7 +719,7 @@ impl SessionEventBlock {
 
         match ctx.mode {
             DisplayMode::Collapsed => {
-                let mut spans = vec![Span::styled("Recap".to_string(), header_style)];
+                let mut spans = vec![Span::styled(header.to_string(), header_style)];
                 let preview = summary.lines().next().unwrap_or(summary).trim();
                 if !preview.is_empty() {
                     spans.push(Span::styled(format!("  {preview}"), theme.muted()));
@@ -711,7 +728,7 @@ impl SessionEventBlock {
                     Line::from(spans),
                     ctx.content_width(),
                 );
-                // Only the preview span is copyable, never the "Recap" label
+                // Only the preview span is copyable, never the header label
                 // No preview (empty after trim) means fully non-selectable
                 let selectable = if preview.is_empty() {
                     Selectable::None
@@ -753,9 +770,9 @@ impl SessionEventBlock {
 
 impl BlockContent for SessionEventBlock {
     fn output(&self, ctx: &BlockContext) -> BlockOutput {
-        // Recap renders in the tool-call style (bullet, bold header, body)
-        if let Some(summary) = self.event.recap_summary() {
-            return self.recap_output(ctx, summary);
+        // A folded event renders in the tool-call style (bullet, bold header, body)
+        if let Some((header, body)) = self.event.folded() {
+            return self.folded_output(ctx, &header, body);
         }
 
         let theme = Theme::current();
@@ -794,7 +811,7 @@ impl BlockContent for SessionEventBlock {
 
     fn accent(&self, ctx: &BlockContext) -> Option<AccentStyle> {
         let theme = Theme::current();
-        if self.event.recap_summary().is_some() {
+        if self.event.folded().is_some() {
             // Loading: animated sidebar so there's feedback that the recap is being generated
             // Gray rather than the magenta `accent_running`: the recap is a passive marker, not an active tool turn
             if ctx.is_running {
@@ -815,7 +832,7 @@ impl BlockContent for SessionEventBlock {
         // Recap: animated dot while loading; default gray dot when collapsed-idle; accent color when expanded
         // A hook outcome keeps the default gray, matching its muted text; other events never show a bullet
         if matches!(self.event, SessionEvent::HookOutcome { .. })
-            || (self.event.recap_summary().is_some()
+            || (self.event.folded().is_some()
                 && !ctx.is_running
                 && ctx.mode == DisplayMode::Collapsed)
         {
@@ -833,14 +850,14 @@ impl BlockContent for SessionEventBlock {
     }
 
     fn is_foldable(&self) -> bool {
-        // A recap with body content folds; other events are single informational lines with nothing to collapse
-        self.recap_has_body()
+        // A folded event with body content folds; other events are single informational lines with nothing to collapse
+        self.folded_has_body()
     }
 
     fn is_selectable(&self) -> bool {
-        // Recap is tool-like: navigable so it can be folded, but only once it has body content (mirrors `is_foldable`)
+        // A folded event is tool-like: navigable so it can be folded, but only once it has body content (mirrors `is_foldable`)
         // That way j/k never lands on the loading spinner or an empty recap. Other events stay non-interactive.
-        self.recap_has_body()
+        self.folded_has_body()
     }
 
     fn default_display_mode(&self) -> DisplayMode {
@@ -848,9 +865,8 @@ impl BlockContent for SessionEventBlock {
     }
 
     fn has_bullet(&self, ctx: &BlockContext) -> bool {
-        // Recap and hook outcomes only, gated on the shared tool bullet so they track the tool rows' appearance setting
-        (self.event.recap_summary().is_some()
-            || matches!(self.event, SessionEvent::HookOutcome { .. }))
+        // Folded events and hook outcomes only, gated on the shared tool bullet so they track the tool rows' appearance setting
+        (self.event.folded().is_some() || matches!(self.event, SessionEvent::HookOutcome { .. }))
             && ctx
                 .appearance
                 .scrollback
@@ -1550,6 +1566,27 @@ mod tests {
         assert!(
             !text.contains("Second line"),
             "preview is first line only: {text}"
+        );
+    }
+
+    #[test]
+    fn model_input_shows_its_source_and_every_line() {
+        let block = SessionEventBlock::new(SessionEvent::ModelInput {
+            source: "stop gate".into(),
+            text: "CI is failing.\nFix it before you stop.".into(),
+        });
+        assert_eq!(block.default_display_mode(), DisplayMode::Expanded);
+        assert!(block.is_foldable());
+        let out = block.output(&recap_ctx(DisplayMode::Expanded, false));
+        let text: Vec<String> = (0..out.lines.len()).map(|i| plain(nth(&out, i))).collect();
+        assert_eq!(text[0], "Sent to the model · stop gate");
+        assert!(
+            text.iter().any(|l| l == "CI is failing."),
+            "first line: {text:?}"
+        );
+        assert!(
+            text.iter().any(|l| l == "Fix it before you stop."),
+            "second line: {text:?}"
         );
     }
 

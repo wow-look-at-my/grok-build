@@ -582,8 +582,7 @@ impl SessionActor {
         )
     }
     pub(super) fn push_system_reminder_with_tag(&self, content: &str, tag: &str) {
-        self.chat_state_handle
-            .push_user_message(wrap_in_reminder_tag(content, tag));
+        self.push_model_input(wrap_in_reminder_tag(content, tag));
     }
     /// Mark completion IDs as reported in the shared `ReportedTaskCompletions` state.
     /// The per-tool-call `TaskCompletionReminder` then won't (re-)surface them.
@@ -966,12 +965,11 @@ impl SessionActor {
         };
         let reminder = crate::session::fork_status::format_reminder(&status);
         tracing::info!(kind = %status.kind, "injecting fork status reminder");
+        let item = wrap_untrusted_in_reminder_tag(&reminder, self.reminder_wrapper_tag());
+        self.announce_model_input(&item);
         let delivered = self
             .chat_state_handle
-            .push_user_message_and_ack(wrap_untrusted_in_reminder_tag(
-                &reminder,
-                self.reminder_wrapper_tag(),
-            ))
+            .push_user_message_and_ack(item)
             .await
             .is_some();
         if !delivered {
@@ -985,11 +983,10 @@ impl SessionActor {
             return;
         };
         tracing::info!("injecting resume status reminder");
-        self.chat_state_handle
-            .push_user_message(wrap_untrusted_in_reminder_tag(
-                &reminder,
-                self.reminder_wrapper_tag(),
-            ));
+        self.push_model_input(wrap_untrusted_in_reminder_tag(
+            &reminder,
+            self.reminder_wrapper_tag(),
+        ));
     }
     /// Whether the built-in todo-stop gate runs for this session. The switch
     /// is the persisted `[ui].stop_gate_unfinished_todos` toggle, which ships
