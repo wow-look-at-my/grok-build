@@ -1056,3 +1056,68 @@ async fn forced_harvest_delivers_nothing_for_a_queued_slash_command() {
         })
         .await;
 }
+
+/// A queued `/skill` row is folded into the running turn like text: the drain expands it.
+#[tokio::test]
+async fn harvest_delivers_a_queued_skill_invocation() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("SKILL.md");
+            std::fs::write(&path, "Find sessions matching $ARGUMENTS").unwrap();
+            let skill = xai_grok_tools::implementations::skills::types::SkillInfo {
+                name: "find-session".to_owned(),
+                description: "Find past sessions".to_owned(),
+                path: path.to_string_lossy().into_owned(),
+                ..Default::default()
+            };
+            actor
+                .agent
+                .borrow()
+                .tool_bridge()
+                .clone()
+                .seed_skill_discovery(
+                    Some(std::path::PathBuf::from("/tmp")),
+                    None,
+                    vec![skill],
+                    None,
+                    Some(256_000),
+                    None,
+                    xai_grok_tools::types::compat::CompatConfig::default(),
+                )
+                .await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.running_task = Some(running_task_stub("running"));
+                state
+                    .pending_inputs
+                    .push_back(slash_command_item("skill1", "/find-session foo"));
+            }
+            *actor.queued_at_turn_start.borrow_mut() = ["running".to_string()].into();
+
+            assert!(actor.harvest_queued_prompts_into_interjections(false).await);
+
+            let state = actor.state.lock().await;
+            assert_eq!(
+                state
+                    .pending_inputs
+                    .iter()
+                    .map(|i| i.prompt_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["running"],
+                "the skill row leaves the queue"
+            );
+            drop(state);
+            let buffered: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(buffered, vec!["/find-session foo"]);
+        })
+        .await;
+}

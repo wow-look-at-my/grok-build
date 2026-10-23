@@ -74,10 +74,14 @@ fn is_interruptible_wait_tool(tool_name: &str, args: &serde_json::Value) -> bool
         _ => false,
     }
 }
-/// A `task` call that blocks the turn on its subagent. An omitted `run_in_background` means background.
+/// A `task` call that blocks the turn on its subagent. An omitted flag means background.
+/// The default agent renames `run_in_background` to `background`, so read both names.
 pub(super) fn is_foreground_task_call(tool_name: &str, args: &serde_json::Value) -> bool {
     xai_grok_tools::implementations::grok_build::task::is_task_tool_id(tool_name)
-        && match args.get("run_in_background") {
+        && match args
+            .get("run_in_background")
+            .or_else(|| args.get("background"))
+        {
             Some(serde_json::Value::Bool(flag)) => !flag,
             Some(serde_json::Value::String(flag)) => flag.trim().eq_ignore_ascii_case("false"),
             _ => false,
