@@ -1217,11 +1217,12 @@ mod tests {
         let (x, y) = cell_pos(&state, 90);
         handle_usage_modal_mouse(&mut state, MouseEventKind::Down(MouseButton::Left), x, y);
         assert_eq!(state.context_selection, Some("Free"));
+        let origin = state.content_rect;
         handle_usage_modal_mouse(
             &mut state,
             MouseEventKind::Down(MouseButton::Left),
-            state.content_rect.x,
-            state.content_rect.y,
+            origin.x,
+            origin.y,
         );
         assert_eq!(
             state.context_selection, None,
