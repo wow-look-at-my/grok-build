@@ -56,6 +56,9 @@ pub struct UiConfig {
     /// Gate the model's turn end on red CI for the branch it pushed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop_gate_ci_failing: Option<bool>,
+    /// Experimental split-and-tee mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split_and_tee_commands: Option<bool>,
     /// Reissue a model call whose output rate stays under this many tokens.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_output_tokens_per_sec: Option<u32>,
@@ -294,6 +297,7 @@ impl Default for UiConfig {
             confirm_before_rewind: None,
             stop_gate_unfinished_todos: None,
             stop_gate_ci_failing: None,
+            split_and_tee_commands: None,
             min_output_tokens_per_sec: None,
             output_rate_sustained_secs: None,
             output_rate_window_secs: None,
@@ -381,6 +385,14 @@ impl UiConfig {
     pub fn stop_gate_ci_failing_enabled(&self) -> bool {
         self.stop_gate_ci_failing
             .unwrap_or(Self::STOP_GATE_CI_FAILING_DEFAULT)
+    }
+
+    /// Default for [`Self::split_and_tee_commands`] when unset. It is an experimental mode, so the user turns it on.
+    pub const SPLIT_AND_TEE_COMMANDS_DEFAULT: bool = false;
+
+    pub fn split_and_tee_commands_enabled(&self) -> bool {
+        self.split_and_tee_commands
+            .unwrap_or(Self::SPLIT_AND_TEE_COMMANDS_DEFAULT)
     }
 
     /// Default for [`Self::thinking_summaries`] when unset.

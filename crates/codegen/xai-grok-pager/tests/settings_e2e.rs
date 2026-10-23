@@ -29,6 +29,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "confirm_before_rewind",
     "stop_gate_unfinished_todos",
     "stop_gate_ci_failing",
+    "split_and_tee_commands",
     "combine_queued_prompts",
     "follow_up_behavior",
     "remember_tool_approvals",
@@ -237,6 +238,12 @@ fn assert_set_bool_action(outcome: SettingsKeyOutcome, key: &str, expected: bool
             assert_eq!(
                 b, expected,
                 "SetStopGateCiFailing value differs from expected"
+            )
+        }
+        ("split_and_tee_commands", Action::SetSplitAndTeeCommands(b)) => {
+            assert_eq!(
+                b, expected,
+                "SetSplitAndTeeCommands value differs from expected"
             )
         }
         ("combine_queued_prompts", Action::SetCombineQueuedPrompts(b)) => {
@@ -537,6 +544,31 @@ fn space_on_subagent_model_inheritance_dispatches_typed_setter() {
     navigate_to(&mut s, "subagent_model_inheritance");
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
     assert_set_bool_action(outcome, "subagent_model_inheritance", true);
+}
+
+/// The experimental split-and-tee row ships off, so Space (and a value-column
+/// click) turns it on through the typed setter.
+#[test]
+fn space_on_split_and_tee_commands_dispatches_typed_setter() {
+    let mut s = make_state();
+    navigate_to(&mut s, "split_and_tee_commands");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Char(' ')));
+    assert_set_bool_action(outcome, "split_and_tee_commands", true);
+}
+
+/// Value-column click toggles `split_and_tee_commands` in one click.
+#[test]
+fn mouse_click_on_split_and_tee_commands_indicator_toggles_in_one_click() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let row_y = row_idx_for(&s, "split_and_tee_commands") as u16;
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        row_y,
+    );
+    assert_set_bool_action(outcome, "split_and_tee_commands", true);
 }
 
 #[test]
@@ -1984,6 +2016,7 @@ fn registry_kind_membership_through_pr_14() {
             "confirm_before_rewind",
             "stop_gate_unfinished_todos",
             "stop_gate_ci_failing",
+            "split_and_tee_commands",
             "combine_queued_prompts",
             "remember_tool_approvals",
             "toolset.ask_user_question.timeout_enabled",
@@ -2158,6 +2191,7 @@ fn defaults_round_trip_through_registry() {
             "confirm_before_rewind" => SettingValue::Bool(true),
             "stop_gate_unfinished_todos" => SettingValue::Bool(true),
             "stop_gate_ci_failing" => SettingValue::Bool(true),
+            "split_and_tee_commands" => SettingValue::Bool(false),
             "combine_queued_prompts" => SettingValue::Bool(false),
             "follow_up_behavior" => SettingValue::Enum("queue"),
             "remember_tool_approvals" => SettingValue::Bool(true),
@@ -2275,6 +2309,7 @@ fn settings_value_payload_matches_kind() {
             | SettingsKeyOutcome::Action(Action::SetConfirmBeforeRewind(_))
             | SettingsKeyOutcome::Action(Action::SetStopGateUnfinishedTodos(_))
             | SettingsKeyOutcome::Action(Action::SetStopGateCiFailing(_))
+            | SettingsKeyOutcome::Action(Action::SetSplitAndTeeCommands(_))
             | SettingsKeyOutcome::Action(Action::SetCombineQueuedPrompts(_))
             | SettingsKeyOutcome::Action(Action::SetMultilineMode(_))
             | SettingsKeyOutcome::Action(Action::SetRememberToolApprovals(_))
