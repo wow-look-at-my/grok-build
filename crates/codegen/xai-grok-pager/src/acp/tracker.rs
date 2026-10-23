@@ -1455,7 +1455,6 @@ impl AcpUpdateTracker {
     /// Attach a summary to the thinking block whose model call carried
     /// `stream_start_ms`. Returns whether the screen changed, so the caller
     /// repaints the row that gained a line rather than the whole transcript.
-    /// A key naming no drawn block (the call streamed no thinking, its block.
     pub fn set_thinking_summary(
         &mut self,
         scrollback: &mut ScrollbackState,

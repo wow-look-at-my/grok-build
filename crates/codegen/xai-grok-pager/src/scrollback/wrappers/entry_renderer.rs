@@ -1186,7 +1186,7 @@ mod tests {
             EntryRenderer::new(entry, &theme)
                 .with_tick(tick)
                 .render(area, &mut buf);
-            // Default layout: accent(1) + left_pad(2), so content starts at 3.
+            // Default layout: accent(1) + left_pad(2), so content starts at a set value.
             buf.cell((3, 0)).unwrap().symbol().to_string()
         };
         let idle = bullet_at(&entry, 0);

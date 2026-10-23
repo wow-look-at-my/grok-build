@@ -344,7 +344,6 @@ fn a_reloaded_transcript_puts_each_summary_back_under_its_row() {
     );
 }
 
-/// The shell's transient `thinking_summary_status`: the call is queued (`failed` is `None`) or gave up.
 fn summary_status_notif(
     session_id: &str,
     stream_start_ms: i64,

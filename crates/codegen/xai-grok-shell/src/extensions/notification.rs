@@ -741,8 +741,8 @@ pub enum SessionUpdate {
         stream_start_ms: i64,
         summary: String,
     },
-    /// The summary side call for one model call is queued (`failed` is `None`) or gave up (`failed` names why).
-    /// Transient: a reload has no call in flight, so a persisted "queued" would spin forever.
+    /// The summary side call for one model call is queued (`failed` is
+    /// `None`) or gave up (`failed` names why).
     ThinkingSummaryStatus {
         /// `streamStartMs` of the model call whose thinking is summarized.
         stream_start_ms: i64,
