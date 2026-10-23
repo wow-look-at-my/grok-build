@@ -54,6 +54,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - The turn loop harvests queued follow-ups before each model request (`harvest_queued_prompts_into_interjections`). A turn parked in an interruptible wait tool (`get_task_output` with a wait, `wait_tasks`, `Await`) makes no request until the task ends. As a result, Queue mode held the row behind a task that can run for minutes.
 - The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. A foreground subagent call is such a wait (`is_foreground_task_call`). The default agent renames its `run_in_background` flag to `background`. The check reads both names. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. An active goal and a pending send-now are exempt.
+- A `/skill` typed mid-turn takes the shell queue like plain text (the `InjectSkill` arm in `dispatch/prompt.rs`). The harvest folds a slash row whose leading token is a skill (`slash_commands::leading_token_is_skill`). The drain expands it. A builtin still waits for its own turn, because only `resolve` runs one.
 
 ## `/context` Messages breakdown
 
