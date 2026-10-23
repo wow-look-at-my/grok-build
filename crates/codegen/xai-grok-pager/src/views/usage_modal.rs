@@ -15,7 +15,7 @@ use crate::views::drag_select::{
     TextDrag, TextEndpoint, endpoint_at, endpoint_at_clamped, paint_text_drag, text_for_drag,
 };
 
-use crate::scrollback::blocks::ContextInfoBlock;
+use crate::scrollback::blocks::{BarGeometry, ContextInfoBlock};
 use crate::theme::Theme;
 use crate::views::credit_bar::CreditBalance;
 use crate::views::modal_window::{
@@ -86,6 +86,10 @@ pub struct UsageInfoModalState {
     pub ctx: UsageInfoContext,
     pub context: Option<ContextInfoBlock>,
     pub context_error: Option<String>,
+    /// Label of the bar segment the user clicked. Its details replace the totals on the Context usage tab.
+    pub context_selection: Option<&'static str>,
+    /// The bar position and segment ranges from the last Context usage render, for click hit tests.
+    context_bar: Option<ContextBarHits>,
     /// Structured `/session-info` rows, built upstream from typed session data (never by re-parsing a formatted string).
     pub session_fields: Option<Vec<SessionInfoField>>,
     pub session_error: Option<String>,
@@ -124,6 +128,24 @@ pub struct SessionCopyHit {
     pub line_idx: usize,
 }
 
+/// The context bar as the last render drew it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ContextBarHits {
+    bar: BarGeometry,
+    segments: Vec<(std::ops::Range<usize>, &'static str)>,
+}
+
+impl ContextBarHits {
+    /// The label of the segment under the content-relative column `x` on content line `line`.
+    fn label_at(&self, x: usize, line: usize) -> Option<&'static str> {
+        let cell = self.bar.cell_at(x, line)?;
+        self.segments
+            .iter()
+            .find(|(cells, _)| cells.contains(&cell))
+            .map(|&(_, label)| label)
+    }
+}
+
 /// Left-button press before the movement threshold promotes a drag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingPress {
@@ -143,6 +165,8 @@ impl UsageInfoModalState {
             ctx,
             context: None,
             context_error: None,
+            context_selection: None,
+            context_bar: None,
             session_error: None,
             session_usage_text: None,
             billing_loading: false,
@@ -442,6 +466,26 @@ fn handle_usage_modal_mouse(
             state.text_drag = None;
             UsageModalOutcome::Changed
         }
+        MouseEventKind::Down(MouseButton::Left)
+            if state.active_tab == UsageInfoTab::ContextUsage && in_content(state, column, row) =>
+        {
+            // A diamond selects its segment; the same segment again, or any other spot, goes back to the totals.
+            let x = (column - state.content_rect.x) as usize;
+            let line = state.scroll as usize + (row - state.content_rect.y) as usize;
+            let hit = state
+                .context_bar
+                .as_ref()
+                .and_then(|hits| hits.label_at(x, line));
+            let next = match hit {
+                Some(label) if state.context_selection != Some(label) => Some(label),
+                _ => None,
+            };
+            if next == state.context_selection {
+                return UsageModalOutcome::Unchanged;
+            }
+            state.context_selection = next;
+            UsageModalOutcome::Changed
+        }
         MouseEventKind::Drag(MouseButton::Left) => {
             if let Some(pending) = state.pending_press.as_ref() {
                 // Same 1-cell threshold as scrollback `drag_threshold_exceeded`.
@@ -579,9 +623,10 @@ pub fn render_usage_modal(
     });
 
     // v_pad and footer_lines pad the body top and bottom (shortcuts render bottom-aligned, so the spare footer row reads as bottom padding)
+    // Wide enough for the context bar and its totals side by side on a typical terminal.
     let sizing = ModalSizing {
-        width_pct: 0.65,
-        max_width: 100,
+        width_pct: 0.8,
+        max_width: 120,
         min_width: 44,
         v_margin: 2,
         h_pad: 2,
@@ -624,6 +669,7 @@ pub fn render_usage_modal(
     let content = mca.content;
     let tab = tab_content(state, balance, theme, content.width);
     state.content_rect = content;
+    state.context_bar = tab.context_bar.clone();
     let plain_lines: Vec<String> = tab.lines.iter().map(ToString::to_string).collect();
     // Endpoints index these strings; drop any gesture if the painted text changed.
     if state.plain_lines != plain_lines {
@@ -691,6 +737,7 @@ struct CopyTarget {
 struct TabContent {
     lines: Vec<Line<'static>>,
     copy_targets: Vec<CopyTarget>,
+    context_bar: Option<ContextBarHits>,
 }
 
 impl TabContent {
@@ -698,6 +745,7 @@ impl TabContent {
         Self {
             lines,
             copy_targets: Vec::new(),
+            context_bar: None,
         }
     }
 }
@@ -709,9 +757,7 @@ fn tab_content(
     width: u16,
 ) -> TabContent {
     match state.active_tab {
-        UsageInfoTab::ContextUsage => {
-            TabContent::from_lines(context_tab_lines(state, theme, width))
-        }
+        UsageInfoTab::ContextUsage => context_tab_content(state, theme, width),
         UsageInfoTab::UsageLimit => {
             TabContent::from_lines(usage_limit_lines(state, balance, theme))
         }
@@ -733,20 +779,28 @@ fn muted_line(theme: &Theme, s: impl Into<String>) -> Line<'static> {
     Line::from(Span::styled(s.into(), theme.muted()))
 }
 
-fn context_tab_lines(state: &UsageInfoModalState, theme: &Theme, width: u16) -> Vec<Line<'static>> {
+fn context_tab_content(state: &UsageInfoModalState, theme: &Theme, width: u16) -> TabContent {
     if let Some(error) = &state.context_error {
-        return vec![muted_line(
+        return TabContent::from_lines(vec![muted_line(
             theme,
             format!("Couldn't load context usage: {error}"),
-        )];
+        )]);
     }
     if let Some(block) = &state.context {
-        return block.lines_for_width(theme, width);
+        let view = block.modal_view(theme, width, state.context_selection);
+        return TabContent {
+            lines: view.lines,
+            copy_targets: Vec::new(),
+            context_bar: Some(ContextBarHits {
+                bar: view.bar,
+                segments: view.segments,
+            }),
+        };
     }
     if state.ctx.session_id.is_none() {
-        return vec![muted_line(theme, "No active session.")];
+        return TabContent::from_lines(vec![muted_line(theme, "No active session.")]);
     }
-    vec![muted_line(theme, "Loading context usage\u{2026}")]
+    TabContent::from_lines(vec![muted_line(theme, "Loading context usage\u{2026}")])
 }
 
 /// Account allowance followed by this session's token/cost totals.
@@ -919,6 +973,7 @@ fn session_info_content(state: &UsageInfoModalState, theme: &Theme) -> TabConten
     TabContent {
         lines,
         copy_targets,
+        context_bar: None,
     }
 }
 
@@ -1068,6 +1123,109 @@ mod tests {
             lines
                 .first()
                 .is_some_and(|l| l.to_string().contains("Loading session usage"))
+        );
+    }
+
+    fn context_snapshot() -> xai_grok_shell::session::ContextInfo {
+        xai_grok_shell::session::ContextInfo {
+            used: 395_000,
+            total: 500_000,
+            system_prompt_tokens: 5_300,
+            tool_definitions_count: 29,
+            tool_definitions_tokens: 13_800,
+            message_tokens: 211_000,
+            free_tokens: 105_000,
+            usage_pct: 79,
+            auto_compact_threshold_percent: 85,
+            ..Default::default()
+        }
+    }
+
+    fn screen_text(buf: &Buffer, area: Rect) -> String {
+        (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect()
+    }
+
+    /// The screen position of bar cell `cell`, from the last render.
+    fn cell_pos(state: &UsageInfoModalState, cell: usize) -> (u16, u16) {
+        let bar = state.context_bar.as_ref().expect("bar rendered").bar;
+        let row = bar.first_line + cell / bar.row_len - state.scroll as usize;
+        (
+            state.content_rect.x + (cell % bar.row_len * 2) as u16,
+            state.content_rect.y + row as u16,
+        )
+    }
+
+    #[test]
+    fn wide_context_tab_shows_totals_beside_the_bar_without_scroll() {
+        let area = Rect::new(0, 0, 160, 50);
+        let mut buf = Buffer::empty(area);
+        let mut state = state_with_session();
+        state.set_tab(UsageInfoTab::ContextUsage);
+        state.context = Some(ContextInfoBlock::new(context_snapshot(), "m"));
+        let theme = Theme::current();
+        render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
+        let text = screen_text(&buf, area);
+        let row_with = |needle: &str| text.lines().position(|l| l.contains(needle));
+        assert_eq!(
+            row_with("Context"),
+            row_with("System prompt"),
+            "totals sit in the right column:\n{text}"
+        );
+        assert!(
+            text.contains("Turns:"),
+            "the counters fit without a scroll:\n{text}"
+        );
+    }
+
+    #[test]
+    fn clicking_a_diamond_inspects_its_range_and_a_second_click_goes_back() {
+        let area = Rect::new(0, 0, 160, 50);
+        let theme = Theme::current();
+        let mut buf = Buffer::empty(area);
+        let mut state = state_with_session();
+        state.set_tab(UsageInfoTab::ContextUsage);
+        state.context = Some(ContextInfoBlock::new(context_snapshot(), "m"));
+        render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
+
+        // A later cell is Overhead.
+        let (x, y) = cell_pos(&state, 60);
+        assert_eq!(
+            handle_usage_modal_mouse(&mut state, MouseEventKind::Down(MouseButton::Left), x, y),
+            UsageModalOutcome::Changed
+        );
+        assert_eq!(state.context_selection, Some("Overhead"));
+        let mut buf = Buffer::empty(area);
+        render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
+        let text = screen_text(&buf, area);
+        assert!(
+            text.contains("Estimate gap") && text.contains("Cells 44"),
+            "inspector replaces the totals:\n{text}"
+        );
+        assert!(!text.contains("Turns:"), "{text}");
+
+        let (x, y) = cell_pos(&state, 43);
+        handle_usage_modal_mouse(&mut state, MouseEventKind::Down(MouseButton::Left), x, y);
+        assert_eq!(state.context_selection, None, "same range again deselects");
+
+        let (x, y) = cell_pos(&state, 90);
+        handle_usage_modal_mouse(&mut state, MouseEventKind::Down(MouseButton::Left), x, y);
+        assert_eq!(state.context_selection, Some("Free"));
+        handle_usage_modal_mouse(
+            &mut state,
+            MouseEventKind::Down(MouseButton::Left),
+            state.content_rect.x,
+            state.content_rect.y,
+        );
+        assert_eq!(
+            state.context_selection, None,
+            "a click off the bar deselects"
         );
     }
 
