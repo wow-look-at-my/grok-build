@@ -640,6 +640,19 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "HookAnnotationKind::is_default")]
         kind: HookAnnotationKind,
     },
+    /// A user-role message the shell sent to the model on its own, for
+    /// example a stop-gate reply or a goal directive.
+    ModelInput {
+        /// What wrote the message, in words the user reads.
+        source: String,
+        /// The full text the model received.
+        text: String,
+    },
+    /// The shell started a model call of its own that streams nothing to the scrollback, for example the goal evaluator.
+    SideModelCall {
+        /// What the call is for, in words the user reads.
+        purpose: String,
+    },
     /// The turn is blocked on an awaited hook batch that just started; sent only when at least one hook will run.
     /// The pager shows a spinner phase once the batch outlives its reveal delay; the matching `HookExecution` or later turn output ends it.
     HookRunStarted {
