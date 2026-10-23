@@ -119,10 +119,11 @@ async fn goal_round_shows_check_and_directive() {
     harness.quit().expect("reap pager");
 }
 
+/// A full goal whose round the evaluator calls complete runs the verifier subagents. That run has a row, above the directive its verdict sends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "probe"]
-async fn probe_full_goal_without_planner() {
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn full_goal_shows_verifier_row() {
     let content = ContentController::start().await.expect("start content");
     let _first = content.expect_agent_turn("first round", ROUND_ONE);
     expect_verdict(
@@ -155,11 +156,33 @@ async fn probe_full_goal_without_planner() {
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");
-    let _ = wait_until(Duration::from_secs(45), || {
-        harness.update(Duration::from_millis(200));
-        false
+    let shown = wait_until(Duration::from_secs(60), || {
+        harness.update(Duration::from_millis(100));
+        harness.screen_contents().contains(DIRECTIVE_ROW)
     });
-    eprintln!("PROBE SCREEN:\n{}", harness.screen_contents());
+    let screen = harness.screen_contents();
+    assert!(
+        shown,
+        "the verdict's directive must show; screen:\n{screen}"
+    );
+    let one = row_of(&screen, ROUND_ONE);
+    let check = row_of(&screen, CHECK_ROW);
+    let verify = row_of(&screen, "Goal verification:");
+    let directive = row_of(&screen, DIRECTIVE_ROW);
+    assert!(
+        one.is_some() && check.is_some() && verify.is_some(),
+        "the round, the goal check and the verifier run must show; screen:\n{screen}"
+    );
+    assert!(
+        one < check && check < verify && verify < directive,
+        "order must be: round, goal check, verifier run, directive; screen:\n{screen}"
+    );
+
+    harness.update(Duration::from_millis(500));
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(200));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    harness.quit().expect("reap pager");
 }
 
 /// A full goal starts with a planner subagent. Its run has a row, so the wait before the first round is accounted for.
@@ -199,16 +222,6 @@ async fn full_goal_shows_planner_row() {
         "the planner run must have a row; screen:\n{}",
         harness.screen_contents()
     );
-    if std::env::var("GOAL_PROBE").is_ok() {
-        let _ = wait_until(Duration::from_secs(40), || {
-            harness.update(Duration::from_millis(200));
-            false
-        });
-        eprintln!("PROBE SCREEN:\n{}", harness.screen_contents());
-        for r in content.requests() {
-            eprintln!("PROBE REQ: {r:?}");
-        }
-    }
 
     harness.update(Duration::from_millis(500));
     harness.inject_keys(b"\x11").expect("ctrl-q once");
