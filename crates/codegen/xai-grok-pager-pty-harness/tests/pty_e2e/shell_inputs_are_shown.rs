@@ -156,12 +156,13 @@ async fn auto_recovery_prompt_is_shown() {
     let profile_arg = profile.to_string_lossy().into_owned();
 
     let binary = pager_binary().expect("resolve pager binary");
-    let mut harness = PtyHarness::spawn_with_content_in_dir(
+    let mut harness = PtyHarness::spawn_with_content_env_in_dir(
         &binary,
         DEFAULT_ROWS,
         DEFAULT_COLS,
         &content,
-        &["--yolo", "--trust", "--agent-profile", &profile_arg],
+        &["--yolo", "--trust"],
+        &[("GROK_AGENT", &profile_arg)],
         Some(content.home()),
     )
     .expect("spawn pager");
