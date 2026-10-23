@@ -5,6 +5,8 @@
 //! `Theme::current()` is re-resolved on every redraw, so switching themes after running `/context` updates the colors immediately.
 //! Formatting at capture time would have baked in stale colors.
 
+use std::ops::Range;
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -200,6 +202,78 @@ impl RowLayout {
     }
 }
 
+/// Index of the first bar row: `Context`, a blank, the totals, the model and a blank come before it.
+const BAR_FIRST_LINE: usize = 5;
+
+/// Columns between the bar and the right column in the two-column modal view.
+const COLUMN_GAP: usize = 3;
+
+const SYSTEM_LABEL: &str = "System prompt";
+const MESSAGES_LABEL: &str = "Messages";
+const OVERHEAD_LABEL: &str = "Overhead";
+const FREE_LABEL: &str = "Free";
+
+/// The category colors. The bar and the legend use the same ones, so both read side by side.
+struct Palette {
+    system: Color,
+    tools: Color,
+    messages: Color,
+    empty: Color,
+    overhead: Color,
+}
+
+impl Palette {
+    fn new(theme: &Theme) -> Self {
+        Self {
+            // Messages get the brightest color. System prompt is a quiet gray base layer.
+            system: quantize(theme.gray_bright),
+            tools: quantize(theme.accent_skill),
+            messages: quantize(theme.text_primary),
+            empty: quantize(theme.gray_dim),
+            overhead: quantize(theme.accent_verify),
+        }
+    }
+}
+
+/// One contiguous run of bar cells for one category, in legend order.
+/// A category too small to round to one cell has an empty range.
+#[derive(Debug, Clone)]
+struct BarSegment {
+    label: &'static str,
+    glyph: &'static str,
+    color: Color,
+    tokens: u64,
+    cells: Range<usize>,
+}
+
+/// Where the bar sits in the modal's context-tab lines, for mouse hit tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct BarGeometry {
+    pub first_line: usize,
+    pub rows: usize,
+    pub row_len: usize,
+}
+
+impl BarGeometry {
+    /// The cell under the content-relative column `x` on content line `line`.
+    /// Column `2i` is cell `i`. The space after a cell selects that cell too.
+    pub(crate) fn cell_at(self, x: usize, line: usize) -> Option<usize> {
+        let row = line.checked_sub(self.first_line)?;
+        if row >= self.rows || x + 1 >= self.row_len * 2 {
+            return None;
+        }
+        Some(row * self.row_len + x / 2)
+    }
+}
+
+/// The modal's context-tab lines, plus the data its mouse handler needs.
+pub(crate) struct ContextModalView {
+    pub lines: Vec<Line<'static>>,
+    pub bar: BarGeometry,
+    /// The cell range and label of each segment that has at least one cell.
+    pub segments: Vec<(Range<usize>, &'static str)>,
+}
+
 impl ContextInfoBlock {
     pub fn new(snapshot: ContextInfo, model: impl Into<String>) -> Self {
         Self {
@@ -208,60 +282,123 @@ impl ContextInfoBlock {
         }
     }
 
-    /// Build the styled lines for an arbitrary content width.
-    /// The usage modal's "Context usage" tab reuses it, so the modal and the minimal-mode scrollback block render the same breakdown.
-    pub(crate) fn lines_for_width(&self, theme: &Theme, width: u16) -> Vec<Line<'static>> {
-        self.build_lines(theme, BarLayout::for_width(width))
+    /// The modal view. When the width holds the bar and the totals side by side, the totals go in a right column.
+    /// `selected` names a clicked segment: its cells stay lit and its details replace the totals.
+    pub(crate) fn modal_view(
+        &self,
+        theme: &Theme,
+        width: u16,
+        selected: Option<&str>,
+    ) -> ContextModalView {
+        let width = width as usize;
+        let wide = BarLayout::WIDE;
+        let bar_width = wide.row_len * 2 - 1;
+        let wide_stats = self.stats_lines(theme, wide);
+        let stats_width = wide_stats.iter().map(Line::width).max().unwrap_or(0);
+        let two_columns = width >= bar_width + COLUMN_GAP + stats_width;
+        let bar = if two_columns {
+            wide
+        } else {
+            BarLayout::for_width(u16::try_from(width).unwrap_or(u16::MAX))
+        };
+        let segments = self.segments(theme, bar);
+        let selected = selected
+            .and_then(|label| segments.iter().find(|s| s.label == label))
+            .filter(|s| !s.cells.is_empty());
+
+        let hint = if selected.is_some() {
+            "Click the lit range again to show the totals."
+        } else {
+            "Click a diamond to inspect its range."
+        };
+        let hint = Line::from(Span::styled(hint, theme.muted()));
+
+        let mut left = self.header_lines(theme);
+        left.extend(bar_lines(&segments, bar, selected.map(|s| s.label), theme));
+        left.push(Line::from(""));
+        let lines = if two_columns {
+            left.extend(word_wrap_lines(vec![hint], bar_width));
+            let right_width = width - bar_width - COLUMN_GAP;
+            let right = match selected {
+                Some(seg) => self.inspect_lines(theme, seg, bar, right_width),
+                None => wide_stats,
+            };
+            zip_columns(left, bar_width + COLUMN_GAP, right)
+        } else {
+            left.extend(word_wrap_lines(vec![hint], width));
+            left.push(Line::from(""));
+            match selected {
+                Some(seg) => left.extend(self.inspect_lines(theme, seg, bar, width)),
+                None => left.extend(self.stats_lines(theme, bar)),
+            }
+            left
+        };
+
+        ContextModalView {
+            lines,
+            bar: BarGeometry {
+                first_line: BAR_FIRST_LINE,
+                rows: bar.rows,
+                row_len: bar.row_len,
+            },
+            segments: segments
+                .iter()
+                .filter(|s| !s.cells.is_empty())
+                .map(|s| (s.cells.clone(), s.label))
+                .collect(),
+        }
     }
 
     /// Build the styled lines using the supplied theme and bar layout. Called from `output()` on every redraw so theme
     /// switches take effect without re-running `/context`. The theme is passed in rather than re-resolved here.
     fn build_lines(&self, theme: &Theme, bar: BarLayout) -> Vec<Line<'static>> {
-        let snapshot = &self.snapshot;
-        let model = &self.model;
+        let segments = self.segments(theme, bar);
+        let mut lines = self.header_lines(theme);
+        lines.extend(bar_lines(&segments, bar, None, theme));
+        lines.push(Line::from(""));
+        lines.extend(self.stats_lines(theme, bar));
+        lines
+    }
 
-        let used = snapshot.used;
-        let total = snapshot.total;
-        let usage_pct = snapshot.usage_pct;
-        let tool_tokens = snapshot.tool_definitions_tokens;
-        let tool_count = snapshot.tool_definitions_count;
-        let turn_count = snapshot.turn_count;
-        let tool_call_count = snapshot.tool_call_count;
-        let compaction_count = snapshot.compaction_count;
+    fn window_tokens(&self) -> WindowTokens {
+        let s = &self.snapshot;
+        window_tokens(s.used, s.total, s.system_prompt_tokens, s.message_tokens)
+    }
 
-        let tokens = window_tokens(
-            used,
-            total,
-            snapshot.system_prompt_tokens,
-            snapshot.message_tokens,
-        );
-        let system_tokens = tokens.system;
-        let message_tokens = tokens.messages;
-        let overhead_tokens = tokens.overhead;
-        let free_tokens = tokens.free;
-
-        let muted = theme.muted();
+    /// `Context`, a blank, the totals, the model and a blank: [`BAR_FIRST_LINE`] lines.
+    fn header_lines(&self, theme: &Theme) -> Vec<Line<'static>> {
         let primary = Style::default()
             .fg(theme.text_primary)
             .add_modifier(Modifier::BOLD);
+        vec![
+            Line::from(Span::styled("Context", primary)),
+            Line::from(""),
+            // `text_secondary` sets the totals apart from the muted rows. The percent is recomputed from `used / total` for decimals.
+            Line::from(Span::styled(
+                format!(
+                    "{} / {} tokens ({:.2}%)",
+                    fmt_tok_big(self.snapshot.used),
+                    fmt_tok_big(self.snapshot.total),
+                    precise_usage_percent(self.snapshot.used, self.snapshot.total),
+                ),
+                Style::default().fg(theme.text_secondary),
+            )),
+            Line::from(Span::styled(
+                self.model.clone(),
+                Style::default().fg(theme.gray_bright),
+            )),
+            Line::from(""),
+        ]
+    }
 
-        // Per-category colors used in both the bar and the legend so the two visualizations are scannable side-by-side
-        // Messages get the brightest treatment (primary): they dominate the breakdown and are the conversation the user is actually steering
-        // System prompt uses the same diamond glyph as messages but in muted gray so it reads as a quiet base layer
-        let system_color = quantize(theme.gray_bright); // gray
-        let tools_color = quantize(theme.accent_skill); // teal / skill accent
-        let messages_color = quantize(theme.text_primary); // primary (white)
-        let empty_color = quantize(theme.gray_dim); // free / outline
-        let overhead_color = quantize(theme.accent_verify);
-
-        // Each category gets its own glyph and color so the bar reads as a stacked breakdown at a glance. Routed through
-        // `glyphs` so the diamonds degrade to CP437-safe stand-ins (`◆`→`♦`, `◇`→`○`). Legacy Windows consoles can't
-        // render the U+25Cx diamonds.
-        let system_glyph = crate::glyphs::diamond_filled(); // ◆ (gray)
-        let tools_glyph = crate::glyphs::diamond_dotted(); // ◈
-        let messages_glyph = crate::glyphs::diamond_filled(); // ◆ (primary)
-        let free_glyph = crate::glyphs::diamond_hollow(); // ◇
-        let overhead_glyph = crate::glyphs::diamond_filled(); // ◆ (violet)
+    /// The bar's categories in legend order. The ranges cover every cell exactly once.
+    fn segments(&self, theme: &Theme, bar: BarLayout) -> Vec<BarSegment> {
+        let snapshot = &self.snapshot;
+        let total = snapshot.total;
+        let tokens = self.window_tokens();
+        let palette = Palette::new(theme);
+        // The `glyphs` helpers fall back to CP437-safe stand-ins on legacy Windows consoles.
+        let filled = crate::glyphs::diamond_filled();
 
         let total_cells = bar.total();
         let cells_for = |tokens: u64| -> usize {
@@ -271,118 +408,138 @@ impl ContextInfoBlock {
                 ((tokens as f64 / total as f64) * total_cells as f64).round() as usize
             }
         };
-        let used_cells = cells_for(used).min(total_cells);
-        let system_cells = cells_for(system_tokens).min(used_cells);
-        let messages_cells = cells_for(message_tokens).min(used_cells - system_cells);
+        let used_cells = cells_for(snapshot.used).min(total_cells);
+        let system_cells = cells_for(tokens.system).min(used_cells);
+        let messages_cells = cells_for(tokens.messages).min(used_cells - system_cells);
         let overhead_cells = used_cells - system_cells - messages_cells;
-        let free_cells = total_cells - used_cells;
 
-        let mut cells: Vec<(&'static str, Color)> = Vec::with_capacity(total_cells);
-        for _ in 0..system_cells {
-            cells.push((system_glyph, system_color));
-        }
+        let mut segments: Vec<BarSegment> = Vec::new();
+        let mut push = |label, glyph, color, tokens, len: usize| {
+            let start = segments.last().map_or(0, |s| s.cells.end);
+            segments.push(BarSegment {
+                label,
+                glyph,
+                color,
+                tokens,
+                cells: start..start + len,
+            });
+        };
+        push(
+            SYSTEM_LABEL,
+            filled,
+            palette.system,
+            tokens.system,
+            system_cells,
+        );
         // Each kind gets its share of the Messages cells. Cumulative rounding keeps the sum exact.
-        let parts = message_parts(theme, &snapshot.message_breakdown, message_tokens);
-        if parts.is_empty() {
-            for _ in 0..messages_cells {
-                cells.push((messages_glyph, messages_color));
-            }
-        } else {
-            let mut acc = 0u64;
-            let mut placed = 0usize;
-            for part in &parts {
-                acc += part.tokens;
-                let end = if message_tokens == 0 {
-                    0
-                } else {
-                    ((acc as f64 / message_tokens as f64) * messages_cells as f64).round() as usize
-                };
-                let end = end.min(messages_cells);
-                for _ in placed..end {
-                    cells.push((messages_glyph, part.color));
-                }
-                placed = placed.max(end);
-            }
-            for _ in placed..messages_cells {
-                cells.push((messages_glyph, messages_color));
-            }
+        let parts = message_parts(theme, &snapshot.message_breakdown, tokens.messages);
+        let mut placed = 0usize;
+        let mut acc = 0u64;
+        for part in &parts {
+            acc += part.tokens;
+            let end = if tokens.messages == 0 {
+                0
+            } else {
+                ((acc as f64 / tokens.messages as f64) * messages_cells as f64).round() as usize
+            };
+            let end = end.min(messages_cells);
+            push(
+                part.label,
+                filled,
+                part.color,
+                part.tokens,
+                end.saturating_sub(placed),
+            );
+            placed = placed.max(end);
         }
-        for _ in 0..overhead_cells {
-            cells.push((overhead_glyph, overhead_color));
+        if placed < messages_cells || parts.is_empty() {
+            push(
+                MESSAGES_LABEL,
+                filled,
+                palette.messages,
+                tokens.messages,
+                messages_cells - placed,
+            );
         }
-        for _ in 0..free_cells {
-            cells.push((free_glyph, empty_color));
-        }
-        debug_assert_eq!(cells.len(), total_cells);
+        push(
+            OVERHEAD_LABEL,
+            filled,
+            palette.overhead,
+            tokens.overhead,
+            overhead_cells,
+        );
+        push(
+            FREE_LABEL,
+            crate::glyphs::diamond_hollow(),
+            palette.empty,
+            tokens.free,
+            total_cells - used_cells,
+        );
+        debug_assert_eq!(segments.last().map_or(0, |s| s.cells.end), total_cells);
+        segments
+    }
 
-        let mut bar_lines: Vec<Line<'static>> = Vec::with_capacity(bar.rows);
-        for row_idx in 0..bar.rows {
-            let start = row_idx * bar.row_len;
-            let end = (start + bar.row_len).min(cells.len());
-            let mut spans = Vec::with_capacity(bar.row_len * 2);
-            for (i, (glyph, color)) in cells.get(start..end).into_iter().flatten().enumerate() {
-                if i > 0 {
-                    spans.push(Span::raw(" "));
-                }
-                spans.push(Span::styled(
-                    (*glyph).to_string(),
-                    Style::default().fg(*color),
-                ));
-            }
-            bar_lines.push(Line::from(spans));
-        }
+    /// The legend, the informational rows, the auto-compact line, the counters, and the compaction tip.
+    fn stats_lines(&self, theme: &Theme, bar: BarLayout) -> Vec<Line<'static>> {
+        let snapshot = &self.snapshot;
+        let total = snapshot.total;
+        let tokens = self.window_tokens();
+        let palette = Palette::new(theme);
+        let muted = theme.muted();
+        let filled = crate::glyphs::diamond_filled();
+        let tools_glyph = crate::glyphs::diamond_dotted();
 
-        // Tool definitions are already in Overhead
-        // Usage categories are already in Messages
+        // Tool definitions are already in Overhead. Usage categories are already in Messages.
         let mut legend_rows = vec![
             LegendRow {
-                glyph: system_glyph,
-                color: system_color,
-                label: "System prompt".to_string(),
-                tokens: system_tokens,
+                glyph: filled,
+                color: palette.system,
+                label: SYSTEM_LABEL.to_string(),
+                tokens: tokens.system,
                 detail: None,
             },
             LegendRow {
-                glyph: messages_glyph,
-                color: messages_color,
-                label: "Messages".to_string(),
-                tokens: message_tokens,
+                glyph: filled,
+                color: palette.messages,
+                label: MESSAGES_LABEL.to_string(),
+                tokens: tokens.messages,
                 detail: None,
             },
         ];
+        let parts = message_parts(theme, &snapshot.message_breakdown, tokens.messages);
         legend_rows.extend(parts.iter().map(|p| LegendRow {
-            glyph: messages_glyph,
+            glyph: filled,
             color: p.color,
             label: format!("  {}", p.label),
             tokens: p.tokens,
             detail: None,
         }));
-        if overhead_tokens > 0 {
+        if tokens.overhead > 0 {
             legend_rows.push(LegendRow {
-                glyph: overhead_glyph,
-                color: overhead_color,
-                label: "Overhead".to_string(),
-                tokens: overhead_tokens,
+                glyph: filled,
+                color: palette.overhead,
+                label: OVERHEAD_LABEL.to_string(),
+                tokens: tokens.overhead,
                 detail: None,
             });
         }
         legend_rows.push(LegendRow {
-            glyph: free_glyph,
-            color: empty_color,
-            label: "Free".to_string(),
-            tokens: free_tokens,
+            glyph: crate::glyphs::diamond_hollow(),
+            color: palette.empty,
+            label: FREE_LABEL.to_string(),
+            tokens: tokens.free,
             detail: None,
         });
         let info_rows: Vec<LegendRow> = std::iter::once(LegendRow {
             glyph: tools_glyph,
-            color: tools_color,
+            color: palette.tools,
             label: "Tool definitions".to_string(),
-            tokens: tool_tokens,
-            detail: Some(count_detail(tool_count, "tool")),
+            tokens: snapshot.tool_definitions_tokens,
+            detail: Some(count_detail(snapshot.tool_definitions_count, "tool")),
         })
         .chain(snapshot.usage_categories.iter().map(|c| LegendRow {
             glyph: tools_glyph,
-            color: tools_color,
+            color: palette.tools,
             label: c.label.clone(),
             tokens: c.tokens,
             detail: c.detail.clone(),
@@ -391,92 +548,246 @@ impl ContextInfoBlock {
         let layout = RowLayout::measure(legend_rows.iter().chain(info_rows.iter()), total);
         let label_style = Style::default().fg(theme.text_secondary);
 
-        let mut lines: Vec<Line<'static>> = vec![
-            // Header: bold white "Context"
-            Line::from(Span::styled("Context", primary)),
-            // Blank row between header and the at-a-glance summary
-            Line::from(""),
-            // Sub-header: token totals and percent. Uses `text_secondary` for a touch more contrast than `muted` so the
-            // at-a-glance numbers stand apart from the breakdown/footer rows. The percentage is recomputed from `used / total`
-            // so we get two decimal places of precision.
-            Line::from(Span::styled(
-                format!(
-                    "{} / {} tokens ({:.2}%)",
-                    fmt_tok_big(used),
-                    fmt_tok_big(total),
-                    precise_usage_percent(used, total),
-                ),
-                Style::default().fg(theme.text_secondary),
-            )),
-            // Model name (one step dimmer than the tokens line so it reads as a supporting caption rather than the primary number)
-            Line::from(Span::styled(
-                model.to_string(),
-                Style::default().fg(theme.gray_bright),
-            )),
-            // Blank space before the bar
-            Line::from(""),
-        ];
-        lines.extend(bar_lines);
-        lines.push(Line::from(""));
+        let mut lines = Vec::new();
         for row in &legend_rows {
             lines.extend(layout.render(row, bar, total, label_style, muted));
         }
         lines.push(Line::from(""));
-
         lines.push(Line::from(Span::styled("Already counted above", muted)));
         for row in &info_rows {
             lines.extend(layout.render(row, bar, total, label_style, muted));
         }
         lines.push(Line::from(""));
-
-        // `threshold_tokens` uses `div_ceil` rather than truncating integer division. Without `div_ceil`, tiny totals
-        // could produce `remaining == 0` while `usage_pct < threshold_percent`. That would show `~0 tokens remaining` for
-        // a context window that isn't actually at the threshold.
-        if total > 0 {
-            let threshold_percent = snapshot.auto_compact_threshold_percent;
-            let threshold_tokens = total.saturating_mul(threshold_percent as u64).div_ceil(100);
-            let remaining = threshold_tokens.saturating_sub(used);
-            let (text, style) = if usage_pct >= threshold_percent {
-                (
-                    format!("Auto-compact triggers next turn (at {threshold_percent}%)"),
-                    Style::default().fg(quantize(theme.warning)),
-                )
-            } else {
-                // Use `fmt_tok_big` (same as the header) so the remaining count rolls over to `m` for wide context windows
-                // A 4m window at 60% reads `~1.0m tokens remaining`, not `~1000k tokens remaining`
-                (
-                    format!(
-                        "Auto-compact at {threshold_percent}% \u{00b7} ~{} tokens remaining",
-                        fmt_tok_big(remaining)
-                    ),
-                    muted,
-                )
-            };
-            lines.push(Line::from(Span::styled(text, style)));
+        if let Some(line) = self.auto_compact_line(theme) {
+            lines.push(line);
             lines.push(Line::from(""));
         }
-
-        // Footer stats
         lines.push(Line::from(Span::styled(
             format!(
-                "Turns: {turn_count} \u{00b7} Tool calls: {tool_call_count} \u{00b7} Compactions: {compaction_count}"
+                "Turns: {} \u{00b7} Tool calls: {} \u{00b7} Compactions: {}",
+                snapshot.turn_count, snapshot.tool_call_count, snapshot.compaction_count
             ),
             muted,
         )));
 
-        // The tip about approaching auto-compact only shows in the gap between the "getting close" mark (80%) and the
-        // actual auto-compact threshold. A second warning-styled tip suggesting a manual `/compact` would just stack
-        // visually and contradict itself.
-        if (80..snapshot.auto_compact_threshold_percent).contains(&usage_pct) {
+        // At or past the threshold the auto-compact line already says it, and a second warning would contradict it.
+        if (80..snapshot.auto_compact_threshold_percent).contains(&snapshot.usage_pct) {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "Tip: run /compact to free up context space.".to_string(),
                 Style::default().fg(quantize(theme.warning)),
             )));
         }
-
         lines
     }
+
+    /// `Auto-compact at N% · ~X tokens remaining`, or the warning when the threshold is reached. `None` for an empty window.
+    fn auto_compact_line(&self, theme: &Theme) -> Option<Line<'static>> {
+        let snapshot = &self.snapshot;
+        if snapshot.total == 0 {
+            return None;
+        }
+        let threshold_percent = snapshot.auto_compact_threshold_percent;
+        // `div_ceil`: truncation can show `~0 tokens remaining` for a tiny window that is still below the threshold.
+        let threshold_tokens = snapshot
+            .total
+            .saturating_mul(threshold_percent as u64)
+            .div_ceil(100);
+        let remaining = threshold_tokens.saturating_sub(snapshot.used);
+        let (text, style) = if snapshot.usage_pct >= threshold_percent {
+            (
+                format!("Auto-compact triggers next turn (at {threshold_percent}%)"),
+                Style::default().fg(quantize(theme.warning)),
+            )
+        } else {
+            (
+                format!(
+                    "Auto-compact at {threshold_percent}% \u{00b7} ~{} tokens remaining",
+                    fmt_tok_big(remaining)
+                ),
+                theme.muted(),
+            )
+        };
+        Some(Line::from(Span::styled(text, style)))
+    }
+
+    /// The details of one clicked segment, word-wrapped to `width`.
+    fn inspect_lines(
+        &self,
+        theme: &Theme,
+        seg: &BarSegment,
+        bar: BarLayout,
+        width: usize,
+    ) -> Vec<Line<'static>> {
+        let snapshot = &self.snapshot;
+        let muted = theme.muted();
+        let used = snapshot.used.min(snapshot.total);
+
+        let mut shares = format!(
+            "{} tokens \u{00b7} {} of window",
+            fmt_tok(seg.tokens),
+            percent_of_window(seg.tokens, snapshot.total)
+        );
+        if seg.label != FREE_LABEL && used > 0 {
+            shares.push_str(&format!(
+                " \u{00b7} {} of used",
+                percent_of_window(seg.tokens, used)
+            ));
+        }
+        let mut lines = vec![
+            Line::from(vec![
+                Span::styled(format!("{} ", seg.glyph), Style::default().fg(seg.color)),
+                Span::styled(
+                    seg.label,
+                    Style::default()
+                        .fg(theme.text_primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(shares, muted)),
+            Line::from(Span::styled(
+                format!(
+                    "Cells {}\u{2013}{} of {} \u{00b7} one cell \u{2248} {} tokens",
+                    seg.cells.start + 1,
+                    seg.cells.end,
+                    bar.total(),
+                    fmt_tok(snapshot.total / bar.total() as u64)
+                ),
+                muted,
+            )),
+            Line::from(""),
+        ];
+        lines.extend(word_wrap_lines(
+            vec![Line::from(Span::styled(
+                segment_description(seg.label),
+                Style::default().fg(theme.text_secondary),
+            ))],
+            width,
+        ));
+
+        if seg.label == OVERHEAD_LABEL {
+            let tools = snapshot.tool_definitions_tokens.min(seg.tokens);
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("Tool definitions  ~{}", fmt_tok(tools)),
+                muted,
+            )));
+            lines.push(Line::from(Span::styled(
+                format!("Estimate gap      ~{}", fmt_tok(seg.tokens - tools)),
+                muted,
+            )));
+        }
+        if seg.label == FREE_LABEL
+            && let Some(line) = self.auto_compact_line(theme)
+        {
+            lines.push(Line::from(""));
+            lines.push(line);
+        }
+        lines
+    }
+}
+
+/// What a segment holds, in plain words.
+fn segment_description(label: &str) -> String {
+    let bytes = xai_token_estimation::BYTES_PER_TOKEN;
+    let what = match label {
+        SYSTEM_LABEL => "The system message that starts every request.",
+        "User" => {
+            "Your prompts, and the text that the harness sends as user messages, such as reminders and attachments."
+        }
+        "Assistant" => "The visible text of the model's replies.",
+        "Reasoning" => {
+            "The thinking blocks that the history replays to the model, with their encrypted content."
+        }
+        "Tool calls" => "The arguments of the model's tool calls.",
+        "Tool results" => "The output that the tools returned to the model.",
+        MESSAGES_LABEL => "All conversation items after the system message.",
+        OVERHEAD_LABEL => {
+            return format!(
+                "Overhead is not a kind of item. It is the measured occupancy minus the estimates above. \
+                 The model's tokenizer measured the occupancy. The estimates count {bytes} bytes per token, \
+                 and a real tokenizer often counts more tokens than that, mostly for code, JSON and paths. \
+                 The tool definitions are also part of this remainder."
+            );
+        }
+        FREE_LABEL => {
+            return "The part of the window that the next request can still use.".to_string();
+        }
+        _ => "",
+    };
+    format!("{what} The count is an estimate at {bytes} bytes per token.")
+        .trim_start()
+        .to_string()
+}
+
+/// The bar rows. With a selection, the selected cells stay lit and bold and every other cell goes dim.
+fn bar_lines(
+    segments: &[BarSegment],
+    bar: BarLayout,
+    selected: Option<&str>,
+    theme: &Theme,
+) -> Vec<Line<'static>> {
+    let dim = quantize(theme.gray_dim);
+    let cells: Vec<(&'static str, Style)> = segments
+        .iter()
+        .flat_map(|seg| {
+            let style = match selected {
+                None => Style::default().fg(seg.color),
+                Some(label) if label == seg.label => {
+                    // Free cells are dim already. Light them so the selection shows.
+                    let color = if seg.label == FREE_LABEL {
+                        quantize(theme.text_secondary)
+                    } else {
+                        seg.color
+                    };
+                    Style::default().fg(color).add_modifier(Modifier::BOLD)
+                }
+                Some(_) => Style::default().fg(dim),
+            };
+            seg.cells.clone().map(move |_| (seg.glyph, style))
+        })
+        .collect();
+    debug_assert_eq!(cells.len(), bar.total());
+
+    cells
+        .chunks(bar.row_len)
+        .take(bar.rows)
+        .map(|row| {
+            let mut spans = Vec::with_capacity(bar.row_len * 2);
+            for (i, (glyph, style)) in row.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::raw(" "));
+                }
+                spans.push(Span::styled((*glyph).to_string(), *style));
+            }
+            Line::from(spans)
+        })
+        .collect()
+}
+
+/// Put `right` beside `left`. Each left line is padded to `left_width` columns.
+fn zip_columns(
+    left: Vec<Line<'static>>,
+    left_width: usize,
+    right: Vec<Line<'static>>,
+) -> Vec<Line<'static>> {
+    let rows = left.len().max(right.len());
+    let mut left = left.into_iter();
+    let mut right = right.into_iter();
+    (0..rows)
+        .map(|_| {
+            let l = left.next().unwrap_or_default();
+            let Some(r) = right.next() else {
+                return l;
+            };
+            let pad = left_width.saturating_sub(l.width());
+            let mut spans = l.spans;
+            spans.push(Span::raw(" ".repeat(pad)));
+            spans.extend(r.spans);
+            Line::from(spans)
+        })
+        .collect()
 }
 
 /// Format a token count compactly (`123`, `1.2k`, `999k`). The cutover from `{.1}k` to plain `{}k` happens at
@@ -1198,6 +1509,70 @@ mod tests {
             all.contains("\u{00b7}  4 servers"),
             "single-digit count must be right-aligned:\n{all}"
         );
+    }
+
+    #[test]
+    fn bar_geometry_maps_columns_and_rows_to_cells() {
+        let bar = BarGeometry {
+            first_line: 5,
+            rows: 5,
+            row_len: 20,
+        };
+        assert_eq!(bar.cell_at(0, 5), Some(0));
+        assert_eq!(bar.cell_at(1, 5), Some(0), "the gap after a cell picks it");
+        assert_eq!(bar.cell_at(38, 9), Some(99));
+        assert_eq!(bar.cell_at(39, 9), None, "past the last cell");
+        assert_eq!(bar.cell_at(0, 4), None);
+        assert_eq!(bar.cell_at(0, 10), None);
+    }
+
+    #[test]
+    fn modal_view_falls_back_to_one_column_when_narrow() {
+        let block = ContextInfoBlock::new(snapshot(), "grok-4");
+        let theme = test_theme();
+        let view = block.modal_view(&theme, 60, None);
+        let all = all_text(&view.lines);
+        let line_of = |needle: &str| all.lines().position(|l| l.contains(needle));
+        assert!(
+            line_of("System prompt") > line_of("Click a diamond"),
+            "totals go under the bar:\n{all}"
+        );
+        assert_eq!(view.bar.row_len, BarLayout::WIDE.row_len);
+
+        let wide = block.modal_view(&theme, 110, None);
+        assert!(
+            line_text(&wide.lines, 0).contains("System prompt"),
+            "a wide view puts the totals beside the header"
+        );
+    }
+
+    #[test]
+    fn modal_view_segments_tile_the_bar_and_selection_dims_the_rest() {
+        let mut snap = snapshot();
+        snap.used = 400_000;
+        let block = ContextInfoBlock::new(snap, "grok-4");
+        let theme = test_theme();
+        let view = block.modal_view(&theme, 110, Some(FREE_LABEL));
+        let covered: usize = view.segments.iter().map(|(r, _)| r.len()).sum();
+        assert_eq!(covered, 100);
+        let all = all_text(&view.lines);
+        assert!(all.contains("Cells 41\u{2013}100 of 100"), "{all}");
+        assert!(all.contains("Auto-compact at 85%"), "{all}");
+
+        let dim = Some(quantize(theme.gray_dim));
+        let first_cell = view
+            .lines
+            .get(BAR_FIRST_LINE)
+            .and_then(|l| l.spans.first())
+            .expect("bar row has cells");
+        assert_eq!(first_cell.style.fg, dim, "unselected cells go dim");
+    }
+
+    #[test]
+    fn modal_view_ignores_a_selection_that_has_no_cells() {
+        let block = ContextInfoBlock::new(snapshot(), "grok-4");
+        let view = block.modal_view(&test_theme(), 110, Some("Reasoning"));
+        assert!(all_text(&view.lines).contains("Click a diamond"));
     }
 
     #[test]
