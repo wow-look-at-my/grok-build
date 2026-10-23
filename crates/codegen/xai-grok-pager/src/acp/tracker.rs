@@ -1477,10 +1477,12 @@ impl AcpUpdateTracker {
         failed: Option<&str>,
     ) -> bool {
         let pending = failed.is_none();
-        let Some(id) = self.update_thinking_block(scrollback, stream_start_ms, |block| match failed {
-            None => block.set_summary_pending(),
-            Some(reason) => block.set_summary_failed(reason.to_string()),
-        }) else {
+        let Some(id) =
+            self.update_thinking_block(scrollback, stream_start_ms, |block| match failed {
+                None => block.set_summary_pending(),
+                Some(reason) => block.set_summary_failed(reason.to_string()),
+            })
+        else {
             return false;
         };
         if pending {

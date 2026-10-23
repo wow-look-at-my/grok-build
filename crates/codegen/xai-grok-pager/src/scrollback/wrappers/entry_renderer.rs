@@ -1201,7 +1201,11 @@ mod tests {
 
         assert!(block.set_summary("done".into()));
         entry.block = RenderBlock::Thinking(block);
-        assert_eq!(bullet_at(&entry, 0), idle, "the summary restores the bullet");
+        assert_eq!(
+            bullet_at(&entry, 0),
+            idle,
+            "the summary restores the bullet"
+        );
     }
 
     #[test]

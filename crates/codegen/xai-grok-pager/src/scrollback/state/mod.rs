@@ -441,9 +441,9 @@ impl ScrollbackState {
     }
 
     fn summary_spinner_live(&self, id: EntryId) -> bool {
-        self.entries.get(&id).is_some_and(|entry| {
-            matches!(&entry.block, RenderBlock::Thinking(block) if block.summary_pending())
-        })
+        self.entries.get(&id).is_some_and(
+            |entry| matches!(&entry.block, RenderBlock::Thinking(block) if block.summary_pending()),
+        )
     }
 
     fn any_summary_spinner_in_viewport(&self) -> bool {
