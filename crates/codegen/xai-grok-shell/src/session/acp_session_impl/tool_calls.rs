@@ -464,7 +464,7 @@ impl SessionActor {
                 None
             };
             for chat in deferred_followups {
-                self.chat_state_handle.push_user_message(chat);
+                self.push_model_input(chat);
             }
         }
         self.drain_interjections_at_safe_point().await;

@@ -286,6 +286,25 @@ fn agent_msg_resets_after_tool() {
     assert_eq!(sb.len(), 3);
 }
 #[test]
+fn a_shell_row_ends_the_message_above_it() {
+    let mut sb = ScrollbackState::new();
+    let mut tracker = AcpUpdateTracker::new();
+    tracker.handle_update(agent_chunk("Done, I think."), &meta(), &mut sb);
+    assert_eq!(tracker.activity(), Some(TurnActivity::Responding));
+    tracker.end_streaming_output(&mut sb);
+    assert_eq!(
+        tracker.activity(),
+        None,
+        "no reply streams while the shell works between steps"
+    );
+    tracker.handle_update(agent_chunk("The gate says CI is red."), &meta(), &mut sb);
+    assert_eq!(
+        sb.len(),
+        2,
+        "the reply is a new message, not more of the old one"
+    );
+}
+#[test]
 fn finish_turn_clears_state() {
     crate::appearance::cache::set_show_thinking_blocks(true);
     let mut sb = ScrollbackState::new();

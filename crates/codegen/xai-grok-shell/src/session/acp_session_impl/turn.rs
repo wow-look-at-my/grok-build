@@ -1247,6 +1247,7 @@ impl SessionActor {
                     user_chat.add_image(format!("data:{};base64,{}", image.mime_type, image.data));
                 }
             }
+            self.announce_model_input(&user_chat);
             if self
                 .chat_state_handle
                 .push_user_message_and_ack(user_chat)
@@ -1407,18 +1408,12 @@ impl SessionActor {
                             break round;
                         }
                         // The built-in todo-stop gate is another stop hook.
-                        // It fires after the user hooks allowed the stop,
-                        // consumes the SAME continuation budget (a model that
-                        // never engages its todos still stops after
-                        // MAX_STOP_HOOK_CONTINUATIONS_PER_TURN
-                        // continuations).
                         if let Some(feedback) = self
                             .ci_stop_gate_feedback(prompt_id, stop_continuations_this_turn)
                             .await
                         {
                             stop_continuations_this_turn += 1;
-                            self.chat_state_handle
-                                .push_user_message(ConversationItem::stop_hook_feedback(feedback));
+                            self.push_model_input(ConversationItem::stop_hook_feedback(feedback));
                             continue;
                         }
                         if !self.todo_stop_gate_active() {
@@ -1458,15 +1453,13 @@ impl SessionActor {
                                     + input.in_progress_backed.len(),
                                 reason: "stop_gate",
                             });
-                        self.chat_state_handle
-                            .push_user_message(ConversationItem::stop_hook_feedback(rendered));
+                        self.push_model_input(ConversationItem::stop_hook_feedback(rendered));
                         continue;
                     }
                     StopGateDecision::KeepWorking { feedback } => {
                         stop_continuations_this_turn += 1;
                         salvage.round_boundary();
-                        self.chat_state_handle
-                            .push_user_message(ConversationItem::stop_hook_feedback(feedback));
+                        self.push_model_input(ConversationItem::stop_hook_feedback(feedback));
                     }
                 }
             }
@@ -1988,8 +1981,7 @@ impl SessionActor {
             return;
         };
         let wrapped = xai_grok_tools::reminders::wrap_reminder(&body);
-        self.chat_state_handle
-            .push_user_message(ConversationItem::system_reminder(wrapped));
+        self.push_model_input(ConversationItem::system_reminder(wrapped));
         tracing::info!(
             session_id = %self.session_info.id.0,
             count = mine.len(),
@@ -2171,7 +2163,7 @@ impl SessionActor {
             sleep(delay).await;
             salvage.round_boundary();
             let recovery_message = ConversationItem::auto_recovery(recovery_prompt.clone());
-            self.chat_state_handle.push_user_message(recovery_message);
+            self.push_model_input(recovery_message);
             // The main call above already ran, so a retry is never the
             // turn's opening pass regardless of what `first_round` was.
             result = self
@@ -3746,12 +3738,12 @@ impl SessionActor {
                     super::length_salvage::SalvageStep::Continue { inject_reminder } => {
                         if inject_reminder {
                             let tag = self.reminder_wrapper_tag();
-                            self.chat_state_handle.push_user_message(
-                                ConversationItem::length_continue_reminder(format!(
+                            self.push_model_input(ConversationItem::length_continue_reminder(
+                                format!(
                                     "<{tag}>{}</{tag}>",
                                     super::length_salvage::LENGTH_CONTINUE_REMINDER_BODY
-                                )),
-                            );
+                                ),
+                            ));
                         }
                         tracing::warn!(
                             session_id = %self.session_info.id,

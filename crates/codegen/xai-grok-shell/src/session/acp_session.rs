@@ -237,6 +237,8 @@ pub(crate) use goal_support::*;
 #[path = "acp_session_impl/hook_dispatch.rs"]
 mod hook_dispatch;
 use hook_dispatch::*;
+#[path = "acp_session_impl/model_input.rs"]
+mod model_input;
 #[path = "acp_session_impl/turn_report_slot.rs"]
 mod turn_report_slot;
 pub(crate) use turn_report_slot::TurnEpoch;
