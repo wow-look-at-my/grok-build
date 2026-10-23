@@ -1462,31 +1462,57 @@ impl AcpUpdateTracker {
         stream_start_ms: i64,
         summary: &str,
     ) -> bool {
-        let Some(id) = self
+        self.update_thinking_block(scrollback, stream_start_ms, |block| {
+            block.set_summary(summary.to_string())
+        })
+        .is_some()
+    }
+
+    /// Mark the summary call for `stream_start_ms` queued (`failed` is `None`) or failed. A queued block spins its
+    /// bullet until the summary or the failure lands. Returns whether the screen changed.
+    pub fn set_thinking_summary_status(
+        &mut self,
+        scrollback: &mut ScrollbackState,
+        stream_start_ms: i64,
+        failed: Option<&str>,
+    ) -> bool {
+        let pending = failed.is_none();
+        let Some(id) = self.update_thinking_block(scrollback, stream_start_ms, |block| match failed {
+            None => block.set_summary_pending(),
+            Some(reason) => block.set_summary_failed(reason.to_string()),
+        }) else {
+            return false;
+        };
+        if pending {
+            scrollback.add_summary_spinner(id);
+        }
+        true
+    }
+
+    /// Apply `update` to the thinking block keyed by `stream_start_ms`. Returns its id when the block changed.
+    fn update_thinking_block(
+        &self,
+        scrollback: &mut ScrollbackState,
+        stream_start_ms: i64,
+        update: impl FnOnce(&mut crate::scrollback::blocks::ThinkingBlock) -> bool,
+    ) -> Option<EntryId> {
+        let id = self
             .thinking_keys
             .iter()
             .rev()
             .find(|(key, _)| *key == stream_start_ms)
-            .map(|(_, id)| *id)
-        else {
-            return false;
+            .map(|(_, id)| *id)?;
+        let entry = scrollback.get_by_id_mut(id)?;
+        let RenderBlock::Thinking(block) = &mut entry.block else {
+            return None;
         };
-        let applied = scrollback
-            .get_by_id_mut(id)
-            .and_then(|entry| match &mut entry.block {
-                RenderBlock::Thinking(block) => Some(block),
-                _ => None,
-            })
-            .is_some_and(|block| block.set_summary(summary.to_string()));
-        if !applied {
-            return false;
+        if !update(block) {
+            return None;
         }
-        if let Some(entry) = scrollback.get_by_id_mut(id) {
-            entry.invalidate_cache();
-        }
-        // The summary adds rows under the header.
+        entry.invalidate_cache();
+        // The summary row changes the height. It also decides whether a verb group folds the row away.
         scrollback.mark_structurally_dirty(id);
-        true
+        Some(id)
     }
 
     /// Forget the current rate.

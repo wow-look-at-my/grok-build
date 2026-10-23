@@ -1509,6 +1509,14 @@ pub(super) fn handle_session_notification_with_origin(
                 &summary,
             )
         }
+        XaiSessionUpdate::ThinkingSummaryStatus {
+            stream_start_ms,
+            failed,
+        } => agent.session.tracker.set_thinking_summary_status(
+            &mut agent.scrollback,
+            stream_start_ms,
+            failed.as_deref(),
+        ),
         _ => {
             tracing::trace!(
                 "Ignoring {}: {:?}",
@@ -1703,6 +1711,19 @@ pub(super) fn handle_child_session_notification(
                 &mut child_view.scrollback,
                 stream_start_ms,
                 &summary,
+            )
+        }
+        XaiSessionUpdate::ThinkingSummaryStatus {
+            stream_start_ms,
+            failed,
+        } => {
+            let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
+                return false;
+            };
+            child_view.session.tracker.set_thinking_summary_status(
+                &mut child_view.scrollback,
+                stream_start_ms,
+                failed.as_deref(),
             )
         }
         XaiSessionUpdate::OutputRate {

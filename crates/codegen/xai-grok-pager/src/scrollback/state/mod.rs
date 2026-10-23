@@ -63,6 +63,9 @@ pub struct ScrollbackState {
     /// Used for O(running) iteration in tick_running().
     running: HashSet<EntryId>,
 
+    /// Thinking entries whose summary call was announced. `tick()` drops one once its summary or failure lands.
+    summary_spinners: HashSet<EntryId>,
+
     /// Entry IDs whose finish-flash (accent stays bright for [`FINISH_FLASH_DURATION_MS`] after completion) may still be active.
     /// Lets `tick()` check O(flashing) recently-finished entries instead of scanning every entry's `finished_at` on every animation tick.
     /// Pushed by `finish_running_with_time`, drained by `tick()` on expiry.
@@ -217,6 +220,7 @@ impl ScrollbackState {
             entries: IndexMap::new(),
             next_id: 1, // Start at 1 so 0 can be a sentinel
             running: HashSet::new(),
+            summary_spinners: HashSet::new(),
             flashing: Vec::new(),
             dirty_heights: HashSet::new(),
             permission_opened: HashSet::new(),
@@ -398,6 +402,11 @@ impl ScrollbackState {
 
         let mut needs_redraw = !self.running.is_empty() && self.any_running_in_viewport();
 
+        let mut spinners = std::mem::take(&mut self.summary_spinners);
+        spinners.retain(|id| self.summary_spinner_live(*id));
+        self.summary_spinners = spinners;
+        needs_redraw |= self.any_summary_spinner_in_viewport();
+
         // Finish-flash: O(flashing) over recently-finished entries, not O(entries) over the whole scrollback. Emit one
         // final redraw when a flash expires so the accent repaints in its static state. Otherwise the last-painted bright
         // frame would linger until the next event.
@@ -426,6 +435,27 @@ impl ScrollbackState {
         needs_redraw
     }
 
+    /// Animate the summary spinner on a thinking entry.
+    pub fn add_summary_spinner(&mut self, id: EntryId) {
+        self.summary_spinners.insert(id);
+    }
+
+    fn summary_spinner_live(&self, id: EntryId) -> bool {
+        self.entries.get(&id).is_some_and(|entry| {
+            matches!(&entry.block, RenderBlock::Thinking(block) if block.summary_pending())
+        })
+    }
+
+    fn any_summary_spinner_in_viewport(&self) -> bool {
+        self.summary_spinners.iter().any(|id| {
+            self.summary_spinner_live(*id)
+                && self
+                    .entries
+                    .get_index_of(id)
+                    .is_some_and(|idx| self.entry_index_in_viewport(idx))
+        })
+    }
+
     /// Whether any entry is still marked running (visible or not).
     pub fn has_running_entries(&self) -> bool {
         !self.running.is_empty()
@@ -449,7 +479,8 @@ impl ScrollbackState {
     /// Check if animation ticks are needed. Off-screen running entries don't need ticks. Finish-flashes deliberately do
     /// not demand ticks: they animate opportunistically while ticks flow for other reasons.
     pub fn needs_animation(&self) -> bool {
-        !self.running.is_empty() && self.any_running_in_viewport()
+        (!self.running.is_empty() && self.any_running_in_viewport())
+            || self.any_summary_spinner_in_viewport()
     }
 
     /// Get the current animation tick value.
@@ -806,6 +837,7 @@ impl ScrollbackState {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.running.clear();
+        self.summary_spinners.clear();
         self.flashing.clear();
         self.dirty_heights.clear();
         self.permission_opened.clear();
