@@ -119,6 +119,49 @@ async fn goal_round_shows_check_and_directive() {
     harness.quit().expect("reap pager");
 }
 
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "probe"]
+async fn probe_full_goal_without_planner() {
+    let content = ContentController::start().await.expect("start content");
+    let _first = content.expect_agent_turn("first round", ROUND_ONE);
+    expect_verdict(
+        &content,
+        "complete",
+        &json!({
+            "decision": "candidate_complete",
+            "evidence": "done",
+            "next_step": "none",
+            "blocker_key": ""
+        }),
+    );
+    content.set_response("ROLE_FALLBACK");
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_env_in_dir(
+        &binary,
+        160,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        &[("GROK_GOAL", "1"), ("GROK_GOAL_PLANNER", "0")],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(b"/goal write two markers")
+        .expect("type goal");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\r").expect("submit goal");
+    let _ = wait_until(Duration::from_secs(45), || {
+        harness.update(Duration::from_millis(200));
+        false
+    });
+    eprintln!("PROBE SCREEN:\n{}", harness.screen_contents());
+}
+
 /// A full goal starts with a planner subagent. Its run has a row, so the wait before the first round is accounted for.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -156,6 +199,16 @@ async fn full_goal_shows_planner_row() {
         "the planner run must have a row; screen:\n{}",
         harness.screen_contents()
     );
+    if std::env::var("GOAL_PROBE").is_ok() {
+        let _ = wait_until(Duration::from_secs(40), || {
+            harness.update(Duration::from_millis(200));
+            false
+        });
+        eprintln!("PROBE SCREEN:\n{}", harness.screen_contents());
+        for r in content.requests() {
+            eprintln!("PROBE REQ: {r:?}");
+        }
+    }
 
     harness.update(Duration::from_millis(500));
     harness.inject_keys(b"\x11").expect("ctrl-q once");
