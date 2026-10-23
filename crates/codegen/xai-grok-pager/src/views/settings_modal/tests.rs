@@ -506,6 +506,20 @@ fn every_dynamic_enum_setting_has_action_for_string_arm() {
                     "`{key}` non-empty canonical must set its slot, got {nonempty_action:?}",
                 );
             }
+            key if crate::settings::model_groups::group_for_setting_key(key).is_some() => {
+                let group = crate::settings::model_groups::group_for_setting_key(key)
+                    .expect("guard matched");
+                assert!(
+                    matches!(empty_action, Some(Action::SetModelGroupModel(id, ref m))
+                        if id == group.id && m.is_empty()),
+                    "`{key}` empty canonical must clear the group, got {empty_action:?}",
+                );
+                assert!(
+                    matches!(nonempty_action, Some(Action::SetModelGroupModel(id, ref m))
+                        if id == group.id && !m.is_empty()),
+                    "`{key}` non-empty canonical must set its group, got {nonempty_action:?}",
+                );
+            }
             other => panic!(
                 "Unknown DynamicEnum key `{other}` — add a discriminating arm in \
                  every_dynamic_enum_setting_has_action_for_string_arm so future \
@@ -797,7 +811,15 @@ fn rows_contain_categories_and_settings_through_pr_14() {
     expected.extend(
         xai_grok_models::HARNESS_MODEL_SLOTS
             .iter()
-            .map(|slot| slot.setting_key()),
+            .filter_map(
+                |slot| match crate::settings::model_groups::group_holding_slot(slot.id) {
+                    None => Some(slot.setting_key()),
+                    Some(group) if group.members.first() == Some(&slot.id) => {
+                        Some(group.setting_key)
+                    }
+                    Some(_) => None,
+                },
+            ),
     );
     expected.extend_from_slice(&[
         // `auto_compact_threshold_percent` (Session category) is not exposed in the modal. Advanced category.

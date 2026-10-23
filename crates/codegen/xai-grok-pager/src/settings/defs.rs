@@ -1767,23 +1767,42 @@ pub fn default_settings() -> Vec<SettingMeta> {
 /// slot added to the harness cannot ship without a settings row. Each row is
 /// SHELL-owned and writes its slot into the `[models]` table. A restart is
 /// required, because a slot is resolved when a session actor is built and a
-/// running session keeps the model it started with.
+/// running session keeps the model it started with. A slot in a model group
+/// has no row. The group's row takes the place of its first member, and it
+/// writes `[model_groups.<id>] model`.
 fn harness_model_settings() -> Vec<SettingMeta> {
+    let row = |key, label, description, keywords| SettingMeta {
+        key,
+        category: SettingCategory::Models,
+        owner: SettingOwner::Shell,
+        label,
+        description,
+        keywords,
+        kind: SettingKind::DynamicEnum {
+            default: "",
+            source: DynamicEnumSource::ActiveModelCatalog,
+            supports_preview: false,
+        },
+        restart_required: true,
+    };
     xai_grok_models::HARNESS_MODEL_SLOTS
         .iter()
-        .map(|slot| SettingMeta {
-            key: slot.setting_key(),
-            category: SettingCategory::Models,
-            owner: SettingOwner::Shell,
-            label: slot.label,
-            description: slot.description,
-            keywords: slot.keywords,
-            kind: SettingKind::DynamicEnum {
-                default: "",
-                source: DynamicEnumSource::ActiveModelCatalog,
-                supports_preview: false,
+        .filter_map(
+            |slot| match crate::settings::model_groups::group_holding_slot(slot.id) {
+                None => Some(row(
+                    slot.setting_key(),
+                    slot.label,
+                    slot.description,
+                    slot.keywords,
+                )),
+                Some(group) if group.members.first() == Some(&slot.id) => Some(row(
+                    group.setting_key,
+                    group.label,
+                    group.description,
+                    group.keywords,
+                )),
+                Some(_) => None,
             },
-            restart_required: true,
-        })
+        )
         .collect()
 }

@@ -1528,6 +1528,9 @@ pub struct Config {
     pub cli: CliConfig,
     #[serde(default, skip_serializing)]
     pub models: ModelsConfig,
+    /// `[model_groups.<id>]`: slots that share one model. See `xai_grok_models::groups`.
+    #[serde(default, skip_serializing)]
+    pub model_groups: std::collections::BTreeMap<String, xai_grok_models::ModelGroupConfig>,
     #[serde(default, skip_serializing)]
     pub harness: HarnessConfig,
     #[serde(default, skip_serializing)]
@@ -1892,6 +1895,7 @@ impl Default for Config {
             paths: PathsConfig::default(),
             cli: CliConfig::default(),
             models: ModelsConfig::default(),
+            model_groups: Default::default(),
             harness: HarnessConfig::default(),
             relay: RelayConfig::default(),
             hub: HubConfig::default(),
@@ -2231,6 +2235,7 @@ impl Config {
         }
         let (mut config, mut unrecognized_keys) =
             Self::deserialize_collecting_unrecognized(base, &raw_without_model_sections)?;
+        xai_grok_models::resolve_model_groups(&config.model_groups)?;
         config.harness.merge_deprecated_keys();
         config.mcp_servers = parsed_mcp_servers.into_iter().collect();
         config.config_models = config_models;
@@ -3234,17 +3239,27 @@ impl Config {
     }
     /// The model for one harness model slot, or `None` when the slot inherits
     /// the session model. Precedence is the slot's environment variable, then
-    /// `[models] <slot>` in `config.toml`, then the slot's compiled default.
-    /// A slot whose `fallback` is `SessionModel` and which nothing sets
-    /// answers `None`, and the caller keeps the session model. The slot id
-    /// must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists. An unknown
-    /// id is a programming error and answers `None`.
+    /// the `model` of the `[model_groups]` group. That group holds the slot,
+    /// then `[models] <slot>` in `config.toml`, then the slot's compiled
+    /// default. A slot whose `fallback` is `SessionModel` and which nothing
+    /// sets answers `None`, and the caller keeps the session model. The slot
+    /// id must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists. An
+    /// unknown id is a programming error and answers `None`.
     pub(crate) fn resolve_harness_model(&self, slot_id: &str) -> Option<Resolved<String>> {
         let slot = xai_grok_models::slot_by_id(slot_id)?;
         if let Ok(v) = std::env::var(slot.env)
             && !v.trim().is_empty()
         {
             return Some(Resolved::new(v.trim().to_owned(), ConfigSource::Env));
+        }
+        if let Some(v) = xai_grok_models::group_model_for_slot(&self.model_groups, slot_id) {
+            if self.harness_model_from_config(slot_id).is_some() {
+                tracing::warn!(
+                    slot = slot_id,
+                    "[models] {slot_id} is ignored: the slot's model group sets the model"
+                );
+            }
+            return Some(Resolved::new(v, ConfigSource::Config));
         }
         if let Some(v) = self.harness_model_from_config(slot_id)
             && !v.trim().is_empty()

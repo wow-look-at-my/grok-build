@@ -1124,6 +1124,16 @@ pub(super) fn action_for_string(
                     .map(|id| Action::SetHarnessModel(slot.id, id.0.to_string()))
             }
         }
+        key if crate::settings::model_groups::group_for_setting_key(key).is_some() => {
+            let group = crate::settings::model_groups::group_for_setting_key(key)?;
+            if value.is_empty() {
+                Some(Action::SetModelGroupModel(group.id, String::new()))
+            } else {
+                snapshot
+                    .resolve_model_name(&value)
+                    .map(|id| Action::SetModelGroupModel(group.id, id.0.to_string()))
+            }
+        }
         _ => {
             let _ = value;
             let _ = snapshot;

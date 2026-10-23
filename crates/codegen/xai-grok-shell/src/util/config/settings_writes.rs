@@ -398,6 +398,83 @@ pub(crate) fn apply_harness_model(
     }
 }
 
+/// Persist the model of one model group into `[model_groups.<id>] model`. An
+/// empty `value` removes the key. A non-empty write also removes the
+/// `[models]` entry of each member, so no hidden per-slot pin stays behind.
+pub async fn set_model_group_model(group_id: &str, value: String) -> Result<()> {
+    if value.len() > MAX_DEFAULT_MODEL_LEN {
+        anyhow::bail!(
+            "model name too long ({} > {} bytes)",
+            value.len(),
+            MAX_DEFAULT_MODEL_LEN
+        );
+    }
+    let group_id = group_id.to_owned();
+    rewrite_user_config_locked("model group", move |path| {
+        rewrite_user_config_table(
+            path,
+            "model group",
+            crate::util::config::persist::atomic_write_follow_bound,
+            |root| apply_model_group_model(root, &group_id, &value),
+        )
+    })
+    .await
+}
+
+/// The edit behind [`set_model_group_model`], on the parsed root table.
+pub(crate) fn apply_model_group_model(
+    root: &mut toml::map::Map<String, toml::Value>,
+    group_id: &str,
+    value: &str,
+) -> Result<()> {
+    let user: std::collections::BTreeMap<String, xai_grok_models::ModelGroupConfig> = root
+        .get("model_groups")
+        .cloned()
+        .map(toml::Value::try_into)
+        .transpose()
+        .context("[model_groups] is invalid")?
+        .unwrap_or_default();
+    let groups = xai_grok_models::resolve_model_groups(&user).map_err(anyhow::Error::msg)?;
+    let group = groups
+        .iter()
+        .find(|g| g.id == group_id)
+        .with_context(|| format!("unknown model group '{group_id}'"))?;
+    if value.is_empty() {
+        let Some(all) = root
+            .get_mut("model_groups")
+            .and_then(toml::Value::as_table_mut)
+        else {
+            return Ok(());
+        };
+        if let Some(table) = all.get_mut(group_id).and_then(toml::Value::as_table_mut) {
+            table.remove("model");
+            if table.is_empty() {
+                all.remove(group_id);
+            }
+        }
+        if all.is_empty() {
+            root.remove("model_groups");
+        }
+        return Ok(());
+    }
+    let table = root
+        .entry("model_groups".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .context("[model_groups] must be a table")?
+        .entry(group_id.to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .with_context(|| format!("[model_groups.{group_id}] must be a table"))?;
+    table.insert("model".to_owned(), toml::Value::String(value.to_owned()));
+    if let Some(models) = root.get_mut("models").and_then(toml::Value::as_table_mut) {
+        for member in &group.members {
+            models.remove(*member);
+        }
+    }
+    Ok(())
+}
+
 /// Bounds for [`set_max_thoughts_width`].
 /// They mirror the pager's registry consts; a CI test pins the agreement.
 const MAX_THOUGHTS_WIDTH_SHELL_MIN: i64 = 40;

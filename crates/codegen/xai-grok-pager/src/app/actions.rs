@@ -568,6 +568,8 @@ pub enum Action {
     SetThinkingSummaryHistoryMinCount(i64),
     /// Commit one harness model slot into `[models]`.
     SetHarnessModel(&'static str, String),
+    /// Commit one model group into `[model_groups.<id>] model`.
+    SetModelGroupModel(&'static str, String),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
     /// Restart-required: tips are resolved once at startup.
     SetShowTips(bool),
