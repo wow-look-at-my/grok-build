@@ -118,3 +118,48 @@ async fn goal_round_shows_check_and_directive() {
     harness.inject_keys(b"\x11").expect("ctrl-q confirm");
     harness.quit().expect("reap pager");
 }
+
+/// A full goal starts with a planner subagent. Its run has a row, so the wait before the first round is accounted for.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn full_goal_shows_planner_row() {
+    let content = ContentController::start().await.expect("start content");
+    content.set_response("PLANNER_FALLBACK");
+
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_env_in_dir(
+        &binary,
+        160,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        &[("GROK_GOAL", "1")],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(b"/goal write two markers")
+        .expect("type goal");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\r").expect("submit goal");
+
+    let shown = wait_until(Duration::from_secs(60), || {
+        harness.update(Duration::from_millis(100));
+        harness.screen_contents().contains("Goal planning:")
+    });
+    assert!(
+        shown,
+        "the planner run must have a row; screen:\n{}",
+        harness.screen_contents()
+    );
+
+    harness.update(Duration::from_millis(500));
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(200));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    harness.quit().expect("reap pager");
+}
