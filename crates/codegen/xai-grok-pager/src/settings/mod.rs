@@ -17,6 +17,7 @@
 //! This mirrors the `ActionRegistry` pattern. No `LazyLock`, no global state.
 
 pub mod defs;
+pub mod model_groups;
 pub mod registry;
 
 pub use registry::{

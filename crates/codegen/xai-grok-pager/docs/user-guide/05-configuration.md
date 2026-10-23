@@ -262,7 +262,7 @@ client_id = "0oa1b2c3d4e5f6g7h8i9"
 
 The harness sends requests to a model for many jobs beside your own turns. Each job is a slot in `[models]`. Set a slot and that job runs on the model you name. Leave it alone and the job inherits your session model, so it follows `/model`.
 
-Every slot also has a picker in the settings modal, under **Models**. A slot is read when a session starts. So a change applies to the next session.
+Every slot also has a picker in the settings modal, under **Models**, or shares its group's picker (see [Model groups](#model-groups)). A slot is read when a session starts. So a change applies to the next session.
 
 ```toml
 [models]
@@ -282,6 +282,7 @@ permission_classifier = "grok-4.5-fast"
 | `compaction` | Summarizing when the window fills | Session model |
 | `recap` | The "where was I" recap | Session model |
 | `turn_summary` | The one-line summary per turn | Session model |
+| `thinking_summary` | The short summary under a thinking block | Session model |
 | `side_note` | `/btw` | Session model |
 | `todo_capture` | `/todo` | Session model |
 | `memory_flush` | Writing long-term memory | Session model |
@@ -296,6 +297,37 @@ Each slot takes an environment variable too, which wins over the config file. Th
 Two older, narrower keys still win over their slot where you set them: `[auto_mode] classifier_model` over `permission_classifier`, and `[memory] flush_model` over `memory_flush`. A `[subagents.models]` entry and an agent definition's own `model` both win over `subagent_default`.
 
 A slot naming a model your account cannot reach logs a warning and falls back to the session model, rather than failing the call.
+
+### Model groups
+
+A model group is a set of slots that share one model and one settings row. A slot in a group has no row of its own. The settings modal shows the group's row in its place. A group with no slots does not show. A slot is in one group at most.
+
+Groups ship by default:
+
+| Group | Label | Slots |
+| --- | --- | --- |
+| `summarization` | Summarization model | `session_summary`, `prompt_suggestion`, `recap`, `turn_summary`, `thinking_summary`, `goal_summarizer` |
+| `dense_summarization` | Dense summarization model | `web_search`, `compaction`, `image_description` |
+| `query` | Query model | `side_note`, `todo_capture` |
+
+Change, unroll or add groups under `[model_groups.<id>]`. Each key is optional. On a default group, a key you leave out keeps its default value.
+
+```toml
+[model_groups.summarization]
+model = "grok-4.5-fast"                # every slot in the group runs on this model
+
+[model_groups.query]
+members = []                           # unroll: side_note and todo_capture get their own rows again
+
+[model_groups.planning]                # a new group
+label = "Planning model"
+description = "Model for the goal planner and strategist."
+members = ["goal_planner", "goal_strategist"]
+```
+
+A slot that your own group lists leaves the default group it was in. So `planning` above can take `recap` without an edit to `summarization`. Two of your groups that list the same slot, an unknown slot, or a group id with characters other than `a-z`, `0-9`. `_` and `-` stop the start with an error that names the problem.
+
+A slot reads its model in this order: the slot's environment variable, then its group's `model`, then its own `[models]` entry, then its default. A group with no `model` changes nothing, so each slot keeps its own entry and default. A pick on a group's settings row writes `[model_groups.<id>] model` and removes the `[models]` entry of each slot in the group.
 
 ### Custom models
 

@@ -9,6 +9,7 @@ use ratatui::layout::Rect;
 use std::sync::Arc;
 
 use xai_grok_pager::app::actions::Action;
+use xai_grok_pager::settings::model_groups::{ModelGroupRow, group_holding_slot, model_groups};
 use xai_grok_pager::settings::{
     EnumChoice, PagerLocalSnapshot, SettingCategory, SettingKind, SettingMeta, SettingOwner,
     SettingValue, SettingsRegistry,
@@ -90,7 +91,9 @@ fn every_registered_setting_is_exercised() {
     for meta in reg.all() {
         // Harness model slots are built from one table, so the keyboard and
         // mouse tests below WALK that table and cover.
-        if xai_grok_models::slot_for_setting_key(meta.key).is_some() {
+        if xai_grok_models::slot_for_setting_key(meta.key).is_some()
+            || xai_grok_pager::settings::model_groups::group_for_setting_key(meta.key).is_some()
+        {
             continue;
         }
         if !ALL_SETTINGS_EXERCISED.contains(&meta.key) {
@@ -2039,11 +2042,7 @@ fn registry_kind_membership_through_pr_14() {
     // Every harness model slot is a DynamicEnum too.
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
     let mut expected_dynamic: Vec<&str> = vec!["default_model"];
-    expected_dynamic.extend(
-        xai_grok_models::HARNESS_MODEL_SLOTS
-            .iter()
-            .map(|slot| slot.setting_key()),
-    );
+    expected_dynamic.extend(model_picker_rows().into_iter().map(PickerRow::key));
     let mut sorted_dynamic = dynamic_enum_keys.clone();
     sorted_dynamic.sort();
     expected_dynamic.sort();
@@ -2210,7 +2209,9 @@ fn defaults_round_trip_through_registry() {
             "contextual_hints.export_copy" => SettingValue::Bool(true),
             "contextual_hints.ssh_wrap" => SettingValue::Bool(true),
             // Every harness model slot defaults to the empty inherit sentinel.
-            key if xai_grok_models::slot_for_setting_key(key).is_some() => {
+            key if xai_grok_models::slot_for_setting_key(key).is_some()
+                || xai_grok_pager::settings::model_groups::group_for_setting_key(key).is_some() =>
+            {
                 SettingValue::String(String::new())
             }
             other => panic!("test must list expected default for `{other}`"),
@@ -6195,25 +6196,112 @@ fn pr14_string_settings_use_known_model_validator() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Harness model slots (DynamicEnum per slot, restart_required: true)
+// Harness model pickers (DynamicEnum per row, restart_required: true)
 //
-// Every row is built from `xai_grok_models::HARNESS_MODEL_SLOTS`, so these
-// tests walk the table rather than naming slots. A slot added to the harness
-// with no working row fails here.
-// ---------------------------------------------------------------------------
+// A row is an ungrouped slot from `xai_grok_models::HARNESS_MODEL_SLOTS` or a
+// model group.
 
-/// Every slot has a picker row, and each is a `KnownModel`-style
-/// `DynamicEnum` under Models whose empty default means "inherit".
+/// One model picker row.
+#[derive(Debug, Clone, Copy)]
+enum PickerRow {
+    Slot(&'static xai_grok_models::ModelSlot),
+    Group(&'static ModelGroupRow),
+}
+
+impl PickerRow {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Slot(slot) => slot.setting_key(),
+            Self::Group(group) => group.setting_key,
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Slot(slot) => slot.id,
+            Self::Group(group) => group.id,
+        }
+    }
+
+    fn first_keyword(self) -> &'static str {
+        match self {
+            Self::Slot(slot) => slot.keywords[0],
+            Self::Group(group) => group.keywords[0],
+        }
+    }
+
+    /// The target id and model a commit on this row carries, or `None` for
+    /// an action of the wrong kind.
+    fn committed(self, action: &Action) -> Option<(&'static str, String)> {
+        match (self, action) {
+            (Self::Slot(_), Action::SetHarnessModel(id, model))
+            | (Self::Group(_), Action::SetModelGroupModel(id, model)) => Some((id, model.clone())),
+            _ => None,
+        }
+    }
+}
+
+/// Every model picker row: each ungrouped slot, then each group.
+fn model_picker_rows() -> Vec<PickerRow> {
+    xai_grok_models::HARNESS_MODEL_SLOTS
+        .iter()
+        .filter(|slot| group_holding_slot(slot.id).is_none())
+        .map(PickerRow::Slot)
+        .chain(model_groups().iter().map(PickerRow::Group))
+        .collect()
+}
+
+/// A grouped slot has no row of its own. Its group's row stands in for it.
+#[test]
+fn a_grouped_slot_has_no_row_and_its_group_does() {
+    let reg = SettingsRegistry::defaults();
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        let Some(group) = group_holding_slot(slot.id) else {
+            continue;
+        };
+        assert!(
+            reg.find(slot.setting_key()).is_none(),
+            "`{}` is in group `{}` and must have no row",
+            slot.id,
+            group.id
+        );
+        assert!(
+            reg.find(group.setting_key).is_some(),
+            "group `{}` must have a row",
+            group.id
+        );
+    }
+}
+
+/// A search for a grouped slot's own keyword finds its group.
+#[test]
+fn a_grouped_slot_keyword_finds_the_group() {
+    let reg = SettingsRegistry::defaults();
+    for group in model_groups() {
+        for member in &group.members {
+            let slot = xai_grok_models::slot_by_id(member).expect("member is a slot");
+            let hits = reg.search(slot.keywords[0]);
+            assert!(
+                hits.iter().any(|m| m.key == group.setting_key),
+                "search(`{}`) must reach group `{}`",
+                slot.keywords[0],
+                group.id
+            );
+        }
+    }
+}
+
+/// Every picker row is a `KnownModel`-style `DynamicEnum` under Models
+/// whose empty default means "inherit".
 #[test]
 fn harness_model_slot_rows_are_registered_model_pickers() {
     use xai_grok_pager::settings::DynamicEnumSource;
     let reg = SettingsRegistry::defaults();
-    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
-        let key = slot.setting_key();
+    for row in model_picker_rows() {
+        let key = row.key();
         let meta = reg
             .find(key)
-            .unwrap_or_else(|| panic!("harness model slot `{}` has no row", slot.id));
+            .unwrap_or_else(|| panic!("model picker `{}` has no row", row.id()));
         assert_eq!(meta.category, SettingCategory::Models, "for `{key}`");
         assert_eq!(meta.owner, SettingOwner::Shell, "for `{key}`");
         assert!(
@@ -6246,39 +6334,42 @@ fn harness_model_slot_rows_read_the_configured_model() {
     use xai_grok_pager::settings::current_value_for;
     let pager = PagerLocalSnapshot::default();
     let mut ui = UiConfig::default();
-    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+    for row in model_picker_rows() {
         assert_eq!(
-            current_value_for(slot.setting_key(), &ui, &pager),
+            current_value_for(row.key(), &ui, &pager),
             Some(SettingValue::String(String::new())),
             "an unset `{}` must read as the inherit sentinel",
-            slot.id
+            row.id()
         );
     }
-    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
-        ui.harness_models
-            .insert(slot.id.to_string(), format!("pinned-{}", slot.id));
+    for row in model_picker_rows() {
+        let map = match row {
+            PickerRow::Slot(_) => &mut ui.harness_models,
+            PickerRow::Group(_) => &mut ui.model_group_models,
+        };
+        map.insert(row.id().to_string(), format!("pinned-{}", row.id()));
     }
-    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+    for row in model_picker_rows() {
         assert_eq!(
-            current_value_for(slot.setting_key(), &ui, &pager),
-            Some(SettingValue::String(format!("pinned-{}", slot.id))),
+            current_value_for(row.key(), &ui, &pager),
+            Some(SettingValue::String(format!("pinned-{}", row.id()))),
             "a set `{}` must read back its model",
-            slot.id
+            row.id()
         );
     }
 }
 
-/// Every slot is reachable from the settings search, by its own id.
+/// Every row is reachable from the settings search, by its first keyword.
 #[test]
 fn harness_model_slot_rows_are_discoverable_via_search() {
     let reg = SettingsRegistry::defaults();
-    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
-        let query = slot.keywords[0];
+    for row in model_picker_rows() {
+        let query = row.first_keyword();
         let hits = reg.search(query);
         assert!(
-            hits.iter().any(|m| m.key == slot.setting_key()),
+            hits.iter().any(|m| m.key == row.key()),
             "search(`{query}`) must reach `{}`",
-            slot.setting_key()
+            row.key()
         );
     }
 }
@@ -6307,8 +6398,8 @@ fn slot_modal_focused_on(key: &str) -> SettingsModalState {
 /// commits that model id against the slot the row names.
 #[test]
 fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
-    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
-        let key = slot.setting_key();
+    for row in model_picker_rows() {
+        let key = row.key();
         let mut s = slot_modal_focused_on(key);
 
         let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
@@ -6329,14 +6420,17 @@ fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
         );
 
         match handle_settings_key(&mut s, &press(KeyCode::Enter)) {
-            SettingsKeyOutcome::Action(Action::SetHarnessModel(slot_id, model)) => {
-                assert_eq!(slot_id, slot.id, "`{key}` must commit against its own slot");
+            SettingsKeyOutcome::Action(action) => {
+                let (id, model) = row
+                    .committed(&action)
+                    .unwrap_or_else(|| panic!("`{key}` committed the wrong action: {action:?}"));
+                assert_eq!(id, row.id(), "`{key}` must commit against its own target");
                 assert_eq!(
                     model, "grok-4.5",
                     "`{key}` must commit the catalog model id, not its display name"
                 );
             }
-            other => panic!("expected SetHarnessModel on `{key}` commit, got {other:?}"),
+            other => panic!("expected a model commit on `{key}`, got {other:?}"),
         }
         assert!(
             matches!(s.mode(), SettingsModalMode::Browse),
@@ -6347,28 +6441,31 @@ fn harness_model_slot_picker_commits_the_catalog_model_for_every_slot() {
 
 #[test]
 fn harness_model_slot_picker_row_zero_clears_the_slot() {
-    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
-        let key = slot.setting_key();
+    for row in model_picker_rows() {
+        let key = row.key();
         let mut s = slot_modal_focused_on(key);
         let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
         match handle_settings_key(&mut s, &press(KeyCode::Enter)) {
-            SettingsKeyOutcome::Action(Action::SetHarnessModel(slot_id, model)) => {
-                assert_eq!(slot_id, slot.id, "`{key}` must clear its own slot");
+            SettingsKeyOutcome::Action(action) => {
+                let (id, model) = row
+                    .committed(&action)
+                    .unwrap_or_else(|| panic!("`{key}` committed the wrong action: {action:?}"));
+                assert_eq!(id, row.id(), "`{key}` must clear its own target");
                 assert!(
                     model.is_empty(),
-                    "row 0 of the `{key}` picker must clear the slot, got `{model}`"
+                    "row 0 of the `{key}` picker must clear, got `{model}`"
                 );
             }
-            other => panic!("expected SetHarnessModel(\"\") on `{key}` row 0, got {other:?}"),
+            other => panic!("expected a clear on `{key}` row 0, got {other:?}"),
         }
     }
 }
 
-/// Mouse parity: a second click on a slot row opens the same picker.
+/// Mouse parity: a second click on a picker row opens the same picker.
 #[test]
 fn mouse_click_on_a_harness_model_slot_row_opens_the_picker() {
-    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
-        let key = slot.setting_key();
+    for row in model_picker_rows() {
+        let key = row.key();
         let mut s = slot_modal_focused_on(key);
         s.list_area = Rect {
             x: 0,

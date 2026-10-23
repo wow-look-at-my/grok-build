@@ -1891,37 +1891,8 @@ pub(in crate::app::dispatch) fn set_harness_model(
     if prev == model_id {
         return vec![];
     }
-    let display = if model_id.is_empty() {
-        "cleared".to_string()
-    } else {
-        let ActiveView::Agent(aid) = app.active_view else {
-            tracing::error!(
-                target: "settings",
-                slot = slot_id,
-                "Action::SetHarnessModel dispatched with no active agent — no-op",
-            );
-            return vec![];
-        };
-        let id = acp::ModelId::new(std::sync::Arc::from(model_id.as_str()));
-        let Some(agent) = app.agents.get(&aid) else {
-            tracing::error!(
-                target: "settings",
-                slot = slot_id,
-                "Action::SetHarnessModel: active_view::Agent points to missing agent",
-            );
-            return vec![];
-        };
-        if !agent.session.models.available.contains_key(&id) {
-            tracing::error!(
-                target: "settings",
-                slot = slot_id,
-                id = ?id,
-                "Action::SetHarnessModel dispatched with id not in catalog — \
-                 validator skew; no-op",
-            );
-            return vec![];
-        }
-        agent.session.models.display_name_for(&id)
+    let Some(display) = catalog_display_name(app, slot_id, &model_id) else {
+        return vec![];
     };
     set_harness_model_inner(app, slot_id, model_id.clone());
     refresh_open_settings_modals(app);
@@ -1935,6 +1906,102 @@ pub(in crate::app::dispatch) fn set_harness_model(
     app.show_toast(&format!("\u{2713} {}: {display}", slot.label));
     vec![Effect::PersistSetting {
         key: slot.setting_key(),
+        value: crate::settings::SettingValue::String(model_id),
+        rollback_value: crate::settings::SettingValue::String(prev),
+    }]
+}
+
+/// The toast text for a model picker commit: "cleared" for an empty id, else
+/// the catalog display name. `None` refuses the commit. The modal's picker
+/// only offers catalog entries, so an id outside the active agent's catalog
+/// is validator skew. `target` names the slot or group in the log.
+fn catalog_display_name(app: &AppView, target: &str, model_id: &str) -> Option<String> {
+    if model_id.is_empty() {
+        return Some("cleared".to_string());
+    }
+    let ActiveView::Agent(aid) = app.active_view else {
+        tracing::error!(
+            target: "settings",
+            target_id = target,
+            "model picker commit with no active agent — no-op",
+        );
+        return None;
+    };
+    let id = acp::ModelId::new(std::sync::Arc::from(model_id));
+    let Some(agent) = app.agents.get(&aid) else {
+        tracing::error!(
+            target: "settings",
+            target_id = target,
+            "model picker commit: active_view::Agent points to missing agent",
+        );
+        return None;
+    };
+    if !agent.session.models.available.contains_key(&id) {
+        tracing::error!(
+            target: "settings",
+            target_id = target,
+            id = ?id,
+            "model picker commit with id not in catalog — validator skew; no-op",
+        );
+        return None;
+    }
+    Some(agent.session.models.display_name_for(&id))
+}
+
+/// State-only mutation for one model group. An empty `model_id` removes the
+/// entry, which is what the modal reads as "(no override)".
+pub(super) fn set_model_group_model_inner(app: &mut AppView, group_id: &str, model_id: String) {
+    if model_id.is_empty() {
+        app.current_ui.model_group_models.remove(group_id);
+    } else {
+        app.current_ui
+            .model_group_models
+            .insert(group_id.to_string(), model_id);
+    }
+}
+
+/// Outer dispatcher for `Action::SetModelGroupModel`. It acts as
+/// [`set_harness_model`] does, on the `[model_groups.<id>] model` key.
+pub(in crate::app::dispatch) fn set_model_group_model(
+    app: &mut AppView,
+    group_id: &'static str,
+    model_id: String,
+) -> Vec<Effect> {
+    let Some(group) = crate::settings::model_groups::model_groups()
+        .iter()
+        .find(|g| g.id == group_id)
+    else {
+        tracing::error!(
+            target: "settings",
+            group = group_id,
+            "Action::SetModelGroupModel dispatched with an unknown group — no-op",
+        );
+        return vec![];
+    };
+    let prev = app
+        .current_ui
+        .model_group_models
+        .get(group_id)
+        .cloned()
+        .unwrap_or_default();
+    if prev == model_id {
+        return vec![];
+    }
+    let Some(display) = catalog_display_name(app, group_id, &model_id) else {
+        return vec![];
+    };
+    set_model_group_model_inner(app, group_id, model_id.clone());
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = group.setting_key,
+        new_id = %model_id,
+        prev_id = %prev,
+        "setting changed",
+    );
+    app.show_toast(&format!("\u{2713} {}: {display}", group.label));
+    vec![Effect::PersistSetting {
+        key: group.setting_key,
         value: crate::settings::SettingValue::String(model_id),
         rollback_value: crate::settings::SettingValue::String(prev),
     }]

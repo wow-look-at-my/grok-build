@@ -2731,6 +2731,16 @@ pub(crate) fn load_initial_ui_config() -> xai_grok_shell::agent::config::UiConfi
                     }
                 }
             }
+            if let Some(groups) = root.get("model_groups").and_then(|v| v.as_table()) {
+                for (id, group) in groups {
+                    if let Some(value) = group.get("model").and_then(|v| v.as_str())
+                        && !value.trim().is_empty()
+                    {
+                        ui.model_group_models
+                            .insert(id.clone(), value.trim().to_string());
+                    }
+                }
+            }
             ui
         })
         .clone()

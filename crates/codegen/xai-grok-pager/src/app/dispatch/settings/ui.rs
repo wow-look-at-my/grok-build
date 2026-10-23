@@ -8,16 +8,16 @@ use super::setters::{
     set_display_refresh_auto_cadence_inner, set_follow_up_behavior_inner,
     set_group_tool_verbs_inner, set_harness_model_inner, set_hunk_tracker_mode_inner,
     set_invert_scroll_inner, set_keep_text_selection_inner, set_max_thoughts_width_inner,
-    set_min_output_tokens_per_sec_inner, set_multiline_mode, set_output_rate_max_retries_inner,
-    set_output_rate_sustained_secs_inner, set_output_rate_window_secs_inner,
-    set_page_flip_on_send_inner, set_prompt_suggestions_inner, set_remember_tool_approvals_inner,
-    set_render_mermaid_inner, set_respect_manual_folds_inner, set_scroll_lines_inner,
-    set_scroll_mode_inner, set_scroll_speed_inner, set_show_thinking_blocks_inner,
-    set_show_tips_inner, set_stop_gate_ci_failing_inner, set_stop_gate_unfinished_todos_inner,
-    set_theme_inner, set_thinking_summaries_inner, set_thinking_summary_history_min_count_inner,
-    set_thinking_summary_history_window_secs_inner, set_timeline_inner, set_timestamps,
-    set_timestamps_inner, set_ttft_timeout_secs_inner, set_voice_capture_mode_inner,
-    set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
+    set_min_output_tokens_per_sec_inner, set_model_group_model_inner, set_multiline_mode,
+    set_output_rate_max_retries_inner, set_output_rate_sustained_secs_inner,
+    set_output_rate_window_secs_inner, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
+    set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
+    set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
+    set_show_thinking_blocks_inner, set_show_tips_inner, set_stop_gate_ci_failing_inner,
+    set_stop_gate_unfinished_todos_inner, set_theme_inner, set_thinking_summaries_inner,
+    set_thinking_summary_history_min_count_inner, set_thinking_summary_history_window_secs_inner,
+    set_timeline_inner, set_timestamps, set_timestamps_inner, set_ttft_timeout_secs_inner,
+    set_voice_capture_mode_inner, set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
 };
 use crate::app::actions::{Action, Effect};
 use crate::app::app_view::{ActiveView, AppView};
@@ -775,6 +775,23 @@ pub(in crate::app::dispatch) fn action_for_reset(
                 None
             }
         }
+        (key, SettingValue::String(s))
+            if crate::settings::model_groups::group_for_setting_key(key).is_some() =>
+        {
+            let group = crate::settings::model_groups::group_for_setting_key(key)?;
+            if s.is_empty() {
+                Some(Action::SetModelGroupModel(group.id, String::new()))
+            } else {
+                tracing::error!(
+                    target: "settings",
+                    key,
+                    value = %s,
+                    "action_for_reset(model group) received non-empty default — \
+                     registry/dispatch skew (default should be empty string)",
+                );
+                None
+            }
+        }
 
         _ => None,
     }
@@ -1077,6 +1094,13 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             let slot =
                 xai_grok_models::slot_for_setting_key(key).expect("guard above matched this key");
             set_harness_model_inner(app, slot.id, s.clone());
+        }
+        (key, SettingValue::String(s))
+            if crate::settings::model_groups::group_for_setting_key(key).is_some() =>
+        {
+            let group = crate::settings::model_groups::group_for_setting_key(key)
+                .expect("guard above matched this key");
+            set_model_group_model_inner(app, group.id, s.clone());
         }
         _ => {
             tracing::error!(

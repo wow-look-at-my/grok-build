@@ -5857,6 +5857,94 @@ fn an_unset_harness_model_slot_falls_back_as_its_table_says() {
     }
 }
 
+/// A group model reaches every member and wins over a member's own
+/// `[models]` entry. A slot outside the group keeps its own entry.
+#[test]
+fn a_model_group_sets_every_member() {
+    let raw: toml::Value = toml::from_str(
+        "[models]\nrecap = \"own\"\ngoal_planner = \"planner\"\n\
+         [model_groups.summarization]\nmodel = \"group-model\"\n",
+    )
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+    for slot in [
+        "session_summary",
+        "prompt_suggestion",
+        "recap",
+        "turn_summary",
+        "thinking_summary",
+        "goal_summarizer",
+    ] {
+        let r = cfg
+            .resolve_harness_model(slot)
+            .expect("grouped slot resolves");
+        assert_eq!(r.value, "group-model", "for {slot}");
+        assert_eq!(r.source, ConfigSource::Config, "for {slot}");
+    }
+    assert_eq!(
+        cfg.resolve_harness_model("goal_planner").map(|r| r.value),
+        Some("planner".to_owned())
+    );
+    assert!(cfg.resolve_harness_model("side_note").is_none());
+}
+
+/// `members = []` unrolls a compiled group, and its slots read their own
+/// `[models]` entries again. A user group takes a slot and sets its model.
+#[test]
+fn a_model_group_can_be_unrolled_or_replaced_from_config() {
+    let raw: toml::Value = toml::from_str(
+        "[models]\nside_note = \"own\"\n\
+         [model_groups.query]\nmembers = []\nmodel = \"ignored\"\n\
+         [model_groups.fast]\nmembers = [\"compaction\"]\nmodel = \"fast-model\"\n\
+         [model_groups.dense_summarization]\nmodel = \"dense\"\n",
+    )
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+    assert_eq!(
+        cfg.resolve_harness_model("side_note").map(|r| r.value),
+        Some("own".to_owned())
+    );
+    assert!(cfg.resolve_harness_model("todo_capture").is_none());
+    assert_eq!(
+        cfg.resolve_harness_model("compaction").map(|r| r.value),
+        Some("fast-model".to_owned())
+    );
+    assert_eq!(
+        cfg.resolve_harness_model("web_search").map(|r| r.value),
+        Some("dense".to_owned())
+    );
+}
+
+/// The slots that resolve through `ModelOverrideConfig` take the group model too.
+#[test]
+fn a_model_group_reaches_the_model_override_slots() {
+    let raw: toml::Value = toml::from_str(
+        "[models]\nweb_search = \"own\"\n\
+         [model_groups.dense_summarization]\nmodel = \"dense\"\n\
+         [model_groups.summarization]\nmodel = \"short\"\n",
+    )
+    .unwrap();
+    let resolved = crate::config::ModelOverrideConfig::resolve(None, None, &raw, None);
+    assert_eq!(resolved.web_search, "dense");
+    assert_eq!(resolved.image_description.as_deref(), Some("dense"));
+    assert_eq!(resolved.session_summary.as_deref(), Some("short"));
+    assert_eq!(
+        resolved.prompt_suggestion,
+        crate::config::PromptSuggestModelPin::Pinned("short".to_owned())
+    );
+}
+
+/// A slot in user groups stops the load with an error that names it.
+#[test]
+fn an_invalid_model_group_fails_the_config_load() {
+    let raw: toml::Value = toml::from_str(
+        "[model_groups.a]\nmembers = [\"recap\"]\n[model_groups.b]\nmembers = [\"recap\"]\n",
+    )
+    .unwrap();
+    let err = Config::new_from_toml_cfg(&raw).unwrap_err();
+    assert!(err.contains("'recap'"), "{err}");
+}
+
 /// A whitespace-only slot value reads as unset, the way every other
 /// model override in this file does.
 #[test]

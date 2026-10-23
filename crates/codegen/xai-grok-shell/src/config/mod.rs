@@ -586,9 +586,26 @@ impl ModelOverrideConfig {
         remote: Option<&crate::util::config::RemoteSettings>,
     ) -> Self {
         let models_table = config.get("models");
-        let parsed_models: crate::agent::config::ModelsConfig = models_table
+        let mut parsed_models: crate::agent::config::ModelsConfig = models_table
             .and_then(|v| v.clone().try_into().ok())
             .unwrap_or_default();
+        // A group model wins over the `[models]` entry of a member slot.
+        let groups: std::collections::BTreeMap<String, xai_grok_models::ModelGroupConfig> = config
+            .get("model_groups")
+            .and_then(|v| v.clone().try_into().ok())
+            .unwrap_or_default();
+        let group_model = |slot| xai_grok_models::group_model_for_slot(&groups, slot);
+        for (slot, field) in [
+            ("web_search", &mut parsed_models.web_search),
+            ("session_summary", &mut parsed_models.session_summary),
+            ("image_description", &mut parsed_models.image_description),
+            ("prompt_suggestion", &mut parsed_models.prompt_suggestion),
+        ] {
+            if let Some(m) = group_model(slot) {
+                *field = Some(m);
+            }
+        }
+        let grouped = |slot| group_model(slot).is_some();
         let mut result = Self {
             web_search: parsed_models
                 .web_search
@@ -599,13 +616,16 @@ impl ModelOverrideConfig {
                 .map(PromptSuggestModelPin::Pinned)
                 .unwrap_or_default(),
         };
-        let has_local_ws = models_table.and_then(|m| m.get("web_search")).is_some();
+        let has_local_ws =
+            models_table.and_then(|m| m.get("web_search")).is_some() || grouped("web_search");
         let has_local_ss = models_table
             .and_then(|m| m.get("session_summary"))
-            .is_some();
+            .is_some()
+            || grouped("session_summary");
         let has_local_id = models_table
             .and_then(|m| m.get("image_description"))
-            .is_some();
+            .is_some()
+            || grouped("image_description");
         if let Some(remote) = remote {
             if !has_local_ws && let Some(ref v) = remote.web_search_model {
                 result.web_search = v.clone();

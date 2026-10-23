@@ -1539,6 +1539,16 @@ pub(crate) async fn write_setting_in_process(
                 .await
                 .map_err(|e| e.to_string())
         }
+        key if crate::settings::model_groups::group_for_setting_key(key).is_some() => {
+            let group = crate::settings::model_groups::group_for_setting_key(key)
+                .expect("guard above matched this key");
+            let SettingValue::String(s) = value else {
+                return Err(kind_mismatch(key, "String", &value));
+            };
+            xai_grok_shell::util::config::set_model_group_model(group.id, s)
+                .await
+                .map_err(|e| e.to_string())
+        }
         other => Err(format!("unknown setting key for persist: `{other}`")),
     }
 }
