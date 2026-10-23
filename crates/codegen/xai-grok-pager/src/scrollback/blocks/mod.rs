@@ -19,6 +19,7 @@ pub(crate) use bg_task::KILLED_SIGNAL;
 pub use bg_task::{BgTaskBlock, BgTaskKind};
 pub use btw::BtwBlock;
 pub use cancel_cause::CancelledBy;
+pub(crate) use context_info::BarGeometry;
 pub use context_info::ContextInfoBlock;
 pub use session_event::{
     CompactionDetail, MemoryCaptureBlock, MemoryCommandKind, SessionEvent, SessionEventBlock,
