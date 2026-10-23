@@ -48,6 +48,8 @@ mod esc_mid_turn_cancels_from_scrollback;
 mod mid_turn_slash_dropdown_esc_dismisses_not_cancel;
 #[path = "pty_e2e/queue_and_interjection_lifecycle.rs"]
 mod queue_and_interjection_lifecycle;
+#[path = "pty_e2e/queue_mode_delivers_follow_ups.rs"]
+mod queue_mode_delivers_follow_ups;
 #[path = "pty_e2e/queue_reorder_local_row_above_server_row.rs"]
 mod queue_reorder_local_row_above_server_row;
 #[path = "pty_e2e/queue_reorder_moves_row_up.rs"]

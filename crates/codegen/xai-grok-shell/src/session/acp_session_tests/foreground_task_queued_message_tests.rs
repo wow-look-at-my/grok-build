@@ -266,6 +266,14 @@ fn foreground_task_call_predicate_reads_the_flag_leniently() {
         "task",
         serde_json::json!({"run_in_background": true})
     ));
+    assert!(call(
+        "spawn_subagent",
+        serde_json::json!({"background": false})
+    ));
+    assert!(!call(
+        "spawn_subagent",
+        serde_json::json!({"background": true})
+    ));
     assert!(!call("task", serde_json::json!({})));
     assert!(!call(
         "bash",
