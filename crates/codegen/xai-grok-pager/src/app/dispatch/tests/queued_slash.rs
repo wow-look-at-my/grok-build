@@ -151,12 +151,12 @@ fn server_rows_carry_the_same_rule() {
 
 // ── the delivery routes ───────────────────────────────────────────────────
 
-/// Handing it to the shell as a plain prompt is what put the literal
-/// `/pr-cleanup fix the branch` in front of the model. The running turn harvests
-/// queued rows into itself as text, and the shell resolves a command only when
-/// the prompt's own turn starts.
+/// A shell command typed mid-turn takes the shell queue as its own prompt row.
+/// The shell runs it as its own turn and never folds it as text
+/// (`harvest_leaves_a_queued_slash_command_to_its_own_turn`). A local row would
+/// also hold back every message typed after it until the turn ended.
 #[test]
-fn a_queued_slash_command_is_not_hoisted_to_the_shell_as_plain_text() {
+fn a_queued_slash_command_takes_the_shell_queue_as_its_own_prompt() {
     let mut app = test_app_with_agent();
     let id = AgentId(0);
     register_shell_command(&mut app, id, "pr-cleanup");
@@ -166,50 +166,24 @@ fn a_queued_slash_command_is_not_hoisted_to_the_shell_as_plain_text() {
         Action::SendPrompt("/pr-cleanup fix the branch".into()),
         &mut app,
     );
-    assert_eq!(
-        model_bound_payloads(&submitted),
-        Vec::<String>::new(),
-        "submitting a command sends nothing to the model: {submitted:?}"
-    );
-    assert_eq!(
-        local_texts(&app, id),
-        vec!["/pr-cleanup fix the branch".to_string()],
-        "the command waits in the local queue for its own turn"
-    );
-
-    // Any later submit (an inbound update does the same) runs the migration that hands leading plain rows to the shell.
-    let later = dispatch(Action::SendPrompt("and one more".into()), &mut app);
-    assert!(
-        model_bound_payloads(&later).is_empty(),
-        "the command row blocks the migration instead of travelling as text: {later:?}"
-    );
-    assert_eq!(
-        local_texts(&app, id),
-        vec![
-            "/pr-cleanup fix the branch".to_string(),
-            "and one more".to_string()
-        ],
-        "both rows stay local"
-    );
-
-    // Once the turn ends the command runs as its own turn's prompt, where the shell resolves it — alone.
-    let agent = app.agents.get_mut(&id).unwrap();
-    agent.session.state = AgentState::Idle;
-    agent.session.current_prompt_id = None;
-    agent.shared_queue.clear();
-    let drained = dispatch(Action::DrainQueue, &mut app);
     assert!(
         matches!(
-            drained.as_slice(),
+            submitted.as_slice(),
             [Effect::SendPrompt { text, .. }] if text == "/pr-cleanup fix the branch"
         ),
-        "the command drains as its own turn, unmerged: {drained:?}"
+        "the command goes to the shell queue as a prompt, never as an interjection: {submitted:?}"
     );
-    assert_eq!(
-        local_texts(&app, id),
-        vec!["and one more".to_string()],
-        "the following plain row keeps its own turn"
+    assert!(local_texts(&app, id).is_empty(), "nothing waits locally");
+
+    let later = dispatch(Action::SendPrompt("and one more".into()), &mut app);
+    assert!(
+        matches!(
+            later.as_slice(),
+            [Effect::SendPrompt { text, .. }] if text == "and one more"
+        ),
+        "the next message is not held behind the command: {later:?}"
     );
+    assert!(local_texts(&app, id).is_empty());
 }
 
 /// Neither the description nor `/plan <description>` may be folded into the
@@ -406,6 +380,12 @@ fn bare_enter_leaves_a_queued_command_to_its_own_turn() {
         Action::SendPrompt("/pr-cleanup fix the branch".into()),
         &mut app,
     );
+    // The echo rebuilt the mirror from the app-level queue, which this fixture never filled. The shell's broadcast carries both rows.
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .shared_queue
+        .insert(0, server_row("srv-1", "an earlier message", 0));
 
     let outcome = app
         .agents
@@ -425,9 +405,12 @@ fn bare_enter_leaves_a_queued_command_to_its_own_turn() {
         );
     }
     assert!(
-        local_texts(&app, id).contains(&"/pr-cleanup fix the branch".to_string()),
+        app.agents[&id]
+            .shared_queue
+            .iter()
+            .any(|row| row.text == "/pr-cleanup fix the branch"),
         "the command is still queued for its own turn: {:?}",
-        local_texts(&app, id)
+        app.agents[&id].shared_queue
     );
 }
 
@@ -590,5 +573,40 @@ fn compact_now_sends_during_a_running_turn_without_taking_the_turn() {
             }
         ),
         "compacting mid-turn must not take the turn's state"
+    );
+}
+
+/// Text typed after a queued pager command is not held behind it. It reaches the shell queue,
+/// so the running turn takes it at its next gap. The command keeps its own local row.
+#[test]
+fn text_typed_after_a_queued_compact_is_not_held_behind_it() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    running_agent_with_a_queued_message(&mut app, id);
+    app.agents.get_mut(&id).unwrap().shared_queue.clear();
+
+    let queued = dispatch(
+        Action::SendPrompt("/compact keep the auth notes".into()),
+        &mut app,
+    );
+    assert_eq!(model_bound_payloads(&queued), Vec::<String>::new());
+    assert_eq!(
+        local_rows(&app, id),
+        vec![(
+            QueueEntryKind::Command,
+            "/compact keep the auth notes".to_string()
+        )],
+        "the command waits locally for its own run"
+    );
+
+    let later = dispatch(Action::SendPrompt("and one more".into()), &mut app);
+    assert!(
+        matches!(later.as_slice(), [Effect::SendPrompt { text, .. }] if text == "and one more"),
+        "the message goes to the shell queue now: {later:?}"
+    );
+    assert_eq!(
+        local_texts(&app, id),
+        vec!["/compact keep the auth notes".to_string()],
+        "only the command stays local"
     );
 }

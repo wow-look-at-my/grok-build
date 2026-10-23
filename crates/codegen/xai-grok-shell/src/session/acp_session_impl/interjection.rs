@@ -99,6 +99,30 @@ impl SessionActor {
         &self,
         include_queued_at_turn_start: bool,
     ) -> bool {
+        // The skill catalog costs a tool listing, so read it only when a slash row waits.
+        let has_slash_row = self.state.lock().await.pending_inputs.iter().any(|item| {
+            item.queue_meta
+                .as_ref()
+                .is_some_and(|meta| Self::row_text_is_command(&meta.text))
+        });
+        let skill_catalog = if has_slash_row {
+            let skills = self.slash_skills_for_resolve().await;
+            let tool_names = self.registered_tool_names().await;
+            let has_workflow_runs = !self.workflow_tracker().await.lock().list().is_empty();
+            Some((
+                skills,
+                self.build_command_availability(&tool_names, has_workflow_runs),
+            ))
+        } else {
+            None
+        };
+        let row_is_skill = |text: &str| {
+            skill_catalog
+                .as_ref()
+                .is_some_and(|(skills, availability)| {
+                    slash_commands::leading_token_is_skill(text, skills, *availability)
+                })
+        };
         let harvested = {
             let mut state = self.state.lock().await;
             let queued_at_turn_start = self.queued_at_turn_start.borrow();
@@ -127,7 +151,7 @@ impl SessionActor {
                 item.prompt_mode == running_mode
                     && (include_queued_at_turn_start
                         || !queued_at_turn_start.contains(&item.prompt_id))
-                    && Self::deliverable_mid_turn(item, &holds)
+                    && Self::deliverable_mid_turn(item, &holds, &row_is_skill)
             });
             if dropped.is_empty() {
                 return false;
@@ -198,7 +222,11 @@ impl SessionActor {
     /// Whether a queued row can be folded into another turn as user text.
     /// Everything excluded here keeps today's behaviour (it runs as its own
     /// turn once the current one ends).
-    fn deliverable_mid_turn(item: &InputItem, holds: &std::collections::HashSet<String>) -> bool {
+    fn deliverable_mid_turn(
+        item: &InputItem,
+        holds: &std::collections::HashSet<String>,
+        row_is_skill: &dyn Fn(&str) -> bool,
+    ) -> bool {
         // Auto-wake, nudges and drains are the system talking to itself; each
         // is written to own a turn.
         if item.input_origin.is_synthetic() || item.send_now {
@@ -227,10 +255,9 @@ impl SessionActor {
         if meta.text.trim().is_empty() {
             return false;
         }
-        // A slash invocation is a command, not a note: `resolve` runs it when
-        // the prompt's OWN turn starts, while this path's drain expands
-        // skills alone.
-        if Self::row_text_is_command(&meta.text) {
+        // A builtin slash command runs only when its OWN turn starts (`resolve`).
+        // The drain expands a skill, so a `/skill` row goes in like text.
+        if Self::row_text_is_command(&meta.text) && !row_is_skill(&meta.text) {
             return false;
         }
         // Text and images are all the interjection pipeline carries.
