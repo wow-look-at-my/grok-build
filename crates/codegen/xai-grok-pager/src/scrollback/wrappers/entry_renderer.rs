@@ -992,9 +992,11 @@ impl Renderable for EntryRenderer<'_> {
             {
                 // The summary call is queued or running: the bullet becomes a spinner until it lands.
                 let frames = crate::glyphs::braille_spinner_frames();
-                let frame = frames[(self.tick / SUMMARY_SPINNER_DIVISOR) as usize % frames.len()];
-                let style = Style::default().fg(self.theme.thinking_summary);
-                buf.set_string_safe(content_area.x, bullet_y, frame, style);
+                let idx = (self.tick / SUMMARY_SPINNER_DIVISOR) as usize % frames.len().max(1);
+                if let Some(frame) = frames.get(idx) {
+                    let style = Style::default().fg(self.theme.thinking_summary);
+                    buf.set_string_safe(content_area.x, bullet_y, frame, style);
+                }
             } else if self.entry.is_pending_user_input {
                 // Pending user input: leave the bullet glyph alone, just freeze its color at the block's bullet color. They would
                 // otherwise render in default gray and lose the cue entirely. The fallback intentionally matches the turn-status
@@ -1196,8 +1198,16 @@ mod tests {
         let frames = crate::glyphs::braille_spinner_frames();
         let first = bullet_at(&entry, 0);
         let next = bullet_at(&entry, SUMMARY_SPINNER_DIVISOR);
-        assert_eq!(first, frames[0], "the bullet becomes the spinner");
-        assert_eq!(next, frames[1], "the spinner advances with the tick");
+        assert_eq!(
+            Some(&first.as_str()),
+            frames.first(),
+            "the bullet becomes the spinner"
+        );
+        assert_eq!(
+            Some(&next.as_str()),
+            frames.get(1),
+            "the spinner advances with the tick"
+        );
 
         assert!(block.set_summary("done".into()));
         entry.block = RenderBlock::Thinking(block);
