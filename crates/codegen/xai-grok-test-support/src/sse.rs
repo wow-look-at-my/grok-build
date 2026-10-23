@@ -301,7 +301,7 @@ pub(crate) fn responses_api_script(text: &str, model: &str) -> Vec<SseEvent> {
         .split_whitespace()
         .map(|word| format!("{word} "))
         .collect();
-    responses_api_script_from_deltas(&deltas, text, model)
+    responses_api_script_from_deltas(&deltas, text, model, ResponsesEnd::Completed)
 }
 
 /// Like [`responses_api_events`] but byte-exact: concatenating the deltas reproduces `text` byte-for-byte (newlines and whitespace runs preserved).
@@ -311,7 +311,34 @@ pub fn responses_api_events_exact(text: &str, model: &str) -> Vec<Event> {
 
 /// Byte-exact Responses API events for a [`crate::ScriptedResponse`].
 pub fn responses_api_script_exact(text: &str, model: &str) -> Vec<SseEvent> {
-    responses_api_script_from_deltas(&responses_api_deltas(text), text, model)
+    responses_api_script_from_deltas(
+        &responses_api_deltas(text),
+        text,
+        model,
+        ResponsesEnd::Completed,
+    )
+}
+
+/// Byte-exact Responses API events for a reply the output-token limit cut off: the stream ends on `response.incomplete`.
+pub fn responses_api_script_exact_length(text: &str, model: &str) -> Vec<SseEvent> {
+    responses_api_script_from_deltas(
+        &responses_api_deltas(text),
+        text,
+        model,
+        ResponsesEnd::Incomplete,
+    )
+}
+
+/// Byte-exact Chat Completions events for a reply the output-token limit cut off: `finish_reason` is `length`.
+pub fn chat_completion_script_exact_length(text: &str, model: &str) -> Vec<SseEvent> {
+    chat_completion_script_from_deltas(&chat_completion_deltas(text), model, "length")
+}
+
+/// The terminal event of a scripted Responses stream.
+#[derive(Clone, Copy)]
+enum ResponsesEnd {
+    Completed,
+    Incomplete,
 }
 
 /// `split_inclusive(' ')` keeps each chunk's trailing space, so concatenating the chunks reconstructs `text` byte-for-byte (newlines included).
@@ -321,7 +348,16 @@ fn responses_api_deltas(text: &str) -> Vec<String> {
 
 // `deltas` and `text` deliberately disagree in echo mode: collapsed deltas, uncollapsed `response.completed` text
 // The shell depends on that mismatch, so do not unify them
-fn responses_api_script_from_deltas(deltas: &[String], text: &str, model: &str) -> Vec<SseEvent> {
+fn responses_api_script_from_deltas(
+    deltas: &[String],
+    text: &str,
+    model: &str,
+    end: ResponsesEnd,
+) -> Vec<SseEvent> {
+    let (end_type, end_status) = match end {
+        ResponsesEnd::Completed => ("response.completed", "completed"),
+        ResponsesEnd::Incomplete => ("response.incomplete", "incomplete"),
+    };
     let mut events = Vec::new();
     let mut seq = 0;
 
@@ -359,14 +395,14 @@ fn responses_api_script_from_deltas(deltas: &[String], text: &str, model: &str) 
 
     events.push(SseEvent::data(
         json!({
-            "type": "response.completed",
+            "type": end_type,
             "sequence_number": seq,
             "response": {
                 "id": "resp_test",
                 "object": "response",
                 "created_at": 1234567890,
                 "model": model,
-                "status": "completed",
+                "status": end_status,
                 "output": [{
                     "type": "message",
                     "id": "msg_test",

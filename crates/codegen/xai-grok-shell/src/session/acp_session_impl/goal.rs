@@ -150,6 +150,10 @@ impl SessionActor {
             .filter(|model| !model.is_empty())
             .unwrap_or_else(|| self.models_manager.current_model_id().0.to_string());
         let session_id = self.session_info.id.to_string();
+        self.send_xai_notification(XaiSessionUpdate::SideModelCall {
+            purpose: "Goal check: the evaluator model reviews this round against the goal".into(),
+        })
+        .await;
         let mut last_error = String::new();
         let mut parse_error: Option<String> = None;
         for _ in 0..2 {
@@ -1845,8 +1849,7 @@ impl SessionActor {
 
     pub(super) async fn inject_goal_continuation_message(&self, directive: String) {
         self.prune_prior_goal_continuation_directives().await;
-        self.chat_state_handle
-            .push_user_message(ConversationItem::goal_summary(directive));
+        self.push_model_input(ConversationItem::goal_summary(directive));
     }
 
     pub(super) async fn maybe_queue_goal_continuation(&self) {

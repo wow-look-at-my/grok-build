@@ -972,6 +972,31 @@ pub(super) fn handle_session_notification_with_origin(
                 .push_block(RenderBlock::session_event(event));
             true
         }
+        XaiSessionUpdate::SideModelCall { purpose } => {
+            agent
+                .session
+                .tracker
+                .end_streaming_output(&mut agent.scrollback);
+            agent
+                .scrollback
+                .push_block(RenderBlock::session_event(SessionEvent::SideModelCall {
+                    purpose,
+                }));
+            true
+        }
+        XaiSessionUpdate::ModelInput { source, text } => {
+            agent
+                .session
+                .tracker
+                .end_streaming_output(&mut agent.scrollback);
+            agent
+                .scrollback
+                .push_block(RenderBlock::session_event(SessionEvent::ModelInput {
+                    source,
+                    text,
+                }));
+            true
+        }
         XaiSessionUpdate::HookRunStarted {
             event_name,
             tool_name,
