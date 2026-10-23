@@ -783,6 +783,21 @@ pub fn current_value_for(
                     .unwrap_or_else(|| id.clone()),
             }))
         }
+        // Model groups read the same way, from `[model_groups.<id>] model`.
+        key if crate::settings::model_groups::group_for_setting_key(key).is_some() => {
+            let group = crate::settings::model_groups::group_for_setting_key(key)?;
+            Some(SettingValue::String(
+                match ui.model_group_models.get(group.id) {
+                    None => String::new(),
+                    Some(id) => pager
+                        .available_models
+                        .iter()
+                        .find(|(_, mid)| mid.0.as_ref() == id.as_str())
+                        .map(|(name, _)| name.clone())
+                        .unwrap_or_else(|| id.clone()),
+                },
+            ))
+        }
 
         _ => None,
     }
@@ -1308,6 +1323,19 @@ mod tests {
                         "UiConfig::default() must pin no harness model slot"
                     );
                 }
+                // A model group lives in `[model_groups]` and reaches the modal through `model_group_models`.
+                (key, SettingKind::DynamicEnum { default, .. })
+                    if crate::settings::model_groups::group_for_setting_key(key).is_some() =>
+                {
+                    assert!(
+                        default.is_empty(),
+                        "`{key}` default must be the empty inherit sentinel"
+                    );
+                    assert!(
+                        ui.model_group_models.is_empty(),
+                        "UiConfig::default() must pin no model group"
+                    );
+                }
                 _ => panic!(
                     "settings::defs::default_settings() contains entry `{}` with no \
                      matching arm in defaults_match_ui_config_default. Add an arm.",
@@ -1579,7 +1607,18 @@ mod tests {
     fn every_harness_model_slot_has_a_settings_row() {
         let reg = SettingsRegistry::defaults();
         for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
-            let key = slot.setting_key();
+            let key = match crate::settings::model_groups::group_holding_slot(slot.id) {
+                Some(group) => {
+                    assert!(
+                        reg.find(slot.setting_key()).is_none(),
+                        "`{}` is in group `{}` and must have no row of its own",
+                        slot.id,
+                        group.id
+                    );
+                    group.setting_key
+                }
+                None => slot.setting_key(),
+            };
             let meta = reg
                 .find(key)
                 .unwrap_or_else(|| panic!("slot `{}` has no settings row at `{key}`", slot.id));
@@ -1610,6 +1649,24 @@ mod tests {
                  session actor is built"
             );
         }
+    }
+
+    /// A group's row reads back `[model_groups.<id>] model`, and the empty
+    /// sentinel when the user set nothing.
+    #[test]
+    fn model_group_row_reads_the_configured_value() {
+        let pager = PagerLocalSnapshot::default();
+        let mut ui = UiConfig::default();
+        assert_eq!(
+            current_value_for("models.group.summarization", &ui, &pager),
+            Some(SettingValue::String(String::new()))
+        );
+        ui.model_group_models
+            .insert("summarization".to_string(), "some-model".to_string());
+        assert_eq!(
+            current_value_for("models.group.summarization", &ui, &pager),
+            Some(SettingValue::String("some-model".to_string()))
+        );
     }
 
     /// A slot's row reads back the model the user set, and reads back the

@@ -936,6 +936,40 @@ fn every_harness_model_slot_round_trips_from_the_settings_write_to_the_resolver(
     }
 }
 
+/// A group write sets `[model_groups.<id>] model`, drops the members'
+/// `[models]` pins, and resolves back for every member. A clear removes the
+/// key and the empty tables.
+#[test]
+fn a_model_group_write_round_trips_to_the_resolver() {
+    let mut root: TomlMap<String, TomlValue> =
+        toml::from_str("[models]\nrecap = \"old\"\ngoal_planner = \"keep\"\n").unwrap();
+    super::super::settings_writes::apply_model_group_model(&mut root, "summarization", "new")
+        .unwrap();
+    let models = root["models"].as_table().unwrap();
+    assert!(!models.contains_key("recap"), "a member pin must go");
+    assert_eq!(models["goal_planner"].as_str(), Some("keep"));
+
+    let reread = TomlValue::Table(root.clone());
+    let cfg = crate::agent::config::Config::new_from_toml_cfg(&reread).unwrap();
+    for slot in ["recap", "turn_summary", "session_summary"] {
+        assert_eq!(
+            cfg.resolve_harness_model(slot).map(|r| r.value),
+            Some("new".to_owned()),
+            "for {slot}"
+        );
+    }
+
+    super::super::settings_writes::apply_model_group_model(&mut root, "summarization", "").unwrap();
+    assert!(
+        !root.contains_key("model_groups"),
+        "a clear leaves no empty table"
+    );
+
+    let err =
+        super::super::settings_writes::apply_model_group_model(&mut root, "nope", "m").unwrap_err();
+    assert!(err.to_string().contains("unknown model group"), "{err}");
+}
+
 /// Clearing a slot removes its key, so the resolver falls back again.
 /// Setting the field to `None` only stops it serializing, which would
 /// leave the model already on disk in place under a "cleared" toast.

@@ -12,6 +12,9 @@ pub struct UiConfig {
     /// The `[models]` harness model slots the user set, keyed by slot id (`xai_grok_models::HARNESS_MODEL_SLOTS`).
     #[serde(skip)]
     pub harness_models: std::collections::BTreeMap<String, String>,
+    /// The `[model_groups.<id>] model` values the user set, keyed by group id.
+    #[serde(skip)]
+    pub model_group_models: std::collections::BTreeMap<String, String>,
     /// YOLO mode. Read by `util::config`, declared here for `serde_ignored`.
     #[serde(default)]
     pub yolo: bool,
@@ -281,6 +284,7 @@ impl Default for UiConfig {
             max_thoughts_width: DEFAULT_MAX_THOUGHTS_WIDTH,
             theme: None,
             harness_models: std::collections::BTreeMap::new(),
+            model_group_models: std::collections::BTreeMap::new(),
             yolo: false,
             ui_theme: None,
             compact_mode: false,
