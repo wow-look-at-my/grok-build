@@ -59,11 +59,19 @@ async fn stop_gate_feedback_is_shown_above_the_reply() {
     let screen = harness.screen_contents();
     let first = row_of(&screen, FIRST);
     let header = row_of(&screen, ROW_HEADER);
-    let reason = row_of(&screen, GATE);
+    // The hook annotation above the row also names the reason, so look for the body below the header.
+    let reason = header.and_then(|h| {
+        screen
+            .lines()
+            .enumerate()
+            .skip(h + 1)
+            .find(|(_, line)| line.contains(GATE))
+            .map(|(i, _)| i)
+    });
     let second = row_of(&screen, SECOND);
     assert!(
         header.is_some() && reason.is_some(),
-        "the gate's message to the model must have a row; screen:\n{screen}"
+        "the gate's message to the model must have a row with its text; screen:\n{screen}"
     );
     assert!(
         first < header && header <= reason && reason < second,
