@@ -13,6 +13,18 @@ impl SessionActor {
         let Some(update) = model_input_update(item) else {
             return;
         };
+        self.send_scrollback_row(update);
+    }
+
+    /// Show a row for a model call the shell makes on its own between steps.
+    pub(super) fn announce_side_model_call(&self, purpose: impl Into<String>) {
+        self.send_scrollback_row(XaiSessionUpdate::SideModelCall {
+            purpose: purpose.into(),
+        });
+    }
+
+    /// Send `update` to the pager and store it in `updates.jsonl`. It needs no await, so a sync caller can use it.
+    fn send_scrollback_row(&self, update: XaiSessionUpdate) {
         let notification = XaiSessionNotification {
             session_id: self.session_info.id.clone(),
             update,
