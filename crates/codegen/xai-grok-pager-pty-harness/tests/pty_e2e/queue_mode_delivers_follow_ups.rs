@@ -491,6 +491,65 @@ async fn queue_mode_folds_skill_typed_during_a_tool() {
     harness.quit().expect("clean quit");
 }
 
+/// Queue mode: messages typed all through a long turn each reach that turn with one Enter.
+/// Every request is stalled, so some messages land while the model is still answering.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn queue_mode_delivers_every_message_typed_across_a_long_turn() {
+    use xai_grok_test_support::{Conversation, MockToolCall, Tool};
+    const DONE: &str = "SOAK_TURN_DONE";
+    let content = ContentController::start().await.expect("start content");
+    let sleep = |n: u32| {
+        MockToolCall::new(
+            Tool::Shell,
+            json!({ "command": "/bin/sleep 4", "description": format!("soak step {n}") }),
+        )
+    };
+    content.server().set_conversations(vec![
+        Conversation::nth(1)
+            .calls([sleep(1), sleep(2), sleep(3)])
+            .stall(Duration::from_secs(2))
+            .reply(DONE),
+    ]);
+
+    let mut harness = spawn_and_submit(&content);
+    let markers: Vec<String> = (1..=5).map(|n| format!("SOAK_MARKER_{n}_XYZ")).collect();
+    harness.update(Duration::from_secs(1));
+    for marker in &markers {
+        type_follow_up(&mut harness, &format!("{marker} note"));
+        harness.update(Duration::from_millis(2700));
+    }
+    harness
+        .wait_for_text(DONE, Duration::from_secs(60))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the turn never ended; screen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness.update(Duration::from_secs(2));
+
+    let bodies = content.request_bodies();
+    for marker in &markers {
+        let first = bodies
+            .iter()
+            .find(|b| b.to_string().contains(marker.as_str()))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{marker} never reached the model\n{}",
+                    dump_non_system_messages(&bodies)
+                )
+            });
+        assert!(
+            !first.to_string().contains(DONE),
+            "{marker} waited for the turn to end\n{}",
+            dump_non_system_messages(&bodies)
+        );
+    }
+    harness.quit().expect("clean quit");
+}
+
 /// Queue mode: a slash command typed mid-turn does not hold back the plain message typed after it.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
