@@ -34,6 +34,126 @@ fn type_follow_up(harness: &mut PtyHarness, text: &str) {
     harness.inject_keys(b"\r").expect("submit follow-up");
 }
 
+/// Script a parent that spawns one subagent, then answers `done`. The child holds until `flag` exists.
+#[cfg(unix)]
+fn script_subagent_turn(
+    content: &ContentController,
+    background: bool,
+    flag: &std::path::Path,
+    done: &str,
+) {
+    use xai_grok_test_support::{Conversation, MockToolCall, Tool};
+    content.server().set_conversations(vec![
+        Conversation::nth(1)
+            .calls([MockToolCall::new(
+                Tool::Task,
+                json!({
+                    "description": "Build the project",
+                    "prompt": "HOLDING_CHILD_PROMPT wait for the flag",
+                    "subagent_type": "general-purpose",
+                    "background": background,
+                }),
+            )])
+            .reply(done)
+            .reply(done)
+            .reply(done),
+        Conversation::nth(2)
+            .calls([MockToolCall::new(
+                Tool::Shell,
+                json!({
+                    "command": format!(
+                        "while [ ! -e {} ]; do /bin/sleep 0.2; done",
+                        flag.display()
+                    ),
+                    "description": "hold until released",
+                }),
+            )])
+            .reply("CHILD_DONE"),
+    ]);
+}
+
+/// Poll for `marker` in a request body, release the child, then assert the marker arrived in time.
+#[cfg(unix)]
+fn assert_reaches_model_before_release(
+    content: &ContentController,
+    harness: &PtyHarness,
+    marker: &str,
+    flag: &std::path::Path,
+) {
+    let reached = poll_for(Duration::from_secs(20), || {
+        content
+            .request_bodies()
+            .iter()
+            .any(|b| b.to_string().contains(marker))
+            .then_some(())
+    });
+    let screen = harness.screen_contents();
+    let _ = std::fs::write(flag, "");
+    assert!(
+        reached.is_some(),
+        "the follow-up sat behind the subagent\nscreen:\n{screen}\n{}",
+        dump_non_system_messages(&content.request_bodies())
+    );
+}
+
+/// Queue mode: a message typed while a foreground subagent runs reaches the model before the subagent ends.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn queue_mode_sends_follow_up_typed_during_a_foreground_subagent() {
+    const MARKER: &str = "QUEUE_FG_TASK_MARKER_XYZ";
+    let content = ContentController::start().await.expect("start content");
+    let flag = content.home().join("fg_hold_flag");
+    script_subagent_turn(&content, false, &flag, "FG_PARENT_DONE");
+
+    let mut harness = spawn_and_submit(&content);
+    harness
+        .wait_for_text("hold until released", Duration::from_secs(60))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the child never started; screen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness.update(Duration::from_millis(500));
+    type_follow_up(&mut harness, &format!("{MARKER} tests are a waste of time"));
+    assert_reaches_model_before_release(&content, &harness, MARKER, &flag);
+    harness.quit().expect("clean quit");
+}
+
+/// Queue mode: a message typed while a background subagent runs after the turn ended starts a turn at once.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn queue_mode_sends_follow_up_typed_while_a_background_subagent_runs() {
+    const MARKER: &str = "QUEUE_BG_TASK_MARKER_XYZ";
+    let content = ContentController::start().await.expect("start content");
+    let flag = content.home().join("bg_hold_flag");
+    script_subagent_turn(&content, true, &flag, "BG_PARENT_DONE");
+
+    let mut harness = spawn_and_submit(&content);
+    harness
+        .wait_for_text("BG_PARENT_DONE", Duration::from_secs(60))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the parent turn never ended; screen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness
+        .wait_for_text("hold until released", Duration::from_secs(60))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the child never started; screen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness.update(Duration::from_millis(500));
+    type_follow_up(&mut harness, &format!("{MARKER} tests are a waste of time"));
+    assert_reaches_model_before_release(&content, &harness, MARKER, &flag);
+    harness.quit().expect("clean quit");
+}
+
 /// Wait until a request body carries `marker`, with no further key press.
 #[cfg(unix)]
 fn assert_reaches_model(
