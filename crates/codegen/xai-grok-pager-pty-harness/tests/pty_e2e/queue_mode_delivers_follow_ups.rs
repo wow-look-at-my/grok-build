@@ -230,7 +230,8 @@ async fn queue_mode_folds_follow_up_typed_during_a_tool() {
         .find(|b| b.to_string().contains(MARKER))
         .expect("a carrier");
     assert!(
-        first.to_string().contains("call_queue_hold"),
+        first.to_string().contains("call_queue_hold")
+            && !first.to_string().contains("QUEUE_TOOL_SETTLED"),
         "the first request that carries the follow-up must be the one after the tool\n{}",
         dump_non_system_messages(&bodies)
     );
@@ -482,8 +483,58 @@ async fn queue_mode_folds_skill_typed_during_a_tool() {
         .find(|b| b.to_string().contains(SKILL_BODY))
         .expect("a carrier");
     assert!(
-        first.to_string().contains("call_queue_skill"),
+        first.to_string().contains("call_queue_skill")
+            && !first.to_string().contains("QUEUE_SKILL_SETTLED"),
         "the skill must be folded into the request after the tool\n{}",
+        dump_non_system_messages(&bodies)
+    );
+    harness.quit().expect("clean quit");
+}
+
+/// Queue mode: a slash command typed mid-turn does not hold back the plain message typed after it.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn queue_mode_slash_command_does_not_hold_back_later_text() {
+    const MARKER: &str = "QUEUE_AFTER_SLASH_MARKER_XYZ";
+    let content = ContentController::start().await.expect("start content");
+    let hold_args = json!({
+        "command": "/bin/sleep 6",
+        "description": "hold turn"
+    })
+    .to_string();
+    let _hold = expect_tool_turn(
+        &content,
+        "call_queue_slash",
+        "run_terminal_command",
+        hold_args,
+    );
+    content.set_response("QUEUE_SLASH_SETTLED");
+
+    let mut harness = spawn_and_submit(&content);
+    harness
+        .wait_for_text("hold turn", Duration::from_secs(45))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the hold tool never started; screen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness.update(Duration::from_millis(500));
+    type_follow_up(&mut harness, "/frobnicate later");
+    harness.update(Duration::from_millis(500));
+    type_follow_up(&mut harness, &format!("{MARKER} meanwhile"));
+
+    assert_reaches_model(&content, &harness, MARKER, Duration::from_secs(30));
+    let bodies = content.request_bodies();
+    let first = bodies
+        .iter()
+        .find(|b| b.to_string().contains(MARKER))
+        .expect("a carrier");
+    assert!(
+        first.to_string().contains("call_queue_slash")
+            && !first.to_string().contains("QUEUE_SLASH_SETTLED"),
+        "the message must reach the turn it was typed in, not wait for it to end\n{}",
         dump_non_system_messages(&bodies)
     );
     harness.quit().expect("clean quit");

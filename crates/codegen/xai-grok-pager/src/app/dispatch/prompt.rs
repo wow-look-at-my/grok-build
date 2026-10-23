@@ -1018,43 +1018,16 @@ pub(super) fn dispatch_send_prompt_submission(
                         [acp::ContentBlock::Text(block)]
                             if block.text == display_text && block.meta.is_none()
                     );
-                if raw_skill
-                    && immediate_server_send_eligible(agent)
-                    && let Some(session_id) = agent.session.session_id.clone()
-                {
-                    agent.release_hook_block_hold();
-                    agent.clear_follow_ups();
-                    agent.credit_limit_stashed_prompt = None;
+                if raw_skill && immediate_server_send_eligible(agent) {
                     if consume_input {
                         agent.prompt.set_text("");
                         agent.note_draft_consumed();
                     }
-                    let agent_id = agent.session.id;
-                    let cwd = agent.session.cwd.clone();
-                    let prompt_id = uuid::Uuid::new_v4().to_string();
-                    agent.note_self_originated_prompt(&prompt_id);
-                    let sid_str = session_id.0.to_string();
-                    push_server_queue_echo(
+                    effects.extend(super::queue::send_slash_row_via_server_queue(
                         app,
-                        agent_id,
-                        &sid_str,
-                        &prompt_id,
-                        &display_text,
-                        "prompt",
-                    );
-                    crate::unified_log::info(
-                        "prompt.send_server_authoritative",
-                        Some(&sid_str),
-                        Some(serde_json::json!({ "kind": "skill", "len": display_text.len() })),
-                    );
-                    effects.push(super::queue::server_queue_send_effect(
-                        agent_id,
-                        session_id,
+                        id,
                         display_text,
                         submitted_images,
-                        &cwd,
-                        prompt_id,
-                        Vec::new(),
                     ));
                     return effects;
                 }
@@ -1095,6 +1068,20 @@ pub(super) fn dispatch_send_prompt_submission(
                 }
             }
             CommandResult::PassThrough(pass_text) => {
+                // The shell runs a passed-through command as its own turn. Held locally, it would also hold every row typed after it.
+                if immediate_server_send_eligible(agent) {
+                    if consume_input {
+                        agent.prompt.set_text("");
+                        agent.note_draft_consumed();
+                    }
+                    effects.extend(super::queue::send_slash_row_via_server_queue(
+                        app,
+                        id,
+                        pass_text,
+                        submitted_images,
+                    ));
+                    return effects;
+                }
                 // A recognized token later in the passthrough text still styles the echo.
                 let skill_token_ranges = agent
                     .prompt
