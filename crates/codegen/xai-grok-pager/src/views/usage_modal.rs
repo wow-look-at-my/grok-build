@@ -1172,10 +1172,9 @@ mod tests {
         let theme = Theme::current();
         render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
         let text = screen_text(&buf, area);
-        let row_with = |needle: &str| text.lines().position(|l| l.contains(needle));
-        assert_eq!(
-            row_with("Context"),
-            row_with("System prompt"),
+        assert!(
+            text.lines()
+                .any(|l| l.contains("395k / 500k") && l.contains("Overhead")),
             "totals sit in the right column:\n{text}"
         );
         assert!(
