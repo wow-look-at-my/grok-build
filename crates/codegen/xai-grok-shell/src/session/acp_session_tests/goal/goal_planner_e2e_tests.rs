@@ -1149,7 +1149,7 @@ async fn planner_fork_inherits_parent_model() {
                 transient_retries_prompt_total: std::cell::Cell::new(0),
                 transient_episode_start: std::cell::Cell::new(None),
                 status_wake: Default::default(),
-                goal_role_models: crate::session::GoalRoleModelConfig {
+                goal_role_models: std::cell::RefCell::new(crate::session::GoalRoleModelConfig {
                     planner: crate::agent::config::GoalRoleModelChoice::Explicit(
                         crate::util::config::GoalRoleModel {
                             model: "some-other-planner-model".to_string(),
@@ -1157,7 +1157,7 @@ async fn planner_fork_inherits_parent_model() {
                         },
                     ),
                     ..Default::default()
-                },
+                }),
                 ..StdArc::try_unwrap(actor).ok().expect("single-owner actor")
             });
             create_test_goal(&actor);

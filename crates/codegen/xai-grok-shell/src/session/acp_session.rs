@@ -1006,9 +1006,9 @@ pub(crate) struct SessionActor {
     pub(crate) goal_verifier_skeptic_count: u32,
     /// Resolved per-role `/goal` model selection (planner / strategist single pairs and the ordered skeptic pool).
     /// The kill-switch is already applied.
-    /// Cached at actor construction from remote settings; `Default` (all `InheritCurrent`, empty pool) reproduces today's behavior.
-    pub(crate) goal_role_models: GoalRoleModelConfig,
-    /// Every harness model slot, resolved when this actor was built.
+    /// Resolved at actor construction and again on a `[models]` reload. Read it through `goal_role_models()`; `Default` (all `InheritCurrent`, empty pool) inherits the session model.
+    pub(crate) goal_role_models: std::cell::RefCell<GoalRoleModelConfig>,
+    /// Every harness model slot, resolved when this actor was built and again on a `[models]` reload.
     pub(crate) harness_models: crate::session::harness_models::ResolvedHarnessModels,
     /// Kill-switch (`GROK_GOAL_USE_CURRENT_MODEL_ONLY` / `[features] goal_use_current_model_only`) resolved at actor build.
     /// When `true`, every `/goal` role inherits the current model.

@@ -795,12 +795,43 @@ fn handle_reload_models(agent: &MvpAgent) -> ExtResult {
 
     agent.models_manager.apply_config(merged_config);
     agent.sync_process_static_api_key(None);
+    reload_harness_models_in_resident_sessions(agent);
 
     let count = agent.models_manager.models().len();
     tracing::info!(count, "model list reloaded from config.toml");
     ExtMethodResult::success(serde_json::json!({ "models": count }))
         .to_ext_response()
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
+}
+
+/// Tell every resident session to resolve its harness model slots again.
+/// Without this, a running session keeps the compaction, summary and
+/// classifier models it resolved at spawn.
+fn reload_harness_models_in_resident_sessions(agent: &MvpAgent) {
+    let session_ids = agent.resident_ids();
+    let mut updated = 0u32;
+    for session_id in &session_ids {
+        let Some(handle) = agent.resident_handle(session_id) else {
+            continue;
+        };
+        if handle
+            .cmd_tx
+            .send(SessionCommand::ReloadHarnessModels)
+            .is_ok()
+        {
+            updated += 1;
+        } else {
+            tracing::error!(
+                session_id = %session_id,
+                "harness model reload not delivered: the session's command channel is closed"
+            );
+        }
+    }
+    tracing::info!(
+        updated,
+        total = session_ids.len(),
+        "harness model reload sent to active sessions"
+    );
 }
 
 // internal/reload_models_cache

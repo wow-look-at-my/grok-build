@@ -36,7 +36,7 @@ pub enum ConfigUpdate {
     /// Updated `[compat]` vendor-compatibility config.
     /// It is applied on the next agent (re)build, which re-resolves `compat_resolved`.
     Compat(Box<xai_grok_tools::types::compat::CompatConfigToml>),
-    /// The `[model.*]` entries in config.toml changed.
+    /// The `[model.*]`, `[models]` or `[model_groups]` tables in config.toml changed.
     /// The agent should re-resolve its model list (BYOK models added/removed, default or surprise changed).
     ModelsChanged,
     /// `~/.grok/models_cache.json` was rewritten on disk (possibly by another grok process sharing the home dir). The agent should consult the cache via `ModelsManager::reload_from_disk_cache`.
@@ -333,13 +333,7 @@ impl ConfigReloader {
                 .send(ConfigUpdate::Compat(Box::new(new_compat)));
         }
 
-        // Models: compare [model] (BYOK entries) and [models] (default, surprise) tables
-        // Use toml::Value comparison (covers all fields including nested model entries).
-        let old_model_table = self.last_global_config.get("model");
-        let new_model_table = new_global.get("model");
-        let old_models_table = self.last_global_config.get("models");
-        let new_models_table = new_global.get("models");
-        if old_model_table != new_model_table || old_models_table != new_models_table {
+        if model_tables_changed(&self.last_global_config, &new_global) {
             info!("model config change detected");
             let _ = self.config_update_tx.send(ConfigUpdate::ModelsChanged);
         }
@@ -370,6 +364,14 @@ impl ConfigReloader {
         }
         Ok(())
     }
+}
+
+/// True when a table that model resolution reads changed: `[model.*]`,
+/// `[models]` or `[model_groups]`.
+fn model_tables_changed(old: &toml::Value, new: &toml::Value) -> bool {
+    ["model", "models", "model_groups"]
+        .iter()
+        .any(|key| old.get(key) != new.get(key))
 }
 
 /// Every config value `Config::resolve_output_rate_floor` reads. A change to
@@ -892,6 +894,23 @@ yolo = true
             output_rate_floor_inputs(&base),
             output_rate_floor_inputs(&unrelated)
         );
+    }
+
+    /// A slot row in the settings modal writes `[models]` or
+    /// `[model_groups]`. Either write must reach running sessions.
+    #[test]
+    fn model_tables_changed_sees_every_model_table_and_nothing_else() {
+        let base: toml::Value = toml::from_str("[ui]\ntheme = \"dark\"").unwrap();
+        for changed in [
+            "[ui]\ntheme = \"dark\"\n[models]\ncompaction = \"m\"",
+            "[ui]\ntheme = \"dark\"\n[model_groups.summaries]\nmodel = \"m\"",
+            "[ui]\ntheme = \"dark\"\n[model.local]\nmodel = \"m\"",
+        ] {
+            let other: toml::Value = toml::from_str(changed).unwrap();
+            assert!(model_tables_changed(&base, &other), "{changed}");
+        }
+        let unrelated: toml::Value = toml::from_str("[ui]\ntheme = \"light\"").unwrap();
+        assert!(!model_tables_changed(&base, &unrelated));
     }
 
     #[test]

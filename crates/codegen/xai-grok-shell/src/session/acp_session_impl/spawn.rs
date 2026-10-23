@@ -1741,44 +1741,8 @@ pub(crate) async fn spawn_session_actor(
         .value;
     let goal_reverify_after = effective_config.resolve_goal_reverify_after().value;
     let goal_use_current_model_only = effective_config.resolve_goal_use_current_model_only().value;
-    let goal_role_models = {
-        let planner = effective_config
-            .resolve_goal_planner_model(goal_use_current_model_only)
-            .value;
-        let strategist = effective_config
-            .resolve_goal_strategist_model(goal_use_current_model_only)
-            .value;
-        let skeptic_pool = effective_config
-            .resolve_goal_skeptic_models(goal_use_current_model_only)
-            .value
-            .into_iter()
-            .filter_map(|c| match c {
-                crate::agent::config::GoalRoleModelChoice::Explicit(p) => Some(p),
-                // A `[models] goal_skeptic` slot names a model only.
-                crate::agent::config::GoalRoleModelChoice::ModelOnly(model) => {
-                    Some(crate::util::config::GoalRoleModel {
-                        model,
-                        agent_type: String::new(),
-                    })
-                }
-                crate::agent::config::GoalRoleModelChoice::InheritCurrent => None,
-            })
-            .collect();
-        let summarizer = if goal_use_current_model_only {
-            crate::agent::config::GoalRoleModelChoice::InheritCurrent
-        } else {
-            match effective_config.resolve_harness_model("goal_summarizer") {
-                Some(m) => crate::agent::config::GoalRoleModelChoice::ModelOnly(m.value),
-                None => crate::agent::config::GoalRoleModelChoice::InheritCurrent,
-            }
-        };
-        GoalRoleModelConfig {
-            planner,
-            strategist,
-            skeptic_pool,
-            summarizer,
-        }
-    };
+    let goal_role_models =
+        GoalRoleModelConfig::resolve(&effective_config, goal_use_current_model_only);
     let doom_loop_recovery = effective_config.resolve_doom_loop_recovery();
     let output_rate_floor = effective_config.resolve_output_rate_floor(&sampling_config.model);
     let resolved_tool_overrides: std::sync::Arc<
@@ -2035,7 +1999,7 @@ pub(crate) async fn spawn_session_actor(
             .as_ref()
             .and_then(|r| r.length_salvage_budget),
         goal_verifier_skeptic_count: effective_config.resolve_goal_verifier_count().value,
-        goal_role_models,
+        goal_role_models: std::cell::RefCell::new(goal_role_models),
         harness_models: crate::session::harness_models::ResolvedHarnessModels::resolve(
             &effective_config,
         ),

@@ -1644,9 +1644,9 @@ mod tests {
                 "`{key}` must be a model picker whose empty default means inherit"
             );
             assert!(
-                meta.restart_required,
-                "`{key}` must be restart_required — a slot is resolved when a \
-                 session actor is built"
+                !meta.restart_required,
+                "`{key}` must apply live — a `[models]` change re-resolves the \
+                 slot in every running session"
             );
         }
     }

@@ -1,44 +1,66 @@
-//! Every harness model slot, resolved once when the session actor is built.
+//! Every harness model slot, resolved when the session actor is built and
+//! again on every `[models]` or `[model_groups]` change.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
-/// The model each slot resolved to. A slot that inherits the session model
-/// is absent from the map.
+/// The model each slot resolved to. A slot that inherits the session model is
+/// absent from the map.
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedHarnessModels {
-    by_slot: HashMap<&'static str, String>,
+    by_slot: RefCell<HashMap<&'static str, String>>,
 }
 
 impl ResolvedHarnessModels {
     /// Resolve every slot in [`xai_grok_models::HARNESS_MODEL_SLOTS`].
     pub(crate) fn resolve(config: &crate::agent::config::Config) -> Self {
-        let mut by_slot = HashMap::new();
-        for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
-            if let Some(resolved) = config.resolve_harness_model(slot.id) {
-                tracing::debug!(
-                    slot = slot.id,
-                    model = %resolved.value,
-                    source = %resolved.source,
-                    "harness model slot resolved"
-                );
-                by_slot.insert(slot.id, resolved.value);
-            }
+        Self {
+            by_slot: RefCell::new(resolve_map(config)),
         }
-        Self { by_slot }
+    }
+
+    /// Resolve every slot again from `config` and replace the map.
+    pub(crate) fn reload(&self, config: &crate::agent::config::Config) {
+        let next = resolve_map(config);
+        let mut current = self.by_slot.borrow_mut();
+        if *current != next {
+            tracing::info!(
+                before = ?*current,
+                after = ?next,
+                "harness model slots reloaded"
+            );
+        }
+        *current = next;
     }
 
     /// The model for one slot, or `None` when it inherits the session model.
-    pub fn get(&self, slot_id: &str) -> Option<&str> {
-        self.by_slot.get(slot_id).map(String::as_str)
+    pub fn get(&self, slot_id: &str) -> Option<String> {
+        self.by_slot.borrow().get(slot_id).cloned()
     }
 
     /// Build a map directly. Tests use this to pin one slot.
     #[cfg(test)]
     pub(crate) fn from_pairs(pairs: &[(&'static str, &str)]) -> Self {
         Self {
-            by_slot: pairs.iter().map(|(k, v)| (*k, (*v).to_string())).collect(),
+            by_slot: RefCell::new(pairs.iter().map(|(k, v)| (*k, (*v).to_string())).collect()),
         }
     }
+}
+
+fn resolve_map(config: &crate::agent::config::Config) -> HashMap<&'static str, String> {
+    let mut by_slot = HashMap::new();
+    for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
+        if let Some(resolved) = config.resolve_harness_model(slot.id) {
+            tracing::debug!(
+                slot = slot.id,
+                model = %resolved.value,
+                source = %resolved.source,
+                "harness model slot resolved"
+            );
+            by_slot.insert(slot.id, resolved.value);
+        }
+    }
+    by_slot
 }
 
 #[cfg(test)]
@@ -54,8 +76,27 @@ mod tests {
     #[test]
     fn a_pinned_slot_reads_back() {
         let models = ResolvedHarnessModels::from_pairs(&[("compaction", "some-model")]);
-        assert_eq!(models.get("compaction"), Some("some-model"));
+        assert_eq!(models.get("compaction").as_deref(), Some("some-model"));
         assert_eq!(models.get("recap"), None);
+    }
+
+    /// A running session keeps this map for its whole life. A reload must
+    /// change what the next read returns, or a settings change waits for a
+    /// restart.
+    #[test]
+    fn reload_replaces_a_pin_on_the_same_map() {
+        let models = ResolvedHarnessModels::from_pairs(&[("compaction", "old-model")]);
+        let mut cfg = crate::agent::config::Config::default();
+        cfg.models.compaction = Some("new-model".to_owned());
+        models.reload(&cfg);
+        assert_eq!(models.get("compaction").as_deref(), Some("new-model"));
+
+        models.reload(&crate::agent::config::Config::default());
+        assert_eq!(
+            models.get("compaction").as_deref(),
+            xai_grok_models::slot_by_id("compaction").and_then(|s| s.compiled_default()),
+            "a removed pin falls back to the slot's default"
+        );
     }
 
     /// Every slot whose fallback is a compiled default must resolve on a
@@ -67,7 +108,7 @@ mod tests {
         for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
             match slot.compiled_default() {
                 Some(expected) => assert_eq!(
-                    resolved.get(slot.id),
+                    resolved.get(slot.id).as_deref(),
                     Some(expected),
                     "{} must resolve to its compiled default",
                     slot.id
