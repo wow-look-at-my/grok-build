@@ -1009,6 +1009,55 @@ pub(super) fn dispatch_send_prompt_submission(
                 display_as_skill,
                 scheduled_task_preview,
             } => {
+                // A raw `/skill args` row is plain text to the shell, which expands it mid-turn.
+                // While the shell is busy it takes the same queue as a plain prompt, so it is delivered at the next gap.
+                let raw_skill = display_as_skill
+                    && scheduled_task_preview.is_none()
+                    && matches!(
+                        prompt_blocks.as_slice(),
+                        [acp::ContentBlock::Text(block)]
+                            if block.text == display_text && block.meta.is_none()
+                    );
+                if raw_skill
+                    && immediate_server_send_eligible(agent)
+                    && let Some(session_id) = agent.session.session_id.clone()
+                {
+                    agent.release_hook_block_hold();
+                    agent.clear_follow_ups();
+                    agent.credit_limit_stashed_prompt = None;
+                    if consume_input {
+                        agent.prompt.set_text("");
+                        agent.note_draft_consumed();
+                    }
+                    let agent_id = agent.session.id;
+                    let cwd = agent.session.cwd.clone();
+                    let prompt_id = uuid::Uuid::new_v4().to_string();
+                    agent.note_self_originated_prompt(&prompt_id);
+                    let sid_str = session_id.0.to_string();
+                    push_server_queue_echo(
+                        app,
+                        agent_id,
+                        &sid_str,
+                        &prompt_id,
+                        &display_text,
+                        "prompt",
+                    );
+                    crate::unified_log::info(
+                        "prompt.send_server_authoritative",
+                        Some(&sid_str),
+                        Some(serde_json::json!({ "kind": "skill", "len": display_text.len() })),
+                    );
+                    effects.push(super::queue::server_queue_send_effect(
+                        agent_id,
+                        session_id,
+                        display_text,
+                        submitted_images,
+                        &cwd,
+                        prompt_id,
+                        Vec::new(),
+                    ));
+                    return effects;
+                }
                 // Enqueue with display text for scrollback but wire_blocks for the actual prompt sent to the model
                 // Leading skill invocation: display_as_skill owns styling (no ranges)
                 let id = agent.session.next_queue_id;

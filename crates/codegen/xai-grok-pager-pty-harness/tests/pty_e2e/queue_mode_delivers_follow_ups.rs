@@ -412,3 +412,79 @@ async fn queue_mode_sends_follow_up_typed_during_a_task_output_wait() {
     assert_reaches_model(&content, &harness, MARKER, Duration::from_secs(20));
     harness.quit().expect("clean quit");
 }
+
+/// Queue mode: a skill invocation typed while a tool runs goes into the request after that tool, expanded.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn queue_mode_folds_skill_typed_during_a_tool() {
+    const SKILL_BODY: &str = "QUEUE_SKILL_BODY_XYZ";
+    let content = ContentController::start().await.expect("start content");
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    git2::Repository::init(workspace.path()).expect("git init workspace");
+    let skill_dir = workspace
+        .path()
+        .join(".grok")
+        .join("skills")
+        .join("queue-skill");
+    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        format!(
+            "---\nname: queue-skill\ndescription: Queue skill.\n---\n\n{SKILL_BODY} do the thing.\n"
+        ),
+    )
+    .expect("write SKILL.md");
+    let hold_args = json!({
+        "command": "/bin/sleep 6",
+        "description": "hold turn"
+    })
+    .to_string();
+    let _hold = expect_tool_turn(
+        &content,
+        "call_queue_skill",
+        "run_terminal_command",
+        hold_args,
+    );
+    content.set_response("QUEUE_SKILL_SETTLED");
+
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_in_dir(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        Some(workspace.path()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text("hold turn", Duration::from_secs(45))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the hold tool never started; screen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness.update(Duration::from_millis(500));
+    type_follow_up(&mut harness, "/queue-skill go");
+
+    assert_reaches_model(&content, &harness, SKILL_BODY, Duration::from_secs(30));
+    let bodies = content.request_bodies();
+    let first = bodies
+        .iter()
+        .find(|b| b.to_string().contains(SKILL_BODY))
+        .expect("a carrier");
+    assert!(
+        first.to_string().contains("call_queue_skill"),
+        "the skill must be folded into the request after the tool\n{}",
+        dump_non_system_messages(&bodies)
+    );
+    harness.quit().expect("clean quit");
+}
