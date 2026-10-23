@@ -436,6 +436,7 @@ impl SessionActor {
             crate::session::goal_orchestrator::build_goal_updated(o, tokens_used, finished_marginal)
         };
         self.goal_notify_sender().send_update(update);
+        self.announce_side_model_call("Goal verification: verifier subagents check the work");
     }
 
     /// Names the goal-harness role that runs inside the turn, and pushes the
@@ -448,6 +449,7 @@ impl SessionActor {
         role: &str,
     ) -> TrackerDropGuard<'_, impl FnOnce(&mut crate::session::goal_tracker::GoalTracker)> {
         self.publish_goal_harness_role(Some(role)).await;
+        self.announce_side_model_call(format!("Goal {role}: the {role} subagent runs"));
         TrackerDropGuard::new(&self.goal_tracker, |t| {
             if let Some(o) = t.snapshot_mut() {
                 o.current_subagent_role = None;
@@ -492,6 +494,7 @@ impl SessionActor {
             crate::session::goal_orchestrator::build_goal_updated(o, tokens_used, finished_marginal)
         };
         self.goal_notify_sender().send_update(update);
+        self.announce_side_model_call("Goal planning: the planner subagent writes the plan");
     }
 
     async fn auto_pause_for_classifier_cap(

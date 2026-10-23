@@ -193,6 +193,74 @@ async fn wake_prompt_is_shown() {
     quit(&mut harness);
 }
 
+/// A monitor prints an event while the session is idle. The drain prompt that delivers it gets a row above the reply.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn notification_drain_prompt_is_shown() {
+    let content = ContentController::start().await.expect("start content");
+    let flag = content.home().join("drain_row_flag");
+    let watch = json!({
+        "command": format!(
+            "while [ ! -e {} ]; do /bin/sleep 0.2; done; echo MONITOR_EVENT_MARK; /bin/sleep 30",
+            flag.display()
+        ),
+        "description": "flag watch"
+    })
+    .to_string();
+    let _monitor = expect_tool_turn(&content, "call_monitor", "monitor", watch);
+    let _settled = content.expect_agent_turn("turn settles", "DRAIN_SETTLED_MARK");
+    let _drain = content.expect_agent_turn("drain reply", "DRAIN_REPLY_MARK");
+    content.set_response("DRAIN_FALLBACK");
+
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_in_dir(
+        &binary,
+        80,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text("DRAIN_SETTLED_MARK", Duration::from_secs(60))
+        .expect("first turn settled");
+
+    std::fs::write(&flag, b"done").expect("release flag");
+    harness
+        .wait_for_text("DRAIN_REPLY_MARK", Duration::from_secs(60))
+        .unwrap_or_else(|_| panic!("no drain reply; screen:\n{}", harness.screen_contents()));
+    harness.update(Duration::from_millis(500));
+
+    let screen = harness.screen_contents();
+    let row = row_of(&screen, "Sent to the model · notifications");
+    let event = row.and_then(|r| {
+        screen
+            .lines()
+            .enumerate()
+            .skip(r + 1)
+            .find(|(_, line)| line.contains("MONITOR_EVENT_MARK"))
+            .map(|(i, _)| i)
+    });
+    let reply = row_of(&screen, "DRAIN_REPLY_MARK");
+    assert!(
+        row.is_some() && event.is_some(),
+        "the drain prompt must have a row that carries the monitor event; screen:\n{screen}"
+    );
+    assert!(
+        event < reply,
+        "the drain row must sit above the reply; screen:\n{screen}"
+    );
+    quit(&mut harness);
+}
+
 /// An agent profile whose completion tool the mock never calls, so the shell sends one recovery prompt.
 fn write_recovery_profile(dir: &Path) -> PathBuf {
     let path = dir.join("recovery-agent.md");
