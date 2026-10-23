@@ -313,3 +313,102 @@ async fn queue_mode_delivers_two_follow_ups_typed_during_a_tool() {
     assert_reaches_model(&content, &harness, SECOND, Duration::from_secs(30));
     harness.quit().expect("clean quit");
 }
+
+/// Returns once the wait turn has been submitted.
+#[cfg(unix)]
+fn start_wait_on_background_command(
+    content: &ContentController,
+    harness: &mut PtyHarness,
+    wait_tool: &str,
+    wait_args: impl Fn(&str) -> serde_json::Value,
+) {
+    let bg_args = json!({
+        "command": "/bin/sleep 40",
+        "description": "long task",
+        "background": true
+    })
+    .to_string();
+    let _bg = expect_tool_turn(content, "call_queue_bg", "run_terminal_command", bg_args);
+    content.set_response("QUEUE_TURN1_SETTLED");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text("QUEUE_TURN1_SETTLED", Duration::from_secs(45))
+        .expect("turn 1 settled");
+    let task_id = poll_for(Duration::from_secs(10), || {
+        content
+            .request_bodies()
+            .iter()
+            .find_map(|b| extract_task_id(&b.to_string()))
+    })
+    .expect("task id in a request body");
+    let _wait = expect_tool_turn(
+        content,
+        "call_queue_wait",
+        wait_tool,
+        wait_args(&task_id).to_string(),
+    );
+    content.set_response("QUEUE_WAIT_SETTLED");
+    harness
+        .inject_keys(b"now wait\r")
+        .expect("submit wait prompt");
+    harness.update(Duration::from_secs(4));
+}
+
+/// Spawn the pager on `content` without submitting a prompt.
+#[cfg(unix)]
+fn spawn_idle(content: &ContentController) -> PtyHarness {
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_in_dir(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        content,
+        &["--yolo", "--trust"],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+}
+
+/// Queue mode: a message typed while the turn blocks on `wait_commands_or_subagents` does not wait for the task.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn queue_mode_sends_follow_up_typed_during_a_task_wait() {
+    const MARKER: &str = "QUEUE_WAIT_MARKER_XYZ";
+    let content = ContentController::start().await.expect("start content");
+    let mut harness = spawn_idle(&content);
+    start_wait_on_background_command(
+        &content,
+        &mut harness,
+        "wait_commands_or_subagents",
+        |id| json!({ "task_ids": [id] }),
+    );
+    type_follow_up(&mut harness, &format!("{MARKER} during wait"));
+    assert_reaches_model(&content, &harness, MARKER, Duration::from_secs(20));
+    harness.quit().expect("clean quit");
+}
+
+/// Queue mode: a message typed while the turn blocks on a task-output read with a timeout does not wait for the task.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn queue_mode_sends_follow_up_typed_during_a_task_output_wait() {
+    const MARKER: &str = "QUEUE_OUTPUT_WAIT_MARKER_XYZ";
+    let content = ContentController::start().await.expect("start content");
+    let mut harness = spawn_idle(&content);
+    start_wait_on_background_command(
+        &content,
+        &mut harness,
+        "get_command_or_subagent_output",
+        |id| json!({ "task_ids": [id], "timeout_ms": 60000 }),
+    );
+    type_follow_up(&mut harness, &format!("{MARKER} during wait"));
+    assert_reaches_model(&content, &harness, MARKER, Duration::from_secs(20));
+    harness.quit().expect("clean quit");
+}
