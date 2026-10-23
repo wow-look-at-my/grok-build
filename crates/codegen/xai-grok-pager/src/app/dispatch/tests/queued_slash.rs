@@ -380,6 +380,12 @@ fn bare_enter_leaves_a_queued_command_to_its_own_turn() {
         Action::SendPrompt("/pr-cleanup fix the branch".into()),
         &mut app,
     );
+    // The echo rebuilt the mirror from the app-level queue, which this fixture never filled. The shell's broadcast carries both rows.
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .shared_queue
+        .insert(0, server_row("srv-1", "an earlier message", 0));
 
     let outcome = app
         .agents
