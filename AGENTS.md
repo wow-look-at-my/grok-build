@@ -53,7 +53,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## A blocking wait is a gap, in Queue mode too
 
 - The turn loop harvests queued follow-ups before each model request (`harvest_queued_prompts_into_interjections`). A turn parked in an interruptible wait tool (`get_task_output` with a wait, `wait_tasks`, `Await`) makes no request until the task ends. As a result, Queue mode held the row behind a task that can run for minutes.
-- The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. A foreground subagent call is such a wait (`is_foreground_task_call`). The default agent renames its `run_in_background` flag to `background`, so the check reads both names. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. An active goal and a pending send-now are exempt.
+- The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. A foreground subagent call is such a wait (`is_foreground_task_call`). The default agent renames its `run_in_background` flag to `background`. The check reads both names. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. An active goal and a pending send-now are exempt.
 
 ## `/context` Messages breakdown
 
