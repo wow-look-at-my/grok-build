@@ -23,6 +23,8 @@ mod pre_tool_text_stays_visible;
 mod rename_title_shows_in_prompt_border;
 #[path = "pty_e2e/reparked_wait_stays_markerless.rs"]
 mod reparked_wait_stays_markerless;
+#[path = "pty_e2e/shell_inputs_are_shown.rs"]
+mod shell_inputs_are_shown;
 #[path = "pty_e2e/spinner_reappears_after_wait_resumes.rs"]
 mod spinner_reappears_after_wait_resumes;
 #[path = "pty_e2e/stop_gate_feedback_is_shown.rs"]
