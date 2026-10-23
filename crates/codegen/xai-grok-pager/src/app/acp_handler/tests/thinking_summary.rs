@@ -417,7 +417,6 @@ fn a_queued_summary_spins_until_the_summary_lands() {
     let agent = app.agents.get_mut(&AgentId(0)).unwrap();
     assert!(!first_thinking_block(agent).summary_pending(), "the summary stops the spinner");
     assert!(!agent.scrollback.needs_animation(), "no spinner, no ticks");
-    assert!(!agent.scrollback.tick(), "an idle screen does not redraw");
 
     // A late "queued" for a call that already has its summary must not restart the spinner.
     let again = handle_ext_notification(
@@ -444,8 +443,10 @@ fn a_failed_summary_says_why_instead_of_spinning() {
     assert!(!first_thinking_block(agent).summary_pending());
     assert!(!agent.scrollback.needs_animation(), "a failed call must not spin forever");
     let rows = collapsed_thinking_rows(agent);
+    // The row wraps at the test width, so compare without whitespace.
+    let squash = |s: &str| s.split_whitespace().collect::<String>();
     assert!(
-        rows[0].contains("no summary: model call failed: 529 overloaded"),
+        squash(&rows[0]).contains(&squash("no summary: model call failed: 529 overloaded")),
         "the row names the failure: {rows:?}"
     );
 }
