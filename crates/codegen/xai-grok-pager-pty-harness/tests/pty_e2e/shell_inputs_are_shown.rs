@@ -133,6 +133,66 @@ async fn plan_mode_reminder_is_shown() {
     quit(&mut harness);
 }
 
+/// A background command finishes while the session is idle. The wake prompt that reports it gets a row above the wake reply.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn wake_prompt_is_shown() {
+    let content = ContentController::start().await.expect("start content");
+    let flag = content.home().join("wake_row_flag");
+    let gated = json!({
+        "command": format!("while [ ! -e {} ]; do /bin/sleep 0.2; done; echo WAKE_OUTPUT_MARK", flag.display()),
+        "description": "flag-gated command",
+        "is_background": true
+    })
+    .to_string();
+    let _background = expect_tool_turn(&content, "call_bg_wake", "run_terminal_command", gated);
+    let _settled = content.expect_agent_turn("turn settles", "WAKE_SETTLED_MARK");
+    let _wake = content.expect_agent_turn("wake reply", "WAKE_REPLY_MARK");
+    content.set_response("WAKE_FALLBACK");
+
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_in_dir(
+        &binary,
+        80,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+    harness
+        .wait_for_text("WAKE_SETTLED_MARK", Duration::from_secs(60))
+        .expect("first turn settled");
+
+    std::fs::write(&flag, b"done").expect("release flag");
+    harness
+        .wait_for_text("WAKE_REPLY_MARK", Duration::from_secs(60))
+        .unwrap_or_else(|_| panic!("no wake reply; screen:\n{}", harness.screen_contents()));
+    harness.update(Duration::from_millis(500));
+
+    let screen = harness.screen_contents();
+    let settled = row_of(&screen, "WAKE_SETTLED_MARK");
+    let row = screen
+        .lines()
+        .enumerate()
+        .skip(settled.unwrap_or(0))
+        .find(|(_, line)| line.contains("Sent to the model ·"))
+        .map(|(i, _)| i);
+    let reply = row_of(&screen, "WAKE_REPLY_MARK");
+    assert!(
+        row.is_some() && row < reply,
+        "the wake prompt must have a row above the wake reply; screen:\n{screen}"
+    );
+    quit(&mut harness);
+}
+
 /// An agent profile whose completion tool the mock never calls, so the shell sends one recovery prompt.
 fn write_recovery_profile(dir: &Path) -> PathBuf {
     let path = dir.join("recovery-agent.md");
