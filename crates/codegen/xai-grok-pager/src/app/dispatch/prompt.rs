@@ -1009,6 +1009,28 @@ pub(super) fn dispatch_send_prompt_submission(
                 display_as_skill,
                 scheduled_task_preview,
             } => {
+                // A raw `/skill args` row is plain text to the shell, which expands it mid-turn.
+                // While the shell is busy it takes the same queue as a plain prompt, so it is delivered at the next gap.
+                let raw_skill = display_as_skill
+                    && scheduled_task_preview.is_none()
+                    && matches!(
+                        prompt_blocks.as_slice(),
+                        [acp::ContentBlock::Text(block)]
+                            if block.text == display_text && block.meta.is_none()
+                    );
+                if raw_skill && immediate_server_send_eligible(agent) {
+                    if consume_input {
+                        agent.prompt.set_text("");
+                        agent.note_draft_consumed();
+                    }
+                    effects.extend(super::queue::send_slash_row_via_server_queue(
+                        app,
+                        id,
+                        display_text,
+                        submitted_images,
+                    ));
+                    return effects;
+                }
                 // Enqueue with display text for scrollback but wire_blocks for the actual prompt sent to the model
                 // Leading skill invocation: display_as_skill owns styling (no ranges)
                 let id = agent.session.next_queue_id;
@@ -1046,6 +1068,20 @@ pub(super) fn dispatch_send_prompt_submission(
                 }
             }
             CommandResult::PassThrough(pass_text) => {
+                // The shell runs a passed-through command as its own turn. Held locally, it would also hold every row typed after it.
+                if immediate_server_send_eligible(agent) {
+                    if consume_input {
+                        agent.prompt.set_text("");
+                        agent.note_draft_consumed();
+                    }
+                    effects.extend(super::queue::send_slash_row_via_server_queue(
+                        app,
+                        id,
+                        pass_text,
+                        submitted_images,
+                    ));
+                    return effects;
+                }
                 // A recognized token later in the passthrough text still styles the echo.
                 let skill_token_ranges = agent
                     .prompt

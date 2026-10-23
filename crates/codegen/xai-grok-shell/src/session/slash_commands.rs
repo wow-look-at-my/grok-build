@@ -1417,6 +1417,24 @@ pub(crate) fn parse_skill_references(
     let catalog = EffectiveCommandCatalog::build(skills, availability, &[]);
     parse_skill_references_with_catalog(text, &catalog)
 }
+/// Whether the leading `/token` of `text` resolves to a skill rather than a builtin or nothing.
+/// A mid-turn drain expands a skill. It cannot run a builtin.
+pub(crate) fn leading_token_is_skill(
+    text: &str,
+    skills: &[SkillInfo],
+    availability: CommandAvailability,
+) -> bool {
+    let Some(rest) = text.trim_start().strip_prefix('/') else {
+        return false;
+    };
+    let word = rest.split_whitespace().next().unwrap_or("");
+    if word.is_empty() {
+        return false;
+    }
+    EffectiveCommandCatalog::build(skills, availability, &[])
+        .skill_resolvable(word)
+        .is_some()
+}
 fn parse_skill_references_with_catalog(
     text: &str,
     catalog: &EffectiveCommandCatalog<'_>,
