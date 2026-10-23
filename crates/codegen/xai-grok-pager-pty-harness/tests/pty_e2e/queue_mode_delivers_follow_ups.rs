@@ -41,22 +41,23 @@ fn script_subagent_turn(
     background: bool,
     flag: &std::path::Path,
     done: &str,
+    replies: usize,
 ) {
     use xai_grok_test_support::{Conversation, MockToolCall, Tool};
+    let mut parent = Conversation::nth(1).calls([MockToolCall::new(
+        Tool::Task,
+        json!({
+            "description": "Build the project",
+            "prompt": "HOLDING_CHILD_PROMPT wait for the flag",
+            "subagent_type": "general-purpose",
+            "background": background,
+        }),
+    )]);
+    for _ in 0..replies {
+        parent = parent.reply(done);
+    }
     content.server().set_conversations(vec![
-        Conversation::nth(1)
-            .calls([MockToolCall::new(
-                Tool::Task,
-                json!({
-                    "description": "Build the project",
-                    "prompt": "HOLDING_CHILD_PROMPT wait for the flag",
-                    "subagent_type": "general-purpose",
-                    "background": background,
-                }),
-            )])
-            .reply(done)
-            .reply(done)
-            .reply(done),
+        parent,
         Conversation::nth(2)
             .calls([MockToolCall::new(
                 Tool::Shell,
@@ -80,11 +81,15 @@ fn assert_reaches_model_before_release(
     marker: &str,
     flag: &std::path::Path,
 ) {
+    // The child's own requests carry its prompt. Only a parent request counts.
     let reached = poll_for(Duration::from_secs(20), || {
         content
             .request_bodies()
             .iter()
-            .any(|b| b.to_string().contains(marker))
+            .any(|b| {
+                let body = b.to_string();
+                body.contains(marker) && !body.contains("HOLDING_CHILD_PROMPT")
+            })
             .then_some(())
     });
     let screen = harness.screen_contents();
@@ -104,7 +109,7 @@ async fn queue_mode_sends_follow_up_typed_during_a_foreground_subagent() {
     const MARKER: &str = "QUEUE_FG_TASK_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
     let flag = content.home().join("fg_hold_flag");
-    script_subagent_turn(&content, false, &flag, "FG_PARENT_DONE");
+    script_subagent_turn(&content, false, &flag, "FG_PARENT_DONE", 2);
 
     let mut harness = spawn_and_submit(&content);
     harness
@@ -129,7 +134,7 @@ async fn queue_mode_sends_follow_up_typed_while_a_background_subagent_runs() {
     const MARKER: &str = "QUEUE_BG_TASK_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
     let flag = content.home().join("bg_hold_flag");
-    script_subagent_turn(&content, true, &flag, "BG_PARENT_DONE");
+    script_subagent_turn(&content, true, &flag, "BG_PARENT_DONE", 3);
 
     let mut harness = spawn_and_submit(&content);
     harness
