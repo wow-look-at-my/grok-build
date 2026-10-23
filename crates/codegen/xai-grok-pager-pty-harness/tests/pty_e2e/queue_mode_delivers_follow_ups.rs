@@ -81,14 +81,14 @@ fn assert_reaches_model_before_release(
     marker: &str,
     flag: &std::path::Path,
 ) {
-    // The child's own requests carry its prompt. Only a parent request counts.
+    // Only a parent request counts. The parent's history holds the spawn call `call_mock_1_1`, and the child's does not.
     let reached = poll_for(Duration::from_secs(20), || {
         content
             .request_bodies()
             .iter()
             .any(|b| {
                 let body = b.to_string();
-                body.contains(marker) && !body.contains("HOLDING_CHILD_PROMPT")
+                body.contains(marker) && body.contains("call_mock_1_1")
             })
             .then_some(())
     });
