@@ -575,3 +575,38 @@ fn compact_now_sends_during_a_running_turn_without_taking_the_turn() {
         "compacting mid-turn must not take the turn's state"
     );
 }
+
+/// Text typed after a queued pager command is not held behind it. It reaches the shell queue,
+/// so the running turn takes it at its next gap. The command keeps its own local row.
+#[test]
+fn text_typed_after_a_queued_compact_is_not_held_behind_it() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    running_agent_with_a_queued_message(&mut app, id);
+    app.agents.get_mut(&id).unwrap().shared_queue.clear();
+
+    let queued = dispatch(
+        Action::SendPrompt("/compact keep the auth notes".into()),
+        &mut app,
+    );
+    assert_eq!(model_bound_payloads(&queued), Vec::<String>::new());
+    assert_eq!(
+        local_rows(&app, id),
+        vec![(
+            QueueEntryKind::Command,
+            "/compact keep the auth notes".to_string()
+        )],
+        "the command waits locally for its own run"
+    );
+
+    let later = dispatch(Action::SendPrompt("and one more".into()), &mut app);
+    assert!(
+        matches!(later.as_slice(), [Effect::SendPrompt { text, .. }] if text == "and one more"),
+        "the message goes to the shell queue now: {later:?}"
+    );
+    assert_eq!(
+        local_texts(&app, id),
+        vec!["/compact keep the auth notes".to_string()],
+        "only the command stays local"
+    );
+}

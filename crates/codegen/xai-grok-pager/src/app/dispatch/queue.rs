@@ -35,7 +35,7 @@ fn combine_queued_prompts_enabled() -> bool {
 
 /// We must also not be mid-edit, mid-model-switch, or mid-replay.
 /// **Server-busy (`is_turn_running() || !shared_queue.is_empty()`):** the immediate-send path is for prompts that must queue server-side rather than start a turn locally.
-/// **FIFO guard (`pending_prompts.is_empty()`):** a prompt may only jump onto the server queue when the local drip-feed queue is empty.
+/// **FIFO guard ([`row_holds_later_text`]):** a prompt may not jump onto the server queue past a local plain row or a `/plan` description. A pager command row (`/compact`, `/loop`) does not hold it. That text reaches the running turn at its next gap.
 ///
 /// **No leader gate:** the shell's queue is what makes a mid-turn prompt arrive
 /// at the next gap between tool calls / model requests. The shell's queue the
@@ -53,7 +53,11 @@ pub(super) fn immediate_server_send_eligible(agent: &AgentView) -> bool {
         agent.session.state.is_turn_running() || wake_running || !agent.shared_queue.is_empty();
     server_busy
         && agent.session.session_id.is_some()
-        && agent.session.pending_prompts.is_empty()
+        && !agent
+            .session
+            .pending_prompts
+            .iter()
+            .any(row_holds_later_text)
         && !matches!(agent.prompt_mode, PromptMode::EditingQueued { .. })
         && !agent.session.model_switch_pending
         && !agent.session.loading_replay
@@ -66,6 +70,12 @@ fn row_is_plain_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
     prompt.kind == crate::app::agent::QueueEntryKind::Prompt
         && prompt.wire_blocks.is_none()
         && prompt.combined_texts.is_empty()
+}
+
+/// Whether a local row keeps text typed after it out of the shell queue. A
+/// plain row is next in line for the shell itself.
+fn row_holds_later_text(prompt: &crate::app::agent::QueuedPrompt) -> bool {
+    row_may_be_migrated(prompt) || prompt.own_turn
 }
 
 /// The effect that puts a prompt on the shell's queue. The shell harvests a
