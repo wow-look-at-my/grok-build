@@ -835,7 +835,7 @@ impl SessionActor {
         let classifier_slug = auto_cfg
             .classifier_model
             .clone()
-            .or_else(|| self.harness_models.get("permission_classifier"));
+            .or_else(|| self.harness_model("permission_classifier"));
         let aux_classifier_sampler = match classifier_slug.as_deref() {
             Some(slug) => self.resolve_auto_classifier_sampler(slug).await,
             None => None,
@@ -998,7 +998,7 @@ impl SessionActor {
         xai_grok_sampler::SamplingClient,
         xai_grok_sampler::SamplerConfig,
     )> {
-        let slug = self.harness_models.get(slot)?;
+        let slug = self.harness_model(slot)?;
         self.resolve_sampler_for_model(slot, &slug).await
     }
     /// [`Self::resolve_slot_sampler`] for a model named by something other

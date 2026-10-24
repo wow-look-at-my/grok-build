@@ -1138,6 +1138,7 @@ impl SessionActor {
     /// A copy of the current `/goal` role models. It is a copy so no borrow
     /// stays open across an await while a reload replaces the value.
     pub(super) fn goal_role_models(&self) -> GoalRoleModelConfig {
+        self.refresh_model_slots_if_stale();
         self.goal_role_models.borrow().clone()
     }
 

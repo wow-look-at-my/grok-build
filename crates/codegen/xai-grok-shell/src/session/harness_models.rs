@@ -1,22 +1,49 @@
 //! Every harness model slot, resolved when the session actor is built and
 //! again on every `[models]` or `[model_groups]` change.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// The count of `[models]` reloads in this process.
+static CONFIG_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Mark every session's resolved slots stale. The `[models]` reload calls this.
+pub(crate) fn mark_all_stale() {
+    CONFIG_GENERATION.fetch_add(1, Ordering::Relaxed);
+}
 
 /// The model each slot resolved to. A slot that inherits the session model is
 /// absent from the map.
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedHarnessModels {
     by_slot: RefCell<HashMap<&'static str, String>>,
+    /// The generation this map was resolved at. `None` never goes stale, which keeps a test's pinned map in place.
+    resolved_at: Cell<Option<u64>>,
 }
 
 impl ResolvedHarnessModels {
     /// Resolve every slot in [`xai_grok_models::HARNESS_MODEL_SLOTS`].
     pub(crate) fn resolve(config: &crate::agent::config::Config) -> Self {
+        let resolved_at = CONFIG_GENERATION.load(Ordering::Relaxed);
         Self {
             by_slot: RefCell::new(resolve_map(config)),
+            resolved_at: Cell::new(Some(resolved_at)),
         }
+    }
+
+    /// True one time after each `[models]` reload. The caller then resolves
+    /// the slots again with [`Self::reload`].
+    pub(crate) fn take_stale(&self) -> bool {
+        let Some(resolved_at) = self.resolved_at.get() else {
+            return false;
+        };
+        let now = CONFIG_GENERATION.load(Ordering::Relaxed);
+        if resolved_at == now {
+            return false;
+        }
+        self.resolved_at.set(Some(now));
+        true
     }
 
     /// Resolve every slot again from `config` and replace the map.
@@ -43,6 +70,7 @@ impl ResolvedHarnessModels {
     pub(crate) fn from_pairs(pairs: &[(&'static str, &str)]) -> Self {
         Self {
             by_slot: RefCell::new(pairs.iter().map(|(k, v)| (*k, (*v).to_string())).collect()),
+            resolved_at: Cell::new(None),
         }
     }
 }
@@ -78,6 +106,18 @@ mod tests {
         let models = ResolvedHarnessModels::from_pairs(&[("compaction", "some-model")]);
         assert_eq!(models.get("compaction").as_deref(), Some("some-model"));
         assert_eq!(models.get("recap"), None);
+    }
+
+    /// A map goes stale once per `[models]` reload, and a pinned test map
+    /// never does.
+    #[test]
+    fn a_reload_marks_a_resolved_map_stale_once() {
+        let resolved = ResolvedHarnessModels::resolve(&crate::agent::config::Config::default());
+        let pinned = ResolvedHarnessModels::from_pairs(&[("compaction", "m")]);
+        let _ = resolved.take_stale();
+        mark_all_stale();
+        assert!(resolved.take_stale());
+        assert!(!pinned.take_stale());
     }
 
     /// A running session keeps this map for its whole life. A reload must

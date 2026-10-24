@@ -576,7 +576,7 @@ impl SessionActor {
                 .flush_config
                 .flush_model
                 .clone()
-                .or_else(|| self.harness_models.get("memory_flush"));
+                .or_else(|| self.harness_model("memory_flush"));
             let flush_sampler = match flush_model.as_deref() {
                 Some(slug) => self.resolve_sampler_for_model("memory_flush", slug).await,
                 None => None,

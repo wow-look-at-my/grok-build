@@ -21,9 +21,24 @@ impl SessionActor {
         self.output_rate_floor.set(policy);
     }
 
-    /// Handle [`SessionCommand::ReloadHarnessModels`]. The config is read the
-    /// way the spawn reads it. A config that does not load keeps the map.
-    pub(super) fn handle_reload_harness_models(&self) {
+    /// The model for one harness slot, or `None` when it inherits the session
+    /// model.
+    pub(crate) fn harness_model(&self, slot_id: &str) -> Option<String> {
+        self.refresh_model_slots_if_stale();
+        self.harness_models.get(slot_id)
+    }
+
+    /// Resolve the slots and the `/goal` role models again when a `[models]`
+    /// reload happened since this actor last resolved them.
+    pub(super) fn refresh_model_slots_if_stale(&self) {
+        if self.harness_models.take_stale() {
+            self.reload_model_slots();
+        }
+    }
+
+    /// The config is read the way the spawn reads it. A config that does not
+    /// load keeps the map.
+    fn reload_model_slots(&self) {
         let config = match crate::config::load_effective_config()
             .map_err(|e| e.to_string())
             .and_then(|raw| crate::agent::config::Config::new_from_toml_cfg(&raw))
