@@ -14,6 +14,73 @@ async fn session_model(actor: &SessionActor) -> String {
         .unwrap_or_default()
 }
 
+fn catalog_entry(model_id: &str) -> crate::agent::config::ModelEntry {
+    crate::agent::config::ModelEntry {
+        info: crate::agent::config::ModelInfo {
+            user_selectable: true,
+            model: model_id.to_string(),
+            context_window: std::num::NonZeroU64::new(128_000).unwrap(),
+            ..Default::default()
+        },
+        mtls_cert_dir: None,
+        api_key: None,
+        env_key: None,
+        auth_provider: None,
+        api_base_url: Some("http://127.0.0.1:9/v1".to_string()),
+    }
+}
+
+/// A slot change on a live session reaches its next compaction request.
+/// The actor is never rebuilt here, which is the case a settings change
+/// hits while a session runs.
+#[tokio::test(flavor = "current_thread")]
+async fn a_reload_moves_a_pinned_slot_on_a_live_session() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _grx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            let tmp = tempfile::TempDir::new().unwrap();
+            let mut catalog = indexmap::IndexMap::new();
+            for id in ["slot-old", "slot-new"] {
+                catalog.insert(id.to_string(), catalog_entry(id));
+            }
+            actor.models_manager = crate::agent::remote_config::ModelsManager::new(
+                None,
+                catalog,
+                agent_client_protocol::ModelId::new("default"),
+                std::sync::Arc::new(xai_grok_login::AuthManager::new(
+                    tmp.path(),
+                    Default::default(),
+                )),
+                crate::agent::config::Config::default(),
+            );
+            actor.harness_models = ResolvedHarnessModels::from_pairs(&[("compaction", "slot-old")]);
+
+            let (_, cfg) = actor
+                .resolve_slot_sampler("compaction")
+                .await
+                .expect("the pinned slot resolves to its own sampler");
+            assert_eq!(cfg.model, "slot-old");
+
+            let mut config = crate::agent::config::Config::default();
+            config.models.compaction = Some("slot-new".to_owned());
+            actor.harness_models.reload(&config);
+
+            let (_, cfg) = actor
+                .resolve_slot_sampler("compaction")
+                .await
+                .expect("the reloaded slot resolves to its own sampler");
+            assert_eq!(
+                cfg.model, "slot-new",
+                "after a reload the running session must stop calling the old model"
+            );
+        })
+        .await;
+}
+
 /// An unset slot changes nothing: the side call keeps the session's model
 /// and the session's window, so a user who pinned no slot is unaffected.
 #[tokio::test(flavor = "current_thread")]

@@ -59,6 +59,54 @@ async fn model_switch_relabels_live_agent_and_system_head() {
         .await;
 }
 
+/// A switch while a turn runs must reach the turn's next request. Each tool
+/// round builds its request from chat state and pushes
+/// `reconstruct_full_config` to the sampler, so both must name the new model.
+#[tokio::test(flavor = "current_thread")]
+async fn model_switch_mid_turn_reaches_the_next_request() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (actor, _gateway_rx) = build_actor().await;
+            actor.state.lock().await.running_task = Some(running_task_stub("running"));
+            let before = actor.reconstruct_full_config().await.model;
+            assert_ne!(before, "switch-target");
+
+            actor
+                .handle_set_session_model(crate::session::SessionModelSwitch {
+                    sampling_config: xai_grok_sampler::SamplerConfig {
+                        model: "switch-target".to_owned(),
+                        context_window: 256_000,
+                        ..xai_grok_sampler::SamplerConfig::default()
+                    },
+                    use_concise: false,
+                    is_family_switch: false,
+                    apply_prompt_override: true,
+                    skip_prompt_rewrite: false,
+                    auto_compact_threshold_percent: 85,
+                    system_prompt_label: SWITCH_TARGET_LABEL.to_owned(),
+                })
+                .await
+                .expect("model switch succeeds while a turn runs");
+
+            assert_eq!(
+                actor.reconstruct_full_config().await.model,
+                "switch-target",
+                "the sampler config of the next round must name the new model"
+            );
+            let request = actor
+                .chat_state_handle
+                .build_request(vec![], None, false, None, "s".to_owned(), "r".to_owned())
+                .await
+                .expect("chat state actor alive");
+            assert_eq!(
+                request.model.as_deref(),
+                Some("switch-target"),
+                "the next request of the running turn must name the new model"
+            );
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn relabel_skipped_mid_turn_keeps_prefire_cache() {
     tokio::task::LocalSet::new()
