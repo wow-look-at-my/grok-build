@@ -129,7 +129,20 @@ pub struct ThinkingBlock {
     /// When the thinking block started (local timestamp for live elapsed).
     started_at: Option<std::time::Instant>,
     /// Short summary shown after the collapsed header, on the same row.
-    summary: Option<String>,
+    summary: SummaryState,
+}
+
+/// Where the summary side call for this block stands.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum SummaryState {
+    /// No call was announced: summaries are off, or the thinking was too short.
+    #[default]
+    None,
+    /// The call is queued or running. The bullet spins.
+    Pending,
+    /// The call gave up. The reason replaces the summary.
+    Failed(String),
+    Ready(String),
 }
 impl ThinkingBlock {
     /// Create a new thinking block with complete text.
@@ -138,7 +151,7 @@ impl ThinkingBlock {
             content: MarkdownContent::new(text),
             elapsed_time_ms: None,
             started_at: None,
-            summary: None,
+            summary: SummaryState::None,
         }
     }
 
@@ -148,7 +161,7 @@ impl ThinkingBlock {
             content: MarkdownContent::streaming(),
             elapsed_time_ms: None,
             started_at: Some(std::time::Instant::now()),
-            summary: None,
+            summary: SummaryState::None,
         }
     }
 
@@ -159,7 +172,7 @@ impl ThinkingBlock {
             content: MarkdownContent::streaming(),
             elapsed_time_ms: None,
             started_at: None,
-            summary: None,
+            summary: SummaryState::None,
         }
     }
 
@@ -213,13 +226,46 @@ impl ThinkingBlock {
 
     /// Set the summary. Returns whether it changed.
     pub fn set_summary(&mut self, summary: String) -> bool {
-        let changed = self.summary.as_deref() != Some(summary.as_str());
-        self.summary = Some(summary);
+        self.set_summary_state(SummaryState::Ready(summary))
+    }
+
+    /// Mark the summary call queued. A summary that already arrived wins. Returns whether it changed.
+    pub fn set_summary_pending(&mut self) -> bool {
+        if matches!(self.summary, SummaryState::Ready(_)) {
+            return false;
+        }
+        self.set_summary_state(SummaryState::Pending)
+    }
+
+    /// Record why the summary call gave up. A summary that already arrived wins. Returns whether it changed.
+    pub fn set_summary_failed(&mut self, reason: String) -> bool {
+        if matches!(self.summary, SummaryState::Ready(_)) {
+            return false;
+        }
+        self.set_summary_state(SummaryState::Failed(reason))
+    }
+
+    fn set_summary_state(&mut self, state: SummaryState) -> bool {
+        let changed = self.summary != state;
+        self.summary = state;
         changed
     }
 
     pub fn summary(&self) -> Option<&str> {
-        self.summary.as_deref()
+        match &self.summary {
+            SummaryState::Ready(summary) => Some(summary),
+            _ => None,
+        }
+    }
+
+    /// Whether the summary call is queued or running.
+    pub fn summary_pending(&self) -> bool {
+        self.summary == SummaryState::Pending
+    }
+
+    /// Whether the collapsed row carries a summary, a spinner or a failure. Such a row must stay drawn.
+    pub fn has_summary_row(&self) -> bool {
+        self.summary != SummaryState::None
     }
 
     /// Set the raw mode, re-rendering if it changed.
@@ -300,10 +346,19 @@ impl ThinkingBlock {
         let width = ctx.content_width().max(1);
         let header = self.header_line(ctx);
         let header_w: usize = header.spans.iter().map(|s| s.content.width()).sum();
-        let summary = self
-            .summary
-            .as_deref()
-            .filter(|_| ctx.mode == DisplayMode::Collapsed && !ctx.is_running);
+        let theme = Theme::current();
+        let (summary, style) = match &self.summary {
+            SummaryState::Ready(summary) => (
+                Some(summary.clone()),
+                Style::default().fg(theme.thinking_summary),
+            ),
+            SummaryState::Failed(reason) => (
+                Some(format!("no summary: {reason}")),
+                Style::default().fg(theme.warning),
+            ),
+            SummaryState::None | SummaryState::Pending => (None, Style::default()),
+        };
+        let summary = summary.filter(|_| ctx.mode == DisplayMode::Collapsed && !ctx.is_running);
         // The summary continues the header row: "Thought for 3s - <summary>".
         // Too narrow for the header plus " - x": header alone, no summary.
         let Some(summary) = summary.filter(|_| header_w + 4 <= width) else {
@@ -313,7 +368,6 @@ impl ThinkingBlock {
                 lines: vec![BlockLine::separator(line)],
             };
         };
-        let style = Style::default().fg(Theme::current().thinking_summary);
         // The pad holds the header's columns so the first row wraps short.
         let pad = " ".repeat(header_w + 1);
         let options = textwrap::Options::new(width).initial_indent(&pad);

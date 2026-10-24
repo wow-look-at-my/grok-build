@@ -343,3 +343,109 @@ fn a_reloaded_transcript_puts_each_summary_back_under_its_row() {
         "the dropped replay left the row as it was: {rows:?}"
     );
 }
+
+fn summary_status_notif(
+    session_id: &str,
+    stream_start_ms: i64,
+    failed: Option<&str>,
+) -> acp::ExtNotification {
+    let payload = SessionNotification {
+        session_id: acp::SessionId::new(session_id),
+        update: XaiSessionUpdate::ThinkingSummaryStatus {
+            stream_start_ms,
+            failed: failed.map(str::to_string),
+        },
+        meta: None,
+    };
+    acp::ExtNotification::new(
+        "x.ai/session/update",
+        std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
+    )
+}
+
+/// A finished turn with one collapsed thinking row keyed `1_000`, so only the spinner can ask for ticks.
+fn finished_turn_with_thought(session_id: &str) -> AppView {
+    let mut app = make_app_with_agent(session_id);
+    {
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        agent.session.start_turn(&mut agent.scrollback);
+        agent.session.current_prompt_id = Some("pid-1".into());
+    }
+    stream_call(&mut app, session_id, 1_000, "long reasoning here");
+    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+    agent.session.tracker.finish_turn(&mut agent.scrollback, Some("pid-1"));
+    agent.scrollback.prepare_layout(80, 40);
+    assert!(!agent.scrollback.needs_animation(), "a finished turn is idle");
+    app
+}
+
+fn first_thinking_block(agent: &mut AgentView) -> crate::scrollback::blocks::ThinkingBlock {
+    agent
+        .scrollback
+        .entries_mut()
+        .find_map(|e| match &e.block {
+            RenderBlock::Thinking(b) => Some(b.clone()),
+            _ => None,
+        })
+        .expect("a thinking row was drawn")
+}
+
+#[test]
+fn a_queued_summary_spins_until_the_summary_lands() {
+    let mut app = finished_turn_with_thought("sess-think-spin");
+
+    let changed = handle_ext_notification(
+        &summary_status_notif("sess-think-spin", 1_000, None),
+        &mut app,
+    );
+    assert!(changed, "a queued summary starts the spinner");
+    {
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        assert!(first_thinking_block(agent).summary_pending());
+        assert!(
+            agent.scrollback.needs_animation(),
+            "the spinner must keep ticks flowing after the turn ended"
+        );
+        assert!(first_thinking_height(agent) > 0, "a verb group must not fold the spinner away");
+    }
+
+    let _ = handle_ext_notification(
+        &thinking_summary_notif("sess-think-spin", 1_000, "DONE", false),
+        &mut app,
+    );
+    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+    assert!(!first_thinking_block(agent).summary_pending(), "the summary stops the spinner");
+    assert!(!agent.scrollback.needs_animation(), "no spinner, no ticks");
+
+    // A late "queued" for a call that already has its summary must not restart the spinner.
+    let again = handle_ext_notification(
+        &summary_status_notif("sess-think-spin", 1_000, None),
+        &mut app,
+    );
+    assert!(!again, "the summary outranks a late queued status");
+}
+
+#[test]
+fn a_failed_summary_says_why_instead_of_spinning() {
+    let mut app = finished_turn_with_thought("sess-think-fail");
+    let _ = handle_ext_notification(
+        &summary_status_notif("sess-think-fail", 1_000, None),
+        &mut app,
+    );
+    let changed = handle_ext_notification(
+        &summary_status_notif("sess-think-fail", 1_000, Some("model call failed: 529 overloaded")),
+        &mut app,
+    );
+    assert!(changed, "a failure replaces the spinner");
+
+    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+    assert!(!first_thinking_block(agent).summary_pending());
+    assert!(!agent.scrollback.needs_animation(), "a failed call must not spin forever");
+    let rows = collapsed_thinking_rows(agent);
+    // The row wraps at the test width, so compare without whitespace.
+    let squash = |s: &str| s.split_whitespace().collect::<String>();
+    assert!(
+        squash(&rows[0]).contains(&squash("no summary: model call failed: 529 overloaded")),
+        "the row names the failure: {rows:?}"
+    );
+}

@@ -741,6 +741,14 @@ pub enum SessionUpdate {
         stream_start_ms: i64,
         summary: String,
     },
+    /// The summary side call for one model call is queued (`failed` is
+    /// `None`) or gave up (`failed` names why).
+    ThinkingSummaryStatus {
+        /// `streamStartMs` of the model call whose thinking is summarized.
+        stream_start_ms: i64,
+        #[serde(default)]
+        failed: Option<String>,
+    },
     /// A compaction checkpoint marker written to `updates.jsonl`.
     CompactionCheckpoint(Box<CompactionCheckpointInfo>),
     /// A rewind marker written to `updates.jsonl` when a rewind occurs. This is **persist-only**: it is never sent to the gateway/UI. Because `updates.jsonl` is append-only, rewinding creates a timeline branch.
