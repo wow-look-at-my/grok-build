@@ -6305,9 +6305,9 @@ fn harness_model_slot_rows_are_registered_model_pickers() {
         assert_eq!(meta.category, SettingCategory::Models, "for `{key}`");
         assert_eq!(meta.owner, SettingOwner::Shell, "for `{key}`");
         assert!(
-            meta.restart_required,
-            "`{key}` must be restart_required — a slot is read when a session \
-             actor is built, so a running session keeps its model"
+            !meta.restart_required,
+            "`{key}` must apply live — a `[models]` change re-resolves the slot \
+             in every running session"
         );
         match &meta.kind {
             SettingKind::DynamicEnum {

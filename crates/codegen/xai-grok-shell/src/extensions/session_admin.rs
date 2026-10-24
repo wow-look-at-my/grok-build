@@ -795,6 +795,7 @@ fn handle_reload_models(agent: &MvpAgent) -> ExtResult {
 
     agent.models_manager.apply_config(merged_config);
     agent.sync_process_static_api_key(None);
+    crate::session::harness_models::mark_all_stale();
 
     let count = agent.models_manager.models().len();
     tracing::info!(count, "model list reloaded from config.toml");
