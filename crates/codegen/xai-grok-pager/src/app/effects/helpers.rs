@@ -992,6 +992,73 @@ pub(crate) async fn persist_setting(
     key: crate::settings::SettingKey,
     value: crate::settings::SettingValue,
 ) -> Result<(), String> {
+    // A confining profile read-binds `$GROK_HOME/config.toml` in THIS
+    // process, and the pager and the agent share that process. The write
+    // cannot be distinguished in-process.
+    if let Some(response) = xai_grok_sandbox::ci_host::persist_setting_on_host(
+        key,
+        &setting_value_to_wire(&value),
+    ) {
+        return if response.ok {
+            Ok(())
+        } else {
+            Err(response.error.unwrap_or_else(|| "host settings write failed".to_string()))
+        };
+    }
+    write_setting_in_process(key, value).await
+}
+
+/// Encode a settings value for the host worker's `setting` request.
+pub(crate) fn setting_value_to_wire(value: &crate::settings::SettingValue) -> serde_json::Value {
+    use crate::settings::SettingValue;
+    match value {
+        SettingValue::Bool(b) => serde_json::json!({"bool": b}),
+        SettingValue::String(s) => serde_json::json!({"string": s}),
+        SettingValue::Enum(s) => serde_json::json!({"enum": s}),
+        SettingValue::Int(i) => serde_json::json!({"int": i}),
+    }
+}
+
+/// Decode a settings value the host worker sent back.
+/// `key` selects the registry entry whose choice catalog backs an `Enum` value.
+pub(crate) fn setting_value_from_wire(
+    key: crate::settings::SettingKey,
+    value: &serde_json::Value,
+) -> Result<crate::settings::SettingValue, String> {
+    use crate::settings::SettingValue;
+    if let Some(b) = value.get("bool").and_then(serde_json::Value::as_bool) {
+        return Ok(SettingValue::Bool(b));
+    }
+    if let Some(s) = value.get("string").and_then(serde_json::Value::as_str) {
+        return Ok(SettingValue::String(s.to_string()));
+    }
+    if let Some(s) = value.get("enum").and_then(serde_json::Value::as_str) {
+        // `SettingValue::Enum` holds a `&'static str`.
+        let registry = crate::settings::registry::SettingsRegistry::defaults();
+        let Some(kind) = registry.find(key).map(|meta| &meta.kind) else {
+            return Err(format!("`{key}` is not a registered setting"));
+        };
+        let crate::settings::registry::SettingKind::Enum { choices, .. } = kind else {
+            return Err(format!("`{key}` does not take an enum value"));
+        };
+        let Some(choice) = choices.iter().find(|choice| choice.canonical == s) else {
+            return Err(format!("`{s}` is not a valid value for `{key}`"));
+        };
+        return Ok(SettingValue::Enum(choice.canonical));
+    }
+    if let Some(i) = value.get("int").and_then(serde_json::Value::as_i64) {
+        return Ok(SettingValue::Int(i));
+    }
+    Err(format!("unrecognised settings value on the wire: {value}"))
+}
+
+/// Write one setting through the user `config.toml` from this process.
+/// `persist_setting` is the entry point callers want; this is the in-process
+/// half, which the host worker also drives on a confined session's behalf.
+pub(crate) async fn write_setting_in_process(
+    key: crate::settings::SettingKey,
+    value: crate::settings::SettingValue,
+) -> Result<(), String> {
     use crate::settings::SettingValue;
     fn kind_mismatch(key: &str, expected: &str, got: &SettingValue) -> String {
         format!("persist_setting({key}) expected {expected}, got {got:?}")

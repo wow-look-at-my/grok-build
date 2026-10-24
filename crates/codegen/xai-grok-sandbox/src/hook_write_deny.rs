@@ -27,6 +27,19 @@ pub fn profile_enforces_hook_write_deny(profile: &ProfileName) -> bool {
     )
 }
 
+/// Whether `profile` write-denies the `$GROK_HOME` trust-boundary files,
+/// which include the user `config.toml`.
+pub fn profile_denies_user_config_write(profile: &ProfileName) -> bool {
+    *profile != ProfileName::Off && profile_enforces_hook_write_deny(profile)
+}
+
+/// The same decision for the sandbox profile requested at this process's startup.
+pub fn requested_confinement_denies_user_config_write() -> bool {
+    crate::requested_confinement_profile()
+        .and_then(|name| name.parse::<ProfileName>().ok())
+        .is_some_and(|profile| profile_denies_user_config_write(&profile))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum HookWriteDenyError {
     #[error("{0}")]

@@ -66,7 +66,6 @@ git2 = { workspace = true }
 serial_test = { workspace = true }
 toml = { workspace = true }
 unicode-width = { workspace = true }
-
 [[test]]
 name = "env_op_compile"
 path = "tests/env_op_compile.rs"
