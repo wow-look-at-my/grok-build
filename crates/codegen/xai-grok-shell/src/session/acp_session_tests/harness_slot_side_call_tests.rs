@@ -23,7 +23,7 @@ fn catalog_entry(model_id: &str) -> crate::agent::config::ModelEntry {
             ..Default::default()
         },
         mtls_cert_dir: None,
-        api_key: None,
+        api_key: Some("test-key".to_string()),
         env_key: None,
         auth_provider: None,
         api_base_url: Some("http://127.0.0.1:9/v1".to_string()),
