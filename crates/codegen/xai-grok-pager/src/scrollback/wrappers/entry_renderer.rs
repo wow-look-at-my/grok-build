@@ -20,6 +20,9 @@ use crate::theme::{self, Theme};
 /// ~0.15 gives a smooth wave that travels the block in ~40 ticks.
 const WAVE_SPEED: f32 = 0.15;
 
+/// Animation ticks per frame of the thinking-summary spinner. It matches the turn-status spinner.
+const SUMMARY_SPINNER_DIVISOR: u64 = crate::views::turn_status::SPINNER_DIVISOR;
+
 pub struct EntryRenderer<'a> {
     entry: &'a ScrollbackEntry,
     theme: &'a Theme,
@@ -984,6 +987,16 @@ impl Renderable for EntryRenderer<'_> {
 
             if bullet_y >= max_row {
                 // bullet not visible; skip post-pass
+            } else if let RenderBlock::Thinking(block) = &self.entry.block
+                && block.summary_pending()
+            {
+                // The summary call is queued or running: the bullet becomes a spinner until it lands.
+                let frames = crate::glyphs::braille_spinner_frames();
+                let idx = (self.tick / SUMMARY_SPINNER_DIVISOR) as usize % frames.len().max(1);
+                if let Some(frame) = frames.get(idx) {
+                    let style = Style::default().fg(self.theme.thinking_summary);
+                    buf.set_string_safe(content_area.x, bullet_y, frame, style);
+                }
             } else if self.entry.is_pending_user_input {
                 // Pending user input: leave the bullet glyph alone, just freeze its color at the block's bullet color. They would
                 // otherwise render in default gray and lose the cue entirely. The fallback intentionally matches the turn-status
@@ -1159,6 +1172,50 @@ mod tests {
         assert_eq!(buf.cell((4, 1)).unwrap().symbol(), "e");
         assert_eq!(buf.cell((5, 1)).unwrap().symbol(), "s");
         assert_eq!(buf.cell((6, 1)).unwrap().symbol(), "t");
+    }
+
+    #[test]
+    fn a_queued_thinking_summary_spins_the_bullet() {
+        use crate::scrollback::blocks::ThinkingBlock;
+
+        let theme = Theme::current();
+        let mut block = ThinkingBlock::new("reasoning");
+        let mut entry = ScrollbackEntry::new(RenderBlock::Thinking(block.clone()));
+        entry.display_mode = DisplayMode::Collapsed;
+        let area = Rect::new(0, 0, 60, 2);
+        let bullet_at = |entry: &ScrollbackEntry, tick: u64| {
+            let mut buf = Buffer::empty(area);
+            EntryRenderer::new(entry, &theme)
+                .with_tick(tick)
+                .render(area, &mut buf);
+            // Default layout: accent(1) + left_pad(2), so content starts at a set value.
+            buf.cell((3, 0)).unwrap().symbol().to_string()
+        };
+        let idle = bullet_at(&entry, 0);
+
+        assert!(block.set_summary_pending());
+        entry.block = RenderBlock::Thinking(block.clone());
+        let frames = crate::glyphs::braille_spinner_frames();
+        let first = bullet_at(&entry, 0);
+        let next = bullet_at(&entry, SUMMARY_SPINNER_DIVISOR);
+        assert_eq!(
+            Some(&first.as_str()),
+            frames.first(),
+            "the bullet becomes the spinner"
+        );
+        assert_eq!(
+            Some(&next.as_str()),
+            frames.get(1),
+            "the spinner advances with the tick"
+        );
+
+        assert!(block.set_summary("done".into()));
+        entry.block = RenderBlock::Thinking(block);
+        assert_eq!(
+            bullet_at(&entry, 0),
+            idle,
+            "the summary restores the bullet"
+        );
     }
 
     #[test]

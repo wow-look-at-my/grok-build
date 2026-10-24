@@ -22,6 +22,8 @@ impl SessionActor {
         else {
             return;
         };
+        // The client draws a spinner until the summary or a failure arrives.
+        self.send_thinking_summary_status(stream_start_ms, None);
         // One summarization request runs at a time per session.
         let previous = self.thinking_summary_tail.lock().unwrap().take();
         let actor = self.clone();
@@ -29,14 +31,29 @@ impl SessionActor {
             if let Some(previous) = previous {
                 let _ = previous.await;
             }
-            actor
+            if let Err(reason) = actor
                 .generate_thinking_summary(thinking, stream_start_ms)
-                .await;
+                .await
+            {
+                actor.send_thinking_summary_status(stream_start_ms, Some(reason));
+            }
         });
         *self.thinking_summary_tail.lock().unwrap() = Some(handle);
     }
 
-    async fn generate_thinking_summary(&self, thinking: String, stream_start_ms: i64) {
+    fn send_thinking_summary_status(&self, stream_start_ms: i64, failed: Option<String>) {
+        self.send_xai_notification_transient(XaiSessionUpdate::ThinkingSummaryStatus {
+            stream_start_ms,
+            failed,
+        });
+    }
+
+    /// The error is the text the client shows in place of the summary.
+    async fn generate_thinking_summary(
+        &self,
+        thinking: String,
+        stream_start_ms: i64,
+    ) -> Result<(), String> {
         use crate::session::helpers::thinking_summary as helpers;
         // Snapshot the session's earlier summaries before this call's own is recorded.
         let prior = self.thinking_summary_history.prior_for(stream_start_ms);
@@ -44,7 +61,7 @@ impl SessionActor {
             Ok(setup) => setup,
             Err(e) => {
                 tracing::warn!(error = %e, "thinking summary: no sampling client");
-                return;
+                return Err(format!("no sampling client: {e}"));
             }
         };
         let session_id = self.session_info.id.to_string();
@@ -76,13 +93,13 @@ impl SessionActor {
             Ok(response) => response,
             Err(e) => {
                 tracing::warn!(error = %e, "thinking summary: model call failed");
-                return;
+                return Err(format!("model call failed: {e}"));
             }
         };
         let summary = helpers::clean_thinking_summary(&response.assistant_text());
         if summary.is_empty() {
             tracing::warn!("thinking summary: the model returned no text");
-            return;
+            return Err("the model returned no text".to_string());
         }
         // Record BEFORE the broadcast: the next call may draw on this.
         self.thinking_summary_history
@@ -92,5 +109,6 @@ impl SessionActor {
             summary,
         })
         .await;
+        Ok(())
     }
 }
