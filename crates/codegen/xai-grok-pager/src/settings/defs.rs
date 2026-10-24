@@ -1783,7 +1783,7 @@ fn harness_model_settings() -> Vec<SettingMeta> {
             source: DynamicEnumSource::ActiveModelCatalog,
             supports_preview: false,
         },
-        restart_required: true,
+        restart_required: false,
     };
     xai_grok_models::HARNESS_MODEL_SLOTS
         .iter()

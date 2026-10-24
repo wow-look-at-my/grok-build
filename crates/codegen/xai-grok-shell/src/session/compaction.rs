@@ -1230,7 +1230,7 @@ impl SessionActor {
             tool_tokens = compaction_tool_tokens,
             "Running compact with model '{}' (slot pinned: {})",
             &sampling_config.model,
-            self.harness_models.get("compaction").is_some()
+            self.harness_model("compaction").is_some()
         );
         let mut last_error: Option<acp::Error> = None;
         let mut last_failure_outcome = CompactionOutcome::Failed;

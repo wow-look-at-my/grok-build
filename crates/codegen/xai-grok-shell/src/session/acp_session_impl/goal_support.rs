@@ -1060,6 +1060,51 @@ pub(crate) struct GoalRoleModelConfig {
     pub(crate) summarizer: crate::agent::config::GoalRoleModelChoice,
 }
 
+impl GoalRoleModelConfig {
+    /// Resolve every `/goal` role from `config`. The actor builder and the
+    /// `[models]` reload both call this.
+    pub(crate) fn resolve(
+        config: &crate::agent::config::Config,
+        use_current_model_only: bool,
+    ) -> Self {
+        use crate::agent::config::GoalRoleModelChoice;
+        let planner = config
+            .resolve_goal_planner_model(use_current_model_only)
+            .value;
+        let strategist = config
+            .resolve_goal_strategist_model(use_current_model_only)
+            .value;
+        let skeptic_pool = config
+            .resolve_goal_skeptic_models(use_current_model_only)
+            .value
+            .into_iter()
+            .filter_map(|c| match c {
+                GoalRoleModelChoice::Explicit(p) => Some(p),
+                // A `[models] goal_skeptic` slot names a model only.
+                GoalRoleModelChoice::ModelOnly(model) => Some(crate::util::config::GoalRoleModel {
+                    model,
+                    agent_type: String::new(),
+                }),
+                GoalRoleModelChoice::InheritCurrent => None,
+            })
+            .collect();
+        let summarizer = if use_current_model_only {
+            GoalRoleModelChoice::InheritCurrent
+        } else {
+            match config.resolve_harness_model("goal_summarizer") {
+                Some(m) => GoalRoleModelChoice::ModelOnly(m.value),
+                None => GoalRoleModelChoice::InheritCurrent,
+            }
+        };
+        Self {
+            planner,
+            strategist,
+            skeptic_pool,
+            summarizer,
+        }
+    }
+}
+
 /// Resume hint shared by the generic planner pause message and the no-`pause_message` fallback.
 pub(super) const GOAL_RESUME_HINT: &str = "Retry with /goal resume.";
 
@@ -1090,6 +1135,13 @@ pub(crate) fn laziness_injection_active(
 }
 
 impl SessionActor {
+    /// A copy of the current `/goal` role models. It is a copy so no borrow
+    /// stays open across an await while a reload replaces the value.
+    pub(super) fn goal_role_models(&self) -> GoalRoleModelConfig {
+        self.refresh_model_slots_if_stale();
+        self.goal_role_models.borrow().clone()
+    }
+
     pub(super) fn goal_harness_enabled(&self) -> bool {
         self.goal_harness_enabled
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -1618,7 +1670,7 @@ impl SessionActor {
         let (role_override, tool_names, inherit_tool_names) = self
             .resolve_goal_single_role_override(
                 "planner",
-                &self.goal_role_models.planner,
+                &self.goal_role_models().planner,
                 goal::RoleCapability::Strategist,
                 &event_tx,
             )
@@ -1727,7 +1779,7 @@ impl SessionActor {
         let (role_override, tool_names, inherit_tool_names) = self
             .resolve_goal_single_role_override(
                 "strategist",
-                &self.goal_role_models.strategist,
+                &self.goal_role_models().strategist,
                 goal::RoleCapability::Strategist,
                 &event_tx,
             )
@@ -1833,7 +1885,7 @@ impl SessionActor {
             .clone();
         // The summarizer keeps the parent toolset whatever model it runs on.
         let tool_names = self.resolve_inherit_role_tool_names().await;
-        let summarizer_model = match &self.goal_role_models.summarizer {
+        let summarizer_model = match &self.goal_role_models().summarizer {
             crate::agent::config::GoalRoleModelChoice::ModelOnly(m) => {
                 self.resolve_goal_role_model_only("summarizer", None, m)
                     .await

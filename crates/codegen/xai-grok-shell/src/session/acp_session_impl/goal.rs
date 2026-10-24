@@ -643,7 +643,7 @@ impl SessionActor {
             )
         } else {
             let assignment = crate::session::goal_classifier::assign_skeptic_models(
-                &self.goal_role_models.skeptic_pool,
+                &self.goal_role_models().skeptic_pool,
                 n as usize,
             );
             if let Some(o) = self.goal_tracker.lock().snapshot_mut() {
