@@ -42,7 +42,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## Branch-stats notes
 
 - The status bar shows `↑ahead ↓behind +ins -del` after the branch name (`branch_stats.rs`, drawn in `agent_view/render.rs`). A count of zero is not drawn.
-- Ahead/behind is against the branch HEAD was created from. The order is: the reflog's `branch: Created from X`, an upstream that names a DIFFERENT branch, `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. The current branch is never its own base, so `master` compares against `origin/master`.
+- Ahead/behind is against the branch the checkout tracks. The order is: the checked-out branch's configured upstream, including the same-named remote-tracking branch, the reflog's `branch: Created from X`, `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. The current branch's local ref is never its own base, so a branch tracking `origin/<name>` compares against that remote copy.
 - The +/- counts are the working tree against HEAD: staged, unstaged, and untracked files git does not ignore.
 - The diff reads the working tree. It runs off-thread behind a 5 s throttle in its own cache, not on the render path.
 

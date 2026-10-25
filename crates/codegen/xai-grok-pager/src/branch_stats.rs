@@ -111,9 +111,10 @@ pub fn compute_branch_stats(cwd: &Path) -> Result<Option<BranchStats>, git2::Err
     Ok(Some(stats))
 }
 
-/// The branch HEAD was created from, as a full ref name and its tip. The
-/// current branch is never its own base, and a detached HEAD has no branch to
-/// be created from.
+/// The base the status bar compares HEAD against: the checked-out branch's
+/// configured upstream, else the branch it was created from, else the
+/// repository's default branch. The current branch is never its own base, and
+/// a detached HEAD has none.
 fn resolve_base(repo: &git2::Repository, head_ref: Option<&str>) -> Option<(String, git2::Oid)> {
     let head_ref = head_ref?;
     let usable = |name: &str| -> Option<(String, git2::Oid)> {
@@ -128,17 +129,16 @@ fn resolve_base(repo: &git2::Repository, head_ref: Option<&str>) -> Option<(Stri
         Some((full, reference.target()?))
     };
 
+    if let Ok(upstream) = repo.branch_upstream_name(head_ref)
+        && let Ok(upstream) = upstream.as_str()
+        && let Some(found) = usable(upstream)
+    {
+        return Some(found);
+    }
     if let Some(from) = reflog_created_from(repo, head_ref)
         && let Some(found) = [format!("refs/heads/{from}"), format!("refs/remotes/{from}")]
             .iter()
             .find_map(|name| usable(name))
-    {
-        return Some(found);
-    }
-    if let Ok(upstream) = repo.branch_upstream_name(head_ref)
-        && let Ok(upstream) = upstream.as_str()
-        && !upstream_tracks_same_branch(upstream, head_ref)
-        && let Some(found) = usable(upstream)
     {
         return Some(found);
     }
@@ -162,21 +162,6 @@ fn reflog_created_from(repo: &git2::Repository, head_ref: &str) -> Option<String
     let message = oldest.message().ok()??;
     let from = message.strip_prefix("branch: Created from ")?.trim();
     (!from.is_empty() && from != "HEAD").then(|| from.to_string())
-}
-
-/// Whether `upstream` (`refs/remotes/<remote>/<branch>`) is the remote copy of
-/// `head_ref` (`refs/heads/<branch>`). A branch name can contain `/`, so only
-/// the earliest segment after `refs/remotes/` is taken as the remote name.
-fn upstream_tracks_same_branch(upstream: &str, head_ref: &str) -> bool {
-    let Some(branch) = head_ref.strip_prefix("refs/heads/") else {
-        return false;
-    };
-    match upstream.strip_prefix("refs/remotes/") {
-        Some(rest) => rest
-            .split_once('/')
-            .is_some_and(|(_, remote_branch)| remote_branch == branch),
-        None => upstream == head_ref,
-    }
 }
 
 fn short_ref_name(full: &str) -> &str {
@@ -243,6 +228,16 @@ mod tests {
         std::fs::write(dir.join(name), body).unwrap();
         git(dir, &["add", name]);
         git(dir, &["commit", "-qm", name]);
+    }
+
+    fn add_origin(dir: &Path) {
+        git(dir, &["remote", "add", "origin", "."]);
+    }
+
+    /// Configure `branch` to track the existing remote-tracking ref `upstream`.
+    fn track(dir: &Path, branch: &str, upstream: &str) {
+        let flag = format!("--set-upstream-to={upstream}");
+        git(dir, &["branch", &flag, branch]);
     }
 
     fn repo_on_master() -> tempfile::TempDir {
@@ -346,15 +341,80 @@ mod tests {
     }
 
     #[test]
-    fn upstream_of_the_same_branch_is_not_a_base() {
-        assert!(upstream_tracks_same_branch(
-            "refs/remotes/origin/claude/x",
-            "refs/heads/claude/x"
-        ));
-        assert!(!upstream_tracks_same_branch(
-            "refs/remotes/origin/master",
-            "refs/heads/claude/x"
-        ));
+    fn a_same_named_upstream_with_no_divergence_shows_no_ahead_behind() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        add_origin(dir);
+        git(dir, &["switch", "-q", "-c", "feature"]);
+        commit_file(dir, "f.txt", "f\n");
+        git(dir, &["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+        track(dir, "feature", "origin/feature");
+
+        let stats = compute_branch_stats(dir).unwrap().unwrap();
+        assert_eq!(stats.base.as_deref(), Some("origin/feature"));
+        assert_eq!(stats.ahead_behind, Some((0, 0)));
+        assert!(
+            format_parts(&stats).is_empty(),
+            "identical tips show no ahead/behind segment"
+        );
+    }
+
+    #[test]
+    fn a_same_named_upstream_with_newer_commits_reports_them_behind() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        add_origin(dir);
+        git(dir, &["switch", "-q", "-c", "feature"]);
+        commit_file(dir, "f.txt", "f\n");
+        git(dir, &["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+        track(dir, "feature", "origin/feature");
+        git(dir, &["switch", "-q", "--detach"]);
+        commit_file(dir, "u1.txt", "u1\n");
+        commit_file(dir, "u2.txt", "u2\n");
+        git(dir, &["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+        git(dir, &["switch", "-q", "feature"]);
+
+        let stats = compute_branch_stats(dir).unwrap().unwrap();
+        assert_eq!(stats.base.as_deref(), Some("origin/feature"));
+        assert_eq!(stats.ahead_behind, Some((0, 2)));
+    }
+
+    #[test]
+    fn the_configured_upstream_wins_over_the_reflog_start_point() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        add_origin(dir);
+        git(dir, &["branch", "develop"]);
+        git(dir, &["switch", "-q", "develop"]);
+        commit_file(dir, "d.txt", "d\n");
+        git(dir, &["switch", "-q", "-c", "feature", "develop"]);
+        commit_file(dir, "f.txt", "f\n");
+        // The upstream is older than the reflog's develop start point, so the
+        // chosen base is visible in the counts.
+        git(
+            dir,
+            &["update-ref", "refs/remotes/origin/feature", "master"],
+        );
+        track(dir, "feature", "origin/feature");
+
+        let stats = compute_branch_stats(dir).unwrap().unwrap();
+        assert_eq!(stats.base.as_deref(), Some("origin/feature"));
+        assert_eq!(stats.ahead_behind, Some((2, 0)));
+    }
+
+    #[test]
+    fn a_tracked_upstream_on_another_branch_is_the_base() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        add_origin(dir);
+        git(dir, &["update-ref", "refs/remotes/origin/main", "master"]);
+        git(dir, &["switch", "-q", "-c", "tracked"]);
+        commit_file(dir, "t.txt", "t\n");
+        track(dir, "tracked", "origin/main");
+
+        let stats = compute_branch_stats(dir).unwrap().unwrap();
+        assert_eq!(stats.base.as_deref(), Some("origin/main"));
+        assert_eq!(stats.ahead_behind, Some((1, 0)));
     }
 
     #[test]
