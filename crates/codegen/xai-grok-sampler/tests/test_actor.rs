@@ -1615,6 +1615,9 @@ async fn responses_doom_loop_does_not_resample_after_output_when_retry_only_befo
 mod output_rate {
     use super::*;
 
+    /// A pace entry that waits for the backup's request instead of sleeping.
+    const WAIT_FOR_BACKUP: u64 = u64::MAX;
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// A collapsed stream gets a backup generation beside it. The never
     /// finishes and the backup answers at the same time, so the backup's
@@ -1743,13 +1746,16 @@ mod output_rate {
         // The process-wide slot cap is sized for one session.
         set_max_parallel_requests(0);
         let counter = Arc::new(AtomicU32::new(0));
+        let backup_arrived = Arc::new(tokio::sync::Notify::new());
         let backup_dropped = Arc::new(std::sync::Mutex::new(None));
         let counter_handler = Arc::clone(&counter);
+        let arrived_handler = Arc::clone(&backup_arrived);
         let dropped_handler = Arc::clone(&backup_dropped);
         let app = Router::new().route(
             "/v1/chat/completions",
             post(move || {
                 let counter = Arc::clone(&counter_handler);
+                let arrived = Arc::clone(&arrived_handler);
                 let dropped = Arc::clone(&dropped_handler);
                 async move {
                     let attempt = counter.fetch_add(1, Ordering::SeqCst);
@@ -1758,14 +1764,30 @@ mod output_rate {
                         let mut events: Vec<(u64, Event)> = (0..20)
                             .map(|_| (200, text_chunk_event("x", false)))
                             .collect();
+                        events.push((WAIT_FOR_BACKUP, text_chunk_event("", false)));
                         events.extend((0..120).map(|_| (25, text_chunk_event(&fast, false))));
                         events.push((25, text_chunk_event("", true)));
-                        let paced = stream::iter(events).then(|(delay, event)| async move {
-                            tokio::time::sleep(Duration::from_millis(delay)).await;
-                            Ok::<_, std::convert::Infallible>(event)
+                        let paced = stream::iter(events).then(move |(delay, event)| {
+                            let arrived = Arc::clone(&arrived);
+                            async move {
+                                if delay == WAIT_FOR_BACKUP {
+                                    // The recovery is what cancels the backup,
+                                    // so the fast phase cannot begin before the
+                                    // backup's request has been counted.
+                                    let _ = tokio::time::timeout(
+                                        Duration::from_secs(20),
+                                        arrived.notified(),
+                                    )
+                                    .await;
+                                } else {
+                                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                                }
+                                Ok::<_, std::convert::Infallible>(event)
+                            }
                         });
                         return Sse::new(paced.boxed());
                     }
+                    arrived.notify_one();
                     let stamp = DropStamp(dropped);
                     let mut events: Vec<Event> =
                         (0..200).map(|_| text_chunk_event("", false)).collect();
@@ -1822,11 +1844,14 @@ mod output_rate {
         // Same reason as the recovery case: a queued backup cannot overtake anything while it waits for a slot.
         set_max_parallel_requests(0);
         let counter = Arc::new(AtomicU32::new(0));
+        let backup_arrived = Arc::new(tokio::sync::Notify::new());
         let counter_handler = Arc::clone(&counter);
+        let arrived_handler = Arc::clone(&backup_arrived);
         let app = Router::new().route(
             "/v1/chat/completions",
             post(move || {
                 let counter = Arc::clone(&counter_handler);
+                let arrived = Arc::clone(&arrived_handler);
                 async move {
                     let attempt = counter.fetch_add(1, Ordering::SeqCst);
                     let (text, count, delay, finish) = if attempt == 0 {
@@ -1834,14 +1859,33 @@ mod output_rate {
                     } else {
                         ("yy", 50, 50, true)
                     };
-                    let mut events: Vec<Event> =
-                        (0..count).map(|_| text_chunk_event(text, false)).collect();
-                    if finish {
-                        events.push(text_chunk_event("", true));
+                    if attempt != 0 {
+                        arrived.notify_one();
                     }
-                    let paced = stream::iter(events).then(move |event| async move {
-                        tokio::time::sleep(Duration::from_millis(delay)).await;
-                        Ok::<_, std::convert::Infallible>(event)
+                    let mut events: Vec<(u64, Event)> = (0..count)
+                        .map(|_| (delay, text_chunk_event(text, false)))
+                        .collect();
+                    if finish {
+                        events.push((delay, text_chunk_event("", true)));
+                    }
+                    if attempt == 0 {
+                        // Slow chunks put the stream past the floor's sustained span.
+                        events.insert(10, (WAIT_FOR_BACKUP, text_chunk_event("", false)));
+                    }
+                    let paced = stream::iter(events).then(move |(delay, event)| {
+                        let arrived = Arc::clone(&arrived);
+                        async move {
+                            if delay == WAIT_FOR_BACKUP {
+                                let _ = tokio::time::timeout(
+                                    Duration::from_secs(20),
+                                    arrived.notified(),
+                                )
+                                .await;
+                            } else {
+                                tokio::time::sleep(Duration::from_millis(delay)).await;
+                            }
+                            Ok::<_, std::convert::Infallible>(event)
+                        }
                     });
                     Sse::new(paced.boxed())
                 }
