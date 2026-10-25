@@ -1289,7 +1289,10 @@ mod tests {
                 if n == 0 {
                     return;
                 }
-                if !buf[..n].starts_with(request_prefix.as_bytes()) {
+                if !buf
+                    .get(..n)
+                    .is_some_and(|got| got.starts_with(request_prefix.as_bytes()))
+                {
                     return;
                 }
                 let _ = stream.write_all(answer.as_bytes());
