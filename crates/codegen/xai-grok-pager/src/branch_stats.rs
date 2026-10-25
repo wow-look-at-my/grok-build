@@ -112,35 +112,35 @@ pub fn compute_branch_stats(cwd: &Path) -> Result<Option<BranchStats>, git2::Err
 }
 
 /// The branch HEAD was created from, as a full ref name and its tip. The
-/// current branch is never its own base.
+/// current branch is never its own base, and a detached HEAD has no branch to
+/// be created from.
 fn resolve_base(repo: &git2::Repository, head_ref: Option<&str>) -> Option<(String, git2::Oid)> {
+    let head_ref = head_ref?;
     let usable = |name: &str| -> Option<(String, git2::Oid)> {
-        if Some(name) == head_ref {
+        if name == head_ref {
             return None;
         }
         let reference = repo.find_reference(name).ok()?.resolve().ok()?;
         let full = reference.name().ok()?.to_string();
-        if Some(full.as_str()) == head_ref {
+        if full == head_ref {
             return None;
         }
         Some((full, reference.target()?))
     };
 
-    if let Some(head_ref) = head_ref {
-        if let Some(from) = reflog_created_from(repo, head_ref)
-            && let Some(found) = [format!("refs/heads/{from}"), format!("refs/remotes/{from}")]
-                .iter()
-                .find_map(|name| usable(name))
-        {
-            return Some(found);
-        }
-        if let Ok(upstream) = repo.branch_upstream_name(head_ref)
-            && let Ok(upstream) = upstream.as_str()
-            && !upstream_tracks_same_branch(upstream, head_ref)
-            && let Some(found) = usable(upstream)
-        {
-            return Some(found);
-        }
+    if let Some(from) = reflog_created_from(repo, head_ref)
+        && let Some(found) = [format!("refs/heads/{from}"), format!("refs/remotes/{from}")]
+            .iter()
+            .find_map(|name| usable(name))
+    {
+        return Some(found);
+    }
+    if let Ok(upstream) = repo.branch_upstream_name(head_ref)
+        && let Ok(upstream) = upstream.as_str()
+        && !upstream_tracks_same_branch(upstream, head_ref)
+        && let Some(found) = usable(upstream)
+    {
+        return Some(found);
     }
 
     [
@@ -285,6 +285,36 @@ mod tests {
         let stats = compute_branch_stats(dir).unwrap().unwrap();
         assert_eq!(stats.base.as_deref(), Some("master"));
         assert_eq!(stats.ahead_behind, Some((1, 0)));
+    }
+
+    #[test]
+    fn a_detached_worktree_at_a_branch_tip_reports_no_divergence() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        // The default branch a detached HEAD used to be compared against.
+        git(dir, &["update-ref", "refs/remotes/origin/master", "HEAD"]);
+        git(
+            dir,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/master",
+            ],
+        );
+        git(dir, &["switch", "-q", "-c", "feature"]);
+        commit_file(dir, "f.txt", "f\n");
+        // A linked worktree detached at the branch tip is what a new Grok
+        // worktree looks like.
+        let outside = tempfile::tempdir().unwrap();
+        let wt = outside.path().join("wt");
+        git(
+            dir,
+            &["worktree", "add", "--detach", wt.to_str().unwrap(), "HEAD"],
+        );
+
+        let stats = compute_branch_stats(&wt).unwrap().unwrap();
+        assert_eq!(stats.base, None);
+        assert_eq!(stats.ahead_behind, None);
     }
 
     #[test]
