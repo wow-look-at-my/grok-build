@@ -48,6 +48,132 @@ fn plan(script: &str, mounts: Vec<Mount>, grok_home: &Path, cwd: &Path) -> JailP
         defaults: JailDefaults::default(),
         // No host worker: these scenarios exec a shell script inside the jail.
         ci_host_fd: None,
+        cache_dirs: Vec::new(),
+        overlay: false,
+        cache_redirect: None,
+    }
+}
+
+/// Whether this bwrap can mount an overlay.
+fn bwrap_can_overlay() -> bool {
+    Command::new("bwrap")
+        .args([
+            "--ro-bind",
+            "/",
+            "/",
+            "--overlay-src",
+            "/tmp",
+            "--tmp-overlay",
+            "/tmp",
+            "true",
+        ])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// The release default: `/tmp` and the cache are overlays of the host
+/// directories. The jail reads the host files. Its writes never reach the host.
+#[test]
+fn tmp_and_the_cache_are_overlays_of_the_host_directories() {
+    if !bwrap_is_usable() || !bwrap_can_overlay() {
+        eprintln!("SKIP: bubblewrap cannot mount an overlay on this host");
+        return;
+    }
+    let work = fixture_dir("overlay-work");
+    let grok_home = fixture_dir("overlay-home");
+    let cache = fixture_dir("overlay-cache");
+    std::fs::write(cache.join("entry"), "host").unwrap();
+    let host_tmp = PathBuf::from(format!("/tmp/grok-jail-overlay-{}", std::process::id()));
+    std::fs::write(&host_tmp, "host").unwrap();
+    let script = format!(
+        r#"
+        set -u
+        printf 'cache_read=%s\n' "$(cat {cache}/entry)"
+        printf 'jail' >{cache}/entry && printf 'cache_written=%s\n' "$(cat {cache}/entry)"
+        touch {cache}/new && echo cache_new_file
+        printf 'tmp_read=%s\n' "$(cat {tmp})"
+        touch /tmp/grok-jail-only && echo tmp_new_file
+        "#,
+        cache = cache.display(),
+        tmp = host_tmp.display(),
+    );
+    let mounts = vec![Mount {
+        access: Access::Rw,
+        path: work.clone(),
+    }];
+    let mut jailed = plan(&script, mounts, &grok_home, &work);
+    jailed.cache_dirs = vec![cache.clone()];
+    jailed.overlay = true;
+    let output = bwrap_command(&jailed).output().expect("bwrap must run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stdout}{stderr}");
+    for expected in [
+        "cache_read=host",
+        "cache_written=jail",
+        "cache_new_file",
+        "tmp_read=host",
+        "tmp_new_file",
+    ] {
+        assert!(stdout.contains(expected), "missing '{expected}': {stdout}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(cache.join("entry")).unwrap(),
+        "host",
+        "a jail write must stay in the overlay"
+    );
+    assert!(
+        !cache.join("new").exists(),
+        "a jail file must not reach the host cache"
+    );
+    assert!(
+        !Path::new("/tmp/grok-jail-only").exists(),
+        "a jail file must not reach the host /tmp"
+    );
+    let _ = std::fs::remove_file(&host_tmp);
+    for dir in [&work, &grok_home, &cache] {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// Without overlay support the cache is an empty tmpfs: the host files are
+/// not visible, and a write does not reach the host.
+#[test]
+fn the_cache_is_an_empty_tmpfs_without_overlay_support() {
+    if !bwrap_is_usable() {
+        eprintln!("SKIP: bubblewrap cannot build a sandbox on this host");
+        return;
+    }
+    let work = fixture_dir("tmpfs-work");
+    let grok_home = fixture_dir("tmpfs-home");
+    let cache = fixture_dir("tmpfs-cache");
+    std::fs::write(cache.join("entry"), "host").unwrap();
+    let script = format!(
+        "test -z \"$(ls -A {cache})\" && echo cache_is_fresh || echo CACHE_LEAKED; \
+         touch {cache}/new && echo cache_writable",
+        cache = cache.display(),
+    );
+    let mounts = vec![Mount {
+        access: Access::Rw,
+        path: work.clone(),
+    }];
+    let mut jailed = plan(&script, mounts, &grok_home, &work);
+    jailed.cache_dirs = vec![cache.clone()];
+    let output = bwrap_command(&jailed).output().expect("bwrap must run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("cache_is_fresh"), "{stdout}");
+    assert!(stdout.contains("cache_writable"), "{stdout}");
+    assert!(
+        !cache.join("new").exists(),
+        "a jail file must not reach the host cache"
+    );
+    for dir in [&work, &grok_home, &cache] {
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 
