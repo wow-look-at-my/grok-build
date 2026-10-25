@@ -52,7 +52,67 @@ fn plan(script: &str, grok_home: &Path, cwd: &Path) -> JailPlan {
         args: vec![OsString::from("-c"), OsString::from(script)],
         defaults: JailDefaults::default(),
         ci_host_fd: None,
+        cache_dirs: Vec::new(),
+        overlay: false,
+        cache_redirect: None,
     }
+}
+
+/// Seatbelt cannot mount. The macOS overlay is halves. The host cache and
+/// `/tmp` stay readable and refuse every write, and `XDG_CACHE_HOME` and
+/// `TMPDIR` name session directories that take the writes. That holds even
+/// under a read-write mount that contains the cache.
+#[test]
+fn the_seatbelt_jail_never_writes_the_host_cache_or_tmp() {
+    if !sandbox_exec_is_usable() {
+        eprintln!("SKIP: sandbox-exec cannot build a sandbox on this host");
+        return;
+    }
+    let work = fixture_dir("scratch-work");
+    let grok_home = fixture_dir("scratch-home");
+    let cache = work.join("cache");
+    let redirect = grok_home.join("sandbox-tmp").join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::create_dir_all(&redirect).unwrap();
+    std::fs::create_dir_all(grok_home.join("sandbox-tmp")).unwrap();
+    std::fs::write(cache.join("entry"), "host").unwrap();
+    let script = format!(
+        "printf 'cache_read=%s\\n' \"$(cat {cache}/entry)\"\n\
+         touch {cache}/new 2>/dev/null && printf 'HOST_CACHE_WRITABLE\\n' || printf 'host_cache_denied=1\\n'\n\
+         touch /tmp/grok-jail-probe-$$ 2>/dev/null && printf 'HOST_TMP_WRITABLE\\n' || printf 'host_tmp_denied=1\\n'\n\
+         touch \"$XDG_CACHE_HOME/new\" && printf 'redirect_writable=1\\n'\n\
+         touch \"$TMPDIR/new\" && printf 'tmpdir_writable=1\\n'\n",
+        cache = cache.display(),
+    );
+    let mut jailed = plan(&script, &grok_home, &work);
+    jailed.cache_dirs = vec![cache.clone()];
+    jailed.cache_redirect = Some(redirect.clone());
+    let output = seatbelt_command(&jailed)
+        .output()
+        .expect("sandbox-exec must run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "status={} stdout={stdout} stderr={stderr}\n{}",
+        output.status,
+        xai_grok_sandbox::jail::seatbelt_profile(&jailed)
+    );
+    for expected in [
+        "cache_read=host",
+        "host_cache_denied=1",
+        "host_tmp_denied=1",
+        "redirect_writable=1",
+        "tmpdir_writable=1",
+    ] {
+        assert!(stdout.contains(expected), "missing '{expected}': {stdout}");
+    }
+    assert!(
+        redirect.join("new").exists(),
+        "the redirect takes the writes"
+    );
+    let _ = std::fs::remove_dir_all(&work);
+    let _ = std::fs::remove_dir_all(&grok_home);
 }
 
 /// The jailed process must find the worker both ways: the fd itself (which is
