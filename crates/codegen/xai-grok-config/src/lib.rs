@@ -21,6 +21,7 @@ mod display_refresh;
 mod env_overlay;
 pub mod fs_atomic;
 pub mod global_hook_sources;
+pub mod host_write;
 mod loader;
 mod macos_managed;
 mod managed_cache;

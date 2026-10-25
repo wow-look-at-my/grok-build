@@ -1925,11 +1925,11 @@ fn main() {
     // spawn an unsandboxed `gh` CI-status worker and hand its stream fd into
     // the jail.
     if xai_grok_sandbox::ci_host::is_ci_host_subprocess() {
-        xai_grok_sandbox::ci_host::run_ci_host_worker_with(
-            xai_grok_pager::host_settings::handle_worker_request,
-        );
+        xai_grok_sandbox::ci_host::run_ci_host_worker();
         std::process::exit(0);
     }
+    // A sandbox may deny this process its own config files. The host worker writes them.
+    xai_grok_sandbox::ci_host::install_host_config_writer();
     // Before anything else.
     xai_grok_sandbox::jail::maybe_reexec_into_jail();
     xai_grok_telemetry::startup::mark_process_start();

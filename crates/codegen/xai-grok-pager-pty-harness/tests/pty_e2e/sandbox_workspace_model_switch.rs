@@ -2,12 +2,12 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// **`/model` under `--sandbox=workspace` switches live, on the wire, and on disk.**
-/// `workspace` write-denies `$GROK_HOME/config.toml` (trust boundary) for this
-/// process, so the persist leg rides the unsandboxed host worker that started
-/// before confinement. The switch must apply live and must land in `config.toml`;
-/// the in-process deny still stands for every tool path. See
-/// docs/user-guide/18-sandbox.md, "Direct global write protection".
+/// **Settings changed under `--sandbox=workspace` save to `config.toml`.**
+/// `workspace` write-denies `$GROK_HOME/config.toml` for this process, so grok
+/// writes it through the unsandboxed host worker that started before
+/// confinement. `/model` must switch live, on the wire and on disk, and a
+/// permission-mode change must save too. See docs/user-guide/18-sandbox.md,
+/// "Direct global write protection".
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 #[cfg(unix)]
@@ -88,22 +88,37 @@ async fn sandbox_workspace_model_switch_switches_on_wire_and_persists() {
         "the request after the switch must carry the switched model\nbodies: {bodies:#?}"
     );
 
-    // The in-process write-deny still holds; the host worker started before confinement is what lands the write.
     let config_path = content.sandbox().grok_home().join("config.toml");
+    wait_for_config(&config_path, "model-b");
+
+    // A setting that grants capability saves the same way: grok writes its own config.
+    harness
+        .inject_keys(b"/always-approve\r")
+        .expect("type always-approve");
+    wait_for_config(&config_path, "permission_mode = \"always-approve\"");
+    assert!(
+        !harness.contains_text("Could not save"),
+        "workspace confinement must not fail the permission-mode persist\nscreen:\n{}",
+        harness.screen_contents()
+    );
+
+    harness.quit().expect("clean quit");
+}
+
+/// Wait until `config.toml` holds `needle`, which only the host worker can write there.
+fn wait_for_config(config_path: &std::path::Path, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let config = std::fs::read_to_string(&config_path).unwrap_or_default();
-        if config.contains("model-b") {
-            break;
+        let config = std::fs::read_to_string(config_path).unwrap_or_default();
+        if config.contains(needle) {
+            return;
         }
         assert!(
             Instant::now() < deadline,
-            "[models].default must reach config.toml through the host worker\nconfig.toml:\n{config}"
+            "`{needle}` must reach config.toml through the host worker\nconfig.toml:\n{config}"
         );
         std::thread::sleep(Duration::from_millis(100));
     }
-
-    harness.quit().expect("clean quit");
 }
 
 /// Whether the sandbox event log holds a kernel-enforced application of the

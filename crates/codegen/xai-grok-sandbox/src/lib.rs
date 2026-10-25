@@ -41,10 +41,7 @@ mod runtime_sockets;
 #[cfg(test)]
 mod test_util;
 mod types;
-pub use hook_write_deny::{
-    profile_denies_user_config_write, profile_enforces_hook_write_deny,
-    requested_confinement_denies_user_config_write, verify_hook_write_deny_enforced,
-};
+pub use hook_write_deny::{profile_enforces_hook_write_deny, verify_hook_write_deny_enforced};
 pub use logging::SandboxLogger;
 pub use network_policy::{
     ChildNetworkPolicy, NETWORK_POLICY_SNAPSHOT_VERSION, NetworkPolicySnapshot,
