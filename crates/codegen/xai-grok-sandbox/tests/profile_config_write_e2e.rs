@@ -23,6 +23,9 @@ const SAVED_CONFIG: &str =
     "[models]\ndefault = \"model-b\"\n\n[ui]\npermission_mode = \"always-approve\"\n";
 #[cfg(target_os = "macos")]
 const SAVED_TRUST: &str = "version = 1\n";
+/// What the child tries to write to a file the worker must refuse.
+#[cfg(target_os = "macos")]
+const OTHER_CONTENT: &str = "refused = true\n";
 
 fn main() {
     // The worker child re-enters this binary with the marker set, exactly as the pager's `main` dispatches it.
@@ -122,7 +125,13 @@ fn parent() {
         std::fs::read_to_string(grok_home.join("trusted_folders.toml")).expect("read trust store"),
         SAVED_TRUST
     );
-    assert!(!grok_home.join("sandbox.toml").exists());
+    // The profile can create an empty `sandbox.toml` to deny. The refused write must not be in it.
+    assert!(
+        !std::fs::read_to_string(grok_home.join("sandbox.toml"))
+            .unwrap_or_default()
+            .contains(OTHER_CONTENT),
+        "the refused sandbox.toml write must not land"
+    );
     println!("{REPORT}PASS");
 }
 
@@ -174,7 +183,7 @@ fn confined_child() {
         "{REPORT}other_write={}",
         outcome(write_atomically(
             &grok_home.join("sandbox.toml"),
-            "x = 1\n",
+            OTHER_CONTENT,
             None
         ))
     );
