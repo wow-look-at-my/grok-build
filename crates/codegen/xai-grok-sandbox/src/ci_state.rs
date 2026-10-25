@@ -45,8 +45,8 @@ pub struct GhRun {
     /// GitHub `conclusion` of a completed run.
     #[serde(default)]
     pub conclusion: String,
-    /// Branch this run was triggered against.
-    #[serde(default)]
+    /// Branch this run was triggered against. `None` when the server does not say.
+    #[serde(default, deserialize_with = "empty_as_none")]
     pub head_branch: Option<String>,
     /// Workflow this run belongs to (`""` when unknown).
     #[serde(default)]
@@ -78,6 +78,14 @@ impl GhRun {
     pub fn is_success(&self) -> bool {
         self.conclusion.eq_ignore_ascii_case("success")
     }
+}
+
+fn empty_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.filter(|text| !text.is_empty()))
 }
 
 /// The `--json` field list that populates every [`GhRun`] field.
@@ -341,6 +349,16 @@ mod tests {
         assert_eq!(runs[0].workflow_name, "CI");
         assert_eq!(runs[0].database_id, Some(42));
         assert_eq!(ci_from_runs(runs), CiStatus::Yellow);
+    }
+
+    /// A mirror that serves the run list sends `"headBranch": ""` on every run.
+    /// The branch filter must keep those runs, or every branch reads as empty.
+    #[test]
+    fn an_empty_head_branch_reads_as_unknown() {
+        let json = br#"[{"conclusion":"success","status":"completed","headBranch":"","workflowName":"CI","databaseId":7},
+                        {"conclusion":"success","status":"completed","headBranch":null,"workflowName":"Lint"}]"#;
+        let runs = parse_gh_runs(json).expect("parseable");
+        assert!(runs.iter().all(|run| run.head_branch.is_none()), "{runs:?}");
     }
 
     #[test]
