@@ -2739,12 +2739,21 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
             };
             let esc_label = if *sp { "Esc revert" } else { "Esc cancel" };
             let consent = crate::settings::is_consent_chooser(key);
-            let mut shortcuts = vec![
-                Shortcut {
-                    label: nav_label,
+            let filtering = picker_is_dynamic(state, key);
+            let mut shortcuts = Vec::new();
+            if filtering {
+                shortcuts.push(Shortcut {
+                    label: "type to filter",
                     clickable: false,
                     id: 0,
-                },
+                });
+            }
+            shortcuts.push(Shortcut {
+                label: nav_label,
+                clickable: false,
+                id: 0,
+            });
+            shortcuts.push(
                 // A chooser picks one of the offered answers, so Enter "selects"
                 // The filter bar and the value editors, where Enter really does commit typed input, keep that wording
                 Shortcut {
@@ -2752,19 +2761,20 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                     clickable: false,
                     id: 0,
                 },
-                Shortcut {
-                    label: "double-click select",
-                    clickable: false,
-                    id: 0,
-                },
-                Shortcut {
-                    label: esc_label,
-                    clickable: false,
-                    id: 0,
-                },
-            ];
+            );
+            shortcuts.push(Shortcut {
+                label: "double-click select",
+                clickable: false,
+                id: 0,
+            });
+            shortcuts.push(Shortcut {
+                label: esc_label,
+                clickable: false,
+                id: 0,
+            });
             // Consent choosers hide reset; the key is disabled there too, so this stays a description of what actually works on the pane
-            if !consent {
+            // A filtering picker spends printable keys on the query, so `d` no longer resets there.
+            if !consent && !filtering {
                 shortcuts.push(Shortcut {
                     label: "d reset",
                     clickable: false,
