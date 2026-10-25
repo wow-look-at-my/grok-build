@@ -748,6 +748,11 @@ pub(crate) fn parse_remote_model_value(
                 .and_then(|v| v.as_object())
                 .and_then(parse_capabilities_reasoning_efforts)
         })
+        .or_else(|| {
+            obj.get("reasoning")
+                .and_then(|v| v.as_object())
+                .and_then(parse_reasoning_object_efforts)
+        })
         .unwrap_or_default();
     Some(crate::agent::config::ModelEntryConfig {
         id,
@@ -759,6 +764,8 @@ pub(crate) fn parse_remote_model_value(
         max_completion_tokens: get_u64(obj, "maxCompletionTokens")
             .or_else(|| get_u64(obj, "max_completion_tokens"))
             .or_else(|| capabilities.and_then(|c| get_u64(c, "max_output_tokens")))
+            .or_else(|| get_u64(obj, "max_output_tokens"))
+            .or_else(|| top_provider.and_then(|tp| get_u64(tp, "max_completion_tokens")))
             .and_then(|v| u32::try_from(v).ok()),
         temperature: get_f64(obj, "temperature").map(|v| v as f32),
         top_p: get_f64(obj, "topP").or_else(|| get_f64(obj, "top_p")).map(|v| v as f32),
@@ -817,7 +824,13 @@ pub(crate) fn parse_remote_model_value(
             .or_else(|| obj.get("supports_reasoning_effort"))
             .or_else(|| meta.and_then(|m| m.get("supportsReasoningEffort")))
             .and_then(|v| v.as_bool())
-            .unwrap_or(false),
+            .unwrap_or_else(|| {
+                obj.get("supported_parameters")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|params| {
+                        params.iter().any(|p| p.as_str() == Some("reasoning_effort"))
+                    })
+            }),
         reasoning_efforts,
         reasoning_effort_server_default,
         variants: obj
@@ -1003,6 +1016,35 @@ fn parse_capabilities_reasoning_efforts(
             tracing::warn!(
                 value = %default,
                 "capabilities.default_reasoning_effort is not a listed level; leaving the server default"
+            );
+        }
+    }
+    Some((options, !marked))
+}
+/// Effort menu from the `reasoning` object OpenRouter and Bifrost listings carry: `supported_efforts` is a bare-string list, `default_effort` names the marked entry.
+/// The second value is true when no entry got marked, so the request omits the effort and the server applies its own.
+fn parse_reasoning_object_efforts(
+    reasoning: &serde_json::Map<String, serde_json::Value>,
+) -> Option<(Vec<xai_grok_sampling_types::ReasoningEffortOption>, bool)> {
+    let arr = reasoning.get("supported_efforts")?.as_array()?;
+    let mut options =
+        xai_grok_sampling_types::parse_reasoning_effort_options(arr, "reasoning.supported_efforts");
+    if options.is_empty() {
+        return None;
+    }
+    let mut marked = false;
+    if let Some(default) = reasoning.get("default_effort").filter(|v| !v.is_null()) {
+        let level = default
+            .as_str()
+            .and_then(|s| s.parse::<xai_grok_sampling_types::ReasoningEffort>().ok());
+        for option in &mut options {
+            option.default = level == Some(option.value);
+            marked |= option.default;
+        }
+        if !marked {
+            tracing::warn!(
+                value = %default,
+                "reasoning.default_effort is not a listed level; leaving the server default"
             );
         }
     }
