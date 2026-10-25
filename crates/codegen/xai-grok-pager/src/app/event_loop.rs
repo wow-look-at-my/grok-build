@@ -2741,6 +2741,7 @@ pub(crate) fn load_initial_ui_config() -> xai_grok_shell::agent::config::UiConfi
                     }
                 }
             }
+            ui.subagent_models = crate::settings::subagent_models::pinned_models(&root);
             ui
         })
         .clone()

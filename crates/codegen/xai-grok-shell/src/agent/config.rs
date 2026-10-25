@@ -1233,9 +1233,6 @@ pub struct ModelsConfig {
     /// `/goal` closing summary role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal_summarizer: Option<String>,
-    /// Model every subagent runs on unless `[subagents.models].<name>` or the agent definition pins one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_default: Option<String>,
     /// Restricts which models are user-selectable for normal chat (picker, `/model`, `-m`).
     /// Non-matching models stay in the catalog but are never shown, defaulted to, or selectable.
     /// Special/internal models (web_search, image_description, subagents) are exempt. User-config globs (`*`, `?`, `[...]`) match the catalog key or model id, case-sensitive. Empty = no restriction; an excluded explicit `default`/`-m` is rejected once the model catalog is fetched. Fleet pins live on [`Requirements::allowed_models`] and replace this list.
@@ -3292,7 +3289,6 @@ impl Config {
             "goal_strategist" => m.goal_strategist.clone(),
             "goal_skeptic" => m.goal_skeptic.clone(),
             "goal_summarizer" => m.goal_summarizer.clone(),
-            "subagent_default" => m.subagent_default.clone(),
             _ => None,
         }
     }

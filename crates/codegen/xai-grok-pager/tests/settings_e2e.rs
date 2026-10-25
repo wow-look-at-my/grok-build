@@ -93,6 +93,7 @@ fn every_registered_setting_is_exercised() {
         // mouse tests below WALK that table and cover.
         if xai_grok_models::slot_for_setting_key(meta.key).is_some()
             || xai_grok_pager::settings::model_groups::group_for_setting_key(meta.key).is_some()
+            || xai_grok_pager::settings::subagent_models::is_setting_key(meta.key)
         {
             continue;
         }

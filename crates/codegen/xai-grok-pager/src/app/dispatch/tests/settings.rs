@@ -1715,6 +1715,22 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
                 let _ = dispatch(Action::SetModelGroupModel(group.id, id.0.to_string()), app);
             }
         }
+        key if crate::settings::subagent_models::is_setting_key(key) => {
+            use agent_client_protocol as acp;
+            use std::sync::Arc;
+            let agent_type =
+                crate::settings::subagent_models::type_for_setting_key(key).expect("guard matched");
+            let row = crate::settings::subagent_models::row_for_name(agent_type)
+                .expect("registered subagent rows name a known type");
+            if let ActiveView::Agent(aid) = app.active_view
+                && let Some(agent) = app.agents.get_mut(&aid)
+            {
+                let id = acp::ModelId::new(Arc::from("test-subagent-move"));
+                let info = acp::ModelInfo::new(id.clone(), "Test Subagent Move".to_string());
+                agent.session.models.available.insert(id.clone(), info);
+                let _ = dispatch(Action::SetSubagentModel(row.name, id.0.to_string()), app);
+            }
+        }
         other => {
             panic!(
                 "move_setting_away_from_default: no arm for `{other}`. \
