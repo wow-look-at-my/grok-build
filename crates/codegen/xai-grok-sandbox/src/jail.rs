@@ -503,10 +503,8 @@ fn session_dir() -> PathBuf {
         .join(std::process::id().to_string())
 }
 
-/// The host cache directories the jail never shows writable: `$XDG_CACHE_HOME`
-/// when set, then `~/.cache`. Each is created, because an overlay needs a
-/// lower directory and a tmpfs needs a mount point. A directory that contains
-/// the home directory is skipped: an overlay there would expose all of home.
+/// The host cache directories the jail never shows writable:
+/// `$XDG_CACHE_HOME` when set, then `~/.cache`.
 fn host_cache_dirs() -> Result<Vec<PathBuf>, JailError> {
     cache_dirs_for(
         xai_dirs::home_dir(),
@@ -514,6 +512,8 @@ fn host_cache_dirs() -> Result<Vec<PathBuf>, JailError> {
     )
 }
 
+/// Creates each directory, because an overlay needs a lower layer. Skips one
+/// that contains home: an overlay there exposes all of home.
 fn cache_dirs_for(home: Option<PathBuf>, xdg: Option<PathBuf>) -> Result<Vec<PathBuf>, JailError> {
     let xdg = xdg.filter(|path| path.is_absolute());
     let dot_cache = home.as_ref().map(|home| home.join(".cache"));
