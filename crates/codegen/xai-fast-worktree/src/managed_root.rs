@@ -1,15 +1,9 @@
 //! Where grok puts the worktrees it manages, and how to recognise them.
-//!
-//! A checkout grok creates lives under the grok home, at
-//! `<grok home>/worktrees/<repo>/<label>`. Checkouts that a release wrote
-//! inside the repository itself, at `<main checkout>/.grok/worktrees/<label>`,
-//! are still recognised wherever a managed path is asked about.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-/// Name of the directory that holds managed checkouts, under the grok home and
-/// under a repository's own `.grok` directory.
+/// Name of the directory that holds managed checkouts.
 pub const WORKTREES_DIR: &str = "worktrees";
 
 /// Parent of the checkouts a release wrote inside their own repository.
@@ -62,10 +56,7 @@ pub fn is_worktree_dir(path: &Path) -> bool {
 
 /// The boundary of a managed layout that `path` sits in, if any. The returned
 /// directory is never itself a checkout: a path is grok-managed exactly when
-/// it is strictly below the boundary. `home_root` is the grok home's
-/// `worktrees` directory, where new checkouts are created; a repository's own
-/// `.grok/worktrees` is recognised as well, for the checkouts a release wrote
-/// there.
+/// it is strictly below the boundary.
 pub fn managed_worktrees_boundary(path: &Path, home_root: &Path) -> Option<PathBuf> {
     if path.starts_with(home_root) {
         return Some(home_root.to_path_buf());

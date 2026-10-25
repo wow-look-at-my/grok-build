@@ -913,8 +913,7 @@ fn managed_base_dir_for_source_in(
     };
     let first = home_dir.join(first);
     // `worktrees/<checkout>...` is the shape an unforked grok build left
-    // behind: the first component is the checkout itself, so a fork lands
-    // beside it under the root rather than inside it.
+    // behind: the first component is the checkout itself.
     if xai_fast_worktree::is_worktree_dir(&first) {
         return Some(home_dir);
     }
@@ -3918,8 +3917,24 @@ mod tests {
         std::fs::create_dir_all(&plain).unwrap();
         assert_eq!(lookup_worktree_label(&plain.to_string_lossy()), None);
 
-        // A source under the repository's own root gets its new checkout under
-        // the grok home, never a second one inside the repository.
+        // Removal reaches it by registry id and by its path, so gc and rm
+        // treat a checkout inside its repository like any other.
+        assert_eq!(
+            resolve_worktree_by_id_or_path("repo-local-wt")
+                .unwrap()
+                .as_deref(),
+            Some(wt.as_path()),
+            "a repo-local checkout is removed by its id"
+        );
+        assert_eq!(
+            resolve_worktree_by_id_or_path(&wt.to_string_lossy())
+                .unwrap()
+                .as_deref(),
+            Some(wt.as_path()),
+            "a repo-local checkout is removed by its path"
+        );
+
+        // A source under the repository's own root gets its new checkout under the grok home.
         let next = resolve_worktree_path(&home, &create_request(&wt, "next"), &root.join("repo"));
         assert_eq!(
             Path::new(&next),
