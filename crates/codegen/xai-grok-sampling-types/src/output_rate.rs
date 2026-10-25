@@ -69,7 +69,7 @@ impl Default for OutputRateFloorPolicy {
 }
 
 impl OutputRateFloorPolicy {
-    /// The meter reports no rate until [`MIN_DISPLAY_SPAN`] of stream.
+    /// The floor judges no rate until [`MIN_DISPLAY_SPAN`] of stream, however early the meter reveals one.
     pub const MIN_WINDOW_SECS: u64 = 2;
     pub const MIN_SUSTAINED_SECS: u64 = 1;
     pub const DEFAULT_MAX_RETRIES: u32 = 2;
