@@ -244,18 +244,44 @@ impl OutputRateMeter {
     }
 
     /// The trailing-window estimate at `now`: output tokens per second over
-    /// the span the response has run.
+    /// the samples still inside the window. `None` until chunks have landed,
+    /// because a rate needs an interval to divide by. The span is the
+    /// intervals between the chunks, not the distance to `now`. Dividing by
+    /// the distance to `now` would let the wait since the last chunk drag the
+    /// number down. A reading taken between arrivals would depend on the
+    /// caller's tick phase instead of the stream. A wait longer than one
+    /// ordinary gap is the stream having nothing to say. That silence does
+    /// lengthen the span. A stall still reads as a falling rate.
     fn estimate(&self, now: Instant) -> Option<f64> {
-        self.anchored_rate(now.checked_sub(self.window), now)
+        let samples: Vec<(Instant, u64)> =
+            self.in_range(now.checked_sub(self.window), now).collect();
+        let first = samples.first()?.0;
+        let last = samples.last()?.0;
+        let intervals = samples.len() - 1;
+        if intervals == 0 {
+            return None;
+        }
+        let base = last.saturating_duration_since(first).as_secs_f64();
+        if base <= 0.0 {
+            return None;
+        }
+        let ordinary_gap = base / intervals as f64;
+        let tail = now.saturating_duration_since(last).as_secs_f64();
+        let span = (base + (tail - ordinary_gap).max(0.0)).min(self.window.as_secs_f64());
+        let tokens = samples.iter().skip(1).map(|(_, bytes)| *bytes).sum::<u64>() as f64
+            / xai_token_estimation::BYTES_PER_TOKEN as f64;
+        Some(tokens / span)
     }
 
-    /// A rate over the samples in `(after, now]`, anchored on the first of
-    /// them. The anchor's own bytes are excluded, so the count and the span
-    /// cover the same intervals.
+    /// A rate over the samples in `(after, now]`, from the first of them to the
+    /// last. The first one's bytes are excluded, so the token count and the
+    /// span cover the same intervals. This is the estimate with no dependence
+    /// on where `now` falls, which is what the ramp test needs.
     fn anchored_rate(&self, after: Option<Instant>, now: Instant) -> Option<f64> {
         let mut samples = self.in_range(after, now);
         let anchor = samples.next()?.0;
-        let span = now.saturating_duration_since(anchor);
+        let last = self.samples.back().filter(|(at, _)| *at <= now)?.0;
+        let span = last.saturating_duration_since(anchor);
         if span.is_zero() {
             return None;
         }
@@ -267,14 +293,13 @@ impl OutputRateMeter {
     /// The rate once it has converged on the rate this stream is running at,
     /// and `None` while the reading would still be moving. The reading is
     /// [`Self::estimate`]: the same quantity the floor judges, over less
-    /// data. Things have to hold. Enough chunks have landed that an interval
-    /// means something: [`REVEAL_MIN_SAMPLES`]. The reading is fresh. It
-    /// divides by the span to `now`, so the wait since the last chunk drags
-    /// it down; that wait is arrival phase, not output. A wait past
-    /// [`REVEAL_TOLERANCE`] of the span is the stream having nothing to say,
-    /// and no reading. The stream has stopped ramping. The recent half of
-    /// the span has to carry the same rate the whole window does. Only a
-    /// rate that is changing fails that.
+    /// data. Enough chunks have landed that an interval means something:
+    /// [`REVEAL_MIN_SAMPLES`]. A quotient over one arrival is that arrival's
+    /// phase, not the stream's. The stream has stopped ramping. The recent
+    /// half of the samples has to carry the whole window's rate. Only a rate
+    /// that is changing fails that, and a collapse still passes once it has
+    /// settled. The number on screen follows the stream rather than
+    /// disappearing.
     pub fn converged(&self, now: Instant) -> Option<f64> {
         let span = self.observed_span(now);
         if span < MIN_REVEAL_SPAN {
@@ -286,10 +311,6 @@ impl OutputRateMeter {
         }
         let window_start = now.checked_sub(self.window);
         if self.in_range(window_start, now).count() < REVEAL_MIN_SAMPLES {
-            return None;
-        }
-        let last = self.samples.back().filter(|(at, _)| *at <= now)?.0;
-        if now.saturating_duration_since(last) > span.mul_f64(REVEAL_TOLERANCE) {
             return None;
         }
         let half = now.checked_sub(span / 2);
@@ -483,13 +504,22 @@ impl OutputRateGate {
     /// The rate to show for this call, or `None` before the stream has
     /// converged enough for the number to mean anything. The first reading is
     /// published as soon as [`OutputRateMeter::converged`] accepts one.
+    ///
+    /// Once a call has shown a rate it keeps showing one. A 10x jump or a
+    /// collapse changes the number; it never withdraws the reading and returns
+    /// the row to no measurement. A stream that has gone quiet reads as zero
+    /// for the same reason. The gate is built per attempt, so the latch lasts
+    /// exactly one model call.
     pub fn rate(&mut self, now: Instant) -> Option<f64> {
         let now = self.measured_at(now);
-        if !self.revealed && self.meter.converged(now).is_none() {
-            return None;
+        if !self.revealed {
+            let Some(rate) = self.meter.converged(now) else {
+                return None;
+            };
+            self.revealed = true;
+            return Some(rate);
         }
-        self.revealed = true;
-        self.meter.estimate(now)
+        Some(self.meter.estimate(now).unwrap_or(0.0))
     }
 
     /// Whether this call has shown a reading yet. It stays set for the rest of
@@ -1067,6 +1097,61 @@ mod tests {
                 .iter()
                 .filter_map(|(i, rate)| rate.map(|r| (*i, r)))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// A jump and a collapse change the number on screen. Neither may take the
+    /// reading away: a segment that vanishes on a burst reads as a broken
+    /// measurement.
+    #[test]
+    fn a_revealed_reading_survives_a_jump_and_a_collapse() {
+        let start = Instant::now();
+        let mut gate = OutputRateGate::new(Some(collapsed_policy()));
+        let step = Duration::from_millis(100);
+        let mut revealed = false;
+        let mut readings = Vec::new();
+        for i in 0..280 {
+            let now = start + step * (i as u32);
+            let bytes = match i {
+                0..=79 => 40,
+                80..=119 => 400,
+                120..=239 => 40,
+                _ => 0,
+            };
+            if bytes > 0 {
+                gate.record(now, bytes);
+            }
+            if let Some(rate) = gate.rate(now) {
+                revealed = true;
+                readings.push((i, rate));
+            }
+        }
+        assert!(revealed, "the steady opening must reveal a rate");
+        assert!(
+            readings.iter().all(|(i, _)| *i >= 5),
+            "nothing is published before the reveal: {readings:?}"
+        );
+        let burst = readings
+            .iter()
+            .find(|(i, _)| *i >= 115)
+            .expect("the burst has a reading")
+            .1;
+        assert!(
+            burst > 400.0,
+            "the jump moved the number on screen: {burst}"
+        );
+        let recovered = readings
+            .iter()
+            .find(|(i, _)| *i == 239)
+            .expect("the stream settling back has a reading")
+            .1;
+        assert!(
+            (recovered - 100.0).abs() < 20.0,
+            "the reading came back down with the stream: {recovered}"
+        );
+        assert!(
+            readings.iter().any(|(i, _)| *i == 279),
+            "a stream that stops dead keeps the segment: {readings:?}"
         );
     }
 

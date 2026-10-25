@@ -1928,6 +1928,94 @@ mod output_rate {
         assert_eq!(response.assistant_text(), "xxxxxxxxxxxx");
     }
 
+    /// A steady stream publishes a rate long before the fixed span the meter
+    /// used to wait. For, and keeps publishing across a burst and across a
+    /// stall. The client renders what this event carries, so a gap here is a
+    /// row with no `tok/s` under a running response.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_steady_stream_publishes_its_rate_early_and_keeps_it() {
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || async move {
+                // Chunks at a set value ms each.
+                let mut events: Vec<(u64, Event)> = Vec::new();
+                for _ in 0..100 {
+                    events.push((50, text_chunk_event(&"f".repeat(40), false)));
+                }
+                for _ in 0..20 {
+                    events.push((50, text_chunk_event(&"F".repeat(400), false)));
+                }
+                for _ in 0..20 {
+                    events.push((100, text_chunk_event("", false)));
+                }
+                events.push((50, text_chunk_event("", true)));
+                let paced = stream::iter(events).then(|(delay, event)| async move {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    Ok::<_, std::convert::Infallible>(event)
+                });
+                Sse::new(paced.boxed())
+            }),
+        );
+        let server = MockServer::spawn(app).await;
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let handle = SamplerActor::spawn(
+            test_config(server.base_url(), "test-model"),
+            RetryPolicy::default(),
+            event_tx,
+        );
+        let events = collect_timed(event_rx);
+
+        let result = handle
+            .submit_and_collect(RequestId::from("req-rate-early"), user_request("hi"))
+            .await;
+        server.shutdown();
+        result.expect("the steady stream answers");
+
+        let events = events.lock().unwrap();
+        let first_token_at = events
+            .iter()
+            .find(|(_, e)| matches!(e, SamplingEvent::ChannelToken { .. }))
+            .map(|(at, _)| *at)
+            .expect("the stream produced tokens");
+        let first_rate_at = events
+            .iter()
+            .find(|(_, e)| matches!(e, SamplingEvent::OutputRate { .. }))
+            .map(|(at, _)| *at)
+            .expect("the stream published a rate");
+        assert!(
+            first_rate_at.saturating_duration_since(first_token_at) < Duration::from_millis(1500),
+            "the first reading took {:?}, which is the fixed floor this must beat",
+            first_rate_at.saturating_duration_since(first_token_at)
+        );
+
+        let rates: Vec<f64> = events
+            .iter()
+            .filter_map(|(_, e)| match e {
+                SamplingEvent::OutputRate { tokens_per_sec, .. } => Some(*tokens_per_sec),
+                _ => None,
+            })
+            .collect();
+        assert!(rates.len() >= 3, "the rate keeps arriving: {rates:?}");
+        let peak = rates.iter().copied().fold(f64::MIN, f64::max);
+        assert!(peak > 300.0, "the burst reached the client: {rates:?}");
+        // The window averages, so a couple of seconds of silence bends
+        // the number down rather than flattening it.
+        let after_peak: Vec<f64> = rates
+            .iter()
+            .copied()
+            .skip_while(|rate| *rate < peak)
+            .skip(1)
+            .collect();
+        assert!(
+            after_peak.len() >= 2,
+            "the stall still publishes readings: {rates:?}"
+        );
+        assert!(
+            after_peak.first() > after_peak.last(),
+            "the stall reads as a falling number: {after_peak:?}"
+        );
+    }
+
     /// A server-side web search delivers nothing while it runs. The model is not
     /// generating during it. The gap is the server's time and not a collapsed
     /// stream: a response that searches for longer than the sustained duration is
