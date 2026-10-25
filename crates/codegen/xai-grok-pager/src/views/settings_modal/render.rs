@@ -1016,7 +1016,7 @@ pub(super) fn render_picking_enum(
             Style::default().fg(theme.text_primary)
         };
         let text = truncate_str(&prompt, area.width as usize);
-        buf.set_span(choices_y, area.x, &Span::styled(text, style), area.width);
+        buf.set_span(area.x, choices_y, &Span::styled(text, style), area.width);
         choices_y = choices_y.saturating_add(1);
         max_choices_h = max_choices_h.saturating_sub(1);
     }
@@ -1027,8 +1027,8 @@ pub(super) fn render_picking_enum(
         let message = format!("No matches for \"{}\"", state.picker_query.trim());
         let text = truncate_str(&message, area.width as usize);
         buf.set_span(
-            choices_y,
             area.x,
+            choices_y,
             &Span::styled(text, Style::default().fg(theme.gray)),
             area.width,
         );

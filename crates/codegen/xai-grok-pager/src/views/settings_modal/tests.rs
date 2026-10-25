@@ -4242,6 +4242,13 @@ fn model_picker_draws_ids_instead_of_blank_labels() {
         text.contains("No matches"),
         "a no-match query must show the empty state, got:\n{text}"
     );
+    let filter_y =
+        find_text_row(&buf, area, "Filter: zzz").expect("the query must render above the choices");
+    let no_match_y = find_text_row(&buf, area, "No matches").expect("the empty state must render");
+    assert!(
+        no_match_y > filter_y,
+        "the empty state must sit below the query row; filter_y={filter_y} no_match_y={no_match_y}"
+    );
 }
 
 fn buffer_text(buf: &Buffer, area: Rect) -> String {
