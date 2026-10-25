@@ -238,6 +238,8 @@ pub enum JailError {
         path: String,
         source: std::io::Error,
     },
+    #[error("the sandbox session directory: {0}")]
+    SessionDir(String),
     #[error("`{0}` is not installed, so --sandbox cannot confine this process")]
     MissingBackend(&'static str),
     #[error("--sandbox is not supported on this platform")]
@@ -468,14 +470,11 @@ pub fn build_plan(
             path: cwd.clone(),
         },
     );
-    let temp_dir = dedicated_temp_dir()?;
+    let session = ensure_session_dir()?;
+    let temp_dir = dedicated_temp_dir(&session)?;
     let cache_dirs = host_cache_dirs()?;
     // A host sink for `--rn` denoted paths.
-    let deny_sink = session_dir().join("deny-sink");
-    std::fs::create_dir_all(&deny_sink).map_err(|source| JailError::NoTempDir {
-        path: deny_sink.display().to_string(),
-        source,
-    })?;
+    let deny_sink = session_subdir(&session, "deny-sink")?;
     let plan = JailPlan {
         mounts,
         grok_home,
@@ -496,11 +495,73 @@ pub fn build_plan(
     Ok(plan)
 }
 
+/// The file that marks a directory as a session directory this module made.
+const SESSION_MARKER: &str = ".grok-sandbox-session";
+
+/// The parent of every session directory.
+fn sandbox_tmp_root(grok_home: &Path) -> PathBuf {
+    grok_home.join("sandbox-tmp")
+}
+
 /// This process's directory under `$GROK_HOME/sandbox-tmp`.
 fn session_dir() -> PathBuf {
-    crate::paths::grok_home()
-        .join("sandbox-tmp")
-        .join(std::process::id().to_string())
+    sandbox_tmp_root(&crate::paths::grok_home()).join(std::process::id().to_string())
+}
+
+/// Create this process's session directory, once per process. It is always
+/// new: `create_dir` fails on anything already at the path. So `TMPDIR` and
+/// `XDG_CACHE_HOME`, which live in it, can never name a folder that existed
+/// before.
+fn ensure_session_dir() -> Result<PathBuf, JailError> {
+    static SESSION: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
+    SESSION
+        .get_or_init(create_session_dir)
+        .clone()
+        .map_err(JailError::SessionDir)
+}
+
+fn create_session_dir() -> Result<PathBuf, String> {
+    let root = sandbox_tmp_root(&crate::paths::grok_home());
+    std::fs::create_dir_all(&root)
+        .map_err(|e| format!("could not create {}: {e}", root.display()))?;
+    require_real_dir(&root)?;
+    let dir = session_dir();
+    match std::fs::symlink_metadata(&dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("could not inspect {}: {e}", dir.display())),
+        // A dead process with this pid left it.
+        Ok(_) if is_session_dir(&dir) => std::fs::remove_dir_all(&dir)
+            .map_err(|e| format!("could not remove the stale {}: {e}", dir.display()))?,
+        Ok(_) => {
+            return Err(format!(
+                "{} exists and is not a sandbox session directory; it is never reused or deleted",
+                dir.display()
+            ));
+        }
+    }
+    std::fs::create_dir(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    std::fs::write(dir.join(SESSION_MARKER), "")
+        .map_err(|e| format!("could not mark {}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Refuse a path that is a symlink or not a directory. A symlinked
+/// `sandbox-tmp` would point the cleanup at somebody else's folder.
+fn require_real_dir(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => Ok(()),
+        Ok(_) => Err(format!(
+            "{} is a symlink or not a directory; the sandbox refuses to use it",
+            path.display()
+        )),
+        Err(e) => Err(format!("could not inspect {}: {e}", path.display())),
+    }
+}
+
+/// Whether `dir` is a real directory, not a symlink, that holds the marker file.
+fn is_session_dir(dir: &Path) -> bool {
+    std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir())
+        && std::fs::symlink_metadata(dir.join(SESSION_MARKER)).is_ok_and(|meta| meta.is_file())
 }
 
 /// The host cache directories the jail never shows writable:
@@ -593,17 +654,31 @@ impl JailPlan {
 
 /// A fresh scratch directory for this process. On Linux the jail mounts an
 /// overlay or a tmpfs over `/tmp` and this directory is that mount, so it
-/// never touches the host. On macOS Seatbelt mounts nothing, so the directory
-/// is a real, empty one under `$GROK_HOME` and `TMPDIR` points at it.
-fn dedicated_temp_dir() -> Result<PathBuf, JailError> {
+/// never touches the host.
+fn dedicated_temp_dir(session: &Path) -> Result<PathBuf, JailError> {
     if cfg!(target_os = "linux") {
         return Ok(PathBuf::from(JAIL_TMP));
     }
-    let path = session_dir().join("tmp");
-    std::fs::create_dir_all(&path).map_err(|source| JailError::NoTempDir {
-        path: path.display().to_string(),
-        source,
-    })?;
+    session_subdir(session, "tmp")
+}
+
+/// A subdirectory of this process's fresh session directory. One that exists
+/// already was made by this process, by an earlier plan. It must still be a
+/// real directory, never a symlink.
+fn session_subdir(session: &Path, name: &str) -> Result<PathBuf, JailError> {
+    let path = session.join(name);
+    match std::fs::create_dir(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            require_real_dir(&path).map_err(JailError::SessionDir)?;
+        }
+        Err(source) => {
+            return Err(JailError::NoTempDir {
+                path: path.display().to_string(),
+                source,
+            });
+        }
+        Ok(()) => {}
+    }
     Ok(path)
 }
 
@@ -1006,12 +1081,27 @@ pub fn maybe_reexec_into_jail() {
 fn spawn_session_reaper(dir: &Path) -> Option<std::os::unix::io::RawFd> {
     use std::os::unix::io::{AsRawFd as _, IntoRawFd as _};
     use std::os::unix::process::CommandExt as _;
+    let root = dir.parent()?;
+    let name = dir.file_name()?;
+    require_real_dir(root).ok()?;
+    if !is_session_dir(dir) {
+        return None;
+    }
     let (reader, writer) = std::io::pipe().ok()?;
     crate::ci_host::inherit_across_exec(writer.as_raw_fd())?;
     let writer_fd = writer.as_raw_fd();
+    // The reaper starts in the real `sandbox-tmp`, before the jail exists,
+    // and names the session directory by one relative component.
+    let script = format!(
+        "cat >/dev/null; [ -d \"$1\" ] && [ ! -L \"$1\" ] && [ -f \"$1/{SESSION_MARKER}\" ] \
+         && [ ! -L \"$1/{SESSION_MARKER}\" ] && exec rm -rf -- \"./$1\""
+    );
     let mut cmd = std::process::Command::new("/bin/sh");
-    cmd.args(["-c", "cat >/dev/null; exec rm -rf -- \"$1\"", "sh"])
-        .arg(dir)
+    cmd.arg("-c")
+        .arg(script)
+        .arg("sh")
+        .arg(name)
+        .current_dir(root)
         .stdin(reader)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -1034,10 +1124,17 @@ fn spawn_session_reaper(dir: &Path) -> Option<std::os::unix::io::RawFd> {
 /// they hold the `TMPDIR` and cache upper layers, which must not outlive the
 /// session the way a tmpfs does not.
 fn sweep_stale_session_dirs(grok_home: &Path) {
-    let Ok(entries) = std::fs::read_dir(grok_home.join("sandbox-tmp")) else {
+    let root = sandbox_tmp_root(grok_home);
+    if require_real_dir(&root).is_err() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(&root) else {
         return;
     };
     for entry in entries.flatten() {
+        if !is_session_dir(&entry.path()) {
+            continue;
+        }
         let Some(pid) = entry
             .file_name()
             .to_str()
@@ -1133,18 +1230,12 @@ fn prepare_cache_redirect(plan: &JailPlan) -> Result<Option<PathBuf>, JailError>
     ) {
         return Ok(None);
     }
-    let target = session_dir().join("cache");
+    // The session directory is new.
+    let target = ensure_session_dir()?.join("cache");
     let no_dir = |source| JailError::NoTempDir {
         path: target.display().to_string(),
         source,
     };
-    // A pid reused from a dead session can leave one behind.
-    if target.exists() {
-        std::fs::remove_dir_all(&target).map_err(no_dir)?;
-    }
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(no_dir)?;
-    }
     if plan.defaults.cache == TmpHandling::Overlay
         && let Some(source) = plan.cache_dirs.first()
     {
@@ -1156,13 +1247,14 @@ fn prepare_cache_redirect(plan: &JailPlan) -> Result<Option<PathBuf>, JailError>
                      copy-on-write clone of {}: {e}",
                     source.display()
                 );
-                if target.exists() {
+                // A partial clone, inside the new session directory.
+                if std::fs::symlink_metadata(&target).is_ok() {
                     std::fs::remove_dir_all(&target).map_err(no_dir)?;
                 }
             }
         }
     }
-    std::fs::create_dir_all(&target).map_err(no_dir)?;
+    std::fs::create_dir(&target).map_err(no_dir)?;
     Ok(Some(target))
 }
 
@@ -2479,8 +2571,7 @@ mod tests {
     #[cfg(unix)]
     fn the_session_reaper_removes_the_directory_once_the_jail_and_its_children_exit() {
         let root = FixtureHome::new("reaper");
-        let dir = root.0.join("session");
-        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        let dir = marked_session(&root.0, "4242");
         let fd = spawn_session_reaper(&dir).expect("start the reaper");
         // A process the jail started inherits the write end, like any tool would.
         #[allow(clippy::disallowed_methods)]
@@ -2503,6 +2594,111 @@ mod tests {
         assert!(
             !dir.exists(),
             "the reaper must remove the session directory once every holder exits"
+        );
+    }
+
+    /// A session directory as `create_session_dir` makes it, under `root`.
+    fn marked_session(root: &Path, name: &str) -> PathBuf {
+        let dir = root.join(name);
+        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        std::fs::write(dir.join("cache/entry"), "jail").unwrap();
+        std::fs::write(dir.join(SESSION_MARKER), "").unwrap();
+        dir
+    }
+
+    /// A folder with real data that no cleanup may ever touch.
+    fn real_folder(root: &Path, name: &str) -> PathBuf {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("precious"), "user data").unwrap();
+        dir
+    }
+
+    fn wait_for_reaper(fd: i32) {
+        // SAFETY: the fd the reaper call leaked for the exec; nothing else owns it.
+        unsafe { libc::close(fd) };
+        // The reaper exits fast once it sees EOF; give it ample time.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_session_reaper_refuses_a_folder_without_the_marker() {
+        let root = FixtureHome::new("reaper-unmarked");
+        let real = real_folder(&root.0, "4243");
+        assert!(
+            spawn_session_reaper(&real).is_none(),
+            "a folder this module did not mark must never get a reaper"
+        );
+        assert!(real.join("precious").exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_symlink_swapped_in_during_the_session_cannot_redirect_the_reaper() {
+        use std::os::unix::fs::symlink;
+        let root = FixtureHome::new("reaper-swap");
+        let tmp_root = root.0.join("sandbox-tmp");
+        let dir = marked_session(&tmp_root, "4244");
+        let fd = spawn_session_reaper(&dir).expect("start the reaper");
+        // The jail can write `$GROK_HOME`.
+        let real = real_folder(&root.0, "real");
+        std::fs::write(real.join(SESSION_MARKER), "").unwrap();
+        std::fs::rename(&dir, root.0.join("moved")).unwrap();
+        symlink(&real, &dir).unwrap();
+        wait_for_reaper(fd);
+        assert!(
+            real.join("precious").exists(),
+            "the reaper must not follow a symlink at the session path"
+        );
+
+        let dir = marked_session(&tmp_root, "4245");
+        let fd = spawn_session_reaper(&dir).expect("start the reaper");
+        let elsewhere = root.0.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let decoy = marked_session(&elsewhere, "4245");
+        std::fs::write(decoy.join("precious"), "user data").unwrap();
+        std::fs::rename(&tmp_root, root.0.join("tmp-moved")).unwrap();
+        symlink(&elsewhere, &tmp_root).unwrap();
+        wait_for_reaper(fd);
+        assert!(
+            decoy.join("precious").exists(),
+            "the reaper must delete in the real sandbox-tmp, not where a new symlink points"
+        );
+        assert!(
+            !root.0.join("tmp-moved/4245").exists(),
+            "it still removes the session directory it was started for"
+        );
+    }
+
+    #[test]
+    fn the_sweep_only_removes_marked_session_dirs_of_dead_processes() {
+        let home = FixtureHome::new("sweep");
+        let tmp_root = sandbox_tmp_root(&home.0);
+        // A pid past any pid_max: never a live process.
+        let dead = marked_session(&tmp_root, "999999999");
+        let unmarked = real_folder(&tmp_root, "999999998");
+        let live = marked_session(&tmp_root, &std::process::id().to_string());
+        sweep_stale_session_dirs(&home.0);
+        assert!(!dead.exists(), "a marked dir of a dead pid is stale");
+        assert!(
+            unmarked.join("precious").exists(),
+            "a numeric folder without the marker is not ours"
+        );
+        assert!(live.exists(), "this process's own directory stays");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_sweep_never_follows_a_symlinked_sandbox_tmp() {
+        let home = FixtureHome::new("sweep-symlink");
+        let elsewhere = home.0.join("projects");
+        let year = marked_session(&elsewhere, "999999999");
+        std::os::unix::fs::symlink(&elsewhere, sandbox_tmp_root(&home.0)).unwrap();
+        sweep_stale_session_dirs(&home.0);
+        assert!(
+            year.exists(),
+            "a symlinked sandbox-tmp points at somebody else's folder"
         );
     }
 
