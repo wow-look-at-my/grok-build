@@ -1203,6 +1203,105 @@ fn parse_openrouter_pricing_is_per_token() {
     assert!((result.pricing.input_per_token_usd - 2e-6).abs() < 1e-15);
     assert!((result.pricing.output_per_token_usd - 1e-5).abs() < 1e-15);
 }
+/// The row a Bifrost gateway serves for an OpenRouter model, from its live `/v1/models`.
+fn bifrost_openrouter_row() -> serde_json::Value {
+    serde_json::json!({
+        "id": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "canonical_slug": "deepseek/deepseek-v4.1-flash-20261017",
+        "name": "DeepSeek: DeepSeek V4.1 Flash 1017",
+        "created": 1792225624,
+        "context_length": 1_048_576,
+        "max_input_tokens": 1_048_576,
+        "max_output_tokens": 393_216,
+        "architecture": {
+            "modality": "text+image->text",
+            "tokenizer": "DeepSeek",
+            "input_modalities": ["text", "image"],
+            "output_modalities": ["text"]
+        },
+        "pricing": { "prompt": "0.00000002", "completion": "0.000001", "input_cache_read": "0.000000015" },
+        "top_provider": { "is_moderated": false, "context_length": 1_048_576, "max_completion_tokens": 943_718 },
+        "supported_parameters": ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort", "tools"],
+        "default_parameters": {},
+        "reasoning": {
+            "mandatory": false,
+            "default_enabled": true,
+            "supported_efforts": ["max", "high", "low", "none"],
+            "default_effort": "high"
+        }
+    })
+}
+#[test]
+fn parse_bifrost_listing_reads_the_reasoning_effort_menu_and_default() {
+    let result =
+        parse_remote_model_value(&bifrost_openrouter_row(), "https://gateway.example/v1").unwrap();
+    let values: Vec<xai_grok_sampling_types::ReasoningEffort> =
+        result.reasoning_efforts.iter().map(|o| o.value).collect();
+    assert_eq!(
+        values,
+        vec![
+            xai_grok_sampling_types::ReasoningEffort::Max,
+            xai_grok_sampling_types::ReasoningEffort::High,
+            xai_grok_sampling_types::ReasoningEffort::Low,
+            xai_grok_sampling_types::ReasoningEffort::None,
+        ]
+    );
+    let defaults: Vec<_> = result
+        .reasoning_efforts
+        .iter()
+        .filter(|o| o.default)
+        .map(|o| o.value)
+        .collect();
+    assert_eq!(
+        defaults,
+        vec![xai_grok_sampling_types::ReasoningEffort::High]
+    );
+    assert!(!result.reasoning_effort_server_default);
+    assert!(result.supports_reasoning_effort);
+    assert_eq!(result.context_window.get(), 1_048_576);
+    assert_eq!(result.max_completion_tokens, Some(393_216));
+    assert!((result.pricing.input_per_token_usd - 2e-8).abs() < 1e-18);
+}
+#[test]
+fn parse_openrouter_listing_reads_the_cap_under_top_provider() {
+    let mut value = bifrost_openrouter_row();
+    value.as_object_mut().unwrap().remove("max_output_tokens");
+    let result = parse_remote_model_value(&value, "https://openrouter.ai/api/v1").unwrap();
+    assert_eq!(result.max_completion_tokens, Some(943_718));
+}
+#[test]
+fn parse_supported_parameters_alone_turns_effort_support_on() {
+    let mut value = bifrost_openrouter_row();
+    value.as_object_mut().unwrap().remove("reasoning");
+    let result = parse_remote_model_value(&value, "https://gateway.example/v1").unwrap();
+    assert!(result.supports_reasoning_effort);
+    assert!(result.reasoning_efforts.is_empty());
+}
+#[test]
+fn parse_reasoning_default_outside_the_menu_leaves_the_server_default() {
+    let mut value = bifrost_openrouter_row();
+    value["reasoning"]["default_effort"] = serde_json::json!("medium");
+    let result = parse_remote_model_value(&value, "https://gateway.example/v1").unwrap();
+    assert!(result.reasoning_efforts.iter().all(|o| !o.default));
+    assert!(result.reasoning_effort_server_default);
+}
+#[test]
+fn parse_sglang_listing_reads_its_window_and_claims_no_effort() {
+    let value = serde_json::json!({
+        "id": "qwen3.8-27b",
+        "object": "model",
+        "created": 1792000000,
+        "owned_by": "sglang",
+        "root": "qwen3.8-27b",
+        "parent": null,
+        "max_model_len": 204_800
+    });
+    let result = parse_remote_model_value(&value, "http://127.0.0.1:30000/v1").unwrap();
+    assert_eq!(result.context_window.get(), 204_800);
+    assert_eq!(result.max_completion_tokens, None);
+    assert!(!result.supports_reasoning_effort);
+    assert!(result.reasoning_efforts.is_empty());
+}
 #[test]
 fn parse_cost_in_an_unknown_unit_is_not_a_price() {
     let value = serde_json::json!({
