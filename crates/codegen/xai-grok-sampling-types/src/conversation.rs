@@ -1701,9 +1701,7 @@ pub fn inject_streaming_reasoning_fallback(items: &mut Vec<ConversationItem>, te
         return;
     }
     let any_with_text = items.iter().any(|i| match i {
-        ConversationItem::Reasoning(r) => r.summary.iter().any(|sp| match sp {
-            rs::SummaryPart::SummaryText(t) => !t.text.is_empty(),
-        }),
+        ConversationItem::Reasoning(r) => !reasoning_item_text(r).trim().is_empty(),
         _ => false,
     });
     if any_with_text {
@@ -3642,6 +3640,56 @@ mod tests {
             response.fallback_text().as_deref(),
             Some("Summary after reasoning.")
         );
+    }
+
+    /// OpenRouter answers a DeepSeek turn on `/responses` with the thinking in
+    /// `content` and an empty `summary`. The streamed text must not be added a
+    /// second time as a summary, or every replay carries the thinking twice.
+    #[test]
+    fn streaming_fallback_leaves_a_reasoning_item_with_content_text_alone() {
+        let item = rs::ReasoningItem {
+            id: "rs_tmp_1".into(),
+            summary: vec![],
+            content: Some(vec![rs::ReasoningTextContent {
+                text: "I will read the file first.".into(),
+            }]),
+            encrypted_content: None,
+            status: None,
+        };
+        let mut items = vec![
+            ConversationItem::Reasoning(item),
+            ConversationItem::assistant("done"),
+        ];
+        inject_streaming_reasoning_fallback(&mut items, "I will read the file first.".into());
+        let ConversationItem::Reasoning(r) = &items[0] else {
+            panic!("the reasoning item moved: {items:?}");
+        };
+        assert!(
+            r.summary.is_empty(),
+            "the thinking was added again as a summary: {r:?}"
+        );
+        assert_eq!(reasoning_item_text(r), "I will read the file first.");
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn streaming_fallback_fills_a_reasoning_item_with_no_text() {
+        let item = rs::ReasoningItem {
+            id: "rs_1".into(),
+            summary: vec![],
+            content: None,
+            encrypted_content: None,
+            status: None,
+        };
+        let mut items = vec![
+            ConversationItem::Reasoning(item),
+            ConversationItem::assistant("done"),
+        ];
+        inject_streaming_reasoning_fallback(&mut items, "streamed thought".into());
+        let ConversationItem::Reasoning(r) = &items[0] else {
+            panic!("the reasoning item moved: {items:?}");
+        };
+        assert_eq!(reasoning_item_text(r), "streamed thought");
     }
 
     #[test]
