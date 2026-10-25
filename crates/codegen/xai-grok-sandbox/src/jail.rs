@@ -25,8 +25,11 @@ fn system_ro_base() -> impl Iterator<Item = &'static str> {
         .copied()
         .chain(SYSTEM_RO_BASE_MACOS.iter().copied())
 }
-/// Where the dedicated tmpfs is mounted on Linux.
+/// Where the jail's `/tmp` overlay or tmpfs is mounted on Linux.
 const JAIL_TMP: &str = "/tmp";
+/// The real directory behind `/tmp`. Seatbelt matches resolved paths.
+#[cfg(target_os = "macos")]
+const HOST_TMP: &str = "/private/tmp";
 
 /// How a path is bound inside the jail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,10 +49,12 @@ pub struct Mount {
     pub path: PathBuf,
 }
 
-/// How `/tmp` is exposed in the jail.
+/// How a scratch directory (`/tmp`, `~/.cache`) is exposed in the jail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TmpHandling {
-    /// A fresh, writable tmpfs over `/tmp`.
+    /// The host directory as a lower layer under a writable tmpfs. The jail reads the host files.
+    Overlay,
+    /// A fresh, empty, writable tmpfs.
     Tmpfs,
     /// Bind the host `/tmp` in read-write.
     Rw,
@@ -67,6 +72,8 @@ pub struct JailDefaults {
     pub grok_home: Access,
     /// `/tmp` handling.
     pub tmp: TmpHandling,
+    /// `~/.cache` (and `$XDG_CACHE_HOME`) handling.
+    pub cache: TmpHandling,
     /// The read-only system base (`/usr`, `/lib`, … and the macOS system dirs).
     pub system: Access,
 }
@@ -76,7 +83,8 @@ impl Default for JailDefaults {
         Self {
             cwd: Access::Rw,
             grok_home: Access::Rw,
-            tmp: TmpHandling::Tmpfs,
+            tmp: TmpHandling::Overlay,
+            cache: TmpHandling::Overlay,
             system: Access::Ro,
         }
     }
@@ -88,17 +96,31 @@ enum DefaultKey {
     Cwd,
     GrokHome,
     Tmp,
+    Cache,
     System,
 }
 
 /// Map a `[jail]` config key name onto its enum so we resolve each key the same
-/// way (`cwd`/`grok_home`/`system` take `ro`/`rw`, `tmp` takes the tri-state).
+/// way (`cwd`/`grok_home`/`system` take `ro`/`rw`, `tmp`/`cache` take a
+/// [`TmpHandling`] token).
 fn default_key(name: &str) -> Option<DefaultKey> {
     match name {
         "cwd" => Some(DefaultKey::Cwd),
         "grok_home" => Some(DefaultKey::GrokHome),
         "tmp" => Some(DefaultKey::Tmp),
+        "cache" => Some(DefaultKey::Cache),
         "system" => Some(DefaultKey::System),
+        _ => None,
+    }
+}
+
+/// The [`TmpHandling`] a `[jail]` token names.
+fn scratch_token(token: &str) -> Option<TmpHandling> {
+    match token {
+        "overlay" => Some(TmpHandling::Overlay),
+        "tmpfs" => Some(TmpHandling::Tmpfs),
+        "rw" => Some(TmpHandling::Rw),
+        "ro" => Some(TmpHandling::Ro),
         _ => None,
     }
 }
@@ -130,9 +152,16 @@ impl JailDefaults {
                 (DefaultKey::GrokHome, "rw") => defaults.grok_home = Access::Rw,
                 (DefaultKey::System, "ro") => defaults.system = Access::Ro,
                 (DefaultKey::System, "rw") => defaults.system = Access::Rw,
-                (DefaultKey::Tmp, "tmpfs") => defaults.tmp = TmpHandling::Tmpfs,
-                (DefaultKey::Tmp, "rw") => defaults.tmp = TmpHandling::Rw,
-                (DefaultKey::Tmp, "ro") => defaults.tmp = TmpHandling::Ro,
+                (DefaultKey::Tmp, token) => {
+                    if let Some(handling) = scratch_token(token) {
+                        defaults.tmp = handling;
+                    }
+                }
+                (DefaultKey::Cache, token) => {
+                    if let Some(handling) = scratch_token(token) {
+                        defaults.cache = handling;
+                    }
+                }
                 _ => {}
             }
         }
@@ -373,6 +402,12 @@ pub struct JailPlan {
     pub defaults: JailDefaults,
     /// The inherited fd of the unsandboxed CI host worker, when one was started for this jail.
     pub ci_host_fd: Option<i32>,
+    /// The host cache directories (`~/.cache`, `$XDG_CACHE_HOME`), canonical, in that order of preference.
+    pub cache_dirs: Vec<PathBuf>,
+    /// Whether bwrap can mount an overlay here. When false, an overlay scratch directory is a tmpfs.
+    pub overlay: bool,
+    /// macOS: the session directory `XDG_CACHE_HOME` points at. Seatbelt cannot mount, so this holds the cache overlay.
+    pub cache_redirect: Option<PathBuf>,
 }
 
 /// Resolve a request into a plan. Every path must exist: a missing bind is a hole the caller cannot see. `defaults` is the config layer (see [`JailDefaults`]) that supplies the per-path access where the command line is silent. The runtime caller loads it via [`JailDefaults::load`], tests pass an explicit value so they never depend on the host's `config.toml`. The working directory is bound read-write by default, so a jail built with the pathbox marker (`--sandbox=pathbox`). Otherwise, a path flag can write in the cwd without an explicit `--rw .`. The effective cwd access is the LAST user mount that contains the cwd (`defaults.cwd` when none does). The effective cwd access also is that single cwd mount is placed at the FRONT of `plan.mounts`. Front-placement plus the effective access is what lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`. The Seatbelt profile emits no stale write-allow for the cwd and bwrap binds it read-only. `parse_jail_args` is untouched — the default is a plan-level injection, not a flag.
@@ -434,11 +469,9 @@ pub fn build_plan(
         },
     );
     let temp_dir = dedicated_temp_dir()?;
+    let cache_dirs = host_cache_dirs()?;
     // A host sink for `--rn` denoted paths.
-    let deny_sink = crate::paths::grok_home()
-        .join("sandbox-tmp")
-        .join(std::process::id().to_string())
-        .join("deny-sink");
+    let deny_sink = session_dir().join("deny-sink");
     std::fs::create_dir_all(&deny_sink).map_err(|source| JailError::NoTempDir {
         path: deny_sink.display().to_string(),
         source,
@@ -454,9 +487,50 @@ pub fn build_plan(
         defaults: *defaults,
         // The CI host worker is spawned by the caller that is about to exec, moments before the jail is built.
         ci_host_fd: None,
+        cache_dirs,
+        // The runtime caller probes bwrap and sets these. A plan never mounts an overlay it has not proven.
+        overlay: false,
+        cache_redirect: None,
     };
     plan.check_cwd_is_bound()?;
     Ok(plan)
+}
+
+/// This process's directory under `$GROK_HOME/sandbox-tmp`.
+fn session_dir() -> PathBuf {
+    crate::paths::grok_home()
+        .join("sandbox-tmp")
+        .join(std::process::id().to_string())
+}
+
+/// The host cache directories the jail never shows writable: `$XDG_CACHE_HOME`
+/// when set, then `~/.cache`. Each is created, because an overlay needs a
+/// lower directory and a tmpfs needs a mount point. A directory that contains
+/// the home directory is skipped: an overlay there would expose all of home.
+fn host_cache_dirs() -> Result<Vec<PathBuf>, JailError> {
+    cache_dirs_for(
+        xai_dirs::home_dir(),
+        std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from),
+    )
+}
+
+fn cache_dirs_for(home: Option<PathBuf>, xdg: Option<PathBuf>) -> Result<Vec<PathBuf>, JailError> {
+    let xdg = xdg.filter(|path| path.is_absolute());
+    let dot_cache = home.as_ref().map(|home| home.join(".cache"));
+    let home = home.map(|home| dunce::canonicalize(&home).unwrap_or(home));
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for dir in xdg.into_iter().chain(dot_cache) {
+        std::fs::create_dir_all(&dir).map_err(|source| JailError::NoTempDir {
+            path: dir.display().to_string(),
+            source,
+        })?;
+        let dir = dunce::canonicalize(&dir).unwrap_or(dir);
+        if home.as_ref().is_some_and(|home| home.starts_with(&dir)) || dirs.contains(&dir) {
+            continue;
+        }
+        dirs.push(dir);
+    }
+    Ok(dirs)
 }
 
 impl JailPlan {
@@ -464,8 +538,8 @@ impl JailPlan {
     /// with a bare chdir error, which reads as a broken sandbox rather than a
     /// missing `--rw`.
     fn check_cwd_is_bound(&self) -> Result<(), JailError> {
-        // The temp directory is compared exactly: on Linux it is a fresh
-        // tmpfs. A path under it exists on the host and not in the jail.
+        // The temp directory is compared exactly: on Linux it can be a fresh
+        // tmpfs. A path under it then exists on the host and not in the jail.
         if self.cwd == self.temp_dir {
             return Ok(());
         }
@@ -484,19 +558,48 @@ impl JailPlan {
             cwd: self.cwd.display().to_string(),
         })
     }
+
+    /// The scratch directories (`tmp`, then the caches) with the user-mount
+    /// index each goes before. A scratch directory goes right after the last
+    /// mount that strictly contains it. So `--rw ~` (or a cwd of `~`) cannot
+    /// expose the host `~/.cache`, while a mount on the directory itself or
+    /// below it still wins. The order is by slot, then by depth, so a nested
+    /// scratch directory goes over its parent.
+    fn scratch_slots(&self, tmp: &Path) -> Vec<(usize, PathBuf, TmpHandling)> {
+        let mut slots: Vec<(usize, PathBuf, TmpHandling)> =
+            std::iter::once((tmp.to_path_buf(), self.defaults.tmp))
+                .chain(
+                    self.cache_dirs
+                        .iter()
+                        .map(|dir| (dir.clone(), self.defaults.cache)),
+                )
+                .map(|(path, handling)| {
+                    let slot = self
+                        .mounts
+                        .iter()
+                        .rposition(|mount| {
+                            mount.access != Access::Deny
+                                && path != mount.path
+                                && path.starts_with(&mount.path)
+                        })
+                        .map_or(0, |index| index + 1);
+                    (slot, path, handling)
+                })
+                .collect();
+        slots.sort_by_key(|(slot, path, _)| (*slot, path.components().count()));
+        slots
+    }
 }
 
-/// A fresh scratch directory for this process. On Linux the jail mounts a
-/// tmpfs over `/tmp` and this directory lives inside it, so it never touches
-/// the host. On macOS Seatbelt mounts nothing, so the directory is a real one
-/// under `$GROK_HOME` and `TMPDIR` points at it.
+/// A fresh scratch directory for this process. On Linux the jail mounts an
+/// overlay or a tmpfs over `/tmp` and this directory is that mount, so it
+/// never touches the host. On macOS Seatbelt mounts nothing, so the directory
+/// is a real, empty one under `$GROK_HOME` and `TMPDIR` points at it.
 fn dedicated_temp_dir() -> Result<PathBuf, JailError> {
     if cfg!(target_os = "linux") {
         return Ok(PathBuf::from(JAIL_TMP));
     }
-    let path = crate::paths::grok_home()
-        .join("sandbox-tmp")
-        .join(std::process::id().to_string());
+    let path = session_dir().join("tmp");
     std::fs::create_dir_all(&path).map_err(|source| JailError::NoTempDir {
         path: path.display().to_string(),
         source,
@@ -510,10 +613,9 @@ fn dedicated_temp_dir() -> Result<PathBuf, JailError> {
 /// earlier one, so this is what makes a later `--ro` beat an earlier `--rw`.
 /// The access each synthesized bind carries comes from [`JailPlan::defaults`]
 /// where a user mount does not name it. This covers the system base from
-/// `system`, `/tmp` from `tmp`, and `$GROK_HOME` from `grok_home`. All of
-/// them default to the release behavior (ro base, tmpfs `/tmp`, rw
-/// `$GROK_HOME`), so a plan built with [`JailDefaults::default`] produces
-/// byte-identical argv to the jail before config existed. Compiled under
+/// `system`, `/tmp` from `tmp`, the caches from `cache`, and `$GROK_HOME`
+/// from `grok_home`. `/tmp` and the caches go among the user mounts, at the
+/// slot [`JailPlan::scratch_slots`] picks. Compiled under
 /// `cfg(test)` off Linux as well. Because the emitted argv IS the contract
 /// (the option order is what makes a later bind win, and what keeps the CI
 /// host-worker fd an option rather than a program argument) and an ordering
@@ -535,22 +637,14 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     cmd.arg("--dev").arg("/dev");
     // `--dev` builds a fresh /dev without /dev/shm.
     cmd.arg("--tmpfs").arg("/dev/shm");
-    match plan.defaults.tmp {
-        // Release default: a fresh, writable tmpfs over /tmp.
-        TmpHandling::Tmpfs => {
-            cmd.arg("--tmpfs").arg(JAIL_TMP);
+    let mut scratch = plan
+        .scratch_slots(Path::new(JAIL_TMP))
+        .into_iter()
+        .peekable();
+    for (index, mount) in plan.mounts.iter().enumerate() {
+        while let Some((_, path, handling)) = scratch.next_if(|(slot, ..)| *slot == index) {
+            push_bwrap_scratch(&mut cmd, &path, handling, plan.overlay);
         }
-        // Overrides bind the host /tmp in/out so a granted path (e.g. an ssh
-        // control socket) reaches the jailed process. bwrap creates the
-        // destination mountpoint.
-        TmpHandling::Rw => {
-            cmd.arg("--bind").arg(JAIL_TMP).arg(JAIL_TMP);
-        }
-        TmpHandling::Ro => {
-            cmd.arg("--ro-bind").arg(JAIL_TMP).arg(JAIL_TMP);
-        }
-    }
-    for mount in &plan.mounts {
         match mount.access {
             Access::Ro => {
                 cmd.arg("--ro-bind").arg(&mount.path).arg(&mount.path);
@@ -561,6 +655,9 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
             // A deny is not bound here.
             Access::Deny => {}
         }
+    }
+    for (_, path, handling) in scratch {
+        push_bwrap_scratch(&mut cmd, &path, handling, plan.overlay);
     }
     // `$GROK_HOME`, bound after the user mounts. A config `grok_home = "ro"`
     // binds it read-only; the release default (`rw`) is unchanged. Because it
@@ -598,6 +695,34 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
     cmd
 }
 
+/// Mount one scratch directory. `rw` and `ro` bind the host directory, so a
+/// granted path (e.g. an ssh control socket in `/tmp`) reaches the jail.
+#[cfg(any(target_os = "linux", test))]
+fn push_bwrap_scratch(
+    cmd: &mut std::process::Command,
+    path: &Path,
+    handling: TmpHandling,
+    overlay: bool,
+) {
+    match handling {
+        TmpHandling::Overlay if overlay => {
+            cmd.arg("--overlay-src")
+                .arg(path)
+                .arg("--tmp-overlay")
+                .arg(path);
+        }
+        TmpHandling::Overlay | TmpHandling::Tmpfs => {
+            cmd.arg("--tmpfs").arg(path);
+        }
+        TmpHandling::Rw => {
+            cmd.arg("--bind").arg(path).arg(path);
+        }
+        TmpHandling::Ro => {
+            cmd.arg("--ro-bind").arg(path).arg(path);
+        }
+    }
+}
+
 /// Build the Seatbelt profile for the plan. Seatbelt confines READS and
 /// WRITES here, mirroring bwrap.
 #[cfg(target_os = "macos")]
@@ -622,6 +747,8 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
                 .filter_map(|mount| (mount.access != Access::Deny).then_some(&mount.path)),
         )
         .chain([&plan.grok_home, &plan.temp_dir])
+        .chain(&plan.cache_dirs)
+        .chain(&plan.cache_redirect)
     {
         for ancestor in path
             .ancestors()
@@ -658,7 +785,14 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     }
     // A --rw mount is readable and writable; a --ro mount is readable only. A
     // --rn (Deny) mount gets no allow here — it is hidden at the end.
-    for mount in &plan.mounts {
+    let mut scratch = plan
+        .scratch_slots(Path::new(HOST_TMP))
+        .into_iter()
+        .peekable();
+    for (index, mount) in plan.mounts.iter().enumerate() {
+        while let Some((_, path, handling)) = scratch.next_if(|(slot, ..)| *slot == index) {
+            push_seatbelt_scratch(&mut profile, &path, handling);
+        }
         if mount.access == Access::Deny {
             continue;
         }
@@ -672,6 +806,9 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
                 sbpl_escape(&mount.path)
             ));
         }
+    }
+    for (_, path, handling) in scratch {
+        push_seatbelt_scratch(&mut profile, &path, handling);
     }
     profile.push_str(&format!(
         "(allow file-read* (subpath \"{}\"))\n",
@@ -693,6 +830,12 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
         "(allow file-write* (subpath \"{}\"))\n",
         sbpl_escape(&plan.temp_dir)
     ));
+    if let Some(cache) = &plan.cache_redirect {
+        profile.push_str(&format!(
+            "(allow file-read* (subpath \"{0}\"))\n(allow file-write* (subpath \"{0}\"))\n",
+            sbpl_escape(cache)
+        ));
+    }
     // `--rn` denies are emitted LAST so SBPL's last-matching-rule hides each
     // path even when a visible ancestor (including $GROK_HOME or /dev) was
     // allowed above it.
@@ -712,6 +855,23 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     profile
 }
 
+/// The rules for one scratch directory. Seatbelt cannot mount, so the host
+/// directory is never writable in the jail. `overlay` keeps it readable, as
+/// the lower layer. `tmpfs` hides it. The writable upper layer is the
+/// session directory `TMPDIR` or `XDG_CACHE_HOME` points at.
+#[cfg(target_os = "macos")]
+fn push_seatbelt_scratch(profile: &mut String, path: &Path, handling: TmpHandling) {
+    let path = sbpl_escape(path);
+    let rules = match handling {
+        TmpHandling::Overlay | TmpHandling::Ro => ["allow file-read*", "deny file-write*"],
+        TmpHandling::Tmpfs => ["deny file-read*", "deny file-write*"],
+        TmpHandling::Rw => ["allow file-read*", "allow file-write*"],
+    };
+    for rule in rules {
+        profile.push_str(&format!("({rule} (subpath \"{path}\"))\n"));
+    }
+}
+
 /// Quote a path for an SBPL string literal.
 #[cfg(any(target_os = "macos", test))]
 fn sbpl_escape(path: &Path) -> String {
@@ -728,6 +888,9 @@ pub fn seatbelt_command(plan: &JailPlan) -> std::process::Command {
     cmd.arg(&plan.self_exe).args(&plan.args);
     cmd.env(JAIL_ENV_VAR, "1");
     cmd.env("TMPDIR", &plan.temp_dir);
+    if let Some(cache) = &plan.cache_redirect {
+        cmd.env("XDG_CACHE_HOME", cache);
+    }
     // Seatbelt inherits the environment, so the host-worker fd is delivered as
     // a command env setting — never as an argument of the jailed program.
     if let Some(fd) = plan.ci_host_fd {
@@ -792,10 +955,22 @@ pub fn maybe_reexec_into_jail() {
     }
     // Read the `[jail]` defaults from this process's `$GROK_HOME`/`config.toml` (release defaults when there is no `[jail]` section), then drive the real plan/service builders.
     let defaults = JailDefaults::load(&crate::paths::grok_home());
+    sweep_stale_session_dirs(&crate::paths::grok_home());
     let mut plan = match build_plan(&request, &defaults, argv) {
         Ok(plan) => plan,
         Err(e) => fail(&e.to_string()),
     };
+    #[cfg(target_os = "linux")]
+    {
+        plan.overlay = bwrap_can_overlay(&plan);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        plan.cache_redirect = match prepare_cache_redirect(&plan) {
+            Ok(dir) => dir,
+            Err(e) => fail(&e.to_string()),
+        };
+    }
     // Start the unsandboxed `gh` CI-status worker *before* the exec so its stream fd survives into the jail.
     plan.ci_host_fd = crate::ci_host::spawn_ci_host(&plan.cwd);
     let mut cmd = match backend_command(&plan) {
@@ -813,6 +988,156 @@ pub fn maybe_reexec_into_jail() {
         let _ = &mut cmd;
         fail("--sandbox is not supported on this platform");
     }
+}
+
+/// Remove the session directories of jails whose process is gone. On macOS
+/// they hold the `TMPDIR` and cache upper layers, which must not outlive the
+/// session the way a tmpfs does not.
+fn sweep_stale_session_dirs(grok_home: &Path) {
+    let Ok(entries) = std::fs::read_dir(grok_home.join("sandbox-tmp")) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if pid == std::process::id() || process_is_alive(pid) {
+            continue;
+        }
+        if let Err(e) = std::fs::remove_dir_all(entry.path()) {
+            eprintln!(
+                "warning: --sandbox: could not remove the stale session directory {}: {e}",
+                entry.path().display()
+            );
+        }
+    }
+}
+
+/// Whether `pid` names a live process.
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: signal 0 sends nothing; it only checks that the pid exists.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn process_is_alive(_pid: u32) -> bool {
+    true
+}
+
+/// Whether bwrap can mount every overlay the plan asks for. When it
+/// fails, the overlays become tmpfs mounts and this says so on stderr.
+#[cfg(target_os = "linux")]
+fn bwrap_can_overlay(plan: &JailPlan) -> bool {
+    let overlays: Vec<PathBuf> = plan
+        .scratch_slots(Path::new(JAIL_TMP))
+        .into_iter()
+        .filter(|(_, _, handling)| *handling == TmpHandling::Overlay)
+        .map(|(_, path, _)| path)
+        .collect();
+    if overlays.is_empty() {
+        return false;
+    }
+    let mut probe = std::process::Command::new("bwrap");
+    probe.args(["--ro-bind", "/", "/"]);
+    for path in &overlays {
+        probe
+            .arg("--overlay-src")
+            .arg(path)
+            .arg("--tmp-overlay")
+            .arg(path);
+    }
+    probe
+        .args(["--", "true"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null());
+    let reason = match probe.output() {
+        Ok(output) if output.status.success() => return true,
+        Ok(output) => String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .next()
+            .unwrap_or("bwrap failed with no message")
+            .to_string(),
+        Err(e) => e.to_string(),
+    };
+    let names: Vec<String> = overlays.iter().map(|p| p.display().to_string()).collect();
+    eprintln!(
+        "warning: --sandbox: {} are empty tmpfs mounts, not overlays of the host directories: {reason}",
+        names.join(", ")
+    );
+    false
+}
+
+/// Make the directory `XDG_CACHE_HOME` points at in a macOS jail. `overlay`
+/// makes it an APFS copy-on-write clone of the host cache. The jail reads the
+/// host files, and its writes land only in the clone. `tmpfs` makes it empty.
+/// `rw` and `ro` redirect nothing.
+#[cfg(target_os = "macos")]
+fn prepare_cache_redirect(plan: &JailPlan) -> Result<Option<PathBuf>, JailError> {
+    if !matches!(
+        plan.defaults.cache,
+        TmpHandling::Overlay | TmpHandling::Tmpfs
+    ) {
+        return Ok(None);
+    }
+    let target = session_dir().join("cache");
+    let no_dir = |source| JailError::NoTempDir {
+        path: target.display().to_string(),
+        source,
+    };
+    // A pid reused from a dead session can leave one behind.
+    if target.exists() {
+        std::fs::remove_dir_all(&target).map_err(no_dir)?;
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(no_dir)?;
+    }
+    if plan.defaults.cache == TmpHandling::Overlay
+        && let Some(source) = plan.cache_dirs.first()
+    {
+        match clone_tree(source, &target) {
+            Ok(()) => return Ok(Some(target)),
+            Err(e) => {
+                eprintln!(
+                    "warning: --sandbox: XDG_CACHE_HOME is an empty directory, not a \
+                     copy-on-write clone of {}: {e}",
+                    source.display()
+                );
+                if target.exists() {
+                    std::fs::remove_dir_all(&target).map_err(no_dir)?;
+                }
+            }
+        }
+    }
+    std::fs::create_dir_all(&target).map_err(no_dir)?;
+    Ok(Some(target))
+}
+
+/// Clone a directory tree with `clonefile(2)`. On APFS each file shares its
+/// blocks with the source until one side writes it.
+#[cfg(target_os = "macos")]
+fn clone_tree(source: &Path, target: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let source = std::ffi::CString::new(source.as_os_str().as_bytes())?;
+    let target = std::ffi::CString::new(target.as_os_str().as_bytes())?;
+    // SAFETY: both pointers are NUL-terminated paths that live across the call.
+    if unsafe { libc::clonefile(source.as_ptr(), target.as_ptr(), 0) } == 0 {
+        return Ok(());
+    }
+    Err(std::io::Error::last_os_error())
 }
 
 /// Report why the jail did not start, then exit. Never returns.
@@ -920,6 +1245,9 @@ mod tests {
             args: vec![OsString::from("--sandbox=pathbox")],
             defaults: JailDefaults::default(),
             ci_host_fd: None,
+            cache_dirs: vec![PathBuf::from("/home/u/.cache")],
+            overlay: false,
+            cache_redirect: None,
         }
     }
 
@@ -1428,12 +1756,13 @@ mod tests {
     const RELEASE: JailDefaults = JailDefaults {
         cwd: Access::Rw,
         grok_home: Access::Rw,
-        tmp: TmpHandling::Tmpfs,
+        tmp: TmpHandling::Overlay,
+        cache: TmpHandling::Overlay,
         system: Access::Ro,
     };
 
     #[test]
-    fn no_config_yields_the_four_release_defaults() {
+    fn no_config_yields_the_release_defaults() {
         assert_eq!(JailDefaults::default(), RELEASE);
         // No `[jail]` section, or an empty file, still resolves to the release struct that every builder consumes.
         assert_eq!(config_defaults(""), RELEASE);
@@ -1480,6 +1809,29 @@ mod tests {
                 ..RELEASE
             }
         );
+        // /tmp as an empty tmpfs.
+        let d = config_defaults("[jail]\ntmp = \"tmpfs\"");
+        assert_eq!(
+            d,
+            JailDefaults {
+                tmp: TmpHandling::Tmpfs,
+                ..RELEASE
+            }
+        );
+        // The caches take the same tokens as /tmp.
+        for (token, handling) in [
+            ("tmpfs", TmpHandling::Tmpfs),
+            ("rw", TmpHandling::Rw),
+            ("ro", TmpHandling::Ro),
+        ] {
+            assert_eq!(
+                config_defaults(&format!("[jail]\ncache = \"{token}\"")),
+                JailDefaults {
+                    cache: handling,
+                    ..RELEASE
+                }
+            );
+        }
         // system rw (weakens the jail — the user's explicit choice).
         let d = config_defaults("[jail]\nsystem = \"rw\"");
         assert_eq!(
@@ -1492,9 +1844,9 @@ mod tests {
     }
 
     #[test]
-    fn all_four_together_and_explicit_rewrite_back_to_release() {
+    fn every_axis_together_and_explicit_rewrite_back_to_release() {
         let d = config_defaults(
-            "[jail]\ncwd = \"ro\"\ngrok_home = \"ro\"\ntmp = \"rw\"\nsystem = \"rw\"",
+            "[jail]\ncwd = \"ro\"\ngrok_home = \"ro\"\ntmp = \"rw\"\ncache = \"tmpfs\"\nsystem = \"rw\"",
         );
         assert_eq!(
             d,
@@ -1502,13 +1854,14 @@ mod tests {
                 cwd: Access::Ro,
                 grok_home: Access::Ro,
                 tmp: TmpHandling::Rw,
+                cache: TmpHandling::Tmpfs,
                 system: Access::Rw,
             }
         );
         // Explicitly spelling the release values round-trips to release.
         assert_eq!(
             config_defaults(
-                "[jail]\ncwd = \"rw\"\ngrok_home = \"rw\"\ntmp = \"tmpfs\"\nsystem = \"ro\""
+                "[jail]\ncwd = \"rw\"\ngrok_home = \"rw\"\ntmp = \"overlay\"\ncache = \"overlay\"\nsystem = \"ro\""
             ),
             RELEASE
         );
@@ -1573,6 +1926,7 @@ mod tests {
                 cwd: Access::Ro,
                 grok_home: Access::Rw,
                 tmp: TmpHandling::Rw,
+                cache: TmpHandling::Overlay,
                 system: Access::Rw,
             }
         );
@@ -1646,6 +2000,7 @@ mod tests {
             cwd: Access::Ro,
             grok_home: Access::Ro,
             tmp: TmpHandling::Rw,
+            cache: TmpHandling::Ro,
             system: Access::Rw,
         };
         let plan = build_plan(
@@ -1871,6 +2226,233 @@ mod tests {
         assert!(
             !args.windows(2).any(|w| w == ["--tmpfs", "/tmp"]),
             "tmp=rw must not leave the tmpfs: {args:?}"
+        );
+    }
+
+    fn bwrap_args(plan: &JailPlan) -> Vec<String> {
+        bwrap_command(plan)
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect()
+    }
+
+    fn position_of(args: &[String], window: &[&str]) -> Option<usize> {
+        args.windows(window.len()).position(|w| w == window)
+    }
+
+    #[test]
+    fn bwrap_overlays_tmp_and_the_cache_when_bwrap_can() {
+        let mut plan = plan_fixture(Vec::new());
+        plan.overlay = true;
+        let args = bwrap_args(&plan);
+        for dir in ["/tmp", "/home/u/.cache"] {
+            assert!(
+                position_of(&args, &["--overlay-src", dir, "--tmp-overlay", dir]).is_some(),
+                "{dir} must be an overlay of the host directory: {args:?}"
+            );
+            assert!(
+                position_of(&args, &["--tmpfs", dir]).is_none(),
+                "an overlay leaves no tmpfs on {dir}: {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bwrap_mounts_a_tmpfs_where_it_cannot_overlay() {
+        let plan = plan_fixture(Vec::new());
+        let args = bwrap_args(&plan);
+        for dir in ["/tmp", "/home/u/.cache"] {
+            assert!(
+                position_of(&args, &["--tmpfs", dir]).is_some(),
+                "without overlay support {dir} must be a tmpfs: {args:?}"
+            );
+        }
+        assert!(
+            !args.iter().any(|a| a == "--overlay-src"),
+            "an unproven overlay must never be emitted: {args:?}"
+        );
+    }
+
+    #[test]
+    fn a_mount_over_a_parent_cannot_expose_the_host_cache_or_tmp() {
+        // `--rw /home/u` and `--rw /` contain the cache and /tmp. The scratch
+        // mounts must come after them, or the jail writes the host directories.
+        let mut plan = plan_fixture(vec![
+            Mount {
+                access: Access::Rw,
+                path: PathBuf::from("/"),
+            },
+            Mount {
+                access: Access::Rw,
+                path: PathBuf::from("/home/u"),
+            },
+        ]);
+        plan.overlay = true;
+        let args = bwrap_args(&plan);
+        let root = position_of(&args, &["--bind", "/", "/"]).expect("root bind");
+        let home = position_of(&args, &["--bind", "/home/u", "/home/u"]).expect("home bind");
+        let tmp = position_of(&args, &["--overlay-src", "/tmp"]).expect("tmp overlay");
+        let cache =
+            position_of(&args, &["--overlay-src", "/home/u/.cache"]).expect("cache overlay");
+        assert!(root < tmp, "/tmp must cover the root bind: {args:?}");
+        assert!(home < cache, "the cache must cover the home bind: {args:?}");
+    }
+
+    #[test]
+    fn a_mount_on_the_scratch_directory_itself_still_wins() {
+        // A user who names the directory, or a path in it, gets the host one.
+        let plan = plan_fixture(vec![
+            Mount {
+                access: Access::Rw,
+                path: PathBuf::from("/home/u"),
+            },
+            Mount {
+                access: Access::Rw,
+                path: PathBuf::from("/home/u/.cache/go-build"),
+            },
+            Mount {
+                access: Access::Rw,
+                path: PathBuf::from("/tmp"),
+            },
+        ]);
+        let args = bwrap_args(&plan);
+        let cache = position_of(&args, &["--tmpfs", "/home/u/.cache"]).expect("cache tmpfs");
+        let go_build = position_of(
+            &args,
+            &[
+                "--bind",
+                "/home/u/.cache/go-build",
+                "/home/u/.cache/go-build",
+            ],
+        )
+        .expect("go-build bind");
+        let tmp_tmpfs = position_of(&args, &["--tmpfs", "/tmp"]).expect("tmp tmpfs");
+        let tmp_bind = position_of(&args, &["--bind", "/tmp", "/tmp"]).expect("tmp bind");
+        assert!(
+            cache < go_build,
+            "a mount inside the cache must win: {args:?}"
+        );
+        assert!(
+            tmp_tmpfs < tmp_bind,
+            "--rw /tmp must win over the tmpfs: {args:?}"
+        );
+    }
+
+    #[test]
+    fn a_cwd_inside_the_cache_stays_bound() {
+        // The injected cwd mount is the first index. With no mount over the
+        // cache, the cache mount goes before it, so the cwd bind is not hidden.
+        let mut plan = plan_fixture(vec![Mount {
+            access: Access::Rw,
+            path: PathBuf::from("/home/u/.cache/project"),
+        }]);
+        plan.cwd = PathBuf::from("/home/u/.cache/project");
+        let args = bwrap_args(&plan);
+        let cache = position_of(&args, &["--tmpfs", "/home/u/.cache"]).expect("cache tmpfs");
+        let cwd = position_of(
+            &args,
+            &["--bind", "/home/u/.cache/project", "/home/u/.cache/project"],
+        )
+        .expect("cwd bind");
+        assert!(
+            cache < cwd,
+            "the cwd must stay bound over the cache: {args:?}"
+        );
+    }
+
+    #[test]
+    fn host_cache_dirs_skips_a_dir_that_contains_home() {
+        let home = FixtureHome::new("xdg-home");
+        let canonical = dunce::canonicalize(&home.0).unwrap();
+        assert_eq!(
+            cache_dirs_for(Some(home.0.clone()), Some(home.0.join("xdg-cache"))).unwrap(),
+            vec![canonical.join("xdg-cache"), canonical.join(".cache")],
+            "$XDG_CACHE_HOME first, then ~/.cache, each created"
+        );
+        assert_eq!(
+            cache_dirs_for(Some(home.0.clone()), Some(home.0.clone())).unwrap(),
+            vec![canonical.join(".cache")],
+            "an overlay on a dir that contains home would expose all of home"
+        );
+        assert_eq!(
+            cache_dirs_for(Some(home.0.clone()), Some(PathBuf::from("relative"))).unwrap(),
+            vec![canonical.join(".cache")],
+            "a relative $XDG_CACHE_HOME is invalid per the XDG spec"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn seatbelt_never_lets_the_jail_write_the_host_tmp_or_cache() {
+        let mut plan = plan_fixture(vec![Mount {
+            access: Access::Rw,
+            path: PathBuf::from("/home/u"),
+        }]);
+        plan.cache_redirect = Some(PathBuf::from("/home/u/.grok/sandbox-tmp/1/cache"));
+        let profile = seatbelt_profile(&plan);
+        let home_write = profile
+            .find("(allow file-write* (subpath \"/home/u\"))")
+            .expect("home write");
+        for dir in ["/private/tmp", "/home/u/.cache"] {
+            let read = profile
+                .find(&format!("(allow file-read* (subpath \"{dir}\"))"))
+                .unwrap_or_else(|| panic!("{dir} stays readable as the lower layer: {profile}"));
+            let deny = profile
+                .find(&format!("(deny file-write* (subpath \"{dir}\"))"))
+                .unwrap_or_else(|| panic!("{dir} must not be writable: {profile}"));
+            assert!(read < deny, "{profile}");
+            if dir == "/home/u/.cache" {
+                assert!(
+                    home_write < deny,
+                    "the deny must follow the home grant: {profile}"
+                );
+            }
+        }
+        assert!(
+            profile.contains("(allow file-write* (subpath \"/home/u/.grok/sandbox-tmp/1/cache\"))"),
+            "the clone is the writable layer: {profile}"
+        );
+        let cache_env = seatbelt_command(&plan)
+            .get_envs()
+            .find(|(key, _)| key.to_string_lossy() == "XDG_CACHE_HOME")
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned());
+        assert_eq!(
+            cache_env.as_deref(),
+            Some("/home/u/.grok/sandbox-tmp/1/cache")
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn seatbelt_tmpfs_hides_the_host_cache() {
+        let mut plan = plan_fixture(Vec::new());
+        plan.defaults.cache = TmpHandling::Tmpfs;
+        let profile = seatbelt_profile(&plan);
+        assert!(
+            profile.contains("(deny file-read* (subpath \"/home/u/.cache\"))"),
+            "tmpfs means the host cache is not visible: {profile}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn clone_tree_makes_an_independent_copy() {
+        let root = FixtureHome::new("clone");
+        let source = root.0.join("source");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::write(source.join("nested/file"), "host").unwrap();
+        let target = root.0.join("target");
+        clone_tree(&source, &target).expect("clonefile on APFS");
+        assert_eq!(
+            std::fs::read_to_string(target.join("nested/file")).unwrap(),
+            "host"
+        );
+        std::fs::write(target.join("nested/file"), "jail").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(source.join("nested/file")).unwrap(),
+            "host",
+            "a write to the clone must never reach the source"
         );
     }
 }
