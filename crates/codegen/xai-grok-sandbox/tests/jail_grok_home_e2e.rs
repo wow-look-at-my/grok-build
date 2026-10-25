@@ -100,10 +100,13 @@ fn settings_save_through_a_symlinked_grok_home_and_a_linked_config() {
     }
     let fixture = Fixture::new();
 
-    // Without the alias and link binds the save fails: this is the jail the fix changes.
-    let (ok, out) = fixture.run("plan-unfixed");
-    assert!(!ok, "the save must fail without the binds: {out}");
+    // Without the binds, Linux reports success into a throwaway `~/.grok`.
+    let (_, out) = fixture.run("plan-unfixed");
     assert_eq!(fixture.config(), "a = 1\n", "{out}");
+    assert!(
+        !fixture.root.join("dotfiles/grok/pager.toml").exists(),
+        "without the binds no save may reach the real grok home: {out}"
+    );
 
     let (ok, out) = fixture.run("plan");
     assert!(ok, "the jailed save must succeed: {out}");

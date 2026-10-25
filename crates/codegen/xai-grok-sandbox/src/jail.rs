@@ -793,8 +793,7 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
         push_bwrap_scratch(&mut cmd, &path, handling, plan.overlay);
     }
     // `$GROK_HOME`, bound after the user mounts. A config `grok_home = "ro"`
-    // binds it read-only; the release default (`rw`) is unchanged. Because it
-    // is bound last it survives a user `--ro` aimed at it either way.
+    // binds it read-only; the release default (`rw`) is unchanged.
     let home_flag = match plan.defaults.grok_home {
         Access::Rw => "--bind",
         Access::Ro | Access::Deny => "--ro-bind",
