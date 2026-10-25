@@ -1207,6 +1207,9 @@ pub fn write_atomically_bound(
     mode: Option<u32>,
 ) -> io::Result<()> {
     dest.prove_unchanged()?;
+    if let Some(result) = crate::host_write::try_write(&dest.path, contents, mode) {
+        return result;
+    }
     write_via_temp(&dest.path, contents, mode, |tmp, path| {
         dest.prove_unchanged()?;
         if mode.is_none() {
