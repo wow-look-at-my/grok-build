@@ -75,3 +75,8 @@ required-features = ["enforce"]
 [[test]]
 name = "profile_ci_host_e2e"
 harness = false
+
+# Same reason: the worker child re-enters this binary on the marker env var.
+[[test]]
+name = "profile_config_write_e2e"
+harness = false

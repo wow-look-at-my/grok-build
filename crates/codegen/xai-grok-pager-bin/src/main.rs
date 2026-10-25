@@ -1928,6 +1928,8 @@ fn main() {
         xai_grok_sandbox::ci_host::run_ci_host_worker();
         std::process::exit(0);
     }
+    // A sandbox may deny this process its own config files. The host worker writes them.
+    xai_grok_sandbox::ci_host::install_host_config_writer();
     // Before anything else.
     xai_grok_sandbox::jail::maybe_reexec_into_jail();
     xai_grok_telemetry::startup::mark_process_start();
