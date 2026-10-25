@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use xai_grok_sampler::{
     ApiBackend, RequestId, RetryPolicy, SamplerActor, SamplerConfig, SamplingChannel,
-    SamplingErrorKind, SamplingEvent, StripReason,
+    SamplingErrorKind, SamplingEvent, StripReason, set_max_parallel_requests,
 };
 use xai_grok_sampling_types::{
     ConversationItem, ConversationRequest, DoomLoopRecoveryPolicy, INVALID_IMAGE_ERROR_CODE,
@@ -1740,6 +1740,8 @@ mod output_rate {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// A slow original that speeds back up keeps its answer and cancels its backup.
     async fn a_recovered_stream_cancels_its_backup_and_keeps_its_answer() {
+        // The process-wide slot cap is sized for one session.
+        set_max_parallel_requests(0);
         let counter = Arc::new(AtomicU32::new(0));
         let backup_dropped = Arc::new(std::sync::Mutex::new(None));
         let counter_handler = Arc::clone(&counter);
@@ -1817,6 +1819,8 @@ mod output_rate {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// A backup that gets ahead replaces the slow original while it still streams.
     async fn a_backup_that_overtakes_replaces_the_slow_stream_mid_response() {
+        // Same reason as the recovery case: a queued backup cannot overtake anything while it waits for a slot.
+        set_max_parallel_requests(0);
         let counter = Arc::new(AtomicU32::new(0));
         let counter_handler = Arc::clone(&counter);
         let app = Router::new().route(
