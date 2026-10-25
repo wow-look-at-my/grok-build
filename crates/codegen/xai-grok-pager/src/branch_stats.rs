@@ -237,7 +237,7 @@ mod tests {
     /// Configure `branch` to track the existing remote-tracking ref `upstream`.
     fn track(dir: &Path, branch: &str, upstream: &str) {
         let flag = format!("--set-upstream-to={upstream}");
-        git(dir, &["branch", &flag, branch]);
+        git(dir, &["branch", flag.as_str(), branch]);
     }
 
     fn repo_on_master() -> tempfile::TempDir {
