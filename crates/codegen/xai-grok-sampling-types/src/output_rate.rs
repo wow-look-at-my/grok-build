@@ -503,13 +503,8 @@ impl OutputRateGate {
 
     /// The rate to show for this call, or `None` before the stream has
     /// converged enough for the number to mean anything. The first reading is
-    /// published as soon as [`OutputRateMeter::converged`] accepts one.
-    ///
-    /// Once a call has shown a rate it keeps showing one. A 10x jump or a
-    /// collapse changes the number; it never withdraws the reading and returns
-    /// the row to no measurement. A stream that has gone quiet reads as zero
-    /// for the same reason. The gate is built per attempt, so the latch lasts
-    /// exactly one model call.
+    /// published as soon as [`OutputRateMeter::converged`] accepts one. Once
+    /// a call has shown a rate it keeps showing one.
     pub fn rate(&mut self, now: Instant) -> Option<f64> {
         let now = self.measured_at(now);
         if !self.revealed {
