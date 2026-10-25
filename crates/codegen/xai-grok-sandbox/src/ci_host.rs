@@ -1055,9 +1055,10 @@ mod tests {
         use std::os::unix::io::AsRawFd as _;
         let (mut ours, theirs) = UnixStream::pair().expect("socketpair");
         let fd = theirs.as_raw_fd();
-        // `sh` execs into a fresh image and writes to the numbered fd it inherited.
+        // `bash` execs into a fresh image and writes to the numbered fd it
+        // inherited.
         let write_to_fd = |fd: i32| {
-            std::process::Command::new("sh")
+            std::process::Command::new("bash")
                 .arg("-c")
                 .arg(format!("printf alive >&{fd}"))
                 .stdout(std::process::Stdio::null())
