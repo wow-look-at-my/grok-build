@@ -973,6 +973,14 @@ pub fn maybe_reexec_into_jail() {
     }
     // Start the unsandboxed `gh` CI-status worker *before* the exec so its stream fd survives into the jail.
     plan.ci_host_fd = crate::ci_host::spawn_ci_host(&plan.cwd);
+    // Last before the exec, so no other helper inherits the pipe and delays the removal.
+    #[cfg(unix)]
+    if spawn_session_reaper(&session_dir()).is_none() {
+        eprintln!(
+            "warning: --sandbox: could not start the cleanup process; {} is removed at the next jail start instead",
+            session_dir().display()
+        );
+    }
     let mut cmd = match backend_command(&plan) {
         Ok(cmd) => cmd,
         Err(e) => fail(&e.to_string()),
@@ -988,6 +996,38 @@ pub fn maybe_reexec_into_jail() {
         let _ = &mut cmd;
         fail("--sandbox is not supported on this platform");
     }
+}
+
+/// Start a detached process that removes `dir` when the jail closes. The
+/// process reads a pipe whose write end the jail inherits, together with
+/// every process the jail starts. It sees EOF only after all of them exit,
+/// a crash and SIGKILL included. Returns the write end, left open across exec.
+#[cfg(unix)]
+fn spawn_session_reaper(dir: &Path) -> Option<std::os::unix::io::RawFd> {
+    use std::os::unix::io::{AsRawFd as _, IntoRawFd as _};
+    use std::os::unix::process::CommandExt as _;
+    let (reader, writer) = std::io::pipe().ok()?;
+    crate::ci_host::inherit_across_exec(writer.as_raw_fd())?;
+    let writer_fd = writer.as_raw_fd();
+    let mut cmd = std::process::Command::new("/bin/sh");
+    cmd.args(["-c", "cat >/dev/null; exec rm -rf -- \"$1\"", "sh"])
+        .arg(dir)
+        .stdin(reader)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    // SAFETY: `close` and `setsid` are async-signal-safe. The reaper must
+    // hold no write end, or it never sees EOF.
+    unsafe {
+        cmd.pre_exec(move || {
+            libc::close(writer_fd);
+            libc::setsid();
+            Ok(())
+        });
+    }
+    // The reaper outlives this process by design: the exec replaces it.
+    #[allow(clippy::disallowed_methods)]
+    cmd.spawn().ok()?;
+    Some(writer.into_raw_fd())
 }
 
 /// Remove the session directories of jails whose process is gone. On macOS
@@ -2432,6 +2472,37 @@ mod tests {
         assert!(
             profile.contains("(deny file-read* (subpath \"/home/u/.cache\"))"),
             "tmpfs means the host cache is not visible: {profile}"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_session_reaper_removes_the_directory_once_the_jail_and_its_children_exit() {
+        let root = FixtureHome::new("reaper");
+        let dir = root.0.join("session");
+        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        let fd = spawn_session_reaper(&dir).expect("start the reaper");
+        // A process the jail started inherits the write end, like any tool would.
+        #[allow(clippy::disallowed_methods)]
+        let mut child = std::process::Command::new("sleep")
+            .arg("1")
+            .spawn()
+            .expect("spawn a child");
+        // SAFETY: the fd the reaper call leaked for the exec; nothing else owns it.
+        unsafe { libc::close(fd) };
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(
+            dir.exists(),
+            "a live child still holds the write end, so the directory must stay"
+        );
+        child.wait().expect("wait for the child");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while dir.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            !dir.exists(),
+            "the reaper must remove the session directory once every holder exits"
         );
     }
 

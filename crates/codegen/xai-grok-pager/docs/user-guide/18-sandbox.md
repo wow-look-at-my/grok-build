@@ -46,7 +46,7 @@ The jail binds these paths, in this order:
 
 A `--rw` on a parent, such as `--rw ~` or a working directory of `~`, does not expose the host `~/.cache` or `/tmp`. They are mounted over it. A flag on the directory itself or a path in it, such as `--rw ~/.cache/go-build`, gives the host directory back. To change the default, set `tmp` or `cache` in the `[jail]` table of `~/.grok/config.toml` to `overlay`, `tmpfs`, `rw` or `ro`.
 
-macOS has no mount namespaces. There the host `/tmp` and `~/.cache` are readable and never writable. `TMPDIR` names an empty session directory, and `XDG_CACHE_HOME` names an APFS copy-on-write clone of the host cache. Both are removed when the next jail starts after the session ends.
+macOS has no mount namespaces. There the host `/tmp` and `~/.cache` are readable and never writable. `TMPDIR` names an empty session directory, and `XDG_CACHE_HOME` names an APFS copy-on-write clone of the host cache. Both are removed when the session and every process it started have exited, a crash included. The next jail start removes any that a killed cleanup left behind.
 
 Order is precedence. A later flag beats an earlier one for the same path, and for any path inside it. So `--rw . --ro ./secrets` gives the agent the working directory and takes back one subtree. `$GROK_HOME` comes last. It is always writable, because the session needs it for its own state.
 
