@@ -6,6 +6,7 @@ use crate::types::resources::{NotificationHandle, OwnerSessionId};
 use crate::types::tool::{ToolKind, ToolNamespace};
 use xai_grok_sandbox::ci_state::{self, CiStatus};
 
+mod checks_fallback;
 mod wait;
 use wait::start_background_wait;
 
@@ -365,15 +366,41 @@ impl std::fmt::Display for CiQueryError {
 
 /// Read a branch's runs through whichever `gh` path this process can reach.
 /// `repo` must be a name [`valid_repo_token`] accepted, or `None` to ask the
-/// repository the git remote at `cwd` points at. An empty `Ok` means the
-/// branch has no runs. Every failure to ask is an `Err` that says what `gh`
-/// said, so a dead token never reads as "nothing pushed".
+/// repository the git remote at `cwd` points at.
 pub fn fetch_runs(
     cwd: &std::path::Path,
     branch: &str,
     limit: u32,
     repo: Option<&str>,
 ) -> Result<Vec<ci_state::GhRun>, CiQueryError> {
+    fetch_branch_runs(cwd, branch, limit, repo).map(|found| found.runs)
+}
+
+/// Where a branch's runs were read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunSource {
+    RunList,
+    /// Each entry is one check of the branch's pull request.
+    PullRequestChecks,
+    /// Each entry is one check run on the branch's pushed head commit.
+    CommitChecks,
+}
+
+#[derive(Debug, Clone)]
+pub struct BranchRuns {
+    pub runs: Vec<ci_state::GhRun>,
+    pub source: RunSource,
+}
+
+/// [`fetch_runs`], plus where the answer came from. A run list that comes
+/// back empty is not the last word. The pull request's checks, then the
+/// pushed head commit's check runs, answer for it.
+pub fn fetch_branch_runs(
+    cwd: &std::path::Path,
+    branch: &str,
+    limit: u32,
+    repo: Option<&str>,
+) -> Result<BranchRuns, CiQueryError> {
     let limit = limit.clamp(1, MAX_RUN_LIMIT).to_string();
     let named = repo.map(str::to_string).or_else(|| remote_repo(cwd));
     let response =
@@ -385,17 +412,30 @@ pub fn fetch_runs(
             stderr: response.stderr,
         });
     }
-    if response.stdout.trim() == "[]" {
-        return Ok(Vec::new());
-    }
-    let Some(mut runs) = ci_state::parse_gh_runs(response.stdout.as_bytes()) else {
-        return Err(CiQueryError::Unparseable {
-            stdout: response.stdout,
-        });
+    let runs = if response.stdout.trim() == "[]" {
+        Vec::new()
+    } else {
+        let Some(runs) = ci_state::parse_gh_runs(response.stdout.as_bytes()) else {
+            return Err(CiQueryError::Unparseable {
+                stdout: response.stdout,
+            });
+        };
+        runs_on_branch(runs, branch)
     };
-    // `--branch` filters server-side; this is the belt to those suspenders.
+    if !runs.is_empty() {
+        return Ok(BranchRuns {
+            runs,
+            source: RunSource::RunList,
+        });
+    }
+    Ok(checks_fallback::fetch(cwd, branch, named.as_deref()))
+}
+
+/// `--branch` filters server-side. This drops only a run that names another
+/// branch. A run that names none stays.
+fn runs_on_branch(mut runs: Vec<ci_state::GhRun>, branch: &str) -> Vec<ci_state::GhRun> {
     runs.retain(|run| run.head_branch.as_deref().is_none_or(|head| head == branch));
-    Ok(runs)
+    runs
 }
 
 /// The branch the session is on, read from git rather than guessed.
@@ -459,13 +499,25 @@ fn state_summary(state: CiStatus, branch: &str, repo: Option<&str>) -> String {
         ),
         CiStatus::Off => match repo {
             Some(repo) => format!(
-                "No CI runs for {branch} in {repo}. Nothing has been pushed to that branch, or that branch does not exist there; pass `repo` to ask about another repository."
+                "No CI runs or checks for {branch} in {repo}. Nothing has been pushed to that branch, or that branch does not exist there; pass `repo` to ask about another repository."
             ),
             None => format!(
                 "No CI runs for {branch}. This directory's git remote names no repository to ask, so nothing was queried. Pass `repo` as `owner/name`."
             ),
         },
     }
+}
+
+/// The sentence that says a state came from checks, not from the run list.
+fn source_note(source: RunSource, branch: &str) -> Option<String> {
+    let what = match source {
+        RunSource::RunList => return None,
+        RunSource::PullRequestChecks => "the pull request's checks",
+        RunSource::CommitChecks => "the check runs on its pushed head commit",
+    };
+    Some(format!(
+        "The run list for {branch} came back empty, so this state is read from {what}."
+    ))
 }
 
 // Tool implementation
@@ -749,11 +801,18 @@ fn status_output(
     limit: u32,
     repo: Option<&str>,
 ) -> Result<CiOutput, xai_tool_runtime::ToolError> {
-    let runs = fetch_runs(cwd, branch, limit, repo).map_err(query_error)?;
+    let BranchRuns { runs, source } =
+        fetch_branch_runs(cwd, branch, limit, repo).map_err(query_error)?;
     let state = ci_state::ci_from_runs(runs.iter().cloned().collect::<Vec<_>>());
     // A run GitHub labels `cancelled` can hold one job that genuinely failed.
     let detail = match state {
-        CiStatus::Red => newest_failing_run(&runs).map(|run| failure_detail(cwd, run, repo)),
+        CiStatus::Red => newest_failing_run(&runs).map(|run| match run.database_id {
+            Some(_) => failure_detail(cwd, run, repo),
+            None => format!(
+                "Check {} ended {}. It names no Actions run, so `logs` cannot read it.",
+                run.workflow_name, run.conclusion
+            ),
+        }),
         _ => None,
     };
     let summary = match &detail {
@@ -762,6 +821,10 @@ fn status_output(
             text.lines().next().unwrap_or_default().trim()
         ),
         None => state_summary(state, branch, repo),
+    };
+    let summary = match source_note(source, branch) {
+        Some(note) => format!("{summary} {note}"),
+        None => summary,
     };
     Ok(CiOutput {
         state: state.as_str().to_string(),
@@ -924,6 +987,28 @@ mod tests {
                 .to_string()
                 .contains("Could not run `gh`")
         );
+    }
+
+    /// A mirror reports `"headBranch": ""` on the runs `--branch` already
+    /// picked. Dropping those emptied every branch, `master` too.
+    #[test]
+    fn a_run_that_names_no_branch_stays_on_the_branch_asked_for() {
+        let body = br#"[{"status":"completed","conclusion":"success","headBranch":"","workflowName":"CI","databaseId":1},
+                        {"status":"completed","conclusion":"failure","headBranch":"other","workflowName":"CI","databaseId":2}]"#;
+        let runs = ci_state::parse_gh_runs(body).expect("parseable");
+        let kept = runs_on_branch(runs, "master");
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].database_id, Some(1));
+        assert_eq!(ci_state::ci_from_runs(kept), CiStatus::Green);
+    }
+
+    #[test]
+    fn a_state_read_from_checks_says_so() {
+        assert_eq!(source_note(RunSource::RunList, "feat/x"), None);
+        let pr = source_note(RunSource::PullRequestChecks, "feat/x").expect("a note");
+        assert!(pr.contains("pull request's checks"), "{pr}");
+        let commit = source_note(RunSource::CommitChecks, "master").expect("a note");
+        assert!(commit.contains("head commit"), "{commit}");
     }
 
     #[test]
