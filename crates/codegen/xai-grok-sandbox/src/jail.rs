@@ -1100,8 +1100,7 @@ fn spawn_session_reaper(dir: &Path) -> Option<std::os::unix::io::RawFd> {
     cmd.arg("-c")
         .arg(script)
         .arg("sh")
-        .arg(name)
-        .current_dir(root)
+        .arg(dir)
         .stdin(reader)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
