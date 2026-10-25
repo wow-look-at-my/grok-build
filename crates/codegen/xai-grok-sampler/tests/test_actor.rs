@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use xai_grok_sampler::{
     ApiBackend, RequestId, RetryPolicy, SamplerActor, SamplerConfig, SamplingChannel,
-    SamplingErrorKind, SamplingEvent, StripReason,
+    SamplingErrorKind, SamplingEvent, StripReason, set_max_parallel_requests,
 };
 use xai_grok_sampling_types::{
     ConversationItem, ConversationRequest, DoomLoopRecoveryPolicy, INVALID_IMAGE_ERROR_CODE,
@@ -1615,6 +1615,9 @@ async fn responses_doom_loop_does_not_resample_after_output_when_retry_only_befo
 mod output_rate {
     use super::*;
 
+    /// A pace entry that waits for the backup's request instead of sleeping.
+    const WAIT_FOR_BACKUP: u64 = u64::MAX;
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// A collapsed stream gets a backup generation beside it. The never
     /// finishes and the backup answers at the same time, so the backup's
@@ -1740,14 +1743,19 @@ mod output_rate {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// A slow original that speeds back up keeps its answer and cancels its backup.
     async fn a_recovered_stream_cancels_its_backup_and_keeps_its_answer() {
+        // The process-wide slot cap is sized for one session.
+        set_max_parallel_requests(0);
         let counter = Arc::new(AtomicU32::new(0));
+        let backup_arrived = Arc::new(tokio::sync::Notify::new());
         let backup_dropped = Arc::new(std::sync::Mutex::new(None));
         let counter_handler = Arc::clone(&counter);
+        let arrived_handler = Arc::clone(&backup_arrived);
         let dropped_handler = Arc::clone(&backup_dropped);
         let app = Router::new().route(
             "/v1/chat/completions",
             post(move || {
                 let counter = Arc::clone(&counter_handler);
+                let arrived = Arc::clone(&arrived_handler);
                 let dropped = Arc::clone(&dropped_handler);
                 async move {
                     let attempt = counter.fetch_add(1, Ordering::SeqCst);
@@ -1756,14 +1764,30 @@ mod output_rate {
                         let mut events: Vec<(u64, Event)> = (0..20)
                             .map(|_| (200, text_chunk_event("x", false)))
                             .collect();
+                        events.push((WAIT_FOR_BACKUP, text_chunk_event("", false)));
                         events.extend((0..120).map(|_| (25, text_chunk_event(&fast, false))));
                         events.push((25, text_chunk_event("", true)));
-                        let paced = stream::iter(events).then(|(delay, event)| async move {
-                            tokio::time::sleep(Duration::from_millis(delay)).await;
-                            Ok::<_, std::convert::Infallible>(event)
+                        let paced = stream::iter(events).then(move |(delay, event)| {
+                            let arrived = Arc::clone(&arrived);
+                            async move {
+                                if delay == WAIT_FOR_BACKUP {
+                                    // The recovery is what cancels the backup,
+                                    // so the fast phase cannot begin before the
+                                    // backup's request has been counted.
+                                    let _ = tokio::time::timeout(
+                                        Duration::from_secs(20),
+                                        arrived.notified(),
+                                    )
+                                    .await;
+                                } else {
+                                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                                }
+                                Ok::<_, std::convert::Infallible>(event)
+                            }
                         });
                         return Sse::new(paced.boxed());
                     }
+                    arrived.notify_one();
                     let stamp = DropStamp(dropped);
                     let mut events: Vec<Event> =
                         (0..200).map(|_| text_chunk_event("", false)).collect();
@@ -1817,12 +1841,17 @@ mod output_rate {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     /// A backup that gets ahead replaces the slow original while it still streams.
     async fn a_backup_that_overtakes_replaces_the_slow_stream_mid_response() {
+        // Same reason as the recovery case: a queued backup cannot overtake anything while it waits for a slot.
+        set_max_parallel_requests(0);
         let counter = Arc::new(AtomicU32::new(0));
+        let backup_arrived = Arc::new(tokio::sync::Notify::new());
         let counter_handler = Arc::clone(&counter);
+        let arrived_handler = Arc::clone(&backup_arrived);
         let app = Router::new().route(
             "/v1/chat/completions",
             post(move || {
                 let counter = Arc::clone(&counter_handler);
+                let arrived = Arc::clone(&arrived_handler);
                 async move {
                     let attempt = counter.fetch_add(1, Ordering::SeqCst);
                     let (text, count, delay, finish) = if attempt == 0 {
@@ -1830,14 +1859,33 @@ mod output_rate {
                     } else {
                         ("yy", 50, 50, true)
                     };
-                    let mut events: Vec<Event> =
-                        (0..count).map(|_| text_chunk_event(text, false)).collect();
-                    if finish {
-                        events.push(text_chunk_event("", true));
+                    if attempt != 0 {
+                        arrived.notify_one();
                     }
-                    let paced = stream::iter(events).then(move |event| async move {
-                        tokio::time::sleep(Duration::from_millis(delay)).await;
-                        Ok::<_, std::convert::Infallible>(event)
+                    let mut events: Vec<(u64, Event)> = (0..count)
+                        .map(|_| (delay, text_chunk_event(text, false)))
+                        .collect();
+                    if finish {
+                        events.push((delay, text_chunk_event("", true)));
+                    }
+                    if attempt == 0 {
+                        // Slow chunks put the stream past the floor's sustained span.
+                        events.insert(10, (WAIT_FOR_BACKUP, text_chunk_event("", false)));
+                    }
+                    let paced = stream::iter(events).then(move |(delay, event)| {
+                        let arrived = Arc::clone(&arrived);
+                        async move {
+                            if delay == WAIT_FOR_BACKUP {
+                                let _ = tokio::time::timeout(
+                                    Duration::from_secs(20),
+                                    arrived.notified(),
+                                )
+                                .await;
+                            } else {
+                                tokio::time::sleep(Duration::from_millis(delay)).await;
+                            }
+                            Ok::<_, std::convert::Infallible>(event)
+                        }
                     });
                     Sse::new(paced.boxed())
                 }
@@ -1926,6 +1974,94 @@ mod output_rate {
         let (response, _metrics) = result.expect("a slow stream still answers");
         assert_eq!(counter.load(Ordering::SeqCst), 1, "no reissue");
         assert_eq!(response.assistant_text(), "xxxxxxxxxxxx");
+    }
+
+    /// A steady stream publishes a rate long before the fixed span the meter
+    /// used to wait. For, and keeps publishing across a burst and across a
+    /// stall. The client renders what this event carries, so a gap here is a
+    /// row with no `tok/s` under a running response.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_steady_stream_publishes_its_rate_early_and_keeps_it() {
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || async move {
+                // Chunks at a set value ms each.
+                let mut events: Vec<(u64, Event)> = Vec::new();
+                for _ in 0..100 {
+                    events.push((50, text_chunk_event(&"f".repeat(40), false)));
+                }
+                for _ in 0..20 {
+                    events.push((50, text_chunk_event(&"F".repeat(400), false)));
+                }
+                for _ in 0..20 {
+                    events.push((100, text_chunk_event("", false)));
+                }
+                events.push((50, text_chunk_event("", true)));
+                let paced = stream::iter(events).then(|(delay, event)| async move {
+                    tokio::time::sleep(Duration::from_millis(delay)).await;
+                    Ok::<_, std::convert::Infallible>(event)
+                });
+                Sse::new(paced.boxed())
+            }),
+        );
+        let server = MockServer::spawn(app).await;
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let handle = SamplerActor::spawn(
+            test_config(server.base_url(), "test-model"),
+            RetryPolicy::default(),
+            event_tx,
+        );
+        let events = collect_timed(event_rx);
+
+        let result = handle
+            .submit_and_collect(RequestId::from("req-rate-early"), user_request("hi"))
+            .await;
+        server.shutdown();
+        result.expect("the steady stream answers");
+
+        let events = events.lock().unwrap();
+        let first_token_at = events
+            .iter()
+            .find(|(_, e)| matches!(e, SamplingEvent::ChannelToken { .. }))
+            .map(|(at, _)| *at)
+            .expect("the stream produced tokens");
+        let first_rate_at = events
+            .iter()
+            .find(|(_, e)| matches!(e, SamplingEvent::OutputRate { .. }))
+            .map(|(at, _)| *at)
+            .expect("the stream published a rate");
+        assert!(
+            first_rate_at.saturating_duration_since(first_token_at) < Duration::from_millis(1500),
+            "the first reading took {:?}, which is the fixed floor this must beat",
+            first_rate_at.saturating_duration_since(first_token_at)
+        );
+
+        let rates: Vec<f64> = events
+            .iter()
+            .filter_map(|(_, e)| match e {
+                SamplingEvent::OutputRate { tokens_per_sec, .. } => Some(*tokens_per_sec),
+                _ => None,
+            })
+            .collect();
+        assert!(rates.len() >= 3, "the rate keeps arriving: {rates:?}");
+        let peak = rates.iter().copied().fold(f64::MIN, f64::max);
+        assert!(peak > 300.0, "the burst reached the client: {rates:?}");
+        // The window averages, so a couple of seconds of silence bends
+        // the number down rather than flattening it.
+        let after_peak: Vec<f64> = rates
+            .iter()
+            .copied()
+            .skip_while(|rate| *rate < peak)
+            .skip(1)
+            .collect();
+        assert!(
+            after_peak.len() >= 2,
+            "the stall still publishes readings: {rates:?}"
+        );
+        assert!(
+            after_peak.first() > after_peak.last(),
+            "the stall reads as a falling number: {after_peak:?}"
+        );
     }
 
     /// A server-side web search delivers nothing while it runs. The model is not
