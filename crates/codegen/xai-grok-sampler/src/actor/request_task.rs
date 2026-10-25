@@ -1151,7 +1151,7 @@ async fn drive_l2(
                         }
                     }
                 }
-                publish_rate(&gate, now, &request_id, event_tx, &mut last_published);
+                publish_rate(&mut gate, now, &request_id, event_tx, &mut last_published);
             }
             signal = next_backup_signal(&mut hedge) => match signal {
                 BackupSignal::Event(event) => {
@@ -1586,7 +1586,7 @@ impl Backup<'_> {
 /// The event also carries how long that has lasted, and that number moves even when
 /// the rate does not. This happens while the rate is under the floor.
 fn publish_rate(
-    gate: &OutputRateGate,
+    gate: &mut OutputRateGate,
     now: std::time::Instant,
     request_id: &RequestId,
     event_tx: &mpsc::UnboundedSender<SamplingEvent>,

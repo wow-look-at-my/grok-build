@@ -623,7 +623,7 @@ pub fn render_usage_modal(
     });
 
     // v_pad and footer_lines pad the body top and bottom (shortcuts render bottom-aligned, so the spare footer row reads as bottom padding)
-    // Wide enough for the context bar and its totals side by side on a typical terminal.
+    // bottom-aligned, so the spare footer row reads as bottom padding).
     let sizing = ModalSizing {
         width_pct: 0.8,
         max_width: 120,

@@ -191,6 +191,8 @@ Each setting also has an environment-variable override, applied on first load on
 
 Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate. When a model call stays too slow, Grok starts a backup of that call and keeps the slow one streaming. Whichever gets ahead is the answer, and a slow call that speeds back up cancels its backup. Tune it in `/settings` → **Slow output**, or in `[ui]`. A change applies to the next model call of every running session.
 
+The `N tok/s` counter beside the timers appears as soon as the measured rate settled, usually a few hundred milliseconds into the response. It shows that same rate the floor judges. And a stall brings it down rather than clearing it. This happens once it appears it stays for the rest of the model call: a speed-up or a slow-down changes the number. While the row waits for the model, after the call ends, and during a retry, there is no stream. The counter is hidden.
+
 | Key | Values (default) | Behavior |
 |-----|------------------|----------|
 | `min_output_tokens_per_sec` | `0`–`500` (`15`) | The floor. `0` turns detection off. `[model.<id>].min_output_tokens_per_sec` overrides it for one model. |
