@@ -1,4 +1,4 @@
-//! Unsandboxed `gh` host worker for `--sandbox` (pathbox) sessions.
+//! Unsandboxed host worker for sandboxed sessions: it runs `gh` and writes grok's own config files.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -106,6 +106,86 @@ const ALLOWED_FLAGS: &[&str] = &[
     "--ref",
     "-r",
 ];
+
+/// The files in `$GROK_HOME` that grok edits about itself and a sandbox profile write-denies.
+const HOST_WRITTEN_CONFIG_FILES: &[&str] = &["config.toml", "trusted_folders.toml"];
+
+/// One whole-file write of a grok config file, done by the worker.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ConfigWriteRequest {
+    pub path: std::path::PathBuf,
+    pub contents: String,
+    #[serde(default)]
+    pub mode: Option<u32>,
+}
+
+/// The outcome of a config write the worker did.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ConfigWriteResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl ConfigWriteResponse {
+    fn from_result(result: std::io::Result<()>) -> Self {
+        match result {
+            Ok(()) => Self {
+                ok: true,
+                error: None,
+            },
+            Err(error) => Self {
+                ok: false,
+                error: Some(error.to_string()),
+            },
+        }
+    }
+
+    fn into_result(self) -> std::io::Result<()> {
+        if self.ok {
+            return Ok(());
+        }
+        Err(std::io::Error::other(self.error.unwrap_or_else(|| {
+            "the host worker did not write the file".to_string()
+        })))
+    }
+}
+
+/// The live `$GROK_HOME`, resolved the way the config and trust-store writers resolve it.
+fn config_home() -> std::path::PathBuf {
+    xai_dirs::resolve_grok_home().unwrap_or_else(xai_dirs::grok_home)
+}
+
+/// Whether `path` is a grok config file in `grok_home` that the worker writes.
+/// A config file can be a symlink, so its resolved target also matches.
+fn is_host_written_config_file(grok_home: &Path, path: &Path) -> bool {
+    HOST_WRITTEN_CONFIG_FILES.iter().any(|name| {
+        let slot = grok_home.join(name);
+        if path == slot {
+            return true;
+        }
+        xai_grok_config::fs_atomic::bind_follow_destination(&slot)
+            .is_ok_and(|dest| dest.as_path() == path)
+    })
+}
+
+/// Do one `config-write` request. Any path that is not a grok config file is refused.
+fn write_config_file(request: &ConfigWriteRequest) -> ConfigWriteResponse {
+    if !is_host_written_config_file(&config_home(), &request.path) {
+        return ConfigWriteResponse::from_result(Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "the host worker writes only grok's own config files, not {}",
+                request.path.display()
+            ),
+        )));
+    }
+    ConfigWriteResponse::from_result(xai_grok_config::fs_atomic::write_atomically_resolved(
+        &request.path,
+        &request.contents,
+        request.mode,
+    ))
+}
 
 /// Whether this process is the host CI worker (its `main` should run the
 /// worker loop and exit rather than start a session).
@@ -280,8 +360,9 @@ fn serve<R: std::io::Read, W: Write>(input: R, output: W) {
 /// Serve one request line, writing the single-line answer to `out`. Pure and
 /// testable: drives the fixed `gh` queries (`gh-status <branch>` for the CI
 /// dot, `gh-pr <branch>` for the shell's `x.ai/pr/status`), runs an
-/// allowlisted `gh <json argv>`, and answers the `.` nothing-usable sentinel
-/// for anything else (confinement).
+/// allowlisted `gh <json argv>`, writes one grok config file (`config-write
+/// <json>`). It answers the `.` nothing-usable sentinel for anything else
+/// (confinement).
 pub fn handle_request<W: Write>(line: &str, out: &mut W) {
     if let Some(branch) = line.strip_prefix("gh-status ") {
         // A lone `.` is the "nothing usable" sentinel (see module docs).
@@ -296,6 +377,18 @@ pub fn handle_request<W: Write>(line: &str, out: &mut W) {
         let payload = run_allowlisted(json)
             .and_then(|response| serde_json::to_vec(&response).ok())
             .unwrap_or_else(|| vec![b'.']);
+        write_one_line(out, payload);
+        return;
+    }
+    if let Some(json) = line.strip_prefix("config-write ") {
+        let response = match serde_json::from_str::<ConfigWriteRequest>(json) {
+            Ok(request) => write_config_file(&request),
+            Err(error) => ConfigWriteResponse::from_result(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("malformed config-write request: {error}"),
+            ))),
+        };
+        let payload = serde_json::to_vec(&response).unwrap_or_else(|_| vec![b'.']);
         write_one_line(out, payload);
         return;
     }
@@ -624,6 +717,42 @@ pub fn query_gh_host(fd: i32, args: &[&str]) -> Option<GhHostResponse> {
     serde_json::from_slice(&response).ok()
 }
 
+/// Ask the host worker to write one grok config file. `None` means the
+/// worker did not answer, or is too old to know the request.
+#[cfg(unix)]
+pub fn write_config_on_host(
+    fd: i32,
+    path: &Path,
+    contents: &str,
+    mode: Option<u32>,
+) -> Option<std::io::Result<()>> {
+    let request = ConfigWriteRequest {
+        path: path.to_path_buf(),
+        contents: contents.to_string(),
+        mode,
+    };
+    let json = serde_json::to_string(&request).ok()?;
+    let response = exchange(fd, &format!("config-write {json}"))?;
+    let response: ConfigWriteResponse = serde_json::from_slice(&response).ok()?;
+    Some(response.into_result())
+}
+
+/// Route this process's writes of its own config files to the host worker.
+pub fn install_host_config_writer() {
+    xai_grok_config::host_write::install(host_config_writer);
+}
+
+fn host_config_writer(
+    path: &Path,
+    contents: &str,
+    mode: Option<u32>,
+) -> Option<std::io::Result<()>> {
+    if !is_host_written_config_file(&config_home(), path) {
+        return None;
+    }
+    write_config_on_host(ci_host_fd()?, path, contents, mode)
+}
+
 /// Run a read-only `gh` command wherever this process can reach `gh`: through
 /// the host worker when sandboxed, by spawning it directly otherwise. The
 /// host worker is authoritative once it exists. A sandboxed session never
@@ -669,6 +798,145 @@ mod tests {
         let mut sink = Sink(Vec::new());
         handle_request(line, &mut sink);
         sink.0
+    }
+
+    /// A fresh, empty directory that stands in for `$GROK_HOME`.
+    fn scratch_grok_home(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("grok-ci-host-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch grok home");
+        dir
+    }
+
+    fn config_write_line(path: &Path, contents: &str) -> String {
+        let request = ConfigWriteRequest {
+            path: path.to_path_buf(),
+            contents: contents.to_string(),
+            mode: None,
+        };
+        format!(
+            "config-write {}",
+            serde_json::to_string(&request).expect("encode request")
+        )
+    }
+
+    fn config_write_answer(line: &str) -> ConfigWriteResponse {
+        serde_json::from_slice(&answer(line)).expect("a config-write answer")
+    }
+
+    /// The worker saves every setting, the ones that grant capability too: it
+    /// is grok writing its own config, not a tool in the sandbox.
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn config_write_saves_any_setting_into_config_toml() {
+        let home = scratch_grok_home("config-write");
+        let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
+        let config = home.join("config.toml");
+        let contents =
+            "[models]\ndefault = \"model-b\"\n\n[ui]\npermission_mode = \"always-approve\"\n";
+        let response = config_write_answer(&config_write_line(&config, contents));
+        assert!(response.ok, "the write must land: {response:?}");
+        assert_eq!(
+            std::fs::read_to_string(&config).expect("read config"),
+            contents
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn config_write_saves_the_folder_trust_store() {
+        let home = scratch_grok_home("trust-write");
+        let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
+        let store = home.join("trusted_folders.toml");
+        let response = config_write_answer(&config_write_line(&store, "version = 1\n"));
+        assert!(response.ok, "the write must land: {response:?}");
+        assert_eq!(
+            std::fs::read_to_string(&store).expect("read store"),
+            "version = 1\n"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// The worker runs outside the sandbox, so it must not become a way to write
+    /// any other file.
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn config_write_refuses_a_file_that_is_not_a_grok_config_file() {
+        let home = scratch_grok_home("config-refuse");
+        let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
+        for path in [
+            home.join("sandbox.toml"),
+            home.join("managed_config.toml"),
+            home.join("hooks").join("config.toml"),
+            std::env::temp_dir().join("config.toml"),
+        ] {
+            let response = config_write_answer(&config_write_line(&path, "x = 1\n"));
+            assert!(!response.ok, "{} must be refused", path.display());
+            assert!(
+                response
+                    .error
+                    .as_deref()
+                    .is_some_and(|e| e.contains("only grok's own config files")),
+                "the refusal must say why: {response:?}"
+            );
+        }
+        assert!(!home.join("sandbox.toml").exists());
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// A `config.toml` that is a symlink is written at its target, which is the
+    /// path the in-process writer binds and sends.
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn config_write_accepts_the_target_of_a_symlinked_config_toml() {
+        let home = scratch_grok_home("config-symlink");
+        let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
+        let target = home.join("dotfiles-grok.toml");
+        std::fs::write(&target, "").expect("seed target");
+        std::os::unix::fs::symlink(&target, home.join("config.toml")).expect("symlink config");
+        let bound = xai_grok_config::fs_atomic::bind_follow_destination(&home.join("config.toml"))
+            .expect("bind config");
+        let response = config_write_answer(&config_write_line(bound.as_path(), "a = 1\n"));
+        assert!(response.ok, "the write must land: {response:?}");
+        assert_eq!(
+            std::fs::read_to_string(&target).expect("read target"),
+            "a = 1\n"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn write_config_on_host_reports_the_workers_verdict() {
+        let fd = peer_expecting("config-write ", vec![r#"{"ok":true,"error":null}"#]);
+        let landed = write_config_on_host(fd, Path::new("/g/config.toml"), "a = 1\n", None);
+        assert!(matches!(landed, Some(Ok(()))), "{landed:?}");
+
+        let fd = peer_expecting("config-write ", vec![r#"{"ok":false,"error":"disk full"}"#]);
+        let failed = write_config_on_host(fd, Path::new("/g/config.toml"), "a = 1\n", None)
+            .expect("an answer")
+            .expect_err("the worker's failure must reach the caller");
+        assert!(failed.to_string().contains("disk full"), "{failed}");
+    }
+
+    /// An old worker answers `.`. The write then falls back to this process.
+    #[test]
+    fn write_config_on_host_gives_back_a_write_an_old_worker_does_not_know() {
+        let fd = peer(vec!["."]);
+        assert!(write_config_on_host(fd, Path::new("/g/config.toml"), "", None).is_none());
+    }
+
+    /// The installed writer touches only grok's config files, and only when a
+    /// worker exists. Everything else stays an in-process write.
+    #[test]
+    #[serial_test::serial(ci_host_env)]
+    fn the_host_writer_leaves_other_files_and_workerless_sessions_in_process() {
+        let home = scratch_grok_home("host-writer");
+        let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
+        let _no_worker = EnvGuard::set(CI_HOST_FD_ENV, "");
+        assert!(host_config_writer(&home.join("pager.toml"), "", None).is_none());
+        assert!(host_config_writer(&home.join("config.toml"), "", None).is_none());
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// Set an env var for one test and restore it on drop.

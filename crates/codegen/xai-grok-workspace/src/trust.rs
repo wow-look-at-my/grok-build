@@ -374,6 +374,9 @@ impl TrustStore {
 
         let body = toml::to_string_pretty(doc)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        if let Some(result) = xai_grok_config::host_write::try_write(path, &body, Some(0o600)) {
+            return result;
+        }
 
         // Unique temp in the same directory (atomic rename requires same FS).
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
