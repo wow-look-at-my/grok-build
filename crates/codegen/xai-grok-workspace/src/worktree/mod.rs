@@ -810,8 +810,8 @@ pub fn derive_worktree_label(user_input: Option<&str>) -> String {
 }
 
 /// Derive a collision-resistant repository slug from the git root path. Falls back to `"repo"` when no suitable components exist.
-/// This names the bucket a repository's checkouts lived under in the legacy
-/// `<grok home>/worktrees/<repo>/` layout, so it still reads existing records.
+/// This names the bucket a repository's checkouts are created in, under the
+/// grok home's `worktrees/` directory.
 pub fn repo_slug(git_root: &Path) -> String {
     let components: Vec<&str> = git_root
         .components()
@@ -860,25 +860,24 @@ fn grok_home() -> std::path::PathBuf {
     xai_fast_worktree::resolve_grok_home().unwrap_or_else(|_| std::env::temp_dir().join(".grok"))
 }
 
-/// Returns `<main checkout root>/.grok/worktrees`, the directory a repository
-/// keeps its own grok-managed checkouts in.
+/// Returns `<grok home>/worktrees/<repo slug>`, the directory a repository's
+/// grok-managed checkouts are created in.
 pub fn worktree_base_dir(git_root: &Path) -> std::path::PathBuf {
-    xai_fast_worktree::repo_worktrees_root(git_root)
+    home_worktrees_root_in(&grok_home()).join(repo_slug(git_root))
 }
 
-/// The legacy `<grok home>/worktrees` root, where checkouts lived before they
-/// moved into their repository.
-fn legacy_worktrees_root_in(grok_home: &Path) -> std::path::PathBuf {
+/// The `<grok home>/worktrees` root holding every repository's bucket.
+fn home_worktrees_root_in(grok_home: &Path) -> std::path::PathBuf {
     grok_home.join(xai_fast_worktree::WORKTREES_DIR)
 }
 
 /// The managed worktrees boundary containing `path`, if it is under one.
 fn managed_worktrees_boundary_in(grok_home: &Path, path: &Path) -> Option<std::path::PathBuf> {
-    xai_fast_worktree::managed_worktrees_boundary(path, &legacy_worktrees_root_in(grok_home))
+    xai_fast_worktree::managed_worktrees_boundary(path, &home_worktrees_root_in(grok_home))
 }
 
-/// Resolves the worktree base directory (`<main checkout
-/// root>/.grok/worktrees`) for a given source path.
+/// Resolves the worktree base directory (`<grok home>/worktrees/<repo slug>`)
+/// for a given source path.
 pub fn worktree_base_dir_for_source(source_path: &Path) -> Result<std::path::PathBuf> {
     worktree_base_dir_for_source_in(&grok_home(), source_path)
 }
@@ -893,30 +892,33 @@ pub fn worktree_base_dir_for_source_in(
         return Ok(base);
     }
     let git_root = find_main_repo_root_from_path(source_path)?;
-    Ok(worktree_base_dir(&git_root))
+    Ok(home_worktrees_root_in(grok_home).join(repo_slug(&git_root)))
 }
 
 /// The managed root a source inside a managed checkout already sits in. It
 /// runs no git discovery, so a Grove parent is never opened with libgit2.
+/// A source under a repository's own `.grok/worktrees` is not answered here:
+/// new checkouts are created under the grok home, never inside a repository.
 fn managed_base_dir_for_source_in(
     grok_home: &Path,
     source_path: &Path,
 ) -> Option<std::path::PathBuf> {
-    let legacy_dir = legacy_worktrees_root_in(grok_home);
-    if let Ok(suffix) = source_path.strip_prefix(&legacy_dir) {
-        let Some(first) = suffix.components().next() else {
-            // The root itself.
-            return Some(legacy_dir.join("repo"));
-        };
-        let first = legacy_dir.join(first);
-        // `<legacy>/<checkout>...` is the shape an unforked grok build left
-        // behind: the first component is the checkout itself.
-        if xai_fast_worktree::is_worktree_dir(&first) {
-            return Some(legacy_dir);
-        }
-        return Some(first);
+    let home_dir = home_worktrees_root_in(grok_home);
+    let Ok(suffix) = source_path.strip_prefix(&home_dir) else {
+        return None;
+    };
+    let Some(first) = suffix.components().next() else {
+        // The root itself.
+        return Some(home_dir.join("repo"));
+    };
+    let first = home_dir.join(first);
+    // `worktrees/<checkout>...` is the shape an unforked grok build left
+    // behind: the first component is the checkout itself, so a fork lands
+    // beside it under the root rather than inside it.
+    if xai_fast_worktree::is_worktree_dir(&first) {
+        return Some(home_dir);
     }
-    xai_fast_worktree::enclosing_repo_worktrees_root(source_path)
+    Some(first)
 }
 
 /// Dest is already pinned; do not use launch cwd as `source_git_root` on a Grove parent.
@@ -940,7 +942,7 @@ fn resolve_worktree_path(grok_home: &Path, req: &CreateWorktreeRequest, git_root
     // Resolve off the source path, not the git root. A session already in a
     // managed checkout must get a sibling, never a tree nested inside it.
     let base = managed_base_dir_for_source_in(grok_home, Path::new(&req.source_path))
-        .unwrap_or_else(|| worktree_base_dir(git_root));
+        .unwrap_or_else(|| home_worktrees_root_in(grok_home).join(repo_slug(git_root)));
     let label = derive_worktree_label(req.label.as_deref());
     let dir_name = resolve_label_collision(&base, &label);
     base.join(dir_name).to_string_lossy().to_string()
@@ -964,13 +966,14 @@ pub fn label_from_path(worktree_path: &str) -> String {
 
 /// Walk up from `cwd` (staying within the managed worktrees root that contains it) to its registered worktree record. Shared resolver for [`lookup_worktree_label`] and [`touch_worktree_for_cwd`].
 /// Returns the open DB alongside the record so callers can issue follow-up queries.
-/// A cwd under neither a repository's own `.grok/worktrees/` nor the legacy
-/// `~/.grok/worktrees/` returns `None` without opening the DB.
+/// A cwd under neither the grok home's `worktrees/` nor a repository's own
+/// `.grok/worktrees/` returns `None` without opening the DB.
 fn worktree_record_for_cwd(cwd: &str) -> Option<(WorktreeDb, WorktreeRecord)> {
     worktree_record_for_cwd_in(&grok_home(), cwd)
 }
 
-/// [`worktree_record_for_cwd`] against the `worktrees.db` and legacy worktree root under an explicit grok home.
+/// [`worktree_record_for_cwd`] against the `worktrees.db` and the managed
+/// worktrees roots under an explicit grok home.
 fn worktree_record_for_cwd_in(grok_home: &Path, cwd: &str) -> Option<(WorktreeDb, WorktreeRecord)> {
     let mut path = Path::new(cwd);
     let worktrees_dir = managed_worktrees_boundary_in(grok_home, path)?;
@@ -1780,8 +1783,9 @@ fn resolve_fork_worktree_path(
     git_root: &Path,
     label: Option<&str>,
 ) -> String {
-    let base = managed_base_dir_for_source_in(&grok_home(), source_worktree_path)
-        .unwrap_or_else(|| worktree_base_dir(git_root));
+    let home = grok_home();
+    let base = managed_base_dir_for_source_in(&home, source_worktree_path)
+        .unwrap_or_else(|| home_worktrees_root_in(&home).join(repo_slug(git_root)));
     let dir_name = derive_worktree_label(label);
     let dir_name = resolve_label_collision(&base, &dir_name);
     base.join(dir_name).to_string_lossy().into_owned()
@@ -3170,8 +3174,9 @@ pub fn candidate_worktree_cwds_for_same_repo(current_cwd: &std::path::Path) -> R
     ))
 }
 
-/// Scan `<main repo root>/.grok/worktrees/` for subdirectories not tracked
-/// in the DB. Returns a sorted list of absolute directory paths.
+/// Scan the repository's bucket under the grok home's `worktrees/` for
+/// subdirectories not tracked in the DB. Returns a sorted list of absolute
+/// directory paths.
 fn scan_worktree_dirs_on_disk(main_repo_root: &std::path::Path) -> Vec<String> {
     let base = worktree_base_dir(main_repo_root);
     let entries = match std::fs::read_dir(&base) {
@@ -3675,10 +3680,11 @@ mod tests {
             "a source under the home's worktrees keeps its repo dir"
         );
         let repo = xai_test_utils::git::seed_repo(temp.path());
+        let git_root = find_main_repo_root_from_path(&repo).unwrap();
         assert_eq!(
-            worktree_base_dir(&find_main_repo_root_from_path(&repo).unwrap()),
+            home.join("worktrees").join(repo_slug(&git_root)),
             worktree_base_dir_for_source_in(&home, &repo).unwrap(),
-            "a plain repository lands in its own `.grok/worktrees`, under no home"
+            "a plain repository lands in its bucket under the given home"
         );
     }
 
@@ -3709,7 +3715,7 @@ mod tests {
     /// directly under the root (the shape an unforked grok build left behind)
     /// must resolve exactly like one inside a per-repository bucket.
     #[test]
-    fn resolvers_answer_for_a_checkout_at_either_depth_of_the_old_location() {
+    fn resolvers_answer_for_a_checkout_at_either_depth_of_the_home_root() {
         for under in [
             &["go-toolchain-dats-sandbox"][..],
             &["repos-buildhost", "2026-09-14-reclaim"][..],
@@ -3793,9 +3799,9 @@ mod tests {
         }
     }
 
-    /// A new worktree goes into the repository's own `.grok/worktrees/`.
+    /// A new worktree goes into the grok home's bucket for the repository.
     #[test]
-    fn created_worktree_lands_in_the_repos_own_grok_dir() {
+    fn created_worktree_lands_in_the_grok_home_bucket() {
         xai_test_utils::require_git!();
         let temp = tempfile::TempDir::new().unwrap();
         let home = temp.path().join("grok-home");
@@ -3808,12 +3814,13 @@ mod tests {
             &find_main_repo_root_from_path(&repo).unwrap(),
         );
         let dest = Path::new(&dest);
+        let bucket = home.join("worktrees").join(repo_slug(&repo));
         assert!(
-            dest.starts_with(repo.join(".grok").join("worktrees")),
-            "destination {dest:?} must live under the repository's own \
-             `.grok/worktrees/`, not the user grok home"
+            dest.starts_with(&bucket),
+            "destination {dest:?} must live under the grok home bucket {}, \
+             not inside the repository",
+            bucket.display()
         );
-        assert!(!home.join("worktrees").exists());
 
         WorktreeBuilder::new(&repo, dest).create().unwrap();
         assert!(dest.join("tracked.txt").exists(), "the checkout is real");
@@ -3821,13 +3828,11 @@ mod tests {
         assert_eq!(
             git_out(&repo, &["status", "--porcelain"]),
             "",
-            "the managed worktrees directory must stay out of the main \
-             checkout's status"
+            "creating a checkout under the grok home leaves the main checkout clean"
         );
         assert!(
-            !repo.join(".gitignore").exists(),
-            "keeping the destination invisible is the repository's own \
-             exclude data's job, never the tracked .gitignore's"
+            !repo.join(".grok").exists(),
+            "creating a worktree adds no .grok directory to the repository"
         );
     }
 
@@ -3838,7 +3843,7 @@ mod tests {
         let home = temp.path().join("grok-home");
         let _env = LockedTestEnv::lock().set("GROK_HOME", &home);
         let repo = init_repo(&temp);
-        let managed = repo.join(".grok").join("worktrees");
+        let managed = home.join("worktrees").join(repo_slug(&repo));
 
         let first = managed.join("first");
         WorktreeBuilder::new(&repo, &first).create().unwrap();
@@ -3855,11 +3860,6 @@ mod tests {
         let second = Path::new(&second);
         assert_eq!(second.parent(), Some(managed.as_path()));
         assert_ne!(second, first, "the fork must not land on its source");
-        assert!(
-            !first.join(".grok/worktrees").exists(),
-            "the new checkout must not carry a copy of the managed tree it \
-             was made beside"
-        );
     }
 
     /// A repo-local checkout keeps its label lookup and its gc liveness touch.
@@ -3917,11 +3917,22 @@ mod tests {
         let plain = root.join("somewhere-else");
         std::fs::create_dir_all(&plain).unwrap();
         assert_eq!(lookup_worktree_label(&plain.to_string_lossy()), None);
+
+        // A source under the repository's own root gets its new checkout under
+        // the grok home, never a second one inside the repository.
+        let next = resolve_worktree_path(&home, &create_request(&wt, "next"), &root.join("repo"));
+        assert_eq!(
+            Path::new(&next),
+            home.join("worktrees")
+                .join(repo_slug(&root.join("repo")))
+                .join("next"),
+            "a repo-local checkout is recognised, not copied into"
+        );
         drop(env);
     }
 
     #[test]
-    fn legacy_grok_home_worktree_still_resolves() {
+    fn grok_home_worktree_still_resolves() {
         let temp = tempfile::TempDir::new().unwrap();
         let (_env, home, wt) = worktree_db_fixture(&temp);
 

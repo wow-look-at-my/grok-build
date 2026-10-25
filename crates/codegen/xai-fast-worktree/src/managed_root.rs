@@ -1,20 +1,23 @@
 //! Where grok puts the worktrees it manages, and how to recognise them.
+//!
+//! A checkout grok creates lives under the grok home, at
+//! `<grok home>/worktrees/<repo>/<label>`. Checkouts that a release wrote
+//! inside the repository itself, at `<main checkout>/.grok/worktrees/<label>`,
+//! are still recognised wherever a managed path is asked about.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-/// Name of the directory that holds a repository's own managed checkouts.
+/// Name of the directory that holds managed checkouts, under the grok home and
+/// under a repository's own `.grok` directory.
 pub const WORKTREES_DIR: &str = "worktrees";
 
-/// Per-repository parent of [`WORKTREES_DIR`].
-pub const REPO_DOT_DIR: &str = ".grok";
+/// Parent of the checkouts a release wrote inside their own repository.
+const IN_REPO_GROK_DIR: &str = ".grok";
 
-/// Line registered in the main checkout's exclude data so its managed checkouts stay out of `git status`.
-pub const WORKTREES_EXCLUDE_LINE: &str = ".grok/worktrees/";
-
-/// The directory one repository keeps its managed checkouts in.
+/// The directory one repository keeps its own checkouts in.
 pub fn repo_worktrees_root(main_root: &Path) -> PathBuf {
-    main_root.join(REPO_DOT_DIR).join(WORKTREES_DIR)
+    main_root.join(IN_REPO_GROK_DIR).join(WORKTREES_DIR)
 }
 
 /// True when `path` is a `<X>/.grok/worktrees` directory. Shape-only, so it
@@ -24,7 +27,7 @@ pub fn is_repo_worktrees_root(path: &Path) -> bool {
     let here_is_worktrees = path.file_name() == Some(OsStr::new(WORKTREES_DIR));
     let parent_is_dot_grok = path
         .parent()
-        .is_some_and(|p| p.file_name() == Some(OsStr::new(REPO_DOT_DIR)));
+        .is_some_and(|p| p.file_name() == Some(OsStr::new(IN_REPO_GROK_DIR)));
     here_is_worktrees && parent_is_dot_grok
 }
 
@@ -37,16 +40,6 @@ pub fn enclosing_repo_worktrees_root(path: &Path) -> Option<PathBuf> {
         }
     }
     outermost
-}
-
-/// The main checkout that owns `path`, when `path` is one of its managed
-/// checkouts or lives inside one.
-pub fn main_root_for_managed_path(path: &Path) -> Option<PathBuf> {
-    enclosing_repo_worktrees_root(path)
-        .as_deref()
-        .and_then(|managed_root| managed_root.parent())
-        .and_then(|dot_grok| dot_grok.parent())
-        .map(Path::to_path_buf)
 }
 
 /// True when a directory's own name can name a checkout. Hidden entries and
@@ -67,45 +60,17 @@ pub fn is_worktree_dir(path: &Path) -> bool {
     is_worktree_entry_name(path) && path.join(".git").symlink_metadata().is_ok()
 }
 
-/// The boundary of the managed layout that `path` sits in, if any. The
-/// returned directory is never itself a checkout: a path is grok-managed
-/// exactly when it is strictly below the boundary.
-pub fn managed_worktrees_boundary(path: &Path, legacy_root: &Path) -> Option<PathBuf> {
-    if path.starts_with(legacy_root) {
-        return Some(legacy_root.to_path_buf());
+/// The boundary of a managed layout that `path` sits in, if any. The returned
+/// directory is never itself a checkout: a path is grok-managed exactly when
+/// it is strictly below the boundary. `home_root` is the grok home's
+/// `worktrees` directory, where new checkouts are created; a repository's own
+/// `.grok/worktrees` is recognised as well, for the checkouts a release wrote
+/// there.
+pub fn managed_worktrees_boundary(path: &Path, home_root: &Path) -> Option<PathBuf> {
+    if path.starts_with(home_root) {
+        return Some(home_root.to_path_buf());
     }
     enclosing_repo_worktrees_root(path)
-}
-
-/// Keeps the managed worktrees directory out of `main_root`'s `git status`.
-/// The entry goes in the repository's own exclude data (`.git/info/exclude`),
-/// never in the tracked `.gitignore`. Which directories a clone happens to
-/// have checked out is not a property of the project. The write is
-/// idempotent, so a repository with multiple worktrees carries one line.
-pub fn exclude_managed_worktrees_dir(main_root: &Path) -> std::io::Result<()> {
-    // A repository whose `.git` is a pointer file keeps `info/exclude` in the
-    // common dir it names, not beside the working tree.
-    let git_dir = gix::discover(main_root)
-        .ok()
-        .map(|repo| repo.common_dir().to_path_buf())
-        .unwrap_or_else(|| main_root.join(".git"));
-    let info_dir = git_dir.join("info");
-    std::fs::create_dir_all(&info_dir)?;
-    let exclude_path = info_dir.join("exclude");
-    let existing = std::fs::read_to_string(&exclude_path).unwrap_or_default();
-    if existing
-        .lines()
-        .any(|line| line.trim_end() == WORKTREES_EXCLUDE_LINE)
-    {
-        return Ok(());
-    }
-    let mut updated = existing;
-    if !updated.is_empty() && !updated.ends_with('\n') {
-        updated.push('\n');
-    }
-    updated.push_str(WORKTREES_EXCLUDE_LINE);
-    updated.push('\n');
-    std::fs::write(&exclude_path, updated)
 }
 
 #[cfg(test)]
@@ -153,63 +118,19 @@ mod tests {
     }
 
     #[test]
-    fn main_root_is_the_owner_of_a_managed_checkout() {
+    fn boundary_prefers_the_given_home_root() {
+        let home_root = Path::new("/home/me/.grok/worktrees");
         assert_eq!(
-            main_root_for_managed_path(Path::new("/r/.grok/worktrees/label/crates/x")),
-            Some(PathBuf::from("/r"))
+            managed_worktrees_boundary(Path::new("/home/me/.grok/worktrees/repo/label"), home_root),
+            Some(home_root.to_path_buf())
         );
         assert_eq!(
-            main_root_for_managed_path(Path::new("/r/.grok/worktrees")),
-            None
-        );
-        assert_eq!(main_root_for_managed_path(Path::new("/r/plain/dir")), None);
-    }
-
-    #[test]
-    fn boundary_prefers_the_configured_legacy_root() {
-        let legacy = Path::new("/home/me/.grok/worktrees");
-        assert_eq!(
-            managed_worktrees_boundary(Path::new("/home/me/.grok/worktrees/repo/label"), legacy),
-            Some(legacy.to_path_buf())
-        );
-        assert_eq!(
-            managed_worktrees_boundary(Path::new("/r/.grok/worktrees/label"), legacy),
+            managed_worktrees_boundary(Path::new("/r/.grok/worktrees/label"), home_root),
             Some(PathBuf::from("/r/.grok/worktrees"))
         );
         assert_eq!(
-            managed_worktrees_boundary(Path::new("/r/plain/dir"), legacy),
+            managed_worktrees_boundary(Path::new("/r/plain/dir"), home_root),
             None
-        );
-    }
-
-    #[test]
-    fn exclusion_line_is_registered_once() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let main_root = temp.path();
-        std::fs::create_dir_all(main_root.join(".git")).unwrap();
-
-        exclude_managed_worktrees_dir(main_root).unwrap();
-        exclude_managed_worktrees_dir(main_root).unwrap();
-        let written = std::fs::read_to_string(main_root.join(".git/info/exclude")).unwrap();
-        assert_eq!(
-            written.matches(WORKTREES_EXCLUDE_LINE).count(),
-            1,
-            "a repeated registration must not pile up entries: {written:?}"
-        );
-    }
-
-    #[test]
-    fn exclusion_keeps_an_existing_entry_intact() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let main_root = temp.path();
-        let exclude = main_root.join(".git/info/exclude");
-        std::fs::create_dir_all(exclude.parent().unwrap()).unwrap();
-        std::fs::write(&exclude, "*.swp").unwrap();
-
-        exclude_managed_worktrees_dir(main_root).unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&exclude).unwrap(),
-            "*.swp\n.grok/worktrees/\n"
         );
     }
 
