@@ -2413,6 +2413,8 @@ impl SessionActor {
                 .record_task_model_output(u64::from(u.completion_tokens));
             self.chat_state_handle
                 .record_token_usage(u64::from(u.total_tokens));
+            self.chat_state_handle
+                .record_prompt_measurement(xai_chat_state::ProviderUsage::from_token_usage(u));
             self.chat_state_handle.record_last_turn_usage(u.clone());
             // Cost priority. Server-reported ticks → server-reported USD float
             // (both already resolved by the sampler into `cost_usd_ticks`) →

@@ -1,6 +1,7 @@
 //! The report a compaction writes beside its checkpoint.
 
-use xai_grok_sampling_types::{ContentPart, ConversationItem, SyntheticReason};
+use xai_chat_state::item_kind;
+use xai_grok_sampling_types::ConversationItem;
 
 /// Everything the report reads. The caller measures; this module only renders.
 pub struct CompactionReportInput<'a> {
@@ -190,60 +191,11 @@ fn push_table<'a>(md: &mut String, rows: impl Iterator<Item = &'a ItemRow>) {
     }
 }
 
-fn item_kind(item: &ConversationItem) -> String {
-    match item {
-        ConversationItem::System(_) => "system prompt".into(),
-        ConversationItem::User(u) => match &u.synthetic_reason {
-            SyntheticReason::Human => "user message".into(),
-            SyntheticReason::CompactionMeta => "compaction meta".into(),
-            SyntheticReason::SystemReminder => "system reminder".into(),
-            SyntheticReason::ProjectInstructions => "project instructions".into(),
-            other => format!("user ({other:?})"),
-        },
-        ConversationItem::Assistant(a) if a.tool_calls.is_empty() => "assistant".into(),
-        ConversationItem::Assistant(a) => format!("assistant, {} tool calls", a.tool_calls.len()),
-        ConversationItem::ToolResult(_) => "tool result".into(),
-        ConversationItem::BackendToolCall(_) => "backend tool call".into(),
-        ConversationItem::Reasoning(_) => "reasoning".into(),
-    }
-}
-
+/// The shared preview, made safe for a markdown table cell.
 fn preview(item: &ConversationItem) -> String {
-    let text: String = match item {
-        ConversationItem::System(s) => s.content.to_string(),
-        ConversationItem::User(u) => u
-            .content
-            .iter()
-            .map(|p| match p {
-                ContentPart::Text { text } => text.to_string(),
-                ContentPart::Image { .. } => "[image]".to_string(),
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-        ConversationItem::Assistant(a) => {
-            let calls: Vec<&str> = a.tool_calls.iter().map(|c| c.name.as_str()).collect();
-            if calls.is_empty() {
-                a.content.to_string()
-            } else {
-                format!("[{}] {}", calls.join(", "), a.content)
-            }
-        }
-        ConversationItem::ToolResult(tr) => tr.content.to_string(),
-        ConversationItem::BackendToolCall(b) => b.text_summary(),
-        ConversationItem::Reasoning(r) => {
-            let words = xai_grok_sampling_types::reasoning_item_text(r);
-            match r.encrypted_content.as_deref() {
-                Some(blob) => format!("[{} encrypted bytes] {words}", blob.len()),
-                None => words,
-            }
-        }
-    };
-    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut out: String = flat.chars().take(PREVIEW_CHARS).collect();
-    if flat.chars().count() > PREVIEW_CHARS {
-        out.push('…');
-    }
-    out.replace('|', "\\|").replace('`', "'")
+    xai_chat_state::item_preview(item, PREVIEW_CHARS)
+        .replace('|', "\\|")
+        .replace('`', "'")
 }
 
 fn fmt_int(n: u64) -> String {
@@ -269,7 +221,7 @@ fn fmt_k(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xai_grok_sampling_types::{SystemItem, ToolResultItem};
+    use xai_grok_sampling_types::{SyntheticReason, SystemItem, ToolResultItem};
 
     fn tool_result(chars: usize) -> ConversationItem {
         ConversationItem::ToolResult(ToolResultItem {
