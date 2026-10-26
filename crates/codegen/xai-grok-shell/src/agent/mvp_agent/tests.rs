@@ -998,7 +998,10 @@ fn harnesses_are_compatible_rejects_strict_mismatches() {
 fn an_unknown_agent_type_is_never_strict() {
     assert!(harnesses_are_compatible("grok-build", "cursor"));
     assert!(harnesses_are_compatible("cursor", "grok-build-plan"));
-    assert!(!harnesses_are_compatible("cursor", "grok-build-orchestrator"));
+    assert!(!harnesses_are_compatible(
+        "cursor",
+        "grok-build-orchestrator"
+    ));
 }
 #[test]
 fn explicit_agent_type_wins_over_session_default() {
@@ -5854,6 +5857,61 @@ fn prompt_routes_only_non_send_now_through_human_delivery_handle() {
                 crate::session::message_delivery::take_human_send_count(),
                 expected_handle_sends
             );
+        }
+    });
+}
+/// A `!` command calls no model, so a session with no usable model still runs it.
+#[test]
+fn bash_prompt_reaches_the_actor_when_the_session_model_is_unavailable() {
+    use acp::Agent as _;
+    run_local_for_bridge_test(|| async {
+        for (bash, expect_prompt) in [(true, true), (false, false)] {
+            let agent = build_minimal_agent_for_tests();
+            let sid = acp::SessionId::new(format!("no-model-bash-{bash}"));
+            let (handle, _tx, mut cmd_rx) = make_live_session_handle(&sid, None);
+            agent.insert_resident(&sid, handle);
+            agent
+                .session_registry
+                .set_unavailable_model(&sid, acp::ModelId::new(std::sync::Arc::from("gone-model")));
+            let saw_prompt = std::rc::Rc::new(std::cell::Cell::new(false));
+            let driver_saw = saw_prompt.clone();
+            tokio::task::spawn_local(async move {
+                while let Some(command) = cmd_rx.recv().await {
+                    match command {
+                        SessionCommand::GetCurrentPromptMode { responds_to } => {
+                            let _ = responds_to.send(Default::default());
+                        }
+                        SessionCommand::Prompt { respond_to, .. } => {
+                            driver_saw.set(true);
+                            let _ = respond_to.send(Ok(crate::session::commands::PromptTurnOk {
+                                stop_reason: acp::StopReason::EndTurn,
+                                total_tokens: 0,
+                                turn_snapshot: None,
+                                completion_kind:
+                                    crate::session::commands::PromptCompletionKind::RemovedFromQueue,
+                                structured_output: None,
+                                usage: None,
+                                tool_overrides: None,
+                            }));
+                        }
+                        _ => {}
+                    }
+                }
+            });
+            let mut text = acp::TextContent::new("! ls");
+            if bash {
+                text = text.meta(
+                    serde_json::to_value(crate::extensions::prompt_meta::PromptBlockMeta::bash(
+                        "ls",
+                    ))
+                    .unwrap()
+                    .as_object()
+                    .cloned(),
+                );
+            }
+            let request = acp::PromptRequest::new(sid, vec![acp::ContentBlock::Text(text)]);
+            assert!(agent.prompt(request).await.is_ok());
+            assert_eq!(saw_prompt.get(), expect_prompt, "bash = {bash}");
         }
     });
 }
