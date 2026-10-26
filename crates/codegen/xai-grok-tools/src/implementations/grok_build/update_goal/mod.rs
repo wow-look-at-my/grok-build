@@ -129,6 +129,8 @@ pub enum RejectReason {
     InFlightOrchestrationVanished,
     /// A lite goal's completion check judged the goal not met, or could not reach a verdict.
     LiteCheckNotMet,
+    /// The todo list still had a pending or in-progress item, so no validator ran.
+    UnfinishedTodos,
 }
 
 impl RejectReason {
@@ -146,6 +148,7 @@ impl RejectReason {
             Self::StatusChangedDuringClassifier => "goal_update_status_changed",
             Self::InFlightOrchestrationVanished => "goal_update_in_flight_orchestration_vanished",
             Self::LiteCheckNotMet => "goal_update_lite_check_not_met",
+            Self::UnfinishedTodos => "goal_update_unfinished_todos",
         }
     }
 }
