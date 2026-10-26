@@ -143,7 +143,7 @@ async fn queued_message_backgrounds_a_foreground_command() {
 						"the call must not wait for `sleep 30` to exit ({case}): took {elapsed:?}"
 					);
 					assert!(
-						result.contains("moved to background"),
+						result.contains("to background") && result.contains("still running"),
 						"the model must be told the command still runs in the background ({case}): {result:?}"
 					);
 				}
