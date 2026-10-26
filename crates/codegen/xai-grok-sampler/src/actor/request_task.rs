@@ -646,6 +646,7 @@ async fn apply_retry_decision(
             let stripped = request.strip_unsupported_message_properties(
                 err.names_unsupported_model_id(),
                 err.names_unsupported_reasoning_content(),
+                err.names_unsupported_reasoning(),
             );
             if !stripped {
                 // Already as narrow as this recovery can make it.
