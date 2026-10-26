@@ -693,6 +693,7 @@ impl SessionActor {
         let message_count = self.chat_state_handle.get_conversation_len().await;
         let message_breakdown = self.chat_state_handle.get_messages_breakdown().await;
         let message_tokens = message_breakdown.total();
+        let request_ledger = self.chat_state_handle.get_context_ledger().await;
         let usage_categories = self.usage_categories().await;
         let free_tokens = xai_token_estimation::free_tokens(context_window, total_tokens);
         let usage_pct = xai_token_estimation::usage_percentage_u8(total_tokens, context_window);
@@ -726,6 +727,13 @@ impl SessionActor {
                 usage_pct,
                 auto_compact_threshold_percent: self.compaction.threshold_percent.get(),
                 usage_categories,
+                request_ledger,
+                transcript_path: Some(
+                    crate::session::persistence::session_dir(&self.session_info)
+                        .join("chat_history.jsonl")
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
             },
         }
     }
