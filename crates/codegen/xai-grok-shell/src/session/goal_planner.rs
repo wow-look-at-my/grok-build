@@ -268,10 +268,7 @@ pub(crate) enum GoalPlannerOutcome {
         todos: Vec<String>,
         latency_ms: u64,
     },
-    /// Produced only by the planner's [`ChannelSpawner`], whose
-    /// `cancel_token` is wired to `start_planner_run`; when the token fires
-    /// mid-spawn (a user Stop, or the turn being cancelled) the attempt
-    /// returns `Interrupted`.
+    /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token` is wired to `start_planner_run`.
     Interrupted,
     FailClosed {
         reason: GoalPlannerFailClosedReason,

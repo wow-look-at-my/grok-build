@@ -36,6 +36,7 @@ pub mod commands;
 pub mod compaction_image_context;
 pub mod compaction_mode;
 pub mod compaction_utils;
+pub mod context_ledger;
 pub mod conversation_util;
 pub mod events;
 pub mod handle;
@@ -53,6 +54,10 @@ pub use actor::state::{
 };
 pub use commands::{ModelMetadata, StrictAppendAck, StrictAppendError};
 pub use compaction_mode::CompactionMode;
+pub use context_ledger::{
+    ContextLedger, ContextSample, LedgerItem, LedgerRequest, ProviderUsage, build_context_ledger,
+    item_kind, item_preview,
+};
 pub use events::ChatStateEvent;
 pub use handle::{ChatStateHandle, ChatStateMailboxClosed};
 pub use persistence::{

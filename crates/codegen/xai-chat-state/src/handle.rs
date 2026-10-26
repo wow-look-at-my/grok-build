@@ -148,6 +148,23 @@ impl ChatStateHandle {
             .send(ChatStateCommand::RecordTokenUsage { total_tokens });
     }
 
+    /// Record the provider's count of the request that is the current conversation.
+    /// Call it before the response's assistant item is pushed.
+    pub fn record_prompt_measurement(&self, usage: crate::ProviderUsage) {
+        let _ = self
+            .cmd_tx
+            .send(ChatStateCommand::RecordPromptMeasurement { usage });
+    }
+
+    /// The per-request list for `/context`.
+    pub async fn get_context_ledger(&self) -> crate::ContextLedger {
+        self.query("GetContextLedger", |reply| {
+            ChatStateCommand::GetContextLedger { reply }
+        })
+        .await
+        .unwrap_or_default()
+    }
+
     /// Stash the per-turn `TokenUsage` from the most recent model response.
     /// Fire-and-forget — no ack returned.
     pub fn record_last_turn_usage(&self, usage: TokenUsage) {
