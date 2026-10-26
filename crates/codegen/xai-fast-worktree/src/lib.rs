@@ -88,9 +88,8 @@ pub use git::{
     remove_stale_worktree_registrations_under,
 };
 pub use managed_root::{
-    REPO_DOT_DIR, WORKTREES_DIR, WORKTREES_EXCLUDE_LINE, enclosing_repo_worktrees_root,
-    exclude_managed_worktrees_dir, is_repo_worktrees_root, is_worktree_dir, is_worktree_entry_name,
-    main_root_for_managed_path, managed_worktrees_boundary, repo_worktrees_root,
+    WORKTREES_DIR, enclosing_repo_worktrees_root, is_repo_worktrees_root, is_worktree_dir,
+    is_worktree_entry_name, managed_worktrees_boundary, repo_worktrees_root,
 };
 pub use metrics::{
     DisposeMethod, grove_wt_create_count, grove_wt_create_last_duration_ns, record_grove_wt_create,
