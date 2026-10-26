@@ -232,7 +232,7 @@ fn volume_bytes_reports_a_real_volume() {
 /// One bucket per checkout, at either depth the location has been written in,
 /// and none for anything else under the root.
 #[test]
-fn buckets_open_for_a_checkout_at_either_depth_of_the_old_location() {
+fn buckets_open_for_a_checkout_at_either_depth_of_the_home_root() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().join("worktrees");
     let checkout = |dir: &Path, bytes: usize| {
