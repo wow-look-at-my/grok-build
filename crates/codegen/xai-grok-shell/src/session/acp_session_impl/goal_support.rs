@@ -697,19 +697,6 @@ pub(super) fn unfinished_todos_bounce<'a>(
     (open > 0).then_some(out)
 }
 
-pub(super) fn format_blocked_chat_notification(reason: &str, detail: Option<&str>) -> String {
-    let mut out = String::with_capacity(reason.len() + detail.map_or(0, str::len) + 96);
-    out.push_str("Goal paused — verification blocked.\nReason: ");
-    out.push_str(reason);
-    out.push('\n');
-    if let Some(detail) = detail {
-        out.push_str(detail);
-        out.push('\n');
-    }
-    out.push_str("\nType /goal resume to continue after you've addressed it.");
-    out
-}
-
 /// Child token counters are cumulative across activations. Completed deltas are retained,
 /// and each reactivation anchors at the previous high-water mark so every token is counted once.
 #[derive(Debug)]

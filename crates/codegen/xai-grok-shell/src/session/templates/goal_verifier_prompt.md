@@ -69,6 +69,7 @@ Your only writes are `{DETAILS_FILE}` and `{VERDICT_FILE}`.{TOOLSET_TOOLS}
 6. Genuinely ambiguous evidence (with CHANGES_FILE available) ⇒ refute.
 7. Where the `## Verification plan` requires a runtime observation, RUN_LOG must show a run that produced it, made after the last relevant edit. The log can lack such a run: dropped, compacted, or never made. Then run that ONE step yourself, cheaply, and judge its output. When RUN_LOG is `(unavailable)`, run the plan's gating steps yourself. If the observation cannot be produced, refute and name the fix — do NOT ask for a saved artifact. Any file the implementer wrote about its work is NOT evidence. A generated/mocked artifact is NOT evidence.
 8. Classify each refute via `blocking`: `"none"` (ordinary model-fixable), `"contradiction"` (objective/plan internally precludes itself), or `"unverifiable"` (evidence infeasible in THIS environment). The latter two signal the goal needs a user decision, not a retry.
+9. When FINAL_RESPONSE has a `## Cannot complete` section, the implementer claims it cannot finish without the user. Test that claim. A gap the implementer can close itself is `blocking: "none"`, and its `detail` names the exact untried action: the file, command, tool, or approach. A gap that needs something only the user can supply (a credential, data, hardware, access, a decision the objective leaves open) is `"unverifiable"`. Never refute with a vague "try more" or "investigate further". The claim alone is not grounds to refute.
 {KIND_LENS}
 ## Output contract — STRICT
 

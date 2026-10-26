@@ -317,3 +317,238 @@ async fn update_goal_completed_with_open_todos_is_rejected_without_a_validator()
         })
         .await;
 }
+
+const UNTRIED_STEP: &str = "Grep src/ViewBuffer.cpp for every lock of the recursive mutex";
+
+fn claim_verdict(decision: &str, steps: &[&str], user_action: &str) -> ScriptedResponse {
+    let json = serde_json::json!({
+        "decision": decision,
+        "evidence": "the agent read the bundle but not the mutex holders",
+        "untried_steps": steps,
+        "user_action": user_action,
+    })
+    .to_string();
+    ScriptedResponse::sse(responses_api_script_exact(&json, "test"))
+}
+
+/// The agent ends the round with a give-up claim.
+fn claim_round(actor: &SessionActor) {
+    actor
+        .chat_state_handle
+        .push_user_message(crate::sampling::ConversationItem::user("continue the goal"));
+    actor
+        .chat_state_handle
+        .push_assistant_response(crate::sampling::ConversationItem::assistant(format!(
+            "I read every log in the bundle.\n\n{}\nThe stall needs a car-side trace.",
+            crate::session::goal_evaluator::BLOCKED_CLAIM_HEADING
+        )));
+}
+
+fn evaluator_bodies(server: &MockInferenceServer) -> Vec<String> {
+    server
+        .request_bodies()
+        .iter()
+        .map(|body| body.to_string())
+        .collect()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_give_up_claim_is_sent_back_with_steps_then_upheld_on_the_same_path_for_lite_and_full() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            for mode in [GoalMode::Lite, GoalMode::Full] {
+                let server = MockInferenceServer::start()
+                    .await
+                    .expect("mock inference server");
+                server.set_keep_requests(true);
+                server.enqueue_response(
+                    "/v1/responses",
+                    claim_verdict("rejected", &[UNTRIED_STEP], ""),
+                );
+                server.enqueue_response(
+                    "/v1/responses",
+                    claim_verdict("upheld", &[], "Capture a Tracy trace of updateColor()"),
+                );
+                let actor = goal_actor(&server).await;
+                let GoalSetupOutcome::Inference { reminder } =
+                    actor.setup_goal("find the stall", None, mode).await
+                else {
+                    panic!("{mode:?}: the goal must flow through to inference");
+                };
+                assert!(
+                    reminder.contains("## Cannot complete"),
+                    "{mode:?}: the rules must teach the claim: {reminder}"
+                );
+
+                claim_round(&actor);
+                match actor.run_goal_round_end().await {
+                    GoalRoundDecision::Continue(directive) => assert!(
+                        directive.starts_with(
+                            "Your claim that you cannot finish the goal was REJECTED."
+                        ) && directive.contains(&format!("1. {UNTRIED_STEP}")),
+                        "{mode:?}: a rejection must carry the untried steps: {directive}"
+                    ),
+                    GoalRoundDecision::EndTurn => {
+                        panic!("{mode:?}: a rejected claim must send the agent back")
+                    }
+                }
+                assert_eq!(
+                    actor.goal_tracker.lock().status(),
+                    Some(GoalStatus::Active),
+                    "{mode:?}: a rejected claim must not run the panel"
+                );
+
+                claim_round(&actor);
+                assert!(matches!(
+                    actor.run_goal_round_end().await,
+                    GoalRoundDecision::EndTurn
+                ));
+                let bodies = evaluator_bodies(&server);
+                assert_eq!(bodies.len(), 2, "{mode:?}: one validator call per claim");
+                assert!(
+                    bodies[1].contains("prior_rejected_steps") && bodies[1].contains(UNTRIED_STEP),
+                    "{mode:?}: the second review must check the steps the first one gave"
+                );
+                let (status, pause) = tracker_view(&actor);
+                match mode {
+                    GoalMode::Lite => {
+                        assert_eq!(
+                            status,
+                            Some(GoalStatus::Blocked),
+                            "lite stops at the validator"
+                        );
+                        assert!(
+                            pause.contains("Capture a Tracy trace of updateColor()"),
+                            "the pause must name the user action: {pause}"
+                        );
+                    }
+                    // The test actor has the verifier off, so InfraPaused proves
+                    // the upheld claim went on to the panel.
+                    GoalMode::Full => assert_eq!(
+                        status,
+                        Some(GoalStatus::InfraPaused),
+                        "full sends an upheld claim to the panel"
+                    ),
+                }
+            }
+        })
+        .await;
+}
+
+fn tracker_view(actor: &SessionActor) -> (Option<GoalStatus>, String) {
+    let tracker = actor.goal_tracker.lock();
+    (
+        tracker.status(),
+        tracker
+            .snapshot()
+            .and_then(|o| o.pause_message.clone())
+            .unwrap_or_default(),
+    )
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn open_todos_do_not_bounce_a_give_up_claim_unheard() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.enqueue_response(
+                "/v1/responses",
+                claim_verdict("upheld", &[], "Send the qtcar logs from before 08:46"),
+            );
+            let mut actor = goal_actor(&server).await;
+            arm_todo_writes(&mut actor).await;
+            let GoalSetupOutcome::Inference { .. } = actor
+                .setup_goal("find the stall", None, GoalMode::Lite)
+                .await
+            else {
+                panic!("a lite goal must flow through to inference");
+            };
+            write_todos(&actor, mixed_todos()).await;
+            claim_round(&actor);
+            assert!(matches!(
+                actor.run_goal_round_end().await,
+                GoalRoundDecision::EndTurn
+            ));
+            assert_eq!(server.request_count_for("/v1/responses"), 1);
+            assert_eq!(
+                actor.goal_tracker.lock().status(),
+                Some(GoalStatus::Blocked)
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn update_goal_blocked_reason_is_reviewed_instead_of_counted() {
+    use xai_grok_tools::implementations::grok_build::update_goal::{
+        UpdateGoalAck, UpdateGoalInput,
+    };
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.enqueue_response(
+                "/v1/responses",
+                claim_verdict("rejected", &[UNTRIED_STEP], ""),
+            );
+            let mut actor = goal_actor(&server).await;
+            actor.background_workflows_enabled = false;
+            let GoalSetupOutcome::Inference { .. } = actor
+                .setup_goal("find the stall", None, GoalMode::Lite)
+                .await
+            else {
+                panic!("a lite goal must flow through to inference");
+            };
+            let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+            actor
+                .drain_goal_updates_with_extra(
+                    0,
+                    DrainPurpose::MidTurn,
+                    vec![(
+                        UpdateGoalInput {
+                            completed: None,
+                            message: None,
+                            blocked_reason: Some("needs a car-side trace".into()),
+                        },
+                        ack_tx,
+                    )],
+                )
+                .await;
+            match ack_rx.await.expect("the drain must answer") {
+                UpdateGoalAck::Accepted { summary } => {
+                    assert!(summary.starts_with("Claim recorded."), "{summary}")
+                }
+                other => panic!("a claim must be recorded for review: {other:?}"),
+            }
+            assert_eq!(
+                server.request_count(),
+                0,
+                "the review waits for the turn end"
+            );
+            assert_eq!(actor.goal_tracker.lock().status(), Some(GoalStatus::Active));
+
+            match actor.run_goal_round_end_legacy().await {
+                GoalRoundDecision::Continue(directive) => assert!(
+                    directive.contains(&format!("1. {UNTRIED_STEP}")),
+                    "{directive}"
+                ),
+                GoalRoundDecision::EndTurn => panic!("a rejected claim must send the agent back"),
+            }
+            assert_eq!(server.request_count_for("/v1/responses"), 1);
+            assert!(
+                actor
+                    .goal_tracker
+                    .lock()
+                    .snapshot()
+                    .is_some_and(|o| o.pending_blocked_claim.is_none()),
+                "a reviewed claim is consumed"
+            );
+        })
+        .await;
+}

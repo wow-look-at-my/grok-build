@@ -116,13 +116,81 @@ pub(super) fn goal_completion_check_text(
     }
 }
 
+pub(super) struct GoalEvaluatorContext {
+    objective: String,
+    mode: crate::session::goal_tracker::GoalMode,
+    transcript: String,
+    plan: Option<String>,
+    model: String,
+    session_id: String,
+}
+
+/// The outcome of a give-up claim review.
+pub(super) enum BlockedClaimReview {
+    /// The goal is no longer active: paused for the user, or complete.
+    Settled,
+    /// The claim was rejected. The note tells the agent what to do next.
+    Rejected(String),
+}
+
+/// The note a full goal gets when its panel finds gaps the agent can close.
+/// The directive lists those gaps under the verifier gaps.
+pub(super) const BLOCKED_CLAIM_PANEL_REJECTION: &str = "Your claim that you cannot finish the \
+     goal was REJECTED by the verification panel. The verifier gaps below are steps you can take \
+     yourself. Do each of them before you claim again.";
+
+/// The `update_goal(blocked_reason)` answer. The review runs when the turn ends.
+pub(super) const BLOCKED_CLAIM_RECORDED: &str = "Claim recorded. When this turn ends, the goal \
+     evaluator reviews it. If it agrees, the goal pauses for the user. If not, you get the \
+     concrete steps you have not tried. End your turn now.";
+
+pub(super) fn render_blocked_claim_rejection(evidence: &str, steps: &str) -> String {
+    format!(
+        "Your claim that you cannot finish the goal was REJECTED.\nWhy: {evidence}\n\
+         Do each of these untried steps before you claim again:\n{steps}"
+    )
+}
+
+/// Add the claim to the panel's final response when the response does not
+/// already carry it. A claim from `update_goal` is not in the reply text.
+pub(super) fn with_blocked_claim(final_response: String, claim: Option<&str>) -> String {
+    use crate::session::goal_evaluator::BLOCKED_CLAIM_HEADING;
+    match claim {
+        Some(claim) if !final_response.contains(BLOCKED_CLAIM_HEADING) => {
+            format!("{final_response}\n\n{BLOCKED_CLAIM_HEADING}\n{claim}")
+        }
+        _ => final_response,
+    }
+}
+
 impl SessionActor {
     async fn evaluate_goal_round(
         &self,
     ) -> Result<crate::session::goal_evaluator::GoalEvaluatorVerdict, String> {
         use crate::session::goal_evaluator::{
-            bounded_goal_transcript, build_goal_evaluator_request, parse_goal_evaluator_verdict,
+            build_goal_evaluator_request, parse_goal_evaluator_verdict,
         };
+        let ctx = self.goal_evaluator_context().await?;
+        self.call_goal_evaluator(
+            "Goal check: the evaluator model reviews this round against the goal",
+            |parse_error| {
+                build_goal_evaluator_request(
+                    &ctx.objective,
+                    ctx.mode,
+                    &ctx.transcript,
+                    ctx.plan.as_deref(),
+                    ctx.model.clone(),
+                    &ctx.session_id,
+                    parse_error,
+                )
+            },
+            parse_goal_evaluator_verdict,
+        )
+        .await
+    }
+
+    async fn goal_evaluator_context(&self) -> Result<GoalEvaluatorContext, String> {
+        use crate::session::goal_evaluator::bounded_goal_transcript;
         let (objective, mode, plan_file) = {
             let tracker = self.goal_tracker.lock();
             let snapshot = tracker
@@ -149,9 +217,26 @@ impl SessionActor {
             .map(|config| config.model)
             .filter(|model| !model.is_empty())
             .unwrap_or_else(|| self.models_manager.current_model_id().0.to_string());
-        let session_id = self.session_info.id.to_string();
+        Ok(GoalEvaluatorContext {
+            objective,
+            mode,
+            transcript,
+            plan,
+            model: active_model,
+            session_id: self.session_info.id.to_string(),
+        })
+    }
+
+    /// One evaluator call with one retry. A parse failure goes back to the
+    /// model as a correction on the retry.
+    async fn call_goal_evaluator<T, E: std::fmt::Display>(
+        &self,
+        purpose: &str,
+        build: impl Fn(Option<&str>) -> crate::sampling::ConversationRequest,
+        parse: impl Fn(&str) -> Result<T, E>,
+    ) -> Result<T, String> {
         self.send_xai_notification(XaiSessionUpdate::SideModelCall {
-            purpose: "Goal check: the evaluator model reviews this round against the goal".into(),
+            purpose: purpose.into(),
         })
         .await;
         let mut last_error = String::new();
@@ -164,15 +249,7 @@ impl SessionActor {
                     continue;
                 }
             };
-            let request = build_goal_evaluator_request(
-                &objective,
-                mode,
-                &transcript,
-                plan.as_deref(),
-                active_model.clone(),
-                &session_id,
-                parse_error.as_deref(),
-            );
+            let request = build(parse_error.as_deref());
             let response = match client.conversation_collect(request).await {
                 Ok(response) => response,
                 Err(error) => {
@@ -192,7 +269,7 @@ impl SessionActor {
                 last_error = "goal evaluator response omitted usage accounting".to_string();
                 continue;
             }
-            match parse_goal_evaluator_verdict(&response.assistant_text()) {
+            match parse(&response.assistant_text()) {
                 Ok(verdict) => return Ok(verdict),
                 Err(error) => {
                     parse_error = Some(error.to_string());
@@ -222,7 +299,166 @@ impl SessionActor {
         tracker.append_history(entry);
     }
 
-    async fn verify_goal_candidate(&self) {
+    /// Review the agent's claim that it cannot finish the goal. Lite and full
+    /// goals share this path. The evaluator judges the claim first. A full
+    /// goal then sends an upheld claim to the same panel a completion
+    /// candidate gets, so a lite goal stops at the validator.
+    pub(super) async fn review_blocked_claim(&self, claim: &str) -> BlockedClaimReview {
+        use crate::session::goal_evaluator::{
+            BlockedClaimDecision, build_blocked_claim_request, parse_blocked_claim_verdict,
+        };
+        let prior_steps = self
+            .goal_tracker
+            .lock()
+            .snapshot()
+            .and_then(|o| o.last_claim_rejection.clone());
+        let verdict = match self.goal_evaluator_context().await {
+            Ok(ctx) => {
+                self.call_goal_evaluator(
+                    "Goal check: the evaluator reviews the claim that the goal cannot be finished",
+                    |parse_error| {
+                        build_blocked_claim_request(
+                            &ctx.objective,
+                            claim,
+                            &ctx.transcript,
+                            ctx.plan.as_deref(),
+                            prior_steps.as_deref(),
+                            ctx.model.clone(),
+                            &ctx.session_id,
+                            parse_error,
+                        )
+                    },
+                    parse_blocked_claim_verdict,
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        };
+        let verdict = match verdict {
+            Ok(verdict) => verdict,
+            Err(error) => {
+                self.record_goal_round_progress(&error, true);
+                self.auto_pause_goal_if_active_with_message(
+                    crate::session::goal_tracker::GoalPauseReason::Infra,
+                    format!(
+                        "The review of the claim that the goal cannot be finished failed after \
+                         a bounded retry: {error}. The goal was paused rather than ended. \
+                         Use /goal resume to retry."
+                    ),
+                )
+                .await;
+                return BlockedClaimReview::Settled;
+            }
+        };
+        match verdict.decision {
+            BlockedClaimDecision::Rejected => {
+                let steps = verdict.numbered_steps();
+                self.record_goal_round_progress(
+                    &format!("Give-up claim rejected: {}", verdict.evidence.trim()),
+                    false,
+                );
+                self.remember_claim_rejection(Some(steps.clone()));
+                BlockedClaimReview::Rejected(render_blocked_claim_rejection(
+                    verdict.evidence.trim(),
+                    &steps,
+                ))
+            }
+            BlockedClaimDecision::Upheld => {
+                self.record_goal_round_progress(
+                    &format!("Give-up claim upheld: {}", verdict.evidence.trim()),
+                    false,
+                );
+                let lite =
+                    self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite;
+                if lite {
+                    self.remember_claim_rejection(None);
+                    self.pause_for_upheld_claim(
+                        verdict.evidence.trim(),
+                        verdict.user_action.trim(),
+                    )
+                    .await;
+                    return BlockedClaimReview::Settled;
+                }
+                self.verify_goal_candidate(Some(claim)).await;
+                let gaps = {
+                    let tracker = self.goal_tracker.lock();
+                    if tracker.status() != Some(crate::session::goal_tracker::GoalStatus::Active) {
+                        None
+                    } else {
+                        Some(
+                            tracker
+                                .snapshot()
+                                .and_then(|o| o.last_classifier_gaps.clone())
+                                .unwrap_or_default(),
+                        )
+                    }
+                };
+                match gaps {
+                    None => {
+                        self.remember_claim_rejection(None);
+                        BlockedClaimReview::Settled
+                    }
+                    Some(gaps) => {
+                        self.remember_claim_rejection(Some(gaps));
+                        BlockedClaimReview::Rejected(BLOCKED_CLAIM_PANEL_REJECTION.to_owned())
+                    }
+                }
+            }
+        }
+    }
+
+    fn remember_claim_rejection(&self, steps: Option<String>) {
+        let mut tracker = self.goal_tracker.lock();
+        if let Some(o) = tracker.snapshot_mut() {
+            o.last_claim_rejection = steps;
+        }
+        self.goal_notify_sender().persist_goal_state(&tracker);
+    }
+
+    async fn pause_for_upheld_claim(&self, evidence: &str, user_action: &str) {
+        if self
+            .auto_pause_goal_if_active_with_message(
+                crate::session::goal_tracker::GoalPauseReason::Verification,
+                format!("{evidence}\nNext user action: {user_action}"),
+            )
+            .await
+        {
+            self.send_slash_command_output(&format!(
+                "Goal paused — the evaluator agrees the goal cannot go on without you.\n\
+                 Why: {evidence}\n\nWhat you need to do: {user_action}\n\n\
+                 Type /goal resume after addressing it."
+            ))
+            .await;
+        }
+    }
+
+    /// End a round whose agent claimed it cannot finish. A rejected claim
+    /// sends the agent back with the untried steps.
+    async fn finish_round_with_blocked_claim(&self, claim: &str) -> GoalRoundDecision {
+        let note = match self.review_blocked_claim(claim).await {
+            BlockedClaimReview::Settled => return GoalRoundDecision::EndTurn,
+            BlockedClaimReview::Rejected(note) => note,
+        };
+        let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
+        if self.enforce_goal_token_budget(current_tokens).await {
+            return GoalRoundDecision::EndTurn;
+        }
+        let Some(plan) = self
+            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd)
+            .await
+        else {
+            return GoalRoundDecision::EndTurn;
+        };
+        if let Some(rec) = plan.strategy_rec.as_deref() {
+            self.consume_strategist_note(rec);
+        }
+        if let Some(pattern) = plan.stop_pattern {
+            self.record_and_emit_premature_stop(pattern);
+        }
+        GoalRoundDecision::Continue(format!("{note}\n\n{}", plan.directive))
+    }
+
+    async fn verify_goal_candidate(&self, blocked_claim: Option<&str>) {
         use crate::session::goal_classifier::GoalClassifierOutcome;
         let policy = self.resolve_goal_classifier_policy();
         if !policy.enabled {
@@ -254,7 +490,7 @@ impl SessionActor {
                     snapshot.current_subagent_role = None;
                 }
             });
-            self.run_verification_stage_for_drain(attempt, policy.max_runs)
+            self.run_verification_stage_for_drain(attempt, policy.max_runs, blocked_claim)
                 .await
         };
         if self.goal_tracker.lock().status()
@@ -548,6 +784,7 @@ impl SessionActor {
         &self,
         attempt: u32,
         max_runs: u32,
+        blocked_claim: Option<&str>,
     ) -> crate::session::goal_classifier::GoalClassifierOutcome {
         use crate::session::events::GoalClassifierFailOpenReason;
         use crate::session::goal_classifier::{
@@ -603,7 +840,8 @@ impl SessionActor {
                     first_final_response.as_deref(),
                     current,
                 );
-            (composed.to_send, composed.to_persist, run_log)
+            let to_send = with_blocked_claim(composed.to_send, blocked_claim);
+            (to_send, composed.to_persist, run_log)
         };
 
         let model_id = self
@@ -1045,8 +1283,6 @@ impl SessionActor {
         self.clear_pending_classifier_completions();
         self.goal_continuation_streak
             .store(0, std::sync::atomic::Ordering::Relaxed);
-        self.goal_blocked_streak
-            .store(0, std::sync::atomic::Ordering::Relaxed);
 
         {
             let (tokens_used, finished_marginal) = self.goal_tokens(token_baseline);
@@ -1189,8 +1425,6 @@ impl SessionActor {
         };
 
         self.goal_continuation_streak
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-        self.goal_blocked_streak
             .store(0, std::sync::atomic::Ordering::Relaxed);
 
         let mut planner_published = false;
@@ -1690,6 +1924,13 @@ impl SessionActor {
         ) {
             return GoalRoundDecision::EndTurn;
         }
+        // A claim goes to review before the todo bounce. Open todos must not
+        // send the agent back unheard when it says it cannot go on.
+        if let Some(claim) = crate::session::goal_evaluator::current_round_blocked_claim(
+            &self.chat_state_handle.get_conversation().await,
+        ) {
+            return self.finish_round_with_blocked_claim(&claim).await;
+        }
         if let Some(bounce) = self.unfinished_goal_todos_bounce().await {
             return self.bounce_round_for_unfinished_todos(bounce).await;
         }
@@ -1733,7 +1974,7 @@ impl SessionActor {
                 if lite {
                     self.complete_lite_goal(&verdict.evidence).await;
                 } else {
-                    self.verify_goal_candidate().await;
+                    self.verify_goal_candidate(None).await;
                 }
             }
             GoalEvaluatorDecision::Blocked => {
@@ -2148,55 +2389,34 @@ impl SessionActor {
                     ack_tx,
                     UpdateGoalAck::Rejected {
                         reason: RejectReason::BlockSeenInDrain,
-                        detail: "Goal just transitioned to Blocked by a prior update in this drain"
+                        detail: "A claim that the goal cannot be finished is already waiting \
+                                 for review; this update was dropped"
                             .to_string(),
                     },
                 );
                 continue;
             }
             if let Some(reason) = cmd.blocked_reason {
-                let streak = self
-                    .goal_blocked_streak
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                    + 1;
-                if streak < 3 {
-                    tracing::info!(
-                        streak,
-                        "blocked attempt rejected — model must try {}/3 before blocking",
-                        streak,
-                    );
-                    try_send_ack(
-                        ack_tx,
-                        UpdateGoalAck::Accepted {
-                            summary: format!(
-                                "Blocked attempt {streak}/3 recorded. The harness needs \
-                                 3 consecutive blocked attempts before pausing the goal — \
-                                 continue retrying or refining the approach."
-                            ),
-                        },
-                    );
-                    continue;
-                }
-                let detail = cmd.message;
-                let chat_text = format_blocked_chat_notification(&reason, detail.as_deref());
-                let success_summary = format!("Goal blocked: {reason}.");
-                let pause_msg = match detail {
-                    Some(d) => format!("{reason}\n{d}"),
+                let claim = match cmd.message {
+                    Some(detail) => format!("{reason}\n{detail}"),
                     None => reason,
                 };
-                let applied = self
-                    .auto_pause_goal_if_active_with_message(
-                        crate::session::goal_tracker::GoalPauseReason::Verification,
-                        pause_msg,
-                    )
-                    .await;
-                if applied {
-                    self.send_slash_command_output(&chat_text).await;
+                let stored = {
+                    let mut tracker = self.goal_tracker.lock();
+                    let active =
+                        tracker.status() == Some(crate::session::goal_tracker::GoalStatus::Active);
+                    if active && let Some(o) = tracker.snapshot_mut() {
+                        o.pending_blocked_claim = Some(claim);
+                    }
+                    notify.persist_goal_state(&tracker);
+                    active
+                };
+                if stored {
                     block_seen = true;
                     try_send_ack(
                         ack_tx,
                         UpdateGoalAck::Accepted {
-                            summary: success_summary,
+                            summary: BLOCKED_CLAIM_RECORDED.to_string(),
                         },
                     );
                 } else {
@@ -2223,9 +2443,6 @@ impl SessionActor {
                 try_send_ack(ack_tx, UpdateGoalAck::Accepted { summary });
                 continue;
             }
-
-            self.goal_blocked_streak
-                .store(0, std::sync::atomic::Ordering::Relaxed);
 
             let goal_active = self.goal_tracker.lock().status()
                 == Some(crate::session::goal_tracker::GoalStatus::Active);
@@ -2443,7 +2660,7 @@ impl SessionActor {
                         o.current_subagent_role = None;
                     }
                 });
-                self.run_verification_stage_for_drain(attempt, policy.max_runs)
+                self.run_verification_stage_for_drain(attempt, policy.max_runs, None)
                     .await
             };
 
@@ -2511,6 +2728,34 @@ impl SessionActor {
     /// The premature-stop signal, if any, is emitted here, once per continued round.
     pub(super) async fn run_goal_round_end_legacy(&self) -> GoalRoundDecision {
         let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
+        if self.goal_harness_enabled() {
+            // The drain moves an `update_goal(blocked_reason)` claim into the
+            // tracker, so the claim review sees it below.
+            self.drain_goal_updates(current_tokens, DrainPurpose::TurnEnd)
+                .await;
+        }
+        let claim = {
+            let mut tracker = self.goal_tracker.lock();
+            let active = tracker.status() == Some(crate::session::goal_tracker::GoalStatus::Active);
+            tracker
+                .snapshot_mut()
+                .and_then(|o| o.pending_blocked_claim.take())
+                .filter(|_| active)
+        };
+        let claim = match claim {
+            Some(claim) => Some(claim),
+            None => crate::session::goal_evaluator::current_round_blocked_claim(
+                &self.chat_state_handle.get_conversation().await,
+            ),
+        };
+        if let Some(claim) = claim
+            && laziness_injection_active(
+                self.goal_harness_enabled(),
+                self.goal_tracker.lock().status(),
+            )
+        {
+            return self.finish_round_with_blocked_claim(&claim).await;
+        }
         let Some(plan) = self
             .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd)
             .await
@@ -2730,6 +2975,28 @@ impl SessionActor {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod blocked_claim_tests {
+    use super::with_blocked_claim;
+    use crate::session::goal_evaluator::BLOCKED_CLAIM_HEADING;
+
+    #[test]
+    fn the_panel_sees_a_claim_that_is_not_in_the_reply() {
+        let sent = with_blocked_claim("read the logs".into(), Some("need a car trace"));
+        assert_eq!(
+            sent,
+            format!("read the logs\n\n{BLOCKED_CLAIM_HEADING}\nneed a car trace")
+        );
+        let reply = format!("read the logs\n\n{BLOCKED_CLAIM_HEADING}\nneed a car trace");
+        assert_eq!(
+            with_blocked_claim(reply.clone(), Some("need a car trace")),
+            reply,
+            "a claim already in the reply is not added twice"
+        );
+        assert_eq!(with_blocked_claim("done".into(), None), "done");
     }
 }
 
