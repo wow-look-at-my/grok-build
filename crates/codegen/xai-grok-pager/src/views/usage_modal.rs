@@ -96,7 +96,7 @@ pub struct UsageInfoModalState {
     /// The bar position and segment ranges from the last Context usage render, for click hit tests.
     context_bar: Option<ContextBarHits>,
     /// The Overhead drill-down rows the user opened.
-    pub ledger_expanded: BTreeSet<LedgerRow>,
+    pub(crate) ledger_expanded: BTreeSet<LedgerRow>,
     /// The clickable drill-down lines from the last Context usage render, by content line.
     context_actions: Vec<(usize, LedgerAction)>,
     /// Structured `/session-info` rows, built upstream from typed session data (never by re-parsing a formatted string).
@@ -1261,7 +1261,7 @@ mod tests {
         let text = screen_text(&buf, area);
         assert!(
             text.lines()
-                .any(|l| l.contains("395k / 500k") && l.contains("Cache read")),
+                .any(|l| l.contains("395k / 500k") && l.contains("Input")),
             "totals sit in the right column:\n{text}"
         );
         assert!(
