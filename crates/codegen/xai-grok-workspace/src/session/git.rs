@@ -2427,8 +2427,8 @@ async fn pop_checkout_auto_stash(
 /// Decide whether a `--restore-code` HEAD checkout is safe to run against `supplied_cwd`. `--depth=1` is only added when the repo is already shallow.
 pub fn restore_code_checkout_allowed(supplied_cwd: &Path, persisted_cwd: Option<&str>) -> bool {
     let mut worktrees_dirs = vec![xai_grok_tools::util::grok_home::grok_home().join("worktrees")];
-    if let Some(repo_root) = xai_fast_worktree::main_root_for_managed_path(supplied_cwd) {
-        worktrees_dirs.push(xai_fast_worktree::repo_worktrees_root(&repo_root));
+    if let Some(in_repo_root) = xai_fast_worktree::enclosing_repo_worktrees_root(supplied_cwd) {
+        worktrees_dirs.push(in_repo_root);
     }
     restore_code_checkout_allowed_in(supplied_cwd, persisted_cwd, &worktrees_dirs)
 }

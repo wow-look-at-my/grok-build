@@ -616,7 +616,7 @@ Grok stores data in `~/.grok` (override with `GROK_HOME`; see [Environment Varia
 | `personas/`              | User-scoped agent personas            |
 | `crash/`                 | Crash reports                         |
 | `trace-exports/`         | Session trace exports                 |
-| `worktrees/`             | Checkouts made by older versions      |
+| `worktrees/`             | Checkouts created for sessions and subagents |
 | `worktrees.db`           | Worktree registry (labels, liveness)  |
 
 ### Read-Only `~/.grok`

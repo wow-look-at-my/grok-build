@@ -161,7 +161,7 @@ fn collect_report_joins_registry_and_flags_untracked() {
 }
 #[cfg(unix)]
 #[test]
-fn one_sized_row_per_checkout_at_either_old_location_depth() {
+fn one_sized_row_per_checkout_at_either_home_root_depth() {
     // `grok du` must agree with the scan it lists alongside: one row per checkout.
     let tmp = tempfile::TempDir::new().unwrap();
     let base = dunce::canonicalize(tmp.path()).unwrap();
