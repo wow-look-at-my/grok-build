@@ -4295,6 +4295,27 @@ impl AgentView {
             self.hit_goal_close.rect = close_rect;
             self.frame_occluder_rects.push(overlay_rect);
         }
+        self.hit_todo_detail_close.rect = None;
+        if let Some(detail) = self.todo_detail.as_mut()
+            && let Some(item) = self.todo.todos().get(detail.index)
+        {
+            use crate::views::todo_detail;
+            let rect = todo_detail::todo_detail_area(area, item);
+            detail.scroll = detail.scroll.min(todo_detail::max_scroll(rect, item));
+            let visible = self.todo.visible_indices();
+            let position = visible.iter().position(|&i| i == detail.index);
+            let total = visible.len().max(1);
+            self.hit_todo_detail_close.rect = todo_detail::render_todo_detail(
+                buf,
+                rect,
+                item,
+                position.map_or(1, |p| p + 1),
+                total,
+                detail.scroll,
+                self.hit_todo_detail_close.hovered,
+            );
+            self.frame_occluder_rects.push(rect);
+        }
         if self.show_workflows {
             let runs = self.workflow_runs_newest_first();
             let mut view = self.workflows_view.clone();
