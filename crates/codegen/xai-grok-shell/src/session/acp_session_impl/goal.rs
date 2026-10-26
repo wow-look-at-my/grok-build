@@ -1690,6 +1690,9 @@ impl SessionActor {
         ) {
             return GoalRoundDecision::EndTurn;
         }
+        if let Some(bounce) = self.unfinished_goal_todos_bounce().await {
+            return self.bounce_round_for_unfinished_todos(bounce).await;
+        }
         let verdict = match self.evaluate_goal_round().await {
             Ok(verdict) => verdict,
             Err(error) => {
@@ -1787,6 +1790,42 @@ impl SessionActor {
             self.record_and_emit_premature_stop(pattern);
         }
         GoalRoundDecision::Continue(plan.directive)
+    }
+
+    /// Send the round back with the open todos. No evaluator and no panel run.
+    async fn bounce_round_for_unfinished_todos(&self, bounce: String) -> GoalRoundDecision {
+        self.record_goal_round_progress(
+            "The evaluator did not run: the todo list has open items.",
+            false,
+        );
+        let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
+        if self.enforce_goal_token_budget(current_tokens).await {
+            return GoalRoundDecision::EndTurn;
+        }
+        let Some(plan) = self
+            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd)
+            .await
+        else {
+            return GoalRoundDecision::EndTurn;
+        };
+        if let Some(rec) = plan.strategy_rec.as_deref() {
+            self.consume_strategist_note(rec);
+        }
+        if let Some(pattern) = plan.stop_pattern {
+            self.record_and_emit_premature_stop(pattern);
+        }
+        GoalRoundDecision::Continue(format!("{bounce}\n\n{}", plan.directive))
+    }
+
+    /// The bounce for a validator submission, or `None` when no todo is open.
+    /// A missing todo resource reads as no open todo, so the validator still runs.
+    async fn unfinished_goal_todos_bounce(&self) -> Option<String> {
+        let todos = self.goal_todo_snapshot().await?;
+        unfinished_todos_bounce(
+            todos
+                .iter()
+                .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
+        )
     }
 
     /// End a lite goal on its evaluator's `candidate_complete`. No panel runs:
@@ -2187,6 +2226,19 @@ impl SessionActor {
 
             self.goal_blocked_streak
                 .store(0, std::sync::atomic::Ordering::Relaxed);
+
+            let goal_active = self.goal_tracker.lock().status()
+                == Some(crate::session::goal_tracker::GoalStatus::Active);
+            if goal_active && let Some(detail) = self.unfinished_goal_todos_bounce().await {
+                try_send_ack(
+                    ack_tx,
+                    UpdateGoalAck::Rejected {
+                        reason: RejectReason::UnfinishedTodos,
+                        detail,
+                    },
+                );
+                continue;
+            }
 
             if self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite {
                 let ack = self.lite_completion_ack().await;

@@ -148,3 +148,172 @@ async fn a_full_goal_still_hands_a_candidate_to_the_panel() {
         })
         .await;
 }
+
+/// Bind the real `todo_write` tool to the actor's live todo list.
+async fn arm_todo_writes(actor: &mut SessionActor) {
+    *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+    actor
+        .workspace_ops
+        .bind_local_session(
+            &actor.session_id_string(),
+            actor.tool_context.cwd.as_path().to_path_buf(),
+            actor.tool_context.hunk_tracker_handle.clone(),
+            actor.agent.borrow().tool_bridge().toolset(),
+            None,
+        )
+        .expect("bind_local_session");
+}
+
+async fn write_todos(actor: &SessionActor, todos: serde_json::Value) {
+    actor
+        .workspace_ops
+        .call_tool(
+            "todo_write",
+            serde_json::json!({ "todos": todos }),
+            "test-seed",
+            Some(&actor.session_info.id.0),
+        )
+        .await
+        .expect("todo_write must succeed");
+}
+
+fn mixed_todos() -> serde_json::Value {
+    serde_json::json!([
+        {"id": "t1", "content": "write the parser", "status": "completed"},
+        {"id": "t2", "content": "wire the parser in", "status": "in_progress"},
+        {"id": "t3", "content": "cover it with a test", "status": "pending"},
+        {"id": "t4", "content": "drop the old path", "status": "cancelled"},
+    ])
+}
+
+fn assert_lists_open_todos(text: &str) {
+    assert!(
+        text.starts_with(
+            "You have incomplete todos, complete them before trying to submit your work \
+             to the goal validator."
+        ),
+        "the bounce must lead with the instruction: {text}"
+    );
+    assert!(
+        text.contains("[in_progress] `t2`: wire the parser in")
+            && text.contains("[pending] `t3`: cover it with a test"),
+        "the bounce must list every open todo: {text}"
+    );
+    assert!(
+        !text.contains("write the parser") && !text.contains("drop the old path"),
+        "a finished todo is not listed: {text}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_round_with_open_todos_is_bounced_without_an_evaluator_call() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.enqueue_response(
+                "/v1/responses",
+                verdict("candidate_complete", "the suite passed on the last run"),
+            );
+            let mut actor = goal_actor(&server).await;
+            arm_todo_writes(&mut actor).await;
+            let GoalSetupOutcome::Inference { .. } = actor
+                .setup_goal("make the tests pass", None, GoalMode::Lite)
+                .await
+            else {
+                panic!("a lite goal must flow through to inference");
+            };
+            write_todos(&actor, mixed_todos()).await;
+
+            match actor.run_goal_round_end().await {
+                GoalRoundDecision::Continue(directive) => assert_lists_open_todos(&directive),
+                GoalRoundDecision::EndTurn => panic!("open todos must send the round back"),
+            }
+            assert_eq!(
+                server.request_count_for("/v1/responses"),
+                0,
+                "no evaluator request while todos are open"
+            );
+            assert_eq!(actor.goal_tracker.lock().status(), Some(GoalStatus::Active));
+
+            write_todos(
+                &actor,
+                serde_json::json!([
+                    {"id": "t2", "content": "wire the parser in", "status": "completed"},
+                    {"id": "t3", "content": "cover it with a test", "status": "completed"},
+                ]),
+            )
+            .await;
+            assert!(matches!(
+                actor.run_goal_round_end().await,
+                GoalRoundDecision::EndTurn
+            ));
+            assert_eq!(server.request_count_for("/v1/responses"), 1);
+            assert_eq!(
+                actor.goal_tracker.lock().status(),
+                Some(GoalStatus::Complete),
+                "with every todo finished, the evaluator runs again"
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn update_goal_completed_with_open_todos_is_rejected_without_a_validator() {
+    use xai_grok_tools::implementations::grok_build::update_goal::{
+        RejectReason, UpdateGoalAck, UpdateGoalInput,
+    };
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            let mut actor = goal_actor(&server).await;
+            arm_todo_writes(&mut actor).await;
+            for mode in [GoalMode::Lite, GoalMode::Full] {
+                let GoalSetupOutcome::Inference { .. } =
+                    actor.setup_goal("make the tests pass", None, mode).await
+                else {
+                    panic!("the goal must flow through to inference");
+                };
+                write_todos(&actor, mixed_todos()).await;
+                let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+                actor
+                    .drain_goal_updates_with_extra(
+                        0,
+                        DrainPurpose::MidTurn,
+                        vec![(
+                            UpdateGoalInput {
+                                completed: Some(true),
+                                message: None,
+                                blocked_reason: None,
+                            },
+                            ack_tx,
+                        )],
+                    )
+                    .await;
+                match ack_rx.await.expect("the drain must answer") {
+                    UpdateGoalAck::Rejected {
+                        reason: RejectReason::UnfinishedTodos,
+                        detail,
+                    } => assert_lists_open_todos(&detail),
+                    other => panic!("{mode:?}: open todos must reject the claim: {other:?}"),
+                }
+                assert_eq!(
+                    actor.goal_tracker.lock().status(),
+                    Some(GoalStatus::Active),
+                    "{mode:?}"
+                );
+                assert!(
+                    actor.pending_classifier_completions.lock().is_empty(),
+                    "{mode:?}: the claim must not wait for a turn-end validator"
+                );
+                actor.goal_tracker.lock().complete();
+            }
+            assert_eq!(server.request_count(), 0, "no validator request was made");
+        })
+        .await;
+}
