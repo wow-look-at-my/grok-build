@@ -5952,6 +5952,8 @@ pub(crate) fn sampling_config_for_model(
     );
     let request_compression =
         crate::util::config::request_compression_for_url(&credentials.base_url);
+    // xAI reads `reasoning_content` only; Ollama reads `reasoning` only.
+    let accepts_reasoning = !crate::util::is_trusted_xai_https_url(&credentials.base_url);
     SamplerConfig {
         api_key: credentials.api_key,
         model: model_name,
@@ -5978,7 +5980,10 @@ pub(crate) fn sampling_config_for_model(
         chat_message_profile: if info.strict_message_schema {
             xai_grok_sampling_types::ChatMessageProfile::STRICT
         } else {
-            xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE
+            xai_grok_sampling_types::ChatMessageProfile {
+                accepts_reasoning,
+                ..xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE
+            }
         },
         reasoning_summary: info.reasoning_summary,
         force_http1: false,
