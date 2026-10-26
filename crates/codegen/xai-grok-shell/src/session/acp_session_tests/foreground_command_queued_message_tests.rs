@@ -34,6 +34,12 @@ async fn run_command_call_with_queued_message(queue_before: bool) -> (Duration, 
         xai_grok_tools::registry::types::ToolConfig::for_tool::<
             xai_grok_tools::implementations::grok_build::BashTool,
         >(),
+        xai_grok_tools::registry::types::ToolConfig::for_tool::<
+            xai_grok_tools::implementations::grok_build::task_output::TaskOutputTool,
+        >(),
+        xai_grok_tools::registry::types::ToolConfig::for_tool::<
+            xai_grok_tools::implementations::grok_build::kill_task::KillTaskTool,
+        >(),
     ])
     .await;
     actor
@@ -90,7 +96,7 @@ async fn run_command_call_with_queued_message(queue_before: bool) -> (Duration, 
         let _ = actor.queue_input(request).await;
     }
 
-    tokio::time::timeout(Duration::from_secs(15), call)
+    let _ = tokio::time::timeout(Duration::from_secs(15), call)
         .await
         .expect("the command call must return once a message is queued")
         .expect("call task");
@@ -122,6 +128,7 @@ async fn run_command_call_with_queued_message(queue_before: bool) -> (Duration, 
 
 /// Every follow-up mode and queue timing: the row arrives during the command, or sat queued before it began.
 #[tokio::test(flavor = "current_thread")]
+#[serial_test::serial(follow_up_steer_cache)]
 async fn queued_message_backgrounds_a_foreground_command() {
     let local = tokio::task::LocalSet::new();
     local
