@@ -370,7 +370,7 @@ impl<'a> EntryRenderer<'a> {
     /// and (when present) the per-message cost indicator. When > 0, content
     /// is wrapped at `content_width - reserved` so text never collides with
     /// the overlay.
-    fn timestamp_reserved(&self) -> u16 {
+    pub(crate) fn timestamp_reserved(&self) -> u16 {
         let cost = self.cost_reserved();
         if self.appearance().show_timestamps && self.should_show_timestamp() {
             let ts: u16 = 10; // max short format: "  12:30 PM"
