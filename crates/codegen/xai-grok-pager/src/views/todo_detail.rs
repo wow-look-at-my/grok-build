@@ -27,16 +27,15 @@ impl TodoDetailState {
     /// Move `step` places through `visible` (the todo indices the pane shows) and wrap at the ends.
     /// An index that is no longer visible moves to the first visible todo.
     pub fn cycle(&mut self, visible: &[usize], step: isize) {
-        if visible.is_empty() {
-            return;
-        }
         let len = visible.len() as isize;
         let next = match visible.iter().position(|&i| i == self.index) {
-            Some(pos) => (pos as isize + step).rem_euclid(len),
+            Some(pos) => (pos as isize + step).rem_euclid(len.max(1)),
             None => 0,
         };
-        self.index = visible[next as usize];
-        self.scroll = 0;
+        if let Some(&index) = visible.get(next as usize) {
+            self.index = index;
+            self.scroll = 0;
+        }
     }
 }
 
