@@ -1621,6 +1621,26 @@ fn x_api_key_auth_scheme_flows_from_config_to_sampler() {
     assert_eq!(info.auth_type, "x-api-key");
 }
 #[test]
+fn replayed_reasoning_rides_both_names_except_on_xai() {
+    for (url, expected) in [
+        ("https://ollama.com/v1", true),
+        ("http://localhost:11434/v1", true),
+        ("https://api.x.ai/v1", false),
+    ] {
+        let model = test_model_entry("m", url, Some("sk-test"), None, None);
+        let config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
+        assert_eq!(
+            config.chat_message_profile.accepts_reasoning, expected,
+            "`reasoning` for {url}"
+        );
+        assert!(
+            config.chat_message_profile.accepts_reasoning_content,
+            "`reasoning_content` for {url}"
+        );
+    }
+}
+#[test]
 fn auth_scheme_defaults_to_bearer_when_not_set_in_config() {
     let model = test_model_entry(
         "grok-4.5",
