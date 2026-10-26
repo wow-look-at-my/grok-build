@@ -1014,6 +1014,11 @@ fn default_profile_is_permissive() {
         assistant["reasoning_content"],
         serde_json::json!("thinking about q1")
     );
+    assert_eq!(
+        assistant["reasoning"],
+        serde_json::json!("thinking about q1"),
+        "Ollama reads only `reasoning`: {assistant:#}"
+    );
 }
 
 /// Suppressing a property must not disturb fields the provider *does* accept:
@@ -1122,6 +1127,7 @@ fn partial_profiles_suppress_independently() {
     let only_model_id = ChatMessageProfile {
         accepts_model_id: true,
         accepts_reasoning_content: false,
+        accepts_reasoning: false,
     };
     let body = wire_body(history_with_model_id_and_reasoning(), only_model_id);
     let messages = body["messages"].as_array().unwrap();
@@ -1139,6 +1145,7 @@ fn partial_profiles_suppress_independently() {
     let only_reasoning = ChatMessageProfile {
         accepts_model_id: false,
         accepts_reasoning_content: true,
+        accepts_reasoning: false,
     };
     let body = wire_body(history_with_model_id_and_reasoning(), only_reasoning);
     let messages = body["messages"].as_array().unwrap();
@@ -1152,6 +1159,25 @@ fn partial_profiles_suppress_independently() {
         serde_json::json!("thinking about q1"),
         "reasoning_content accepted by this profile must be sent"
     );
+    assert!(
+        assistant.get("reasoning").is_none(),
+        "reasoning rejected by this profile must be omitted"
+    );
+
+    let only_alias = ChatMessageProfile {
+        accepts_model_id: false,
+        accepts_reasoning_content: false,
+        accepts_reasoning: true,
+    };
+    let body = wire_body(history_with_model_id_and_reasoning(), only_alias);
+    let messages = body["messages"].as_array().unwrap();
+    let assistant = messages.iter().find(|m| m["role"] == "assistant").unwrap();
+    assert!(assistant.get("reasoning_content").is_none());
+    assert_eq!(
+        assistant["reasoning"],
+        serde_json::json!("thinking about q1"),
+        "reasoning accepted by this profile must be sent"
+    );
 }
 
 /// `strip_unsupported_message_properties` drops exactly what the provider
@@ -1163,20 +1189,25 @@ fn strip_unsupported_message_properties_narrows_named_fields_only() {
     assert!(req.chat_message_profile.is_permissive());
 
     // Provider named only `model_id`.
-    assert!(req.strip_unsupported_message_properties(true, false));
+    assert!(req.strip_unsupported_message_properties(true, false, false));
     assert!(!req.chat_message_profile.accepts_model_id);
     assert!(
         req.chat_message_profile.accepts_reasoning_content,
         "reasoning_content was not named, so it stays"
     );
 
-    // A second strip for the other named property still makes progress.
-    assert!(req.strip_unsupported_message_properties(false, true));
+    // A provider that reads `reasoning_content` but rejects `reasoning` keeps the first.
+    assert!(req.strip_unsupported_message_properties(false, false, true));
+    assert!(!req.chat_message_profile.accepts_reasoning);
+    assert!(req.chat_message_profile.accepts_reasoning_content);
+
+    // A further strip for the other named property still makes progress.
+    assert!(req.strip_unsupported_message_properties(false, true, false));
     assert!(!req.chat_message_profile.accepts_reasoning_content);
 
     // Now fully narrowed: further strips are no-ops, so the caller can stop.
     assert!(
-        !req.strip_unsupported_message_properties(true, true),
+        !req.strip_unsupported_message_properties(true, true, true),
         "an already-narrow profile must report no change"
     );
 }
@@ -1186,7 +1217,7 @@ fn strip_unsupported_message_properties_narrows_named_fields_only() {
 #[test]
 fn strip_with_no_named_property_narrows_both() {
     let mut req = ConversationRequest::from_items(history_with_model_id_and_reasoning());
-    assert!(req.strip_unsupported_message_properties(false, false));
+    assert!(req.strip_unsupported_message_properties(false, false, false));
     assert_eq!(req.chat_message_profile, ChatMessageProfile::STRICT);
 }
 
@@ -1204,12 +1235,14 @@ fn strip_then_serialize_omits_unsupported_properties() {
     assert!(before["messages"][2].get("model_id").is_some());
 
     // The provider's names both; strip, then serialize again.
-    assert!(req.strip_unsupported_message_properties(true, true));
+    assert!(req.strip_unsupported_message_properties(true, true, true));
     let after: crate::types::ChatCompletionRequest = req.into();
     let after = serde_json::to_value(&after).unwrap();
     for m in after["messages"].as_array().unwrap() {
         assert!(
-            m.get("model_id").is_none() && m.get("reasoning_content").is_none(),
+            m.get("model_id").is_none()
+                && m.get("reasoning_content").is_none()
+                && m.get("reasoning").is_none(),
             "recovered body must carry no unsupported property: {m:#}"
         );
     }
