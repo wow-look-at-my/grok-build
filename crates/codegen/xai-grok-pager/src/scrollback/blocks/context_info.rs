@@ -5,11 +5,13 @@
 //! `Theme::current()` is re-resolved on every redraw, so switching themes after running `/context` updates the colors immediately.
 //! Formatting at capture time would have baked in stale colors.
 
+use std::collections::BTreeSet;
 use std::ops::Range;
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use super::context_ledger_view::{LedgerAction, LedgerRow};
 use crate::appearance::AppearanceConfig;
 use crate::render::wrapping::word_wrap_lines;
 use crate::scrollback::block::BlockContent;
@@ -272,6 +274,8 @@ pub(crate) struct ContextModalView {
     pub bar: BarGeometry,
     /// The cell range and label of each segment that has at least one cell.
     pub segments: Vec<(Range<usize>, &'static str)>,
+    /// The clickable drill-down lines, by line index.
+    pub actions: Vec<(usize, LedgerAction)>,
 }
 
 impl ContextInfoBlock {
@@ -289,6 +293,7 @@ impl ContextInfoBlock {
         theme: &Theme,
         width: u16,
         selected: Option<&str>,
+        expanded: &BTreeSet<LedgerRow>,
     ) -> ContextModalView {
         let width = width as usize;
         let wide = BarLayout::WIDE;
@@ -316,11 +321,16 @@ impl ContextInfoBlock {
         let mut left = self.header_lines(theme);
         left.extend(bar_lines(&segments, bar, selected.map(|s| s.label), theme));
         left.push(Line::from(""));
+        let mut actions = Vec::new();
         let lines = if two_columns {
             left.extend(word_wrap_lines(vec![hint], bar_width));
             let right_width = width - bar_width - COLUMN_GAP;
             let right = match selected {
-                Some(seg) => self.inspect_lines(theme, seg, bar, right_width),
+                Some(seg) => {
+                    let (lines, hits) = self.inspect_lines(theme, seg, bar, right_width, expanded);
+                    actions = hits;
+                    lines
+                }
                 None => wide_stats,
             };
             zip_columns(left, bar_width + COLUMN_GAP, right)
@@ -328,7 +338,12 @@ impl ContextInfoBlock {
             left.extend(word_wrap_lines(vec![hint], width));
             left.push(Line::from(""));
             match selected {
-                Some(seg) => left.extend(self.inspect_lines(theme, seg, bar, width)),
+                Some(seg) => {
+                    let (lines, hits) = self.inspect_lines(theme, seg, bar, width, expanded);
+                    let offset = left.len();
+                    actions = hits.into_iter().map(|(i, a)| (i + offset, a)).collect();
+                    left.extend(lines);
+                }
                 None => left.extend(self.stats_lines(theme, bar)),
             }
             left
@@ -336,6 +351,7 @@ impl ContextInfoBlock {
 
         ContextModalView {
             lines,
+            actions,
             bar: BarGeometry {
                 first_line: BAR_FIRST_LINE,
                 rows: bar.rows,
@@ -611,14 +627,15 @@ impl ContextInfoBlock {
         Some(Line::from(Span::styled(text, style)))
     }
 
-    /// The details of one clicked segment, word-wrapped to `width`.
+    /// The details of one clicked segment, word-wrapped to `width`, and the clickable lines among them.
     fn inspect_lines(
         &self,
         theme: &Theme,
         seg: &BarSegment,
         bar: BarLayout,
         width: usize,
-    ) -> Vec<Line<'static>> {
+        expanded: &BTreeSet<LedgerRow>,
+    ) -> (Vec<Line<'static>>, Vec<(usize, LedgerAction)>) {
         let snapshot = &self.snapshot;
         let muted = theme.muted();
         let used = snapshot.used.min(snapshot.total);
@@ -666,17 +683,19 @@ impl ContextInfoBlock {
             width,
         ));
 
+        let mut actions = Vec::new();
         if seg.label == OVERHEAD_LABEL {
-            let tools = snapshot.tool_definitions_tokens.min(seg.tokens);
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("Tool definitions  ~{}", fmt_tok(tools)),
-                muted,
-            )));
-            lines.push(Line::from(Span::styled(
-                format!("Estimate gap      ~{}", fmt_tok(seg.tokens - tools)),
-                muted,
-            )));
+            let ledger = super::context_ledger_view::overhead_lines(
+                snapshot,
+                self.window_tokens().overhead,
+                expanded,
+                theme,
+                width,
+            );
+            let offset = lines.len();
+            actions.extend(ledger.actions.into_iter().map(|(i, a)| (i + offset, a)));
+            lines.extend(ledger.lines);
         }
         if seg.label == FREE_LABEL
             && let Some(line) = self.auto_compact_line(theme)
@@ -684,7 +703,7 @@ impl ContextInfoBlock {
             lines.push(Line::from(""));
             lines.push(line);
         }
-        lines
+        (lines, actions)
     }
 }
 
@@ -792,7 +811,7 @@ fn zip_columns(
 
 /// Format a token count compactly (`123`, `1.2k`, `999k`). The cutover from `{.1}k` to plain `{}k` happens at
 /// 99_500 (not 100_000) to avoid a precision discontinuity.
-fn fmt_tok(n: u64) -> String {
+pub(super) fn fmt_tok(n: u64) -> String {
     if n >= 99_500 {
         // Round half-up to the nearest 1k; equivalent to `(n + 500) / 1000` for u64, which avoids the f64 rounding artifact described above
         format!("{}k", (n + 500) / 1000)
@@ -986,6 +1005,8 @@ mod tests {
             usage_pct: 4,
             auto_compact_threshold_percent: 85,
             usage_categories: vec![],
+            overhead_ledger: Default::default(),
+            transcript_path: None,
         }
     }
 
@@ -1433,6 +1454,8 @@ mod tests {
             usage_pct: 20,
             auto_compact_threshold_percent: 65,
             usage_categories: vec![],
+            overhead_ledger: Default::default(),
+            transcript_path: None,
         };
         let block = ContextInfoBlock::new(snap, "grok-build");
         let theme = test_theme();
@@ -1530,7 +1553,7 @@ mod tests {
     fn modal_view_falls_back_to_one_column_when_narrow() {
         let block = ContextInfoBlock::new(snapshot(), "grok-4");
         let theme = test_theme();
-        let view = block.modal_view(&theme, 60, None);
+        let view = block.modal_view(&theme, 60, None, &BTreeSet::new());
         let all = all_text(&view.lines);
         let line_of = |needle: &str| all.lines().position(|l| l.contains(needle));
         assert!(
@@ -1539,7 +1562,7 @@ mod tests {
         );
         assert_eq!(view.bar.row_len, BarLayout::WIDE.row_len);
 
-        let wide = block.modal_view(&theme, 110, None);
+        let wide = block.modal_view(&theme, 110, None, &BTreeSet::new());
         assert!(
             line_text(&wide.lines, 0).contains("System prompt"),
             "a wide view puts the totals beside the header"
@@ -1552,7 +1575,7 @@ mod tests {
         snap.used = 400_000;
         let block = ContextInfoBlock::new(snap, "grok-4");
         let theme = test_theme();
-        let view = block.modal_view(&theme, 110, Some(FREE_LABEL));
+        let view = block.modal_view(&theme, 110, Some(FREE_LABEL), &BTreeSet::new());
         let covered: usize = view.segments.iter().map(|(r, _)| r.len()).sum();
         assert_eq!(covered, 100);
         let all = all_text(&view.lines);
@@ -1571,7 +1594,7 @@ mod tests {
     #[test]
     fn modal_view_ignores_a_selection_that_has_no_cells() {
         let block = ContextInfoBlock::new(snapshot(), "grok-4");
-        let view = block.modal_view(&test_theme(), 110, Some("Reasoning"));
+        let view = block.modal_view(&test_theme(), 110, Some("Reasoning"), &BTreeSet::new());
         assert!(all_text(&view.lines).contains("Click a diamond"));
     }
 

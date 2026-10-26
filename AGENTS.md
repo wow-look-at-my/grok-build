@@ -60,6 +60,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - Kind itemizes messages: user, assistant text, reasoning, tool-call arguments, tool results (`estimate_messages_breakdown` in `xai-chat-state`, carried on `ContextInfo::message_breakdown`). The parts sum to `message_tokens`.
 - Overhead is a remainder: occupancy minus system minus the Messages estimate. It is not reasoning. It is hidden when the estimate meets occupancy. The sub-rows scale to the capped Messages count.
+- Clicking Overhead opens a per-request ledger (`xai_chat_state::context_ledger`, rendered by `context_ledger_view.rs`). Each main-loop response records its `prompt_tokens` before the assistant item is pushed. A request's gap is measured growth minus the bytes/4 growth of the items it sent. A row expands into those items. A replace (compaction) or restore clears the samples. A rewind keeps only the ones before it.
+- The tool definitions row is taken out of the first request's gap. The last row is the remainder, so the rows always sum to Overhead. `o` or the footer button opens `chat_history.jsonl` and copies the path when no opener runs.
 
 ## Compaction report
 

@@ -438,6 +438,21 @@ impl ChatStateActor {
         self.send_event(ChatStateEvent::TokensUpdated { total_tokens });
     }
 
+    /// Add a ledger sample for the request that is the current conversation.
+    /// A retry of the same request replaces its sample.
+    pub(super) fn record_prompt_measurement(&mut self, prompt_tokens: u64) {
+        let sample = crate::ContextSample {
+            conversation_len: self.state.conversation.len(),
+            estimate: super::state::estimate_conversation_tokens(&self.state.conversation),
+            prompt_tokens,
+        };
+        let samples = &mut self.state.context_samples;
+        match samples.last_mut() {
+            Some(last) if last.conversation_len == sample.conversation_len => *last = sample,
+            _ => samples.push(sample),
+        }
+    }
+
     /// Stash the per-turn `TokenUsage` from the most recent model response.
     /// No event is emitted — this slot is read on demand at `PromptResponse`
     /// construction time, not pushed to subscribers.
@@ -551,6 +566,7 @@ impl ChatStateActor {
         self.state.estimated_tokens_since_model = 0;
         self.state.total_tokens = estimated_tokens;
         self.state.estimate_at_last_response = base_estimate;
+        self.state.context_samples.clear();
         self.rebase_turn_capture_offset();
         self.send_event(ChatStateEvent::ConversationReset {
             new_len: self.state.conversation.len(),
@@ -593,6 +609,7 @@ impl ChatStateActor {
         } else {
             super::state::estimate_conversation_tokens(&self.state.conversation)
         };
+        self.state.context_samples.clear();
         self.state.agent_edited_paths = snap.agent_edited_paths;
         self.state.prompt_texts = snap.prompt_texts;
         self.state.stream_start_ms = snap.stream_start_ms;
