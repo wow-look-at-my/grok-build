@@ -26,15 +26,18 @@ fn backend_is_usable() -> bool {
 
 /// Under the target directory: the jail hides or overlays `/tmp`.
 fn fixture_root() -> PathBuf {
+    // Parallel tests can read the same clock value, so a counter keeps each root apart.
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-        "grok-jail-home-e2e-{}-{}",
+        "grok-jail-home-e2e-{}-{}-{}",
         std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
     dunce::canonicalize(&path).unwrap()
 }
 
