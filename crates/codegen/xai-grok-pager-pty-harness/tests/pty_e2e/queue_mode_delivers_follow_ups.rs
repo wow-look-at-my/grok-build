@@ -244,6 +244,59 @@ async fn queue_mode_folds_follow_up_typed_during_a_tool() {
     harness.quit().expect("clean quit");
 }
 
+/// Queue mode: a follow-up typed during a long foreground command reaches the model before the command exits.
+/// The command moves to the background and keeps running.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn queue_mode_sends_follow_up_typed_during_a_long_command() {
+    const MARKER: &str = "QUEUE_LONG_COMMAND_MARKER_XYZ";
+    let content = ContentController::start().await.expect("start content");
+    let hold_args = json!({
+        "command": "/bin/sleep 60",
+        "description": "long build"
+    })
+    .to_string();
+    let _hold = expect_tool_turn(
+        &content,
+        "call_queue_long",
+        "run_terminal_command",
+        hold_args,
+    );
+    content.set_response("QUEUE_LONG_SETTLED");
+
+    let mut harness = spawn_and_submit(&content);
+    harness
+        .wait_for_text("long build", Duration::from_secs(45))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the command never started; screen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness.update(Duration::from_millis(500));
+    let typed = Instant::now();
+    type_follow_up(&mut harness, &format!("{MARKER} look at this now"));
+
+    assert_reaches_model(&content, &harness, MARKER, Duration::from_secs(20));
+    assert!(
+        typed.elapsed() < Duration::from_secs(30),
+        "the follow-up waited for the 60s command"
+    );
+    let bodies = content.request_bodies();
+    let first = bodies
+        .iter()
+        .find(|b| b.to_string().contains(MARKER))
+        .expect("a carrier")
+        .to_string();
+    assert!(
+        first.contains("call_queue_long") && first.contains("background"),
+        "the carrier must answer the command as moved to the background\n{}",
+        dump_non_system_messages(&bodies)
+    );
+    harness.quit().expect("clean quit");
+}
+
 /// Queue mode: a follow-up typed while the final answer streams runs as the next turn when that one ends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
