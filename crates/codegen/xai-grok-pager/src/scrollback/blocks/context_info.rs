@@ -17,7 +17,7 @@ use crate::render::wrapping::word_wrap_lines;
 use crate::scrollback::block::BlockContent;
 use crate::scrollback::types::{AccentStyle, BlockContext, BlockLine, BlockOutput};
 use crate::theme::{Theme, quantize};
-use xai_grok_shell::session::{ContextInfo, MessageTokenBreakdown, count_detail};
+use xai_grok_shell::session::{ContextInfo, ProviderUsage};
 
 /// Categorical bar: each cell uses its category's glyph and color, filled left-to-right in legend order; free capacity is muted outlines.
 /// The informational rows never enter the bar.
@@ -210,29 +210,29 @@ const BAR_FIRST_LINE: usize = 5;
 /// Columns between the bar and the right column in the two-column modal view.
 const COLUMN_GAP: usize = 3;
 
-const SYSTEM_LABEL: &str = "System prompt";
-const MESSAGES_LABEL: &str = "Messages";
-const OVERHEAD_LABEL: &str = "Overhead";
+const CACHE_READ_LABEL: &str = "Cache read";
+const CACHE_WRITE_LABEL: &str = "Cache write";
+const INPUT_LABEL: &str = "Input";
+const OUTPUT_LABEL: &str = "Output";
 const FREE_LABEL: &str = "Free";
 
 /// The category colors. The bar and the legend use the same ones, so both read side by side.
 struct Palette {
-    system: Color,
-    tools: Color,
-    messages: Color,
+    cache_read: Color,
+    cache_write: Color,
+    input: Color,
+    output: Color,
     empty: Color,
-    overhead: Color,
 }
 
 impl Palette {
     fn new(theme: &Theme) -> Self {
         Self {
-            // Messages get the brightest color. System prompt is a quiet gray base layer.
-            system: quantize(theme.gray_bright),
-            tools: quantize(theme.accent_skill),
-            messages: quantize(theme.text_primary),
+            cache_read: quantize(theme.gray_bright),
+            cache_write: quantize(theme.accent_skill),
+            input: quantize(theme.text_primary),
+            output: quantize(theme.accent_assistant),
             empty: quantize(theme.gray_dim),
-            overhead: quantize(theme.accent_verify),
         }
     }
 }
@@ -321,30 +321,39 @@ impl ContextInfoBlock {
         let mut left = self.header_lines(theme);
         left.extend(bar_lines(&segments, bar, selected.map(|s| s.label), theme));
         left.push(Line::from(""));
+        // Without a selection the request list follows the totals. Its clickable lines are offset to where it lands.
         let mut actions = Vec::new();
+        let with_requests = |mut lines: Vec<Line<'static>>,
+                             width: usize,
+                             base: usize,
+                             actions: &mut Vec<(usize, LedgerAction)>| {
+            lines.push(Line::from(""));
+            let list =
+                super::context_ledger_view::request_lines(&self.snapshot, expanded, theme, width);
+            let offset = base + lines.len();
+            actions.extend(list.actions.into_iter().map(|(i, a)| (i + offset, a)));
+            lines.extend(list.lines);
+            lines
+        };
         let lines = if two_columns {
             left.extend(word_wrap_lines(vec![hint], bar_width));
             let right_width = width - bar_width - COLUMN_GAP;
             let right = match selected {
-                Some(seg) => {
-                    let (lines, hits) = self.inspect_lines(theme, seg, bar, right_width, expanded);
-                    actions = hits;
-                    lines
-                }
-                None => wide_stats,
+                Some(seg) => self.inspect_lines(theme, seg, bar, right_width),
+                None => with_requests(wide_stats, right_width, 0, &mut actions),
             };
             zip_columns(left, bar_width + COLUMN_GAP, right)
         } else {
             left.extend(word_wrap_lines(vec![hint], width));
             left.push(Line::from(""));
             match selected {
-                Some(seg) => {
-                    let (lines, hits) = self.inspect_lines(theme, seg, bar, width, expanded);
-                    let offset = left.len();
-                    actions = hits.into_iter().map(|(i, a)| (i + offset, a)).collect();
-                    left.extend(lines);
+                Some(seg) => left.extend(self.inspect_lines(theme, seg, bar, width)),
+                None => {
+                    let base = left.len();
+                    let stats =
+                        with_requests(self.stats_lines(theme, bar), width, base, &mut actions);
+                    left.extend(stats);
                 }
-                None => left.extend(self.stats_lines(theme, bar)),
             }
             left
         };
@@ -376,9 +385,10 @@ impl ContextInfoBlock {
         lines
     }
 
-    fn window_tokens(&self) -> WindowTokens {
-        let s = &self.snapshot;
-        window_tokens(s.used, s.total, s.system_prompt_tokens, s.message_tokens)
+    /// The provider's counts for the last request, capped to the window. `None` before any request reported usage.
+    fn window_tokens(&self) -> Option<WindowTokens> {
+        let usage = self.snapshot.request_ledger.requests.last()?.usage;
+        Some(window_tokens(&usage, self.snapshot.total))
     }
 
     /// `Context`, a blank, the totals, the model and a blank: [`BAR_FIRST_LINE`] lines.
@@ -386,17 +396,26 @@ impl ContextInfoBlock {
         let primary = Style::default()
             .fg(theme.text_primary)
             .add_modifier(Modifier::BOLD);
+        let total = self.snapshot.total;
+        // The percent is recomputed from `used / total` for decimals.
+        let totals = match self.window_tokens() {
+            Some(t) => format!(
+                "{} / {} tokens ({:.2}%)",
+                fmt_tok_big(t.used),
+                fmt_tok_big(total),
+                precise_usage_percent(t.used, total),
+            ),
+            None => format!(
+                "No usage reported yet \u{00b7} {} window",
+                fmt_tok_big(total)
+            ),
+        };
         vec![
             Line::from(Span::styled("Context", primary)),
             Line::from(""),
-            // `text_secondary` sets the totals apart from the muted rows. The percent is recomputed from `used / total` for decimals.
+            // `text_secondary` sets the totals apart from the muted rows.
             Line::from(Span::styled(
-                format!(
-                    "{} / {} tokens ({:.2}%)",
-                    fmt_tok_big(self.snapshot.used),
-                    fmt_tok_big(self.snapshot.total),
-                    precise_usage_percent(self.snapshot.used, self.snapshot.total),
-                ),
+                totals,
                 Style::default().fg(theme.text_secondary),
             )),
             Line::from(Span::styled(
@@ -409,26 +428,22 @@ impl ContextInfoBlock {
 
     /// The bar's categories in legend order. The ranges cover every cell exactly once.
     fn segments(&self, theme: &Theme, bar: BarLayout) -> Vec<BarSegment> {
-        let snapshot = &self.snapshot;
-        let total = snapshot.total;
-        let tokens = self.window_tokens();
+        let total = self.snapshot.total;
+        let tokens = self.window_tokens().unwrap_or_default();
         let palette = Palette::new(theme);
         // The `glyphs` helpers fall back to CP437-safe stand-ins on legacy Windows consoles.
         let filled = crate::glyphs::diamond_filled();
 
         let total_cells = bar.total();
-        let cells_for = |tokens: u64| -> usize {
+        // Cumulative rounding: each boundary is rounded, so the runs sum to the used cells exactly.
+        let cells_through = |tokens: u64| -> usize {
             if total == 0 {
                 0
             } else {
-                ((tokens as f64 / total as f64) * total_cells as f64).round() as usize
+                (((tokens as f64 / total as f64) * total_cells as f64).round() as usize)
+                    .min(total_cells)
             }
         };
-        let used_cells = cells_for(snapshot.used).min(total_cells);
-        let system_cells = cells_for(tokens.system).min(used_cells);
-        let messages_cells = cells_for(tokens.messages).min(used_cells - system_cells);
-        let overhead_cells = used_cells - system_cells - messages_cells;
-
         let mut segments: Vec<BarSegment> = Vec::new();
         let mut push = |label, glyph, color, tokens, len: usize| {
             let start = segments.last().map_or(0, |s| s.cells.end);
@@ -440,138 +455,75 @@ impl ContextInfoBlock {
                 cells: start..start + len,
             });
         };
-        push(
-            SYSTEM_LABEL,
-            filled,
-            palette.system,
-            tokens.system,
-            system_cells,
-        );
-        // Each kind gets its share of the Messages cells. Cumulative rounding keeps the sum exact.
-        let parts = message_parts(theme, &snapshot.message_breakdown, tokens.messages);
-        let mut placed = 0usize;
         let mut acc = 0u64;
-        for part in &parts {
-            acc += part.tokens;
-            let end = if tokens.messages == 0 {
-                0
-            } else {
-                ((acc as f64 / tokens.messages as f64) * messages_cells as f64).round() as usize
-            };
-            let end = end.min(messages_cells);
-            push(
-                part.label,
-                filled,
-                part.color,
-                part.tokens,
-                end.saturating_sub(placed),
-            );
-            placed = placed.max(end);
+        let mut placed = 0usize;
+        for (label, color, part) in [
+            (CACHE_READ_LABEL, palette.cache_read, tokens.cache_read),
+            (CACHE_WRITE_LABEL, palette.cache_write, tokens.cache_write),
+            (INPUT_LABEL, palette.input, tokens.input),
+            (OUTPUT_LABEL, palette.output, tokens.output),
+        ] {
+            acc += part;
+            let end = cells_through(acc).max(placed);
+            push(label, filled, color, part, end - placed);
+            placed = end;
         }
-        if placed < messages_cells || parts.is_empty() {
-            push(
-                MESSAGES_LABEL,
-                filled,
-                palette.messages,
-                tokens.messages,
-                messages_cells - placed,
-            );
-        }
-        push(
-            OVERHEAD_LABEL,
-            filled,
-            palette.overhead,
-            tokens.overhead,
-            overhead_cells,
-        );
         push(
             FREE_LABEL,
             crate::glyphs::diamond_hollow(),
             palette.empty,
-            tokens.free,
-            total_cells - used_cells,
+            tokens.free(total),
+            total_cells - placed,
         );
         debug_assert_eq!(segments.last().map_or(0, |s| s.cells.end), total_cells);
         segments
     }
 
-    /// The legend, the informational rows, the auto-compact line, the counters, and the compaction tip.
+    /// The legend of the last request's provider counts, the auto-compact line, the counters, and the compaction tip.
     fn stats_lines(&self, theme: &Theme, bar: BarLayout) -> Vec<Line<'static>> {
         let snapshot = &self.snapshot;
         let total = snapshot.total;
-        let tokens = self.window_tokens();
         let palette = Palette::new(theme);
         let muted = theme.muted();
         let filled = crate::glyphs::diamond_filled();
-        let tools_glyph = crate::glyphs::diamond_dotted();
-
-        // Tool definitions are already in Overhead. Usage categories are already in Messages.
-        let mut legend_rows = vec![
-            LegendRow {
-                glyph: filled,
-                color: palette.system,
-                label: SYSTEM_LABEL.to_string(),
-                tokens: tokens.system,
-                detail: None,
-            },
-            LegendRow {
-                glyph: filled,
-                color: palette.messages,
-                label: MESSAGES_LABEL.to_string(),
-                tokens: tokens.messages,
-                detail: None,
-            },
-        ];
-        let parts = message_parts(theme, &snapshot.message_breakdown, tokens.messages);
-        legend_rows.extend(parts.iter().map(|p| LegendRow {
-            glyph: filled,
-            color: p.color,
-            label: format!("  {}", p.label),
-            tokens: p.tokens,
-            detail: None,
-        }));
-        if tokens.overhead > 0 {
-            legend_rows.push(LegendRow {
-                glyph: filled,
-                color: palette.overhead,
-                label: OVERHEAD_LABEL.to_string(),
-                tokens: tokens.overhead,
-                detail: None,
-            });
-        }
-        legend_rows.push(LegendRow {
-            glyph: crate::glyphs::diamond_hollow(),
-            color: palette.empty,
-            label: FREE_LABEL.to_string(),
-            tokens: tokens.free,
-            detail: None,
-        });
-        let info_rows: Vec<LegendRow> = std::iter::once(LegendRow {
-            glyph: tools_glyph,
-            color: palette.tools,
-            label: "Tool definitions".to_string(),
-            tokens: snapshot.tool_definitions_tokens,
-            detail: Some(count_detail(snapshot.tool_definitions_count, "tool")),
-        })
-        .chain(snapshot.usage_categories.iter().map(|c| LegendRow {
-            glyph: tools_glyph,
-            color: palette.tools,
-            label: c.label.clone(),
-            tokens: c.tokens,
-            detail: c.detail.clone(),
-        }))
-        .collect();
-        let layout = RowLayout::measure(legend_rows.iter().chain(info_rows.iter()), total);
-        let label_style = Style::default().fg(theme.text_secondary);
 
         let mut lines = Vec::new();
-        for row in &legend_rows {
-            lines.extend(layout.render(row, bar, total, label_style, muted));
-        }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Already counted above", muted)));
-        for row in &info_rows {
-            lines.extend(layout.render(row, bar, total, label_style, muted));
+        match self.window_tokens() {
+            Some(tokens) => {
+                let row = |label: &str, color, tokens| LegendRow {
+                    glyph: filled,
+                    color,
+                    label: label.to_string(),
+                    tokens,
+                    detail: None,
+                };
+                let legend_rows = [
+                    row(CACHE_READ_LABEL, palette.cache_read, tokens.cache_read),
+                    row(CACHE_WRITE_LABEL, palette.cache_write, tokens.cache_write),
+                    row(INPUT_LABEL, palette.input, tokens.input),
+                    row(OUTPUT_LABEL, palette.output, tokens.output),
+                    LegendRow {
+                        glyph: crate::glyphs::diamond_hollow(),
+                        color: palette.empty,
+                        label: FREE_LABEL.to_string(),
+                        tokens: tokens.free(total),
+                        detail: None,
+                    },
+                ];
+                let layout = RowLayout::measure(legend_rows.iter(), total);
+                let label_style = Style::default().fg(theme.text_secondary);
+                for row in &legend_rows {
+                    lines.extend(layout.render(row, bar, total, label_style, muted));
+                }
+                lines.push(Line::from(Span::styled(
+                    "The provider's usage for the last request.",
+                    muted,
+                )));
+            }
+            None => lines.push(Line::from(Span::styled(
+                "No request has reported usage since the session loaded or compacted.",
+                muted,
+            ))),
         }
         lines.push(Line::from(""));
         if let Some(line) = self.auto_compact_line(theme) {
@@ -627,18 +579,17 @@ impl ContextInfoBlock {
         Some(Line::from(Span::styled(text, style)))
     }
 
-    /// The details of one clicked segment, word-wrapped to `width`, and the clickable lines among them.
+    /// The details of one clicked segment, word-wrapped to `width`.
     fn inspect_lines(
         &self,
         theme: &Theme,
         seg: &BarSegment,
         bar: BarLayout,
         width: usize,
-        expanded: &BTreeSet<LedgerRow>,
-    ) -> (Vec<Line<'static>>, Vec<(usize, LedgerAction)>) {
+    ) -> Vec<Line<'static>> {
         let snapshot = &self.snapshot;
         let muted = theme.muted();
-        let used = snapshot.used.min(snapshot.total);
+        let used = self.window_tokens().map_or(0, |t| t.used);
 
         let mut shares = format!(
             "{} tokens \u{00b7} {} of window",
@@ -683,61 +634,30 @@ impl ContextInfoBlock {
             width,
         ));
 
-        let mut actions = Vec::new();
-        if seg.label == OVERHEAD_LABEL {
-            lines.push(Line::from(""));
-            let ledger = super::context_ledger_view::overhead_lines(
-                snapshot,
-                self.window_tokens().overhead,
-                expanded,
-                theme,
-                width,
-            );
-            let offset = lines.len();
-            actions.extend(ledger.actions.into_iter().map(|(i, a)| (i + offset, a)));
-            lines.extend(ledger.lines);
-        }
         if seg.label == FREE_LABEL
             && let Some(line) = self.auto_compact_line(theme)
         {
             lines.push(Line::from(""));
             lines.push(line);
         }
-        (lines, actions)
+        lines
     }
 }
 
 /// What a segment holds, in plain words.
-fn segment_description(label: &str) -> String {
-    let bytes = xai_token_estimation::BYTES_PER_TOKEN;
-    let what = match label {
-        SYSTEM_LABEL => "The system message that starts every request.",
-        "User" => {
-            "Your prompts, and the text that the harness sends as user messages, such as reminders and attachments."
+fn segment_description(label: &str) -> &'static str {
+    match label {
+        CACHE_READ_LABEL => {
+            "Prompt tokens the provider served from its prompt cache: Messages `cache_read_input_tokens`, OpenAI `cached_tokens`."
         }
-        "Assistant" => "The visible text of the model's replies.",
-        "Reasoning" => {
-            "The thinking blocks that the history replays to the model, with their encrypted content."
+        CACHE_WRITE_LABEL => {
+            "Prompt tokens the provider wrote to its prompt cache on this request: Messages `cache_creation_input_tokens`."
         }
-        "Tool calls" => "The arguments of the model's tool calls.",
-        "Tool results" => "The output that the tools returned to the model.",
-        MESSAGES_LABEL => "All conversation items after the system message.",
-        OVERHEAD_LABEL => {
-            return format!(
-                "Overhead is not a kind of item. It is the measured occupancy minus the estimates above. \
-                 The model's tokenizer measured the occupancy. The estimates count {bytes} bytes per token, \
-                 and a real tokenizer often counts more tokens than that, mostly for code, JSON and paths. \
-                 The tool definitions are also part of this remainder."
-            );
-        }
-        FREE_LABEL => {
-            return "The part of the window that the next request can still use.".to_string();
-        }
+        INPUT_LABEL => "Prompt tokens neither read from nor written to the cache.",
+        OUTPUT_LABEL => "The tokens the model generated for its reply.",
+        FREE_LABEL => "The part of the window that the next request can still use.",
         _ => "",
-    };
-    format!("{what} The count is an estimate at {bytes} bytes per token.")
-        .trim_start()
-        .to_string()
+    }
 }
 
 /// The bar rows. With a selection, the selected cells stay lit and bold and every other cell goes dim.
@@ -842,63 +762,41 @@ fn fmt_tok_big(n: u64) -> String {
     }
 }
 
-/// `system`, `messages`, `overhead`, and `free` sum to `total`.
+/// The provider's counts for one request, capped so `used` never passes the window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct WindowTokens {
-    system: u64,
-    messages: u64,
-    overhead: u64,
-    free: u64,
+    cache_read: u64,
+    cache_write: u64,
+    input: u64,
+    output: u64,
+    used: u64,
 }
 
-/// `system_tokens` and `message_tokens` can exceed `used`.
-/// `used` can exceed `total`.
-fn window_tokens(used: u64, total: u64, system_tokens: u64, message_tokens: u64) -> WindowTokens {
-    let used = used.min(total);
-    let system = system_tokens.min(used);
-    let messages = message_tokens.min(used - system);
+impl WindowTokens {
+    fn free(&self, total: u64) -> u64 {
+        total.saturating_sub(self.used)
+    }
+}
+
+/// Take each count in legend order until the window is full.
+fn window_tokens(usage: &ProviderUsage, total: u64) -> WindowTokens {
+    let mut left = total;
+    let mut take = |n: u64| {
+        let n = n.min(left);
+        left -= n;
+        n
+    };
+    let cache_read = take(usage.cache_read);
+    let cache_write = take(usage.cache_write);
+    let input = take(usage.input);
+    let output = take(usage.output);
     WindowTokens {
-        system,
-        messages,
-        overhead: used - system - messages,
-        free: xai_token_estimation::free_tokens(total, used),
+        cache_read,
+        cache_write,
+        input,
+        output,
+        used: total - left,
     }
-}
-
-/// One kind of message item inside the Messages row.
-struct MessagePart {
-    label: &'static str,
-    color: Color,
-    tokens: u64,
-}
-
-/// The nonzero kinds of `breakdown`, scaled so they sum to `shown`, the Messages count after the cap to occupancy.
-/// Empty when the snapshot carries no breakdown.
-fn message_parts(theme: &Theme, breakdown: &MessageTokenBreakdown, shown: u64) -> Vec<MessagePart> {
-    let estimate = breakdown.total();
-    if estimate == 0 {
-        return Vec::new();
-    }
-    let mut parts: Vec<MessagePart> = [
-        ("User", theme.accent_user, breakdown.user),
-        ("Assistant", theme.accent_assistant, breakdown.assistant),
-        ("Reasoning", theme.accent_thinking, breakdown.reasoning),
-        ("Tool calls", theme.accent_tool, breakdown.tool_calls),
-        ("Tool results", theme.command, breakdown.tool_results),
-    ]
-    .into_iter()
-    .filter(|&(_, _, tokens)| tokens > 0)
-    .map(|(label, color, tokens)| MessagePart {
-        label,
-        color: quantize(color),
-        tokens: ((tokens as u128 * shown as u128) / estimate as u128) as u64,
-    })
-    .collect();
-    // Floor division loses a few tokens. Give them to the largest part so the rows sum to `shown`.
-    let lost = shown - parts.iter().map(|p| p.tokens).sum::<u64>();
-    if let Some(largest) = parts.iter_mut().max_by_key(|p| p.tokens) {
-        largest.tokens += lost;
-    }
-    parts
 }
 
 /// Format a category's share of the total context window as a percentage.
@@ -986,7 +884,7 @@ impl BlockContent for ContextInfoBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xai_grok_shell::session::TokenUsageCategory;
+    use xai_grok_shell::session::{ContextLedger, LedgerRequest};
 
     fn snapshot() -> ContextInfo {
         ContextInfo {
@@ -1005,7 +903,19 @@ mod tests {
             usage_pct: 4,
             auto_compact_threshold_percent: 85,
             usage_categories: vec![],
-            overhead_ledger: Default::default(),
+            request_ledger: ContextLedger {
+                requests: vec![LedgerRequest {
+                    turn: 1,
+                    usage: ProviderUsage {
+                        cache_read: 29_900,
+                        cache_write: 5_000,
+                        input: 1_200,
+                        output: 600,
+                    },
+                    items: vec![],
+                }],
+                unsent: vec![],
+            },
             transcript_path: None,
         }
     }
@@ -1226,154 +1136,92 @@ mod tests {
     }
 
     #[test]
-    fn window_tokens_caps_used_to_total_and_system_to_used() {
-        let tokens = window_tokens(600_000, 500_000, 1_000, 400_000);
-        assert_eq!(0, tokens.free);
-        assert_eq!(500_000, tokens.system + tokens.messages + tokens.overhead);
-
-        let tokens = window_tokens(100, 1_000, 500, 50);
-        assert_eq!(100, tokens.system);
-        assert_eq!(0, tokens.messages);
-        assert_eq!(0, tokens.overhead);
-        assert_eq!(900, tokens.free);
+    fn window_tokens_fill_in_legend_order_and_cap_at_the_window() {
+        let usage = ProviderUsage {
+            cache_read: 400,
+            cache_write: 300,
+            input: 200,
+            output: 100,
+        };
+        let t = window_tokens(&usage, 1_000);
+        assert_eq!((t.used, t.free(1_000)), (1_000, 0));
+        let t = window_tokens(&usage, 800);
+        assert_eq!(
+            (t.cache_read, t.cache_write, t.input, t.output, t.used),
+            (400, 300, 100, 0, 800)
+        );
+        assert_eq!(t.free(800), 0);
     }
 
     #[test]
-    fn legend_itemizes_messages_and_scales_rows_to_the_capped_total() {
-        let mut snap = snapshot();
-        snap.used = 100_000;
-        snap.total = 1_000_000;
-        snap.system_prompt_tokens = 0;
-        snap.message_breakdown = MessageTokenBreakdown {
-            user: 10_000,
-            assistant: 20_000,
-            tool_calls: 30_000,
-            tool_results: 60_000,
-            reasoning: 80_000,
-        };
-        snap.message_tokens = snap.message_breakdown.total();
-
-        let block = ContextInfoBlock::new(snap, "grok-build");
-        let lines = block.build_lines(&test_theme(), BarLayout::WIDE);
-        let all = all_text(&lines);
-        // 200k of estimate shown as 100k of occupancy: each kind is halved.
+    fn legend_shows_the_provider_counts_and_no_estimates() {
+        let all = all_text(
+            &ContextInfoBlock::new(snapshot(), "grok-4")
+                .build_lines(&test_theme(), BarLayout::WIDE),
+        );
         for (label, tokens) in [
-            ("User", "5.0k"),
-            ("Assistant", "10.0k"),
-            ("Reasoning", "40.0k"),
-            ("Tool calls", "15.0k"),
-            ("Tool results", "30.0k"),
+            ("Cache read", "29.9k"),
+            ("Cache write", "5.0k"),
+            ("Input", "1.2k"),
+            ("Output", "600"),
+            ("Free", "963k"),
         ] {
             assert!(
                 all.lines().any(|l| l.contains(label) && l.contains(tokens)),
                 "{label} row should read {tokens}:\n{all}"
             );
         }
-        assert!(!all.contains("Overhead"), "{all}");
-    }
-
-    /// The reported session: 176k of 1.0m used, 2.1k of system prompt, and an estimate that fills the rest.
-    /// Reasoning and tool calls must render as their own rows.
-    #[test]
-    fn legend_shows_reasoning_when_the_estimate_fills_occupancy() {
-        let mut snap = snapshot();
-        snap.used = 176_000;
-        snap.total = 1_000_000;
-        snap.system_prompt_tokens = 2_100;
-        snap.message_breakdown = MessageTokenBreakdown {
-            user: 6_000,
-            assistant: 9_000,
-            tool_calls: 21_000,
-            tool_results: 98_000,
-            reasoning: 46_000,
-        };
-        snap.message_tokens = snap.message_breakdown.total();
-
-        let block = ContextInfoBlock::new(snap, "openrouter/deepseek/deepseek-v4.1-flash");
-        let all = all_text(&block.build_lines(&test_theme(), BarLayout::WIDE));
-        println!("{all}");
-        for label in ["Reasoning", "Tool calls", "Tool results"] {
-            assert!(all.contains(label), "{label} row missing:\n{all}");
+        for gone in [
+            "Overhead",
+            "System prompt",
+            "Messages",
+            "Already counted above",
+        ] {
+            assert!(!all.contains(gone), "{gone} is an estimate:\n{all}");
         }
     }
 
     #[test]
-    fn message_parts_sum_to_the_shown_total() {
-        let b = MessageTokenBreakdown {
-            user: 1,
-            assistant: 1,
-            tool_calls: 1,
-            tool_results: 0,
-            reasoning: 1,
-        };
-        let parts = message_parts(&test_theme(), &b, 7);
-        assert_eq!(4, parts.len(), "zero kinds get no row");
-        assert_eq!(7, parts.iter().map(|p| p.tokens).sum::<u64>());
-        assert!(message_parts(&test_theme(), &MessageTokenBreakdown::default(), 7).is_empty());
-    }
-
-    #[test]
-    fn legend_caps_messages_when_estimate_exceeds_used() {
+    fn no_reported_request_shows_an_empty_bar_and_says_why() {
         let mut snap = snapshot();
-        snap.used = 206_000;
-        snap.total = 500_000;
-        snap.system_prompt_tokens = 1_500;
-        snap.message_tokens = 380_000;
-        snap.usage_pct = 41;
-
-        let block = ContextInfoBlock::new(snap, "grok-build");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
-
+        snap.request_ledger = Default::default();
+        let lines =
+            ContextInfoBlock::new(snap, "grok-4").build_lines(&test_theme(), BarLayout::WIDE);
         let all = all_text(&lines);
-        assert!(
-            all.contains("Messages") && all.contains("205k") && all.contains("(41%)"),
-            "Messages should show capped occupancy, not the 380k estimate:\n{all}"
-        );
-        assert!(
-            !all.contains("Overhead"),
-            "overhead is zero when messages eat remaining occupancy:\n{all}"
-        );
-        assert!(
-            all.contains("Free") && all.contains("294k") && all.contains("(59%)"),
-            "Free stays window minus occupancy:\n{all}"
-        );
-        assert!(
-            all.contains("Already counted above"),
-            "info rows must be labeled as overlapping:\n{all}"
-        );
+        assert!(all.contains("No usage reported yet"), "{all}");
+        assert!(all.contains("No request has reported usage"), "{all}");
+        let (diamonds, _, free, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
+        assert_eq!((diamonds, free, total), (0, 100, 100));
     }
 
     #[test]
-    fn bar_used_band_does_not_overshoot_when_estimates_exceed_used() {
+    fn bar_used_band_matches_the_provider_total() {
         let mut snap = snapshot();
         snap.total = 100_000;
-        snap.used = 10_000;
-        snap.system_prompt_tokens = 8_000;
-        snap.message_tokens = 5_000;
-        snap.tool_definitions_tokens = 0;
-        snap.free_tokens = 90_000;
-        snap.usage_pct = 10;
-        let block = ContextInfoBlock::new(snap, "grok-4");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
-        let (diamonds, tools, free, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
-        assert_eq!(total, 100);
-        assert_eq!(tools, 0);
-        assert_eq!(
-            diamonds, 10,
-            "used band must equal cells_for(used)=10 even when estimates (13k) exceed used (10k)"
-        );
-        assert_eq!(free, 90);
+        snap.request_ledger.requests[0].usage = ProviderUsage {
+            cache_read: 6_000,
+            cache_write: 2_000,
+            input: 1_500,
+            output: 500,
+        };
+        let lines =
+            ContextInfoBlock::new(snap, "grok-4").build_lines(&test_theme(), BarLayout::WIDE);
+        let (diamonds, _, free, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
+        assert_eq!((diamonds, free, total), (10, 90, 100));
     }
 
     #[test]
-    fn bar_total_cells_always_sum_to_one_hundred() {
-        let block = ContextInfoBlock::new(snapshot(), "grok-4");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
-        let (_, _, _, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
-        assert_eq!(total, 100, "bar must always render exactly 100 cells");
+    fn bar_all_used_when_completely_full() {
+        let mut snap = snapshot();
+        snap.total = 1_000;
+        snap.request_ledger.requests[0].usage = ProviderUsage {
+            cache_read: 2_000,
+            ..Default::default()
+        };
+        let lines =
+            ContextInfoBlock::new(snap, "grok-4").build_lines(&test_theme(), BarLayout::WIDE);
+        let (diamonds, _, free, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
+        assert_eq!((diamonds, free, total), (100, 0, 100));
     }
 
     #[test]
@@ -1381,159 +1229,19 @@ mod tests {
         let mut snap = snapshot();
         snap.total = 0;
         snap.used = 0;
-        snap.system_prompt_tokens = 0;
-        snap.tool_definitions_tokens = 0;
-        snap.message_tokens = 0;
-        snap.free_tokens = 0;
-        let block = ContextInfoBlock::new(snap, "grok-4");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
+        let lines =
+            ContextInfoBlock::new(snap, "grok-4").build_lines(&test_theme(), BarLayout::WIDE);
         let (diamonds, tools, free, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
-        assert_eq!(total, 100);
-        assert_eq!(diamonds, 0, "no diamonds when total=0");
-        assert_eq!(tools, 0, "no tools when total=0");
-        assert_eq!(free, 100, "all cells free when total=0");
+        assert_eq!((diamonds, tools, free, total), (0, 0, 100, 100));
     }
 
     #[test]
-    fn bar_all_used_when_completely_full() {
-        // Fill the bar entirely with messages so we can count by glyph (system and messages share the diamond; tools and free are distinct)
-        let mut snap = snapshot();
-        snap.total = 1_000;
-        snap.used = 1_000;
-        snap.system_prompt_tokens = 0;
-        snap.tool_definitions_tokens = 0;
-        snap.message_tokens = 1_000;
-        snap.free_tokens = 0;
-        snap.usage_pct = 100;
-        let block = ContextInfoBlock::new(snap, "grok-4");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
-        let (diamonds, tools, free, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
-        assert_eq!(total, 100);
-        assert_eq!(diamonds, 100, "messages should fill the entire bar");
-        assert_eq!(tools, 0);
-        assert_eq!(free, 0);
-    }
-
-    #[test]
-    fn bar_used_band_excludes_tools_and_never_overshoots() {
-        let mut snap = snapshot();
-        snap.total = 1_000;
-        snap.used = 1_000;
-        snap.system_prompt_tokens = 495;
-        snap.message_tokens = 10;
-        snap.tool_definitions_tokens = 800;
-        snap.free_tokens = 0;
-        snap.usage_pct = 100;
-        let block = ContextInfoBlock::new(snap, "grok-4");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
-        let (diamonds, tools, free, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
+    fn bar_total_cells_always_sum_to_one_hundred() {
+        let lines =
+            ContextInfoBlock::new(snapshot(), "grok-4").build_lines(&test_theme(), BarLayout::WIDE);
+        let (_, _, _, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
         assert_eq!(total, 100, "bar must always render exactly 100 cells");
-        assert_eq!(tools, 0, "tool definitions must never enter the bar");
-        assert_eq!(diamonds, 100, "used band fills the bar at 100% usage");
-        assert_eq!(free, 0, "no free cells at 100% usage");
     }
-
-    #[test]
-    fn bar_and_legend_reconcile_used_with_overhead_excluding_tools() {
-        let snap = ContextInfo {
-            used: 100_000,
-            total: 500_000,
-            system_prompt_tokens: 5_000,
-            tool_definitions_count: 190,
-            tool_definitions_tokens: 75_000,
-            compaction_count: 0,
-            turn_count: 1,
-            tool_call_count: 0,
-            message_count: 4,
-            message_tokens: 25_000,
-            message_breakdown: Default::default(),
-            free_tokens: 400_000,
-            usage_pct: 20,
-            auto_compact_threshold_percent: 65,
-            usage_categories: vec![],
-            overhead_ledger: Default::default(),
-            transcript_path: None,
-        };
-        let block = ContextInfoBlock::new(snap, "grok-build");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
-
-        let all = all_text(&lines);
-        assert!(
-            all.contains("Overhead") && all.contains("70.0k"),
-            "overhead row (70.0k) missing:\n{all}"
-        );
-        assert!(
-            all.contains("Tool definitions") && all.contains("190 tools"),
-            "tools row must be shown with its count:\n{all}"
-        );
-
-        let (diamonds, tools, free, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
-        assert_eq!(total, 100);
-        assert_eq!(tools, 0, "tool definitions excluded from the bar");
-        assert_eq!(diamonds, 20, "used band must equal used/total");
-        assert_eq!(free, 80);
-    }
-
-    #[test]
-    fn build_lines_renders_usage_categories_with_details() {
-        let mut snap = snapshot();
-        snap.usage_categories = vec![
-            TokenUsageCategory::skills_listing(&"x".repeat(9_600), 21),
-            TokenUsageCategory::mcp_servers(&"y".repeat(1_200), 4),
-            TokenUsageCategory::agents_md(&"z".repeat(4_400), 2),
-        ];
-        let block = ContextInfoBlock::new(snap, "grok-4");
-        let theme = test_theme();
-        let lines = block.build_lines(&theme, BarLayout::WIDE);
-        let all = all_text(&lines);
-        assert!(
-            all.contains("Skills") && all.contains("21 skills"),
-            "skills row missing:\n{all}"
-        );
-        assert!(
-            all.contains("MCP servers") && all.contains("4 servers"),
-            "mcp row missing:\n{all}"
-        );
-        assert!(
-            all.contains("AGENTS.md") && all.contains("2 files"),
-            "agents.md row missing:\n{all}"
-        );
-        assert!(all.contains("\u{00b7} 12 tools"), "tools count:\n{all}");
-        let (_, tools, _, total) = count_bar_glyphs(&lines, BarLayout::WIDE);
-        assert_eq!(total, 100);
-        assert_eq!(tools, 0, "usage categories must never enter the bar");
-
-        // Token, percent, and count columns line up across all rows; single-digit counts are right-aligned ("·  4 servers")
-        let is_row = |l: &&str| {
-            (l.starts_with('\u{25C6}') || l.starts_with('\u{25C8}') || l.starts_with('\u{25C7}'))
-                && l.contains(" tokens ")
-        };
-        let cols = |needle: &str| -> Vec<usize> {
-            all.lines()
-                .filter(is_row)
-                .filter_map(|l| l.find(needle))
-                .collect()
-        };
-        for needle in [" tokens ", ")"] {
-            let positions = cols(needle);
-            assert!(
-                positions.windows(2).all(|w| {
-                    let [a, b] = w else { return false };
-                    a == b
-                }),
-                "{needle:?} column misaligned: {positions:?}\n{all}"
-            );
-        }
-        assert!(
-            all.contains("\u{00b7}  4 servers"),
-            "single-digit count must be right-aligned:\n{all}"
-        );
-    }
-
     #[test]
     fn bar_geometry_maps_columns_and_rows_to_cells() {
         let bar = BarGeometry {
@@ -1557,14 +1265,14 @@ mod tests {
         let all = all_text(&view.lines);
         let line_of = |needle: &str| all.lines().position(|l| l.contains(needle));
         assert!(
-            line_of("System prompt") > line_of("Click a diamond"),
+            line_of("Cache read") > line_of("Click a diamond"),
             "totals go under the bar:\n{all}"
         );
         assert_eq!(view.bar.row_len, BarLayout::WIDE.row_len);
 
         let wide = block.modal_view(&theme, 110, None, &BTreeSet::new());
         assert!(
-            line_text(&wide.lines, 0).contains("System prompt"),
+            line_text(&wide.lines, 0).contains("Cache read"),
             "a wide view puts the totals beside the header"
         );
     }
@@ -1572,7 +1280,10 @@ mod tests {
     #[test]
     fn modal_view_segments_tile_the_bar_and_selection_dims_the_rest() {
         let mut snap = snapshot();
-        snap.used = 400_000;
+        snap.request_ledger.requests[0].usage = ProviderUsage {
+            cache_read: 400_000,
+            ..Default::default()
+        };
         let block = ContextInfoBlock::new(snap, "grok-4");
         let theme = test_theme();
         let view = block.modal_view(&theme, 110, Some(FREE_LABEL), &BTreeSet::new());
@@ -1746,13 +1457,13 @@ mod tests {
         let block = ContextInfoBlock::new(snapshot(), "grok-4");
         let theme = test_theme();
         let lines = block.build_lines(&theme, BarLayout::WIDE);
-        let row = find_legend_line(&lines, "System prompt").expect("legend row");
+        let row = find_legend_line(&lines, "Cache read").expect("legend row");
         // Span layout for WIDE: [glyph+space, label, " ", tokens, ...].
-        // The label span content begins with "System prompt".
+        // The label span content begins with "Cache read".
         let label_span = row
             .spans
             .iter()
-            .find(|s| s.content.as_ref().starts_with("System prompt"))
+            .find(|s| s.content.as_ref().starts_with("Cache read"))
             .expect("label span");
         assert_eq!(
             label_span.style.fg,
@@ -1767,12 +1478,12 @@ mod tests {
         let block = ContextInfoBlock::new(snapshot(), "grok-4");
         let theme = test_theme();
         let lines = block.build_lines(&theme, BarLayout::NARROW);
-        let row = find_legend_line(&lines, "System prompt").expect("legend row 1");
+        let row = find_legend_line(&lines, "Cache read").expect("legend row 1");
         // Span layout for NARROW row 1: [glyph+space, label].
         let label_span = row
             .spans
             .iter()
-            .find(|s| s.content.as_ref() == "System prompt")
+            .find(|s| s.content.as_ref() == "Cache read")
             .expect("label span");
         assert_eq!(
             label_span.style.fg,
@@ -1788,9 +1499,10 @@ mod tests {
         let theme = test_theme();
         let lines = block.build_lines(&theme, BarLayout::NARROW);
         let categories = [
-            ("System prompt", "1.2k"),
-            ("Messages", "29.9k"),
-            ("Overhead", "5.6k"),
+            ("Cache read", "29.9k"),
+            ("Cache write", "5.0k"),
+            ("Input", "1.2k"),
+            ("Output", "600"),
             ("Free", "963k"),
         ];
         let mut idx = 16;
@@ -1821,7 +1533,7 @@ mod tests {
         let block = ContextInfoBlock::new(snapshot(), "grok-4");
         let theme = test_theme();
         let lines = block.build_lines(&theme, BarLayout::NARROW);
-        // The data row for the first legend entry sits at index 17 (16 is the "System prompt" header row, 17 its data row)
+        // The data row for the first legend entry sits at index 17 (16 is the "Cache read" header row, 17 its data row)
         let Some(data_row) = lines.get(17) else {
             panic!("expected data row at index 17");
         };
@@ -1850,23 +1562,23 @@ mod tests {
         };
         let l11 = row_text(11);
         assert!(
-            l11.contains("System prompt") && l11.contains("1.2k"),
+            l11.contains("Cache read") && l11.contains("29.9k"),
             "wide legend should keep label + tokens on one line, got: {l11:?}"
         );
         let l12 = row_text(12);
         assert!(
-            l12.contains("Messages") && l12.contains("29.9k"),
+            l12.contains("Cache write") && l12.contains("5.0k"),
             "wide legend should keep label + tokens on one line, got: {l12:?}"
         );
         let l13 = row_text(13);
         assert!(
-            l13.contains("Overhead") && l13.contains("5.6k"),
-            "wide legend should show overhead on one line, got: {l13:?}"
+            l13.contains("Input") && l13.contains("1.2k"),
+            "wide legend should keep label + tokens on one line, got: {l13:?}"
         );
-        let l14 = row_text(14);
+        let l15 = row_text(15);
         assert!(
-            l14.contains("Free") && l14.contains("963k"),
-            "wide legend should keep label + tokens on one line, got: {l14:?}"
+            l15.contains("Free") && l15.contains("963k"),
+            "wide legend should keep label + tokens on one line, got: {l15:?}"
         );
     }
 }

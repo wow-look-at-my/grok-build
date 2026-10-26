@@ -1,4 +1,4 @@
-//! The Overhead drill-down in the `/context` modal: tool definitions, one row per measured request, and the remainder.
+//! The `/context` request list: the provider's counts for each request, and the items each added.
 
 use std::collections::BTreeSet;
 
@@ -14,7 +14,7 @@ use crate::theme::Theme;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum LedgerRow {
     Request(usize),
-    Unmeasured,
+    Unsent,
 }
 
 /// What a click on a drill-down line does.
@@ -40,77 +40,60 @@ impl LedgerLines {
     }
 }
 
-/// Build the drill-down for an Overhead of `overhead` tokens.
-pub(crate) fn overhead_lines(
+/// The request list: one row per request with the provider's counts, each expandable into the items it added.
+pub(crate) fn request_lines(
     snapshot: &ContextInfo,
-    overhead: u64,
     expanded: &BTreeSet<LedgerRow>,
     theme: &Theme,
     width: usize,
 ) -> LedgerLines {
-    let ledger = &snapshot.overhead_ledger;
+    let ledger = &snapshot.request_ledger;
     let muted = theme.muted();
     let label = Style::default().fg(theme.text_secondary);
     let mut out = LedgerLines::default();
 
     out.push(
         Line::from(Span::styled(
-            "Where it comes from",
+            "Requests",
             Style::default()
                 .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         )),
         None,
     );
-    let tools = snapshot.tool_definitions_tokens;
     out.push(
-        fit(
-            vec![
-                Span::styled(format!("  {:<24}", "Tool definitions"), label),
-                Span::styled(format!("{:>7}", fmt_signed(tools as i64)), label),
-                Span::styled("  sent with every request".to_string(), muted),
-            ],
-            width,
-        ),
+        Line::from(Span::styled(
+            "        prompt   growth   cache read / write / input \u{00b7} output",
+            muted,
+        )),
         None,
     );
 
-    let mut measured_gap = 0i64;
+    let mut prev_prompt = 0u64;
     for (i, request) in ledger.requests.iter().enumerate() {
-        // The first request also carried the tool definitions, which have their own row.
-        let gap = if i == 0 {
-            request.gap() - tools as i64
-        } else {
-            request.gap()
-        };
-        measured_gap += gap;
+        let u = request.usage;
+        let growth = u.prompt() as i64 - prev_prompt as i64;
+        prev_prompt = u.prompt();
         let row = LedgerRow::Request(i);
         let open = expanded.contains(&row);
-        let ratio = if request.estimated > 0 {
-            format!(
-                " \u{00d7}{:.2}",
-                request.measured as f64 / request.estimated as f64
-            )
-        } else {
-            String::new()
-        };
         out.push(
             fit(
                 vec![
                     Span::styled(format!("{} ", disclosure(open)), muted),
+                    Span::styled(format!("#{:<4}", i + 1), label),
                     Span::styled(
-                        format!(
-                            "{:<24}",
-                            format!("Request {} \u{00b7} turn {}", i + 1, request.turn)
-                        ),
-                        label,
+                        format!("{:>7}", fmt_tok(u.prompt())),
+                        Style::default().fg(theme.text_primary),
                     ),
-                    Span::styled(format!("{:>7}", fmt_signed(gap)), gap_style(theme, gap)),
+                    Span::styled(format!("  {:>7}", fmt_signed(growth)), label),
                     Span::styled(
                         format!(
-                            "  {} measured / {} est{ratio} \u{00b7} {}",
-                            fmt_tok(request.measured),
-                            fmt_tok(request.estimated),
+                            "   {} / {} / {} \u{00b7} {} \u{00b7} turn {} \u{00b7} {}",
+                            fmt_tok(u.cache_read),
+                            fmt_tok(u.cache_write),
+                            fmt_tok(u.input),
+                            fmt_tok(u.output),
+                            request.turn,
                             count(request.items.len(), "item"),
                         ),
                         muted,
@@ -124,46 +107,31 @@ pub(crate) fn overhead_lines(
             push_items(&mut out, &request.items, theme, width);
         }
     }
-
-    // The remainder makes the rows sum to Overhead: the last reply's output against its estimate, and items not yet sent.
-    let rest = overhead as i64 - tools as i64 - measured_gap;
-    let open = expanded.contains(&LedgerRow::Unmeasured);
-    let rest_label = if ledger.requests.is_empty() {
-        "Not measured yet"
-    } else {
-        "Since the last request"
-    };
-    out.push(
-        fit(
-            vec![
-                Span::styled(format!("{} ", disclosure(open)), muted),
-                Span::styled(format!("{rest_label:<24}"), label),
-                Span::styled(format!("{:>7}", fmt_signed(rest)), gap_style(theme, rest)),
-                Span::styled(
-                    format!("  {} not yet sent", count(ledger.unmeasured.len(), "item")),
-                    muted,
-                ),
-            ],
-            width,
-        ),
-        Some(LedgerAction::Toggle(LedgerRow::Unmeasured)),
-    );
-    if open {
-        push_items(&mut out, &ledger.unmeasured, theme, width);
+    if ledger.requests.is_empty() {
+        out.push(
+            Line::from(Span::styled(
+                "  No request has reported usage since the session loaded or compacted.",
+                muted,
+            )),
+            None,
+        );
     }
-
-    out.push(Line::from(""), None);
-    let note = if ledger.requests.is_empty() {
-        "No model request has been measured since the session loaded, compacted or rewound. \
-         The overhead is carried over from before that."
-    } else {
-        "A gap is what the provider counted for a request minus the bytes/4 estimate of the items it added. \
-         Click a row to list its items."
-    };
-    for line in
-        crate::render::wrapping::word_wrap_lines(vec![Line::from(Span::styled(note, muted))], width)
-    {
-        out.push(line, None);
+    if !ledger.unsent.is_empty() {
+        let open = expanded.contains(&LedgerRow::Unsent);
+        out.push(
+            fit(
+                vec![
+                    Span::styled(format!("{} ", disclosure(open)), muted),
+                    Span::styled("Not sent yet", label),
+                    Span::styled(format!("   {}", count(ledger.unsent.len(), "item")), muted),
+                ],
+                width,
+            ),
+            Some(LedgerAction::Toggle(LedgerRow::Unsent)),
+        );
+        if open {
+            push_items(&mut out, &ledger.unsent, theme, width);
+        }
     }
     if let Some(path) = &snapshot.transcript_path {
         out.push(Line::from(""), None);
@@ -186,7 +154,7 @@ pub(crate) fn overhead_lines(
     out
 }
 
-/// One line per item: position, kind, estimate and preview.
+/// One line per item: position, kind, byte size and preview.
 fn push_items(out: &mut LedgerLines, items: &[LedgerItem], theme: &Theme, width: usize) {
     let muted = theme.muted();
     if items.is_empty() {
@@ -201,7 +169,7 @@ fn push_items(out: &mut LedgerLines, items: &[LedgerItem], theme: &Theme, width:
                         format!("{:<22}", truncate_str(&item.kind, 22)),
                         Style::default().fg(theme.text_secondary),
                     ),
-                    Span::styled(format!("{:>7}  ", fmt_tok(item.tokens)), muted),
+                    Span::styled(format!("{:>8}  ", fmt_bytes(item.bytes)), muted),
                     Span::styled(item.preview.clone(), muted),
                 ],
                 width,
@@ -215,11 +183,13 @@ fn disclosure(open: bool) -> &'static str {
     if open { "\u{25be}" } else { "\u{25b8}" }
 }
 
-fn gap_style(theme: &Theme, gap: i64) -> Style {
-    if gap < 0 {
-        theme.muted()
+fn fmt_bytes(n: u64) -> String {
+    if n >= 1024 * 1024 {
+        format!("{:.1} MB", n as f64 / (1024.0 * 1024.0))
+    } else if n >= 1024 {
+        format!("{:.1} KB", n as f64 / 1024.0)
     } else {
-        Style::default().fg(theme.text_primary)
+        format!("{n} B")
     }
 }
 

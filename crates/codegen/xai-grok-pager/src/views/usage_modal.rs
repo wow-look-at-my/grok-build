@@ -1199,16 +1199,31 @@ mod tests {
     }
 
     fn context_snapshot() -> xai_grok_shell::session::ContextInfo {
+        use xai_grok_shell::session::{ContextLedger, LedgerItem, LedgerRequest, ProviderUsage};
         xai_grok_shell::session::ContextInfo {
             used: 395_000,
             total: 500_000,
-            system_prompt_tokens: 5_300,
-            tool_definitions_count: 29,
-            tool_definitions_tokens: 13_800,
-            message_tokens: 211_000,
             free_tokens: 105_000,
             usage_pct: 79,
             auto_compact_threshold_percent: 85,
+            request_ledger: ContextLedger {
+                requests: vec![LedgerRequest {
+                    turn: 1,
+                    usage: ProviderUsage {
+                        cache_read: 300_000,
+                        cache_write: 10_000,
+                        input: 80_000,
+                        output: 5_000,
+                    },
+                    items: vec![LedgerItem {
+                        index: 1,
+                        kind: "project instructions".into(),
+                        bytes: 286_000,
+                        preview: "# AGENTS.md big rules".into(),
+                    }],
+                }],
+                unsent: vec![],
+            },
             ..Default::default()
         }
     }
@@ -1246,7 +1261,7 @@ mod tests {
         let text = screen_text(&buf, area);
         assert!(
             text.lines()
-                .any(|l| l.contains("395k / 500k") && l.contains("Overhead")),
+                .any(|l| l.contains("395k / 500k") && l.contains("Cache read")),
             "totals sit in the right column:\n{text}"
         );
         assert!(
@@ -1256,43 +1271,23 @@ mod tests {
     }
 
     #[test]
-    fn overhead_drills_down_to_requests_and_items_and_opens_the_transcript() {
-        use xai_grok_shell::session::{ContextLedger, LedgerItem, LedgerRequest};
+    fn requests_expand_into_items_and_the_transcript_opens() {
         let area = Rect::new(0, 0, 160, 50);
         let theme = Theme::current();
         let mut state = state_with_session();
         state.set_tab(UsageInfoTab::ContextUsage);
         let mut snapshot = context_snapshot();
-        snapshot.overhead_ledger = ContextLedger {
-            requests: vec![LedgerRequest {
-                turn: 1,
-                measured: 120_000,
-                estimated: 60_000,
-                items: vec![LedgerItem {
-                    index: 1,
-                    kind: "project instructions".into(),
-                    tokens: 55_000,
-                    preview: "# AGENTS.md big rules".into(),
-                }],
-            }],
-            unmeasured: vec![],
-        };
         snapshot.transcript_path = Some("/s/chat_history.jsonl".into());
         state.context = Some(ContextInfoBlock::new(snapshot, "m"));
         let mut buf = Buffer::empty(area);
         render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
-        let (x, y) = cell_pos(&state, 60);
-        handle_usage_modal_mouse(&mut state, MouseEventKind::Down(MouseButton::Left), x, y);
-        assert_eq!(state.context_selection, Some("Overhead"));
-
-        let mut buf = Buffer::empty(area);
-        render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
-        // The drill-down can run past the visible rows, so read every rendered line.
+        // The list can run past the visible rows, so read every rendered line.
         let text = state.plain_lines.join("\n");
         assert!(
-            text.contains("Request 1") && text.contains("+46.2k"),
-            "the first request's gap leaves out the tool definitions:\n{text}"
+            text.contains("#1") && text.contains("390k") && text.contains("300k / 10.0k / 80.0k"),
+            "a request row shows the provider's counts:\n{text}"
         );
+        assert!(!text.contains("Overhead"), "{text}");
         assert!(!text.contains("AGENTS.md big rules"), "{text}");
 
         let (line, _) = state
@@ -1316,15 +1311,16 @@ mod tests {
             UsageModalOutcome::Changed
         );
         assert_eq!(
-            state.context_selection,
-            Some("Overhead"),
-            "a row click keeps the inspector"
+            state.context_selection, None,
+            "a row click selects no range"
         );
         let mut buf = Buffer::empty(area);
         render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
         let text = state.plain_lines.join("\n");
         assert!(
-            text.contains("project instructions") && text.contains("AGENTS.md big rules"),
+            text.contains("project instructions")
+                && text.contains("279.3 KB")
+                && text.contains("AGENTS.md big rules"),
             "an open request lists its items:\n{text}"
         );
         assert!(
@@ -1348,23 +1344,22 @@ mod tests {
         state.context = Some(ContextInfoBlock::new(context_snapshot(), "m"));
         render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
 
-        // A later cell is Overhead.
-        let (x, y) = cell_pos(&state, 60);
+        let (x, y) = cell_pos(&state, 10);
         assert_eq!(
             handle_usage_modal_mouse(&mut state, MouseEventKind::Down(MouseButton::Left), x, y),
             UsageModalOutcome::Changed
         );
-        assert_eq!(state.context_selection, Some("Overhead"));
+        assert_eq!(state.context_selection, Some("Cache read"));
         let mut buf = Buffer::empty(area);
         render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
         let text = screen_text(&buf, area);
         assert!(
-            text.contains("Where it comes from") && text.contains("Cells 44"),
+            text.contains("cache_read_input_tokens") && text.contains("Cells 1\u{2013}60"),
             "inspector replaces the totals:\n{text}"
         );
         assert!(!text.contains("Turns:"), "{text}");
 
-        let (x, y) = cell_pos(&state, 43);
+        let (x, y) = cell_pos(&state, 30);
         handle_usage_modal_mouse(&mut state, MouseEventKind::Down(MouseButton::Left), x, y);
         assert_eq!(state.context_selection, None, "same range again deselects");
 

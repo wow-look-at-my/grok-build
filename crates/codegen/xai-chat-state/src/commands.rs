@@ -104,7 +104,7 @@ pub enum ChatStateCommand {
     RecordTokenUsage { total_tokens: u64 },
 
     /// Record the provider's count of the request sent, which is the current conversation.
-    RecordPromptMeasurement { prompt_tokens: u64 },
+    RecordPromptMeasurement { usage: crate::ProviderUsage },
 
     /// Stash the per-turn `TokenUsage` from the most recent model response.
     /// Overwrites any previously stashed value.
@@ -270,7 +270,7 @@ pub enum ChatStateCommand {
         reply: oneshot::Sender<crate::actor::state::MessageTokenBreakdown>,
     },
 
-    /// The per-request Overhead drill-down for `/context`.
+    /// The per-request list for `/context`.
     GetContextLedger {
         reply: oneshot::Sender<crate::ContextLedger>,
     },

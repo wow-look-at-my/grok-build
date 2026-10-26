@@ -1445,7 +1445,7 @@ mod searchable_text_tests {
             usage_pct: 10,
             auto_compact_threshold_percent: 85,
             usage_categories: vec![],
-            overhead_ledger: Default::default(),
+            request_ledger: Default::default(),
             transcript_path: None,
         };
         let block = RenderBlock::context_info(snapshot, "grok-4.5");

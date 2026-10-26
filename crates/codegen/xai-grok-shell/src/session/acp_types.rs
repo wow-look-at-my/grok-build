@@ -595,7 +595,9 @@ impl TokenUsageCategory {
     }
 }
 
-pub use xai_chat_state::{ContextLedger, LedgerItem, LedgerRequest, MessageTokenBreakdown};
+pub use xai_chat_state::{
+    ContextLedger, LedgerItem, LedgerRequest, MessageTokenBreakdown, ProviderUsage,
+};
 
 /// Formats a count with a naively pluralized noun: `"1 skill"`, `"21 skills"`.
 pub fn count_detail(count: u64, noun: &str) -> String {
@@ -632,9 +634,9 @@ pub struct ContextInfo {
     /// Empty on partial snapshots.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub usage_categories: Vec<TokenUsageCategory>,
-    /// Overhead per measured request, with the items each sent. Empty on partial snapshots.
+    /// The provider's counts for each request since the last load or compaction, with the items each sent.
     #[serde(default)]
-    pub overhead_ledger: xai_chat_state::ContextLedger,
+    pub request_ledger: xai_chat_state::ContextLedger,
     /// The session's `chat_history.jsonl`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transcript_path: Option<String>,

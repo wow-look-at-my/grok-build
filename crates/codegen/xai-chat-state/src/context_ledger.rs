@@ -1,64 +1,81 @@
-//! Where the `/context` Overhead comes from, one model request at a time.
+//! The `/context` request list: what the provider reported for each main-loop request, and the items each sent.
 
-use xai_grok_sampling_types::{ContentPart, ConversationItem, SyntheticReason};
-
-use crate::actor::state::estimate_item_tokens;
+use xai_grok_sampling_types::{ContentPart, ConversationItem, SyntheticReason, TokenUsage};
 
 /// Characters kept from an item's text for a ledger row.
 pub const LEDGER_PREVIEW_CHARS: usize = 120;
 
-/// One measured request: the conversation length and estimate that were sent, and what the provider counted.
+/// The provider's token counts for one request, as its usage JSON reported them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ProviderUsage {
+    /// Prompt tokens neither read from nor written to the cache.
+    pub input: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub output: u64,
+}
+
+impl ProviderUsage {
+    pub fn from_token_usage(u: &TokenUsage) -> Self {
+        let prompt = u64::from(u.prompt_tokens);
+        let cache_read = u64::from(u.cached_prompt_tokens);
+        let cache_write = u64::from(u.cache_creation_prompt_tokens);
+        Self {
+            input: prompt.saturating_sub(cache_read + cache_write),
+            cache_read,
+            cache_write,
+            output: u64::from(u.completion_tokens),
+        }
+    }
+
+    /// The whole prompt: input plus both cache counts.
+    pub fn prompt(&self) -> u64 {
+        self.input + self.cache_read + self.cache_write
+    }
+
+    /// The prompt plus the output.
+    pub fn total(&self) -> u64 {
+        self.prompt() + self.output
+    }
+}
+
+/// One reported request: how long the conversation was when it went out, and the provider's counts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ContextSample {
     pub conversation_len: usize,
-    pub estimate: u64,
-    pub prompt_tokens: u64,
+    pub usage: ProviderUsage,
 }
 
-/// One conversation item in a ledger row.
+/// One conversation item in a request row.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LedgerItem {
     /// Position in the conversation.
     pub index: usize,
     pub kind: String,
-    /// Bytes/4 estimate.
-    pub tokens: u64,
+    /// UTF-8 length of the item's text.
+    pub bytes: u64,
     pub preview: String,
 }
 
-/// The items one request added, with what they were estimated at and what the provider measured for them.
+/// One request: the provider's counts and the items added since the request before it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LedgerRequest {
     /// The user prompt index the request belongs to.
     pub turn: usize,
-    pub measured: u64,
-    pub estimated: u64,
+    pub usage: ProviderUsage,
     pub items: Vec<LedgerItem>,
 }
 
-impl LedgerRequest {
-    /// Measured minus estimated. Negative when the estimate ran high.
-    pub fn gap(&self) -> i64 {
-        self.measured as i64 - self.estimated as i64
-    }
-}
-
-/// The Overhead drill-down: the requests measured since the last load, compaction or rewind, and the items since the last one.
+/// The requests reported since the last load, compaction or rewind, and the items added after the last one.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ContextLedger {
     pub requests: Vec<LedgerRequest>,
-    /// Items added after the last measured request. Nothing has measured them yet.
-    pub unmeasured: Vec<LedgerItem>,
-}
-
-impl ContextLedger {
-    /// The sum of every request's gap.
-    pub fn measured_gap(&self) -> i64 {
-        self.requests.iter().map(LedgerRequest::gap).sum()
-    }
+    /// Items added after the last request. No request has sent them yet.
+    pub unsent: Vec<LedgerItem>,
 }
 
 /// Build the ledger from the conversation and its samples. A sample past the end of the conversation is ignored.
@@ -67,7 +84,7 @@ pub fn build_context_ledger(
     samples: &[ContextSample],
 ) -> ContextLedger {
     let mut requests = Vec::with_capacity(samples.len());
-    let (mut prev_len, mut prev_estimate, mut prev_measured) = (0usize, 0u64, 0u64);
+    let mut prev_len = 0usize;
     let mut turn = 0usize;
     for sample in samples.iter().filter(|s| s.conversation_len <= items.len()) {
         let range = prev_len.min(sample.conversation_len)..sample.conversation_len;
@@ -79,19 +96,14 @@ pub fn build_context_ledger(
             .count();
         requests.push(LedgerRequest {
             turn,
-            measured: sample.prompt_tokens.saturating_sub(prev_measured),
-            estimated: sample.estimate.saturating_sub(prev_estimate),
+            usage: sample.usage,
             items: ledger_items(items, range),
         });
-        (prev_len, prev_estimate, prev_measured) = (
-            sample.conversation_len,
-            sample.estimate,
-            sample.prompt_tokens,
-        );
+        prev_len = sample.conversation_len;
     }
     ContextLedger {
         requests,
-        unmeasured: ledger_items(items, prev_len.min(items.len())..items.len()),
+        unsent: ledger_items(items, prev_len.min(items.len())..items.len()),
     }
 }
 
@@ -103,11 +115,12 @@ fn ledger_items(items: &[ConversationItem], range: std::ops::Range<usize>) -> Ve
     range
         .filter_map(|index| {
             let item = items.get(index)?;
+            let text = item_text(item);
             Some(LedgerItem {
                 index,
                 kind: item_kind(item),
-                tokens: estimate_item_tokens(item),
-                preview: item_preview(item, LEDGER_PREVIEW_CHARS),
+                bytes: text.len() as u64,
+                preview: one_line(&text, LEDGER_PREVIEW_CHARS),
             })
         })
         .collect()
@@ -134,7 +147,11 @@ pub fn item_kind(item: &ConversationItem) -> String {
 
 /// The item's text on one line, cut at `max_chars` with an ellipsis.
 pub fn item_preview(item: &ConversationItem, max_chars: usize) -> String {
-    let text: String = match item {
+    one_line(&item_text(item), max_chars)
+}
+
+fn item_text(item: &ConversationItem) -> String {
+    match item {
         ConversationItem::System(s) => s.content.to_string(),
         ConversationItem::User(u) => u
             .content
@@ -146,7 +163,11 @@ pub fn item_preview(item: &ConversationItem, max_chars: usize) -> String {
             .collect::<Vec<_>>()
             .join(" "),
         ConversationItem::Assistant(a) => {
-            let calls: Vec<&str> = a.tool_calls.iter().map(|c| c.name.as_str()).collect();
+            let calls: Vec<String> = a
+                .tool_calls
+                .iter()
+                .map(|c| format!("{}({})", c.name, c.arguments))
+                .collect();
             if calls.is_empty() {
                 a.content.to_string()
             } else {
@@ -162,7 +183,10 @@ pub fn item_preview(item: &ConversationItem, max_chars: usize) -> String {
                 None => words,
             }
         }
-    };
+    }
+}
+
+fn one_line(text: &str, max_chars: usize) -> String {
     let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out: String = flat.chars().take(max_chars).collect();
     if flat.chars().count() > max_chars {
@@ -175,14 +199,31 @@ pub fn item_preview(item: &ConversationItem, max_chars: usize) -> String {
 #[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use crate::estimate_conversation_tokens;
 
-    fn sample(items: &[ConversationItem], prompt_tokens: u64) -> ContextSample {
-        ContextSample {
-            conversation_len: items.len(),
-            estimate: estimate_conversation_tokens(items),
-            prompt_tokens,
+    fn usage(input: u64, cache_read: u64) -> ProviderUsage {
+        ProviderUsage {
+            input,
+            cache_read,
+            cache_write: 0,
+            output: 10,
         }
+    }
+
+    #[test]
+    fn provider_usage_splits_the_prompt_into_input_and_cache() {
+        let u = ProviderUsage::from_token_usage(&TokenUsage {
+            prompt_tokens: 1_000,
+            completion_tokens: 50,
+            total_tokens: 1_050,
+            reasoning_tokens: 0,
+            cached_prompt_tokens: 700,
+            cache_creation_prompt_tokens: 200,
+        });
+        assert_eq!(
+            (u.input, u.cache_read, u.cache_write, u.output),
+            (100, 700, 200, 50)
+        );
+        assert_eq!((u.prompt(), u.total()), (1_000, 1_050));
     }
 
     #[test]
@@ -191,27 +232,34 @@ mod tests {
             ConversationItem::system("s".repeat(400)),
             ConversationItem::user("u".repeat(4000)),
         ];
-        let first = sample(&items, 3000);
+        let first = ContextSample {
+            conversation_len: items.len(),
+            usage: usage(3000, 0),
+        };
         items.push(ConversationItem::assistant("a".repeat(40)));
         items.push(ConversationItem::user("second prompt"));
-        let second = sample(&items, 3030);
+        let second = ContextSample {
+            conversation_len: items.len(),
+            usage: usage(30, 3000),
+        };
         items.push(ConversationItem::assistant("tail"));
 
         let ledger = build_context_ledger(&items, &[first, second]);
 
         assert_eq!(ledger.requests.len(), 2);
         let r0 = &ledger.requests[0];
-        assert_eq!((r0.turn, r0.measured, r0.estimated), (1, 3000, 1100));
-        assert_eq!(r0.gap(), 1900);
+        assert_eq!(r0.turn, 1);
+        assert_eq!(r0.usage, usage(3000, 0));
         assert_eq!(r0.items.iter().map(|i| i.index).collect::<Vec<_>>(), [0, 1]);
-        assert_eq!(r0.items[1].kind, "user message");
+        assert_eq!(
+            (r0.items[1].kind.as_str(), r0.items[1].bytes),
+            ("user message", 4000)
+        );
         let r1 = &ledger.requests[1];
         assert_eq!(r1.turn, 2);
-        assert_eq!(r1.measured, 30);
         assert_eq!(r1.items.len(), 2);
-        assert_eq!(ledger.measured_gap(), r0.gap() + r1.gap());
-        assert_eq!(ledger.unmeasured.len(), 1);
-        assert_eq!(ledger.unmeasured[0].index, 4);
+        assert_eq!(ledger.unsent.len(), 1);
+        assert_eq!(ledger.unsent[0].index, 4);
     }
 
     #[test]
@@ -219,12 +267,11 @@ mod tests {
         let items = vec![ConversationItem::user("hi")];
         let stale = ContextSample {
             conversation_len: 5,
-            estimate: 10,
-            prompt_tokens: 10,
+            usage: usage(10, 0),
         };
         let ledger = build_context_ledger(&items, &[stale]);
         assert!(ledger.requests.is_empty());
-        assert_eq!(ledger.unmeasured.len(), 1);
+        assert_eq!(ledger.unsent.len(), 1);
     }
 
     #[test]

@@ -440,11 +440,10 @@ impl ChatStateActor {
 
     /// Add a ledger sample for the request that is the current conversation.
     /// A retry of the same request replaces its sample.
-    pub(super) fn record_prompt_measurement(&mut self, prompt_tokens: u64) {
+    pub(super) fn record_prompt_measurement(&mut self, usage: crate::ProviderUsage) {
         let sample = crate::ContextSample {
             conversation_len: self.state.conversation.len(),
-            estimate: super::state::estimate_conversation_tokens(&self.state.conversation),
-            prompt_tokens,
+            usage,
         };
         let samples = &mut self.state.context_samples;
         match samples.last_mut() {

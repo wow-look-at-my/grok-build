@@ -55,8 +55,8 @@ pub use actor::state::{
 pub use commands::{ModelMetadata, StrictAppendAck, StrictAppendError};
 pub use compaction_mode::CompactionMode;
 pub use context_ledger::{
-    ContextLedger, ContextSample, LedgerItem, LedgerRequest, build_context_ledger, item_kind,
-    item_preview,
+    ContextLedger, ContextSample, LedgerItem, LedgerRequest, ProviderUsage, build_context_ledger,
+    item_kind, item_preview,
 };
 pub use events::ChatStateEvent;
 pub use handle::{ChatStateHandle, ChatStateMailboxClosed};

@@ -231,8 +231,8 @@ impl ChatStateActor {
             ChatStateCommand::RecordTokenUsage { total_tokens } => {
                 self.record_token_usage(total_tokens);
             }
-            ChatStateCommand::RecordPromptMeasurement { prompt_tokens } => {
-                self.record_prompt_measurement(prompt_tokens);
+            ChatStateCommand::RecordPromptMeasurement { usage } => {
+                self.record_prompt_measurement(usage);
             }
             ChatStateCommand::RecordLastTurnUsage { usage } => {
                 self.record_last_turn_usage(usage);
