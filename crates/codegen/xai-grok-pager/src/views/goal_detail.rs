@@ -80,7 +80,7 @@ fn status_label(goal: &GoalDisplayState) -> (&'static str, Color, String) {
 
 /// Wrap a string into rows of at most `width` terminal columns. `width` of zero or one returns a
 /// single un-split row to avoid divide-by-zero behaviour at degenerate modal widths.
-fn wrap_pause_message_lines(text: &str, width: u16) -> Vec<String> {
+pub(crate) fn wrap_pause_message_lines(text: &str, width: u16) -> Vec<String> {
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
     let w = width as usize;

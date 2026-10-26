@@ -130,6 +130,7 @@ mod subagent_takeover;
 mod task_icon_mouse_tests;
 #[cfg(test)]
 mod task_status_tests;
+mod todo_detail_overlay;
 mod viewer;
 mod workflows_overlay;
 use super::actions;
@@ -786,6 +787,9 @@ pub struct AgentView {
     pub last_cleared_goal_id: Option<String>,
     /// Whether the expanded goal detail overlay is visible. Toggled by `Action::ToggleGoalDetail`.
     pub show_goal_detail: bool,
+    /// The todo detail popup, opened by a double-click or `Enter` on a todo pane row.
+    pub todo_detail: Option<crate::views::todo_detail::TodoDetailState>,
+    pub hit_todo_detail_close: HitArea,
     /// UTC ms when the current turn started (`turnStartMs` from notification meta). Used for turn elapsed display.
     pub turn_start_ms: Option<i64>,
     /// Prompt id the stored `turn_start_ms` belongs to (stamped together from the same delta meta).
