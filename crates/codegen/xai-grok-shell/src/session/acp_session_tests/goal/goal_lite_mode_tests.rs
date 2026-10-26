@@ -552,3 +552,144 @@ async fn update_goal_blocked_reason_is_reviewed_instead_of_counted() {
         })
         .await;
 }
+
+/// A subagent coordinator for the full panel. Each skeptic writes `verdict`
+/// to the verdict file its prompt names. Any other spawn is the summarizer.
+/// The log keeps every spawn prompt.
+fn panel_coordinator(
+    verdict: serde_json::Value,
+) -> (
+    tokio::sync::mpsc::UnboundedSender<
+        xai_grok_tools::implementations::grok_build::task::types::SubagentEvent,
+    >,
+    std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+) {
+    use xai_grok_tools::implementations::grok_build::task::types::{SubagentEvent, SubagentResult};
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
+    let prompts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let log = std::sync::Arc::clone(&prompts);
+    tokio::task::spawn_local(async move {
+        while let Some(event) = rx.recv().await {
+            let SubagentEvent::Spawn(req) = event else {
+                continue;
+            };
+            log.lock().unwrap().push(req.prompt.clone());
+            let output = match crate::session::goal_classifier::parse_verdict_path_from_prompt(
+                &req.prompt,
+            ) {
+                Some(path) => {
+                    std::fs::write(&path, verdict.to_string()).expect("write the verdict");
+                    verdict.to_string()
+                }
+                None => "The stall was traced to the mutex holder.".to_string(),
+            };
+            let id = req.id.clone();
+            let _ = req.result_tx.send(SubagentResult {
+                success: true,
+                output: std::sync::Arc::from(output.as_str()),
+                subagent_id: id.clone(),
+                child_session_id: id,
+                ..Default::default()
+            });
+        }
+    });
+    (tx, prompts)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_full_goal_runs_the_panel_on_an_upheld_claim() {
+    let blocked = serde_json::json!({
+        "refuted": true,
+        "confidence": "high",
+        "blocking": "unverifiable",
+        "evidence": "no car-side trace is reachable from this workspace",
+        "findings": [{"kind": "gap", "location": "updateColor()", "detail": "needs a car-side Tracy trace"}],
+    });
+    let fixable = serde_json::json!({
+        "refuted": true,
+        "confidence": "high",
+        "blocking": "none",
+        "evidence": "src/ViewBuffer.cpp:146",
+        "findings": [{"kind": "gap", "location": "src/ViewBuffer.cpp:146", "detail": "Grep src/ for every lock of the ViewBuffer recursive mutex"}],
+    });
+    let cleared = serde_json::json!({
+        "refuted": false,
+        "confidence": "high",
+        "blocking": "none",
+        "evidence": "the report names the mutex holder",
+    });
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            for (verdict, expect) in [
+                (blocked, GoalStatus::Blocked),
+                (fixable, GoalStatus::Active),
+                (cleared, GoalStatus::Complete),
+            ] {
+                let server = MockInferenceServer::start()
+                    .await
+                    .expect("mock inference server");
+                server.enqueue_response(
+                    "/v1/responses",
+                    claim_verdict("upheld", &[], "Capture a Tracy trace of updateColor()"),
+                );
+                let (coordinator, prompts) = panel_coordinator(verdict);
+                let mut actor = goal_actor(&server).await;
+                actor.goal_classifier_enabled = true;
+                actor.goal_summary_enabled = true;
+                actor.goal_verifier_skeptic_count = 1;
+                actor.tool_context.subagent_event_tx = Some(coordinator);
+                let GoalSetupOutcome::Inference { .. } = actor
+                    .setup_goal("find the stall", None, GoalMode::Full)
+                    .await
+                else {
+                    panic!("a full goal must flow through to inference");
+                };
+
+                claim_round(&actor);
+                let decision = actor.run_goal_round_end().await;
+                assert_eq!(actor.goal_tracker.lock().status(), Some(expect));
+
+                let prompts = prompts.lock().unwrap().clone();
+                let skeptic = &prompts[0];
+                assert!(
+                    skeptic.contains("The stall needs a car-side trace.")
+                        && skeptic.contains("the implementer claims it cannot finish"),
+                    "{expect:?}: the skeptic must see the claim and the rule for it"
+                );
+                match expect {
+                    GoalStatus::Blocked => {
+                        assert!(matches!(decision, GoalRoundDecision::EndTurn));
+                        let (_, pause) = tracker_view(&actor);
+                        assert!(
+                            pause.contains("needs a car-side Tracy trace"),
+                            "the pause names what only the user can supply: {pause}"
+                        );
+                    }
+                    GoalStatus::Active => match decision {
+                        GoalRoundDecision::Continue(directive) => assert!(
+                            directive.starts_with(
+                                "Your claim that you cannot finish the goal was REJECTED by the \
+                                 verification panel."
+                            ) && directive.contains(
+                                "Grep src/ for every lock of the ViewBuffer recursive mutex"
+                            ),
+                            "the panel's concrete step reaches the agent: {directive}"
+                        ),
+                        GoalRoundDecision::EndTurn => {
+                            panic!("a fixable panel gap must send the agent back")
+                        }
+                    },
+                    _ => {
+                        assert!(matches!(decision, GoalRoundDecision::EndTurn));
+                        assert_eq!(
+                            prompts.len(),
+                            2,
+                            "a cleared panel runs the summarizer after the skeptic"
+                        );
+                    }
+                }
+            }
+        })
+        .await;
+}
