@@ -1864,7 +1864,9 @@ impl SessionActor {
     /// Goal completion is NEVER blocked, paused, or un-achieved (the goal is already Complete when this runs).
     /// Read-only: the spawn pins a read-only toolset and the prompt forbids edits.
     pub(super) async fn maybe_run_goal_summarizer(&self, attempt: u32) {
-        if !self.goal_summary_enabled {
+        if !self.goal_summary_enabled
+            || self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite
+        {
             return;
         }
         let Some(event_tx) = self.tool_context.subagent_event_tx.clone() else {

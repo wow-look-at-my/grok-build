@@ -300,9 +300,9 @@ impl SessionActor {
     }
 
     /// Review the agent's claim that it cannot finish the goal. Lite and full
-    /// goals share this path. The evaluator judges the claim first. A full
-    /// goal then sends an upheld claim to the same panel a completion
-    /// candidate gets, so a lite goal stops at the validator.
+    /// goals share this path. The evaluator judges the claim first. An
+    /// upheld claim then goes to the panel a completion candidate gets. A
+    /// lite goal's panel is one validator and no summarizer.
     pub(super) async fn review_blocked_claim(&self, claim: &str) -> BlockedClaimReview {
         use crate::session::goal_evaluator::{
             BlockedClaimDecision, build_blocked_claim_request, parse_blocked_claim_verdict,
@@ -368,17 +368,6 @@ impl SessionActor {
                     &format!("Give-up claim upheld: {}", verdict.evidence.trim()),
                     false,
                 );
-                let lite =
-                    self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite;
-                if lite {
-                    self.remember_claim_rejection(None);
-                    self.pause_for_upheld_claim(
-                        verdict.evidence.trim(),
-                        verdict.user_action.trim(),
-                    )
-                    .await;
-                    return BlockedClaimReview::Settled;
-                }
                 self.verify_goal_candidate(Some(claim)).await;
                 let gaps = {
                     let tracker = self.goal_tracker.lock();
@@ -413,23 +402,6 @@ impl SessionActor {
             o.last_claim_rejection = steps;
         }
         self.goal_notify_sender().persist_goal_state(&tracker);
-    }
-
-    async fn pause_for_upheld_claim(&self, evidence: &str, user_action: &str) {
-        if self
-            .auto_pause_goal_if_active_with_message(
-                crate::session::goal_tracker::GoalPauseReason::Verification,
-                format!("{evidence}\nNext user action: {user_action}"),
-            )
-            .await
-        {
-            self.send_slash_command_output(&format!(
-                "Goal paused — the evaluator agrees the goal cannot go on without you.\n\
-                 Why: {evidence}\n\nWhat you need to do: {user_action}\n\n\
-                 Type /goal resume after addressing it."
-            ))
-            .await;
-        }
     }
 
     /// End a round whose agent claimed it cannot finish. A rejected claim
@@ -865,10 +837,15 @@ impl SessionActor {
             .clone();
         let task_tool_name = self.resolve_goal_tool_names().await.task;
 
-        let n = self.goal_verifier_skeptic_count.clamp(
-            crate::session::goal_classifier::GOAL_VERIFIER_SKEPTIC_MIN,
-            crate::session::goal_classifier::GOAL_VERIFIER_SKEPTIC_MAX,
-        );
+        // A lite goal's panel is one validator.
+        let n = if self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite {
+            crate::session::goal_classifier::GOAL_VERIFIER_SKEPTIC_MIN
+        } else {
+            self.goal_verifier_skeptic_count.clamp(
+                crate::session::goal_classifier::GOAL_VERIFIER_SKEPTIC_MIN,
+                crate::session::goal_classifier::GOAL_VERIFIER_SKEPTIC_MAX,
+            )
+        };
         let inherit_tool_names = self.resolve_inherit_role_tool_names().await;
         let mut skeptic0_model_moved = false;
         let (skeptic_overrides, skeptic_tool_names): (

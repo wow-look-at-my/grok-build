@@ -127,7 +127,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 - The agent claims it cannot finish with a `## Cannot complete` section in its reply. On the legacy driver, `update_goal(blocked_reason)` also counts. The round end calls `review_blocked_claim` (`acp_session_impl/goal.rs`) before the todo bounce. Lite and full share this path.
 - The evaluator judges the claim first (`build_blocked_claim_request` in `goal_evaluator.rs`). A rejection must list concrete untried steps, and `is_vague_step` refuses "try harder" steps. An upheld claim must name the user action. The next review gets the last rejected steps.
-- Lite stops there and pauses `Blocked`. Full sends an upheld claim to the same panel a completion candidate gets (`verify_goal_candidate(Some(claim))`). The `## Cannot complete` rule in `goal_verifier_prompt.md` tells the skeptics how to judge it.
+- Both modes send an upheld claim to the panel a completion candidate gets (`verify_goal_candidate(Some(claim))`). A lite goal's panel is one skeptic and no summarizer. The `## Cannot complete` rule in `goal_verifier_prompt.md` tells the skeptics how to judge it.
 
 ## `/todo` capture feature notes
 

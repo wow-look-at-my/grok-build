@@ -410,27 +410,13 @@ async fn a_give_up_claim_is_sent_back_with_steps_then_upheld_on_the_same_path_fo
                     bodies[1].contains("prior_rejected_steps") && bodies[1].contains(UNTRIED_STEP),
                     "{mode:?}: the second review must check the steps the first one gave"
                 );
-                let (status, pause) = tracker_view(&actor);
-                match mode {
-                    GoalMode::Lite => {
-                        assert_eq!(
-                            status,
-                            Some(GoalStatus::Blocked),
-                            "lite stops at the validator"
-                        );
-                        assert!(
-                            pause.contains("Capture a Tracy trace of updateColor()"),
-                            "the pause must name the user action: {pause}"
-                        );
-                    }
-                    // The test actor has the verifier off, so InfraPaused proves
-                    // the upheld claim went on to the panel.
-                    GoalMode::Full => assert_eq!(
-                        status,
-                        Some(GoalStatus::InfraPaused),
-                        "full sends an upheld claim to the panel"
-                    ),
-                }
+                // The test actor has the verifier off, so InfraPaused proves
+                // the upheld claim went on to the panel in both modes.
+                assert_eq!(
+                    actor.goal_tracker.lock().status(),
+                    Some(GoalStatus::InfraPaused),
+                    "{mode:?}: an upheld claim goes to the panel"
+                );
             }
         })
         .await;
@@ -476,7 +462,8 @@ async fn open_todos_do_not_bounce_a_give_up_claim_unheard() {
             assert_eq!(server.request_count_for("/v1/responses"), 1);
             assert_eq!(
                 actor.goal_tracker.lock().status(),
-                Some(GoalStatus::Blocked)
+                Some(GoalStatus::InfraPaused),
+                "the upheld claim went on to the panel, which this actor has off"
             );
         })
         .await;
@@ -597,7 +584,7 @@ fn panel_coordinator(
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_full_goal_runs_the_panel_on_an_upheld_claim() {
+async fn lite_and_full_goals_run_the_panel_on_an_upheld_claim() {
     let blocked = serde_json::json!({
         "refuted": true,
         "confidence": "high",
@@ -621,11 +608,15 @@ async fn a_full_goal_runs_the_panel_on_an_upheld_claim() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
-            for (verdict, expect) in [
+            let cases = [
                 (blocked, GoalStatus::Blocked),
                 (fixable, GoalStatus::Active),
                 (cleared, GoalStatus::Complete),
-            ] {
+            ];
+            for (mode, (verdict, expect)) in [GoalMode::Lite, GoalMode::Full]
+                .into_iter()
+                .flat_map(|mode| cases.clone().map(|case| (mode, case)))
+            {
                 let server = MockInferenceServer::start()
                     .await
                     .expect("mock inference server");
@@ -637,26 +628,36 @@ async fn a_full_goal_runs_the_panel_on_an_upheld_claim() {
                 let mut actor = goal_actor(&server).await;
                 actor.goal_classifier_enabled = true;
                 actor.goal_summary_enabled = true;
-                actor.goal_verifier_skeptic_count = 1;
+                // Skeptics are configured. A lite goal still runs one.
+                actor.goal_verifier_skeptic_count = match mode {
+                    GoalMode::Lite => 3,
+                    GoalMode::Full => 1,
+                };
                 actor.tool_context.subagent_event_tx = Some(coordinator);
-                let GoalSetupOutcome::Inference { .. } = actor
-                    .setup_goal("find the stall", None, GoalMode::Full)
-                    .await
+                let GoalSetupOutcome::Inference { .. } =
+                    actor.setup_goal("find the stall", None, mode).await
                 else {
-                    panic!("a full goal must flow through to inference");
+                    panic!("{mode:?}: the goal must flow through to inference");
                 };
 
                 claim_round(&actor);
                 let decision = actor.run_goal_round_end().await;
-                assert_eq!(actor.goal_tracker.lock().status(), Some(expect));
+                assert_eq!(actor.goal_tracker.lock().status(), Some(expect), "{mode:?}");
 
                 let prompts = prompts.lock().unwrap().clone();
                 let skeptic = &prompts[0];
                 assert!(
                     skeptic.contains("The stall needs a car-side trace.")
                         && skeptic.contains("the implementer claims it cannot finish"),
-                    "{expect:?}: the skeptic must see the claim and the rule for it"
+                    "{mode:?} {expect:?}: the skeptic must see the claim and the rule for it"
                 );
+                if mode == GoalMode::Lite {
+                    assert_eq!(
+                        prompts.len(),
+                        1,
+                        "{expect:?}: a lite goal runs one validator and no summarizer"
+                    );
+                }
                 match expect {
                     GoalStatus::Blocked => {
                         assert!(matches!(decision, GoalRoundDecision::EndTurn));
@@ -682,11 +683,13 @@ async fn a_full_goal_runs_the_panel_on_an_upheld_claim() {
                     },
                     _ => {
                         assert!(matches!(decision, GoalRoundDecision::EndTurn));
-                        assert_eq!(
-                            prompts.len(),
-                            2,
-                            "a cleared panel runs the summarizer after the skeptic"
-                        );
+                        if mode == GoalMode::Full {
+                            assert_eq!(
+                                prompts.len(),
+                                2,
+                                "a cleared full panel runs the summarizer after the skeptic"
+                            );
+                        }
                     }
                 }
             }
