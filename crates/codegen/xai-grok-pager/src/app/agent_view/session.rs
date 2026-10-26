@@ -236,6 +236,8 @@ impl AgentView {
             workflows_view: crate::views::workflows::WorkflowsViewState::default(),
             last_cleared_goal_id: None,
             show_goal_detail: false,
+            todo_detail: None,
+            hit_todo_detail_close: Default::default(),
             turn_start_ms: None,
             turn_start_ms_prompt: None,
             turn_started_at: None,
