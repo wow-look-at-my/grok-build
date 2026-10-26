@@ -144,6 +144,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The byte count beside the name is what the tail cannot say. A tail of a large body looks the same at any size.
 - The preview truncates each line. It never wraps one. Every fragment redraws it. A wrapped line changes the block's height as the model types, which makes the whole transcript jump.
 
+## Todo detail popup
+
+- A double-click or `Enter` on a todo pane row opens `views/todo_detail.rs`. It shows the full text, status, priority, the `verification` condition with its verifier verdict, and any `meta`. `←`/`→` (`h`/`l`) step through the rows the pane shows and wrap. `↑`/`↓` scroll. `Esc` closes it. Input lives in `agent_view/todo_detail_overlay.rs`.
+- Pane clicks map against the list body the last render drew (`TodoPane::body`), not the whole pane. The whole pane includes the `done/total` header row, so a map against it is one row off.
+
 ## The todo list cannot be discarded or overwritten
 
 - A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Text is changed by sending that id with new content.
