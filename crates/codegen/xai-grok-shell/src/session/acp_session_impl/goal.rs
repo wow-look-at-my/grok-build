@@ -929,7 +929,7 @@ impl SessionActor {
             run_log: Some(run_log.body.as_str()),
             implementer_scratch_dir: implementer_scratch.as_path(),
             scratch_dir_ready,
-            skeptic_count: self.goal_verifier_skeptic_count,
+            skeptic_count: n,
             max_runs,
             // A run cannot continue on a model that did not write it.
             prior_skeptic0_session_id: prior_skeptic0.as_deref().filter(|_| !skeptic0_model_moved),
