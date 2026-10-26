@@ -111,6 +111,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
 - The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier try added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
+## Open todos block the goal validator
+
+- While the todo list has a `pending` or `in_progress` item, no validator runs. `run_goal_round_end` skips the evaluator and the panel and continues the round (`bounce_round_for_unfinished_todos`). `update_goal(completed: true)` is rejected with `RejectReason::UnfinishedTodos` before the lite check, the classifier, or the mid-turn deferral.
+- Both answers start with `UNFINISHED_TODOS_BOUNCE` and list every open item with its status and id (`unfinished_todos_bounce` in `goal_support.rs`). A missing todo resource reads as no open item. The validator still runs.
+
 ## Lite `/goal` mode
 
 - `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
