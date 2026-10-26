@@ -233,6 +233,13 @@ pub struct ChatRequestMessage {
     /// The reasoning/thinking content from the model (for models that support extended thinking)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+    /// The same text as `reasoning_content`, under the name Ollama reads.
+    #[serde(
+        rename = "reasoning",
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reasoning_alias: Option<String>,
 }
 
 impl ChatRequestMessage {
@@ -245,6 +252,7 @@ impl ChatRequestMessage {
             tool_call_id: None,
             model_id: None,
             reasoning_content: None,
+            reasoning_alias: None,
         }
     }
 
@@ -257,6 +265,7 @@ impl ChatRequestMessage {
             tool_call_id: None,
             model_id: None,
             reasoning_content: None,
+            reasoning_alias: None,
         }
     }
 
@@ -273,6 +282,7 @@ impl ChatRequestMessage {
             tool_call_id: None,
             model_id: Some(model_id.into()),
             reasoning_content,
+            reasoning_alias: None,
         }
     }
 
@@ -285,6 +295,7 @@ impl ChatRequestMessage {
             tool_call_id: None,
             model_id: None,
             reasoning_content: None,
+            reasoning_alias: None,
         }
     }
 
@@ -297,6 +308,7 @@ impl ChatRequestMessage {
             tool_call_id: Some(tool_call_id.into()),
             model_id: None,
             reasoning_content: None,
+            reasoning_alias: None,
         }
     }
 
@@ -1437,25 +1449,30 @@ pub struct ChatMessageProfile {
     pub accepts_model_id: bool,
     /// Whether the target accepts `reasoning_content` on replayed messages.
     pub accepts_reasoning_content: bool,
+    /// Whether the target accepts `reasoning` on replayed messages. Ollama reads only that name.
+    #[serde(default)]
+    pub accepts_reasoning: bool,
 }
 
 impl ChatMessageProfile {
-    /// Today's behavior: emit both properties. This is what every provider
-    /// except a strict-schema one expects.
+    /// Emit every property. This is what every provider except a
+    /// strict-schema one expects.
     pub const PERMISSIVE: Self = Self {
         accepts_model_id: true,
         accepts_reasoning_content: true,
+        accepts_reasoning: true,
     };
 
-    /// A target whose schema defines neither property: omit both.
+    /// A target whose schema defines none of the properties: omit them all.
     pub const STRICT: Self = Self {
         accepts_model_id: false,
         accepts_reasoning_content: false,
+        accepts_reasoning: false,
     };
 
-    /// Whether this profile emits both properties (i.e. nothing is suppressed).
+    /// Whether this profile emits every property (i.e. nothing is suppressed).
     pub fn is_permissive(&self) -> bool {
-        self.accepts_model_id && self.accepts_reasoning_content
+        self.accepts_model_id && self.accepts_reasoning_content && self.accepts_reasoning
     }
 
     /// Narrow `self` by `other`: a property rejected by either side is
@@ -1465,19 +1482,28 @@ impl ChatMessageProfile {
             accepts_model_id: self.accepts_model_id && other.accepts_model_id,
             accepts_reasoning_content: self.accepts_reasoning_content
                 && other.accepts_reasoning_content,
+            accepts_reasoning: self.accepts_reasoning && other.accepts_reasoning,
         }
     }
 
     /// Drop the properties named as unsupported by a provider error, if any.
     /// Returns `None` when nothing changed, so a retry loop can tell a
     /// productive strip from a no-op.
-    pub fn strip_named(&mut self, names_model_id: bool, names_reasoning_content: bool) -> bool {
+    pub fn strip_named(
+        &mut self,
+        names_model_id: bool,
+        names_reasoning_content: bool,
+        names_reasoning: bool,
+    ) -> bool {
         let before = *self;
         if names_model_id {
             self.accepts_model_id = false;
         }
         if names_reasoning_content {
             self.accepts_reasoning_content = false;
+        }
+        if names_reasoning {
+            self.accepts_reasoning = false;
         }
         *self != before
     }

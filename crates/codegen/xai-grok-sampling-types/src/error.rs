@@ -544,6 +544,12 @@ impl SamplingError {
             .is_some_and(|names| names.iter().any(|n| n == "reasoning_content"))
     }
 
+    /// Whether this error names `reasoning` as an unsupported property.
+    pub fn names_unsupported_reasoning(&self) -> bool {
+        self.unsupported_property_names()
+            .is_some_and(|names| names.iter().any(|n| n == "reasoning"))
+    }
+
     /// The distinct property names an unsupported-property error names.
     /// `None` when this is not such an error. The provider packs several
     /// failures into one newline-separated string, e.g.
@@ -2498,6 +2504,26 @@ mod tests {
             !err.names_unsupported_model_id(),
             "model_id was not named and must not be claimed"
         );
+        assert!(
+            !err.names_unsupported_reasoning(),
+            "`reasoning` is a different property from `reasoning_content`"
+        );
+    }
+
+    #[test]
+    fn unsupported_property_names_tells_reasoning_from_reasoning_content() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "wrong_api_format: messages.1.assistant.reasoning: property \
+                 'messages.1.assistant.reasoning' is unsupported"
+                .into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+            error_code: None,
+        };
+        assert!(err.names_unsupported_reasoning());
+        assert!(!err.names_unsupported_reasoning_content());
     }
 
     /// Narrowness: the classifier requires the provider's own code AND the "is
