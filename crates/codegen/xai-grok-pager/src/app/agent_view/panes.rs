@@ -248,6 +248,14 @@ impl AgentView {
             }
             return overlay_action_to_outcome(action);
         }
+        if key.code == KeyCode::Enter
+            && key.modifiers.is_empty()
+            && !has_input
+            && let Some(index) = self.todo.selected_todo()
+        {
+            self.open_todo_detail(index);
+            return InputOutcome::Changed;
+        }
         if self.todo.handle_key(key) {
             InputOutcome::Changed
         } else {
