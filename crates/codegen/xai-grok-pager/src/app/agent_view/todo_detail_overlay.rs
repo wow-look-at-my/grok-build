@@ -87,7 +87,7 @@ mod todo_detail_overlay_tests {
     #[test]
     fn arrows_cycle_the_open_popup_and_esc_closes_it() {
         let mut agent = make_agent();
-        let reg = ActionRegistry::default();
+        let reg = ActionRegistry::defaults();
         agent.todo.update_todos(vec![
             item("a", TodoStatus::Pending),
             item("b", TodoStatus::InProgress),
@@ -114,7 +114,7 @@ mod todo_detail_overlay_tests {
     #[test]
     fn cycling_skips_todos_the_pane_hides() {
         let mut agent = make_agent();
-        let reg = ActionRegistry::default();
+        let reg = ActionRegistry::defaults();
         agent.todo.update_todos(vec![
             item("a", TodoStatus::Pending),
             item("b", TodoStatus::Completed),
@@ -129,7 +129,7 @@ mod todo_detail_overlay_tests {
     #[test]
     fn a_shrunk_list_closes_the_popup() {
         let mut agent = make_agent();
-        let reg = ActionRegistry::default();
+        let reg = ActionRegistry::defaults();
         agent
             .todo
             .update_todos(vec![item("a", TodoStatus::Pending)]);
