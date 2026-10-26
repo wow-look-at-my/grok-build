@@ -809,11 +809,13 @@ impl ConversationRequest {
         &mut self,
         names_model_id: bool,
         names_reasoning_content: bool,
+        names_reasoning: bool,
     ) -> bool {
-        let narrow_to_known = !names_model_id && !names_reasoning_content;
+        let narrow_to_known = !names_model_id && !names_reasoning_content && !names_reasoning;
         self.chat_message_profile.strip_named(
             names_model_id || narrow_to_known,
             names_reasoning_content || narrow_to_known,
+            names_reasoning || narrow_to_known,
         )
     }
 }
