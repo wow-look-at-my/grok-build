@@ -653,7 +653,9 @@ fn segment_description(label: &str) -> &'static str {
         CACHE_WRITE_LABEL => {
             "Prompt tokens the provider wrote to its prompt cache on this request: Messages `cache_creation_input_tokens`."
         }
-        INPUT_LABEL => "Prompt tokens neither read from nor written to the cache.",
+        INPUT_LABEL => {
+            "The prompt minus the reported cache reads and writes. The Chat Completions wire reports no cache writes, so there they are counted here."
+        }
         OUTPUT_LABEL => "The tokens the model generated for its reply.",
         FREE_LABEL => "The part of the window that the next request can still use.",
         _ => "",

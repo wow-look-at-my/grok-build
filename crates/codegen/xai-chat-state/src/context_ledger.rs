@@ -9,7 +9,7 @@ pub const LEDGER_PREVIEW_CHARS: usize = 120;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ProviderUsage {
-    /// Prompt tokens neither read from nor written to the cache.
+    /// The prompt minus the reported cache reads and writes.
     pub input: u64,
     pub cache_read: u64,
     pub cache_write: u64,
