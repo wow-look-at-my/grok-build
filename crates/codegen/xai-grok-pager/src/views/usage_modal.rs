@@ -15,7 +15,9 @@ use crate::views::drag_select::{
     TextDrag, TextEndpoint, endpoint_at, endpoint_at_clamped, paint_text_drag, text_for_drag,
 };
 
-use crate::scrollback::blocks::{BarGeometry, ContextInfoBlock};
+use std::collections::BTreeSet;
+
+use crate::scrollback::blocks::{BarGeometry, ContextInfoBlock, LedgerAction, LedgerRow};
 use crate::theme::Theme;
 use crate::views::credit_bar::CreditBalance;
 use crate::views::modal_window::{
@@ -27,6 +29,9 @@ pub const COPY_SESSION_ID_SHORTCUT: usize = 1;
 
 /// Footer shortcut ID for "copy all session info".
 pub const COPY_ALL_SESSION_INFO_SHORTCUT: usize = 2;
+
+/// Footer shortcut ID for "open transcript".
+pub const OPEN_TRANSCRIPT_SHORTCUT: usize = 3;
 
 /// The three tabs, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +95,10 @@ pub struct UsageInfoModalState {
     pub context_selection: Option<&'static str>,
     /// The bar position and segment ranges from the last Context usage render, for click hit tests.
     context_bar: Option<ContextBarHits>,
+    /// The Overhead drill-down rows the user opened.
+    pub(crate) ledger_expanded: BTreeSet<LedgerRow>,
+    /// The clickable drill-down lines from the last Context usage render, by content line.
+    context_actions: Vec<(usize, LedgerAction)>,
     /// Structured `/session-info` rows, built upstream from typed session data (never by re-parsing a formatted string).
     pub session_fields: Option<Vec<SessionInfoField>>,
     pub session_error: Option<String>,
@@ -167,6 +176,8 @@ impl UsageInfoModalState {
             context_error: None,
             context_selection: None,
             context_bar: None,
+            ledger_expanded: BTreeSet::new(),
+            context_actions: Vec::new(),
             session_error: None,
             session_usage_text: None,
             billing_loading: false,
@@ -259,6 +270,11 @@ impl UsageInfoModalState {
         )
     }
 
+    /// The session's `chat_history.jsonl`, once the context snapshot names it.
+    pub fn transcript_path(&self) -> Option<String> {
+        self.context.as_ref()?.snapshot.transcript_path.clone()
+    }
+
     fn step_tab(&mut self, forward: bool) {
         let n = UsageInfoTab::ALL.len();
         let i = self.active_tab.index();
@@ -283,8 +299,15 @@ pub enum UsageModalOutcome {
     /// Copy Session-info text.
     /// Emitted by `y`, a click on a value row, the footer "copy all" button, and a finished drag-select.
     CopyText(String),
+    /// Open the session transcript with the system opener.
+    OpenPath(String),
     Changed,
     Unchanged,
+}
+
+/// Open `path` with the system opener. Returns false when no opener ran, so the host can copy the path instead.
+pub fn open_transcript(path: &str) -> bool {
+    crate::link_opener::open_path(std::path::Path::new(path))
 }
 
 /// The modal's chrome config: no title, tabs, footer, or fold tree of its own (tabs and shortcuts are painted by `render_usage_modal`).
@@ -337,6 +360,10 @@ pub fn route_usage_modal_mouse(
                 && let Some(text) = state.session_info_copy_all()
             {
                 UsageModalOutcome::CopyText(text)
+            } else if id == OPEN_TRANSCRIPT_SHORTCUT
+                && let Some(path) = state.transcript_path()
+            {
+                UsageModalOutcome::OpenPath(path)
             } else {
                 UsageModalOutcome::Changed
             }
@@ -418,6 +445,12 @@ fn handle_usage_modal_key(state: &mut UsageInfoModalState, key: &KeyEvent) -> Us
             Some(text) => UsageModalOutcome::CopyText(text),
             None => UsageModalOutcome::Unchanged,
         },
+        KeyCode::Char('o') if state.active_tab == UsageInfoTab::ContextUsage => {
+            match state.transcript_path() {
+                Some(path) => UsageModalOutcome::OpenPath(path),
+                None => UsageModalOutcome::Unchanged,
+            }
+        }
         _ => UsageModalOutcome::Unchanged,
     }
 }
@@ -469,9 +502,31 @@ fn handle_usage_modal_mouse(
         MouseEventKind::Down(MouseButton::Left)
             if state.active_tab == UsageInfoTab::ContextUsage && in_content(state, column, row) =>
         {
-            // A diamond selects its segment; the same segment again, or any other spot, goes back to the totals.
+            // A drill-down line acts. A diamond selects its segment. The same segment again, or any other spot, goes back to the totals.
             let x = (column - state.content_rect.x) as usize;
             let line = state.scroll as usize + (row - state.content_rect.y) as usize;
+            let bar_hit = state
+                .context_bar
+                .as_ref()
+                .and_then(|hits| hits.label_at(x, line));
+            let action = state
+                .context_actions
+                .iter()
+                .find(|(l, _)| *l == line)
+                .map(|(_, a)| a.clone());
+            if bar_hit.is_none()
+                && let Some(action) = action
+            {
+                return match action {
+                    LedgerAction::Toggle(row) => {
+                        if !state.ledger_expanded.remove(&row) {
+                            state.ledger_expanded.insert(row);
+                        }
+                        UsageModalOutcome::Changed
+                    }
+                    LedgerAction::OpenTranscript(path) => UsageModalOutcome::OpenPath(path),
+                };
+            }
             let hit = state
                 .context_bar
                 .as_ref()
@@ -607,6 +662,13 @@ pub fn render_usage_modal(
             id: COPY_SESSION_ID_SHORTCUT,
         });
     }
+    if state.active_tab == UsageInfoTab::ContextUsage && state.transcript_path().is_some() {
+        shortcuts.push(Shortcut {
+            label: "o open transcript",
+            clickable: true,
+            id: OPEN_TRANSCRIPT_SHORTCUT,
+        });
+    }
     if state.active_tab == UsageInfoTab::SessionInfo
         && state.session_fields.as_ref().is_some_and(|f| !f.is_empty())
     {
@@ -670,6 +732,7 @@ pub fn render_usage_modal(
     let tab = tab_content(state, balance, theme, content.width);
     state.content_rect = content;
     state.context_bar = tab.context_bar.clone();
+    state.context_actions = tab.context_actions;
     let plain_lines: Vec<String> = tab.lines.iter().map(ToString::to_string).collect();
     // Endpoints index these strings; drop any gesture if the painted text changed.
     if state.plain_lines != plain_lines {
@@ -738,6 +801,7 @@ struct TabContent {
     lines: Vec<Line<'static>>,
     copy_targets: Vec<CopyTarget>,
     context_bar: Option<ContextBarHits>,
+    context_actions: Vec<(usize, LedgerAction)>,
 }
 
 impl TabContent {
@@ -746,6 +810,7 @@ impl TabContent {
             lines,
             copy_targets: Vec::new(),
             context_bar: None,
+            context_actions: Vec::new(),
         }
     }
 }
@@ -787,9 +852,15 @@ fn context_tab_content(state: &UsageInfoModalState, theme: &Theme, width: u16) -
         )]);
     }
     if let Some(block) = &state.context {
-        let view = block.modal_view(theme, width, state.context_selection);
+        let view = block.modal_view(
+            theme,
+            width,
+            state.context_selection,
+            &state.ledger_expanded,
+        );
         return TabContent {
             lines: view.lines,
+            context_actions: view.actions,
             copy_targets: Vec::new(),
             context_bar: Some(ContextBarHits {
                 bar: view.bar,
@@ -974,6 +1045,7 @@ fn session_info_content(state: &UsageInfoModalState, theme: &Theme) -> TabConten
         lines,
         copy_targets,
         context_bar: None,
+        context_actions: Vec::new(),
     }
 }
 
@@ -1127,16 +1199,31 @@ mod tests {
     }
 
     fn context_snapshot() -> xai_grok_shell::session::ContextInfo {
+        use xai_grok_shell::session::{ContextLedger, LedgerItem, LedgerRequest, ProviderUsage};
         xai_grok_shell::session::ContextInfo {
             used: 395_000,
             total: 500_000,
-            system_prompt_tokens: 5_300,
-            tool_definitions_count: 29,
-            tool_definitions_tokens: 13_800,
-            message_tokens: 211_000,
             free_tokens: 105_000,
             usage_pct: 79,
             auto_compact_threshold_percent: 85,
+            request_ledger: ContextLedger {
+                requests: vec![LedgerRequest {
+                    turn: 1,
+                    usage: ProviderUsage {
+                        cache_read: 300_000,
+                        cache_write: 10_000,
+                        input: 80_000,
+                        output: 5_000,
+                    },
+                    items: vec![LedgerItem {
+                        index: 1,
+                        kind: "project instructions".into(),
+                        bytes: 286_000,
+                        preview: "# AGENTS.md big rules".into(),
+                    }],
+                }],
+                unsent: vec![],
+            },
             ..Default::default()
         }
     }
@@ -1174,12 +1261,76 @@ mod tests {
         let text = screen_text(&buf, area);
         assert!(
             text.lines()
-                .any(|l| l.contains("395k / 500k") && l.contains("Overhead")),
+                .any(|l| l.contains("395k / 500k") && l.contains("Input")),
             "totals sit in the right column:\n{text}"
         );
         assert!(
             text.contains("Turns:"),
             "the counters fit without a scroll:\n{text}"
+        );
+    }
+
+    #[test]
+    fn requests_expand_into_items_and_the_transcript_opens() {
+        let area = Rect::new(0, 0, 160, 50);
+        let theme = Theme::current();
+        let mut state = state_with_session();
+        state.set_tab(UsageInfoTab::ContextUsage);
+        let mut snapshot = context_snapshot();
+        snapshot.transcript_path = Some("/s/chat_history.jsonl".into());
+        state.context = Some(ContextInfoBlock::new(snapshot, "m"));
+        let mut buf = Buffer::empty(area);
+        render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
+        // The list can run past the visible rows, so read every rendered line.
+        let text = state.plain_lines.join("\n");
+        assert!(
+            text.contains("#1") && text.contains("390k") && text.contains("300k / 10.0k / 80.0k"),
+            "a request row shows the provider's counts:\n{text}"
+        );
+        assert!(!text.contains("Overhead"), "{text}");
+        assert!(!text.contains("AGENTS.md big rules"), "{text}");
+
+        let (line, _) = state
+            .context_actions
+            .iter()
+            .find(|(_, a)| *a == LedgerAction::Toggle(LedgerRow::Request(0)))
+            .cloned()
+            .expect("request row is clickable");
+        state.scroll_to(line as u16);
+        let mut buf = Buffer::empty(area);
+        render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
+        let row = state.content_rect.y + (line - state.scroll as usize) as u16;
+        let col = state.content_rect.x + state.content_rect.width - 1;
+        assert_eq!(
+            handle_usage_modal_mouse(
+                &mut state,
+                MouseEventKind::Down(MouseButton::Left),
+                col,
+                row
+            ),
+            UsageModalOutcome::Changed
+        );
+        assert_eq!(
+            state.context_selection, None,
+            "a row click selects no range"
+        );
+        let mut buf = Buffer::empty(area);
+        render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
+        let text = state.plain_lines.join("\n");
+        assert!(
+            text.contains("project instructions")
+                && text.contains("279.3 KB")
+                && text.contains("AGENTS.md big rules"),
+            "an open request lists its items:\n{text}"
+        );
+        assert!(
+            screen_text(&buf, area).contains("o open transcript"),
+            "the footer offers the transcript"
+        );
+
+        assert_eq!(
+            handle_usage_modal_key(&mut state, &key(KeyCode::Char('o'))),
+            UsageModalOutcome::OpenPath("/s/chat_history.jsonl".into())
         );
     }
 
@@ -1193,23 +1344,22 @@ mod tests {
         state.context = Some(ContextInfoBlock::new(context_snapshot(), "m"));
         render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
 
-        // A later cell is Overhead.
-        let (x, y) = cell_pos(&state, 60);
+        let (x, y) = cell_pos(&state, 10);
         assert_eq!(
             handle_usage_modal_mouse(&mut state, MouseEventKind::Down(MouseButton::Left), x, y),
             UsageModalOutcome::Changed
         );
-        assert_eq!(state.context_selection, Some("Overhead"));
+        assert_eq!(state.context_selection, Some("Cache read"));
         let mut buf = Buffer::empty(area);
         render_usage_modal(&mut buf, area, &mut state, None, false, &theme);
         let text = screen_text(&buf, area);
         assert!(
-            text.contains("Estimate gap") && text.contains("Cells 44"),
+            text.contains("cache_read_input_tokens") && text.contains("Cells 1\u{2013}60"),
             "inspector replaces the totals:\n{text}"
         );
         assert!(!text.contains("Turns:"), "{text}");
 
-        let (x, y) = cell_pos(&state, 43);
+        let (x, y) = cell_pos(&state, 30);
         handle_usage_modal_mouse(&mut state, MouseEventKind::Down(MouseButton::Left), x, y);
         assert_eq!(state.context_selection, None, "same range again deselects");
 

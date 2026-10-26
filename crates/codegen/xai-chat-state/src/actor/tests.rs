@@ -508,6 +508,40 @@ async fn record_token_usage_emits_event() {
 }
 
 #[tokio::test]
+async fn prompt_measurements_build_the_context_ledger_until_a_replace() {
+    let input = |n| crate::ProviderUsage {
+        input: n,
+        ..Default::default()
+    };
+    let h = TestHarness::new();
+    h.handle
+        .push_user_message(ConversationItem::user("a".repeat(400)));
+    h.handle.record_prompt_measurement(input(300));
+    // A retry of the same request replaces its sample.
+    h.handle.record_prompt_measurement(input(310));
+    h.handle
+        .push_assistant_response(ConversationItem::assistant("b".repeat(40)));
+    h.handle.push_user_message(ConversationItem::user("c"));
+    h.handle.record_prompt_measurement(input(330));
+    h.handle
+        .push_assistant_response(ConversationItem::assistant("d"));
+
+    let ledger = h.handle.get_context_ledger().await;
+    assert_eq!(ledger.requests.len(), 2);
+    assert_eq!(ledger.requests[0].usage, input(310));
+    assert_eq!(ledger.requests[0].items.len(), 1);
+    assert_eq!(ledger.requests[1].usage, input(330));
+    assert_eq!(ledger.requests[1].items.len(), 2);
+    assert_eq!(ledger.unsent.len(), 1);
+
+    h.handle
+        .replace_conversation(vec![ConversationItem::system("compacted")]);
+    let ledger = h.handle.get_context_ledger().await;
+    assert!(ledger.requests.is_empty(), "a compaction drops the samples");
+    assert_eq!(ledger.unsent.len(), 1);
+}
+
+#[tokio::test]
 async fn record_last_turn_usage_round_trip() {
     use xai_grok_sampling_types::TokenUsage;
 

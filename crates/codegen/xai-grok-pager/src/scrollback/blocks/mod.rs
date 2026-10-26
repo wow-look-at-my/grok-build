@@ -3,6 +3,7 @@ mod bg_task;
 mod btw;
 mod cancel_cause;
 mod context_info;
+mod context_ledger_view;
 pub mod markdown_content;
 pub mod mermaid_content;
 mod quote_bar;
@@ -21,6 +22,7 @@ pub use btw::BtwBlock;
 pub use cancel_cause::CancelledBy;
 pub(crate) use context_info::BarGeometry;
 pub use context_info::ContextInfoBlock;
+pub(crate) use context_ledger_view::{LedgerAction, LedgerRow};
 pub use session_event::{
     CompactionDetail, MemoryCaptureBlock, MemoryCommandKind, SessionEvent, SessionEventBlock,
 };
