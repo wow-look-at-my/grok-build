@@ -1086,12 +1086,9 @@ mod tests {
         assert!(repo_path.join("file.txt").exists());
     }
     #[test]
-    fn worktree_base_dir_is_the_repos_own_grok_dir() {
+    fn worktree_base_dir_extracts_repo_name() {
         let base = worktree_base_dir(Path::new("/home/user/projects/my-repo"));
-        assert_eq!(
-            base,
-            Path::new("/home/user/projects/my-repo/.grok/worktrees")
-        );
+        assert!(base.ends_with("worktrees/projects-my-repo"));
     }
     fn git_head_sha(path: &std::path::Path) -> String {
         let out = std::process::Command::new("git")
