@@ -1045,6 +1045,7 @@ fn session_info_content(state: &UsageInfoModalState, theme: &Theme) -> TabConten
         lines,
         copy_targets,
         context_bar: None,
+        context_actions: Vec::new(),
     }
 }
 
