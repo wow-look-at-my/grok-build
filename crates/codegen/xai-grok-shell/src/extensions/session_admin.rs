@@ -14,7 +14,7 @@
 //! - `x.ai/internal/reload_skills`          skills file watcher fan-out
 //! - `x.ai/internal/reload_models`          model list hot-reload from config.toml
 //! - `x.ai/internal/reload_models_cache`    model catalog hot-reload from disk cache
-//! - `x.ai/internal/reload_output_rate_floor` output-rate floor hot-reload, all sessions
+//! - `x.ai/internal/reload_output_rate_floor` output-rate floor hot-reload, all sessions - `x.ai/internal/reload_thinking_summaries` thinking-summary settings hot-reload, all sessions
 //! - `x.ai/internal/auth_cleared`           auth hot-clear cleanup
 //! - `x.ai/plugins/reload`                  rebuild shared plugin registry
 //! - `x.ai/commands/list`                   list slash commands
@@ -72,6 +72,7 @@ async fn handle_internal(
         InternalMethod::ReloadModels => handle_reload_models(agent),
         InternalMethod::ReloadModelsCache => handle_reload_models_cache(agent),
         InternalMethod::ReloadOutputRateFloor => handle_reload_output_rate_floor(agent),
+        InternalMethod::ReloadThinkingSummaries => handle_reload_thinking_summaries(agent),
         InternalMethod::AuthCleared => handle_auth_cleared(agent),
         // Arrives as a notification, so it never reaches this request path.
         InternalMethod::EvictSessions => Err(acp::Error::method_not_found()),
@@ -727,29 +728,43 @@ fn cwd_matches(session_cwd: &std::path::Path, target_cwd: &std::path::Path) -> b
 
 /// Tell every resident session to re-read its output-rate floor.
 fn handle_reload_output_rate_floor(agent: &MvpAgent) -> ExtResult {
+    send_reload_to_residents(agent, "output-rate floor", || {
+        SessionCommand::ReloadOutputRateFloor
+    })
+}
+
+/// Tell every resident session to re-read its thinking-summary settings.
+fn handle_reload_thinking_summaries(agent: &MvpAgent) -> ExtResult {
+    send_reload_to_residents(agent, "thinking-summary", || {
+        SessionCommand::ReloadThinkingSummaries
+    })
+}
+
+/// Send the command from `command` to every resident session. `what` names the reload in the log.
+fn send_reload_to_residents(
+    agent: &MvpAgent,
+    what: &str,
+    command: impl Fn() -> SessionCommand,
+) -> ExtResult {
     let session_ids = agent.resident_ids();
     let mut updated = 0u32;
     for session_id in &session_ids {
         let Some(handle) = agent.resident_handle(session_id) else {
             continue;
         };
-        if handle
-            .cmd_tx
-            .send(SessionCommand::ReloadOutputRateFloor)
-            .is_ok()
-        {
+        if handle.cmd_tx.send(command()).is_ok() {
             updated += 1;
         } else {
             tracing::error!(
                 session_id = %session_id,
-                "output-rate floor reload not delivered: the session's command channel is closed"
+                "{what} reload not delivered: the session's command channel is closed"
             );
         }
     }
     tracing::info!(
         updated,
         total = session_ids.len(),
-        "output-rate floor reload sent to active sessions"
+        "{what} reload sent to active sessions"
     );
     ExtMethodResult::success(serde_json::json!({ "updated": updated }))
         .to_ext_response()

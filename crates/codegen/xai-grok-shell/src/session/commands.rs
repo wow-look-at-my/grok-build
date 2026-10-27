@@ -440,6 +440,8 @@ pub enum SessionCommand {
     },
     /// Re-read the output-rate floor from config.toml for the session's current model.
     ReloadOutputRateFloor,
+    /// Re-read `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` from config.toml.
+    ReloadThinkingSummaries,
     /// Signals then report the override model rather than the agent-level default.
     /// `SetSessionModel` does NOT update `primaryModelId` in signals; the resolved model is already tracked via inference responses.
     /// Keeps the existing base_url, api_key, and other config; only the `model` field in the `x-grok-model-override` header changes.

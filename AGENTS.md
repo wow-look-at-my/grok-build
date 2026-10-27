@@ -140,6 +140,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - It arrives after its model call ends, keyed by `stream_start_ms`. The root agent and the child-session handler both route it to `set_thinking_summary` on their own tracker.
 - A summarized thought is `RunStep::Transparent` in a verb-group run. It keeps its row rather than fold to height 0.
 - The summary is strictly async: nothing waits for it. The row redraws when the summary lands.
+- `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` need no start. The config watcher sends `ReloadThinkingSummaries` to every resident session, the same path as the output-rate floor.
 - Headless `streaming-json` emits a `thinking_summary` line. The Messages format has no field for it and drops it.
 
 ## Streaming tool-call notes
