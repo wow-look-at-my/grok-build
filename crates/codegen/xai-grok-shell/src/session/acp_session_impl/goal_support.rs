@@ -669,17 +669,32 @@ pub(super) fn next_step_from_todos<'a>(
     }
 }
 
-pub(super) fn format_blocked_chat_notification(reason: &str, detail: Option<&str>) -> String {
-    let mut out = String::with_capacity(reason.len() + detail.map_or(0, str::len) + 96);
-    out.push_str("Goal paused — verification blocked.\nReason: ");
-    out.push_str(reason);
-    out.push('\n');
-    if let Some(detail) = detail {
-        out.push_str(detail);
-        out.push('\n');
+/// The first line of the bounce the harness sends in place of a validator call.
+pub(super) const UNFINISHED_TODOS_BOUNCE: &str = "You have incomplete todos, complete them \
+     before trying to submit your work to the goal validator.";
+
+/// The bounce for a validator submission while the todo list has open items.
+/// It lists every pending and in-progress item, in list order. `None` when no
+/// item is open. The item text is capped and its reminder-frame tags are broken.
+pub(super) fn unfinished_todos_bounce<'a>(
+    todos: impl IntoIterator<Item = (&'a str, &'a str, crate::tools::todo::TodoStatus)>,
+) -> Option<String> {
+    use crate::session::goal_classifier::{cap_chars, neutralize_reminder_tags};
+    use crate::tools::todo::TodoStatus;
+    let mut out = format!("{UNFINISHED_TODOS_BOUNCE}\nIncomplete todos:");
+    let mut open = 0usize;
+    for (id, content, status) in todos {
+        if !matches!(status, TodoStatus::Pending | TodoStatus::InProgress) {
+            continue;
+        }
+        open += 1;
+        out.push_str(&format!(
+            "\n- {} `{id}`: {}",
+            status.tag(),
+            neutralize_reminder_tags(cap_chars(content, GOAL_NEXT_STEP_MAX_CHARS))
+        ));
     }
-    out.push_str("\nType /goal resume to continue after you've addressed it.");
-    out
+    (open > 0).then_some(out)
 }
 
 /// Child token counters are cumulative across activations. Completed deltas are retained,
@@ -1849,7 +1864,9 @@ impl SessionActor {
     /// Goal completion is NEVER blocked, paused, or un-achieved (the goal is already Complete when this runs).
     /// Read-only: the spawn pins a read-only toolset and the prompt forbids edits.
     pub(super) async fn maybe_run_goal_summarizer(&self, attempt: u32) {
-        if !self.goal_summary_enabled {
+        if !self.goal_summary_enabled
+            || self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite
+        {
             return;
         }
         let Some(event_tx) = self.tool_context.subagent_event_tx.clone() else {

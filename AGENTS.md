@@ -53,7 +53,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## A blocking wait is a gap, in Queue mode too
 
 - The turn loop harvests queued follow-ups before each model request (`harvest_queued_prompts_into_interjections`). A turn parked in an interruptible wait tool (`get_task_output` with a wait, `wait_tasks`, `Await`) makes no request until the task ends. As a result, Queue mode held the row behind a task that can run for minutes.
-- The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. A foreground subagent call is such a wait (`is_foreground_task_call`). The default agent renames its `run_in_background` flag to `background`. The check reads both names. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. An active goal and a pending send-now are exempt.
+- The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. A foreground subagent call is such a wait (`is_foreground_task_call`). The default agent renames its `run_in_background` flag to `background`. The check reads both names. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. A pending send-now is exempt.
+- A wait takes every row an empty Enter will (`harvest_queued_prompts_into_interjections(true)`), a row queued before the turn started included. A goal run is not exempt, in the shell or in the pager (`is_parked_on_sendable_wait`). A message never needs the empty-Enter force-send to end a wait.
 - A `/skill` typed mid-turn takes the shell queue like plain text (the `InjectSkill` arm in `dispatch/prompt.rs`). The harvest folds a slash row whose leading token is a skill (`slash_commands::leading_token_is_skill`). The drain expands it. A builtin still waits for its own turn, because only `resolve` runs one.
 
 ## `/context` shows provider counts only
@@ -111,12 +112,23 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
 - The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier try added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
+## Open todos block the goal validator
+
+- While the todo list has a `pending` or `in_progress` item, no validator runs. `run_goal_round_end` skips the evaluator and the panel and continues the round (`bounce_round_for_unfinished_todos`). `update_goal(completed: true)` is rejected with `RejectReason::UnfinishedTodos` before the lite check, the classifier, or the mid-turn deferral.
+- Both answers start with `UNFINISHED_TODOS_BOUNCE` and list every open item with its status and id (`unfinished_todos_bounce` in `goal_support.rs`). A missing todo resource reads as no open item. The validator still runs.
+
 ## Lite `/goal` mode
 
 - `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
 - The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is last.
 - Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
 - On the legacy driver, a lite `update_goal(completed: true)` makes one evaluator call and is refused with `LiteCheckNotMet` unless the verdict is `candidate_complete`.
+
+## A give-up claim is reviewed, not counted
+
+- The agent claims it cannot finish with a `## Cannot complete` section in its reply. On the legacy driver, `update_goal(blocked_reason)` also counts. The round end calls `review_blocked_claim` (`acp_session_impl/goal.rs`) before the todo bounce. Lite and full share this path.
+- The evaluator judges the claim first (`build_blocked_claim_request` in `goal_evaluator.rs`). A rejection must list concrete untried steps, and `is_vague_step` refuses "try harder" steps. An upheld claim must name the user action. The next review gets the last rejected steps.
+- Both modes send an upheld claim to the panel a completion candidate gets (`verify_goal_candidate(Some(claim))`). A lite goal's panel is one skeptic and no summarizer. The `## Cannot complete` rule in `goal_verifier_prompt.md` tells the skeptics how to judge it.
 
 ## `/todo` capture feature notes
 
@@ -138,6 +150,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The tail is bounded in both directions. It drops the older lines. One line stops growing at its character cap. A tab becomes spaces. So a large write costs a fixed row height however long it runs.
 - The byte count beside the name is what the tail cannot say. A tail of a large body looks the same at any size.
 - The preview truncates each line. It never wraps one. Every fragment redraws it. A wrapped line changes the block's height as the model types, which makes the whole transcript jump.
+
+## Todo detail popup
+
+- A double-click or `Enter` on a todo pane row opens `views/todo_detail.rs`. It shows the full text, status, priority, the `verification` condition with its verifier verdict, and any `meta`. `←`/`→` (`h`/`l`) step through the rows the pane shows and wrap. `↑`/`↓` scroll. `Esc` closes it. Input lives in `agent_view/todo_detail_overlay.rs`.
+- Pane clicks map against the list body the last render drew (`TodoPane::body`), not the whole pane. The whole pane includes the `done/total` header row, so a map against it is one row off.
 
 ## The todo list cannot be discarded or overwritten
 

@@ -55,6 +55,8 @@ fn plan(script: &str, grok_home: &Path, cwd: &Path) -> JailPlan {
         cache_dirs: Vec::new(),
         overlay: false,
         cache_redirect: None,
+        grok_home_alias: None,
+        grok_home_links: Vec::new(),
     }
 }
 
