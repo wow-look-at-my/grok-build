@@ -43,6 +43,8 @@ mod reasoning_efforts_model_menu_opens_on_default;
 mod reverse_agent_type_mismatch_cursor_to_default;
 #[path = "pty_e2e/same_agent_type_switch_no_modal.rs"]
 mod same_agent_type_switch_no_modal;
+#[path = "pty_e2e/sandbox_pathbox_settings_save.rs"]
+mod sandbox_pathbox_settings_save;
 #[path = "pty_e2e/sandbox_workspace_model_switch.rs"]
 mod sandbox_workspace_model_switch;
 #[path = "pty_e2e/show_thinking_blocks_toggle_hides_existing_pty.rs"]
