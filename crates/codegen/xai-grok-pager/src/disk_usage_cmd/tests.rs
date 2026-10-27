@@ -363,10 +363,7 @@ fn top_level_symlink_costs_its_own_inode_not_the_target() {
         link_bytes > 0,
         "the link's own inode is measurable, so the totals below are not vacuous"
     );
-    // With compression or delayed allocation the target can report the same
-    // physical size as an inode, so no size comparison can prove the walk did
-    // not follow it. The totals are the guard: following would charge the
-    // target's cost instead of the link's own.
+    // Compression can make sizes tie, so the totals are what this checks.
     assert_eq!(
         report.root_files_bytes, link_bytes,
         "a top-level symlink must cost exactly its own inode, never the target"

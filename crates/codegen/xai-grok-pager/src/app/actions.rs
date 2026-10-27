@@ -833,8 +833,7 @@ pub enum Action {
     DashboardStop,
     /// Confirm permanent delete of the armed dashboard row.
     DashboardDelete,
-    /// The row's `[✗]` control. An Idle row moves into the Inactive group with no confirmation
-    /// and no deletion; an Inactive row arms the permanent-delete confirmation.
+    /// The row's `[✗]`: Idle rows dismiss to Inactive; Inactive rows arm permanent delete.
     DashboardDismissRow(crate::views::dashboard::DashboardRowId),
     /// Cycle the dispatch input's mode for the next spawned agent: Normal, Plan, Auto, Always-Approve, then back around.
     /// Auto is skipped when gated off. Bound to Shift+Tab.

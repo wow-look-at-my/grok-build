@@ -7319,8 +7319,8 @@ fn dashboard_dismiss_inactive_row_cancel_preserves_the_session() {
     assert!(dashboard_rows(&app).iter().any(|r| r.id == row));
 }
 
-/// The Idle-row move works when it is the only open session: the session stays
-/// loaded, re-attachable, and the cursor falls back to the `+ New Agent` button.
+/// The Idle-row move works with a single open session. The session stays loaded
+/// and re-attachable; the cursor falls back to the `+ New Agent` button.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 #[test]
 fn dashboard_dismiss_only_idle_row_keeps_it_open() {

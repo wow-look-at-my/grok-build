@@ -3838,13 +3838,11 @@ fn reset_overlay_dims_all_rows_except_target() {
                  stay at full intensity. Row: {row_text:?}",
             );
         }
-        // The descriptive half of a shortcut is intentionally muted (DIM under a
-        // no-color/terminal theme); the key token is the action element and must
-        // stay at full intensity on every theme.
+        // A shortcut's descriptive half is muted under a no-color theme. The key token
+        // stays at full intensity on every theme.
         for (needle, key) in [("y reset", 'y'), ("n cancel", 'n')] {
             if let Some(offset) = row_text.find(needle) {
-                // `find` returns a byte offset; box-drawing borders are multi-byte,
-                // so convert the prefix to display columns.
+                // `find` returns bytes; borders are multi-byte, so convert to columns.
                 use unicode_width::UnicodeWidthStr as _;
                 let column = row_text[..offset].width() as u16;
                 assert!(

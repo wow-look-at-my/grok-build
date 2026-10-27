@@ -21,9 +21,7 @@ use xai_grok_shell::session::persistence::MAX_TITLE_SCALARS as MAX_RENAME_SCALAR
 
 const PROMPT_MULTI_CLICK_MS: u128 = 300;
 
-/// Local rows the user dismissed with `[✗]`, keyed by row and mapped to the moment they were moved.
-/// A mapped row is emitted as [`RowState::Inactive`] while its underlying state is [`RowState::Idle`],
-/// and the timestamp is its Inactive-group recency anchor.
+/// Dismissed local rows mapped to their move time, used as the Inactive recency anchor.
 pub type InactiveMoves = BTreeMap<DashboardRowId, SystemTime>;
 
 /// Stable identity for a dashboard row.
@@ -151,9 +149,9 @@ pub enum RowState {
     /// Alive, idle.
     Idle,
     /// A roster-only session: idle / dormant in another pager process and never loaded in this one.
-    /// Local agents never classify as `Inactive` (see `classify_top_level`); the row builder emits
-    /// this for a local Idle row the user dismissed with `[✗]` (see `DashboardState::inactive_moves`),
-    /// so the "Idle" section stays focused on sessions you're actively cycling between.
+    /// Local agents never classify as `Inactive` (see `classify_top_level`).
+    /// The row builder emits it for a local Idle row the user dismissed with `[✗]`.
+    /// The "Idle" section then stays focused on sessions you're actively cycling between.
     Inactive,
     /// Finished, with status == "completed".
     Completed,
@@ -437,9 +435,7 @@ pub struct DashboardState {
     /// A second gesture on the same row within [`CONFIRM_WINDOW`] deletes it (see [`Self::armed_delete_row`]); otherwise it lapses.
     /// Cleared on any focus change.
     pub delete_confirm: Option<(DashboardRowId, Instant)>,
-    /// Idle rows the user dismissed with the row's `[✗]` control, keyed to the move time.
-    /// The row builder emits each as `RowState::Inactive` so it leaves the active groups without
-    /// closing the session; the timestamp places it first in the Inactive section.
+    /// Dismissed Idle rows and their move time; the row builder emits each as `Inactive`.
     pub(crate) inactive_moves: InactiveMoves,
     pub workspace_membership_mode: bool,
     /// Ctrl+X meaning for the selected v2 row in the current frame.
@@ -1398,8 +1394,7 @@ impl DashboardState {
         self.delete_confirm = Some((id, Instant::now()));
     }
 
-    /// Move `id` out of the active groups and into the Inactive group, keeping the session loaded.
-    /// The move time is the row's Inactive recency anchor, so it sorts to the top of that group.
+    /// Move `id` into Inactive with a fresh recency anchor.
     pub fn move_to_inactive(&mut self, id: DashboardRowId) {
         self.inactive_moves.insert(id, SystemTime::now());
         self.delete_confirm = None;

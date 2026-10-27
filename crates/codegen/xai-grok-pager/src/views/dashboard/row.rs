@@ -103,9 +103,8 @@ pub fn build_rows_with_roster(
 }
 
 /// [`build_rows_with_roster`] plus the dashboard's dismissed-to-Inactive map.
-/// A local Idle row listed in `inactive_moves` is emitted as `RowState::Inactive` with the move time
-/// as its recency anchor; `Working` / `NeedsInput` classification still wins, so dismissed sessions
-/// reappear while they run and return to Inactive once they settle.
+/// A listed Idle row becomes `RowState::Inactive` anchored at its move time.
+/// `Working` / `NeedsInput` still win. A dismissed session rejoins Inactive when it settles.
 pub fn build_rows_with_roster_and_inactive(
     agents: &IndexMap<AgentId, AgentView>,
     pinned: &std::collections::BTreeSet<DashboardRowId>,

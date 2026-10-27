@@ -4684,8 +4684,7 @@ fn click_delete_control_routes_to_dismiss_action() {
         row,
         modifiers: KeyModifiers::NONE,
     };
-    // The `[✗]` hit sends a dismiss action; the dispatcher decides move vs. delete-confirm,
-    // so the coordinate handler never arms or deletes on its own.
+    // The hit sends a dismiss action; the dispatcher decides move vs. confirm.
     let first = state.handle_mouse(&click(11, 2));
     assert!(
         matches!(&first, InputOutcome::Action(Action::DashboardDismissRow(row)) if row == &id),

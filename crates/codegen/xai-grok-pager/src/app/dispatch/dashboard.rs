@@ -2021,8 +2021,8 @@ pub(super) fn dispatch_dashboard_dismiss(
         _ => vec![],
     }
 }
-/// Dismiss an Idle row: mark it Inactive with a move-time anchor and move the cursor to its
-/// neighbor, since the row itself now sits in a (default-collapsed) group.
+/// Dismiss an Idle row with a move-time anchor. The cursor moves to its neighbor,
+/// since the dismissed row now sits in a collapsed group.
 fn move_dashboard_row_to_inactive(app: &mut AppView, row: crate::views::dashboard::DashboardRowId) {
     let neighbor = dashboard_neighbor_row(app, &row);
     let Some(dashboard) = app.dashboard.as_mut() else {
