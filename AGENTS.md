@@ -19,6 +19,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Commit messages: concise, imperative mood, describing the change.
 - Keep the working tree clean before switching context. Use `git stash` / `git stash pop` for temporary changes and restore them promptly.
 
+## Build prerequisites
+
+- A Linux build needs `mold` (`.cargo/config.toml` links with `-fuse-ld=mold`) and `protoc` (`xai-grok-tools-api`'s build script). Install both before the first `cargo check`: `apt-get install -y mold protobuf-compiler`.
+- `bin/protoc` is a dotslash file. Without `dotslash` on `PATH`, the build script falls back to the `protoc` on `PATH`, and fails when there is none.
+
 ## Verification
 
 [docs/verification.md](docs/verification.md) holds this section.
