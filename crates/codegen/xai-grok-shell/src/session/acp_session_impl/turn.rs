@@ -2859,7 +2859,7 @@ impl SessionActor {
             }
             // Ahead of the drain, and so ahead of a model request.
             if should_harvest_before_request(loop_index, first_round) {
-                self.harvest_queued_prompts_into_interjections(false).await;
+                self.harvest_queued_prompts_into_interjections(true).await;
             }
             if identical_tool_calls.take_nudge() {
                 let run_len = identical_tool_calls.run_len;

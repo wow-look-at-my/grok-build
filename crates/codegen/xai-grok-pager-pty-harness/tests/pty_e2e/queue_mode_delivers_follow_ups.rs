@@ -561,7 +561,7 @@ async fn queue_mode_folds_skill_typed_during_a_tool() {
     harness.quit().expect("clean quit");
 }
 
-/// Queue mode: messages typed all through a long turn each reach that turn with one Enter.
+/// Queue mode: messages typed all through a long turn each reach the model promptly with one Enter.
 /// Every request is stalled, so some messages land while the model is still answering.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -586,9 +586,26 @@ async fn queue_mode_delivers_every_message_typed_across_a_long_turn() {
     let mut harness = spawn_and_submit(&content);
     let markers: Vec<String> = (1..=5).map(|n| format!("SOAK_MARKER_{n}_XYZ")).collect();
     harness.update(Duration::from_secs(1));
+    // A message waits at most for the reply that streams when it is typed. A running sleep steps aside for it, and one typed
+    // after the turn ends starts a turn of its own.
     for marker in &markers {
         type_follow_up(&mut harness, &format!("{marker} note"));
-        harness.update(Duration::from_millis(2700));
+        let typed = Instant::now();
+        let reached = poll_for(Duration::from_secs(10), || {
+            content
+                .request_bodies()
+                .iter()
+                .any(|b| b.to_string().contains(marker.as_str()))
+                .then_some(())
+        });
+        assert!(
+            reached.is_some(),
+            "{marker} did not reach the model within {:?} of being typed\nscreen:\n{}\n{}",
+            typed.elapsed(),
+            harness.screen_contents(),
+            dump_non_system_messages(&content.request_bodies())
+        );
+        harness.update(Duration::from_millis(700));
     }
     harness
         .wait_for_text(DONE, Duration::from_secs(60))
@@ -598,25 +615,6 @@ async fn queue_mode_delivers_every_message_typed_across_a_long_turn() {
                 harness.screen_contents()
             )
         });
-    harness.update(Duration::from_secs(2));
-
-    let bodies = content.request_bodies();
-    for marker in &markers {
-        let first = bodies
-            .iter()
-            .find(|b| b.to_string().contains(marker.as_str()))
-            .unwrap_or_else(|| {
-                panic!(
-                    "{marker} never reached the model\n{}",
-                    dump_non_system_messages(&bodies)
-                )
-            });
-        assert!(
-            !first.to_string().contains(DONE),
-            "{marker} waited for the turn to end\n{}",
-            dump_non_system_messages(&bodies)
-        );
-    }
     harness.quit().expect("clean quit");
 }
 
