@@ -103,12 +103,8 @@ fn backgrounded_task_tool_result() -> ToolRunResult {
         effective_tool_name: None,
     }
 }
-fn should_flush_held_queue_before_wait(
-    has_interruptible_wait: bool,
-    steer: bool,
-    goal_loop_active: bool,
-) -> bool {
-    has_interruptible_wait && steer && !goal_loop_active
+fn should_flush_held_queue_before_wait(has_interruptible_wait: bool, steer: bool) -> bool {
+    has_interruptible_wait && steer
 }
 use crate::tools::tool_context::BlockingWaitGuard;
 /// Clears `awaiting_plan_approval` (and re-persists) when the [`SessionActor::request_plan_approval`] await resolves or is dropped.
@@ -738,12 +734,11 @@ impl SessionActor {
         if should_flush_held_queue_before_wait(
             has_interruptible_wait,
             crate::util::config::follow_up_steer_enabled().await,
-            self.goal_loop_active(),
         ) {
             self.promote_queued_as_interjections().await;
-        } else if has_interruptible_wait && !self.goal_loop_active() {
-            // Queue mode: a blocking wait is a gap with no model request in it, so deliver what the turn loop would harvest there.
-            self.harvest_queued_prompts_into_interjections(false).await;
+        } else if has_interruptible_wait {
+            // Queue mode: a blocking wait is a gap with no model request in it, so deliver every row an empty Enter would.
+            self.harvest_queued_prompts_into_interjections(true).await;
         }
         let pending_interjections = self.pending_interjections.clone();
         let (parent_interject, running_turn, running_prompt_id) = {
@@ -3806,17 +3801,13 @@ mod wait_interrupt_tests {
         );
     }
     #[test]
-    fn wait_start_flush_skips_queue_mode_and_active_goals() {
-        assert!(should_flush_held_queue_before_wait(true, true, false));
+    fn wait_start_flush_skips_queue_mode() {
+        assert!(should_flush_held_queue_before_wait(true, true));
         assert!(
-            !should_flush_held_queue_before_wait(true, false, false),
+            !should_flush_held_queue_before_wait(true, false),
             "queue mode harvests instead of promoting"
         );
-        assert!(
-            !should_flush_held_queue_before_wait(true, true, true),
-            "an active goal wait is not sendable; promoting would abort it immediately"
-        );
-        assert!(!should_flush_held_queue_before_wait(false, true, false));
+        assert!(!should_flush_held_queue_before_wait(false, true));
     }
     #[test]
     fn interruptible_wait_tool_only_when_timeout_positive() {

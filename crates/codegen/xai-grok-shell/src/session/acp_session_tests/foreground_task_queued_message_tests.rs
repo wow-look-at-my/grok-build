@@ -203,6 +203,7 @@ async fn run_task_call_with_queued_message(
 
 /// Every follow-up mode and queue timing: the row arrives during the call, or sat queued before it began.
 #[tokio::test(flavor = "current_thread")]
+#[serial_test::serial(follow_up_steer_cache)]
 async fn queued_message_backgrounds_a_foreground_task_call() {
     let local = tokio::task::LocalSet::new();
     local
@@ -233,6 +234,7 @@ async fn queued_message_backgrounds_a_foreground_task_call() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[serial_test::serial(follow_up_steer_cache)]
 async fn queued_message_leaves_a_background_task_call_alone() {
     let local = tokio::task::LocalSet::new();
     local
