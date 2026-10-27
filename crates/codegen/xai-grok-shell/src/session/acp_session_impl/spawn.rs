@@ -1980,7 +1980,6 @@ pub(crate) async fn spawn_session_actor(
         goal_tracker,
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-        goal_blocked_streak: std::sync::atomic::AtomicU32::new(0),
         goal_update_rx: std::cell::RefCell::new(Some(goal_update_rx)),
         goal_update_tx,
         workflow_manager: workflow_manager.clone(),

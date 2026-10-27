@@ -18,4 +18,8 @@ Anything you write about your own work is ignored.
 
 SCRATCH: use your private scratch dir {SCRATCH_DIR} only for throwaway files the work itself needs. Never use shared `/tmp/...` paths (skeptics and concurrent goals collide there). {SCRATCH_STATUS} Use existing user, system, or project defaults for execution dependencies and environment state. NEVER set `HOME`, `CARGO_HOME`, `RUSTUP_HOME`, package-manager homes, virtualenvs, caches, or config dirs to scratch, or write persistent config that references scratch. The scratch dir is deleted when the goal ends. The plan's `{SCRATCH}` placeholder resolves to it.
 
-TEST PROACTIVELY: run targeted tests after every change, not at the end. The harness evaluates completion automatically after every model round. {COMPLETION_CHECK} Do not stop merely to announce completion. If a real external blocker remains after repeated attempts, explain the exact evidence and user action needed in your last response. The harness applies the repeated-blocker policy automatically.
+TEST PROACTIVELY: run targeted tests after every change, not at the end. The harness evaluates completion automatically after every model round. {COMPLETION_CHECK} Do not stop merely to announce completion.
+
+CANNOT COMPLETE: if you cannot finish the goal without the user, end your reply with a `## Cannot complete` heading. Under it, list each approach you tried and why it failed, then the exact thing only the user can supply. A strict reviewer checks the claim against your transcript when the round ends. If you proved that no step you can take moves the goal forward, the goal pauses for the user. If not, you are sent back with the concrete steps you have not tried. Do those steps before you claim again.
+
+Never use the heading to stop early, and never keep working in circles. This applies when the only open items need the user.
