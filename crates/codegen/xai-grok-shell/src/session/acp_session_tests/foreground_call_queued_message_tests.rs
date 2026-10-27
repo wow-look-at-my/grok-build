@@ -236,6 +236,13 @@ async fn queued_message_backgrounds_a_foreground_mcp_call() {
             Arc::get_mut(&mut actor.rebuild_spec)
                 .expect("the test actor holds the only rebuild spec")
                 .tools_notification_handle = notifications;
+            // Dispatch refuses an MCP call until the session's MCP init has settled.
+            {
+                let mut mcp = actor.mcp_state.lock().await;
+                std::mem::forget(mcp.try_start_init().expect("fixture claims init"));
+                mcp.finish_init();
+                mcp.complete_init();
+            }
             let release = Arc::new(tokio::sync::Notify::new());
             actor
                 .agent
