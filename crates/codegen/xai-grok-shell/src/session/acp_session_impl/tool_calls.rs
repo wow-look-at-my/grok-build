@@ -94,7 +94,7 @@ enum ForegroundHandoff {
     /// The terminal backend moves the command to the background by its call id.
     Command,
     /// The call moves to its own task, and its result arrives as a background-task completion.
-    Mcp,
+    Detach,
 }
 /// A shell command that blocks the turn until it exits. A queued user message moves it to the background.
 /// A toolset can rename `is_background` to `background`, so read both names.
@@ -108,6 +108,24 @@ pub(super) fn is_foreground_command_call(
             Some(serde_json::Value::String(flag)) => flag.trim().eq_ignore_ascii_case("true"),
             _ => false,
         }
+}
+/// A built-in tool that only reads or fetches and can run for long. A queued user message moves it to the background,
+/// the way it moves an MCP call. A tool that edits files or waits on the user is not one.
+pub(super) fn is_detachable_kind(kind: Option<xai_grok_tools::types::tool::ToolKind>) -> bool {
+    use xai_grok_tools::types::tool::ToolKind;
+    matches!(
+        kind,
+        Some(
+            ToolKind::WebFetch
+                | ToolKind::WebSearch
+                | ToolKind::ImageGen
+                | ToolKind::VideoGen
+                | ToolKind::ImageToVideo
+                | ToolKind::ReferenceToVideo
+                | ToolKind::DeployApp
+                | ToolKind::Lsp
+        )
+    )
 }
 /// A call to an MCP server's tool, directly or through a meta-dispatch tool such as `use_tool`.
 /// A queued user message moves the call to the background.
@@ -130,10 +148,10 @@ async fn background_command_for_queued_message(
     }
 }
 const COMMAND_HANDOFF_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
-/// The most of a backgrounded MCP result the completion message carries. The file holds all of it.
-const MCP_COMPLETION_OUTPUT_BYTES: usize = 16 * 1024;
-/// Model-facing result of a foreground MCP call that a queued user message moved to the background.
-fn backgrounded_mcp_tool_result(task_id: &str) -> ToolRunResult {
+/// The most of a detached call's result the completion message carries. The file holds all of it.
+const DETACHED_COMPLETION_OUTPUT_BYTES: usize = 16 * 1024;
+/// Model-facing result of a detached call that a queued user message moved to the background.
+fn detached_call_tool_result(task_id: &str) -> ToolRunResult {
     let text = format!(
         "The call was moved to the background because the user sent a message. \
 		 It keeps running, and its result arrives as a message when it finishes (task_id: {task_id})."
@@ -149,9 +167,9 @@ fn backgrounded_mcp_tool_result(task_id: &str) -> ToolRunResult {
         effective_tool_name: None,
     }
 }
-/// Waits for a backgrounded MCP call and reports its result through the background-task completion path.
+/// Waits for a detached call and reports its result through the background-task completion path.
 /// The completion names a file that holds the whole result. The message carries the head of it.
-async fn report_backgrounded_mcp_call(
+async fn report_detached_call(
     call: tokio::task::JoinHandle<Result<ToolRunResult, xai_tool_runtime::ToolError>>,
     notifications: xai_grok_tools::notification::types::ToolNotificationHandle,
     task_id: String,
@@ -176,10 +194,10 @@ async fn report_backgrounded_mcp_call(
             %task_id,
             path = %output_file.display(),
             %error,
-            "could not write the backgrounded MCP result; the completion carries only its head"
+            "could not write the detached call's result; the completion carries only its head"
         );
     }
-    let mut cut = text.len().min(MCP_COMPLETION_OUTPUT_BYTES);
+    let mut cut = text.len().min(DETACHED_COMPLETION_OUTPUT_BYTES);
     while !text.is_char_boundary(cut) {
         cut -= 1;
     }
@@ -202,10 +220,10 @@ async fn report_backgrounded_mcp_call(
         explicitly_killed: false,
         kill_result_delivered: false,
         owner_session_id: Some(owner_session_id),
-        description: Some(format!("MCP call {tool_name}")),
+        description: Some(format!("Tool call {tool_name}")),
         is_backgrounded: true,
     };
-    tracing::info!(%task_id, tool = %tool_name, failed, "backgrounded MCP call finished");
+    tracing::info!(%task_id, tool = %tool_name, failed, "detached call finished");
     notifications
         .send(xai_grok_tools::notification::types::ToolNotification::TaskCompleted(snapshot));
 }
@@ -863,8 +881,9 @@ impl SessionActor {
                     } else if is_mcp_tool_call(
                         bridge.tool_namespace(&prepared.tool_name),
                         prepared.dispatch_target_name.as_deref(),
-                    ) {
-                        ForegroundHandoff::Mcp
+                    ) || is_detachable_kind(bridge.tool_kind(&prepared.tool_name))
+                    {
+                        ForegroundHandoff::Detach
                     } else {
                         ForegroundHandoff::None
                     }
@@ -998,7 +1017,7 @@ impl SessionActor {
                     let latest_slot = std::sync::Arc::new(parking_lot::Mutex::new(
                         xai_grok_tools::types::source_summary::SourceSummarySlot::new(),
                     ));
-                    // Owns what it reads, so a backgrounded MCP call can take it to its own task.
+                    // Owns what it reads, so a detached call can take it to its own task.
                     let run_tool = {
                         let prepared = Arc::clone(&prepared);
                         let session_id = session_id.clone();
@@ -1188,7 +1207,7 @@ impl SessionActor {
                             .await,
                             false,
                         )
-                    } else if handoff == ForegroundHandoff::Mcp {
+                    } else if handoff == ForegroundHandoff::Detach {
                         // The call runs on its own task.
                         let started = std::time::SystemTime::now();
                         let mut call = {
@@ -1220,13 +1239,13 @@ impl SessionActor {
                                         &parent_interject,
                                     ) => {}
                                 }
-                                let task_id = format!("mcp-{}", prepared.call_id);
+                                let task_id = format!("bg-{}", prepared.call_id);
                                 tracing::info!(
                                     tool = %prepared.tool_name,
                                     %task_id,
-                                    "moved MCP call to background: queued message pending"
+                                    "moved tool call to background: queued message pending"
                                 );
-                                tokio::spawn(report_backgrounded_mcp_call(
+                                tokio::spawn(report_detached_call(
                                     call,
                                     tool_notifications,
                                     task_id.clone(),
@@ -1235,7 +1254,7 @@ impl SessionActor {
                                     session_id.to_string(),
                                     started,
                                 ));
-                                Ok(backgrounded_mcp_tool_result(&task_id))
+                                Ok(detached_call_tool_result(&task_id))
                             }
                             .instrument(tool_span)
                             .await,

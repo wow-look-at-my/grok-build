@@ -265,7 +265,7 @@ async fn queued_message_backgrounds_a_foreground_mcp_call() {
                 "the MCP call must not hold the turn: took {elapsed:?}"
             );
             assert!(
-                result.contains("moved to the background") && result.contains("mcp-mcp-call-1"),
+                result.contains("moved to the background") && result.contains("bg-mcp-call-1"),
                 "the model must be told the call still runs, under its task id: {result:?}"
             );
 
@@ -284,7 +284,7 @@ async fn queued_message_backgrounds_a_foreground_mcp_call() {
                 })
                 .await
                 .expect("the backgrounded MCP call must report its completion");
-            assert_eq!(completion.task_id, "mcp-mcp-call-1");
+            assert_eq!(completion.task_id, "bg-mcp-call-1");
             assert!(completion.completed && completion.is_backgrounded);
             assert_eq!(completion.exit_code, Some(0));
             assert!(
@@ -301,7 +301,7 @@ async fn queued_message_backgrounds_a_foreground_mcp_call() {
 
 #[test]
 fn foreground_handoff_predicates() {
-    use super::tool_calls::{is_foreground_command_call, is_mcp_tool_call};
+    use super::tool_calls::{is_detachable_kind, is_foreground_command_call, is_mcp_tool_call};
     use xai_grok_tools::types::tool::ToolKind;
     let command =
         |kind: Option<ToolKind>, args: serde_json::Value| is_foreground_command_call(kind, &args);
@@ -332,4 +332,31 @@ fn foreground_handoff_predicates() {
     assert!(is_mcp_tool_call(None, Some("slow_server__fetch")));
     assert!(!is_mcp_tool_call(None, None));
     assert!(!is_mcp_tool_call(None, Some("run_terminal_cmd")));
+    for kind in [
+        ToolKind::WebFetch,
+        ToolKind::WebSearch,
+        ToolKind::ImageGen,
+        ToolKind::Lsp,
+    ] {
+        assert!(
+            is_detachable_kind(Some(kind)),
+            "{kind:?} reads or fetches, so it detaches"
+        );
+    }
+    for kind in [
+        ToolKind::Edit,
+        ToolKind::Write,
+        ToolKind::Delete,
+        ToolKind::Move,
+        ToolKind::AskUser,
+        ToolKind::ExitPlan,
+        ToolKind::Task,
+        ToolKind::Execute,
+    ] {
+        assert!(
+            !is_detachable_kind(Some(kind)),
+            "{kind:?} must keep the turn waiting"
+        );
+    }
+    assert!(!is_detachable_kind(None));
 }
