@@ -33,7 +33,7 @@ pub struct UpdateGoalInput {
 
     #[serde(default)]
     #[schemars(
-        description = "Set only when truly stuck after 3+ consecutive failed attempts at the same problem. If set, the goal is paused as blocked. This is a FAILURE signal — never put success text here. For success, use `completed: true` with `message`."
+        description = "Claim that you cannot finish the goal without the user. State what you tried, why each attempt failed, and the exact thing only the user can supply. When the turn ends a strict reviewer checks the claim against your transcript. It pauses the goal for the user only when you proved there is no step left you can take. Otherwise it sends you back with the concrete steps you have not tried. This is a FAILURE signal — never put success text here. For success, use `completed: true` with `message`."
     )]
     pub blocked_reason: Option<String>,
 }
