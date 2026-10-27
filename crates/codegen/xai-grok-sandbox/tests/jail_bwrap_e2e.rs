@@ -51,6 +51,8 @@ fn plan(script: &str, mounts: Vec<Mount>, grok_home: &Path, cwd: &Path) -> JailP
         cache_dirs: Vec::new(),
         overlay: false,
         cache_redirect: None,
+        grok_home_alias: None,
+        grok_home_links: Vec::new(),
     }
 }
 
