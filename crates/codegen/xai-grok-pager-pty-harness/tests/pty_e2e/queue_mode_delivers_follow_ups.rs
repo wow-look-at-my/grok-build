@@ -126,6 +126,76 @@ async fn queue_mode_sends_follow_up_typed_during_a_foreground_subagent() {
     harness.quit().expect("clean quit");
 }
 
+/// A goal round that waits on a foreground subagent is a gap too: the typed message reaches the model before the subagent ends.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+async fn goal_round_sends_follow_up_typed_during_a_foreground_subagent() {
+    use xai_grok_pager_pty_harness::{InferenceEndpoint, InferenceRequestMatcher};
+    const MARKER: &str = "GOAL_FG_TASK_MARKER_XYZ";
+    let content = ContentController::start().await.expect("start content");
+    let flag = content.home().join("goal_fg_hold_flag");
+    script_subagent_turn(&content, false, &flag, "GOAL_PARENT_DONE", 2);
+    let verdict = json!({
+        "decision": "candidate_complete",
+        "evidence": "the subagent ran",
+        "next_step": "none",
+        "blocker_key": ""
+    })
+    .to_string();
+    for (endpoint, response) in [
+        (
+            InferenceEndpoint::Responses,
+            ScriptedResponse::sse(sse::responses_api_script_exact(&verdict, "test-model")),
+        ),
+        (
+            InferenceEndpoint::ChatCompletions,
+            ScriptedResponse::sse(sse::chat_completion_script_exact(&verdict, "test-model")),
+        ),
+    ] {
+        let _ = content.expect_response(
+            format!("goal verdict ({endpoint:?})"),
+            InferenceRequestMatcher::auxiliary(endpoint),
+            response,
+        );
+    }
+
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness = PtyHarness::spawn_with_content_env_in_dir(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        &content,
+        &["--yolo", "--trust"],
+        &[("GROK_GOAL", "1")],
+        Some(content.home()),
+    )
+    .expect("spawn pager");
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome");
+    harness
+        .inject_keys(b"/goal --lite build the project")
+        .expect("type goal");
+    harness.update(Duration::from_millis(300));
+    harness.inject_keys(b"\r").expect("submit goal");
+    harness
+        .wait_for_text("hold until released", Duration::from_secs(60))
+        .unwrap_or_else(|_| {
+            panic!(
+                "the child never started; screen:\n{}",
+                harness.screen_contents()
+            )
+        });
+    harness.update(Duration::from_millis(500));
+    type_follow_up(&mut harness, &format!("{MARKER} tests are a waste of time"));
+    assert_reaches_model_before_release(&content, &harness, MARKER, &flag);
+    harness.inject_keys(b"\x11").expect("ctrl-q once");
+    harness.update(Duration::from_millis(200));
+    harness.inject_keys(b"\x11").expect("ctrl-q confirm");
+    harness.quit().expect("reap pager");
+}
+
 /// Queue mode: a message typed while a background subagent runs after the turn ended starts a turn at once.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
