@@ -30,12 +30,6 @@ const UNWANTED_AUTO_WAKE_SENTINEL: &str = "UNWANTED_AUTO_WAKE_SENTINEL_XYZ";
 #[cfg(unix)]
 const BG_SLEEP_SECS: &str = "6";
 
-/// Foreground sleep that holds the auto-wake turn deterministically running while the user message and Ctrl+C are injected.
-/// It never runs to completion; the cancel kills it on both the broken and fixed paths.
-/// A generous bound therefore costs nothing and removes the race where the hold settles before the cancel lands.
-#[cfg(unix)]
-const HOLD_SLEEP_SECS: &str = "15";
-
 /// Which cancel gesture the scenario drives. All three send the same `session/cancel`; only the input path differs.
 /// StopClick and SendNow also gate on the wake stop affordance ([stop] while the pane is idle), which only exists with the wake-turn cancel support.
 /// Esc is not a gesture here: it never cancels a turn (it only hints at Ctrl+C).
@@ -124,7 +118,8 @@ pub(crate) async fn run_wake_cancel_scenario(gesture: WakeCancelGesture, cast_pr
 
     // Enqueue the auto-wake turn's scripts BEFORE the background sleep completes
     // The first script is a task-output poll; its completed result triggers the sweep of consumed completions
-    // The second is a foreground sleep that pins the turn running while the user message and Ctrl+C land
+    // The second is a reply held open before its last event. That pins the turn mid-generation while the user message and the
+    // gesture land. A foreground tool call cannot hold it: a typed message moves that call to the background.
     let poll_args = json!({ "task_ids": [task_id.clone()] }).to_string();
     let _poll_turn = expect_tool_turn(
         &content,
@@ -132,17 +127,7 @@ pub(crate) async fn run_wake_cancel_scenario(gesture: WakeCancelGesture, cast_pr
         "get_command_or_subagent_output",
         poll_args,
     );
-    let hold_args = json!({
-        "command": format!("/bin/sleep {HOLD_SLEEP_SECS}"),
-        "description": "hold turn"
-    })
-    .to_string();
-    let _hold_turn = expect_tool_turn(
-        &content,
-        "call_wake_hold",
-        "run_terminal_command",
-        hold_args,
-    );
+    let hold_turn = content.expect_agent_turn_blocked("wake hold", slow_turn_text("WAKEHOLD"));
     // This is the fallback for every unscripted request after the queues drain, and the response the surviving user prompt streams on the fixed path
     content.set_response("AUTO_WAKE_SETTLED");
 
@@ -229,8 +214,12 @@ pub(crate) async fn run_wake_cancel_scenario(gesture: WakeCancelGesture, cast_pr
         }
     }
     harness.update(Duration::from_secs(2));
+    // Esc does not cancel, so the held reply must end for the queued row to run.
+    if matches!(gesture, WakeCancelGesture::Esc) {
+        hold_turn.release();
+    }
 
-    // Send now must beat the 15-second hold; the cancel gestures only need to preserve the row.
+    // Send now must beat the held reply; the cancel gestures only need to preserve the row.
     let delivery_timeout = if matches!(gesture, WakeCancelGesture::SendNow) {
         Duration::from_secs(5)
     } else {
@@ -249,6 +238,7 @@ pub(crate) async fn run_wake_cancel_scenario(gesture: WakeCancelGesture, cast_pr
         let _ = harness.wait_for_full_text("AUTO_WAKE_SETTLED", Duration::from_secs(15));
     }
 
+    hold_turn.release();
     write_cast_if_requested(&harness, &format!("{cast_prefix}_main.cast"));
 
     // Graceful quit (Ctrl+Q double-press: focus is in the prompt, 'q' would type).

@@ -87,6 +87,146 @@ pub(super) fn is_foreground_task_call(tool_name: &str, args: &serde_json::Value)
             _ => false,
         }
 }
+/// How a foreground call steps aside for a queued user message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForegroundHandoff {
+    None,
+    /// The terminal backend moves the command to the background by its call id.
+    Command,
+    /// The call moves to its own task, and its result arrives as a background-task completion.
+    Detach,
+}
+/// A shell command that blocks the turn until it exits. A queued user message moves it to the background.
+/// A toolset can rename `is_background` to `background`, so read both names.
+pub(super) fn is_foreground_command_call(
+    kind: Option<xai_grok_tools::types::tool::ToolKind>,
+    args: &serde_json::Value,
+) -> bool {
+    kind == Some(xai_grok_tools::types::tool::ToolKind::Execute)
+        && !match args.get("is_background").or_else(|| args.get("background")) {
+            Some(serde_json::Value::Bool(flag)) => *flag,
+            Some(serde_json::Value::String(flag)) => flag.trim().eq_ignore_ascii_case("true"),
+            _ => false,
+        }
+}
+/// A built-in tool that only reads or fetches and can run for long. A queued user message moves it to the background,
+/// the way it moves an MCP call. A tool that edits files or waits on the user is not one.
+pub(super) fn is_detachable_kind(kind: Option<xai_grok_tools::types::tool::ToolKind>) -> bool {
+    use xai_grok_tools::types::tool::ToolKind;
+    matches!(
+        kind,
+        Some(
+            ToolKind::WebFetch
+                | ToolKind::WebSearch
+                | ToolKind::ImageGen
+                | ToolKind::VideoGen
+                | ToolKind::ImageToVideo
+                | ToolKind::ReferenceToVideo
+                | ToolKind::DeployApp
+                | ToolKind::Lsp
+        )
+    )
+}
+/// A call to an MCP server's tool, directly or through a meta-dispatch tool such as `use_tool`.
+/// A queued user message moves the call to the background.
+pub(super) fn is_mcp_tool_call(
+    namespace: Option<xai_grok_tools::types::tool::ToolNamespace>,
+    dispatch_target: Option<&str>,
+) -> bool {
+    namespace == Some(xai_grok_tools::types::tool::ToolNamespace::MCP)
+        || dispatch_target.is_some_and(|target| {
+            crate::session::mcp_servers::parse_mcp_tool_name(target).is_some()
+        })
+}
+/// Move the command of `call_id` to the background. The command can still be in startup when the message arrives, so try again until it moves.
+async fn background_command_for_queued_message(
+    bridge: &xai_grok_tools::bridge::ToolBridge,
+    call_id: &str,
+) {
+    while !bridge.background_foreground_command(call_id).await {
+        tokio::time::sleep(COMMAND_HANDOFF_RETRY).await;
+    }
+}
+const COMMAND_HANDOFF_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
+/// The most of a detached call's result the completion message carries. The file holds all of it.
+const DETACHED_COMPLETION_OUTPUT_BYTES: usize = 16 * 1024;
+/// Model-facing result of a detached call that a queued user message moved to the background.
+fn detached_call_tool_result(task_id: &str) -> ToolRunResult {
+    let text = format!(
+        "The call was moved to the background because the user sent a message. \
+		 It keeps running, and its result arrives as a message when it finishes (task_id: {task_id})."
+    );
+    ToolRunResult {
+        output: xai_grok_tools::types::output::ToolOutput::Text(
+            xai_grok_tools::types::output::TextOutput {
+                text: text.clone(),
+                consumed_completion_task_id: None,
+            },
+        ),
+        prompt_text: text,
+        effective_tool_name: None,
+    }
+}
+/// Waits for a detached call and reports its result through the background-task completion path.
+/// The completion names a file that holds the whole result. The message carries the head of it.
+async fn report_detached_call(
+    call: tokio::task::JoinHandle<Result<ToolRunResult, xai_tool_runtime::ToolError>>,
+    notifications: xai_grok_tools::notification::types::ToolNotificationHandle,
+    task_id: String,
+    tool_name: String,
+    output_dir: std::path::PathBuf,
+    owner_session_id: String,
+    start_time: std::time::SystemTime,
+) {
+    let (text, failed) = match call.await {
+        Ok(Ok(result)) => {
+            let failed = result.output.is_error();
+            (result.prompt_text, failed)
+        }
+        Ok(Err(error)) => (error.to_string(), true),
+        Err(join) => (format!("the call ended without a result: {join}"), true),
+    };
+    let output_file = output_dir.join(format!("{task_id}.txt"));
+    if let Err(error) =
+        std::fs::create_dir_all(&output_dir).and_then(|()| std::fs::write(&output_file, &text))
+    {
+        tracing::error!(
+            %task_id,
+            path = %output_file.display(),
+            %error,
+            "could not write the detached call's result; the completion carries only its head"
+        );
+    }
+    let mut cut = text.len().min(DETACHED_COMPLETION_OUTPUT_BYTES);
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let snapshot = xai_grok_tools::computer::types::TaskSnapshot {
+        task_id: task_id.clone(),
+        command: tool_name.clone(),
+        display_command: Some(tool_name.clone()),
+        cwd: String::new(),
+        start_time,
+        end_time: Some(std::time::SystemTime::now()),
+        output: text[..cut].to_string(),
+        output_file,
+        truncated: cut < text.len(),
+        output_total_bytes: text.len(),
+        exit_code: Some(i32::from(failed)),
+        signal: None,
+        completed: true,
+        kind: xai_grok_tools::computer::types::TaskKind::Bash,
+        block_waited: false,
+        explicitly_killed: false,
+        kill_result_delivered: false,
+        owner_session_id: Some(owner_session_id),
+        description: Some(format!("Tool call {tool_name}")),
+        is_backgrounded: true,
+    };
+    tracing::info!(%task_id, tool = %tool_name, failed, "detached call finished");
+    notifications
+        .send(xai_grok_tools::notification::types::ToolNotification::TaskCompleted(snapshot));
+}
 /// Model-facing result of a foreground `task` call that a queued user message cut short.
 fn backgrounded_task_tool_result() -> ToolRunResult {
     let text = "The subagent was moved to the background because the user sent a message. \
@@ -727,10 +867,36 @@ impl SessionActor {
         let workflow_smoke_check_permits = Arc::new(tokio::sync::Semaphore::new(
             workflow_write_smoke_check::MAX_CONCURRENT_CHECKS,
         ));
-        let has_interruptible_wait = approved.iter().any(|prepared| {
-            is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments())
+        let handoffs: Vec<ForegroundHandoff> = {
+            let agent = self.agent.borrow();
+            let bridge = agent.tool_bridge();
+            approved
+                .iter()
+                .map(|prepared| {
+                    if is_foreground_command_call(
+                        bridge.tool_kind(&prepared.tool_name),
+                        prepared.authored_arguments(),
+                    ) {
+                        ForegroundHandoff::Command
+                    } else if is_mcp_tool_call(
+                        bridge.tool_namespace(&prepared.tool_name),
+                        prepared.dispatch_target_name.as_deref(),
+                    ) || is_detachable_kind(bridge.tool_kind(&prepared.tool_name))
+                    {
+                        ForegroundHandoff::Detach
+                    } else {
+                        ForegroundHandoff::None
+                    }
+                })
+                .collect()
+        };
+        let has_interruptible_wait = approved.iter().zip(&handoffs).any(|(prepared, handoff)| {
+            *handoff != ForegroundHandoff::None
+                || is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments())
                 || is_foreground_task_call(&prepared.tool_name, prepared.authored_arguments())
         });
+        let tool_bridge = self.tool_bridge_handle();
+        let tool_notifications = self.rebuild_spec.tools_notification_handle.clone();
         if should_flush_held_queue_before_wait(
             has_interruptible_wait,
             crate::util::config::follow_up_steer_enabled().await,
@@ -781,6 +947,12 @@ impl SessionActor {
                     is_foreground_task_call(&prepared.tool_name, prepared.authored_arguments())
                         .then(|| subagent_event_tx.clone().zip(running_prompt_id.clone()))
                         .flatten();
+                let handoff = handoffs
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(ForegroundHandoff::None);
+                let tool_bridge = Arc::clone(&tool_bridge);
+                let tool_notifications = tool_notifications.clone();
                 let prepared = {
                     let mut dispatch_prepared = prepared.clone();
                     if interruptible
@@ -845,46 +1017,55 @@ impl SessionActor {
                     let latest_slot = std::sync::Arc::new(parking_lot::Mutex::new(
                         xai_grok_tools::types::source_summary::SourceSummarySlot::new(),
                     ));
-                    let run_tool = || {
+                    // Owns what it reads, so a detached call can take it to its own task.
+                    let run_tool = {
                         let prepared = Arc::clone(&prepared);
-                        let workspace_ops = workspace_ops.clone();
                         let session_id = session_id.clone();
-                        let lock = lock.clone();
-                        let workflow_smoke_check_cwd = workflow_smoke_check_cwd.clone();
-                        let workflow_smoke_check_display_cwd =
-                            workflow_smoke_check_display_cwd.clone();
-                        let workflow_smoke_check_session_dir =
-                            workflow_smoke_check_session_dir.clone();
-                        let workflow_smoke_check_permits =
-                            Arc::clone(&workflow_smoke_check_permits);
-                        let authored_path_param_names = authored_path_param_names.clone();
-                        let workflow_tool_name = workflow_tool_name.clone();
-                        let workflow_script_path_param = workflow_script_path_param.clone();
-                        let workflow_validate_only_param = workflow_validate_only_param.clone();
                         let latest_slot = std::sync::Arc::clone(&latest_slot);
                         let origin = origin.clone();
-                        async move {
-                            let slot =
-                                xai_grok_tools::types::source_summary::SourceSummarySlot::new();
-                            *latest_slot.lock() = slot.clone();
-                            let result = {
-                                let _guard = if let Some(ref l) = lock {
-                                    Some(l.lock().await)
-                                } else {
-                                    None
+                        let workflow_smoke_check_session_dir =
+                            workflow_smoke_check_session_dir.clone();
+                        move || {
+                            let prepared = Arc::clone(&prepared);
+                            let workspace_ops = workspace_ops.clone();
+                            let session_id = session_id.clone();
+                            let lock = lock.clone();
+                            let workflow_smoke_check_cwd = workflow_smoke_check_cwd.clone();
+                            let workflow_smoke_check_display_cwd =
+                                workflow_smoke_check_display_cwd.clone();
+                            let workflow_smoke_check_session_dir =
+                                workflow_smoke_check_session_dir.clone();
+                            let workflow_smoke_check_permits =
+                                Arc::clone(&workflow_smoke_check_permits);
+                            let authored_path_param_names = authored_path_param_names.clone();
+                            let workflow_tool_name = workflow_tool_name.clone();
+                            let workflow_script_path_param = workflow_script_path_param.clone();
+                            let workflow_validate_only_param = workflow_validate_only_param.clone();
+                            let latest_slot = std::sync::Arc::clone(&latest_slot);
+                            let origin = origin.clone();
+                            async move {
+                                let slot =
+                                    xai_grok_tools::types::source_summary::SourceSummarySlot::new();
+                                *latest_slot.lock() = slot.clone();
+                                let result = {
+                                    let _guard = if let Some(ref l) = lock {
+                                        Some(l.lock().await)
+                                    } else {
+                                        None
+                                    };
+                                    dispatch_observed(
+                                        &workspace_ops,
+                                        &prepared,
+                                        &session_id,
+                                        origin,
+                                        slot,
+                                    )
+                                    .await
                                 };
-                                dispatch_observed(
-                                    &workspace_ops,
-                                    &prepared,
-                                    &session_id,
-                                    origin,
-                                    slot,
-                                )
-                                .await
-                            };
-                            let mut result = result;
-                            let snapshot =
-                                if workflow_smoke_check_enabled && workflow_smoke_check_this_call {
+                                let mut result = result;
+                                let snapshot = if workflow_smoke_check_enabled
+                                    && workflow_smoke_check_this_call
+                                {
                                     workflow_write_smoke_check::snapshot_authored_workflow(
                                         authored_tool_kind,
                                         prepared.authored_arguments(),
@@ -897,30 +1078,34 @@ impl SessionActor {
                                 } else {
                                     None
                                 };
-                            let failure = match snapshot {
-                                Some(Ok(snapshot)) => {
-                                    workflow_write_smoke_check::check_snapshot(
-                                        snapshot,
-                                        &workflow_smoke_check_permits,
-                                    )
-                                    .await
+                                let failure = match snapshot {
+                                    Some(Ok(snapshot)) => {
+                                        workflow_write_smoke_check::check_snapshot(
+                                            snapshot,
+                                            &workflow_smoke_check_permits,
+                                        )
+                                        .await
+                                    }
+                                    Some(Err(failure)) => Some(failure),
+                                    None => None,
+                                };
+                                if let (Ok(tool_result), Some(failure)) = (&mut result, failure) {
+                                    workflow_write_smoke_check::append_validation_warning(
+                                        &mut tool_result.prompt_text,
+                                        &failure,
+                                        &workflow_tool_name,
+                                        &workflow_script_path_param,
+                                        &workflow_validate_only_param,
+                                    );
                                 }
-                                Some(Err(failure)) => Some(failure),
-                                None => None,
-                            };
-                            if let (Ok(tool_result), Some(failure)) = (&mut result, failure) {
-                                workflow_write_smoke_check::append_validation_warning(
-                                    &mut tool_result.prompt_text,
-                                    &failure,
-                                    &workflow_tool_name,
-                                    &workflow_script_path_param,
-                                    &workflow_validate_only_param,
-                                );
+                                result
                             }
-                            result
                         }
                     };
                     let wait_guard = interruptible
+                        .then(|| BlockingWaitGuard::enter(blocking_wait_depth.clone()));
+                    // `queue_input` harvests a message that arrives while the call runs.
+                    let _handoff_guard = (handoff != ForegroundHandoff::None)
                         .then(|| BlockingWaitGuard::enter(blocking_wait_depth.clone()));
                     let (result, wait_aborted) = if interruptible {
                         async {
@@ -982,6 +1167,94 @@ impl SessionActor {
                                         backend.hand_off_foreground_for_prompt(&prompt_id).await;
                                     } => Ok(backgrounded_task_tool_result()),
                                 }
+                            }
+                            .instrument(tool_span)
+                            .await,
+                            false,
+                        )
+                    } else if handoff == ForegroundHandoff::Command {
+                        // A running command makes no model request.
+                        let call_id = prepared.call_id.clone();
+                        let call = call_with_auth_retry(
+                            am.as_ref(),
+                            Some(&shared_recovery),
+                            &prepared.tool_name,
+                            run_tool,
+                        );
+                        (
+                            async {
+                                tokio::pin!(call);
+                                tokio::select! {
+                                    biased;
+                                    result = &mut call => return result,
+                                    () = async {
+                                        wait_for_wait_interrupt(
+                                            &pending_interjections,
+                                            &parent_interject,
+                                        )
+                                        .await;
+                                        background_command_for_queued_message(&tool_bridge, &call_id)
+                                            .await;
+                                    } => {}
+                                }
+                                tracing::info!(
+                                    tool = %prepared.tool_name,
+                                    "moved foreground command to background: queued message pending"
+                                );
+                                call.await
+                            }
+                            .instrument(tool_span)
+                            .await,
+                            false,
+                        )
+                    } else if handoff == ForegroundHandoff::Detach {
+                        // The call runs on its own task.
+                        let started = std::time::SystemTime::now();
+                        let mut call = {
+                            let am = am.clone();
+                            let shared_recovery = Arc::clone(&shared_recovery);
+                            let tool_name = prepared.tool_name.clone();
+                            tokio::spawn(async move {
+                                call_with_auth_retry(
+                                    am.as_ref(),
+                                    Some(&shared_recovery),
+                                    &tool_name,
+                                    run_tool,
+                                )
+                                .await
+                            })
+                        };
+                        (
+                            async {
+                                tokio::select! {
+                                    biased;
+                                    joined = &mut call => return joined.unwrap_or_else(|join| {
+                                        Err(xai_tool_runtime::ToolError::custom(
+                                            "tool_dispatch",
+                                            format!("the call ended without a result: {join}"),
+                                        ))
+                                    }),
+                                    _ = wait_for_wait_interrupt(
+                                        &pending_interjections,
+                                        &parent_interject,
+                                    ) => {}
+                                }
+                                let task_id = format!("bg-{}", prepared.call_id);
+                                tracing::info!(
+                                    tool = %prepared.tool_name,
+                                    %task_id,
+                                    "moved tool call to background: queued message pending"
+                                );
+                                tokio::spawn(report_detached_call(
+                                    call,
+                                    tool_notifications,
+                                    task_id.clone(),
+                                    prepared.tool_name.clone(),
+                                    workflow_smoke_check_session_dir.join("background_tool_calls"),
+                                    session_id.to_string(),
+                                    started,
+                                ));
+                                Ok(detached_call_tool_result(&task_id))
                             }
                             .instrument(tool_span)
                             .await,
