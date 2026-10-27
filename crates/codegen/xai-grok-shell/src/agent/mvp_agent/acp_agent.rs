@@ -1076,7 +1076,11 @@ impl acp::Agent for MvpAgent {
             .session_handle_waiting_for_load(&arguments.session_id)
             .await
             .ok_or_else(|| acp::Error::invalid_params().data("unknown session id"))?;
-        if self.models_manager.allowlist_excludes_all() {
+        // A `!` command runs in the local shell and calls no model, so no model gate applies to it.
+        let needs_model =
+            crate::extensions::prompt_meta::PromptBlockMeta::command_in(&arguments.prompt)
+                .is_none();
+        if needs_model && self.models_manager.allowlist_excludes_all() {
             let deny = crate::agent::remote_config::allowlist_excludes_all_message(
                 &self.cfg.borrow(),
             );
@@ -1091,7 +1095,8 @@ impl acp::Agent for MvpAgent {
         }
         let latched_model = self
             .session_registry
-            .unavailable_model(&arguments.session_id);
+            .unavailable_model(&arguments.session_id)
+            .filter(|_| needs_model);
         if let Some(unavailable_model) = latched_model {
             let models = self.models_manager.models();
             let available = self.models_manager.available();

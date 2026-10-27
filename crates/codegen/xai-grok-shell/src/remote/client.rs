@@ -634,7 +634,7 @@ pub(crate) fn fetch_models_for_api_base_blocking(
     api_key: Option<&str>,
 ) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
     let url = models_list_url_for_base(base_url.trim_end_matches('/'));
-    fetch_models_for_list_url_blocking(&url, api_key)
+    fetch_models_for_list_url_blocking(&url, api_key, &[])
 }
 
 /// Fetch and parse a listing from an exact URL.
@@ -642,9 +642,12 @@ pub(crate) fn fetch_models_for_api_base_blocking(
 /// base. A provider that serves its listing somewhere else
 /// (`[model_providers.<id>].models_list_url`) names the URL itself, and
 /// deriving one from it would append a second `/models`.
+/// `headers` are the provider's own request headers. A gateway that routes or
+/// authenticates by header answers the listing only with them.
 pub(crate) fn fetch_models_for_list_url_blocking(
     url: &str,
     api_key: Option<&str>,
+    headers: &[(String, String)],
 ) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
     let client = crate::http::shared_startup_blocking_client();
     // The listing carries no base of its own, so an entry that names none falls back to this.
@@ -652,6 +655,9 @@ pub(crate) fn fetch_models_for_list_url_blocking(
     allow_endpoint(url)?;
     tracing::debug!(models_url = %url, "Fetching models for BYOK/custom API base");
     let mut request = client.get(url);
+    for (name, value) in headers {
+        request = request.header(name.as_str(), value.as_str());
+    }
     if let Some(key) = api_key
         && !key.is_empty()
     {
