@@ -90,7 +90,33 @@ pub fn build_rows_with_roster(
     home: Option<&str>,
     roster: &[RosterEntry],
 ) -> Vec<DashboardRow> {
-    let mut rows = build_local_rows(agents, pinned, home);
+    build_rows_with_roster_and_inactive(
+        agents,
+        pinned,
+        reorder,
+        grouping,
+        filter,
+        home,
+        roster,
+        &super::state::InactiveMoves::new(),
+    )
+}
+
+/// [`build_rows_with_roster`] plus the dashboard's dismissed-to-Inactive map.
+/// A local Idle row listed in `inactive_moves` is emitted as `RowState::Inactive` with the move time
+/// as its recency anchor; `Working` / `NeedsInput` classification still wins, so dismissed sessions
+/// reappear while they run and return to Inactive once they settle.
+pub fn build_rows_with_roster_and_inactive(
+    agents: &IndexMap<AgentId, AgentView>,
+    pinned: &std::collections::BTreeSet<DashboardRowId>,
+    reorder: &[DashboardRowId],
+    grouping: super::state::Grouping,
+    filter: &Filter,
+    home: Option<&str>,
+    roster: &[RosterEntry],
+    inactive_moves: &super::state::InactiveMoves,
+) -> Vec<DashboardRow> {
+    let mut rows = build_local_rows(agents, pinned, home, inactive_moves);
     append_roster_rows(&mut rows, roster, agents, pinned, home);
     apply_filter(&mut rows, filter, home);
     sort_rows(&mut rows, grouping, reorder);
@@ -155,7 +181,7 @@ pub(crate) fn build_rows_with_workspace(
                 return None;
             }
             if let Some((id, agent)) = live {
-                return Some(top_level_row(id, agent, is_pinned, home));
+                return Some(top_level_row(id, agent, is_pinned, home, None));
             }
             Some(workspace_member_row(member, is_pinned, home))
         })
@@ -165,7 +191,7 @@ pub(crate) fn build_rows_with_workspace(
         if is_empty_idle_top_level(agent) {
             return None;
         }
-        Some(top_level_row(*id, agent, false, home))
+        Some(top_level_row(*id, agent, false, home, None))
     }));
     apply_filter(&mut rows, filter, home);
     sort_rows(&mut rows, inputs.grouping(), &reorder);
@@ -257,6 +283,7 @@ fn build_local_rows(
     agents: &IndexMap<AgentId, AgentView>,
     pinned: &std::collections::BTreeSet<DashboardRowId>,
     home: Option<&str>,
+    inactive_moves: &super::state::InactiveMoves,
 ) -> Vec<DashboardRow> {
     let mut rows = Vec::new();
     for (id, agent) in agents.iter() {
@@ -264,7 +291,14 @@ fn build_local_rows(
         if is_empty_idle_top_level(agent) && !pinned.contains(&top_id) {
             continue;
         }
-        rows.push(top_level_row(*id, agent, pinned.contains(&top_id), home));
+        let moved_at = inactive_moves.get(&top_id).copied();
+        rows.push(top_level_row(
+            *id,
+            agent,
+            pinned.contains(&top_id),
+            home,
+            moved_at,
+        ));
     }
     rows
 }
@@ -457,13 +491,28 @@ fn top_level_label(agent: &AgentView) -> String {
     }
     NEW_SESSION_LABEL.to_string()
 }
-fn top_level_row(id: AgentId, agent: &AgentView, pinned: bool, home: Option<&str>) -> DashboardRow {
-    let state = classify_top_level(agent);
+fn top_level_row(
+    id: AgentId,
+    agent: &AgentView,
+    pinned: bool,
+    home: Option<&str>,
+    moved_to_inactive_at: Option<SystemTime>,
+) -> DashboardRow {
+    let classified = classify_top_level(agent);
+    // A dismissed session rejoins the active groups only while it has live work to show.
+    let state = if classified == RowState::Idle && moved_to_inactive_at.is_some() {
+        RowState::Inactive
+    } else {
+        classified
+    };
     let label = top_level_label(agent);
     let subtitle = top_level_subtitle(agent);
     let activity = top_level_activity(agent, state);
     let secondary_line = top_level_secondary_line(agent, state, activity.as_deref());
-    let last_change_at = top_level_last_change_at(agent, state);
+    let last_change_at = match (state, moved_to_inactive_at) {
+        (RowState::Inactive, Some(at)) => at,
+        _ => top_level_last_change_at(agent, state),
+    };
     let mut badges = Vec::new();
     if agent.is_worktree {
         badges.push(RowBadge::Worktree);
@@ -1575,7 +1624,7 @@ mod tests {
     fn idle_local_agent_without_message_has_blank_secondary() {
         let agent = make_idle_agent_with_model(Some("grok-4.5"));
         assert_eq!(classify_top_level(&agent), RowState::Idle);
-        let row = top_level_row(AgentId(0), &agent, false, None);
+        let row = top_level_row(AgentId(0), &agent, false, None, None);
         assert_eq!(
             row.secondary_line, None,
             "the model must not appear on the list row anymore",
@@ -1585,7 +1634,7 @@ mod tests {
     #[test]
     fn idle_local_agent_without_message_or_model_has_no_secondary() {
         let agent = make_idle_agent_with_model(None);
-        let row = top_level_row(AgentId(0), &agent, false, None);
+        let row = top_level_row(AgentId(0), &agent, false, None, None);
         assert_eq!(row.secondary_line, None);
     }
     /// A worktree agent's subtitle shows the branch, the worktree's human label, and a `worktree` marker.
@@ -1668,7 +1717,7 @@ mod tests {
                 .session
                 .bg_tasks
                 .insert("t1".into(), make_task(status));
-            let row = top_level_row(AgentId(0), &agent, false, None);
+            let row = top_level_row(AgentId(0), &agent, false, None, None);
             assert_eq!(
                 row.badges.contains(&RowBadge::Tasks(1)),
                 expect_badge,
@@ -1706,7 +1755,7 @@ mod tests {
             .bg_tasks
             .insert("m1".into(), running_bg_task("m1", true));
         assert_eq!(classify_top_level(&agent), RowState::Working);
-        let row = top_level_row(AgentId(0), &agent, false, None);
+        let row = top_level_row(AgentId(0), &agent, false, None, None);
         assert_eq!(vec![RowBadge::Watchers(1)], row.badges);
         assert_eq!(None, row.activity);
     }
@@ -1719,7 +1768,7 @@ mod tests {
             .scheduled_tasks
             .insert("l1".into(), scheduled_loop("l1"));
         assert_eq!(classify_top_level(&agent), RowState::Working);
-        let row = top_level_row(AgentId(0), &agent, false, None);
+        let row = top_level_row(AgentId(0), &agent, false, None, None);
         assert_eq!(vec![RowBadge::Watchers(1)], row.badges);
         assert_eq!(None, row.activity);
     }
@@ -1744,7 +1793,7 @@ mod tests {
             .scheduled_tasks
             .insert("l1".into(), scheduled_loop("l1"));
         assert_eq!(classify_top_level(&agent), RowState::Working);
-        let row = top_level_row(AgentId(0), &agent, false, None);
+        let row = top_level_row(AgentId(0), &agent, false, None, None);
         assert_eq!(vec![RowBadge::Tasks(2), RowBadge::Watchers(2)], row.badges);
     }
     /// Replay loading remains live activity while background work is present.
@@ -1757,7 +1806,7 @@ mod tests {
             .bg_tasks
             .insert("m1".into(), running_bg_task("m1", true));
         assert_eq!(classify_top_level(&agent), RowState::Working);
-        let row = top_level_row(AgentId(0), &agent, false, None);
+        let row = top_level_row(AgentId(0), &agent, false, None, None);
         assert_eq!(
             row.activity.as_deref(),
             Some("Loading…"),

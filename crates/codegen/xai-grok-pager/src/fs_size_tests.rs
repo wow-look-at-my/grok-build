@@ -91,12 +91,19 @@ fn a_root_off_the_anchor_is_measured_by_nobody() {
     std::fs::write(worktree.join(".git"), "gitdir: /repo/.git/worktrees/wt-a\n").unwrap();
     std::fs::write(worktree.join("payload.bin"), vec![b'x'; 65536]).unwrap();
     let elsewhere = Volume::of(tmp.path()).other_device_for_test();
+    let git_bytes = physical_file_size(&std::fs::metadata(worktree.join(".git")).unwrap());
+    let payload_bytes =
+        physical_file_size(&std::fs::metadata(worktree.join("payload.bin")).unwrap());
+    let expected = git_bytes + payload_bytes;
     let home = physical_buckets(&root, Volume::of(&root));
-    assert!(home.total.bytes().is_some_and(|bytes| bytes >= 65536));
-    assert!(
-        home.buckets
-            .get(&worktree)
-            .is_some_and(|m| m.bytes().is_some_and(|b| b >= 65536)),
+    assert_eq!(
+        Some(expected),
+        home.total.bytes(),
+        "the total is the worktree files' physical size"
+    );
+    assert_eq!(
+        Some(expected),
+        home.buckets.get(&worktree).and_then(|m| m.bytes()),
         "on its own volume the worktree is a counted bucket"
     );
     let foreign = physical_buckets(&root, elsewhere);

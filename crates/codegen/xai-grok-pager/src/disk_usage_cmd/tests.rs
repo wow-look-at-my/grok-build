@@ -359,12 +359,14 @@ fn top_level_symlink_costs_its_own_inode_not_the_target() {
     std::os::unix::fs::symlink(&external, &link).unwrap();
     let report = collect_report(&home).unwrap();
     let link_bytes = physical_file_size(&std::fs::symlink_metadata(&link).unwrap());
-    let target_bytes = physical_file_size(&std::fs::metadata(&external).unwrap());
     assert!(
-        link_bytes < target_bytes,
-        "the target must be big enough for following it to be visible: \
-         link {link_bytes}, target {target_bytes}"
+        link_bytes > 0,
+        "the link's own inode is measurable, so the totals below are not vacuous"
     );
+    // With compression or delayed allocation the target can report the same
+    // physical size as an inode, so no size comparison can prove the walk did
+    // not follow it. The totals are the guard: following would charge the
+    // target's cost instead of the link's own.
     assert_eq!(
         report.root_files_bytes, link_bytes,
         "a top-level symlink must cost exactly its own inode, never the target"
@@ -456,8 +458,10 @@ fn a_row_off_the_anchor_reports_no_size() {
     assert_eq!(size, Measure::Elsewhere);
     assert_eq!(size.bytes(), None, "no row prints bytes no total holds");
     assert_eq!(issues.other_filesystems, 1);
-    assert!(
-        measured(&wt).is_some_and(|bytes| bytes >= 65536),
+    let payload_bytes = physical_file_size(&std::fs::metadata(wt.join("payload.bin")).unwrap());
+    assert_eq!(
+        Some(payload_bytes),
+        measured(&wt),
         "the bytes are there to measure: the anchor is the only reason the row has none"
     );
 }
@@ -589,8 +593,8 @@ fn the_registry_open_lands_after_sizing() {
         sidecars.iter().all(|p| !p.exists()),
         "a closed connection checkpoints its sidecars away"
     );
-    let report = collect_report(&home).unwrap();
     let db_bytes = physical_file_size(&std::fs::symlink_metadata(&db_path).unwrap());
+    let report = collect_report(&home).unwrap();
     assert_eq!(
         report.root_files_bytes, db_bytes,
         "the total holds the database and nothing this run's open created"
