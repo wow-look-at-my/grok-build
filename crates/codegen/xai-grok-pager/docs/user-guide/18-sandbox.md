@@ -42,7 +42,7 @@ The jail binds these paths, in this order:
 2. A fresh `/proc` and `/dev`.
 3. `/tmp` and `~/.cache` (and `$XDG_CACHE_HOME`) as overlays of the host directories. The jail reads the host files, and its writes go to a tmpfs that disappears with the session. Nothing written there touches the host. bubblewrap before 0.11, or a setuid bubblewrap, cannot mount an overlay. There both are empty tmpfs mounts and grok prints a warning.
 4. Each `--ro PATH` and `--rw PATH`, in the order you typed them.
-5. `$GROK_HOME` (`~/.grok`), read-write.
+5. `$GROK_HOME` (`~/.grok`), read-write. A symlinked `~/.grok` works: the jail mounts it at the path grok uses. A file or folder that `~/.grok` links to elsewhere, such as a `config.toml` kept in a dotfiles repository, has its folder bound read-write too. Settings save in place. A link to a folder that contains your home directory is not bound, and grok prints a warning.
 
 A `--rw` on a parent, such as `--rw ~` or a working directory of `~`, does not expose the host `~/.cache` or `/tmp`. They are mounted over it. A flag on the directory itself or a path in it, such as `--rw ~/.cache/go-build`, gives the host directory back. To change the default, set `tmp` or `cache` in the `[jail]` table of `~/.grok/config.toml` to `overlay`, `tmpfs`, `rw` or `ro`.
 

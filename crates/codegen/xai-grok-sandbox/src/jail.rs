@@ -410,6 +410,10 @@ pub struct JailPlan {
     pub overlay: bool,
     /// macOS: the session directory `XDG_CACHE_HOME` points at. Seatbelt cannot mount, so this holds the cache overlay.
     pub cache_redirect: Option<PathBuf>,
+    /// `$GROK_HOME` as the jailed process names it, when that differs from the canonical `grok_home`.
+    pub grok_home_alias: Option<PathBuf>,
+    /// Folders outside `$GROK_HOME` that its top-level symlinks point into, bound with the same access.
+    pub grok_home_links: Vec<PathBuf>,
 }
 
 /// Resolve a request into a plan. Every path must exist: a missing bind is a hole the caller cannot see. `defaults` is the config layer (see [`JailDefaults`]) that supplies the per-path access where the command line is silent. The runtime caller loads it via [`JailDefaults::load`], tests pass an explicit value so they never depend on the host's `config.toml`. The working directory is bound read-write by default, so a jail built with the pathbox marker (`--sandbox=pathbox`). Otherwise, a path flag can write in the cwd without an explicit `--rw .`. The effective cwd access is the LAST user mount that contains the cwd (`defaults.cwd` when none does). The effective cwd access also is that single cwd mount is placed at the FRONT of `plan.mounts`. Front-placement plus the effective access is what lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`. The Seatbelt profile emits no stale write-allow for the cwd and bwrap binds it read-only. `parse_jail_args` is untouched — the default is a plan-level injection, not a flag.
@@ -441,9 +445,12 @@ pub fn build_plan(
         path: grok_home.display().to_string(),
         source,
     })?;
+    let literal_home = grok_home.clone();
     let grok_home = dunce::canonicalize(&grok_home).unwrap_or(grok_home);
     let self_exe = std::env::current_exe().map_err(JailError::NoSelfExe)?;
     let cwd = std::env::current_dir().map_err(JailError::NoCwd)?;
+    let grok_home_alias = Some(cwd.join(literal_home)).filter(|alias| *alias != grok_home);
+    let grok_home_links = grok_home_link_targets(&grok_home);
     let cwd = dunce::canonicalize(&cwd).unwrap_or(cwd);
     // A `--rn` that contains or equals the cwd hides it, but the jail must
     // chdir into the cwd to run.
@@ -490,9 +497,60 @@ pub fn build_plan(
         // The runtime caller probes bwrap and sets these. A plan never mounts an overlay it has not proven.
         overlay: false,
         cache_redirect: None,
+        grok_home_alias,
+        grok_home_links,
     };
     plan.check_cwd_is_bound()?;
     Ok(plan)
+}
+
+/// The folders the top-level symlinks of `grok_home` point into, outside it.
+/// A file link binds its folder, because a save writes a temp file beside
+/// the target and renames it. A folder that contains `grok_home` or the
+/// user's home is never bound: that would expose all of home.
+fn grok_home_link_targets(grok_home: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(grok_home) else {
+        return Vec::new();
+    };
+    let user_home = xai_dirs::home_dir().map(|home| dunce::canonicalize(&home).unwrap_or(home));
+    let mut targets: Vec<PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        if !entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
+            continue;
+        }
+        // A dangling link has nothing to bind.
+        let Ok(target) = dunce::canonicalize(entry.path()) else {
+            continue;
+        };
+        if target.starts_with(grok_home) {
+            continue;
+        }
+        let folder = if target.is_dir() {
+            target
+        } else {
+            match target.parent() {
+                Some(parent) => parent.to_path_buf(),
+                None => continue,
+            }
+        };
+        if grok_home.starts_with(&folder)
+            || user_home
+                .as_ref()
+                .is_some_and(|home| home.starts_with(&folder))
+        {
+            eprintln!(
+                "warning: --sandbox: {} points into {}, which contains your home directory; the jail does not bind it",
+                entry.path().display(),
+                folder.display()
+            );
+            continue;
+        }
+        if !targets.contains(&folder) {
+            targets.push(folder);
+        }
+    }
+    targets.sort();
+    targets
 }
 
 /// The file that marks a directory as a session directory this module made.
@@ -735,17 +793,19 @@ pub fn bwrap_command(plan: &JailPlan) -> std::process::Command {
         push_bwrap_scratch(&mut cmd, &path, handling, plan.overlay);
     }
     // `$GROK_HOME`, bound after the user mounts. A config `grok_home = "ro"`
-    // binds it read-only; the release default (`rw`) is unchanged. Because it
-    // is bound last it survives a user `--ro` aimed at it either way.
-    match plan.defaults.grok_home {
-        Access::Rw => {
-            cmd.arg("--bind").arg(&plan.grok_home).arg(&plan.grok_home);
-        }
-        Access::Ro | Access::Deny => {
-            cmd.arg("--ro-bind")
-                .arg(&plan.grok_home)
-                .arg(&plan.grok_home);
-        }
+    // binds it read-only; the release default (`rw`) is unchanged.
+    let home_flag = match plan.defaults.grok_home {
+        Access::Rw => "--bind",
+        Access::Ro | Access::Deny => "--ro-bind",
+    };
+    cmd.arg(home_flag).arg(&plan.grok_home).arg(&plan.grok_home);
+    for link in &plan.grok_home_links {
+        cmd.arg(home_flag).arg(link).arg(link);
+    }
+    // The path the jailed process computes for `$GROK_HOME`. Without it a
+    // symlinked `~/.grok` does not exist in the jail.
+    if let Some(alias) = &plan.grok_home_alias {
+        cmd.arg(home_flag).arg(&plan.grok_home).arg(alias);
     }
     cmd.arg("--ro-bind-try")
         .arg(&plan.self_exe)
@@ -824,6 +884,8 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
         .chain([&plan.grok_home, &plan.temp_dir])
         .chain(&plan.cache_dirs)
         .chain(&plan.cache_redirect)
+        .chain(&plan.grok_home_links)
+        .chain(&plan.grok_home_alias)
     {
         for ancestor in path
             .ancestors()
@@ -895,6 +957,25 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
         profile.push_str(&format!(
             "(allow file-write* (subpath \"{}\"))\n",
             sbpl_escape(&plan.grok_home)
+        ));
+    }
+    for link in &plan.grok_home_links {
+        profile.push_str(&format!(
+            "(allow file-read* (subpath \"{}\"))\n",
+            sbpl_escape(link)
+        ));
+        if plan.defaults.grok_home == Access::Rw {
+            profile.push_str(&format!(
+                "(allow file-write* (subpath \"{}\"))\n",
+                sbpl_escape(link)
+            ));
+        }
+    }
+    // Seatbelt checks the resolved path, so the symlink itself only needs a read.
+    if let Some(alias) = &plan.grok_home_alias {
+        profile.push_str(&format!(
+            "(allow file-read* (literal \"{}\"))\n",
+            sbpl_escape(alias)
         ));
     }
     profile.push_str(&format!(
@@ -1380,6 +1461,8 @@ mod tests {
             cache_dirs: vec![PathBuf::from("/home/u/.cache")],
             overlay: false,
             cache_redirect: None,
+            grok_home_alias: None,
+            grok_home_links: Vec::new(),
         }
     }
 
@@ -2700,6 +2783,76 @@ mod tests {
             year.exists(),
             "a symlinked sandbox-tmp points at somebody else's folder"
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn grok_home_links_bind_the_folders_their_targets_live_in() {
+        use std::os::unix::fs::symlink;
+        let root = FixtureHome::new("home-links");
+        let base = dunce::canonicalize(&root.0).unwrap();
+        let grok = base.join("grok");
+        let conf = base.join("dotfiles/conf");
+        let skills = base.join("skills");
+        for dir in [&grok, &conf, &skills, &grok.join("sessions")] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(conf.join("config.toml"), "").unwrap();
+        symlink(conf.join("config.toml"), grok.join("config.toml")).unwrap();
+        symlink(&skills, grok.join("skills")).unwrap();
+        symlink(grok.join("sessions"), grok.join("inner")).unwrap();
+        symlink(base.join("missing"), grok.join("dangling")).unwrap();
+        symlink("/", grok.join("root")).unwrap();
+        assert_eq!(
+            grok_home_link_targets(&grok),
+            vec![conf, skills],
+            "a file link binds its folder, a folder link binds itself; links inside \
+             grok home, dangling links and a link to a folder holding home bind nothing"
+        );
+    }
+
+    #[test]
+    fn bwrap_binds_the_grok_home_alias_and_links_with_grok_home_access() {
+        let mut plan = plan_fixture(Vec::new());
+        plan.grok_home_alias = Some(PathBuf::from("/home/u/.grok-link"));
+        plan.grok_home_links = vec![PathBuf::from("/home/u/dotfiles")];
+        let args = bwrap_args(&plan);
+        let home =
+            position_of(&args, &["--bind", "/home/u/.grok", "/home/u/.grok"]).expect("home bind");
+        let link = position_of(&args, &["--bind", "/home/u/dotfiles", "/home/u/dotfiles"])
+            .expect("link bind");
+        let alias = position_of(&args, &["--bind", "/home/u/.grok", "/home/u/.grok-link"])
+            .expect("the canonical home mounted at the path the jail uses");
+        let separator = args.iter().position(|a| a == "--").expect("separator");
+        assert!(home < link && link < alias && alias < separator, "{args:?}");
+
+        plan.defaults.grok_home = Access::Ro;
+        let args = bwrap_args(&plan);
+        for window in [
+            ["--ro-bind", "/home/u/dotfiles", "/home/u/dotfiles"],
+            ["--ro-bind", "/home/u/.grok", "/home/u/.grok-link"],
+        ] {
+            assert!(
+                position_of(&args, &window).is_some(),
+                "grok_home = ro must hold for {window:?}: {args:?}"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn seatbelt_grants_the_grok_home_alias_and_links() {
+        let mut plan = plan_fixture(Vec::new());
+        plan.grok_home_alias = Some(PathBuf::from("/home/u/.grok-link"));
+        plan.grok_home_links = vec![PathBuf::from("/home/u/dotfiles")];
+        let profile = seatbelt_profile(&plan);
+        for rule in [
+            "(allow file-read* (literal \"/home/u/.grok-link\"))",
+            "(allow file-read* (subpath \"/home/u/dotfiles\"))",
+            "(allow file-write* (subpath \"/home/u/dotfiles\"))",
+        ] {
+            assert!(profile.contains(rule), "missing {rule}: {profile}");
+        }
     }
 
     #[test]
