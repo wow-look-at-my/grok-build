@@ -1195,7 +1195,7 @@ impl SessionActor {
                             let am = am.clone();
                             let shared_recovery = Arc::clone(&shared_recovery);
                             let tool_name = prepared.tool_name.clone();
-                            tokio::task::spawn_local(async move {
+                            tokio::spawn(async move {
                                 call_with_auth_retry(
                                     am.as_ref(),
                                     Some(&shared_recovery),
@@ -1226,7 +1226,7 @@ impl SessionActor {
                                     %task_id,
                                     "moved MCP call to background: queued message pending"
                                 );
-                                tokio::task::spawn_local(report_backgrounded_mcp_call(
+                                tokio::spawn(report_backgrounded_mcp_call(
                                     call,
                                     tool_notifications,
                                     task_id.clone(),
