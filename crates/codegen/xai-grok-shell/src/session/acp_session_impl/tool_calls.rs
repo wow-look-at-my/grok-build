@@ -87,29 +87,6 @@ pub(super) fn is_foreground_task_call(tool_name: &str, args: &serde_json::Value)
             _ => false,
         }
 }
-/// A shell command that blocks the turn until it exits. A queued user message moves it to the background.
-/// A toolset can rename `is_background` to `background`, so read both names.
-pub(super) fn is_foreground_command_call(
-    kind: Option<xai_grok_tools::types::tool::ToolKind>,
-    args: &serde_json::Value,
-) -> bool {
-    kind == Some(xai_grok_tools::types::tool::ToolKind::Execute)
-        && !match args.get("is_background").or_else(|| args.get("background")) {
-            Some(serde_json::Value::Bool(flag)) => *flag,
-            Some(serde_json::Value::String(flag)) => flag.trim().eq_ignore_ascii_case("true"),
-            _ => false,
-        }
-}
-/// Move the command of `call_id` to the background. The command can still be in startup when the message arrives, so try again until it moves.
-async fn background_command_for_queued_message(
-    bridge: &xai_grok_tools::bridge::ToolBridge,
-    call_id: &str,
-) {
-    while !bridge.background_foreground_command(call_id).await {
-        tokio::time::sleep(COMMAND_HANDOFF_RETRY).await;
-    }
-}
-const COMMAND_HANDOFF_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
 /// Model-facing result of a foreground `task` call that a queued user message cut short.
 fn backgrounded_task_tool_result() -> ToolRunResult {
     let text = "The subagent was moved to the background because the user sent a message. \
@@ -126,12 +103,8 @@ fn backgrounded_task_tool_result() -> ToolRunResult {
         effective_tool_name: None,
     }
 }
-fn should_flush_held_queue_before_wait(
-    has_interruptible_wait: bool,
-    steer: bool,
-    goal_loop_active: bool,
-) -> bool {
-    has_interruptible_wait && steer && !goal_loop_active
+fn should_flush_held_queue_before_wait(has_interruptible_wait: bool, steer: bool) -> bool {
+    has_interruptible_wait && steer
 }
 use crate::tools::tool_context::BlockingWaitGuard;
 /// Clears `awaiting_plan_approval` (and re-persists) when the [`SessionActor::request_plan_approval`] await resolves or is dropped.
@@ -754,44 +727,18 @@ impl SessionActor {
         let workflow_smoke_check_permits = Arc::new(tokio::sync::Semaphore::new(
             workflow_write_smoke_check::MAX_CONCURRENT_CHECKS,
         ));
-        let command_calls: Vec<bool> = {
-            let agent = self.agent.borrow();
-            let bridge = agent.tool_bridge();
-            approved
-                .iter()
-                .map(|prepared| {
-                    is_foreground_command_call(
-                        bridge.tool_kind(&prepared.tool_name),
-                        prepared.authored_arguments(),
-                    )
-                })
-                .collect()
-        };
-        let has_interruptible_wait =
-            approved
-                .iter()
-                .zip(&command_calls)
-                .any(|(prepared, command)| {
-                    *command
-                        || is_interruptible_wait_tool(
-                            &prepared.tool_name,
-                            prepared.authored_arguments(),
-                        )
-                        || is_foreground_task_call(
-                            &prepared.tool_name,
-                            prepared.authored_arguments(),
-                        )
-                });
-        let tool_bridge = self.tool_bridge_handle();
+        let has_interruptible_wait = approved.iter().any(|prepared| {
+            is_interruptible_wait_tool(&prepared.tool_name, prepared.authored_arguments())
+                || is_foreground_task_call(&prepared.tool_name, prepared.authored_arguments())
+        });
         if should_flush_held_queue_before_wait(
             has_interruptible_wait,
             crate::util::config::follow_up_steer_enabled().await,
-            self.goal_loop_active(),
         ) {
             self.promote_queued_as_interjections().await;
-        } else if has_interruptible_wait && !self.goal_loop_active() {
-            // Queue mode: a blocking wait is a gap with no model request in it, so deliver what the turn loop would harvest there.
-            self.harvest_queued_prompts_into_interjections(false).await;
+        } else if has_interruptible_wait {
+            // Queue mode: a blocking wait is a gap with no model request in it, so deliver every row an empty Enter would.
+            self.harvest_queued_prompts_into_interjections(true).await;
         }
         let pending_interjections = self.pending_interjections.clone();
         let (parent_interject, running_turn, running_prompt_id) = {
@@ -834,11 +781,6 @@ impl SessionActor {
                     is_foreground_task_call(&prepared.tool_name, prepared.authored_arguments())
                         .then(|| subagent_event_tx.clone().zip(running_prompt_id.clone()))
                         .flatten();
-                let command_handoff = command_calls
-                    .get(idx)
-                    .copied()
-                    .unwrap_or(false)
-                    .then(|| Arc::clone(&tool_bridge));
                 let prepared = {
                     let mut dispatch_prepared = prepared.clone();
                     if interruptible
@@ -980,10 +922,6 @@ impl SessionActor {
                     };
                     let wait_guard = interruptible
                         .then(|| BlockingWaitGuard::enter(blocking_wait_depth.clone()));
-                    // `queue_input` harvests a message that arrives while the command runs.
-                    let _command_guard = command_handoff
-                        .is_some()
-                        .then(|| BlockingWaitGuard::enter(blocking_wait_depth.clone()));
                     let (result, wait_aborted) = if interruptible {
                         async {
                             tokio::select! {
@@ -1044,41 +982,6 @@ impl SessionActor {
                                         backend.hand_off_foreground_for_prompt(&prompt_id).await;
                                     } => Ok(backgrounded_task_tool_result()),
                                 }
-                            }
-                            .instrument(tool_span)
-                            .await,
-                            false,
-                        )
-                    } else if let Some(bridge) = command_handoff {
-                        // A running command makes no model request.
-                        let call_id = prepared.call_id.clone();
-                        let call = call_with_auth_retry(
-                            am.as_ref(),
-                            Some(&shared_recovery),
-                            &prepared.tool_name,
-                            run_tool,
-                        );
-                        (
-                            async {
-                                tokio::pin!(call);
-                                tokio::select! {
-                                    biased;
-                                    result = &mut call => return result,
-                                    () = async {
-                                        wait_for_wait_interrupt(
-                                            &pending_interjections,
-                                            &parent_interject,
-                                        )
-                                        .await;
-                                        background_command_for_queued_message(&bridge, &call_id)
-                                            .await;
-                                    } => {}
-                                }
-                                tracing::info!(
-                                    tool = %prepared.tool_name,
-                                    "moved foreground command to background: queued message pending"
-                                );
-                                call.await
                             }
                             .instrument(tool_span)
                             .await,
@@ -3898,17 +3801,13 @@ mod wait_interrupt_tests {
         );
     }
     #[test]
-    fn wait_start_flush_skips_queue_mode_and_active_goals() {
-        assert!(should_flush_held_queue_before_wait(true, true, false));
+    fn wait_start_flush_skips_queue_mode() {
+        assert!(should_flush_held_queue_before_wait(true, true));
         assert!(
-            !should_flush_held_queue_before_wait(true, false, false),
+            !should_flush_held_queue_before_wait(true, false),
             "queue mode harvests instead of promoting"
         );
-        assert!(
-            !should_flush_held_queue_before_wait(true, true, true),
-            "an active goal wait is not sendable; promoting would abort it immediately"
-        );
-        assert!(!should_flush_held_queue_before_wait(false, true, false));
+        assert!(!should_flush_held_queue_before_wait(false, true));
     }
     #[test]
     fn interruptible_wait_tool_only_when_timeout_positive() {

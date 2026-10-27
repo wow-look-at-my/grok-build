@@ -2503,6 +2503,66 @@ async fn queue_input_wait_folds_held_and_new_rows() {
         .await;
 }
 
+/// A wait is a gap during a goal run too, and it takes every row an empty Enter would.
+/// That includes a row queued before the turn started. Without this, a goal turn that
+/// waits on a background command holds the message until the command ends.
+#[tokio::test]
+async fn queue_input_wait_during_goal_delivers_pre_turn_and_new_rows() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (actor, _rx) = build_actor().await;
+            {
+                let mut state = actor.state.lock().await;
+                state.pending_inputs.push_back(user_item("running", "A"));
+                state.pending_inputs.push_back(user_item("before", "A"));
+                state.running_task = Some(running_task_stub("running"));
+            }
+            *actor.queued_at_turn_start.borrow_mut() =
+                ["running".to_string(), "before".to_string()].into();
+            *actor
+                .current_prompt_id
+                .lock()
+                .expect("current_prompt_id mutex poisoned") = Some("running".into());
+            actor.goal_tracker.lock().create_goal(
+                "goal".into(),
+                "objective".into(),
+                None,
+                0,
+                "2026-01-01T00:00:00Z".into(),
+                None,
+            );
+
+            actor.tool_context.blocking_wait_depth.set_depth_for_test(1);
+            let (respond_to, _prx) = oneshot::channel();
+            let cancel = actor
+                .queue_input(queue_input_request(
+                    vec![acp::ContentBlock::Text(acp::TextContent::new("mid-wait"))],
+                    "mid-wait",
+                    respond_to,
+                ))
+                .await;
+            assert!(!cancel, "a plain row never cancels the goal turn");
+
+            let state = actor.state.lock().await;
+            let order: Vec<&str> = state
+                .pending_inputs
+                .iter()
+                .map(|i| i.prompt_id.as_str())
+                .collect();
+            assert_eq!(order, vec!["running"], "both rows go into the waiting turn");
+            drop(state);
+            let interjections: Vec<String> = actor
+                .pending_interjections
+                .drain_all()
+                .into_iter()
+                .map(|entry| entry.text)
+                .collect();
+            assert_eq!(interjections.len(), 2, "{interjections:?}");
+        })
+        .await;
+}
+
 #[tokio::test]
 #[serial_test::serial(follow_up_steer_cache)]
 async fn queue_input_queue_mode_wait_delivers_without_cancelling() {
