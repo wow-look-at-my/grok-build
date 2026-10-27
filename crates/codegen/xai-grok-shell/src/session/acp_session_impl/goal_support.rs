@@ -697,19 +697,6 @@ pub(super) fn unfinished_todos_bounce<'a>(
     (open > 0).then_some(out)
 }
 
-pub(super) fn format_blocked_chat_notification(reason: &str, detail: Option<&str>) -> String {
-    let mut out = String::with_capacity(reason.len() + detail.map_or(0, str::len) + 96);
-    out.push_str("Goal paused — verification blocked.\nReason: ");
-    out.push_str(reason);
-    out.push('\n');
-    if let Some(detail) = detail {
-        out.push_str(detail);
-        out.push('\n');
-    }
-    out.push_str("\nType /goal resume to continue after you've addressed it.");
-    out
-}
-
 /// Child token counters are cumulative across activations. Completed deltas are retained,
 /// and each reactivation anchors at the previous high-water mark so every token is counted once.
 #[derive(Debug)]
@@ -1877,7 +1864,9 @@ impl SessionActor {
     /// Goal completion is NEVER blocked, paused, or un-achieved (the goal is already Complete when this runs).
     /// Read-only: the spawn pins a read-only toolset and the prompt forbids edits.
     pub(super) async fn maybe_run_goal_summarizer(&self, attempt: u32) {
-        if !self.goal_summary_enabled {
+        if !self.goal_summary_enabled
+            || self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite
+        {
             return;
         }
         let Some(event_tx) = self.tool_context.subagent_event_tx.clone() else {
