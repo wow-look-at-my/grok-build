@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 use super::animation::{Animation, NEEDS_INPUT_BLINK_DIVISOR, PaintedAnimations, SPINNER_DIVISOR};
 pub use super::chrome::HeaderUpgradeCta;
 use super::layout::MIN_DASHBOARD_WIDTH;
-use super::row::{DashboardRow, build_rows_with_roster, build_rows_with_workspace};
+use super::row::{DashboardRow, build_rows_with_roster_and_inactive, build_rows_with_workspace};
 use super::state::{
     DashboardRowId, DashboardState, DashboardStopAction, Filter, Focusable, Grouping,
     LocationPickerState, RenameDraft, RowState, SectionKey,
@@ -86,7 +86,7 @@ pub(crate) fn render_dashboard(
     let rows = if workspace_dashboard_enabled {
         build_rows_with_workspace(agents, row_inputs, &state.filter, home)
     } else {
-        build_rows_with_roster(
+        build_rows_with_roster_and_inactive(
             agents,
             &state.pinned,
             &state.reorder,
@@ -94,6 +94,7 @@ pub(crate) fn render_dashboard(
             &state.filter,
             home,
             roster,
+            &state.inactive_moves,
         )
     };
     state.painted_animations = PaintedAnimations::default();
@@ -1633,9 +1634,7 @@ fn render_row(
     );
 
     let armed_delete = state.armed_delete_row_ref();
-    let show_delete = (!row.id.is_workspace() || state.workspace_membership_mode)
-        && row.state.allows_delete()
-        && !state.row_is_conversation(&row.id)
+    let show_delete = state.row_shows_close_control(row)
         && (state.hovered_row.as_ref() == Some(&row.id) || armed_delete == Some(&row.id));
     let delete_label = crate::glyphs::ballot_x_button();
     let delete_w = UnicodeWidthStr::width(delete_label) as u16;
@@ -1935,10 +1934,7 @@ fn render_narrow_rows_with_grouping(
             let gap_after_marker = 1u16;
             let chrome = marker_w + gap_after_marker + icon_w + 1;
             let armed_here = state.armed_delete_row_ref() == Some(&row.id);
-            let show_delete = (!row.id.is_workspace() || state.workspace_membership_mode)
-                && row.state.allows_delete()
-                && !state.row_is_conversation(&row.id)
-                && (hovered || armed_here);
+            let show_delete = state.row_shows_close_control(row) && (hovered || armed_here);
             let delete_label = crate::glyphs::ballot_x_button();
             let delete_w = UnicodeWidthStr::width(delete_label) as u16;
             let label_budget = body_width
@@ -2620,7 +2616,7 @@ fn render_footer(
                 } else if state.workspace_membership_mode {
                     "confirm archive"
                 } else {
-                    "confirm delete"
+                    "delete permanently"
                 };
             let hints = vec![
                 HintItem::new(key!('y'), confirm_label),
@@ -2641,7 +2637,7 @@ fn render_footer(
                 } else if state.workspace_membership_mode {
                     "archive this session"
                 } else {
-                    "delete this session"
+                    "delete this session permanently"
                 },
             };
             ShortcutsBar::new(&[])

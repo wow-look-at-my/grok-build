@@ -1679,7 +1679,8 @@ pub(super) fn workspace_rows(
     );
     (rows, inputs.grouping())
 }
-pub(super) fn dashboard_focusables(app: &AppView) -> Vec<crate::views::dashboard::Focusable> {
+/// The v1 dashboard rows in display order, from the same build the renderer runs.
+pub(super) fn dashboard_rows(app: &AppView) -> Vec<crate::views::dashboard::DashboardRow> {
     let Some(d) = app.dashboard.as_ref() else {
         return Vec::new();
     };
@@ -1689,21 +1690,25 @@ pub(super) fn dashboard_focusables(app: &AppView) -> Vec<crate::views::dashboard
     } else {
         &app.dashboard_local_sessions
     };
+    crate::views::dashboard::build_rows_with_roster_and_inactive(
+        &app.agents,
+        &d.pinned,
+        &d.reorder,
+        d.grouping,
+        &d.filter,
+        home,
+        roster,
+        &d.inactive_moves,
+    )
+}
+pub(super) fn dashboard_focusables(app: &AppView) -> Vec<crate::views::dashboard::Focusable> {
+    let Some(d) = app.dashboard.as_ref() else {
+        return Vec::new();
+    };
     let (rows, grouping) = if app.workspace_dashboard_enabled {
         workspace_rows(app, &d.filter)
     } else {
-        (
-            crate::views::dashboard::build_rows_with_roster(
-                &app.agents,
-                &d.pinned,
-                &d.reorder,
-                d.grouping,
-                &d.filter,
-                home,
-                roster,
-            ),
-            d.grouping,
-        )
+        (dashboard_rows(app), d.grouping)
     };
     crate::views::dashboard::render::focusables(
         &rows,
@@ -1983,6 +1988,51 @@ pub(super) fn dispatch_dashboard_delete(app: &mut AppView) -> Vec<Effect> {
         return vec![];
     }
     delete_dashboard_row(app, sel)
+}
+/// The row's `[✗]`: the row's current dashboard state decides the gesture.
+/// Idle rows move into the Inactive group immediately (session stays loaded, no confirmation);
+/// Inactive rows arm the permanent-delete confirmation and delete only on a second gesture or `y`.
+/// The v2 workspace dashboard keeps its history-preserving archive.
+pub(super) fn dispatch_dashboard_dismiss(
+    app: &mut AppView,
+    row: crate::views::dashboard::DashboardRowId,
+) -> Vec<Effect> {
+    use crate::views::dashboard::RowState;
+    {
+        let Some(dashboard) = app.dashboard.as_mut() else {
+            return vec![];
+        };
+        dashboard.focus_row(row.clone());
+        dashboard.list_focused = true;
+    }
+    if app.workspace_dashboard_enabled {
+        return arm_or_delete(app, row);
+    }
+    let state = dashboard_rows(app)
+        .into_iter()
+        .find(|candidate| candidate.id == row)
+        .map(|candidate| candidate.state);
+    match state {
+        Some(RowState::Inactive) => arm_or_delete(app, row),
+        Some(RowState::Idle) => {
+            move_dashboard_row_to_inactive(app, row);
+            vec![]
+        }
+        _ => vec![],
+    }
+}
+/// Dismiss an Idle row with a move-time anchor. The cursor moves to its neighbor,
+/// since the dismissed row now sits in a collapsed group.
+fn move_dashboard_row_to_inactive(app: &mut AppView, row: crate::views::dashboard::DashboardRowId) {
+    let neighbor = dashboard_neighbor_row(app, &row);
+    let Some(dashboard) = app.dashboard.as_mut() else {
+        return;
+    };
+    dashboard.move_to_inactive(row);
+    match neighbor {
+        Some(next) => dashboard.focus_row(next),
+        None => dashboard.focus_new_agent_button(),
+    }
 }
 /// Delete `row`, which the caller has confirmed is idle and armed.
 /// Takes `row` as a parameter (not read back off `delete_confirm`) and never cancels a turn or kills a task; delete is a settled-row operation.
