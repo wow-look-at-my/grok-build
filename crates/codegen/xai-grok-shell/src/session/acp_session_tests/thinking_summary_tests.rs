@@ -145,7 +145,7 @@ async fn a_long_thinking_block_is_summarized_keyed_to_its_own_call() {
             let (persistence_tx, mut prx) =
                 tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            actor.thinking_summaries_enabled = true;
+            actor.thinking_summaries_enabled.set(true);
             let actor = std::sync::Arc::new(actor);
 
             let server = MockInferenceServer::start().await.unwrap();
@@ -234,7 +234,7 @@ async fn short_thinking_is_summarized_too() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            actor.thinking_summaries_enabled = true;
+            actor.thinking_summaries_enabled.set(true);
             let actor = std::sync::Arc::new(actor);
 
             let server = MockInferenceServer::start().await.unwrap();
@@ -273,7 +273,7 @@ async fn a_session_resolved_with_the_switch_off_asks_nothing() {
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
             // Production sets this once at spawn from `[ui].thinking_summaries`.
-            actor.thinking_summaries_enabled = false;
+            actor.thinking_summaries_enabled.set(false);
             let actor = std::sync::Arc::new(actor);
 
             let server = MockInferenceServer::start().await.unwrap();
@@ -309,7 +309,7 @@ async fn a_second_summary_carries_the_first_as_its_direction_block() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            actor.thinking_summaries_enabled = true;
+            actor.thinking_summaries_enabled.set(true);
             // A couple of seconds between calls, so the default window covers both.
             actor.thinking_summary_history = ThinkingSummaryHistory::new(120, 5);
             let actor = std::sync::Arc::new(actor);
@@ -381,7 +381,7 @@ async fn a_summary_past_the_window_is_left_out_and_the_count_floor_carries_it() 
                 let (persistence_tx, _prx) =
                     tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
                 let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-                actor.thinking_summaries_enabled = true;
+                actor.thinking_summaries_enabled.set(true);
                 actor.thinking_summary_history =
                     ThinkingSummaryHistory::new(window_secs, min_count);
                 let actor = std::sync::Arc::new(actor);
@@ -430,7 +430,7 @@ async fn zero_window_and_zero_count_leave_the_summary_call_stateless() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            actor.thinking_summaries_enabled = true;
+            actor.thinking_summaries_enabled.set(true);
             actor.thinking_summary_history = ThinkingSummaryHistory::new(0, 0);
             let actor = std::sync::Arc::new(actor);
 
@@ -472,7 +472,7 @@ async fn the_second_summary_waits_for_the_first_request_to_finish() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            actor.thinking_summaries_enabled = true;
+            actor.thinking_summaries_enabled.set(true);
             let actor = std::sync::Arc::new(actor);
 
             let server = MockInferenceServer::start().await.unwrap();
@@ -586,7 +586,7 @@ async fn a_held_summary_leaves_the_caller_free_and_the_queue_closed() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            actor.thinking_summaries_enabled = true;
+            actor.thinking_summaries_enabled.set(true);
             let actor = std::sync::Arc::new(actor);
 
             let server = MockInferenceServer::start().await.unwrap();
@@ -641,7 +641,7 @@ async fn a_summary_call_asks_for_reasoning_off_on_the_wire() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            actor.thinking_summaries_enabled = true;
+            actor.thinking_summaries_enabled.set(true);
             let actor = std::sync::Arc::new(actor);
 
             let server = MockInferenceServer::start().await.unwrap();

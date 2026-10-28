@@ -1,6 +1,40 @@
+// Handle [`SessionCommand::ReloadThinkingSummaries`].
+
 use super::*;
 
 impl SessionActor {
+    /// Handle [`SessionCommand::ReloadThinkingSummaries`]. A config that does
+    /// not load keeps the current values.
+    pub(super) fn handle_reload_thinking_summaries(&self) {
+        let ui = match crate::config::load_effective_config()
+            .map_err(|e| e.to_string())
+            .and_then(|raw| crate::agent::config::Config::new_from_toml_cfg(&raw))
+        {
+            Ok(cfg) => cfg.ui,
+            Err(error) => {
+                tracing::error!(
+                    session_id = %self.session_info.id.0,
+                    %error,
+                    "thinking-summary reload skipped: the config did not load"
+                );
+                return;
+            }
+        };
+        let enabled = ui.thinking_summaries_enabled();
+        let window_secs = ui.thinking_summary_history_window_secs_value();
+        let min_count = ui.thinking_summary_history_min_count_value();
+        self.thinking_summaries_enabled.set(enabled);
+        self.thinking_summary_history
+            .set_limits(window_secs, min_count);
+        tracing::info!(
+            session_id = %self.session_info.id.0,
+            enabled,
+            window_secs,
+            min_count,
+            "thinking-summary settings reloaded from config"
+        );
+    }
+
     /// Summarize the thinking in `response`, keyed by its `stream_start_ms`.
     pub(crate) fn spawn_thinking_summary(
         self: &Arc<Self>,
@@ -8,7 +42,7 @@ impl SessionActor {
         stream_start_ms: Option<i64>,
     ) {
         use crate::session::helpers::thinking_summary as helpers;
-        if !self.thinking_summaries_enabled {
+        if !self.thinking_summaries_enabled.get() {
             return;
         }
         let Some(stream_start_ms) = stream_start_ms else {

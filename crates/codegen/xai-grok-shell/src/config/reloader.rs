@@ -45,6 +45,8 @@ pub enum ConfigUpdate {
     ModelsCacheChanged,
     /// A key the output-rate floor resolves from changed. Every resident session re-reads its floor.
     OutputRateFloorChanged,
+    /// `[ui].thinking_summaries` or a `[ui].thinking_summary_history_*` key changed. Every resident session re-reads them.
+    ThinkingSummariesChanged,
     /// Updated UI settings; the agent broadcasts `x.ai/config_changed` to IPC clients.
     Ui { theme: Option<String>, yolo: bool },
 }
@@ -347,6 +349,14 @@ impl ConfigReloader {
                 .send(ConfigUpdate::OutputRateFloorChanged);
         }
 
+        if thinking_summary_inputs(&self.last_global_config) != thinking_summary_inputs(&new_global)
+        {
+            info!("thinking-summary config change detected");
+            let _ = self
+                .config_update_tx
+                .send(ConfigUpdate::ThinkingSummariesChanged);
+        }
+
         // UI fields (theme, yolo)
         let old_ui = extract_ui_fields(&self.last_global_config);
         let new_ui = extract_ui_fields(&new_global);
@@ -388,6 +398,17 @@ fn output_rate_floor_inputs(config: &toml::Value) -> [Option<&toml::Value>; 8] {
         config.get("output_rate_floor"),
         config.get("model"),
         config.get("model_providers"),
+    ]
+}
+
+/// Every config value a session's thinking summaries read.
+fn thinking_summary_inputs(config: &toml::Value) -> [Option<&toml::Value>; 3] {
+    let ui = config.get("ui");
+    let ui_key = |key: &str| ui.and_then(|ui| ui.get(key));
+    [
+        ui_key("thinking_summaries"),
+        ui_key("thinking_summary_history_window_secs"),
+        ui_key("thinking_summary_history_min_count"),
     ]
 }
 
@@ -893,6 +914,28 @@ yolo = true
         assert_eq!(
             output_rate_floor_inputs(&base),
             output_rate_floor_inputs(&unrelated)
+        );
+    }
+
+    #[test]
+    fn thinking_summary_inputs_see_every_summary_key_and_nothing_else() {
+        let base: toml::Value = toml::from_str("[ui]\ntheme = \"dark\"").unwrap();
+        for changed in [
+            "[ui]\ntheme = \"dark\"\nthinking_summaries = false",
+            "[ui]\ntheme = \"dark\"\nthinking_summary_history_window_secs = 30",
+            "[ui]\ntheme = \"dark\"\nthinking_summary_history_min_count = 2",
+        ] {
+            let other: toml::Value = toml::from_str(changed).unwrap();
+            assert_ne!(
+                thinking_summary_inputs(&base),
+                thinking_summary_inputs(&other),
+                "{changed}"
+            );
+        }
+        let unrelated: toml::Value = toml::from_str("[ui]\ntheme = \"light\"").unwrap();
+        assert_eq!(
+            thinking_summary_inputs(&base),
+            thinking_summary_inputs(&unrelated)
         );
     }
 

@@ -1145,10 +1145,10 @@ pub(crate) struct SessionActor {
     /// Advanced when an attempt completes (success *or* failure, with catch-up past skipped checkpoints), and persisted to the watermark.
     /// Once it reaches the end the title is frozen.
     pub(crate) next_title_refresh_idx: std::cell::Cell<usize>,
-    /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`), resolved a single time at spawn.
-    pub(crate) thinking_summaries_enabled: bool,
-    /// The thinking summaries THIS session has produced, plus how far back the next summary call may look
-    /// (`[ui].thinking_summary_history_*`, resolved once at spawn).
+    /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`).
+    pub(crate) thinking_summaries_enabled: std::cell::Cell<bool>,
+    /// The thinking summaries THIS session has produced, plus how far back
+    /// the next summary call may look (`[ui].thinking_summary_history_*`).
     pub(crate) thinking_summary_history:
         crate::session::helpers::thinking_summary::ThinkingSummaryHistory,
     /// The summarization task this session queued most recently, in flight or not.
