@@ -4671,7 +4671,7 @@ fn nav_key_disarms_pending_delete_confirm() {
 }
 
 #[test]
-fn click_delete_control_arms_then_confirms() {
+fn click_delete_control_routes_to_dismiss_action() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     let mut state = DashboardState::new();
     let id = DashboardRowId::TopLevel(AgentId(0));
@@ -4684,19 +4684,56 @@ fn click_delete_control_arms_then_confirms() {
         row,
         modifiers: KeyModifiers::NONE,
     };
-    // First `[✗]` click only arms — it must not open/attach the session.
+    // The hit sends a dismiss action; the dispatcher decides move vs. confirm.
     let first = state.handle_mouse(&click(11, 2));
-    assert!(matches!(first, InputOutcome::Changed), "got {first:?}");
+    assert!(
+        matches!(&first, InputOutcome::Action(Action::DashboardDismissRow(row)) if row == &id),
+        "got {first:?}"
+    );
     assert!(!matches!(
         first,
         InputOutcome::Action(Action::DashboardAttach(_))
     ));
-    assert_eq!(state.armed_delete_row_ref(), Some(&id));
-    // Second click confirms.
+    assert!(state.delete_confirm.is_none());
+    assert_eq!(state.selected, Some(id.clone()));
+    assert!(state.list_focused);
+    // A second click re-emits the same decision rather than deleting from the mouse path.
     assert!(matches!(
         state.handle_mouse(&click(11, 2)),
-        InputOutcome::Action(Action::DashboardDelete)
+        InputOutcome::Action(Action::DashboardDismissRow(_))
     ));
+    assert!(state.delete_confirm.is_none());
+}
+
+#[test]
+fn move_to_inactive_records_an_anchor_and_clears_the_arm() {
+    use crate::views::dashboard::row::build_rows_with_roster_and_inactive;
+    use crate::views::dashboard::{Filter, Grouping, RowState};
+    let mut state = DashboardState::new();
+    let id = DashboardRowId::TopLevel(AgentId(0));
+    state.focus_row(id.clone());
+    state.arm_delete(id.clone());
+    state.move_to_inactive(id.clone());
+    assert!(state.is_dismissed_to_inactive(&id));
+    assert!(state.delete_confirm.is_none());
+
+    let mut agent = crate::app::agent_view::test_fixtures::make_agent();
+    agent.generated_session_title = Some("Dismissed".to_owned());
+    let agents = indexmap::IndexMap::from([(AgentId(0), agent)]);
+    let rows = build_rows_with_roster_and_inactive(
+        &agents,
+        &std::collections::BTreeSet::new(),
+        &[],
+        Grouping::State,
+        &Filter::None,
+        None,
+        &[],
+        &state.inactive_moves,
+    );
+    let row = rows.first().expect("row");
+    assert_eq!(row.id, id);
+    assert_eq!(row.state, RowState::Inactive);
+    assert_eq!(row.label, "Dismissed");
 }
 
 #[test]
