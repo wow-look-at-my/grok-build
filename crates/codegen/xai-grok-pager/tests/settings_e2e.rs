@@ -7234,18 +7234,29 @@ fn thinking_summaries_enter_dispatches_typed_setter() {
 }
 
 #[test]
-fn thinking_summaries_renders_under_appearance_category_shared_owned_restart_required() {
+fn thinking_summaries_renders_under_appearance_category_shared_owned_live() {
     let reg = SettingsRegistry::defaults();
     let meta = reg
         .find("thinking_summaries")
         .expect("thinking_summaries must be registered");
     assert_eq!(meta.category, SettingCategory::Appearance);
-    // Shared: the pager writes it and the shell resolves it when a session spawns.
+    // Shared: the pager writes it and the shell's config watcher applies it to running sessions.
     assert_eq!(meta.owner, SettingOwner::Shared);
-    assert!(
-        meta.restart_required,
-        "a session reads the switch once, so the row must say a restart is needed"
-    );
+    for key in [
+        "thinking_summaries",
+        "thinking_summary_history_window_secs",
+        "thinking_summary_history_min_count",
+    ] {
+        let meta = reg.find(key).expect("thinking-summary row registered");
+        assert!(
+            !meta.restart_required,
+            "{key}: running sessions reload it, so the row must not ask for a restart"
+        );
+        assert!(
+            !meta.description.contains("Restart"),
+            "{key}: the description must not ask for a restart"
+        );
+    }
     match &meta.kind {
         SettingKind::Bool { default } => assert!(*default, "default must be true"),
         other => panic!("expected Bool kind for thinking_summaries, got {other:?}"),

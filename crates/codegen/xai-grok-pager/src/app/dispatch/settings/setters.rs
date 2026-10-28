@@ -479,11 +479,10 @@ pub(super) fn set_thinking_summaries_inner(app: &mut AppView, new: bool) {
     app.current_ui.thinking_summaries = Some(new);
 }
 
-/// SHARED: `[ui].thinking_summaries` via `Effect::PersistSetting`.
-/// Restart-relevant: a session resolves the switch once when it is spawned,
-/// so this changes what the next session does. Summaries already drawn stay
-/// where they are: they are part of the transcript, not a live view of the
-/// setting.
+/// SHARED: `[ui].thinking_summaries` via `Effect::PersistSetting`. The shell's
+/// config watcher applies it to every running session. Summaries already
+/// drawn stay where they are: they are part of the transcript, not a live view
+/// of the setting.
 pub(in crate::app::dispatch) fn set_thinking_summaries(
     app: &mut AppView,
     new: bool,

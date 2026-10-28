@@ -1215,6 +1215,21 @@ pub async fn run_leader(
                                 );
                             }
                         }
+                        ConfigUpdate::ThinkingSummariesChanged => {
+                            info!("Thinking-summary config change detected — reloading active sessions");
+                            let line = internal_reload_request_line(
+                                "config-reload-thinking-summaries",
+                                InternalMethod::ReloadThinkingSummaries,
+                                serde_json::json!({}),
+                            );
+                            let mut tx = acp_tx_for_config.lock().await;
+                            if let Err(e) = tx.write_all(line.as_bytes()).await {
+                                warn!(
+                                    error = %e,
+                                    "failed to inject thinking-summary reload into ACP stream"
+                                );
+                            }
+                        }
                         ConfigUpdate::Memory(mem) => {
                             info!(
                                 enabled = mem.enabled,

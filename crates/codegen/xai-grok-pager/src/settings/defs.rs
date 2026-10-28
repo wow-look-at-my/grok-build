@@ -1161,8 +1161,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             label: "Summarize thinking",
             description: "Under a collapsed thinking block, show a one-or-two-sentence \
                           summary of what the model worked out. Uses a model call per \
-                          thinking block. Restart required: a session picks the setting up \
-                          when it starts.",
+                          thinking block.",
             keywords: &[
                 "thinking",
                 "reasoning",
@@ -1174,7 +1173,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             kind: SettingKind::Bool {
                 default: ui_default.thinking_summaries_enabled(),
             },
-            restart_required: true,
+            restart_required: false,
         },
         // SHARED: `[ui].thinking_summary_history_window_secs`.
         SettingMeta {
@@ -1185,7 +1184,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             description: "How far back, in seconds, a thinking block's summary may look \
                           for earlier summaries, to keep its direction and avoid \
                           repeating one. A 0 here and a 0 below leave the summary \
-                          stateless. Restart required.",
+                          stateless.",
             keywords: &[
                 "thinking",
                 "reasoning",
@@ -1203,7 +1202,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 min: THINKING_SUMMARY_HISTORY_WINDOW_SECS_MIN,
                 max: THINKING_SUMMARY_HISTORY_WINDOW_SECS_MAX,
             },
-            restart_required: true,
+            restart_required: false,
         },
         // SHARED: `[ui].thinking_summary_history_min_count`.
         SettingMeta {
@@ -1213,7 +1212,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             label: "Thinking-summary minimum",
             description: "Always include this many of the most recent thinking \
                           summaries, even when they are older than the lookback \
-                          window. Restart required.",
+                          window.",
             keywords: &[
                 "thinking",
                 "reasoning",
@@ -1230,7 +1229,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 min: THINKING_SUMMARY_HISTORY_MIN_COUNT_MIN,
                 max: THINKING_SUMMARY_HISTORY_MIN_COUNT_MAX,
             },
-            restart_required: true,
+            restart_required: false,
         },
         // SHELL-owned: `[ui.display_refresh].auto_cadence_enabled`. Restart-required (cadence pinned at startup).
         SettingMeta {

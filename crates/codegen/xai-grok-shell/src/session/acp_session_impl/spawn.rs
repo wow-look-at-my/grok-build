@@ -2062,7 +2062,9 @@ pub(crate) async fn spawn_session_actor(
         title_refresh_task: std::cell::RefCell::new(None),
         title_refresh_generation: std::cell::Cell::new(0),
         next_title_refresh_idx: std::cell::Cell::new(initial_title_refresh_idx),
-        thinking_summaries_enabled: effective_config.ui.thinking_summaries_enabled(),
+        thinking_summaries_enabled: std::cell::Cell::new(
+            effective_config.ui.thinking_summaries_enabled(),
+        ),
         thinking_summary_history:
             crate::session::helpers::thinking_summary::ThinkingSummaryHistory::new(
                 effective_config

@@ -2053,7 +2053,7 @@ fn set_show_thinking_blocks_applies_persists_and_rolls_back() {
 }
 #[test]
 fn set_thinking_summaries_persists_the_ui_key_and_rolls_back() {
-    // The row's only state is `[ui].thinking_summaries`: the shell resolves it when a session spawns.
+    // The row's only state is `[ui].thinking_summaries`: the shell reads it from config.
     let mut app = test_app_with_agent();
     let shipped = app.current_ui.thinking_summaries_enabled();
     assert!(shipped, "the feature ships ON");
