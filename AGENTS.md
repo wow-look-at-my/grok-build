@@ -19,6 +19,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Commit messages: concise, imperative mood, describing the change.
 - Keep the working tree clean before switching context. Use `git stash` / `git stash pop` for temporary changes and restore them promptly.
 
+## Build prerequisites
+
+- A Linux build needs `mold` (`.cargo/config.toml` links with `-fuse-ld=mold`) and `protoc` (`xai-grok-tools-api`'s build script). Install both before the first `cargo check`: `apt-get install -y mold protobuf-compiler`.
+- `bin/protoc` is a dotslash file. Without `dotslash` on `PATH`, the build script falls back to the `protoc` on `PATH`, and fails when there is none.
+
 ## Verification
 
 [docs/verification.md](docs/verification.md) holds this section.
@@ -141,6 +146,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - It arrives after its model call ends, keyed by `stream_start_ms`. The root agent and the child-session handler both route it to `set_thinking_summary` on their own tracker.
 - A summarized thought is `RunStep::Transparent` in a verb-group run. It keeps its row rather than fold to height 0.
 - The summary is strictly async: nothing waits for it. The row redraws when the summary lands.
+- `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` apply to a session that already runs. The config watcher sends `ReloadThinkingSummaries` to every resident session, the same path as the output-rate floor.
 - Headless `streaming-json` emits a `thinking_summary` line. The Messages format has no field for it and drops it.
 
 ## Streaming tool-call notes

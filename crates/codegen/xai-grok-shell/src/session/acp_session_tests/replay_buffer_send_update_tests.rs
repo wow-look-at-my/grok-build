@@ -301,7 +301,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
         title_refresh_enabled: false,
-        thinking_summaries_enabled: false,
+        thinking_summaries_enabled: std::cell::Cell::new(false),
         thinking_summary_history: Default::default(),
         thinking_summary_tail: Default::default(),
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

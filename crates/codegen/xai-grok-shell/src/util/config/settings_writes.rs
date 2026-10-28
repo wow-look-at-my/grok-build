@@ -1,3 +1,5 @@
+// Process-wide cache for `[ui].follow_up_behavior == "steer"`.
+
 use super::persist::{update_config, update_config_removing};
 use crate::agent::config::Feature;
 use anyhow::{Context, Result};
@@ -596,8 +598,8 @@ pub async fn set_show_thinking_blocks(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.show_thinking_blocks = Some(value)).await
 }
 
-/// Persist `[ui].thinking_summaries` via `update_config`. A session resolves it
-/// once at spawn, so the change reaches the next session.
+/// Persist `[ui].thinking_summaries` via `update_config`. The config watcher
+/// applies it to every running session.
 pub async fn set_thinking_summaries(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.thinking_summaries = Some(value)).await
 }
