@@ -33,16 +33,17 @@ use super::cta::{
 };
 use super::ctx::{find_agent_by_session_id, get_active_agent, get_active_agent_mut};
 use super::dashboard::{
-    apply_pending_dispatch_config, dispatch_dashboard_attach, dispatch_dashboard_begin_rename,
-    dispatch_dashboard_commit_rename, dispatch_dashboard_confirm_worktree,
-    dispatch_dashboard_create_new_agent_with_detail, dispatch_dashboard_delete,
-    dispatch_dashboard_dispatch, dispatch_dashboard_dispatch_slash,
-    dispatch_dashboard_overlay_cycle, dispatch_dashboard_overlay_exit,
-    dispatch_dashboard_overlay_stop, dispatch_dashboard_peek_reply,
-    dispatch_dashboard_permission_followup, dispatch_dashboard_permission_select,
-    dispatch_dashboard_question_answer, dispatch_dashboard_stop,
-    dispatch_dashboard_toggle_auto_approve, dispatch_dashboard_toggle_pin, dispatch_exit_dashboard,
-    dispatch_open_dashboard, ensure_dashboard_state, resolve_location_input,
+    apply_pending_dispatch_config, dashboard_rows, dispatch_dashboard_attach,
+    dispatch_dashboard_begin_rename, dispatch_dashboard_commit_rename,
+    dispatch_dashboard_confirm_worktree, dispatch_dashboard_create_new_agent_with_detail,
+    dispatch_dashboard_delete, dispatch_dashboard_dismiss, dispatch_dashboard_dispatch,
+    dispatch_dashboard_dispatch_slash, dispatch_dashboard_overlay_cycle,
+    dispatch_dashboard_overlay_exit, dispatch_dashboard_overlay_stop,
+    dispatch_dashboard_peek_reply, dispatch_dashboard_permission_followup,
+    dispatch_dashboard_permission_select, dispatch_dashboard_question_answer,
+    dispatch_dashboard_stop, dispatch_dashboard_toggle_auto_approve, dispatch_dashboard_toggle_pin,
+    dispatch_exit_dashboard, dispatch_open_dashboard, ensure_dashboard_state,
+    resolve_location_input,
 };
 use super::modes::{
     YOLO_ON_UNDER_PLAN_TOAST, active_agent_plan_nudge_state, dispatch_cycle_mode_and_sync,

@@ -1,8 +1,8 @@
 //! Dashboard state types: `DashboardState`, `DashboardRowId`, filters, grouping, persistence.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::Rect;
@@ -20,6 +20,9 @@ use crate::views::prompt_widget::{PromptEvent, PromptWidget};
 use xai_grok_shell::session::persistence::MAX_TITLE_SCALARS as MAX_RENAME_SCALARS;
 
 const PROMPT_MULTI_CLICK_MS: u128 = 300;
+
+/// Dismissed local rows mapped to their move time, used as the Inactive recency anchor.
+pub type InactiveMoves = BTreeMap<DashboardRowId, SystemTime>;
 
 /// Stable identity for a dashboard row.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -146,8 +149,9 @@ pub enum RowState {
     /// Alive, idle.
     Idle,
     /// A roster-only session: idle / dormant in another pager process and never loaded in this one.
-    /// Local agents never classify as `Inactive` (see `classify_top_level`); only `roster_activity_to_state` produces it, so the "Idle" section
-    /// stays focused on sessions you're actively cycling between.
+    /// Local agents never classify as `Inactive` (see `classify_top_level`).
+    /// The row builder emits it for a local Idle row the user dismissed with `[✗]`.
+    /// The "Idle" section then stays focused on sessions you're actively cycling between.
     Inactive,
     /// Finished, with status == "completed".
     Completed,
@@ -431,6 +435,8 @@ pub struct DashboardState {
     /// A second gesture on the same row within [`CONFIRM_WINDOW`] deletes it (see [`Self::armed_delete_row`]); otherwise it lapses.
     /// Cleared on any focus change.
     pub delete_confirm: Option<(DashboardRowId, Instant)>,
+    /// Dismissed Idle rows and their move time; the row builder emits each as `Inactive`.
+    pub(crate) inactive_moves: InactiveMoves,
     pub workspace_membership_mode: bool,
     /// Ctrl+X meaning for the selected v2 row in the current frame.
     pub(crate) selected_stop_action: Option<DashboardStopAction>,
@@ -1115,6 +1121,7 @@ impl DashboardState {
             rename: None,
             error_toast: None,
             delete_confirm: None,
+            inactive_moves: BTreeMap::new(),
             workspace_membership_mode: false,
             selected_stop_action: None,
             spinner_tick: 0,
@@ -1385,6 +1392,28 @@ impl DashboardState {
 
     pub fn arm_delete(&mut self, id: DashboardRowId) {
         self.delete_confirm = Some((id, Instant::now()));
+    }
+
+    /// Move `id` into Inactive with a fresh recency anchor.
+    pub fn move_to_inactive(&mut self, id: DashboardRowId) {
+        self.inactive_moves.insert(id, SystemTime::now());
+        self.delete_confirm = None;
+    }
+
+    /// True when `[✗]` has already moved `id` into the Inactive group.
+    pub fn is_dismissed_to_inactive(&self, id: &DashboardRowId) -> bool {
+        self.inactive_moves.contains_key(id)
+    }
+
+    /// Whether `row` paints the `[✗]` control.
+    /// v1: Idle rows (dismiss to Inactive) and Inactive rows (confirm permanent delete).
+    /// v2 keeps its history-preserving archive on every settled membership row.
+    pub fn row_shows_close_control(&self, row: &DashboardRow) -> bool {
+        if self.workspace_membership_mode {
+            return row.state.allows_delete();
+        }
+        matches!(row.state, RowState::Idle | RowState::Inactive)
+            && !self.row_is_conversation(&row.id)
     }
 
     /// Whether `id` is a chat-conversation roster row, which the dashboard can't delete yet (see [`Self::conversation_row_ids`]).
@@ -1664,6 +1693,7 @@ impl DashboardState {
     pub fn gc_stale_refs(&mut self, alive: &dyn Fn(&DashboardRowId) -> bool) {
         self.pinned.retain(|id| alive(id));
         self.reorder.retain(|id| alive(id));
+        self.inactive_moves.retain(|id, _| alive(id));
         if let Some(rn) = self.rename.as_ref()
             && !alive(&rn.row)
         {
@@ -3538,14 +3568,11 @@ impl DashboardState {
                 .map(|(id, _)| id.clone())
             {
                 self.manual_scroll_active = false;
-                // Second `[✗]` click within the window confirms; else re-arm.
-                if self.armed_delete_row().as_ref() == Some(&id) {
-                    return InputOutcome::Action(Action::DashboardDelete);
-                }
+                // The dispatcher decides by the row's current state: Idle rows move to Inactive
+                // with no confirmation, Inactive rows arm the permanent-delete confirmation.
                 self.focus_row(id.clone());
                 self.set_list_focused(true);
-                self.arm_delete(id);
-                return InputOutcome::Changed;
+                return InputOutcome::Action(Action::DashboardDismissRow(id));
             }
 
             // Click on the `+ New Agent` button: same outcome as Enter-with-empty-prompt while the button is focused
