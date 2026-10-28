@@ -3816,19 +3816,43 @@ fn reset_overlay_dims_all_rows_except_target() {
         !action_rows.is_empty(),
         "reset/cancel action footer must be visible — found neither row",
     );
+    let muted_is_dim = xai_grok_pager::theme::Theme::current()
+        .muted()
+        .add_modifier
+        .contains(Modifier::DIM);
     for action_y in action_rows {
         let mut action_dim_count = 0usize;
+        let mut row_text = String::new();
         for dx in 0..area.width {
+            if let Some(cell) = buf.cell((area.x + dx, action_y)) {
+                row_text.push_str(cell.symbol());
+            }
             if has_dim(area.x + dx, action_y) {
                 action_dim_count += 1;
             }
         }
-        assert_eq!(
-            action_dim_count, 0,
-            "no cell on the action footer row (y={action_y}) may carry \
-             Modifier::DIM — y/n shortcuts are action elements and must \
-             stay at full intensity",
-        );
+        if !muted_is_dim {
+            assert_eq!(
+                action_dim_count, 0,
+                "no cell on the action footer row (y={action_y}) may carry \
+                 Modifier::DIM — y/n shortcuts are action elements and must \
+                 stay at full intensity. Row: {row_text:?}",
+            );
+        }
+        // A shortcut's descriptive half is muted under a no-color theme. The key token
+        // stays at full intensity on every theme.
+        for (needle, key) in [("y reset", 'y'), ("n cancel", 'n')] {
+            if let Some(offset) = row_text.find(needle) {
+                // `find` returns bytes; borders are multi-byte, so convert to columns.
+                use unicode_width::UnicodeWidthStr as _;
+                let column = row_text[..offset].width() as u16;
+                assert!(
+                    !has_dim(area.x + column, action_y),
+                    "the {key:?} key in {needle:?} must stay at full intensity. \
+                     Row: {row_text:?}",
+                );
+            }
+        }
     }
 }
 
