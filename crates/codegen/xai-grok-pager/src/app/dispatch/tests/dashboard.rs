@@ -5028,7 +5028,7 @@ fn dashboard_overlay_cycle_skips_dismissed_inactive_rows() {
     }
     let d = app.dashboard.as_ref().unwrap();
     assert_eq!(
-        crate::views::dashboard::overlay_cycle_order(d, &app.agents, Some(AgentId(0))),
+        crate::app::dispatch::overlay_cycle_ids(&app, d, AgentId(0)),
         vec![AgentId(0)],
         "the dismissed rows must not count toward i/n",
     );
@@ -5039,7 +5039,7 @@ fn dashboard_overlay_cycle_skips_dismissed_inactive_rows() {
 
     let _ = dispatch_dashboard_attach(&mut app, DashboardRowId::TopLevel(AgentId(2)));
     let d = app.dashboard.as_ref().unwrap();
-    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents, Some(AgentId(2)));
+    let order = crate::app::dispatch::overlay_cycle_ids(&app, d, AgentId(2));
     assert_eq!(order, vec![AgentId(0), AgentId(2)]);
     let _ = dispatch_dashboard_overlay_cycle(&mut app, 1);
     assert_eq!(ActiveView::Agent(AgentId(0)), app.active_view);

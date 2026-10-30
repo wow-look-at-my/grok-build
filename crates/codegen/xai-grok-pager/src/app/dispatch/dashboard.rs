@@ -964,6 +964,18 @@ pub(super) fn dispatch_dashboard_confirm_worktree(
     );
     effects
 }
+/// The agents `‹`/`›` walk, from the row build the dashboard paints. The header's `i/n` reads it too.
+pub(crate) fn overlay_cycle_ids(
+    app: &AppView,
+    d: &crate::views::dashboard::DashboardState,
+    current: AgentId,
+) -> Vec<AgentId> {
+    if app.workspace_dashboard_enabled {
+        crate::views::dashboard::cycle_ids(&workspace_rows(app, &d.filter).0, Some(current))
+    } else {
+        crate::views::dashboard::overlay_cycle_order(d, &app.agents, Some(current))
+    }
+}
 /// Cycle the dashboard overlay to the prev (-1) / next (+1) agent in the visible row order, wrapping at the ends.
 /// Attaches overlay chrome on the first cycle from a session not opened via the dashboard.
 pub(super) fn dispatch_dashboard_overlay_cycle(app: &mut AppView, delta: i32) -> Vec<Effect> {
@@ -974,24 +986,17 @@ pub(super) fn dispatch_dashboard_overlay_cycle(app: &mut AppView, delta: i32) ->
     if app.agents.len() <= 1 {
         return vec![];
     }
-    let order = if app.workspace_dashboard_enabled {
-        let filter = app
-            .dashboard
-            .as_ref()
-            .map_or(&crate::views::dashboard::Filter::None, |d| &d.filter);
-        crate::views::dashboard::cycle_ids(&workspace_rows(app, filter).0, Some(current))
-    } else {
-        match app.dashboard.as_ref() {
-            Some(d) => crate::views::dashboard::overlay_cycle_order(d, &app.agents, Some(current)),
-            None => {
-                if !crate::views::dashboard::dashboard_enabled()
-                    || !matches!(app.auth_state, crate::app::app_view::AuthState::Done)
-                {
-                    return vec![];
-                }
-                let transient = dashboard_state_for_mode(app);
-                crate::views::dashboard::overlay_cycle_order(&transient, &app.agents, Some(current))
+    let order = match app.dashboard.as_ref() {
+        Some(d) => overlay_cycle_ids(app, d, current),
+        None => {
+            if !app.workspace_dashboard_enabled
+                && (!crate::views::dashboard::dashboard_enabled()
+                    || !matches!(app.auth_state, crate::app::app_view::AuthState::Done))
+            {
+                return vec![];
             }
+            let transient = dashboard_state_for_mode(app);
+            overlay_cycle_ids(app, &transient, current)
         }
     };
     if order.len() <= 1 {

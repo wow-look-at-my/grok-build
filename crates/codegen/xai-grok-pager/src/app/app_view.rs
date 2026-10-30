@@ -4298,6 +4298,16 @@ impl AppView {
         });
         let welcome_default_yolo = self.default_yolo;
         let welcome_auto_gate = self.auto_mode_gate;
+        let overlay_position = match (self.active_view, self.dashboard.as_ref()) {
+            (ActiveView::Agent(id), Some(d)) if d.attached_agent == Some(id) => {
+                let order = crate::app::dispatch::overlay_cycle_ids(self, d, id);
+                order
+                    .iter()
+                    .position(|i| *i == id)
+                    .map(|idx| (idx + 1, order.len()))
+            }
+            _ => None,
+        };
         let Self {
             active_view,
             agents,
@@ -4661,20 +4671,7 @@ impl AppView {
                                 .dashboard
                                 .as_ref()
                                 .is_some_and(|d| d.attached_agent == Some(id));
-                            let position: Option<(usize, usize)> =
-                                if overlay_active && let Some(d) = self.dashboard.as_ref() {
-                                    let order = crate::views::dashboard::overlay_cycle_order(
-                                        d,
-                                        agents,
-                                        Some(id),
-                                    );
-                                    order
-                                        .iter()
-                                        .position(|i| *i == id)
-                                        .map(|idx| (idx + 1, order.len()))
-                                } else {
-                                    None
-                                };
+                            let position = overlay_position.filter(|_| overlay_active);
                             let overlay_title = overlay_active
                                 .then(|| {
                                     agents
