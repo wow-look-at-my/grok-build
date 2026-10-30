@@ -375,7 +375,7 @@ jobs:
     name: Link darwin/arm64 (macOS)
     needs: build-release
     if: github.event.repository.visibility == 'public'
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       id-token: write
       contents: read
@@ -407,7 +407,7 @@ jobs:
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
     if: github.event.repository.visibility == 'public'
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       id-token: write
       contents: read
