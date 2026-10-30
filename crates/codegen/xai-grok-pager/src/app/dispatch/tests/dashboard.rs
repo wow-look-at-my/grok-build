@@ -4982,7 +4982,7 @@ fn dashboard_overlay_cycle_order_matches_visible_rows() {
     app.agents.insert(id3, agent3);
     open_dashboard(&mut app);
     let d = app.dashboard.as_ref().unwrap();
-    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents);
+    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents, None);
     assert_eq!(
         order,
         vec![AgentId(2), AgentId(1), AgentId(0)],
@@ -4995,12 +4995,54 @@ fn dashboard_overlay_cycle_order_matches_visible_rows() {
             )));
     }
     let d = app.dashboard.as_ref().unwrap();
-    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents);
+    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents, None);
     assert_eq!(
         order,
         vec![AgentId(0), AgentId(2), AgentId(1)],
         "pinned rows must lead the cycle order, just like the visible list",
     );
+}
+/// `‹`/`›` skip a row dismissed to Inactive. The attached Inactive agent stays
+/// in the order, so `›` can still leave it.
+#[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_overlay_cycle_skips_dismissed_inactive_rows() {
+    use crate::views::dashboard::DashboardRowId;
+    let mut app = test_app_with_agent();
+    app.leader_mode = false;
+    app.dashboard_local_sessions.clear();
+    mark_agent_nonempty(&mut app, AgentId(0));
+    for (n, sid) in [(1, "agent2"), (2, "agent3")] {
+        let id = AgentId(n);
+        let session = make_test_agent_session(&app, id, sid);
+        let mut agent = AgentView::new(session, ScrollbackState::new());
+        agent.generated_session_title = Some(format!("Agent {n}"));
+        app.agents.insert(id, agent);
+    }
+    open_dashboard(&mut app);
+    for id in [AgentId(1), AgentId(2)] {
+        let _ = dispatch(
+            Action::DashboardDismissRow(DashboardRowId::TopLevel(id)),
+            &mut app,
+        );
+    }
+    let d = app.dashboard.as_ref().unwrap();
+    assert_eq!(
+        crate::views::dashboard::overlay_cycle_order(d, &app.agents, Some(AgentId(0))),
+        vec![AgentId(0)],
+        "the dismissed rows must not count toward i/n",
+    );
+
+    let _ = dispatch_dashboard_attach(&mut app, DashboardRowId::TopLevel(AgentId(0)));
+    let _ = dispatch_dashboard_overlay_cycle(&mut app, 1);
+    assert_eq!(ActiveView::Agent(AgentId(0)), app.active_view);
+
+    let _ = dispatch_dashboard_attach(&mut app, DashboardRowId::TopLevel(AgentId(2)));
+    let d = app.dashboard.as_ref().unwrap();
+    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents, Some(AgentId(2)));
+    assert_eq!(order, vec![AgentId(0), AgentId(2)]);
+    let _ = dispatch_dashboard_overlay_cycle(&mut app, 1);
+    assert_eq!(ActiveView::Agent(AgentId(0)), app.active_view);
 }
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 /// Regression: the cycle anchors on the viewed agent, not a stale
@@ -5021,7 +5063,7 @@ fn dashboard_overlay_cycle_anchors_on_visible_agent_not_stale_attach() {
     app.agents.insert(id3, agent3);
     open_dashboard(&mut app);
     let d = app.dashboard.as_ref().unwrap();
-    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents);
+    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents, None);
     assert_eq!(order, vec![AgentId(2), AgentId(1), AgentId(0)]);
     let [first, _, third] = order.as_slice() else {
         panic!("expected 3 cycle agents: {order:?}");
@@ -5332,8 +5374,11 @@ fn dashboard_overlay_cycle_non_overlay_noop_when_current_agent_hidden() {
     app.agents.insert(id2, agent2);
     app.active_view = ActiveView::Agent(current);
     ensure_dashboard_state(&mut app);
-    let order =
-        crate::views::dashboard::overlay_cycle_order(app.dashboard.as_ref().unwrap(), &app.agents);
+    let order = crate::views::dashboard::overlay_cycle_order(
+        app.dashboard.as_ref().unwrap(),
+        &app.agents,
+        None,
+    );
     assert_eq!(
         order,
         vec![id2, id1],

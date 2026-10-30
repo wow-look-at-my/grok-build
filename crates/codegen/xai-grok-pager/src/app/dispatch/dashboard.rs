@@ -979,17 +979,10 @@ pub(super) fn dispatch_dashboard_overlay_cycle(app: &mut AppView, delta: i32) ->
             .dashboard
             .as_ref()
             .map_or(&crate::views::dashboard::Filter::None, |d| &d.filter);
-        workspace_rows(app, filter)
-            .0
-            .into_iter()
-            .filter_map(|row| match row.id {
-                DashboardRowId::TopLevel(id) => Some(id),
-                _ => None,
-            })
-            .collect()
+        crate::views::dashboard::cycle_ids(&workspace_rows(app, filter).0, Some(current))
     } else {
         match app.dashboard.as_ref() {
-            Some(d) => crate::views::dashboard::overlay_cycle_order(d, &app.agents),
+            Some(d) => crate::views::dashboard::overlay_cycle_order(d, &app.agents, Some(current)),
             None => {
                 if !crate::views::dashboard::dashboard_enabled()
                     || !matches!(app.auth_state, crate::app::app_view::AuthState::Done)
@@ -997,7 +990,7 @@ pub(super) fn dispatch_dashboard_overlay_cycle(app: &mut AppView, delta: i32) ->
                     return vec![];
                 }
                 let transient = dashboard_state_for_mode(app);
-                crate::views::dashboard::overlay_cycle_order(&transient, &app.agents)
+                crate::views::dashboard::overlay_cycle_order(&transient, &app.agents, Some(current))
             }
         }
     };
