@@ -1360,6 +1360,10 @@ You have NO file editing tools. Do not create, modify, or delete files.\
 ${%- if tools.by_kind.execute %} \
 Use ${{ tools.by_kind.execute }} only for read-only commands \
 (ls, git status, git log, git diff, find, cat, head, tail).\
+${%- endif %}\
+${%- if tools.by_kind.git %} \
+Use ${{ tools.by_kind.git }} for history and repository state \
+(log, show, diff, blame, status, branch). It runs reads only.\
 ${%- endif %}
 
 Strengths:

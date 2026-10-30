@@ -96,6 +96,7 @@ pub(crate) const ALL_TOOL_KINDS: &[ToolKind] = &[
     ToolKind::GoalUpdate,
     ToolKind::Workflow,
     ToolKind::Ci,
+    ToolKind::Git,
     ToolKind::SendMessage,
     ToolKind::Feedback,
     ToolKind::Other,
@@ -135,7 +136,9 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
         }
 
         // Inspect class.
-        Lsp | ListDir | List | Ci => matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute),
+        Lsp | ListDir | List | Ci | Git => {
+            matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute)
+        }
 
         // Edit class.
         Edit | Write | Delete | Move | Feedback | ImageGen | VideoGen | ImageToVideo

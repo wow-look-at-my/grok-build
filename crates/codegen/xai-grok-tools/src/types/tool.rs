@@ -94,6 +94,7 @@ pub enum ToolKind {
     GoalUpdate,
     Workflow,
     Ci,
+    Git,
     SendMessage,
     Feedback,
     #[serde(other)]

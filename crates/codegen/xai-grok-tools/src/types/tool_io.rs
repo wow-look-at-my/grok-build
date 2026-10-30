@@ -89,6 +89,7 @@ pub enum ToolInput {
     SchedulerList(crate::implementations::grok_build::scheduler::list::SchedulerListInput),
     UpdateGoal(UpdateGoalInput),
     Ci(crate::implementations::grok_build::ci::CiInput),
+    Git(crate::implementations::grok_build::git::GitInput),
     Workflow(crate::implementations::grok_build::workflow::WorkflowToolInput),
     SendMessage(crate::implementations::grok_build::send_message::SendMessageInput),
     /// Dynamic input for runtime-registered tools (MCP, etc.)
