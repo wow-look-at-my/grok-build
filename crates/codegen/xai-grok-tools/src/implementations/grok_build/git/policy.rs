@@ -508,9 +508,7 @@ fn reflog(rest: &[String]) -> Result<Approved, String> {
 			Ok(with_no_ext_diff("reflog", &["show"], more))
 		}
 		Some((sub, more)) if sub == "list" && more.is_empty() => Ok(plain("reflog", rest)),
-		Some((sub, more)) if sub == "exists" && more.len() == 1 && !more[0].starts_with('-') => {
-			Ok(plain("reflog", rest))
-		}
+		Some((sub, [name])) if sub == "exists" && !name.starts_with('-') => Ok(plain("reflog", rest)),
 		_ => Err(
 			"only `git reflog`, `git reflog show [<options>] [<ref>]`, `git reflog list` and `git reflog exists <ref>` run in this read-only tool"
 				.to_owned(),
