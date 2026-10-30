@@ -292,7 +292,7 @@ fn branch(rest: &[String]) -> Result<Approved, String> {
         valued: LISTING_VALUED,
         optional_value: &["--abbrev", "--color", "--column"],
         shorts: "aiqrv",
-        short_number: None,
+        ..Spec::default()
     };
     let positionals = parse("branch", rest, &spec)?;
     if !positionals.is_empty() && !rest.iter().any(|a| a == "--list") {
@@ -319,6 +319,7 @@ fn tag(rest: &[String]) -> Result<Approved, String> {
         optional_value: &["--color", "--column"],
         shorts: "il",
         short_number: Some('n'),
+        ..Spec::default()
     };
     let positionals = parse("tag", rest, &spec)?;
     let listing = rest
