@@ -1415,10 +1415,16 @@ async fn model_auth_memo_serves_cached_status_and_keys_on_model() {
                 }));
 
             // Cache hit: served without consulting config.
-            assert_eq!(actor.model_auth_facts("model-a").byok, ModelByok::Byok);
+            assert_eq!(
+                actor.model_auth_facts("model-a", None).byok,
+                ModelByok::Byok
+            );
 
             // Different model re-resolves rather than serving the stale `Byok`.
-            assert_ne!(actor.model_auth_facts("model-b").byok, ModelByok::Byok);
+            assert_ne!(
+                actor.model_auth_facts("model-b", None).byok,
+                ModelByok::Byok
+            );
         })
         .await;
 }
