@@ -696,6 +696,7 @@ impl SettingsModalState {
                             canonical: c.canonical.to_string(),
                             display: c.display.to_string(),
                             description: c.description.to_string(),
+                            search_extra: String::new(),
                         })
                         .collect(),
                 ),
@@ -1292,6 +1293,7 @@ pub(super) fn picker_choices(state: &SettingsModalState, key: SettingKey) -> Vec
                     canonical: choice.canonical.to_string(),
                     display: choice.display.to_string(),
                     description: choice.description.to_string(),
+                    search_extra: String::new(),
                 })
                 .collect()
         }
@@ -1334,6 +1336,7 @@ pub(super) fn picker_choices_for_query(
         .into_iter()
         .filter(|choice| {
             query_keeps_choice(&choice.display, &choice.canonical, &state.picker_query)
+                || query_keeps_choice(&choice.search_extra, "", &state.picker_query)
         })
         .collect()
 }

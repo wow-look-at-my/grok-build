@@ -85,6 +85,8 @@ pub struct OwnedEnumChoice {
     pub canonical: String,
     pub display: String,
     pub description: String,
+    /// More text the picker search matches, but does not draw. A model choice holds its model id here.
+    pub search_extra: String,
 }
 
 /// Source of runtime choices for a `SettingKind::DynamicEnum`.
@@ -110,17 +112,19 @@ pub fn dynamic_enum_choices(
                 canonical: String::new(),
                 display: "(no override)".to_string(),
                 description: "Inherit the default model (no per-user override).".to_string(),
+                search_extra: String::new(),
             });
             let mut models: Vec<OwnedEnumChoice> = snapshot
                 .available_models
                 .iter()
-                .map(|(name, id)| model_choice_label(name, id))
+                .map(|(name, id)| (model_choice_label(name, id), id.0.to_string()))
                 // A blank label draws an empty row and collides with the "(no override)" sentinel.
-                .filter(|label| !label.trim().is_empty())
-                .map(|label| OwnedEnumChoice {
+                .filter(|(label, _)| !label.trim().is_empty())
+                .map(|(label, id)| OwnedEnumChoice {
                     canonical: label.clone(),
                     display: label,
                     description: String::new(),
+                    search_extra: id,
                 })
                 .collect();
             // The catalog arrives in provider order. Sort it so a reader can scan the list.
