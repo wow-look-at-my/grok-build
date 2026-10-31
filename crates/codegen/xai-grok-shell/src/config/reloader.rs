@@ -377,9 +377,9 @@ impl ConfigReloader {
 }
 
 /// True when a table that model resolution reads changed: `[model.*]`,
-/// `[models]` or `[model_groups]`.
+/// `[models]`, `[model_groups]` or `[subagents]` (its per-type pins).
 fn model_tables_changed(old: &toml::Value, new: &toml::Value) -> bool {
-    ["model", "models", "model_groups"]
+    ["model", "models", "model_groups", "subagents"]
         .iter()
         .any(|key| old.get(key) != new.get(key))
 }

@@ -249,6 +249,8 @@ pub struct SettingsModalState {
     pub(super) group_return: Option<(SettingKey, usize)>,
     /// Last left-click on a picker radio: `(choice index, when)`.
     pub(super) picker_last_click: Option<(usize, std::time::Instant)>,
+    /// Type-to-filter query for the open enum picker. Empty shows every choice.
+    pub(super) picker_query: String,
 }
 
 impl SettingsModalState {
@@ -289,6 +291,7 @@ impl SettingsModalState {
             close_on_picker_exit: false,
             group_return: None,
             picker_last_click: None,
+            picker_query: String::new(),
         }
     }
 
@@ -579,6 +582,7 @@ impl SettingsModalState {
         self.breadcrumb_hovered = false;
         self.close_on_picker_exit = false;
         self.picker_last_click = None;
+        self.picker_query.clear();
     }
 
     /// Open the editor or picker of a non-Bool group child. Returns `false`
@@ -668,6 +672,7 @@ impl SettingsModalState {
     /// is an Enum). Returns `false` if the key isn't a registered
     /// Enum/DynamicEnum.
     pub(super) fn try_enter_picking_enum_for(&mut self, key: SettingKey) -> bool {
+        self.picker_query.clear();
         let (first_canonical, current_value, supports_preview, resolved_choices) = {
             let Some(meta) = self.registry.find(key) else {
                 return false;
@@ -1134,6 +1139,17 @@ pub(super) fn action_for_string(
                     .map(|id| Action::SetModelGroupModel(group.id, id.0.to_string()))
             }
         }
+        key if crate::settings::subagent_models::type_for_setting_key(key).is_some() => {
+            let agent_type = crate::settings::subagent_models::type_for_setting_key(key)?;
+            let row = crate::settings::subagent_models::row_for_name(agent_type)?;
+            if value.is_empty() {
+                Some(Action::SetSubagentModel(row.name, String::new()))
+            } else {
+                snapshot
+                    .resolve_model_name(&value)
+                    .map(|id| Action::SetSubagentModel(row.name, id.0.to_string()))
+            }
+        }
         _ => {
             let _ = value;
             let _ = snapshot;
@@ -1254,6 +1270,61 @@ pub(super) fn enum_choice_gated_off(
         || ((key == "theme" || key == "auto_dark_theme" || key == "auto_light_theme")
             && canonical == "terminal"
             && !gates.terminal_theme)
+}
+
+/// Every choice an open picker offers, before the type-to-filter query is
+/// applied. Static Enums pass through their runtime gates; catalog-backed
+/// rows are rebuilt from the live model list.
+pub(super) fn picker_choices(state: &SettingsModalState, key: SettingKey) -> Vec<OwnedEnumChoice> {
+    let Some(meta) = state.registry.find(key) else {
+        return Vec::new();
+    };
+    match &meta.kind {
+        SettingKind::Enum { choices, .. } => {
+            effective_enum_choices(key, choices, &state.pager_snapshot)
+                .into_iter()
+                .map(|choice| OwnedEnumChoice {
+                    canonical: choice.canonical.to_string(),
+                    display: choice.display.to_string(),
+                    description: choice.description.to_string(),
+                })
+                .collect()
+        }
+        SettingKind::DynamicEnum { source, .. } => {
+            dynamic_enum_choices(*source, &state.pager_snapshot)
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Whether this picker's choices come from the live catalog.
+pub(super) fn picker_is_dynamic(state: &SettingsModalState, key: SettingKey) -> bool {
+    matches!(
+        state.registry.find(key).map(|meta| &meta.kind),
+        Some(SettingKind::DynamicEnum { .. })
+    )
+}
+
+/// Whether a choice's label or canonical contains `query`, case-insensitively.
+/// An empty query keeps every choice.
+pub fn query_keeps_choice(display: &str, canonical: &str, query: &str) -> bool {
+    let needle = query.trim().to_lowercase();
+    needle.is_empty()
+        || display.to_lowercase().contains(&needle)
+        || canonical.to_lowercase().contains(&needle)
+}
+
+/// The choices an open picker shows after its type-to-filter query.
+pub(super) fn picker_choices_for_query(
+    state: &SettingsModalState,
+    key: SettingKey,
+) -> Vec<OwnedEnumChoice> {
+    picker_choices(state, key)
+        .into_iter()
+        .filter(|choice| {
+            query_keeps_choice(&choice.display, &choice.canonical, &state.picker_query)
+        })
+        .collect()
 }
 
 /// The effective static Enum choices for a picker, hiding gated-off options so the modal never offers a choice the setter would silently no-op.

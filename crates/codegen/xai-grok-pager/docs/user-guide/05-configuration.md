@@ -292,11 +292,10 @@ permission_classifier = "grok-4.5-fast"
 | `goal_strategist` | A new angle on a stalled goal | Session model |
 | `goal_skeptic` | Every skeptic in the verification panel | Session model |
 | `goal_summarizer` | The closing summary of a goal | Session model |
-| `subagent_default` | Any subagent with no pin of its own | Session model |
 
 Each slot takes an environment variable too, which wins over the config file. The name is the slot in upper case under `GROK_MODEL_`, so `goal_skeptic` reads `GROK_MODEL_GOAL_SKEPTIC`. The exception is `prompt_suggestion`, whose variable keeps its older name `GROK_PROMPT_SUGGESTIONS_MODEL`.
 
-Two older, narrower keys still win over their slot where you set them: `[auto_mode] classifier_model` over `permission_classifier`, and `[memory] flush_model` over `memory_flush`. A `[subagents.models]` entry and an agent definition's own `model` both win over `subagent_default`.
+Two older, narrower keys still win over their slot where you set them: `[auto_mode] classifier_model` over `permission_classifier`, and `[memory] flush_model` over `memory_flush`.
 
 A slot naming a model your account cannot reach logs a warning and falls back to the session model, rather than failing the call.
 
@@ -447,7 +446,7 @@ plan = false
 explore = "grok-4.6"               # route to different models
 ```
 
-To pin the model a subagent uses, set its entry under `[subagents.models]`. `usage_frequency` does not gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating. See [Subagents and Personas](16-subagents.md#usage-frequency).
+To pin the model a subagent uses, set its entry under `[subagents.models]`. Settings has one row per spawnable type, including workspace and plugin agents, and each row writes that type's entry. `usage_frequency` does not gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating. See [Subagents and Personas](16-subagents.md#usage-frequency).
 
 ### Goal mode and background workflows
 

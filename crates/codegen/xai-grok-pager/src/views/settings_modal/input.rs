@@ -5,13 +5,12 @@ use super::render::int_step_sizes;
 use super::state::{
     RowEntry, SettingsKeyOutcome, SettingsModalState, SettingsMode, SettingsModeKind,
     action_for_bool, action_for_enum, action_for_enum_commit, action_for_int, action_for_string,
-    effective_enum_choices, group_children, validate_string,
+    effective_enum_choices, group_children, picker_choices_for_query, picker_is_dynamic,
+    query_keeps_choice, validate_string,
 };
 use crate::app::actions::Action;
 use crate::input::line_editor::LineEditOutcome;
-use crate::settings::{
-    SettingKey, SettingKind, SettingValue, StringValidator, dynamic_enum_choices,
-};
+use crate::settings::{SettingKey, SettingKind, SettingValue, StringValidator};
 
 /// F2/Ctrl+,/Cmd+, always close regardless of mode. Space/Enter Repeat events are suppressed to
 /// avoid per-tick disk writes.
@@ -84,8 +83,10 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
         _ => unreachable!("picker handler requires PickingEnum state"),
     };
 
+    let dynamic_picker = picker_is_dynamic(state, setting_key);
+
     match key.code {
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             let len = picker_choices_len(state, setting_key);
             if choices_idx + 1 >= len {
                 return SettingsKeyOutcome::Unchanged;
@@ -98,7 +99,7 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
                 supports_preview,
             )
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             if choices_idx == 0 {
                 return SettingsKeyOutcome::Unchanged;
             }
@@ -110,13 +111,52 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
                 supports_preview,
             )
         }
-        KeyCode::Enter => {
-            // Commit the focused choice; this is the only point in a picker's open-to-close cycle that fires
-            // `Effect::PersistSetting`.
-            let close = std::mem::take(&mut state.close_on_picker_exit);
-            if !close {
-                state.transition_to_browse();
+        KeyCode::Char('j') if !dynamic_picker => {
+            let len = picker_choices_len(state, setting_key);
+            if choices_idx + 1 >= len {
+                return SettingsKeyOutcome::Unchanged;
             }
+            set_picker_idx(
+                state,
+                setting_key,
+                choices_idx + 1,
+                original_value,
+                supports_preview,
+            )
+        }
+        KeyCode::Char('k') if !dynamic_picker => {
+            if choices_idx == 0 {
+                return SettingsKeyOutcome::Unchanged;
+            }
+            set_picker_idx(
+                state,
+                setting_key,
+                choices_idx - 1,
+                original_value,
+                supports_preview,
+            )
+        }
+        KeyCode::Char(c)
+            if dynamic_picker
+                && !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::SUPER) =>
+        {
+            state.picker_query.push(c);
+            refocus_filtered_picker(state, setting_key, original_value, supports_preview)
+        }
+        KeyCode::Backspace if dynamic_picker => {
+            if state.picker_query.pop().is_none() {
+                return SettingsKeyOutcome::Unchanged;
+            }
+            refocus_filtered_picker(state, setting_key, original_value, supports_preview)
+        }
+        KeyCode::Enter => {
+            // A filtered list with no matches has nothing to commit.
+            if dynamic_picker && picker_choices_len(state, setting_key) == 0 {
+                return SettingsKeyOutcome::Unchanged;
+            }
+            // Read the focused choice before leaving the picker: leaving
+            // clears the filter, and the filtered list is what Enter acts on.
             let kind_is_dynamic = matches!(
                 state.registry.find(setting_key).map(|m| &m.kind),
                 Some(SettingKind::DynamicEnum { .. })
@@ -129,6 +169,11 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
                 picker_choice_at(state, setting_key, choices_idx)
                     .and_then(|c| action_for_enum_commit(setting_key, c))
             };
+            // Commit the focused choice.
+            let close = std::mem::take(&mut state.close_on_picker_exit);
+            if !close {
+                state.transition_to_browse();
+            }
             match (close, commit) {
                 (true, Some(action)) => SettingsKeyOutcome::ActionThenClose(action),
                 (true, None) => SettingsKeyOutcome::Close,
@@ -267,6 +312,34 @@ pub(super) fn set_picker_idx(
         return SettingsKeyOutcome::Action(action);
     }
     SettingsKeyOutcome::Changed
+}
+
+/// Keep the focused row inside the filtered list after the query changes.
+fn refocus_filtered_picker(
+    state: &mut SettingsModalState,
+    setting_key: SettingKey,
+    original_value: SettingValue,
+    supports_preview: bool,
+) -> SettingsKeyOutcome {
+    let len = picker_choices_len(state, setting_key);
+    if len == 0 {
+        return SettingsKeyOutcome::Changed;
+    }
+    let current = match &state.state.mode {
+        SettingsMode::PickingEnum { choices_idx, .. } => *choices_idx,
+        _ => return SettingsKeyOutcome::Unchanged,
+    };
+    if current < len {
+        // The query narrowed around the focused row; nothing to move.
+        return SettingsKeyOutcome::Changed;
+    }
+    set_picker_idx(
+        state,
+        setting_key,
+        len - 1,
+        original_value,
+        supports_preview,
+    )
 }
 
 /// Key routing for the inline string/int editor. Esc cancels, Enter commits.
@@ -486,26 +559,13 @@ fn update_int_buffer(state: &mut SettingsModalState, new_buffer: String) {
     *buffer = new_buffer;
 }
 
-/// Number of choices for the picker.
-/// Handles both `SettingKind::Enum` (static catalog) and `SettingKind::DynamicEnum` (catalog built from the snapshot at picker-open time).
+/// Number of choices the picker shows.
 pub(super) fn picker_choices_len(state: &SettingsModalState, key: SettingKey) -> usize {
-    state
-        .registry
-        .find(key)
-        .and_then(|m| match &m.kind {
-            SettingKind::Enum { choices, .. } => {
-                Some(effective_enum_choices(key, choices, &state.pager_snapshot).len())
-            }
-            SettingKind::DynamicEnum { source, .. } => {
-                Some(dynamic_enum_choices(*source, &state.pager_snapshot).len())
-            }
-            _ => None,
-        })
-        .unwrap_or(0)
+    picker_choices_for_query(state, key).len()
 }
 
-/// Canonical value at index `idx` in the picker's choices, or `None` if the key isn't a registered
-/// Enum/DynamicEnum or `idx` is out of bounds.
+/// Canonical value at `idx` in the picker's shown choices, or `None` if the
+/// key isn't an Enum or `idx` is out of bounds.
 pub(super) fn picker_choice_at(
     state: &SettingsModalState,
     key: SettingKey,
@@ -516,8 +576,10 @@ pub(super) fn picker_choice_at(
         return None;
     };
     effective_enum_choices(key, choices, &state.pager_snapshot)
-        .get(idx)
-        .map(|c| c.canonical)
+        .into_iter()
+        .filter(|choice| query_keeps_choice(choice.display, choice.canonical, &state.picker_query))
+        .nth(idx)
+        .map(|choice| choice.canonical)
 }
 
 /// Allocates one `String` per call; the picker calls it on commit, and per Up/Down only when
@@ -527,19 +589,10 @@ fn picker_choice_at_owned(
     key: SettingKey,
     idx: usize,
 ) -> Option<String> {
-    let meta = state.registry.find(key)?;
-    match &meta.kind {
-        SettingKind::Enum { choices, .. } => {
-            effective_enum_choices(key, choices, &state.pager_snapshot)
-                .get(idx)
-                .map(|c| c.canonical.to_string())
-        }
-        SettingKind::DynamicEnum { source, .. } => {
-            let resolved = dynamic_enum_choices(*source, &state.pager_snapshot);
-            resolved.get(idx).map(|c| c.canonical.clone())
-        }
-        _ => None,
-    }
+    picker_choices_for_query(state, key)
+        .into_iter()
+        .nth(idx)
+        .map(|choice| choice.canonical)
 }
 
 /// F2 / Ctrl+, / Cmd+, are the modal-internal close keys. `handle_filter_focused` has its own. EscEsc
@@ -977,6 +1030,49 @@ fn handle_picker_mouse(
     column: u16,
     row: u16,
 ) -> SettingsKeyOutcome {
+    // The wheel moves the focused choice and, through the renderer's
+    // scroll-to-focus, the viewport. The picker stays open.
+    if matches!(kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
+        let over_list = state
+            .picker_choice_rects
+            .iter()
+            .any(|rect| rect.height > 0 && rect_contains(*rect, column, row));
+        if !over_list {
+            return SettingsKeyOutcome::Unchanged;
+        }
+        let (setting_key, current_idx, original_value, supports_preview) = match &state.state.mode {
+            SettingsMode::PickingEnum {
+                key,
+                choices_idx,
+                original_value,
+                supports_preview,
+            } => (
+                *key,
+                *choices_idx,
+                original_value.clone(),
+                *supports_preview,
+            ),
+            _ => unreachable!("picker mouse handler requires PickingEnum state"),
+        };
+        let len = picker_choices_len(state, setting_key);
+        if len == 0 {
+            return SettingsKeyOutcome::Unchanged;
+        }
+        let target_idx = match kind {
+            MouseEventKind::ScrollDown => (current_idx + 3).min(len - 1),
+            _ => current_idx.saturating_sub(3),
+        };
+        if target_idx == current_idx {
+            return SettingsKeyOutcome::Unchanged;
+        }
+        return set_picker_idx(
+            state,
+            setting_key,
+            target_idx,
+            original_value,
+            supports_preview,
+        );
+    }
     // Hover highlight for picker choices
     // Track the choice index under the cursor in `state.hover_row` (the same field the row-list path uses; it is mode-aware)
     if matches!(kind, MouseEventKind::Moved) {

@@ -490,6 +490,15 @@ const CONTEXTUAL_HINTS_CHILDREN: &[&str] = &[
 
 /// Build the catalog; called once at process start via `SettingsRegistry::defaults()`.
 pub fn default_settings() -> Vec<SettingMeta> {
+    default_settings_with_subagent_rows(crate::settings::subagent_models::rows())
+}
+
+/// The catalog for an explicit subagent type list. `default_settings` passes
+/// the discovered types; tests pass a seeded list so a discovered agent type
+/// is exercised without touching the developer's home directory.
+pub(crate) fn default_settings_with_subagent_rows(
+    subagent_rows: &[crate::settings::subagent_models::SubagentModelRow],
+) -> Vec<SettingMeta> {
     // The shell schema defaults are the registry's source of truth
     let ui_default = UiConfig::default();
 
@@ -1758,7 +1767,31 @@ pub fn default_settings() -> Vec<SettingMeta> {
     ]
     .into_iter()
     .chain(harness_model_settings())
+    .chain(subagent_model_settings(subagent_rows))
     .collect()
+}
+
+/// One picker per spawnable subagent type. Each row writes
+/// `[subagents.models].<type>`, so a pin applies to that type alone.
+fn subagent_model_settings(
+    rows: &[crate::settings::subagent_models::SubagentModelRow],
+) -> Vec<SettingMeta> {
+    rows.iter()
+        .map(|row| SettingMeta {
+            key: row.setting_key,
+            category: SettingCategory::Models,
+            owner: SettingOwner::Shell,
+            label: row.label,
+            description: row.description,
+            keywords: row.keywords,
+            kind: SettingKind::DynamicEnum {
+                default: "",
+                source: DynamicEnumSource::ActiveModelCatalog,
+                supports_preview: false,
+            },
+            restart_required: false,
+        })
+        .collect()
 }
 
 /// One picker per harness model slot, under Models. The rows are built from
