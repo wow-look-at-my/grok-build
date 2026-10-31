@@ -687,6 +687,8 @@ pub(crate) use crate::session::streaming_capture::StreamingTurnCapture;
 #[derive(Clone)]
 pub(crate) struct ModelAuthMemo {
     pub(crate) model_id: String,
+    /// The endpoint the facts were resolved for; a bare routing slug can be supplied by more than one listing.
+    pub(crate) endpoint: Option<String>,
     pub(crate) facts: crate::agent::config::ModelAuthFacts,
     pub(crate) provider: Option<xai_grok_login::AuthProviderRef>,
 }

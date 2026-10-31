@@ -5629,10 +5629,12 @@ pub(crate) struct ModelAuthFacts {
     pub auth_scheme: AuthScheme,
 }
 /// Resolve `model_id` to its auth facts and auth-provider reference from one effective-config load. Both ride the same memo (see `SessionActor::model_auth_memo`).
-/// A load/parse failure yields `byok = Unknown`; a model absent from the catalog yields `NotByok`.
+/// A load/parse failure yields `byok = Unknown`; a model no configured provider listing owns yields `NotByok`.
+/// A model a provider listing supplies has no entry in the config-only catalog, so one is synthesized from the owning `[model_providers.<id>]`. `endpoint` names that owner when several listings could supply a bare routing slug.
 /// An empty `model_id` (no sampling config yet) yields `Unknown`, not `NotByok`, so the gate isn't activated for an unidentified model.
 pub(crate) fn resolve_model_auth_facts_and_provider(
     model_id: &str,
+    endpoint: Option<&str>,
 ) -> (ModelAuthFacts, Option<xai_grok_login::AuthProviderRef>) {
     if model_id.is_empty() {
         return (
@@ -5643,7 +5645,7 @@ pub(crate) fn resolve_model_auth_facts_and_provider(
             None,
         );
     }
-    with_resolved_model(model_id, |lookup| {
+    with_resolved_model(model_id, endpoint, |lookup| {
         let facts = ModelAuthFacts {
             byok: byok_from_lookup(&lookup),
             auth_scheme: match lookup {
@@ -5729,7 +5731,12 @@ enum ModelLookup<'a> {
 }
 /// Load and parse the effective config and hand the `model_id` lookup to `f`.
 /// Keeps "config unavailable" distinct from "model absent" so callers can stay conservative on a transient config failure.
-fn with_resolved_model<T>(model_id: &str, f: impl FnOnce(ModelLookup) -> T) -> T {
+/// A model the config-only catalog does not hold is resolved through the provider whose listing supplies it.
+fn with_resolved_model<T>(
+    model_id: &str,
+    endpoint: Option<&str>,
+    f: impl FnOnce(ModelLookup) -> T,
+) -> T {
     let Some(raw) = crate::config::load_effective_config()
         .map_err(|e| tracing::warn!(error = %e, "config load failed for model auth lookup"))
         .ok()
@@ -5743,7 +5750,88 @@ fn with_resolved_model<T>(model_id: &str, f: impl FnOnce(ModelLookup) -> T) -> T
         return f(ModelLookup::ConfigUnavailable);
     };
     let models = resolve_model_list(&cfg, None);
-    f(ModelLookup::Loaded(find_model_by_id(&models, model_id)))
+    let listed;
+    let entry = match find_model_by_id(&models, model_id) {
+        Some(entry) => Some(entry),
+        None => {
+            listed = provider_listed_entry(&cfg, model_id, endpoint);
+            listed.as_ref()
+        }
+    };
+    f(ModelLookup::Loaded(entry))
+}
+
+/// The entry a provider's listing supplies for `model_id`, built from its
+/// `[model_providers.<id>]` block. Discovery puts those models in the catalog
+/// under `<provider>/<slug>`; a turn sends the routing `<slug>`. Neither shape
+/// is in the config-only catalog, so the provider has to be named here.
+fn provider_listed_entry(
+    cfg: &Config,
+    model_id: &str,
+    endpoint: Option<&str>,
+) -> Option<ModelEntry> {
+    let (provider_id, slug) = listing_owner(cfg, model_id, endpoint)?;
+    let provider = cfg.model_providers.get(provider_id)?;
+    let listed = ConfigModelOverride {
+        model: Some(slug.to_owned()),
+        ..Default::default()
+    };
+    Some(entry_for_provider_model(
+        cfg,
+        model_id,
+        provider_id,
+        provider,
+        &listed,
+    ))
+}
+
+/// Which provider's listing holds `model_id`, and the slug to send it. A
+/// provider-qualified id names its own provider. A bare routing slug names
+/// none. It belongs to the one listing configured, or to the one whose base URL
+/// is the endpoint the request is going to.
+fn listing_owner<'a>(
+    cfg: &'a Config,
+    model_id: &'a str,
+    endpoint: Option<&str>,
+) -> Option<(&'a str, &'a str)> {
+    if let Some((first, slug)) = model_id.split_once('/')
+        && cfg.model_providers.contains_key(first)
+    {
+        return Some((first, slug));
+    }
+    let mut owners: Vec<&str> = cfg
+        .model_providers
+        .iter()
+        .filter(|(_, provider)| provider.autodetect_enabled())
+        .map(|(id, _)| id.as_str())
+        .collect();
+    if owners.len() > 1
+        && let Some(endpoint) = endpoint
+    {
+        owners.retain(|id| {
+            cfg.model_providers
+                .get(*id)
+                .and_then(provider_base_url)
+                .is_some_and(|url| same_endpoint(url, endpoint))
+        });
+    }
+    match owners.as_slice() {
+        [only] => Some((*only, model_id)),
+        _ => None,
+    }
+}
+
+fn provider_base_url(
+    provider: &crate::agent::model_providers::ModelProviderConfig,
+) -> Option<&str> {
+    provider
+        .base_url
+        .as_deref()
+        .or(provider.api_base_url.as_deref())
+}
+
+fn same_endpoint(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
 }
 /// Resolve a standalone `SamplerConfig` for an auxiliary model slug (image description, session summary, ...).
 /// Resolved through the catalog so a `[model.*]` override redirects it to its own endpoint, credentials, and routing `model`.

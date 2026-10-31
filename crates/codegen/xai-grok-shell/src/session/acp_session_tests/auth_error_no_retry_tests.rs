@@ -1407,6 +1407,7 @@ async fn model_auth_memo_serves_cached_status_and_keys_on_model() {
                 .model_auth_memo
                 .replace(Some(crate::session::acp_session::ModelAuthMemo {
                     model_id: "model-a".to_string(),
+                    endpoint: None,
                     facts: ModelAuthFacts {
                         byok: ModelByok::Byok,
                         auth_scheme: Default::default(),
@@ -1415,10 +1416,16 @@ async fn model_auth_memo_serves_cached_status_and_keys_on_model() {
                 }));
 
             // Cache hit: served without consulting config.
-            assert_eq!(actor.model_auth_facts("model-a").byok, ModelByok::Byok);
+            assert_eq!(
+                actor.model_auth_facts("model-a", None).byok,
+                ModelByok::Byok
+            );
 
             // Different model re-resolves rather than serving the stale `Byok`.
-            assert_ne!(actor.model_auth_facts("model-b").byok, ModelByok::Byok);
+            assert_ne!(
+                actor.model_auth_facts("model-b", None).byok,
+                ModelByok::Byok
+            );
         })
         .await;
 }
@@ -1450,6 +1457,7 @@ async fn reconstruct_full_config_no_bearer_resolver_for_byok_model_on_session_me
                 .model_auth_memo
                 .replace(Some(crate::session::acp_session::ModelAuthMemo {
                     model_id: model,
+                    endpoint: None,
                     facts: ModelAuthFacts {
                         byok: ModelByok::Byok,
                         auth_scheme: Default::default(),
@@ -1547,6 +1555,7 @@ async fn set_session_model_invalidates_byok_memo_for_same_model_id() {
                 .model_auth_memo
                 .replace(Some(crate::session::acp_session::ModelAuthMemo {
                     model_id: model.clone(),
+                    endpoint: None,
                     facts: ModelAuthFacts {
                         byok: ModelByok::NotByok,
                         auth_scheme: Default::default(),
@@ -1610,6 +1619,7 @@ async fn seed_provider_memo(actor: &Arc<SessionActor>, provider: xai_grok_login:
         .model_auth_memo
         .replace(Some(crate::session::acp_session::ModelAuthMemo {
             model_id: model,
+            endpoint: None,
             facts: crate::agent::config::ModelAuthFacts {
                 byok: crate::agent::auth_method::ModelByok::Byok,
                 auth_scheme: Default::default(),
