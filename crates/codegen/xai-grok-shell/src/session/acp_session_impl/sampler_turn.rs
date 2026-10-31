@@ -476,7 +476,7 @@ impl SessionActor {
     }
 
     /// Reads and populates [`Self::model_auth_memo`]; a fresh `Unknown` falls back to the last definite entry (see the field's contract).
-    /// `endpoint` is part of the memo key because a bare routing slug can belong to more than one provider's listing.
+    /// `endpoint` only routes the fresh lookup: the memo stays keyed by model id, so a seeded entry serves every call for that model.
     fn model_auth_state(
         &self,
         model_id: &str,
@@ -489,7 +489,6 @@ impl SessionActor {
         use crate::session::acp_session::ModelAuthMemo;
         if let Some(memo) = self.model_auth_memo.borrow().as_ref()
             && memo.model_id == model_id
-            && memo.endpoint.as_deref() == endpoint
             && memo.facts.byok != ModelByok::Unknown
         {
             return (memo.facts, memo.provider.clone());
@@ -499,7 +498,6 @@ impl SessionActor {
         if fresh.byok == ModelByok::Unknown {
             if let Some(memo) = self.model_auth_memo.borrow().as_ref()
                 && memo.model_id == model_id
-                && memo.endpoint.as_deref() == endpoint
             {
                 return (memo.facts, memo.provider.clone());
             }
@@ -507,7 +505,6 @@ impl SessionActor {
         }
         *self.model_auth_memo.borrow_mut() = Some(ModelAuthMemo {
             model_id: model_id.to_string(),
-            endpoint: endpoint.map(str::to_owned),
             facts: fresh,
             provider: provider.clone(),
         });

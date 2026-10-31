@@ -244,7 +244,6 @@ async fn session_token_actor(
         .model_auth_memo
         .replace(Some(crate::session::acp_session::ModelAuthMemo {
             model_id: "test".to_string(),
-            endpoint: None,
             facts: crate::agent::config::ModelAuthFacts {
                 byok: crate::agent::auth_method::ModelByok::NotByok,
                 auth_scheme: Default::default(),

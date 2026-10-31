@@ -5629,8 +5629,8 @@ pub(crate) struct ModelAuthFacts {
     pub auth_scheme: AuthScheme,
 }
 /// Resolve `model_id` to its auth facts and auth-provider reference from one effective-config load. Both ride the same memo (see `SessionActor::model_auth_memo`).
-/// A load/parse failure yields `byok = Unknown`; a model no configured provider listing owns yields `NotByok`.
-/// A model a provider listing supplies has no entry in the config-only catalog, so one is synthesized from the owning `[model_providers.<id>]`. `endpoint` names that owner when several listings could supply a bare routing slug.
+/// A load/parse failure yields `byok = Unknown`; a model that no configured provider listing owns yields `NotByok`.
+/// A model a listing supplies has no entry in the config-only catalog, so one is synthesized from its `[model_providers.<id>]` block. `endpoint` names that provider when the id is a bare routing slug.
 /// An empty `model_id` (no sampling config yet) yields `Unknown`, not `NotByok`, so the gate isn't activated for an unidentified model.
 pub(crate) fn resolve_model_auth_facts_and_provider(
     model_id: &str,
@@ -5787,8 +5787,8 @@ fn provider_listed_entry(
 
 /// Which provider's listing holds `model_id`, and the slug to send it. A
 /// provider-qualified id names its own provider. A bare routing slug names
-/// none. It belongs to the one listing configured, or to the one whose base URL
-/// is the endpoint the request is going to.
+/// none, so it belongs to the one listing whose base URL is the endpoint the
+/// call is going to.
 fn listing_owner<'a>(
     cfg: &'a Config,
     model_id: &'a str,
@@ -5799,26 +5799,20 @@ fn listing_owner<'a>(
     {
         return Some((first, slug));
     }
-    let mut owners: Vec<&str> = cfg
+    let endpoint = endpoint?;
+    let mut owners = cfg
         .model_providers
         .iter()
         .filter(|(_, provider)| provider.autodetect_enabled())
-        .map(|(id, _)| id.as_str())
-        .collect();
-    if owners.len() > 1
-        && let Some(endpoint) = endpoint
-    {
-        owners.retain(|id| {
-            cfg.model_providers
-                .get(*id)
-                .and_then(provider_base_url)
-                .is_some_and(|url| same_endpoint(url, endpoint))
-        });
+        .filter(|(_, provider)| {
+            provider_base_url(provider).is_some_and(|url| same_endpoint(url, endpoint))
+        })
+        .map(|(id, _)| id.as_str());
+    let first = owners.next()?;
+    if owners.next().is_some() {
+        return None;
     }
-    match owners.as_slice() {
-        [only] => Some((*only, model_id)),
-        _ => None,
-    }
+    Some((first, model_id))
 }
 
 fn provider_base_url(
