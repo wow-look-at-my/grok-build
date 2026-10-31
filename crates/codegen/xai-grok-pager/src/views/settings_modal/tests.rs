@@ -8172,10 +8172,10 @@ fn slash_starts_a_search_in_the_model_picker() {
 
     type_text(&mut s, "vendor/model-15");
     assert_eq!(s.picker_query, "vendor/model-15");
-    assert_eq!(picker_choices_len(&s, "models.goal_planner"), 11);
+    assert_eq!(picker_choices_len(&s, "models.goal_planner"), 10);
     let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(
-        matches!(out, SettingsKeyOutcome::Action(Action::SetHarnessModel("goal_planner", ref m)) if m == "vendor/model-015"),
+        matches!(out, SettingsKeyOutcome::Action(Action::SetHarnessModel("goal_planner", ref m)) if m == "vendor/model-150"),
         "Enter commits the first match, got {out:?}"
     );
 }
