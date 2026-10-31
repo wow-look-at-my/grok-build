@@ -2006,6 +2006,62 @@ pub(in crate::app::dispatch) fn set_model_group_model(
     }]
 }
 
+/// State-only mutation for one subagent type. An empty `model_id` removes
+/// the entry, which is what the modal reads as "(no override)".
+pub(super) fn set_subagent_model_inner(app: &mut AppView, agent_type: &str, model_id: String) {
+    if model_id.is_empty() {
+        app.current_ui.subagent_models.remove(agent_type);
+    } else {
+        app.current_ui
+            .subagent_models
+            .insert(agent_type.to_string(), model_id);
+    }
+}
+
+/// Outer dispatcher for `Action::SetSubagentModel`. It acts as
+/// [`set_harness_model`] does, on `[subagents.models].<type>`.
+pub(in crate::app::dispatch) fn set_subagent_model(
+    app: &mut AppView,
+    agent_type: &'static str,
+    model_id: String,
+) -> Vec<Effect> {
+    let Some(row) = crate::settings::subagent_models::row_for_name(agent_type) else {
+        tracing::error!(
+            target: "settings",
+            agent_type,
+            "Action::SetSubagentModel dispatched with an unknown subagent type — no-op",
+        );
+        return vec![];
+    };
+    let prev = app
+        .current_ui
+        .subagent_models
+        .get(agent_type)
+        .cloned()
+        .unwrap_or_default();
+    if prev == model_id {
+        return vec![];
+    }
+    let Some(display) = catalog_display_name(app, agent_type, &model_id) else {
+        return vec![];
+    };
+    set_subagent_model_inner(app, agent_type, model_id.clone());
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = row.setting_key,
+        new_id = %model_id,
+        prev_id = %prev,
+        "setting changed",
+    );
+    app.show_toast(&format!("\u{2713} {}: {display}", row.label));
+    vec![Effect::PersistSetting {
+        key: row.setting_key,
+        value: crate::settings::SettingValue::String(model_id),
+        rollback_value: crate::settings::SettingValue::String(prev),
+    }]
+}
+
 // max_thoughts_width is an Int-valued setting
 // The registry hands over an `i64`; it is clamped to `(min, max)` bounds and cast to `u16`
 // Live application goes through `app.current_ui.max_thoughts_width`

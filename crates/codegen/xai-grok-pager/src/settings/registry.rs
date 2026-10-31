@@ -111,15 +111,26 @@ pub fn dynamic_enum_choices(
                 display: "(no override)".to_string(),
                 description: "Inherit the default model (no per-user override).".to_string(),
             });
-            for (name, _id) in &snapshot.available_models {
+            for (name, id) in &snapshot.available_models {
+                let label = model_choice_label(name, id);
                 out.push(OwnedEnumChoice {
-                    canonical: name.clone(),
-                    display: name.clone(),
+                    // A blank catalog name cannot be the persisted canonical: empty is the "(no override)" sentinel.
+                    canonical: label.clone(),
+                    display: label,
                     description: String::new(),
                 });
             }
             out
         }
+    }
+}
+
+/// The label a model choice shows.
+pub fn model_choice_label(name: &str, id: &acp::ModelId) -> String {
+    if name.trim().is_empty() {
+        id.0.to_string()
+    } else {
+        name.to_owned()
     }
 }
 
@@ -439,13 +450,13 @@ impl PagerLocalSnapshot {
     /// Case-insensitive ASCII match against display names only.
     /// Ids aren't carried in the snapshot's primary key; callers needing id-based resolution should use `ModelState::resolve_by_name_or_id`.
     pub fn resolve_model_name(&self, query: &str) -> Option<acp::ModelId> {
-        self.available_models.iter().find_map(|(name, id)| {
-            if name.eq_ignore_ascii_case(query) {
-                Some(id.clone())
-            } else {
-                None
-            }
-        })
+        self.available_models
+            .iter()
+            .find(|(name, id)| {
+                name.eq_ignore_ascii_case(query)
+                    || (name.trim().is_empty() && id.0.as_ref().eq_ignore_ascii_case(query))
+            })
+            .map(|(_, id)| id.clone())
     }
 }
 
@@ -471,6 +482,16 @@ impl SettingsRegistry {
     pub fn from_entries(entries: Vec<SettingMeta>) -> Self {
         assert_unique_keys(&entries);
         Self { entries }
+    }
+
+    /// Build a registry whose subagent rows come from an explicit type list.
+    /// Exists for tests that seed a discovered agent type; production starts
+    /// from [`Self::defaults`].
+    #[doc(hidden)]
+    pub fn with_subagent_rows(rows: &[crate::settings::subagent_models::SubagentModelRow]) -> Self {
+        Self::from_entries(crate::settings::defs::default_settings_with_subagent_rows(
+            rows,
+        ))
     }
 
     /// All registered settings, in declaration order.
@@ -779,7 +800,7 @@ pub fn current_value_for(
                     .available_models
                     .iter()
                     .find(|(_, mid)| mid.0.as_ref() == id.as_str())
-                    .map(|(name, _)| name.clone())
+                    .map(|(name, mid)| model_choice_label(name, mid))
                     .unwrap_or_else(|| id.clone()),
             }))
         }
@@ -793,10 +814,23 @@ pub fn current_value_for(
                         .available_models
                         .iter()
                         .find(|(_, mid)| mid.0.as_ref() == id.as_str())
-                        .map(|(name, _)| name.clone())
+                        .map(|(name, mid)| model_choice_label(name, mid))
                         .unwrap_or_else(|| id.clone()),
                 },
             ))
+        }
+        // A subagent type's pin reads from `[subagents.models].<type>`.
+        key if crate::settings::subagent_models::type_for_setting_key(key).is_some() => {
+            let name = crate::settings::subagent_models::type_for_setting_key(key)?;
+            Some(SettingValue::String(match ui.subagent_models.get(name) {
+                None => String::new(),
+                Some(id) => pager
+                    .available_models
+                    .iter()
+                    .find(|(_, mid)| mid.0.as_ref() == id.as_str())
+                    .map(|(name, mid)| model_choice_label(name, mid))
+                    .unwrap_or_else(|| id.clone()),
+            }))
         }
 
         _ => None,
@@ -1334,6 +1368,19 @@ mod tests {
                     assert!(
                         ui.model_group_models.is_empty(),
                         "UiConfig::default() must pin no model group"
+                    );
+                }
+                // A subagent type's pin lives in `[subagents.models]` and reaches the modal through `subagent_models`.
+                (key, SettingKind::DynamicEnum { default, .. })
+                    if crate::settings::subagent_models::row_for_setting_key(key).is_some() =>
+                {
+                    assert!(
+                        default.is_empty(),
+                        "`{key}` default must be the empty inherit sentinel"
+                    );
+                    assert!(
+                        ui.subagent_models.is_empty(),
+                        "UiConfig::default() must pin no subagent model"
                     );
                 }
                 _ => panic!(
@@ -1952,5 +1999,115 @@ mod tests {
                 crate::views::settings_modal::MAX_PICKER_CHOICES,
             );
         }
+    }
+
+    /// Every spawnable subagent type gets its own model row, and no shared
+    /// "default" row exists to fall back on.
+    #[test]
+    fn each_subagent_type_has_its_own_model_row() {
+        use crate::settings::subagent_models::{SubagentModelRow, SubagentType, rows_from};
+        let types = vec![
+            SubagentType {
+                name: "general-purpose".into(),
+                description: String::new(),
+            },
+            SubagentType {
+                name: "explore".into(),
+                description: String::new(),
+            },
+            SubagentType {
+                name: "plan".into(),
+                description: String::new(),
+            },
+            SubagentType {
+                name: "seeded-agent".into(),
+                description: String::new(),
+            },
+        ];
+        let seeded: Vec<SubagentModelRow> = rows_from(&types);
+        let reg = SettingsRegistry::with_subagent_rows(&seeded);
+
+        for name in ["general-purpose", "explore", "plan", "seeded-agent"] {
+            let key = format!("subagents.models.{name}");
+            let meta = reg
+                .find(Box::leak(key.clone().into_boxed_str()))
+                .unwrap_or_else(|| panic!("no model row for subagent type {name}"));
+            assert!(matches!(meta.kind, SettingKind::DynamicEnum { .. }));
+            assert!(
+                crate::settings::subagent_models::type_for_setting_key(meta.key)
+                    .is_some_and(|listed| listed == name),
+                "row key {} must name type {name}",
+                meta.key
+            );
+        }
+        assert!(
+            reg.find("models.subagent_default").is_none(),
+            "the shared subagent default row must not exist"
+        );
+        assert!(
+            !reg.all()
+                .iter()
+                .any(|m| m.key.starts_with("subagents.models.default")),
+            "no default subagent model row"
+        );
+
+        let mut ui = UiConfig::default();
+        ui.subagent_models
+            .insert("seeded-agent".to_string(), "seeded-model".to_string());
+        assert_eq!(
+            current_value_for(
+                seeded
+                    .iter()
+                    .find(|row| row.name == "seeded-agent")
+                    .map(|row| row.setting_key)
+                    .expect("seeded row"),
+                &ui,
+                &PagerLocalSnapshot::default(),
+            ),
+            Some(SettingValue::String("seeded-model".to_string())),
+            "a seeded discovered type reads its own [subagents.models] key"
+        );
+    }
+
+    /// A subagent row reads `[subagents.models].<type>` and nothing else.
+    #[test]
+    fn a_subagent_row_reads_its_own_type_pin() {
+        use crate::settings::subagent_models::{SubagentModelRow, SubagentType, rows_from};
+        let rows: Vec<SubagentModelRow> = rows_from(&[
+            SubagentType {
+                name: "explore".into(),
+                description: String::new(),
+            },
+            SubagentType {
+                name: "plan".into(),
+                description: String::new(),
+            },
+        ]);
+        let reg = SettingsRegistry::with_subagent_rows(&rows);
+        let mut ui = UiConfig::default();
+        ui.subagent_models
+            .insert("explore".to_string(), "fast-model".to_string());
+        let pager = PagerLocalSnapshot::default();
+
+        let key = rows
+            .iter()
+            .find(|row| row.name == "explore")
+            .map(|row| row.setting_key)
+            .expect("explore row");
+        assert_eq!(
+            current_value_for(key, &ui, &pager),
+            Some(SettingValue::String("fast-model".to_string())),
+        );
+        let plan_key = rows
+            .iter()
+            .find(|row| row.name == "plan")
+            .map(|row| row.setting_key)
+            .expect("plan row");
+        assert_eq!(
+            current_value_for(plan_key, &ui, &pager),
+            Some(SettingValue::String(String::new())),
+            "another type's pin must not be shown"
+        );
+        assert!(reg.find(key).is_some());
     }
 }

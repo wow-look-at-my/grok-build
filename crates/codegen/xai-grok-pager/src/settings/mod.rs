@@ -19,6 +19,7 @@
 pub mod defs;
 pub mod model_groups;
 pub mod registry;
+pub mod subagent_models;
 
 pub use registry::{
     CodingDataSharingLock, DynamicEnumSource, EnumChoice, FeatureOverrideState, OwnedEnumChoice,

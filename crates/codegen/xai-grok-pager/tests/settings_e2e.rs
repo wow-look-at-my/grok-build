@@ -93,6 +93,7 @@ fn every_registered_setting_is_exercised() {
         // mouse tests below WALK that table and cover.
         if xai_grok_models::slot_for_setting_key(meta.key).is_some()
             || xai_grok_pager::settings::model_groups::group_for_setting_key(meta.key).is_some()
+            || xai_grok_pager::settings::subagent_models::is_setting_key(meta.key)
         {
             continue;
         }
@@ -2043,6 +2044,11 @@ fn registry_kind_membership_through_pr_14() {
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
     let mut expected_dynamic: Vec<&str> = vec!["default_model"];
     expected_dynamic.extend(model_picker_rows().into_iter().map(PickerRow::key));
+    expected_dynamic.extend(
+        xai_grok_pager::settings::subagent_models::rows()
+            .iter()
+            .map(|row| row.setting_key),
+    );
     let mut sorted_dynamic = dynamic_enum_keys.clone();
     sorted_dynamic.sort();
     expected_dynamic.sort();
@@ -2145,6 +2151,7 @@ fn defaults_round_trip_through_registry() {
     xai_grok_pager::appearance::cache::set_invert_scroll(false);
     // 3 = the registry default shown while the profile is in charge.
     xai_grok_pager::appearance::cache::set_scroll_lines(3);
+    xai_grok_pager::appearance::cache::set_collapsed_edit_blocks(false);
 
     // Hard-coded per-key expectations (independent of registry).
     let expected = |key: &str| -> SettingValue {
@@ -2208,9 +2215,12 @@ fn defaults_round_trip_through_registry() {
             "contextual_hints.word_select" => SettingValue::Bool(true),
             "contextual_hints.export_copy" => SettingValue::Bool(true),
             "contextual_hints.ssh_wrap" => SettingValue::Bool(true),
-            // Every harness model slot defaults to the empty inherit sentinel.
+            // Every harness model slot, model group, and subagent type pin
+            // defaults to the empty inherit sentinel.
             key if xai_grok_models::slot_for_setting_key(key).is_some()
-                || xai_grok_pager::settings::model_groups::group_for_setting_key(key).is_some() =>
+                || xai_grok_pager::settings::model_groups::group_for_setting_key(key).is_some()
+                || xai_grok_pager::settings::subagent_models::row_for_setting_key(key)
+                    .is_some() =>
             {
                 SettingValue::String(String::new())
             }

@@ -1482,6 +1482,16 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
+        key if crate::settings::subagent_models::type_for_setting_key(key).is_some() => {
+            let agent_type = crate::settings::subagent_models::type_for_setting_key(key)
+                .expect("guard above matched this key");
+            let SettingValue::String(s) = value else {
+                return Err(kind_mismatch(key, "String", &value));
+            };
+            xai_grok_shell::util::config::set_subagent_model(agent_type, s)
+                .await
+                .map_err(|e| e.to_string())
+        }
         other => Err(format!("unknown setting key for persist: `{other}`")),
     }
 }

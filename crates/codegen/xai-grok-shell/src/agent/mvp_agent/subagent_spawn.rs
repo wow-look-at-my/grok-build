@@ -237,7 +237,6 @@ impl MvpAgent {
             base_personas,
             subagent_model_overrides,
             subagent_toggle,
-            subagent_default_model,
         ) = {
             let cfg = self.cfg.borrow();
             (
@@ -245,8 +244,6 @@ impl MvpAgent {
                 cfg.subagent_personas.clone(),
                 cfg.subagent_model_overrides.clone(),
                 cfg.subagent_toggle.clone(),
-                cfg.resolve_harness_model("subagent_default")
-                    .map(|r| r.value),
             )
         };
         let (subagent_roles, subagent_personas) =
@@ -344,7 +341,6 @@ impl MvpAgent {
             parent_max_turns,
             available_models,
             subagent_model_overrides,
-            subagent_default_model,
             subagent_toggle,
             subagent_roles,
             subagent_personas,
