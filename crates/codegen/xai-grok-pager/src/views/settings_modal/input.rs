@@ -908,7 +908,7 @@ pub fn handle_settings_mouse(
         return upgrade_if_breadcrumb_flipped(outcome, breadcrumb_hover_flipped);
     }
 
-    // PickingEnum: click-to-pick on choice rects; the scroll wheel is a no-op (the picker is bounded; scrolling there could surprise)
+    // PickingEnum: click-to-pick on choice rects. The wheel moves the focus and the viewport follows it.
     if state.state.mode_kind() == SettingsModeKind::PickingEnum {
         let outcome = handle_picker_mouse(state, kind, column, row);
         return upgrade_if_breadcrumb_flipped(outcome, breadcrumb_hover_flipped);
