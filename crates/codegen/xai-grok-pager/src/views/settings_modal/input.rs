@@ -83,9 +83,27 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
         _ => unreachable!("picker handler requires PickingEnum state"),
     };
 
-    let dynamic_picker = picker_is_dynamic(state, setting_key);
+    let dynamic_picker = picker_takes_text(state, setting_key);
+    let searching = state.picker_search_active || !state.picker_query.is_empty();
 
     match key.code {
+        // `/` starts a search, as it does in the settings list. Inside a query it is a literal character, because model ids contain it.
+        KeyCode::Char('/') if key.modifiers.is_empty() && !searching => {
+            state.picker_search_active = true;
+            SettingsKeyOutcome::Changed
+        }
+        // Esc leaves the search first. A second Esc leaves the picker.
+        KeyCode::Esc if searching => edit_picker_query(
+            state,
+            setting_key,
+            original_value,
+            supports_preview,
+            |state| {
+                state.picker_query.clear();
+                state.picker_search_active = false;
+                true
+            },
+        ),
         KeyCode::Down => {
             let len = picker_choices_len(state, setting_key);
             if choices_idx + 1 >= len {
@@ -141,15 +159,24 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
                 && !key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::SUPER) =>
         {
-            state.picker_query.push(c);
-            refocus_filtered_picker(state, setting_key, original_value, supports_preview)
+            edit_picker_query(
+                state,
+                setting_key,
+                original_value,
+                supports_preview,
+                |state| {
+                    state.picker_query.push(c);
+                    true
+                },
+            )
         }
-        KeyCode::Backspace if dynamic_picker => {
-            if state.picker_query.pop().is_none() {
-                return SettingsKeyOutcome::Unchanged;
-            }
-            refocus_filtered_picker(state, setting_key, original_value, supports_preview)
-        }
+        KeyCode::Backspace if dynamic_picker => edit_picker_query(
+            state,
+            setting_key,
+            original_value,
+            supports_preview,
+            |state| state.picker_query.pop().is_some(),
+        ),
         KeyCode::Enter => {
             // A filtered list with no matches has nothing to commit.
             if dynamic_picker && picker_choices_len(state, setting_key) == 0 {
