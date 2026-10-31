@@ -40,7 +40,7 @@ pub(in crate::app) use auth::scrollback_has_recent_error_banner;
 pub(crate) use billing::{
     CREDIT_LIMIT_RETRY_OPTION_ID, UPSELL_URL_PAYG, UPSELL_URL_UPGRADE, is_credit_limit_error,
 };
-pub(crate) use dashboard::{DashboardStopReadiness, dashboard_stop_readiness};
+pub(crate) use dashboard::{DashboardStopReadiness, dashboard_stop_readiness, overlay_cycle_ids};
 pub(crate) use modes::{downgrade_displayed_auto_if_gated, effective_auto};
 pub(crate) use notes::FEEDBACK_TRACE_UPLOAD_TIMEOUT_MS;
 pub(crate) use notes::{
