@@ -970,6 +970,38 @@ fn a_model_group_write_round_trips_to_the_resolver() {
     assert!(err.to_string().contains("unknown model group"), "{err}");
 }
 
+/// A subagent model write lands in `[subagents.models].<type>` and clears
+/// back to no pin, pruning the empty tables.
+#[test]
+fn a_subagent_model_write_round_trips_to_the_resolver() {
+    let mut root: TomlMap<String, TomlValue> = toml::from_str("").unwrap();
+    super::super::settings_writes::apply_subagent_model(&mut root, "explore", "fast-model")
+        .unwrap();
+    let config = TomlValue::Table(root.clone());
+    let resolved = crate::config::SubagentsConfig::resolve(None, &config);
+    assert_eq!(
+        resolved.models.get("explore").map(String::as_str),
+        Some("fast-model")
+    );
+    assert!(!resolved.models.contains_key("plan"));
+
+    super::super::settings_writes::apply_subagent_model(&mut root, "explore", "").unwrap();
+    assert!(
+        !root.contains_key("subagents"),
+        "a clear leaves no empty table"
+    );
+
+    let mut quoted: TomlMap<String, TomlValue> = toml::from_str("").unwrap();
+    super::super::settings_writes::apply_subagent_model(&mut quoted, "plugin:reviewer", "m")
+        .unwrap();
+    let config = TomlValue::Table(quoted);
+    let resolved = crate::config::SubagentsConfig::resolve(None, &config);
+    assert_eq!(
+        resolved.models.get("plugin:reviewer").map(String::as_str),
+        Some("m")
+    );
+}
+
 /// Clearing a slot removes its key, so the resolver falls back again.
 /// Setting the field to `None` only stops it serializing, which would
 /// leave the model already on disk in place under a "cleared" toast.

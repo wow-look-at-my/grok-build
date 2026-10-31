@@ -15,6 +15,9 @@ pub struct UiConfig {
     /// The `[model_groups.<id>] model` values the user set, keyed by group id.
     #[serde(skip)]
     pub model_group_models: std::collections::BTreeMap<String, String>,
+    /// The `[subagents.models].<name>` pins the user set, keyed by subagent type.
+    #[serde(skip)]
+    pub subagent_models: std::collections::BTreeMap<String, String>,
     /// YOLO mode. Read by `util::config`, declared here for `serde_ignored`.
     #[serde(default)]
     pub yolo: bool,
@@ -285,6 +288,7 @@ impl Default for UiConfig {
             theme: None,
             harness_models: std::collections::BTreeMap::new(),
             model_group_models: std::collections::BTreeMap::new(),
+            subagent_models: std::collections::BTreeMap::new(),
             yolo: false,
             ui_theme: None,
             compact_mode: false,

@@ -298,8 +298,6 @@ pub(crate) struct SubagentSpawnContext {
     pub available_models: indexmap::IndexMap<String, crate::agent::config::ModelEntry>,
     /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
     pub subagent_model_overrides: std::collections::HashMap<String, String>,
-    /// `[models] subagent_default`.
-    pub subagent_default_model: Option<String>,
     /// Per-subagent enable/disable toggles from config.toml `[subagents.toggle]`.
     /// Omitted agents default to enabled (`true`).
     pub subagent_toggle: std::collections::HashMap<String, bool>,
@@ -624,7 +622,7 @@ impl SubagentPresentation {
         Arc::clone(&self.is_turn_active)
     }
 }
-/// Resolve the sampling config and model ID for a subagent. Precedence: `[subagents.models].{agent_name}` config override > explicit `AgentDefinition` model > the `[models] subagent_default` slot > the parent session's live sampling config.
+/// Resolve the sampling config and model ID for a subagent. Precedence: `[subagents.models].{agent_name}` config override > explicit `AgentDefinition` model > the parent session's live sampling config.
 /// Unknown pins warn and fall through. The caller applies runtime model overrides before this runs.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn resolve_subagent_sampling_config(
@@ -665,15 +663,6 @@ async fn resolve_subagent_sampling_config(
             model_id,
             "agent_definition",
             "Agent definition model references unknown model, falling through to inherit",
-        )
-    {
-        return resolved;
-    }
-    if let Some(model_id) = ctx.subagent_default_model.as_deref()
-        && let Some(resolved) = try_pin(
-            model_id,
-            "subagent_default_slot",
-            "[models] subagent_default references unknown model, falling through to inherit",
         )
     {
         return resolved;

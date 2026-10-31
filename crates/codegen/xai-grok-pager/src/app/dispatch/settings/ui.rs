@@ -14,10 +14,11 @@ use super::setters::{
     set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
     set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
     set_show_thinking_blocks_inner, set_show_tips_inner, set_stop_gate_ci_failing_inner,
-    set_stop_gate_unfinished_todos_inner, set_theme_inner, set_thinking_summaries_inner,
-    set_thinking_summary_history_min_count_inner, set_thinking_summary_history_window_secs_inner,
-    set_timeline_inner, set_timestamps, set_timestamps_inner, set_ttft_timeout_secs_inner,
-    set_voice_capture_mode_inner, set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
+    set_stop_gate_unfinished_todos_inner, set_subagent_model_inner, set_theme_inner,
+    set_thinking_summaries_inner, set_thinking_summary_history_min_count_inner,
+    set_thinking_summary_history_window_secs_inner, set_timeline_inner, set_timestamps,
+    set_timestamps_inner, set_ttft_timeout_secs_inner, set_voice_capture_mode_inner,
+    set_voice_keybind_enabled_inner, set_voice_stt_language_inner,
 };
 use crate::app::actions::{Action, Effect};
 use crate::app::app_view::{ActiveView, AppView};
@@ -793,6 +794,25 @@ pub(in crate::app::dispatch) fn action_for_reset(
             }
         }
 
+        (key, SettingValue::String(s))
+            if crate::settings::subagent_models::type_for_setting_key(key).is_some() =>
+        {
+            let agent_type = crate::settings::subagent_models::type_for_setting_key(key)?;
+            let row = crate::settings::subagent_models::row_for_name(agent_type)?;
+            if s.is_empty() {
+                Some(Action::SetSubagentModel(row.name, String::new()))
+            } else {
+                tracing::error!(
+                    target: "settings",
+                    key,
+                    value = %s,
+                    "action_for_reset(subagent model) received non-empty default — \
+                     registry/dispatch skew (default should be empty string)",
+                );
+                None
+            }
+        }
+
         _ => None,
     }
 }
@@ -1101,6 +1121,13 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             let group = crate::settings::model_groups::group_for_setting_key(key)
                 .expect("guard above matched this key");
             set_model_group_model_inner(app, group.id, s.clone());
+        }
+        (key, SettingValue::String(s))
+            if crate::settings::subagent_models::type_for_setting_key(key).is_some() =>
+        {
+            let agent_type = crate::settings::subagent_models::type_for_setting_key(key)
+                .expect("guard above matched this key");
+            set_subagent_model_inner(app, agent_type, s.clone());
         }
         _ => {
             tracing::error!(

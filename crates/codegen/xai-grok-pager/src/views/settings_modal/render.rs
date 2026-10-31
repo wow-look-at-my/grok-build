@@ -7,12 +7,13 @@ use unicode_width::UnicodeWidthStr;
 use super::state::{
     CONTENT_MIN_WIDTH, MAX_THOUGHTS_WIDTH_WIDENED_MARGIN, MODAL_TITLE, RowEntry,
     STANDARD_MAX_WIDTH, SettingsModalState, SettingsMode, SettingsModeKind,
-    TITLE_LEADING_DECORATION_W, effective_enum_choices, group_children, mode_is_consent_chooser,
+    TITLE_LEADING_DECORATION_W, group_children, mode_is_consent_chooser, picker_choices_for_query,
+    picker_is_dynamic,
 };
 use crate::render::line_utils::truncate_str;
 use crate::settings::{
     CodingDataSharingLock, OwnedEnumChoice, SettingKey, SettingKind, SettingMeta, SettingValue,
-    StringValidator, dynamic_enum_choices,
+    StringValidator,
 };
 use crate::theme::Theme;
 use crate::views::modal_window::{
@@ -988,22 +989,8 @@ pub(super) fn render_picking_enum(
         return;
     };
 
-    let choices: Vec<OwnedEnumChoice> = match &meta.kind {
-        SettingKind::Enum { choices, .. } => {
-            effective_enum_choices(setting_key, choices, &state.pager_snapshot)
-                .into_iter()
-                .map(|c| OwnedEnumChoice {
-                    canonical: c.canonical.to_string(),
-                    display: c.display.to_string(),
-                    description: c.description.to_string(),
-                })
-                .collect()
-        }
-        SettingKind::DynamicEnum { source, .. } => {
-            dynamic_enum_choices(*source, &state.pager_snapshot)
-        }
-        _ => return,
-    };
+    let choices: Vec<OwnedEnumChoice> = picker_choices_for_query(state, setting_key);
+    let filtering = picker_is_dynamic(state, setting_key);
 
     if area.width == 0 || area.height == 0 {
         return;
@@ -1014,9 +1001,37 @@ pub(super) fn render_picking_enum(
     if area.height <= header_rows {
         return;
     }
-    let choices_y = area.y + header_rows;
-    let max_choices_h = area.height.saturating_sub(header_rows) as usize;
+    let mut choices_y = area.y + header_rows;
+    let mut max_choices_h = area.height.saturating_sub(header_rows) as usize;
+    if filtering {
+        let query = state.picker_query.trim();
+        let prompt = if query.is_empty() {
+            "Type to filter".to_string()
+        } else {
+            format!("Filter: {query}")
+        };
+        let style = if query.is_empty() {
+            Style::default().fg(theme.gray_dim)
+        } else {
+            Style::default().fg(theme.text_primary)
+        };
+        let text = truncate_str(&prompt, area.width as usize);
+        buf.set_span(area.x, choices_y, &Span::styled(text, style), area.width);
+        choices_y = choices_y.saturating_add(1);
+        max_choices_h = max_choices_h.saturating_sub(1);
+    }
     if max_choices_h == 0 {
+        return;
+    }
+    if filtering && choices.is_empty() {
+        let message = format!("No matches for \"{}\"", state.picker_query.trim());
+        let text = truncate_str(&message, area.width as usize);
+        buf.set_span(
+            area.x,
+            choices_y,
+            &Span::styled(text, Style::default().fg(theme.gray)),
+            area.width,
+        );
         return;
     }
 
@@ -2724,12 +2739,21 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
             };
             let esc_label = if *sp { "Esc revert" } else { "Esc cancel" };
             let consent = crate::settings::is_consent_chooser(key);
-            let mut shortcuts = vec![
-                Shortcut {
-                    label: nav_label,
+            let filtering = picker_is_dynamic(state, key);
+            let mut shortcuts = Vec::new();
+            if filtering {
+                shortcuts.push(Shortcut {
+                    label: "type to filter",
                     clickable: false,
                     id: 0,
-                },
+                });
+            }
+            shortcuts.push(Shortcut {
+                label: nav_label,
+                clickable: false,
+                id: 0,
+            });
+            shortcuts.push(
                 // A chooser picks one of the offered answers, so Enter "selects"
                 // The filter bar and the value editors, where Enter really does commit typed input, keep that wording
                 Shortcut {
@@ -2737,19 +2761,20 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                     clickable: false,
                     id: 0,
                 },
-                Shortcut {
-                    label: "double-click select",
-                    clickable: false,
-                    id: 0,
-                },
-                Shortcut {
-                    label: esc_label,
-                    clickable: false,
-                    id: 0,
-                },
-            ];
+            );
+            shortcuts.push(Shortcut {
+                label: "double-click select",
+                clickable: false,
+                id: 0,
+            });
+            shortcuts.push(Shortcut {
+                label: esc_label,
+                clickable: false,
+                id: 0,
+            });
             // Consent choosers hide reset; the key is disabled there too, so this stays a description of what actually works on the pane
-            if !consent {
+            // A filtering picker spends printable keys on the query, so `d` no longer resets there.
+            if !consent && !filtering {
                 shortcuts.push(Shortcut {
                     label: "d reset",
                     clickable: false,

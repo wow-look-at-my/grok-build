@@ -570,6 +570,8 @@ pub enum Action {
     SetHarnessModel(&'static str, String),
     /// Commit one model group into `[model_groups.<id>] model`.
     SetModelGroupModel(&'static str, String),
+    /// Commit one subagent type's model into `[subagents.models].<type>`.
+    SetSubagentModel(&'static str, String),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
     /// Restart-required: tips are resolved once at startup.
     SetShowTips(bool),

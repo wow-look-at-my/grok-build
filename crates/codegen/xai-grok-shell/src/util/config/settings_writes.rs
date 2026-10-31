@@ -395,7 +395,6 @@ pub(crate) fn apply_harness_model(
         "goal_strategist" => m.goal_strategist = value,
         "goal_skeptic" => m.goal_skeptic = value,
         "goal_summarizer" => m.goal_summarizer = value,
-        "subagent_default" => m.subagent_default = value,
         // Unreachable: the id was checked against the slot table above.
         other => tracing::error!(slot = other, "harness model slot has no config field"),
     }
@@ -475,6 +474,70 @@ pub(crate) fn apply_model_group_model(
             models.remove(*member);
         }
     }
+    Ok(())
+}
+
+/// Persist one subagent type's model into `[subagents.models].<type>`. An
+/// empty `value` removes the key and any table it leaves empty.
+pub async fn set_subagent_model(agent_type: &str, value: String) -> Result<()> {
+    if value.len() > MAX_DEFAULT_MODEL_LEN {
+        anyhow::bail!(
+            "model name too long ({} > {} bytes)",
+            value.len(),
+            MAX_DEFAULT_MODEL_LEN
+        );
+    }
+    if agent_type.trim().is_empty() {
+        anyhow::bail!("subagent type must not be empty");
+    }
+    let agent_type = agent_type.to_owned();
+    rewrite_user_config_locked("subagent model", move |path| {
+        rewrite_user_config_table(
+            path,
+            "subagent model",
+            crate::util::config::persist::atomic_write_follow_bound,
+            |root| apply_subagent_model(root, &agent_type, &value),
+        )
+    })
+    .await
+}
+
+/// The edit behind [`set_subagent_model`], on the parsed root table.
+pub(crate) fn apply_subagent_model(
+    root: &mut toml::map::Map<String, toml::Value>,
+    agent_type: &str,
+    value: &str,
+) -> Result<()> {
+    if value.is_empty() {
+        let Some(subagents) = root
+            .get_mut("subagents")
+            .and_then(toml::Value::as_table_mut)
+        else {
+            return Ok(());
+        };
+        if let Some(models) = subagents
+            .get_mut("models")
+            .and_then(toml::Value::as_table_mut)
+        {
+            models.remove(agent_type);
+            if models.is_empty() {
+                subagents.remove("models");
+            }
+        }
+        if subagents.is_empty() {
+            root.remove("subagents");
+        }
+        return Ok(());
+    }
+    root.entry("subagents".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .context("[subagents] must be a table")?
+        .entry("models".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .context("[subagents.models] must be a table")?
+        .insert(agent_type.to_owned(), toml::Value::String(value.to_owned()));
     Ok(())
 }
 
