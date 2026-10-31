@@ -251,6 +251,8 @@ pub struct SettingsModalState {
     pub(super) picker_last_click: Option<(usize, std::time::Instant)>,
     /// Type-to-filter query for the open enum picker. Empty shows every choice.
     pub(super) picker_query: String,
+    /// True after `/` in an open picker. Keys then go to `picker_query`, in a static picker too.
+    pub(super) picker_search_active: bool,
 }
 
 impl SettingsModalState {
@@ -292,6 +294,7 @@ impl SettingsModalState {
             group_return: None,
             picker_last_click: None,
             picker_query: String::new(),
+            picker_search_active: false,
         }
     }
 
@@ -583,6 +586,7 @@ impl SettingsModalState {
         self.close_on_picker_exit = false;
         self.picker_last_click = None;
         self.picker_query.clear();
+        self.picker_search_active = false;
     }
 
     /// Open the editor or picker of a non-Bool group child. Returns `false`
@@ -673,6 +677,7 @@ impl SettingsModalState {
     /// Enum/DynamicEnum.
     pub(super) fn try_enter_picking_enum_for(&mut self, key: SettingKey) -> bool {
         self.picker_query.clear();
+        self.picker_search_active = false;
         let (first_canonical, current_value, supports_preview, resolved_choices) = {
             let Some(meta) = self.registry.find(key) else {
                 return false;
@@ -1303,6 +1308,12 @@ pub(super) fn picker_is_dynamic(state: &SettingsModalState, key: SettingKey) -> 
         state.registry.find(key).map(|meta| &meta.kind),
         Some(SettingKind::DynamicEnum { .. })
     )
+}
+
+/// Whether the open picker sends typed keys to its filter query.
+/// A model picker always does. A static picker does after `/`.
+pub(super) fn picker_takes_text(state: &SettingsModalState, key: SettingKey) -> bool {
+    state.picker_search_active || picker_is_dynamic(state, key)
 }
 
 /// Whether a choice's label or canonical contains `query`, case-insensitively.

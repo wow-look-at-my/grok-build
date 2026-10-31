@@ -5,7 +5,7 @@ use super::render::int_step_sizes;
 use super::state::{
     RowEntry, SettingsKeyOutcome, SettingsModalState, SettingsMode, SettingsModeKind,
     action_for_bool, action_for_enum, action_for_enum_commit, action_for_int, action_for_string,
-    effective_enum_choices, group_children, picker_choices_for_query, picker_is_dynamic,
+    effective_enum_choices, group_children, picker_choices_for_query, picker_takes_text,
     query_keeps_choice, validate_string,
 };
 use crate::app::actions::Action;
@@ -341,32 +341,38 @@ pub(super) fn set_picker_idx(
     SettingsKeyOutcome::Changed
 }
 
-/// Keep the focused row inside the filtered list after the query changes.
-fn refocus_filtered_picker(
+/// Apply `edit` to the picker query, then keep the focus on the same choice.
+/// When the query hides that choice, the focus goes to the first match.
+/// `edit` returns false when it changed nothing.
+fn edit_picker_query(
     state: &mut SettingsModalState,
     setting_key: SettingKey,
     original_value: SettingValue,
     supports_preview: bool,
+    edit: impl FnOnce(&mut SettingsModalState) -> bool,
 ) -> SettingsKeyOutcome {
-    let len = picker_choices_len(state, setting_key);
-    if len == 0 {
-        return SettingsKeyOutcome::Changed;
-    }
     let current = match &state.state.mode {
         SettingsMode::PickingEnum { choices_idx, .. } => *choices_idx,
         _ => return SettingsKeyOutcome::Unchanged,
     };
-    if current < len {
-        // The query narrowed around the focused row; nothing to move.
+    let focused = picker_choice_at_owned(state, setting_key, current);
+    if !edit(state) {
+        return SettingsKeyOutcome::Unchanged;
+    }
+    let choices = picker_choices_for_query(state, setting_key);
+    if choices.is_empty() {
         return SettingsKeyOutcome::Changed;
     }
-    set_picker_idx(
-        state,
-        setting_key,
-        len - 1,
-        original_value,
-        supports_preview,
-    )
+    let target = focused
+        .as_deref()
+        .and_then(|canonical| choices.iter().position(|c| c.canonical == canonical))
+        .unwrap_or(0);
+    let same_choice =
+        target == current && Some(choices[target].canonical.as_str()) == focused.as_deref();
+    if same_choice {
+        return SettingsKeyOutcome::Changed;
+    }
+    set_picker_idx(state, setting_key, target, original_value, supports_preview)
 }
 
 /// Key routing for the inline string/int editor. Esc cancels, Enter commits.
@@ -1060,10 +1066,12 @@ fn handle_picker_mouse(
     // The wheel moves the focused choice and, through the renderer's
     // scroll-to-focus, the viewport. The picker stays open.
     if matches!(kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
-        let over_list = state
-            .picker_choice_rects
-            .iter()
-            .any(|rect| rect.height > 0 && rect_contains(*rect, column, row));
+        // Anywhere in the list scrolls it, the `… N more` row and the blank rows below the last choice included.
+        let over_list = rect_contains(state.list_area, column, row)
+            || state
+                .picker_choice_rects
+                .iter()
+                .any(|rect| rect.height > 0 && rect_contains(*rect, column, row));
         if !over_list {
             return SettingsKeyOutcome::Unchanged;
         }
