@@ -652,6 +652,7 @@ impl ToolRegistryBuilder {
         b.register::<grok_build::UpdateGoalTool>();
         b.register::<grok_build::SendMessageTool>();
         b.register::<grok_build::CiTool>();
+        b.register::<grok_build::GitTool>();
         b.register::<grok_build::WorkflowTool>();
         b.register::<grok_build::TaskOutputTool>();
         b.register_with_params::<

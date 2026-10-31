@@ -31,6 +31,7 @@ pub mod copy_move;
 pub mod deploy_app;
 pub mod enter_plan_mode;
 pub mod exit_plan_mode;
+pub mod git;
 pub mod grep;
 pub mod image_edit;
 pub mod image_gen;
@@ -64,6 +65,7 @@ pub use copy_move::{CopyFileTool, MoveFileTool};
 pub use deploy_app::DEPLOY_APP_TOOL_NAME;
 pub use enter_plan_mode::EnterPlanModeTool;
 pub use exit_plan_mode::ExitPlanModeTool;
+pub use git::{GIT_TOOL_NAME, GitTool};
 pub use grep::GrepTool;
 pub use image_edit::{IMAGE_EDIT_TOOL_NAME, ImageEditTool};
 pub use image_gen::{

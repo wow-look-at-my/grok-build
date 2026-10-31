@@ -276,7 +276,9 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             | ToolInput::AskUserQuestion(_)
             | ToolInput::UpdateGoal(_)
             // `ci` runs only allowlisted read-only `gh` queries.
-            | ToolInput::Ci(_) => AccessKind::Read(None),
+            | ToolInput::Ci(_)
+            // `git` runs allowlisted reads in a write-denied child.
+            | ToolInput::Git(_) => AccessKind::Read(None),
             ToolInput::Task(_) => AccessKind::Tool("task".to_owned()),
             ToolInput::SchedulerCreate(_) => AccessKind::Tool("scheduler_create".to_owned()),
             ToolInput::SchedulerDelete(_) => AccessKind::Tool("scheduler_delete".to_owned()),

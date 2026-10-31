@@ -158,6 +158,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The byte count beside the name is what the tail cannot say. A tail of a large body looks the same at any size.
 - The preview truncates each line. It never wraps one. Every fragment redraws it. A wrapped line changes the block's height as the model types, which makes the whole transcript jump.
 
+## Explore-mode `git` tool
+
+- Explore has no shell. Its `git` tool (`grok_build/git/`) runs an argument array, not a shell line. `policy.rs` allowlists the subcommands. `branch`, `tag`, `config`, `stash`, `remote`, `worktree`, `notes`, `reflog`, `symbolic-ref` and `submodule` run only their listing forms.
+- In those subcommands a value option must be `--opt=value`. A bare `--sort` takes the next argument as its value, so `branch --sort --list foo` creates `foo`. A denied long option matches by prefix, and the arguments after `--` are checked too.
+- Argument checks alone are not enough. `git diff` and `describe --dirty` rewrite `.git/index`, even with `GIT_OPTIONAL_LOCKS=0`. So git runs in `xai_grok_sandbox::read_only_child`, which denies every write but `/dev/null`: Landlock on Linux, `sandbox-exec` on macOS. Other platforms refuse to run the tool.
+
 ## Todo detail popup
 
 - A double-click or `Enter` on a todo pane row opens `views/todo_detail.rs`. It shows the full text, status, priority, the `verification` condition with its verifier verdict, and any `meta`. `←`/`→` (`h`/`l`) step through the rows the pane shows and wrap. `↑`/`↓` scroll. `Esc` closes it. Input lives in `agent_view/todo_detail_overlay.rs`.
