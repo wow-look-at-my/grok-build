@@ -111,17 +111,63 @@ pub fn dynamic_enum_choices(
                 display: "(no override)".to_string(),
                 description: "Inherit the default model (no per-user override).".to_string(),
             });
-            for (name, id) in &snapshot.available_models {
-                let label = model_choice_label(name, id);
-                out.push(OwnedEnumChoice {
-                    // A blank catalog name cannot be the persisted canonical: empty is the "(no override)" sentinel.
+            let mut models: Vec<OwnedEnumChoice> = snapshot
+                .available_models
+                .iter()
+                .map(|(name, id)| model_choice_label(name, id))
+                // A blank label draws an empty row and collides with the "(no override)" sentinel.
+                .filter(|label| !label.trim().is_empty())
+                .map(|label| OwnedEnumChoice {
                     canonical: label.clone(),
                     display: label,
                     description: String::new(),
-                });
-            }
+                })
+                .collect();
+            // The catalog arrives in provider order. Sort it so a reader can scan the list.
+            models.sort_by(|a, b| {
+                natural_cmp_ignore_case(&a.display, &b.display)
+                    .then_with(|| a.display.cmp(&b.display))
+            });
+            models.dedup_by(|a, b| a.canonical == b.canonical);
+            out.extend(models);
             out
         }
+    }
+}
+
+/// Compare labels case-insensitively, with each run of digits compared as a number. So
+/// `glm-4.7` sorts before `glm-10`.
+pub fn natural_cmp_ignore_case(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mut a = a.chars().peekable();
+    let mut b = b.chars().peekable();
+    loop {
+        let (Some(&ca), Some(&cb)) = (a.peek(), b.peek()) else {
+            return a.peek().is_some().cmp(&b.peek().is_some());
+        };
+        if ca.is_ascii_digit() && cb.is_ascii_digit() {
+            let mut da = String::new();
+            while let Some(c) = a.next_if(|c| c.is_ascii_digit()) {
+                da.push(c);
+            }
+            let mut db = String::new();
+            while let Some(c) = b.next_if(|c| c.is_ascii_digit()) {
+                db.push(c);
+            }
+            let ta = da.trim_start_matches('0');
+            let tb = db.trim_start_matches('0');
+            let ord = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb));
+            if ord != Ordering::Equal {
+                return ord;
+            }
+            continue;
+        }
+        let ord = ca.to_lowercase().cmp(cb.to_lowercase());
+        if ord != Ordering::Equal {
+            return ord;
+        }
+        a.next();
+        b.next();
     }
 }
 
@@ -2109,5 +2155,54 @@ mod tests {
             "another type's pin must not be shown"
         );
         assert!(reg.find(key).is_some());
+    }
+
+    /// The model picker keeps "(no override)" first, sorts the rest naturally and
+    /// case-insensitively, and drops a model with neither a name nor an id.
+    #[test]
+    fn model_catalog_choices_are_sorted_and_never_blank() {
+        let model = |name: &str, id: &str| {
+            (
+                name.to_string(),
+                acp::ModelId::new(std::sync::Arc::from(id)),
+            )
+        };
+        let snapshot = PagerLocalSnapshot {
+            available_models: vec![
+                model("zeta", "z"),
+                model("IncoAI/glm-10", "g10"),
+                model("", ""),
+                model("incoai/glm-4.7", "g47"),
+                model("", "alpha-id"),
+                model("   ", "  "),
+                model("Beta", "b"),
+            ],
+            ..PagerLocalSnapshot::default()
+        };
+        let labels: Vec<String> =
+            dynamic_enum_choices(DynamicEnumSource::ActiveModelCatalog, &snapshot)
+                .into_iter()
+                .map(|c| c.display)
+                .collect();
+        assert_eq!(
+            labels,
+            [
+                "(no override)",
+                "alpha-id",
+                "Beta",
+                "incoai/glm-4.7",
+                "IncoAI/glm-10",
+                "zeta",
+            ]
+        );
+    }
+
+    #[test]
+    fn natural_cmp_orders_digit_runs_as_numbers() {
+        use std::cmp::Ordering::*;
+        assert_eq!(natural_cmp_ignore_case("glm-4.7", "glm-10"), Less);
+        assert_eq!(natural_cmp_ignore_case("Qwen 3.8", "qwen 3.8"), Equal);
+        assert_eq!(natural_cmp_ignore_case("k3", "k3:fast"), Less);
+        assert_eq!(natural_cmp_ignore_case("v007", "v7"), Equal);
     }
 }
