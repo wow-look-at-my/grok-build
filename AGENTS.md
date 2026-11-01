@@ -83,6 +83,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/harness-model-slot-notes.md](docs/harness-model-slot-notes.md) holds this section.
 
+## Config hot-reload notes
+
+- `config.toml` is the store of settings. `/settings` writes the file and so does an editor. The watcher carries either write into a running agent (`agent/config_reload.rs`). No setting has a second in-memory copy to update.
+- Every way of running an agent applies a reload the same way: `apply_reload` calls `session_admin::handle` on the agent. The TUI (`acp/spawn.rs`), stdio and in-process agents use `spawn_config_reload`. `run_leader` keeps its own loop, because it also hot-swaps auth.
+- A summary a provider refuses reads `FinishReason::ContentFilter`. The row shows `summary_refusal_text`. A usage object with no counts reads as `None` (`deserialize_reported_usage`), so the refusal chunk parses and its finish reason survives.
+
 ## `/debug` feature notes
 
 - `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only `scroll`, `fps` and `log` are reserved. Everything else is free text. So a question must never come back as an "unknown option" error again.
