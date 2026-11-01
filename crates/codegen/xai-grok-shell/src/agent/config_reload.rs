@@ -1,17 +1,17 @@
-//! Config hot-reload, shared by the leader and the stdio agent.
+//! Config hot-reload, shared by every way of running an agent.
 //!
 //! `config.toml` is the store of settings. `/settings` writes it and so does
 //! an editor. This watcher is what carries either write into the running
 //! agent.
+use crate::agent::MvpAgent;
 use crate::agent::config::Config as AgentConfig;
 use crate::config::reloader::{ConfigReloader, ConfigUpdate};
 use crate::config::watcher::ConfigFileWatcher;
-use crate::leader::protocol::{InternalMethod, internal_request_line};
+use crate::leader::protocol::InternalMethod;
 use crate::util::grok_home;
 use std::path::Path;
-use std::sync::Arc;
-use tokio::io::{AsyncWrite, AsyncWriteExt as _};
-use tokio::sync::{Mutex as TokioMutex, mpsc};
+use std::rc::Rc;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
@@ -77,93 +77,96 @@ pub(crate) fn start_config_reload(
 }
 
 /// The internal request that applies `update` to the running agent, or `None` when the update
-/// is not applied through the ACP stream.
-pub(crate) fn reload_request_line(update: &ConfigUpdate) -> Option<String> {
-    let (id, method, params) = match update {
-        ConfigUpdate::McpServersChanged => (
-            "config-reload-mcp",
-            InternalMethod::ReloadAllMcpServers,
-            serde_json::json!({}),
-        ),
+/// is not a reload.
+fn reload_request(update: &ConfigUpdate) -> Option<(InternalMethod, serde_json::Value)> {
+    Some(match update {
+        ConfigUpdate::McpServersChanged => {
+            (InternalMethod::ReloadAllMcpServers, serde_json::json!({}))
+        }
         ConfigUpdate::ProjectMcpServersChanged { cwd } => (
-            "config-reload-project-mcp",
             InternalMethod::ReloadProjectMcpServers,
             serde_json::json!({ "cwd": cwd.to_string_lossy() }),
         ),
-        ConfigUpdate::ModelsChanged => (
-            "config-reload-models",
-            InternalMethod::ReloadModels,
-            serde_json::json!({}),
-        ),
-        ConfigUpdate::ModelsCacheChanged => (
-            "config-reload-models-cache",
-            InternalMethod::ReloadModelsCache,
-            serde_json::json!({}),
-        ),
-        ConfigUpdate::OutputRateFloorChanged => (
-            "config-reload-output-rate-floor",
-            InternalMethod::ReloadOutputRateFloor,
-            serde_json::json!({}),
-        ),
+        ConfigUpdate::ModelsChanged => (InternalMethod::ReloadModels, serde_json::json!({})),
+        ConfigUpdate::ModelsCacheChanged => {
+            (InternalMethod::ReloadModelsCache, serde_json::json!({}))
+        }
+        ConfigUpdate::OutputRateFloorChanged => {
+            (InternalMethod::ReloadOutputRateFloor, serde_json::json!({}))
+        }
         ConfigUpdate::ThinkingSummariesChanged => (
-            "config-reload-thinking-summaries",
             InternalMethod::ReloadThinkingSummaries,
             serde_json::json!({}),
         ),
         _ => return None,
-    };
-    Some(internal_request_line(id, method, params))
+    })
 }
 
-/// Write `update`'s reload request into the agent's ACP stream.
-/// Returns whether `update` was a reload.
-pub(crate) async fn inject_reload<W>(acp_tx: &Arc<TokioMutex<W>>, update: &ConfigUpdate) -> bool
-where
-    W: AsyncWrite + Unpin,
-{
-    let Some(line) = reload_request_line(update) else {
+/// Run `update`'s reload on `agent`. Returns whether `update` was a reload.
+pub(crate) async fn apply_reload(agent: &MvpAgent, update: &ConfigUpdate) -> bool {
+    let Some((method, params)) = reload_request(update) else {
         return false;
     };
-    info!(line = line.trim_end(), "config change detected, reloading");
-    let mut tx = acp_tx.lock().await;
-    if let Err(error) = tx.write_all(line.as_bytes()).await {
-        warn!(%error, "failed to inject config reload into ACP stream");
+    info!(method = method.name(), "config change detected, reloading");
+    let params = match serde_json::value::to_raw_value(&params) {
+        Ok(params) => params,
+        Err(error) => {
+            warn!(%error, "config reload params did not serialize");
+            return true;
+        }
+    };
+    let request = agent_client_protocol::ExtRequest::new(method.name(), params.into());
+    if let Err(error) = crate::extensions::session_admin::handle(agent, &request).await {
+        warn!(%error, method = method.name(), "config reload failed");
     }
     true
 }
 
-/// Apply config updates for an agent with no leader process around it, the TUI's in-process
-/// agent included. Only reloads reach it: `run_leader` alone hot-swaps auth and relays UI changes.
-pub(crate) fn spawn_reload_forwarder<W>(
-    mut updates: mpsc::UnboundedReceiver<ConfigUpdate>,
-    acp_tx: Arc<TokioMutex<W>>,
-) where
-    W: AsyncWrite + Unpin + 'static,
-{
+/// Watch the config for an agent with no leader around it. Only reloads apply to it:
+/// `run_leader` alone hot-swaps auth and relays UI changes.
+/// Cancel `cancel` to stop the watcher.
+pub fn spawn_config_reload(
+    agent: Rc<MvpAgent>,
+    agent_config: &AgentConfig,
+    cancel: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    let (watcher, mut updates) = start_config_reload(
+        agent_config,
+        &std::env::current_dir().unwrap_or_default(),
+        recursive_config_watch_enabled(),
+        cancel.clone(),
+    );
     tokio::task::spawn_local(async move {
-        while let Some(update) = updates.recv().await {
-            if !inject_reload(&acp_tx, &update).await {
-                debug!("config update has no reload in a stdio agent");
+        let _watcher = watcher;
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => break,
+                update = updates.recv() => match update {
+                    Some(update) => {
+                        if !apply_reload(&agent, &update).await {
+                            debug!("config update is not a reload");
+                        }
+                    }
+                    None => break,
+                },
             }
         }
-    });
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn method_of(update: &ConfigUpdate) -> Option<String> {
-        let line = reload_request_line(update)?;
-        let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
-        Some(msg["method"].as_str().unwrap().to_string())
+    fn method_of(update: &ConfigUpdate) -> Option<&'static str> {
+        reload_request(update).map(|(method, _)| method.name())
     }
 
     #[test]
     fn a_model_change_reloads_the_model_tables() {
         assert_eq!(
-            method_of(&ConfigUpdate::ModelsChanged).as_deref(),
-            Some("_x.ai/internal/reload_models"),
+            method_of(&ConfigUpdate::ModelsChanged),
+            Some("x.ai/internal/reload_models"),
         );
     }
 
@@ -176,19 +179,5 @@ mod tests {
             }),
             None,
         );
-    }
-
-    #[tokio::test]
-    async fn inject_writes_one_line_and_reports_a_reload() {
-        let (mut read, write) = tokio::io::simplex(4096);
-        let tx = Arc::new(TokioMutex::new(write));
-        assert!(inject_reload(&tx, &ConfigUpdate::ModelsChanged).await);
-        drop(tx);
-        let mut text = String::new();
-        tokio::io::AsyncReadExt::read_to_string(&mut read, &mut text)
-            .await
-            .unwrap();
-        assert_eq!(text.matches('\n').count(), 1, "one request line: {text}");
-        assert!(text.contains("reload_models"), "{text}");
     }
 }

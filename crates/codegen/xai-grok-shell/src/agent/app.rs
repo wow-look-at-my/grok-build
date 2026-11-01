@@ -1,6 +1,6 @@
 use crate::agent::config::{Config as AgentConfig, ModelEntry};
 use crate::agent::config_reload::{
-    inject_reload, recursive_config_watch_enabled, spawn_reload_forwarder, start_config_reload,
+    apply_reload, recursive_config_watch_enabled, spawn_config_reload, start_config_reload,
 };
 use crate::agent::init::{bootstrap_with_cancel, exit_on_config_error};
 use crate::agent::mvp_agent::MvpAgent;
@@ -186,13 +186,6 @@ pub async fn run_stdio_agent(
     let keepalive_for_spawn = Rc::clone(&agent_keepalive);
     let result = local_set
         .run_until(async move {
-            let (_config_watcher, config_updates) = start_config_reload(
-                &agent_config,
-                &std::env::current_dir().unwrap_or_default(),
-                recursive_config_watch_enabled(),
-                cancel_for_agent.clone(),
-            );
-            spawn_reload_forwarder(config_updates, acp_incoming_tx.clone());
             let simplex_tx = acp_incoming_tx;
             tokio::task::spawn_local(async move {
                 let _ = stdin_closed_rx.await;
@@ -212,6 +205,7 @@ pub async fn run_stdio_agent(
             )
             .await?;
             apply_otel_config(&auth_manager, &agent_config.grok_com_config);
+            let reload_config = agent_config.clone();
             let handle_io = spawn_agent_local(
                 agent_config,
                 auth_manager,
@@ -222,6 +216,9 @@ pub async fn run_stdio_agent(
                 incoming,
                 &keepalive_for_spawn,
             );
+            if let Some(agent) = keepalive_for_spawn.borrow().clone() {
+                spawn_config_reload(agent, &reload_config, cancel_for_agent.clone());
+            }
             handle_io.await?;
             Ok::<(), anyhow::Error>(())
         })
@@ -801,6 +798,7 @@ pub async fn run_leader(
     let mut agent_config_for_spawn = agent_config.clone();
     agent_config_for_spawn.remote_settings = None;
     let keepalive_for_spawn = Rc::clone(&agent_keepalive);
+    let keepalive_for_config = Rc::clone(&agent_keepalive);
     crate::util::config::sync_campaign_fields(&mut agent_config_for_spawn);
     let agent_to_ipc_tx_clone = agent_to_ipc_tx.clone();
     let cancel_clone = cancel.clone();
@@ -1053,7 +1051,10 @@ pub async fn run_leader(
             tokio::task::spawn_local(async move {
                 use crate::config::reloader::ConfigUpdate;
                 while let Some(update) = config_update_rx.recv().await {
-                    if inject_reload(&acp_tx_for_config, &update).await {
+                    let agent = keepalive_for_config.borrow().clone();
+                    if let Some(agent) = agent
+                        && apply_reload(&agent, &update).await
+                    {
                         continue;
                     }
                     match update {
@@ -1120,7 +1121,7 @@ pub async fn run_leader(
                         | ConfigUpdate::ModelsCacheChanged
                         | ConfigUpdate::OutputRateFloorChanged
                         | ConfigUpdate::ThinkingSummariesChanged => {
-                            unreachable!("inject_reload handled every reload above")
+                            warn!("config change arrived before the agent was built");
                         }
                         ConfigUpdate::Memory(mem) => {
                             info!(
