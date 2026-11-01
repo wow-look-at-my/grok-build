@@ -11,15 +11,10 @@ use std::process::{Command, Stdio};
 use xai_grok_sandbox::gh_shim::{GH_CONTRACT, ShimLayout, client_script, command_for};
 use xai_grok_sandbox::jail::{Access, JailDefaults, JailPlan, Mount};
 
+/// A short root under `/tmp`. The server's socket lives below it, and macOS caps a socket path at
+/// many bytes, which a fixture under the target directory exceeds.
 fn fixture_dir(name: &str) -> PathBuf {
-    let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-        "grok-gh-shim-{}-{name}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let path = Path::new("/tmp").join(format!("ggh-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&path).unwrap();
     dunce::canonicalize(&path).unwrap()
 }
