@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 /// Whether the watcher also follows project configs under the working directory.
-pub(super) fn recursive_config_watch_enabled() -> bool {
+pub(crate) fn recursive_config_watch_enabled() -> bool {
     let user_cfg = crate::config::load_from_disk().ok();
     let requirements = crate::agent::config::read_requirements_toml();
     crate::util::config::resolve_mcp_recursive_config_watch(
@@ -28,7 +28,7 @@ pub(super) fn recursive_config_watch_enabled() -> bool {
 
 /// Start the file watcher and the reloader that turns its events into [`ConfigUpdate`]s.
 /// The returned watcher stops when dropped. `None` means hot-reload is off for this process.
-pub(super) fn start_config_reload(
+pub(crate) fn start_config_reload(
     agent_config: &AgentConfig,
     cwd: &Path,
     recursive_watch: bool,
@@ -78,7 +78,7 @@ pub(super) fn start_config_reload(
 
 /// The internal request that applies `update` to the running agent, or `None` when the update
 /// is not applied through the ACP stream.
-pub(super) fn reload_request_line(update: &ConfigUpdate) -> Option<String> {
+pub(crate) fn reload_request_line(update: &ConfigUpdate) -> Option<String> {
     let (id, method, params) = match update {
         ConfigUpdate::McpServersChanged => (
             "config-reload-mcp",
@@ -117,7 +117,7 @@ pub(super) fn reload_request_line(update: &ConfigUpdate) -> Option<String> {
 
 /// Write `update`'s reload request into the agent's ACP stream.
 /// Returns whether `update` was a reload.
-pub(super) async fn inject_reload<W>(acp_tx: &Arc<TokioMutex<W>>, update: &ConfigUpdate) -> bool
+pub(crate) async fn inject_reload<W>(acp_tx: &Arc<TokioMutex<W>>, update: &ConfigUpdate) -> bool
 where
     W: AsyncWrite + Unpin,
 {
@@ -132,9 +132,9 @@ where
     true
 }
 
-/// Apply config updates for an agent that has no leader around it. Only reloads reach it: the
-/// leader alone hot-swaps auth and relays UI changes.
-pub(super) fn spawn_reload_forwarder<W>(
+/// Apply config updates for an agent with no leader process around it, the TUI's in-process
+/// agent included. Only reloads reach it: `run_leader` alone hot-swaps auth and relays UI changes.
+pub(crate) fn spawn_reload_forwarder<W>(
     mut updates: mpsc::UnboundedReceiver<ConfigUpdate>,
     acp_tx: Arc<TokioMutex<W>>,
 ) where

@@ -130,6 +130,13 @@ impl SessionActor {
                 return Err(format!("model call failed: {e}"));
             }
         };
+        if response.stop_reason == Some(xai_grok_sampling_types::StopReason::ContentFilter) {
+            tracing::warn!(model = %setup.model, "thinking summary: the provider refused");
+            return Err(helpers::summary_refusal_text(
+                &setup.model,
+                response.stop_message.as_deref(),
+            ));
+        }
         let summary = helpers::clean_thinking_summary(&response.assistant_text());
         if summary.is_empty() {
             tracing::warn!("thinking summary: the model returned no text");

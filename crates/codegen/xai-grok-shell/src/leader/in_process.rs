@@ -5,16 +5,21 @@ use std::sync::Arc;
 
 use agent_client_protocol as acp;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader, simplex};
+use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio_util::compat::{TokioAsyncReadCompatExt as _, TokioAsyncWriteCompatExt as _};
+use tokio_util::sync::CancellationToken;
 use xai_acp_lib::{
     AcpAgentGatewayReceiver as GatewayReceiver, AcpAgentGatewaySender as GatewaySender,
     LineBufferedRead,
 };
 
 use crate::agent::config::Config as AgentConfig;
+use crate::agent::config_reload::{
+    recursive_config_watch_enabled, spawn_reload_forwarder, start_config_reload,
+};
 use crate::agent::mvp_agent::MvpAgent;
 
 const SIMPLEX_BUF: usize = 8 * 1024 * 1024;
@@ -40,7 +45,9 @@ pub async fn spawn_agent(
     mut to_agent: UnboundedReceiver<String>,
     from_agent: UnboundedSender<String>,
 ) -> InProcessAgent {
-    let (agent_in_read, mut agent_in_write) = simplex(SIMPLEX_BUF);
+    let (agent_in_read, agent_in_write) = simplex(SIMPLEX_BUF);
+    let agent_in_write = Arc::new(TokioMutex::new(agent_in_write));
+    let reload_write = agent_in_write.clone();
     let (agent_out_read, agent_out_write) = simplex(SIMPLEX_BUF);
     let (keepalive_tx, keepalive_rx) = oneshot::channel();
 
@@ -75,6 +82,15 @@ pub async fn spawn_agent(
         if keepalive_tx.send(Rc::clone(&agent)).is_err() {
             return;
         }
+        let reload_cancel = CancellationToken::new();
+        let _stop_reloader = reload_cancel.clone().drop_guard();
+        let (_config_watcher, config_updates) = start_config_reload(
+            &config,
+            &std::env::current_dir().unwrap_or_default(),
+            recursive_config_watch_enabled(),
+            reload_cancel,
+        );
+        spawn_reload_forwarder(config_updates, reload_write);
         let incoming = LineBufferedRead::spawn_local(agent_in_read.compat());
         let (conn, handle_io) =
             acp::AgentSideConnection::new(agent, agent_out_write.compat_write(), incoming, |fut| {
@@ -90,6 +106,7 @@ pub async fn spawn_agent(
 
     let requests = tokio::task::spawn_local(async move {
         while let Some(msg) = to_agent.recv().await {
+            let mut agent_in_write = agent_in_write.lock().await;
             if agent_in_write.write_all(msg.as_bytes()).await.is_err()
                 || agent_in_write.write_all(b"\n").await.is_err()
             {

@@ -14,6 +14,16 @@ const INPUT_TAIL_CHARS: usize = 32_000;
 /// Upper bound on the per-session summary history, so a long session cannot grow it without limit.
 pub(crate) const THINKING_SUMMARY_HISTORY_CAPACITY: usize = 64;
 
+/// What the client shows when the provider refused the summary request.
+pub(crate) fn summary_refusal_text(model: &str, explanation: Option<&str>) -> String {
+    let mut text = format!("{model} refused this as a safety violation");
+    if let Some(explanation) = explanation {
+        text.push_str(": ");
+        text.push_str(explanation);
+    }
+    text
+}
+
 /// The words of every reasoning item in the response, in order.
 pub(crate) fn response_thinking_text(response: &ConversationResponse) -> String {
     response
