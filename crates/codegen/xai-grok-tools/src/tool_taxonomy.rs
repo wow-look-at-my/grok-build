@@ -70,6 +70,7 @@ impl ToolKind {
             ToolKind::GoalUpdate => "Update Goal",
             ToolKind::Workflow => "Workflow",
             ToolKind::Ci => "CI Status",
+            ToolKind::Git => "Git",
             ToolKind::SendMessage => "Send Message",
             ToolKind::Feedback => "Feedback",
             ToolKind::Other => "Tool",
@@ -92,6 +93,7 @@ impl ToolKind {
             | ToolKind::EnterPlan
             | ToolKind::ExitPlan
             | ToolKind::Ci
+            | ToolKind::Git
             | ToolKind::AskUser => true,
             ToolKind::Edit
             | ToolKind::Delete

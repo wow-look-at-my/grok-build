@@ -37,6 +37,7 @@ pub mod package_cache;
 mod paths;
 mod profiles;
 mod read_deny_verify;
+pub mod read_only_child;
 mod runtime_sockets;
 #[cfg(test)]
 mod test_util;

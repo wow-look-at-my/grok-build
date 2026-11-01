@@ -2512,6 +2512,7 @@ impl SessionActor {
                         | ToolKind::WebFetch
                         // The `ci` tool is a read of GitHub state: it declares itself read-only.
                         | ToolKind::Ci
+                        | ToolKind::Git
                         | ToolKind::EnterPlan
                         | ToolKind::ExitPlan
                         | ToolKind::AskUser
@@ -2863,6 +2864,7 @@ impl SessionActor {
             ToolInput::SchedulerDelete(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::SchedulerList(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::Ci(_) => (acp::ToolKind::Other, vec![], vec![]),
+            ToolInput::Git(_) => (acp::ToolKind::Read, vec![], vec![]),
             #[allow(unreachable_patterns)]
             _ => (acp::ToolKind::Other, vec![], vec![]),
         };
