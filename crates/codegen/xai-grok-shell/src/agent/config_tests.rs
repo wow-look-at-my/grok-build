@@ -3656,13 +3656,8 @@ fn e2e_credential_priority_model_key_beats_session_beats_env() {
         sampling.base_url, "https://custom.api/v1",
         "model's own base_url must be used"
     );
-    let model_no_key = test_model_entry(
-        "test",
-        "https://proxy.api/v1",
-        None,
-        None,
-        Some("https://api.x.ai/v1"),
-    );
+    let proxy = xai_grok_env::PROD_CLI_CHAT_PROXY_BASE_URL;
+    let model_no_key = test_model_entry("test", proxy, None, None, Some("https://api.x.ai/v1"));
     let sampling = resolve_sampling(&model_no_key, Some("session-key"));
     assert_eq!(
         sampling.api_key.as_deref(),
@@ -3670,8 +3665,21 @@ fn e2e_credential_priority_model_key_beats_session_beats_env() {
         "session token should beat env key when model has no own credentials"
     );
     assert_eq!(
-        sampling.base_url, "https://proxy.api/v1",
+        sampling.base_url, proxy,
         "session auth should use base_url, not api_base_url"
+    );
+    let third_party = test_model_entry(
+        "test",
+        "https://gateway.example/v1",
+        None,
+        None,
+        Some("https://api.x.ai/v1"),
+    );
+    let sampling = resolve_sampling(&third_party, Some("session-key"));
+    assert_ne!(
+        sampling.api_key.as_deref(),
+        Some("session-key"),
+        "a host xAI does not operate never gets the session token"
     );
     let sampling = resolve_sampling(&model_no_key, None);
     assert_eq!(

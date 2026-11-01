@@ -124,6 +124,11 @@ pub fn is_cli_chat_proxy_url(url: &str) -> bool {
 pub fn is_xai_api_url(url: &str) -> bool {
     is_xai_api_url_impl(url, false)
 }
+/// True when the xAI session token may be attached for `url`: an xAI
+/// endpoint, or a blank URL, which builds no request.
+pub fn may_carry_xai_session(url: &str) -> bool {
+    url.trim().is_empty() || is_xai_api_url(url)
+}
 /// Like [`is_xai_api_url`], but requires `https` on every arm, so a session bearer is never attached to a cleartext endpoint, including loopback.
 /// A co-located process could otherwise read a token sent to `http://localhost`.
 pub fn is_xai_api_bearer_url(url: &str) -> bool {
