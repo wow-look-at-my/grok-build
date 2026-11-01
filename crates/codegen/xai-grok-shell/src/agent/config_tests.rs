@@ -1423,6 +1423,19 @@ fn resolve_credentials_empty_api_key_falls_through_to_session() {
     assert_eq!(creds.auth_type, AuthType::SessionToken);
     assert_eq!(creds.api_key.as_deref(), Some("session-jwt"));
 }
+/// A model with no key of its own on a third-party host never gets the session token.
+#[test]
+#[serial]
+fn resolve_credentials_keeps_session_off_third_party_host() {
+    use crate::agent::auth_method::{LEGACY_XAI_API_KEY_ENV_VAR, XAI_API_KEY_ENV_VAR};
+    use xai_grok_test_support::EnvGuard;
+    let _global = EnvGuard::unset(XAI_API_KEY_ENV_VAR);
+    let _legacy = EnvGuard::unset(LEGACY_XAI_API_KEY_ENV_VAR);
+    let model = test_model_entry("m", "https://gateway.example/v1", None, None, None);
+    assert!(!model.has_own_credentials());
+    let creds = resolve_credentials(&model, Some("session-jwt"));
+    assert_ne!(creds.api_key.as_deref(), Some("session-jwt"));
+}
 #[test]
 #[serial]
 fn config_toml_env_key_array_parses() {
@@ -1781,6 +1794,64 @@ api_key = "sk-other"
     assert_eq!(facts.byok, ModelByok::Byok, "{routing} at {gateway}");
     let ambiguous = resolve_model_auth_facts_and_provider(routing, None).0;
     assert_eq!(ambiguous.byok, ModelByok::NotByok, "{routing} is ambiguous");
+}
+/// A gateway provider with a `[model.<id>]` block that routes to it, a
+/// `[models]` default and local blocks beside it. Every pazer-listed id is BYOK.
+#[test]
+#[serial]
+fn gateway_listed_models_are_byok_beside_other_model_blocks() {
+    use crate::agent::auth_method::ModelByok;
+    let home = tempfile::tempdir().expect("temp grok home");
+    std::fs::write(
+        home.path().join("config.toml"),
+        r#"
+[models]
+default = "pazer/openrouter/anthropic/claude-haiku-5.5:batch"
+default_reasoning_effort = "high"
+web_search = "pazer/Synthetic/syn:small:text"
+
+[model_providers.pazer]
+base_url = "https://gateway.pazer.ai/v1"
+api_backend = "chat_completions"
+api_key = "sk-pazer"
+models_autodetect = true
+
+[model.qwen-local]
+model = "qwen3.8-27b"
+base_url = "http://192.168.1.84:30000/v1"
+api_backend = "chat_completions"
+auth_scheme = "none"
+
+[model.qwen-gateway]
+model = "sgl/RadixArk/Qwen3.8-Flash-Next-NVFP4"
+model_provider = "pazer"
+
+[model.qwen-hf]
+model = "Qwen/Qwen3.8-Flash-Next-FP8"
+base_url = "https://example.endpoints.huggingface.cloud/v1"
+api_backend = "chat_completions"
+api_key = "sk-hf"
+"#,
+    )
+    .expect("write config");
+    let _home = EnvGuard::set("GROK_HOME", home.path());
+    let gateway = "https://gateway.pazer.ai/v1";
+    for (model_id, endpoint) in [
+        ("pazer/openrouter/anthropic/claude-haiku-5.5:batch", None),
+        (
+            "pazer/openrouter/anthropic/claude-haiku-5.5:batch",
+            Some(gateway),
+        ),
+        ("openrouter/anthropic/claude-haiku-5.5:batch", Some(gateway)),
+        ("openrouter/anthropic/claude-opus-5-5", Some(gateway)),
+        (
+            "openrouter/deepseek/deepseek-v4.1-flash-1017",
+            Some(gateway),
+        ),
+    ] {
+        let facts = resolve_model_auth_facts_and_provider(model_id, endpoint).0;
+        assert_eq!(facts.byok, ModelByok::Byok, "{model_id} at {endpoint:?}");
+    }
 }
 #[test]
 fn resolve_model_auth_facts_empty_model_id_is_unknown() {
