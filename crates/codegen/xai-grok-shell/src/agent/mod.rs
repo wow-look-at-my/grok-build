@@ -4,6 +4,7 @@ pub mod auth_method;
 pub mod chat_modes;
 pub mod config;
 pub(crate) mod config_model_override_parse;
+mod config_reload;
 pub(crate) mod cursor_worker_config;
 mod ext_parsers;
 pub mod external_otel_pin;
