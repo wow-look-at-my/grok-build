@@ -65,6 +65,7 @@ pub(crate) fn build_effort_arg_items(
                 insert_text,
                 description: option.description.clone().unwrap_or_default(),
                 loaded_in_vram: None,
+                favorite: false,
             }
         })
         .collect()

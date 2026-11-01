@@ -323,9 +323,9 @@ base_url = "https://gateway.example/v1"
 favorite_models = ["*-sonnet-*", "*-opus-*"]
 ```
 
-`/model` opens on the favorites plus the model the session runs. The moment you type, it searches the whole catalog, so a model nobody marked is still one search away and `-m` still reaches it.
+`/model` lists every model, newest first. Favorites come first, each with a star. Batch routes (`:batch`) are not listed, because they cannot answer an interactive turn.
 
-The lists are joined: `[models].favorite_models` matches any model, and a provider's own list matches only that provider's models. A pattern matches the catalog key or the routing slug, case-sensitive. When nothing is marked, the picker lists every model as before.
+The lists are joined: `[models].favorite_models` matches any model, and a provider's own list matches only that provider's models. A pattern matches the catalog key or the routing slug, case-sensitive.
 
 ---
 

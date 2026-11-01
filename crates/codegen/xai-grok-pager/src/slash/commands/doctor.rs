@@ -71,6 +71,7 @@ impl SlashCommand for DoctorCommand {
                     insert_text: format!("fix {handle}"),
                     description: label.into(),
                     loaded_in_vram: None,
+                    favorite: false,
                 })
                 .collect::<Vec<_>>();
             return (!items.is_empty()).then_some(items);
@@ -81,6 +82,7 @@ impl SlashCommand for DoctorCommand {
             insert_text: "fix".into(),
             description: "Show automatic fixes available here".into(),
             loaded_in_vram: None,
+            favorite: false,
         }])
     }
 

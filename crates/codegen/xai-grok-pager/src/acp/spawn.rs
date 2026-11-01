@@ -328,6 +328,7 @@ pub async fn spawn_grok_shell(
     let auth_manager_for_pager = auth_manager.clone();
 
     let skills_paths = agent_config.skills.paths.clone();
+    let reload_config = agent_config.clone();
 
     let spawn_fn: Box<dyn FnOnce(AcpClientTx) -> Result<Rc<MvpAgent>> + Send + 'static> = {
         Box::new(move |client_tx| {
@@ -346,8 +347,14 @@ pub async fn spawn_grok_shell(
 
     // Spawn the agent thread with direct dispatch
     startup::enter(StartupPhase::WorkerSpawn);
-    let handle =
-        spawn_agent_thread_direct(spawn_fn, acp_agent, agent_cancel.clone(), skills_paths).await?;
+    let handle = spawn_agent_thread_direct(
+        spawn_fn,
+        acp_agent,
+        agent_cancel.clone(),
+        skills_paths,
+        reload_config,
+    )
+    .await?;
 
     // The spawn succeeded: the caller's AgentShutdownGuard owns cancellation now.
     let agent_cancel = cancel_auth_tasks_unless_spawned.disarm();
@@ -367,6 +374,7 @@ async fn spawn_agent_thread_direct(
     channel: AcpAgentChannel,
     cancel: CancellationToken,
     skills_paths: Vec<String>,
+    reload_config: xai_grok_shell::agent::config::Config,
 ) -> Result<thread::JoinHandle<Result<()>>> {
     spawn_runtime_thread("acp-agent-worker", move |rt| {
         // Declared before the `LocalSet` so an unwind also drops it last: tokio drops tasks in spawn order, so the gateway task would free the agent before its `LocalRef` tasks are dropped.
@@ -384,6 +392,12 @@ async fn spawn_agent_thread_direct(
                 skills_paths,
                 cancel.child_token(),
             ));
+            let _config_reload =
+                AbortOnDropHandle::new(xai_grok_shell::agent::config_reload::spawn_config_reload(
+                    agent_rc.clone(),
+                    &reload_config,
+                    cancel.child_token(),
+                ));
 
             cancel.cancelled().await;
             agent_rc.flush_all_sessions(SESSION_FLUSH_GRACE).await;

@@ -5518,6 +5518,7 @@ pub(crate) fn resolve_credentials(
             xai_chat_state::AuthType::ApiKey,
         )
     } else if let Some(key) = session_key
+        && crate::util::may_carry_xai_session(&info.base_url)
         && xai_grok_login::backend::AuthBackend::may_receive_session(
             &xai_grok_login::backend::ActiveAuthBackend::default(),
             &info.base_url,

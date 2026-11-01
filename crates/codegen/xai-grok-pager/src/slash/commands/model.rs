@@ -7,6 +7,8 @@ use xai_grok_shell::sampling::types::{
     supports_reasoning_effort_meta,
 };
 
+use super::model_order::{is_batch_model, newest_first};
+
 use crate::acp::model_state::ModelState;
 use crate::app::actions::Action;
 use crate::slash::command::{
@@ -39,9 +41,7 @@ impl SlashCommand for ModelCommand {
         if let Some(items) = sub_phase_items(ctx.models, args_query) {
             return Some(items);
         }
-        // The opening list is the favorites.
-        let favorites_only = args_query.trim().is_empty();
-        Some(build_model_items(ctx.models, favorites_only))
+        Some(build_model_items(ctx.models))
     }
 
     fn search_args(&self, ctx: &AppCtx, args_query: &str) -> Option<Vec<ArgItem>> {
@@ -51,7 +51,11 @@ impl SlashCommand for ModelCommand {
         if let Some(items) = sub_phase_items(ctx.models, args_query) {
             return Some(items);
         }
-        Some(build_model_items(ctx.models, false))
+        Some(build_model_items(ctx.models))
+    }
+
+    fn keeps_arg_order_on_ties(&self) -> bool {
+        true
     }
 
     fn preselected_arg(&self, ctx: &AppCtx, args_query: &str) -> Option<String> {
@@ -329,6 +333,7 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
             insert_text: chained_insert(id.0.as_ref(), info),
             description: info.description.clone().unwrap_or_default(),
             loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
+            favorite: is_favorite(info),
         });
     }
     items
@@ -338,16 +343,16 @@ fn build_route_items(models: &ModelState, group: &[&acp::ModelId]) -> Vec<ArgIte
 /// `insert_text` so the prompt widget chains into the effort sub-menu. A name
 /// that several models share is one row. It inserts the name and a space,
 /// which opens the route phase: one row per provider serving it.
-/// `favorites_only` narrows the list to the models the config marked, plus
-/// the current one. A picker that hides what the session is running reads as
-/// a model that went missing. A catalog with no favorite in it lists
-/// everything, so an unconfigured session sees the whole catalog as before.
-fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> {
+/// Every model is listed, except a batch route the session is not running.
+/// The ones the config marked come first, then the newest of each family.
+fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
-    let narrow = favorites_only && models.available.values().any(is_favorite);
     let mut items: Vec<ArgItem> = Vec::with_capacity(models.available.len());
     let mut grouped: Vec<String> = Vec::new();
     for (id, info) in &models.available {
+        if is_batch_model(id.0.as_ref()) && current_id != Some(id) {
+            continue;
+        }
         if name_is_shared(models, id) {
             let key = info.name.to_lowercase();
             if grouped.contains(&key) {
@@ -359,9 +364,6 @@ fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> 
                 .filter_map(|id| models.available.get(*id))
                 .collect();
             let has_current = group.iter().any(|g| current_id == Some(*g));
-            if narrow && !has_current && !infos.iter().any(|i| is_favorite(i)) {
-                continue;
-            }
             grouped.push(key);
             let routes: Vec<String> = group
                 .iter()
@@ -387,14 +389,12 @@ fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> 
                 insert_text: format!("{} ", info.name),
                 description: format!("{} providers: {}", group.len(), routes.join(", ")),
                 loaded_in_vram: loaded,
+                favorite: infos.iter().any(|i| is_favorite(i)),
             });
             continue;
         }
 
         let is_current = current_id == Some(id);
-        if narrow && !is_current && !is_favorite(info) {
-            continue;
-        }
         let mut display = info.name.clone();
         if is_current {
             display.push_str(" (current)");
@@ -408,8 +408,18 @@ fn build_model_items(models: &ModelState, favorites_only: bool) -> Vec<ArgItem> 
             description: row_description(info),
             // Only a provider that reports residency answers this, so the dot appears beside local models and nowhere else.
             loaded_in_vram: loaded_in_vram_meta(info.meta.as_ref()),
+            favorite: is_favorite(info),
         });
     }
+    let plain_name = |item: &ArgItem| {
+        let name = item.display.strip_suffix(" (current)");
+        name.unwrap_or(&item.display).to_owned()
+    };
+    items.sort_by(|a, b| {
+        b.favorite
+            .cmp(&a.favorite)
+            .then_with(|| newest_first(&plain_name(a), &plain_name(b)))
+    });
     items
 }
 
@@ -498,11 +508,21 @@ mod tests {
     }
 
     #[test]
-    fn the_opening_list_is_the_favorites_plus_the_running_model() {
-        let state = state_with_a_favorite();
+    fn the_opening_list_is_every_model_with_favorites_first() {
+        let mut state = ModelState::default();
+        let (a, ainfo) = plain_model("one", "One");
+        let (b, binfo) = plain_model("two", "Two");
+        let (f, finfo) = favorite_model("kept", "Kept");
+        state.available.insert(a, ainfo);
+        state.available.insert(b, binfo);
+        state.available.insert(f, finfo);
+
         let items = ModelCommand.suggest_args(&ctx_for(&state), "").unwrap();
-        let names: Vec<&str> = items.iter().map(|i| i.match_text.as_str()).collect();
-        assert_eq!(names, vec!["Kept", "Running"]);
+        let rows: Vec<(&str, bool)> = items
+            .iter()
+            .map(|i| (i.match_text.as_str(), i.favorite))
+            .collect();
+        assert_eq!(rows, vec![("Kept", true), ("One", false), ("Two", false)]);
     }
 
     #[test]
@@ -511,7 +531,7 @@ mod tests {
         // The caller ranks the rows, so the command's job is to offer every model the moment anything is typed.
         let items = ModelCommand.suggest_args(&ctx_for(&state), "cro").unwrap();
         let names: Vec<&str> = items.iter().map(|i| i.match_text.as_str()).collect();
-        assert_eq!(names, vec!["Kept", "Running", "Crowd One"]);
+        assert_eq!(names, vec!["Kept", "Crowd One", "Running"]);
     }
 
     #[test]
@@ -520,7 +540,52 @@ mod tests {
         // The modal picker asks one time and filters its own copy.
         let items = ModelCommand.search_args(&ctx_for(&state), "").unwrap();
         let names: Vec<&str> = items.iter().map(|i| i.match_text.as_str()).collect();
-        assert_eq!(names, vec!["Kept", "Running", "Crowd One"]);
+        assert_eq!(names, vec!["Kept", "Crowd One", "Running"]);
+    }
+
+    #[test]
+    fn a_batch_route_is_listed_only_while_the_session_runs_it() {
+        let mut state = ModelState::default();
+        let (live, live_info) = plain_model("opus-5.5", "Opus 5.5");
+        let (batch, batch_info) = plain_model("opus-5.5:batch", "Opus 5.5 (batch)");
+        state.available.insert(live, live_info);
+        state.available.insert(batch.clone(), batch_info);
+
+        let names = |state: &ModelState| -> Vec<String> {
+            let items = ModelCommand.suggest_args(&ctx_for(state), "").unwrap();
+            items.into_iter().map(|i| i.display).collect()
+        };
+        assert_eq!(names(&state), vec!["Opus 5.5"]);
+
+        state.current = Some(batch);
+        assert_eq!(
+            names(&state),
+            vec!["Opus 5.5", "Opus 5.5 (batch) (current)"]
+        );
+    }
+
+    #[test]
+    fn newer_models_lead_the_list_and_a_tied_search() {
+        let mut state = ModelState::default();
+        for (id, name) in [("opus-4.1", "Opus 4.1"), ("opus-5.5", "Opus 5.5")] {
+            let (id, info) = plain_model(id, name);
+            state.available.insert(id, info);
+        }
+        let items = ModelCommand.suggest_args(&ctx_for(&state), "").unwrap();
+        let opening: Vec<&str> = items.iter().map(|i| i.display.as_str()).collect();
+        assert_eq!(opening, vec!["Opus 5.5", "Opus 4.1"]);
+
+        let mut ctrl = crate::slash::SlashController::with_builtins(std::path::PathBuf::from("."));
+        let slash = crate::slash::SlashState::default();
+        let text = "/model opus";
+        ctrl.refresh(&slash, text, text.len(), &state);
+        let snapshot = slash.snapshot();
+        let found: Vec<&str> = snapshot
+            .matches
+            .iter()
+            .map(|row| row.display.as_str())
+            .collect();
+        assert_eq!(found, vec!["Opus 5.5", "Opus 4.1"]);
     }
 
     fn routed_model(
