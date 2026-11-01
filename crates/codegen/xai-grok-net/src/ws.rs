@@ -5,7 +5,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-pub use tokio_tungstenite::tungstenite::{Message, Utf8Bytes, protocol};
+pub use tokio_tungstenite::tungstenite::{Message, Utf8Bytes, error, protocol};
 pub use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 /// The error a WebSocket connect or stream returns.

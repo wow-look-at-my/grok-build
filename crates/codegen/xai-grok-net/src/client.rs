@@ -26,6 +26,8 @@ pub struct ClientOptions {
     https_only: bool,
     no_proxy: bool,
     no_redirects: bool,
+    decompress: bool,
+    proxy: Option<reqwest::Proxy>,
     user_agent: Option<String>,
     default_headers: HeaderMap,
     identity: Option<reqwest::Identity>,
@@ -61,6 +63,7 @@ impl ClientOptions {
         http2_keep_alive_interval: Duration,
         http2_keep_alive_timeout: Duration,
         identity: reqwest::Identity,
+        proxy: reqwest::Proxy,
     );
     flag_setters!(
         http2_keep_alive_while_idle,
@@ -69,6 +72,7 @@ impl ClientOptions {
         https_only,
         no_proxy,
         no_redirects,
+        decompress,
     );
 
     pub fn user_agent(mut self, value: impl Into<String>) -> Self {
@@ -129,6 +133,12 @@ impl ClientOptions {
         }
         if self.no_redirects {
             b = b.redirect(reqwest::redirect::Policy::none());
+        }
+        if self.decompress {
+            b = b.gzip(true).brotli(true).deflate(true);
+        }
+        if let Some(proxy) = &self.proxy {
+            b = b.proxy(proxy.clone());
         }
         if let Some(ua) = &self.user_agent {
             b = b.user_agent(ua.as_str());
