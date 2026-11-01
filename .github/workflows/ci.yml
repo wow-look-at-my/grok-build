@@ -120,10 +120,7 @@ jobs:
           packages: bubblewrap mold
 
       # gh_contract_e2e serves sandbox/gh.xml with the real api-cli, the program that serves it to a sandboxed session.
-      - name: Install api-cli
-        run: |
-          curl -fsSL https://apt.pazer.build/api-cli/install.sh | sudo sh
-          sudo apt-get install -y api-cli
+      - uses: ./.github/actions/setup-api-cli
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
@@ -426,11 +423,7 @@ jobs:
         run: rustup show
 
       # gh_contract_e2e serves sandbox/gh.xml with the real api-cli.
-      - name: Install api-cli
-        run: |
-          brew trust https://brew.pazer.build/tap.git
-          brew tap pazer/build https://brew.pazer.build/tap.git
-          brew install pazer/build/api-cli
+      - uses: ./.github/actions/setup-api-cli
 
       - name: Test xai-grok-sandbox on macOS
         run: cargo test --locked -p xai-grok-sandbox

@@ -1,0 +1,42 @@
+name: Set up api-cli
+description: Install api-cli from the build of the same-named branch when api-cli has one, else its default-branch package.
+runs:
+  using: composite
+  steps:
+    - name: Install api-cli
+      shell: bash
+      env:
+        BRANCH: ${{ github.head_ref || github.ref_name }}
+      run: |
+        set -euo pipefail
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        case "$(uname -m)" in
+          x86_64) arch=amd64 ;;
+          aarch64 | arm64) arch=arm64 ;;
+          *) echo "::error::no api-cli build for $(uname -m)"; exit 1 ;;
+        esac
+        url="https://dl.pazer.build/api-cli?branch=$(jq -rn --arg b "$BRANCH" '$b|@uri')&os=${os}&arch=${arch}"
+        code=$(curl -sS -o /dev/null -w '%{http_code}' "$url")
+        case "$code" in
+          302)
+            echo "::notice::api-cli follows its branch ${BRANCH}"
+            sudo curl -fsSL -o /usr/local/bin/api-cli "$url"
+            sudo chmod +x /usr/local/bin/api-cli
+            ;;
+          404)
+            echo "::notice::api-cli has no branch ${BRANCH}; installing its default-branch package"
+            if [ "$os" = darwin ]; then
+              brew trust https://brew.pazer.build/tap.git
+              brew tap pazer/build https://brew.pazer.build/tap.git
+              brew install pazer/build/api-cli
+            else
+              curl -fsSL https://apt.pazer.build/api-cli/install.sh | sudo sh
+              sudo apt-get install -y api-cli
+            fi
+            ;;
+          *)
+            echo "::error::dl.pazer.build answered ${code} for ${url}"
+            exit 1
+            ;;
+        esac
+        api-cli --version
