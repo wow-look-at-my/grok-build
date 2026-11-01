@@ -1142,16 +1142,15 @@ fn session_token_auth_gate_truth_table() {
         assert!(!gate(false, ModelByok::NotByok, fp));
         assert!(!gate(false, ModelByok::Byok, fp));
         assert!(!gate(false, ModelByok::Unknown, fp));
-        // Session method: a definite classification ignores the endpoint
-        // NotByok always refreshes (it only ever routes to the session endpoint); a genuine per-model Byok never does
-        assert!(gate(true, ModelByok::NotByok, fp));
+        // A genuine per-model Byok never refreshes.
         assert!(!gate(true, ModelByok::Byok, fp));
     }
-    // Unknown BYOK: refresh only against a first-party xAI host.
-    // That way a transiently-unclassifiable config can't demote a live session (the stale-token 401 regression).
-    // The session token still never leaks to a third-party BYOK endpoint.
-    assert!(gate(true, ModelByok::Unknown, true));
-    assert!(!gate(true, ModelByok::Unknown, false));
+    // NotByok and Unknown refresh only against a first-party xAI host, so a
+    // catalog miss cannot send the session token to a third-party gateway.
+    for byok in [ModelByok::NotByok, ModelByok::Unknown] {
+        assert!(gate(true, byok, true), "{byok:?} on a first-party host");
+        assert!(!gate(true, byok, false), "{byok:?} on a third-party host");
+    }
 }
 
 /// Pre-fix, the gate read `auth_type` and skipped recovery here, 401'ing every turn until restart.

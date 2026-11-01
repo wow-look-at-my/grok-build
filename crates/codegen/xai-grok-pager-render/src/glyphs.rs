@@ -234,6 +234,14 @@ pub fn timeline_tick_hover() -> &'static str {
 }
 
 /// Filled status dot. Hollow `○` is already CP437; only the filled form needs a `•` stand-in on legacy ConHost.
+pub fn star() -> &'static str {
+    if is_legacy_windows_console() {
+        "*"
+    } else {
+        "\u{2605}"
+    }
+}
+
 pub fn filled_dot() -> &'static str {
     if is_legacy_windows_console() {
         "\u{2022}"
@@ -491,6 +499,7 @@ mod tests {
     fn chrome_glyph_variants_are_one_column() {
         for (fancy, fallback) in [
             ("\u{2503}", "\u{2502}"), // accent_bar
+            ("\u{2605}", "*"),        // star
             ("\u{25CF}", "\u{2022}"), // filled_dot
             ("\u{258F}", "\u{2502}"), // selection_bar
             ("\u{203A}", ">"),        // chevron
