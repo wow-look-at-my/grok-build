@@ -1720,10 +1720,72 @@ fn byok_from_lookup_classifies_all_states() {
         "no-auth models must keep the session-token resolver disabled",
     );
 }
+/// A model only a provider's listing supplies is in no config-only catalog, so its
+/// credentials come from `[model_providers.<id>]`. A turn reaches it by the
+/// catalog key discovery gives it and by the routing slug the sampler sends. Both
+/// must read as BYOK, or the session bearer goes to that provider's endpoint.
+#[test]
+#[serial]
+fn provider_listed_model_resolves_to_its_provider_credentials() {
+    use crate::agent::auth_method::{ModelByok, session_token_auth_gate};
+    let qualified = "gateway/openrouter/anthropic/claude-sonnet-5.5";
+    let routing = "openrouter/anthropic/claude-sonnet-5.5";
+    let gateway = "https://gateway.example/v1";
+    let single = tempfile::tempdir().expect("temp grok home");
+    std::fs::write(
+        single.path().join("config.toml"),
+        r#"
+[model_providers.gateway]
+base_url = "https://gateway.example/v1"
+api_key = "sk-gateway"
+"#,
+    )
+    .expect("write config");
+    {
+        let _home = EnvGuard::set("GROK_HOME", single.path());
+        for (model_id, endpoint) in [
+            (qualified, None),
+            (qualified, Some(gateway)),
+            (routing, Some(gateway)),
+        ] {
+            let facts = resolve_model_auth_facts_and_provider(model_id, endpoint).0;
+            assert_eq!(facts.byok, ModelByok::Byok, "{model_id} at {endpoint:?}");
+            assert!(
+                !session_token_auth_gate(true, facts.byok, false),
+                "{model_id}: a provider-listed model must not receive the session bearer",
+            );
+        }
+        // A slug aimed at some other endpoint belongs to no listing here, so
+        // the provider is not guessed at from its presence alone.
+        let elsewhere =
+            resolve_model_auth_facts_and_provider(routing, Some("https://other.example/v1")).0;
+        assert_eq!(elsewhere.byok, ModelByok::NotByok);
+    }
+    // Listings: the request's endpoint still names its provider.
+    let multi = tempfile::tempdir().expect("temp grok home");
+    std::fs::write(
+        multi.path().join("config.toml"),
+        r#"
+[model_providers.gateway]
+base_url = "https://gateway.example/v1"
+api_key = "sk-gateway"
+
+[model_providers.other]
+base_url = "https://other.example/v1"
+api_key = "sk-other"
+"#,
+    )
+    .expect("write config");
+    let _home = EnvGuard::set("GROK_HOME", multi.path());
+    let facts = resolve_model_auth_facts_and_provider(routing, Some(gateway)).0;
+    assert_eq!(facts.byok, ModelByok::Byok, "{routing} at {gateway}");
+    let ambiguous = resolve_model_auth_facts_and_provider(routing, None).0;
+    assert_eq!(ambiguous.byok, ModelByok::NotByok, "{routing} is ambiguous");
+}
 #[test]
 fn resolve_model_auth_facts_empty_model_id_is_unknown() {
     assert_eq!(
-        resolve_model_auth_facts_and_provider("").0.byok,
+        resolve_model_auth_facts_and_provider("", None).0.byok,
         ModelByok::Unknown
     );
 }
