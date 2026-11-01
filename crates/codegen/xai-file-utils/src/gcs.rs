@@ -406,7 +406,7 @@ where
     }
 }
 
-/// Stream an async reader directly to GCS via the gcloud-storage client.
+/// Stream an async reader directly to GCS.
 async fn upload_stream_direct<R: tokio::io::AsyncRead + Send + Sync + 'static>(
     bucket: &str,
     object_path: &str,
@@ -414,24 +414,12 @@ async fn upload_stream_direct<R: tokio::io::AsyncRead + Send + Sync + 'static>(
     content_type: &str,
     service_account_key: Option<&str>,
 ) -> anyhow::Result<String> {
-    use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
-    use tokio_util::io::ReaderStream;
-
-    let client = build_gcs_client(service_account_key).await?;
-    let stream = ReaderStream::new(reader);
-
-    let mut media = Media::new(object_path.to_string());
-    media.content_type = content_type.to_owned().into();
-    let upload_type = UploadType::Simple(media);
-    let request = UploadObjectRequest {
-        bucket: bucket.to_string(),
-        ..Default::default()
-    };
+    let client = crate::gcs_net::GcsDirect::new(service_account_key).await?;
+    let body = xai_grok_net::Body::wrap_stream(tokio_util::io::ReaderStream::new(reader));
     client
-        .upload_streamed_object(&request, stream, &upload_type)
+        .upload(bucket, object_path, content_type, body)
         .await
         .with_context(|| format!("Failed to upload to gs://{}/{}", bucket, object_path))?;
-
     Ok(format!("gs://{}/{}", bucket, object_path))
 }
 
