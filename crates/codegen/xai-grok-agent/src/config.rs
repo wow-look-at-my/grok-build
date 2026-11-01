@@ -371,6 +371,7 @@ fn explore_toolset() -> ToolServerConfig {
             (&grok_build::ReadFileTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&grok_build::GitTool).into(),
             (&grok_build::SendMessageTool).into(),
             task_tool_config(),
             task_output_tool_config(),
