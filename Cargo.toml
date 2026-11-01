@@ -445,7 +445,6 @@ codegen-units = 1
 strip = true
 
 [profile.dev]
-panic = "abort"
 split-debuginfo = "unpacked"
 codegen-units = 128
 debug = "line-tables-only"
