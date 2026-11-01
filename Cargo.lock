@@ -14078,6 +14078,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "xai-grok-net"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "parking_lot",
+ "reqwest 0.12.24",
+ "serde",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
+ "xai-grok-extra-ca",
+]
+
+[[package]]
 name = "xai-grok-otel"
 version = "0.1.0"
 dependencies = [
