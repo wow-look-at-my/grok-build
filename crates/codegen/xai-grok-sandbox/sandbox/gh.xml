@@ -108,8 +108,8 @@
 		</command>
 	</command>
 	<!-- gh api sends GET unless a field, an input or a method says otherwise. None of those flags is declared, and neither is a header, which can carry a method override. -->
-	<command name="api" description="A GET request to the GitHub API.">
-		<arg name="endpoint" required="true"/>
+	<command name="api" runnable="true" description="A GET request to the GitHub REST API, or a GraphQL query.">
+		<arg name="endpoint" required="true" pattern="^(/?[A-Za-z0-9_.-]+/.+|user|rate_limit|meta|emojis|zen|octocat|events|feeds|gists|notifications)$"/>
 		<flag name="jq" type="string"/>
 		<flag name="template" short="t" type="string"/>
 		<flag name="paginate" type="bool"/>
@@ -118,5 +118,30 @@
 		<flag name="hostname" type="string"/>
 		<flag name="include" short="i" type="bool"/>
 		<run><argv>gh</argv><argv>api</argv><argv>--method=GET</argv><argv>{{.arg.endpoint}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		<!-- GraphQL is a POST with fields. Only a query document passes, so a mutation never runs. A typed field that starts with @ reads a file on the host, so none may. -->
+		<command name="graphql" description="A GraphQL query. A mutation is refused.">
+			<flag name="raw-field" short="f" type="string-slice"/>
+			<flag name="field" short="F" type="string-slice"/>
+			<flag name="jq" type="string"/>
+			<flag name="template" short="t" type="string"/>
+			<flag name="paginate" type="bool"/>
+			<flag name="slurp" type="bool"/>
+			<flag name="cache" type="string"/>
+			<flag name="hostname" type="string"/>
+			<preconditions>
+				<precondition>{{ range (concat .flag.field (index .flag "raw-field")) }}{{ $kv := splitn "=" 2 . }}{{ if eq $kv._0 "query" }}{{ $doc := trim $kv._1 }}{{ if or (not (or (hasPrefix "query" $doc) (hasPrefix "{" $doc))) (contains "mutation" $doc) (contains "subscription" $doc) }}gh api graphql: only a query document is allowed{{ end }}{{ end }}{{ end }}</precondition>
+				<precondition>{{ range .flag.field }}{{ if contains "=@" . }}gh api graphql: a field may not read a file{{ end }}{{ end }}</precondition>
+			</preconditions>
+			<run><argv>gh</argv><argv>api</argv><argv>graphql</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+	</command>
+	<command name="wait-ci" description="CI state, through the gh-wait-ci extension.">
+		<command name="checks" description="Every check on a commit.">
+			<flag name="repo" short="R" type="string"/>
+			<flag name="sha" short="s" type="string"/>
+			<flag name="json" type="bool"/>
+			<flag name="failed" type="bool"/>
+			<run><argv>gh</argv><argv>wait-ci</argv><argv>checks</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
 	</command>
 </config>

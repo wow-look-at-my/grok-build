@@ -117,6 +117,23 @@ fn reads_run_on_the_host_with_the_hosts_token() {
             "api --method=GET repos/o/r/pulls --paginate",
         ),
         (&["auth", "status"][..], "auth status"),
+        (
+            &[
+                "api",
+                "graphql",
+                "-f",
+                "query=query($owner: String!) { repository(owner: $owner, name: \"r\") { isFork } }",
+                "-F",
+                "owner=o",
+                "--jq",
+                ".data",
+            ][..],
+            "api graphql --field=owner=o --jq=.data --raw-field=query=query($owner: String!) { repository(owner: $owner, name: \"r\") { isFork } }",
+        ),
+        (
+            &["wait-ci", "checks", "-R", "o/r", "--sha", "abc", "--json"][..],
+            "wait-ci checks --json --repo=o/r --sha=abc",
+        ),
     ] {
         let (code, out, err) = gh(&server, args);
         assert_eq!(code, 0, "gh {args:?}: {err}");
@@ -147,6 +164,29 @@ fn writes_and_undeclared_flags_never_reach_gh() {
         &["issue", "create"][..],
         &["run", "rerun", "1"][..],
         &["--config", "/tmp/other.xml", "pr", "view", "1"][..],
+        &[
+            "api",
+            "graphql",
+            "-f",
+            "query=mutation { addStar(input: {starrableId: \"x\"}) { clientMutationId } }",
+        ][..],
+        &[
+            "api",
+            "graphql",
+            "-f",
+            "query=query A { viewer { login } } mutation B { addStar(input: {starrableId: \"x\"}) { clientMutationId } }",
+            "-f",
+            "operationName=B",
+        ][..],
+        &[
+            "api",
+            "graphql",
+            "-f",
+            "query={ viewer { login } }",
+            "-F",
+            "x=@/etc/passwd",
+        ][..],
+        &["api", "graphql", "--method", "POST"][..],
     ] {
         let (code, out, err) = gh(&server, args);
         assert_ne!(code, 0, "gh {args:?} must be refused");

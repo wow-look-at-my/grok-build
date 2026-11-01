@@ -8,6 +8,14 @@ pub const GH_CONTRACT: &str = include_str!("../sandbox/gh.xml");
 /// Env var that names the directory that holds the `gh` shim.
 pub const GH_SHIM_DIR_ENV: &str = "GROK_GH_SHIM_DIR";
 
+/// The variables gh and the GitHub API clients read a token from.
+pub const GITHUB_TOKEN_VARS: &[&str] = &[
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+];
+
 /// How long the host waits for the server's socket.
 const SOCKET_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -73,6 +81,11 @@ pub fn start() {
             unavailable_script(&reason)
         }
     };
+    // The server took its environment when it started. The session that becomes the sandbox keeps no token.
+    for name in GITHUB_TOKEN_VARS {
+        // SAFETY: this runs on the startup path, before the session starts its threads.
+        unsafe { std::env::remove_var(name) };
+    }
     if let Err(error) = write_script(&layout.bin.join("gh"), &script) {
         eprintln!(
             "warning: sandbox: could not install the gh shim in {}: {error}",
@@ -307,7 +320,7 @@ mod tests {
                 "gh.xml must not declare {write}"
             );
         }
-        for flag in ["method", "field", "raw-field", "input", "header"] {
+        for flag in ["method", "input", "header"] {
             assert!(
                 !GH_CONTRACT.contains(&format!("name=\"{flag}\"")),
                 "gh api must not take --{flag}"
