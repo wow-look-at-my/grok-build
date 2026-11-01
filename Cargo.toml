@@ -456,6 +456,41 @@ incremental = true
 [profile.dev.package."*"]
 debug = false
 
+# Image and raster crates run per-pixel loops, which take minutes at the first opt-level.
+# Their generics are instantiated inside these crates, so the setting reaches every caller.
+[profile.dev.package.adler2]
+opt-level = 3
+[profile.dev.package.crc32fast]
+opt-level = 3
+[profile.dev.package.fast_image_resize]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.image-webp]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.resvg]
+opt-level = 3
+[profile.dev.package.simd-adler32]
+opt-level = 3
+[profile.dev.package.tiny-skia]
+opt-level = 3
+[profile.dev.package.tiny-skia-path]
+opt-level = 3
+[profile.dev.package.usvg]
+opt-level = 3
+[profile.dev.package.zune-core]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
 [profile.bench]
 debug = true
 
