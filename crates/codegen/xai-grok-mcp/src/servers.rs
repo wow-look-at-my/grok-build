@@ -59,22 +59,6 @@ pub use xai_grok_workspace_types::MCP_TOOL_NAME_DELIMITER;
 /// Caller-supplied configs cannot smuggle it: the header is stripped from every HTTP/SSE config and re-added only when the spawn context asks for it (mirroring the `GROK_SESSION_ID` env protection on stdio servers).
 pub const GROK_AGENT_ID_HEADER: &str = "X-Grok-Agent-ID";
 
-/// Reqwest 0.13 twin of the 0.12 adapters in `xai_grok_extra_ca`.
-fn with_extra_root_certificates(mut builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
-    xai_grok_extra_ca::ensure_default_crypto_provider();
-    builder = builder.tls_backend_rustls();
-    for der in xai_grok_extra_ca::extra_root_ders() {
-        match reqwest::Certificate::from_der(der) {
-            Ok(cert) => builder = builder.add_root_certificate(cert),
-            Err(e) => tracing::warn!(
-                error = %e,
-                "extra CA bundle: validated DER rejected by reqwest 0.13; skipping cert"
-            ),
-        }
-    }
-    builder
-}
-
 /// Max protocol icons kept per server/tool at ingest.
 pub const MAX_MCP_ICONS_PER_ENTITY: usize = 8;
 
@@ -1348,7 +1332,7 @@ fn init_error_is_connect_phase(err: &ClientInitializeError) -> bool {
     matches!(
         error
             .error
-            .downcast_ref::<StreamableHttpError<reqwest::Error>>(),
+            .downcast_ref::<StreamableHttpError<crate::net_http_client::McpHttpError>>(),
         Some(StreamableHttpError::Client(e)) if e.is_connect()
     )
 }
@@ -2226,7 +2210,7 @@ async fn discover_and_prepare_auth(
         crate::credentials::McpCredentialStoreAdapter::new(server_name.to_string(), parsed_url);
     let observed = adapter.observed();
 
-    let mut manager = match rmcp::transport::auth::AuthorizationManager::new(server_url).await {
+    let mut manager = match crate::net_http_client::new_authorization_manager(server_url).await {
         Ok(m) => m,
         Err(e) => {
             tracing::warn!(server = server_name, %e, "Failed to create OAuth manager");
@@ -2362,20 +2346,9 @@ async fn probe_anonymous_access(
 /// Move the credential headers the user configured for this server out of `headers`,
 /// as the request's [`xai_grok_net::Auth`].
 fn configured_auth(headers: &mut http::HeaderMap) -> xai_grok_net::Auth {
-    let names: Vec<_> = headers
-        .keys()
-        .filter(|name| xai_grok_net::is_credential_header(name))
-        .cloned()
-        .collect();
-    if names.is_empty() {
+    let credentials = crate::net_http_client::take_credential_headers(headers);
+    if credentials.is_empty() {
         return xai_grok_net::Auth::None;
-    }
-    let mut credentials = http::HeaderMap::new();
-    for name in names {
-        for value in headers.get_all(&name) {
-            credentials.append(name.clone(), value.clone());
-        }
-        headers.remove(&name);
     }
     xai_grok_net::Auth::Configured(credentials)
 }
@@ -3997,7 +3970,9 @@ impl McpClient {
         config: &HttpConfig,
         auth_manager: &Arc<tokio::sync::Mutex<rmcp::transport::auth::AuthorizationManager>>,
     ) -> Result<
-        crate::mcp_http_client::McpHttpClient<rmcp::transport::auth::AuthClient<reqwest::Client>>,
+        crate::mcp_http_client::McpHttpClient<
+            rmcp::transport::auth::AuthClient<crate::net_http_client::NetHttpClient>,
+        >,
         McpError,
     > {
         let name = &self.server_name;
@@ -4018,19 +3993,14 @@ impl McpClient {
                 .map(|(key, value)| (key.as_str(), value.as_str())),
         );
         apply_user_agent_policy(&mut headers, name, &config.url);
-        // reqwest 0.13; the policy chokepoint is typed for 0.12 and cannot wrap this builder.
-        #[allow(clippy::disallowed_methods)]
-        let http_client = with_extra_root_certificates(
-            reqwest::Client::builder()
-                .default_headers(headers)
-                .connect_timeout(HTTP_CONNECT_TIMEOUT),
-        )
-        .build()
-        .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
+        let http_client = Self::build_net_http_client(
+            headers,
+            xai_grok_net::ClientOptions::default().connect_timeout(HTTP_CONNECT_TIMEOUT),
+        )?;
         // `AuthClient::new` wants an owned manager, but ours is shared (`Arc`) with the OAuth flow
         // The struct is non_exhaustive, so build with a throwaway manager and swap in the shared one
         let placeholder_manager =
-            rmcp::transport::auth::AuthorizationManager::new(config.url.as_str())
+            crate::net_http_client::new_authorization_manager(config.url.as_str())
                 .await
                 .map_err(|e| McpError::ClientError(format!("Failed to build OAuth client: {e}")))?;
         let mut auth_client =
@@ -4168,7 +4138,10 @@ impl McpClient {
         config: &HttpConfig,
         server_name: &str,
         warn_budget: crate::mcp_http_client::WarnBudget,
-    ) -> Result<crate::mcp_http_client::McpHttpClient<reqwest::Client>, McpError> {
+    ) -> Result<
+        crate::mcp_http_client::McpHttpClient<crate::net_http_client::NetHttpClient>,
+        McpError,
+    > {
         let mut headers = parse_config_headers(
             server_name,
             "transport",
@@ -4178,29 +4151,32 @@ impl McpClient {
                 .map(|(key, value)| (key.as_str(), value.as_str())),
         );
         apply_user_agent_policy(&mut headers, server_name, &config.url);
-        // reqwest 0.13; the policy chokepoint is typed for 0.12 and cannot wrap this builder.
-        #[allow(clippy::disallowed_methods)]
-        let mut builder = with_extra_root_certificates(
-            reqwest::Client::builder()
-                .default_headers(headers)
-                .connect_timeout(HTTP_CONNECT_TIMEOUT),
-        );
+        let mut options =
+            xai_grok_net::ClientOptions::default().connect_timeout(HTTP_CONNECT_TIMEOUT);
         if config.local_agent_endpoint {
             // A local app endpoint must never see its agent-id header travel
             // through a proxy or follow a redirect off the machine.
-            builder = builder
-                .no_proxy()
-                .redirect(reqwest::redirect::Policy::none());
+            options = options.no_proxy().no_redirects();
         }
-        // rmcp requires reqwest 0.13; the approved xai helper is typed for 0.12.
-        #[allow(clippy::disallowed_methods)]
-        let client = builder
-            .build()
-            .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
+        let client = Self::build_net_http_client(headers, options)?;
         Ok(crate::mcp_http_client::McpHttpClient::new(
             client,
             server_name,
             warn_budget,
+        ))
+    }
+
+    /// The configured credential headers leave `headers` and go on each request as an `Auth`.
+    /// The other headers are the client's default headers.
+    fn build_net_http_client(
+        mut headers: http::HeaderMap,
+        options: xai_grok_net::ClientOptions,
+    ) -> Result<crate::net_http_client::NetHttpClient, McpError> {
+        let configured = crate::net_http_client::take_credential_headers(&mut headers);
+        let client = xai_grok_net::HttpClient::build(options.default_headers(headers))
+            .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
+        Ok(crate::net_http_client::NetHttpClient::new(
+            client, configured,
         ))
     }
 
