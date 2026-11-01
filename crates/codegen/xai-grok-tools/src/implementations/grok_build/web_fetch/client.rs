@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use reqwest::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, USER_AGENT};
 use url::Url;
+use xai_grok_net::header::{ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, USER_AGENT};
 
 use super::cache::FetchCache;
 use super::config::{MAX_REDIRECTS, MAX_URL_LENGTH, USER_AGENT_STRING, WebFetchParams};
@@ -359,7 +359,7 @@ enum FetchResult {
 /// rebinding between redirects cannot sneak a previously-blocked address past the initial check
 /// (partial TOCTOU mitigation; peer IP on the live TCP connection is not available from reqwest).
 async fn fetch_url(
-    client: &reqwest::Client,
+    client: &xai_grok_net::HttpClient,
     url: &Url,
     max_content_length: usize,
     allow_local: bool,
@@ -374,7 +374,7 @@ async fn fetch_url(
         ssrf::check_ssrf(&current_url, allow_local).await?;
 
         let resp = client
-            .get(current_url.as_str())
+            .get(current_url.as_str(), xai_grok_net::Auth::None)
             .header(USER_AGENT, USER_AGENT_STRING)
             .header(
                 ACCEPT,

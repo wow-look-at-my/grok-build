@@ -1,10 +1,10 @@
-use async_trait::async_trait;
+use http::HeaderMap;
 use opentelemetry::global;
 use opentelemetry_http::HeaderInjector;
-use reqwest::header::HeaderMap;
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware, Middleware};
+use std::time::Duration;
 use tracing::{Instrument, Span, field};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use xai_grok_net::{Auth, ClientOptions, HttpClient, Method, Request, Response};
 
 pub fn attach_trace_to_http_request(headers: &mut HeaderMap) {
     global::get_text_map_propagator(|propagator| {
@@ -13,54 +13,100 @@ pub fn attach_trace_to_http_request(headers: &mut HeaderMap) {
     });
 }
 
-pub type TracedHttpClient = ClientWithMiddleware;
-
-pub fn traced_client(client: reqwest::Client) -> TracedHttpClient {
-    ClientBuilder::new(client).with(TracingMiddleware).build()
+/// An [`HttpClient`] that opens a client span for each request and sends its `traceparent`.
+#[derive(Clone, Debug)]
+pub struct TracedHttpClient {
+    inner: HttpClient,
 }
 
-#[allow(clippy::disallowed_methods)] // generic helper; grok CLI callers pass a policy-built client to traced_client
-pub fn traced_client_new() -> TracedHttpClient {
-    traced_client(reqwest::Client::new())
+pub fn traced_client(client: HttpClient) -> TracedHttpClient {
+    TracedHttpClient { inner: client }
 }
 
-#[allow(clippy::disallowed_methods)] // generic middleware helper; callers supply a policy-built client
+pub fn traced_client_new() -> Result<TracedHttpClient, xai_grok_net::Error> {
+    traced_client_from_builder(ClientOptions::default())
+}
+
 pub fn traced_client_from_builder(
-    builder: reqwest::ClientBuilder,
-) -> Result<TracedHttpClient, reqwest::Error> {
-    Ok(traced_client(builder.build()?))
+    options: ClientOptions,
+) -> Result<TracedHttpClient, xai_grok_net::Error> {
+    Ok(traced_client(HttpClient::build(options)?))
 }
 
-#[derive(Clone, Debug, Default)]
-struct TracingMiddleware;
+impl TracedHttpClient {
+    pub fn request(&self, method: Method, url: impl AsRef<str>, auth: Auth) -> TracedRequest {
+        let url = url.as_ref();
+        TracedRequest {
+            method: method.as_str().to_owned(),
+            url: url.to_owned(),
+            inner: self.inner.request(method, url, auth),
+        }
+    }
 
-#[async_trait]
-impl Middleware for TracingMiddleware {
-    async fn handle(
-        &self,
-        mut req: reqwest::Request,
-        extensions: &mut http::Extensions,
-        next: reqwest_middleware::Next<'_>,
-    ) -> reqwest_middleware::Result<reqwest::Response> {
-        let method = req.method().as_str().to_owned();
-        let url = req.url().clone();
+    pub fn get(&self, url: impl AsRef<str>, auth: Auth) -> TracedRequest {
+        self.request(Method::GET, url, auth)
+    }
+
+    pub fn post(&self, url: impl AsRef<str>, auth: Auth) -> TracedRequest {
+        self.request(Method::POST, url, auth)
+    }
+
+    /// The client without the tracing layer.
+    pub fn inner(&self) -> &HttpClient {
+        &self.inner
+    }
+}
+
+/// A request of a [`TracedHttpClient`].
+pub struct TracedRequest {
+    inner: Request,
+    method: String,
+    url: String,
+}
+
+impl TracedRequest {
+    /// Change the inner request, for a builder step this type does not wrap.
+    pub fn map(mut self, f: impl FnOnce(Request) -> Request) -> Self {
+        self.inner = f(self.inner);
+        self
+    }
+
+    pub fn headers(self, headers: HeaderMap) -> Self {
+        self.map(|r| r.headers(headers))
+    }
+
+    pub fn json<T: serde::Serialize + ?Sized>(self, json: &T) -> Self {
+        self.map(|r| r.json(json))
+    }
+
+    pub fn body(self, body: impl Into<xai_grok_net::Body>) -> Self {
+        self.map(|r| r.body(body))
+    }
+
+    pub fn timeout(self, timeout: Duration) -> Self {
+        self.map(|r| r.timeout(timeout))
+    }
+
+    pub async fn send(self) -> Result<Response, xai_grok_net::Error> {
         // No active dispatcher → the span has no consumer and would only be
         // downgraded to `log` spam. See `crate::dispatcher_active`.
         let span = if crate::dispatcher_active() {
             tracing::info_span!(
                 "http_request",
                 otel.kind = "client",
-                "http.request.method" = %method,
-                "url.full" = %url,
+                "http.request.method" = %self.method,
+                "url.full" = %self.url,
                 "http.response.status_code" = field::Empty,
             )
         } else {
             Span::none()
         };
 
+        let inner = self.inner;
         let result = async move {
-            attach_trace_to_http_request(req.headers_mut());
-            next.run(req, extensions).await
+            let mut headers = HeaderMap::new();
+            attach_trace_to_http_request(&mut headers);
+            inner.headers(headers).send().await
         }
         .instrument(span.clone())
         .await;
@@ -102,14 +148,14 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = traced_client(reqwest::Client::new());
+        let client = traced_client(HttpClient::build(ClientOptions::default()).unwrap());
         let parent = tracing::info_span!("parent_handler");
         let parent_span_id = otel_span_id_hex(&parent);
         let parent_trace_id = otel_trace_id_hex(&parent);
 
         async {
             client
-                .get(format!("{}/health", server.uri()))
+                .get(format!("{}/health", server.uri()), Auth::None)
                 .send()
                 .await
                 .unwrap();
@@ -140,9 +186,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = traced_client_new();
+        let client = traced_client_new().unwrap();
         let resp = client
-            .get(format!("{}/missing", server.uri()))
+            .get(format!("{}/missing", server.uri()), Auth::None)
             .send()
             .await
             .unwrap();

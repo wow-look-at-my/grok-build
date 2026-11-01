@@ -63,21 +63,14 @@ pub fn fastrace_channel(
         .service(channel)
 }
 
-// Request middleware (TODO: Move into http_client when deprecated tracing)
-#[derive(Clone)]
-#[allow(dead_code)]
-pub struct TraceparentMiddleware;
-
-#[async_trait::async_trait]
-impl reqwest_middleware::Middleware for TraceparentMiddleware {
-    async fn handle(
-        &self,
-        mut req: reqwest::Request,
-        extensions: &mut http::Extensions,
-        next: reqwest_middleware::Next<'_>,
-    ) -> reqwest_middleware::Result<reqwest::Response> {
-        req.headers_mut()
-            .extend(fastrace_reqwest::traceparent_headers());
-        next.run(req, extensions).await
+/// The `traceparent` header of the current local fastrace span. It is empty when no
+/// span is current. Pass it to a request's `headers`.
+pub fn traceparent_headers() -> http::HeaderMap {
+    let mut headers = http::HeaderMap::new();
+    if let Some(parent) = SpanContext::current_local_parent()
+        && let Ok(value) = http::HeaderValue::from_str(&parent.encode_w3c_traceparent())
+    {
+        headers.insert(http::HeaderName::from_static("traceparent"), value);
     }
+    headers
 }

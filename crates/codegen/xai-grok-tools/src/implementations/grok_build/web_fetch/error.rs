@@ -31,10 +31,10 @@ pub enum WebFetchError {
     DnsEmpty(String),
 
     #[error("failed to build HTTP client: {0}")]
-    ClientBuildError(reqwest::Error),
+    ClientBuildError(xai_grok_net::Error),
 
     #[error("HTTP request failed: {0}")]
-    HttpRequest(#[from] reqwest::Error),
+    HttpRequest(#[from] xai_grok_net::Error),
 
     #[error("invalid redirect URL: {0}")]
     InvalidRedirect(String),
@@ -56,6 +56,12 @@ pub enum WebFetchError {
 
     #[error("content body does not match claimed content type {content_type} from {url}")]
     ContentTypeMismatch { content_type: String, url: String },
+}
+
+impl From<xai_grok_net::TransportError> for WebFetchError {
+    fn from(e: xai_grok_net::TransportError) -> Self {
+        Self::HttpRequest(e.into())
+    }
 }
 
 /// Extra recovery guidance appended to an [`WebFetchError::SsrfBlocked`] message. `web_fetch` can't reach internal/private hosts, but GitHub /

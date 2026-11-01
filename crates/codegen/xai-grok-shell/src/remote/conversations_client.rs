@@ -57,11 +57,17 @@ pub enum ConvError {
     #[error("no OAuth credentials for conversations:read")]
     NoOauth,
     #[error("network error: {0}")]
-    Network(#[from] reqwest::Error),
+    Network(#[from] xai_grok_net::Error),
     #[error("request failed: {status}")]
     Http { status: u16 },
     #[error("parse error: {0}")]
     Parse(#[from] serde_json::Error),
+}
+
+impl From<xai_grok_net::TransportError> for ConvError {
+    fn from(e: xai_grok_net::TransportError) -> Self {
+        Self::Network(e.into())
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -83,7 +89,7 @@ struct ListConversationsMatchWire {
 }
 
 pub struct ConversationsClient {
-    http: reqwest::Client,
+    http: xai_grok_net::HttpClient,
     base_url: String,
     auth: Arc<AuthManager>,
 }
@@ -116,11 +122,10 @@ impl ConversationsClient {
 
     fn apply_auth_headers(
         &self,
-        builder: reqwest::RequestBuilder,
+        builder: xai_grok_net::Request,
         auth: &GrokAuth,
-    ) -> reqwest::RequestBuilder {
+    ) -> xai_grok_net::Request {
         let mut builder = builder
-            .header("Authorization", format!("Bearer {}", auth.key))
             .header(
                 "X-XAI-Token-Auth",
                 self.auth.grok_com_config().token_header.clone(),
@@ -135,7 +140,7 @@ impl ConversationsClient {
                 crate::http::CLIENT_MODE_HEADER,
                 crate::http::process_client_mode(),
             )
-            .header(reqwest::header::ACCEPT, "application/json");
+            .header(xai_grok_net::header::ACCEPT, "application/json");
         if let Some(email) = &auth.email {
             builder = builder.header("x-email", email);
         }
@@ -160,7 +165,8 @@ impl ConversationsClient {
             query.push(("workspaceId", workspace.to_owned()));
         }
 
-        let builder = self.apply_auth_headers(self.http.get(&url).query(&query), &auth);
+        let builder =
+            self.apply_auth_headers(self.http.get(&url, auth.wire_auth()).query(&query), &auth);
 
         let response = builder.send().await?;
         let status = response.status();
@@ -205,7 +211,7 @@ impl ConversationsClient {
             urlencoding::encode(conversation_id)
         );
         let builder = self
-            .apply_auth_headers(self.http.put(&url), &auth)
+            .apply_auth_headers(self.http.put(&url, auth.wire_auth()), &auth)
             .json(body);
 
         let response = builder.send().await?;
@@ -229,7 +235,7 @@ impl ConversationsClient {
             self.base_url,
             urlencoding::encode(conversation_id)
         );
-        let builder = self.apply_auth_headers(self.http.delete(&url), &auth);
+        let builder = self.apply_auth_headers(self.http.delete(&url, auth.wire_auth()), &auth);
 
         let response = builder.send().await?;
         let status = response.status();

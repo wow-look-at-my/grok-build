@@ -1,7 +1,7 @@
 //! Lightweight Mixpanel HTTP tracking client.
 //!
-//! This is a minimal replacement for `mixpanel-rs` that uses `reqwest 0.12`
-//! instead of `reqwest 0.11`, avoiding a duplicate HTTP stack in the binary.
+//! This is a minimal replacement for `mixpanel-rs` that sends through
+//! `xai-grok-net`, so the binary has one HTTP stack.
 //!
 //! Only the `track` API is implemented since that's all we use.
 
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 #[derive(Clone)]
 pub struct Mixpanel {
     token: String,
-    client: reqwest::Client,
+    client: xai_grok_net::HttpClient,
     base_url: String,
 }
 
@@ -22,7 +22,7 @@ pub struct Mixpanel {
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("HTTP request failed: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[from] xai_grok_net::Error),
     #[error("JSON serialization failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("mixpanel rejected the request: {0}")]
@@ -34,17 +34,13 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl Mixpanel {
     /// Create a new Mixpanel client with the given project token.
-    #[allow(clippy::disallowed_methods)] // transport-neutral crate; the grok CLI injects a policy client via with_client
-    pub fn new(token: impl Into<String>) -> Self {
-        Self {
-            token: token.into(),
-            client: reqwest::Client::new(),
-            base_url: API_BASE_URL.to_owned(),
-        }
+    pub fn new(token: impl Into<String>) -> Result<Self, Error> {
+        let client = xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default())?;
+        Ok(Self::with_client(token, client))
     }
 
-    /// Create a new Mixpanel client with a shared reqwest client.
-    pub fn with_client(token: impl Into<String>, client: reqwest::Client) -> Self {
+    /// Create a new Mixpanel client with a shared HTTP client.
+    pub fn with_client(token: impl Into<String>, client: xai_grok_net::HttpClient) -> Self {
         Self {
             token: token.into(),
             client,
@@ -120,15 +116,18 @@ impl Mixpanel {
 
         let body = self
             .client
-            .post(format!("{}{path}", self.base_url))
+            // The project token travels in the body, so the request names no credential.
+            .post(format!("{}{path}", self.base_url), xai_grok_net::Auth::None)
             .query(&[("verbose", "1")])
             .timeout(REQUEST_TIMEOUT)
             .form(&[("data", &encoded)])
             .send()
             .await?
-            .error_for_status()?
+            .error_for_status()
+            .map_err(xai_grok_net::Error::from)?
             .text()
-            .await?;
+            .await
+            .map_err(xai_grok_net::Error::from)?;
 
         check_reply(&body)
     }
@@ -160,23 +159,24 @@ mod tests {
         );
     }
 
-    /// Client whose every request would fail: all traffic is routed through a
-    /// proxy at an unroutable address. If [`Mixpanel::track`] or
+    /// Client whose every request would fail: it sends to a closed loopback
+    /// port. If [`Mixpanel::track`] or
     /// [`Mixpanel::engage`] ever egress again, the send fails and the `Ok`
     /// assertions below fail with it.
     fn unroutable_client() -> Mixpanel {
-        let client = reqwest::Client::builder()
-            .proxy(reqwest::Proxy::all("http://127.0.0.1:9").unwrap())
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-            .unwrap();
-        Mixpanel::with_client("test-token", client)
+        let client = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default().timeout(std::time::Duration::from_secs(2)),
+        )
+        .unwrap();
+        let mut mp = Mixpanel::with_client("test-token", client);
+        mp.base_url = "http://127.0.0.1:9".to_owned();
+        mp
     }
 
     /// Drive `fut` with a no-op waker and require it to complete on the first
     /// poll. The disabled stubs return before touching the network, so they
     /// resolve synchronously; a reverted stub would return `Pending` (or fail
-    /// on the unroutable proxy), failing the test either way.
+    /// on the closed port), failing the test either way.
     fn poll_once<F: std::future::Future>(fut: F) -> F::Output {
         let mut fut = std::pin::pin!(fut);
         let waker = std::task::Waker::noop();
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn prepare_properties_scrubs_then_injects_token() {
         let project_token = "Bearer fake-project-token-abcdef0123456789";
-        let mp = Mixpanel::new(project_token);
+        let mp = Mixpanel::new(project_token).unwrap();
 
         let mut props = HashMap::new();
         props.insert("error".into(), "Bearer abcdef0123456789abcdef".into());

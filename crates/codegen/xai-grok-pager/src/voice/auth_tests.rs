@@ -4,7 +4,7 @@ use chrono::{Duration, Utc};
 use pretty_assertions::assert_eq;
 use xai_grok_login::{AuthManager, AuthMode, GrokAuth, GrokComConfig};
 use xai_grok_test_support::EnvGuard;
-use xai_grok_voice::VoiceAuthError;
+use xai_grok_voice::{Auth, VoiceAuthError};
 
 use super::build_voice_auth;
 
@@ -32,12 +32,22 @@ async fn foreign_session_is_refused_and_xai_credential_is_served() {
     let auth = build_voice_auth(mgr.clone());
 
     mgr.hot_swap(session("https://cursor.com"));
-    assert_eq!(Err(VoiceAuthError::ForeignSession), auth.bearer().await);
+    assert_eq!(
+        Err(VoiceAuthError::ForeignSession),
+        auth.auth().await.map(|_| ())
+    );
 
+    // A static key is not the login, so it goes as an API key.
     mgr.set_process_static_api_key(Some("xai-static-key".to_owned()));
-    assert_eq!(Ok("xai-static-key".to_owned()), auth.bearer().await);
+    match auth.auth().await {
+        Ok(Auth::ApiKey { key, .. }) => assert_eq!("xai-static-key", key),
+        other => panic!("expected the static key as an API key, got {other:?}"),
+    }
 
     mgr.set_process_static_api_key(None);
     mgr.clear().unwrap();
-    assert_eq!(Err(VoiceAuthError::NotSignedIn), auth.bearer().await);
+    assert_eq!(
+        Err(VoiceAuthError::NotSignedIn),
+        auth.auth().await.map(|_| ())
+    );
 }

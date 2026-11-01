@@ -28,6 +28,18 @@ fn test_handshake_401_detected_through_anyhow_context() {
         anyhow::Error::from(WsError::Http(Box::new(resp))).context("WebSocket connection failed");
     assert!(is_handshake_unauthorized(&err));
 }
+/// `connect_ws` wraps the handshake error in `WsConnectError`, which is what production sees.
+#[test]
+fn test_handshake_401_detected_through_ws_connect_error() {
+    use xai_grok_net::ws::{WsConnectError, WsError};
+    let resp = axum::http::Response::builder()
+        .status(401)
+        .body(None::<Vec<u8>>)
+        .unwrap();
+    let err = anyhow::Error::from(WsConnectError::Handshake(WsError::Http(Box::new(resp))))
+        .context("WebSocket connection failed");
+    assert!(is_handshake_unauthorized(&err));
+}
 #[test]
 fn test_handshake_non_401_and_non_ws_errors_rejected() {
     use tokio_tungstenite::tungstenite::Error as WsError;

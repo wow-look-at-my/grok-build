@@ -4,16 +4,9 @@
 #![allow(clippy::unwrap_used)] // Hits predate the gate
 //! Two responsibilities:
 //!
-//! 1. **Quarantines `rmcp` 2.1 and `reqwest` 0.13.** `rmcp` 2.1 requires
-//!    `reqwest >= 0.13.2`. The rest of the workspace consumes `reqwest` 0.12
-//!    and a transitive ecosystem (`opentelemetry-otlp`, `oauth2`,
-//!    `xai-mixpanel`, `xai-grok-tools`, ...) also pinned to 0.12. Bumping every
-//!    crate to 0.13 to satisfy `rmcp` triggers a cascade — an OpenTelemetry
-//!    `HttpClient` adapter and cross-version test breakage when a crate
-//!    carries both versions under a renamed `package = "reqwest"` alias.
-//!    reqwest 0.13 is now a fully private impl detail of [`servers`]; no
-//!    re-export. Consumers reach `rmcp` model types through this namespace
-//!    (`xai_grok_mcp::rmcp::*`).
+//! - **Wraps `rmcp`.** rmcp's HTTP goes through `xai_grok_net` ([`net_http_client`]).
+//!   Consumers reach `rmcp` model types through this namespace
+//!   (`xai_grok_mcp::rmcp::*`).
 //!
 //! 2. **Owns MCP-specific integration code**:
 //!    - [`credentials`]: on-disk `$GROK_HOME/mcp_credentials.json` store and the rmcp `CredentialStore` adapter.
@@ -54,6 +47,7 @@ pub mod elicitation;
 mod generation;
 pub mod liveness;
 pub mod mcp_http_client;
+pub mod net_http_client;
 pub mod oauth;
 pub mod oauth_config;
 pub mod owned_clients;

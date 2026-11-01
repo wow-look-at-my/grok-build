@@ -52,7 +52,7 @@ async fn manual_auth_does_not_post_when_product_telemetry_disabled() {
         None,
         "0.0.0-test".into(),
         None,
-        reqwest::Client::new(),
+        xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default()).unwrap(),
     );
 
     xai_grok_telemetry::log_event(ManualAuth {

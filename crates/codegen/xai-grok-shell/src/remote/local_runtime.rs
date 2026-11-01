@@ -404,34 +404,37 @@ fn lmstudio_description(
 // ── HTTP helpers ────────────────────────────────────────────────────────
 
 fn get_json<T: serde::de::DeserializeOwned>(
-    client: &reqwest::blocking::Client,
+    client: &xai_grok_net::BlockingHttpClient,
     url: &str,
     api_key: Option<&str>,
 ) -> Result<T, BackendError> {
     super::client::allow_endpoint(url)?;
-    let mut request = client.get(url);
-    if let Some(key) = api_key.filter(|k| !k.is_empty()) {
-        request = request.header("Authorization", format!("Bearer {key}"));
-    }
-    read_json(request, url)
+    read_json(client.get(url, key_auth(api_key)), url)
 }
 
 fn post_json<T: serde::de::DeserializeOwned>(
-    client: &reqwest::blocking::Client,
+    client: &xai_grok_net::BlockingHttpClient,
     url: &str,
     api_key: Option<&str>,
     body: &serde_json::Value,
 ) -> Result<T, BackendError> {
     super::client::allow_endpoint(url)?;
-    let mut request = client.post(url).json(body);
-    if let Some(key) = api_key.filter(|k| !k.is_empty()) {
-        request = request.header("Authorization", format!("Bearer {key}"));
+    read_json(client.post(url, key_auth(api_key)).json(body), url)
+}
+
+/// The runtime's own key, as `Authorization: Bearer`, or no credential.
+fn key_auth(api_key: Option<&str>) -> xai_grok_net::Auth {
+    match api_key.filter(|k| !k.is_empty()) {
+        Some(key) => xai_grok_net::Auth::ApiKey {
+            key: key.to_owned(),
+            scheme: xai_grok_net::KeyScheme::Bearer,
+        },
+        None => xai_grok_net::Auth::None,
     }
-    read_json(request, url)
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(
-    request: reqwest::blocking::RequestBuilder,
+    request: xai_grok_net::BlockingRequest,
     url: &str,
 ) -> Result<T, BackendError> {
     let response = request.send()?;

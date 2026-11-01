@@ -705,7 +705,7 @@ mod tests {
     }
 
     async fn manager_ready_for_exchange(token_endpoint: String) -> (AuthorizationManager, String) {
-        let mut mgr = AuthorizationManager::new("http://localhost/mcp")
+        let mut mgr = crate::net_http_client::new_authorization_manager("http://localhost/mcp")
             .await
             .unwrap();
         mgr.set_metadata(require_iss_metadata(token_endpoint));
@@ -816,7 +816,7 @@ mod tests {
 
         let server_url = format!("http://{addr}/mcp");
         let mgr = Arc::new(Mutex::new(
-            AuthorizationManager::new(server_url.as_str())
+            crate::net_http_client::new_authorization_manager(server_url.as_str())
                 .await
                 .unwrap(),
         ));
@@ -854,7 +854,12 @@ mod tests {
             "http://{addr}/callback?code=c1&state=s1&iss={}",
             urlencoding_encode(TEST_ISSUER)
         );
-        let resp = reqwest::get(&url).await.unwrap();
+        let resp = xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default())
+            .unwrap()
+            .get(url.as_str(), xai_grok_net::Auth::None)
+            .send()
+            .await
+            .unwrap();
         assert!(resp.status().is_success());
         let body = resp.text().await.unwrap();
         assert!(body.contains("Authorization Complete"));

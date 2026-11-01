@@ -1,5 +1,6 @@
-use reqwest::RequestBuilder;
 use std::sync::Arc;
+use xai_grok_auth::RequestAuth;
+use xai_grok_net::header::{HeaderMap, HeaderName, HeaderValue};
 /// User token (xAI users) sends `Bearer` and `X-XAI-Token-Auth: xai-grok-cli`.
 #[derive(Clone)]
 pub struct GrokAuthCredentials {
@@ -83,24 +84,39 @@ impl GrokAuthCredentials {
             }
         }
     }
-    pub fn apply(&self, builder: RequestBuilder, base_url: &str) -> RequestBuilder {
-        let builder = if let Some(ref token) = self.user_token {
-            builder
-                .header("Authorization", format!("Bearer {}", token))
-                .header(
-                    obfstr::obfstr!("X-XAI-Token-Auth"),
-                    obfstr::obfstr!("xai-grok-cli"),
-                )
-        } else {
-            builder
-        };
+    /// The xAI session token and `X-XAI-Token-Auth`, or nothing when there is no token.
+    pub fn request_auth(&self, base_url: &str) -> RequestAuth {
         let _ = base_url;
-        builder
+        let Some(ref token) = self.user_token else {
+            return RequestAuth::none();
+        };
+        let mut headers = HeaderMap::new();
+        if let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(obfstr::obfstr!("X-XAI-Token-Auth").as_bytes()),
+            HeaderValue::from_str(obfstr::obfstr!("xai-grok-cli")),
+        ) {
+            headers.insert(name, value);
+        }
+        RequestAuth {
+            auth: xai_grok_net::Auth::XaiSession(token.clone()),
+            headers,
+        }
+    }
+
+    /// Start a request to `url` with this credential and its plain headers.
+    pub fn request(
+        &self,
+        client: &xai_grok_net::HttpClient,
+        method: xai_grok_net::Method,
+        url: &str,
+    ) -> xai_grok_net::Request {
+        let auth = self.request_auth(url);
+        auth.headers_on(client.request(method, url, auth.auth.clone()))
     }
 }
 impl xai_grok_auth::HttpAuth for GrokAuthCredentials {
-    fn apply(&self, builder: RequestBuilder, base_url: &str) -> RequestBuilder {
-        GrokAuthCredentials::apply(self, builder, base_url)
+    fn request_auth(&self, base_url: &str) -> RequestAuth {
+        GrokAuthCredentials::request_auth(self, base_url)
     }
 }
 #[cfg(test)]

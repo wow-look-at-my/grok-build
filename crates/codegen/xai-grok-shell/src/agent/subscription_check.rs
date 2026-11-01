@@ -31,16 +31,15 @@ pub(crate) struct UnblockResult {
     pub(crate) refresh_deadline_hit: bool,
 }
 async fn fetch_user_info(
-    http_client: &reqwest::Client,
+    http_client: &xai_grok_net::HttpClient,
     url: &str,
     auth: &xai_grok_login::GrokAuth,
     auth_manager: &AuthManager,
     alpha_test_key: Option<&str>,
 ) -> Result<UserInfo, &'static str> {
     let request = http_client
-        .get(url)
+        .get(url, auth.wire_auth())
         .timeout(Duration::from_secs(10))
-        .header("Authorization", format!("Bearer {}", auth.key))
         .header(
             "X-XAI-Token-Auth",
             auth_manager.grok_com_config().token_header.as_str(),
@@ -57,6 +56,7 @@ async fn fetch_user_info(
         }
         Ok(_resp) => Err("http_status"),
         Err(e) if e.is_timeout() => Err("timeout"),
+        Err(e) if e.auth_refusal().is_some() => Err("auth_refused"),
         Err(_) => Err("transport"),
     }
 }

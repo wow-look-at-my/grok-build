@@ -511,7 +511,8 @@ pub(crate) fn compute_retry_delay(
 async fn do_refresh(inner: &Inner, refresh_token: &str) -> Result<RefreshOutcome, RefreshError> {
     let previous_expires_at = inner.snapshot.load().expires_at;
     let issuer = inner.issuer.trim_end_matches('/');
-    let client = xai_grok_extra_ca::build_reqwest_client(|builder| builder).map_err(refresh_err)?;
+    let client = xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default())
+        .map_err(refresh_err)?;
 
     #[derive(serde::Deserialize)]
     struct Discovery {
@@ -520,7 +521,10 @@ async fn do_refresh(inner: &Inner, refresh_token: &str) -> Result<RefreshOutcome
 
     let disc: Discovery = require_success(
         client
-            .get(format!("{issuer}/.well-known/openid-configuration"))
+            .get(
+                format!("{issuer}/.well-known/openid-configuration"),
+                xai_grok_net::Auth::None,
+            )
             .timeout(DISCOVERY_TIMEOUT)
             .send()
             .await
@@ -555,7 +559,7 @@ async fn do_refresh(inner: &Inner, refresh_token: &str) -> Result<RefreshOutcome
 
     let tokens: Tokens = require_success(
         client
-            .post(&disc.token_endpoint)
+            .post(&disc.token_endpoint, xai_grok_net::Auth::None)
             .form(&params)
             .timeout(TOKEN_TIMEOUT)
             .send()
@@ -654,19 +658,19 @@ fn persist_refresh_event_after(
     });
 }
 
-fn is_terminal_auth_status(status: reqwest::StatusCode) -> bool {
+fn is_terminal_auth_status(status: xai_grok_net::StatusCode) -> bool {
     matches!(
         status,
-        reqwest::StatusCode::BAD_REQUEST
-            | reqwest::StatusCode::UNAUTHORIZED
-            | reqwest::StatusCode::FORBIDDEN
+        xai_grok_net::StatusCode::BAD_REQUEST
+            | xai_grok_net::StatusCode::UNAUTHORIZED
+            | xai_grok_net::StatusCode::FORBIDDEN
     )
 }
 
-fn parse_retry_after(resp: &reqwest::Response) -> Option<Duration> {
+fn parse_retry_after(resp: &xai_grok_net::Response) -> Option<Duration> {
     let raw = resp
         .headers()
-        .get(reqwest::header::RETRY_AFTER)?
+        .get(xai_grok_net::header::RETRY_AFTER)?
         .to_str()
         .ok()?;
     parse_retry_after_value(raw)
@@ -716,9 +720,9 @@ impl std::fmt::Display for Exchange {
 /// `400`/`401`/`403` from the token endpoint are terminal (see [`Exchange`]).
 /// `429`/`408`/`425`/`5xx` stay on the retry backoff so a rate-limit cannot permanently stop `current()`.
 async fn require_success(
-    resp: reqwest::Response,
+    resp: xai_grok_net::Response,
     exchange: Exchange,
-) -> Result<reqwest::Response, RefreshError> {
+) -> Result<xai_grok_net::Response, RefreshError> {
     let status = resp.status();
     if status.is_success() {
         return Ok(resp);

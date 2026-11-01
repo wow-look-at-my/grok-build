@@ -29,12 +29,11 @@ chrono = { workspace = true }
 dirs = { workspace = true }
 indexmap = { workspace = true }
 xai-dirs = { workspace = true }
-reqwest = { workspace = true }
 xai-grok-extra-ca = { workspace = true }
-reqwest-middleware = { workspace = true }
+xai-grok-net = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time", "io-util", "fs"] }
 sha2 = { workspace = true, features = ["force-soft"] }
-xai-grok-auth = { path = "../xai-grok-auth", features = ["middleware"] }
+xai-grok-auth = { path = "../xai-grok-auth" }
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
 async-compression = { workspace = true, features = ["tokio"] }
 gcloud-storage = { workspace = true }
@@ -59,6 +58,7 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync
 xai-test-utils = { workspace = true }
 filetime = { workspace = true }
 tracing-subscriber = { workspace = true }
+xai-grok-net = { workspace = true, features = ["test-loopback-session"] }
 
 [lints]
 workspace = true

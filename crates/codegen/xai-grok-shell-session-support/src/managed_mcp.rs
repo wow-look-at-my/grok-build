@@ -150,13 +150,33 @@ impl GatewayTool {
 pub enum ManagedMcpFetchError {
     #[error("HTTP {status}: {message}")]
     Status {
-        status: reqwest::StatusCode,
+        status: xai_grok_net::StatusCode,
         message: String,
     },
     #[error("transport: {0}")]
-    Transport(#[from] reqwest::Error),
+    Transport(#[from] xai_grok_net::Error),
     #[error("no auth token available")]
     NoAuth,
+}
+
+/// The client for gateway calls, built once with the shared-client settings.
+fn gateway_client() -> Result<xai_grok_net::HttpClient, ManagedMcpFetchError> {
+    static CLIENT: std::sync::OnceLock<xai_grok_net::HttpClient> = std::sync::OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client.clone());
+    }
+    let secs = std::time::Duration::from_secs;
+    let client = xai_grok_net::HttpClient::build(
+        xai_grok_net::ClientOptions::default()
+            .connect_timeout(secs(30))
+            .user_agent(xai_grok_http::process_user_agent_string())
+            .pool_idle_timeout(secs(30))
+            .http2_keep_alive_interval(secs(20))
+            .http2_keep_alive_timeout(secs(10))
+            .http2_keep_alive_while_idle()
+            .tcp_keepalive(secs(30)),
+    )?;
+    Ok(CLIENT.get_or_init(|| client).clone())
 }
 
 async fn get_authenticated_json<T: serde::de::DeserializeOwned>(
@@ -166,10 +186,9 @@ async fn get_authenticated_json<T: serde::de::DeserializeOwned>(
     fetch_failed_message: &'static str,
     parse_error_message: &'static str,
 ) -> Result<T, ManagedMcpFetchError> {
-    let resp = match xai_grok_http::shared_client()
-        .get(url)
+    let resp = match gateway_client()?
+        .get(url, xai_grok_net::Auth::XaiSession(auth_key.to_owned()))
         .timeout(std::time::Duration::from_secs(10))
-        .header("Authorization", format!("Bearer {auth_key}"))
         .header("X-XAI-Token-Auth", "xai-grok-cli")
         .header("x-grok-client-version", xai_grok_version::version())
         .send()
@@ -194,7 +213,7 @@ async fn get_authenticated_json<T: serde::de::DeserializeOwned>(
         Ok(value) => Ok(value),
         Err(e) => {
             tracing::debug!(error = %e, "{}", parse_error_message);
-            Err(e.into())
+            Err(xai_grok_net::Error::from(e).into())
         }
     }
 }
@@ -219,10 +238,9 @@ pub async fn call_gateway_tool(
         arguments,
     };
 
-    let resp = match xai_grok_http::shared_client()
-        .post(&url)
+    let resp = match gateway_client()?
+        .post(&url, xai_grok_net::Auth::XaiSession(auth_key.to_owned()))
         .timeout(GATEWAY_TOOL_CALL_TIMEOUT)
-        .header("Authorization", format!("Bearer {auth_key}"))
         .header("X-XAI-Token-Auth", "xai-grok-cli")
         .header("x-grok-client-version", xai_grok_version::version())
         .json(&request)
@@ -257,12 +275,15 @@ pub async fn call_gateway_tool(
                 "Managed MCP gateway tool call parse error: {}",
                 e
             );
-            Err(e.into())
+            Err(xai_grok_net::Error::from(e).into())
         }
     }
 }
 
-async fn gateway_error_message(status: reqwest::StatusCode, response: reqwest::Response) -> String {
+async fn gateway_error_message(
+    status: xai_grok_net::StatusCode,
+    response: xai_grok_net::Response,
+) -> String {
     let fallback = format!("HTTP {status}");
     let Ok(body) = response.text().await else {
         return fallback;
@@ -518,7 +539,7 @@ mod tests {
 
         match err {
             ManagedMcpFetchError::Status { status, message } => {
-                assert_eq!(reqwest::StatusCode::BAD_REQUEST, status);
+                assert_eq!(xai_grok_net::StatusCode::BAD_REQUEST, status);
                 assert_eq!(
                     "Invalid arguments for google_calendar_availability: missing field `calendars`",
                     message

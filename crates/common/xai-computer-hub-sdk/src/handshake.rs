@@ -6,7 +6,7 @@
 //! [`crate::ClientError`].
 
 use futures::{SinkExt, StreamExt};
-use tokio_tungstenite::tungstenite::Message;
+use xai_grok_net::ws::Message;
 use xai_tool_protocol::{ConnectionKind, HelloAckMsg, HelloMsg};
 
 use crate::error::ClientError;
@@ -36,7 +36,7 @@ pub async fn send_hello<Si, St>(
 where
     Si: SinkExt<Message> + Unpin,
     Si::Error: std::fmt::Display,
-    St: StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    St: StreamExt<Item = Result<Message, xai_grok_net::ws::WsError>> + Unpin,
 {
     let hello = HelloMsg {
         protocol_version: PROTOCOL_VERSION.to_owned(),

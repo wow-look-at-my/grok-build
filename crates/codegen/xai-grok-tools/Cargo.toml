@@ -19,6 +19,7 @@ xai-tty-utils = { workspace = true }
 xai-grok-auth = { workspace = true }
 xai-grok-config = { path = "../xai-grok-config" }
 xai-grok-extra-ca = { workspace = true }
+xai-grok-net = { workspace = true }
 xai-grok-feedback = { workspace = true }
 xai-grok-tools-api = { path = "../xai-grok-tools-api" }
 xai-grok-workspace-types = { path = "../xai-grok-workspace-types" }
@@ -48,7 +49,6 @@ minijinja = { version = "2", features = ["custom_syntax"] }
 parking_lot = { workspace = true }
 htmd = { workspace = true }
 scraper = { workspace = true }
-reqwest = { workspace = true, features = ["rustls-tls", "json", "gzip", "brotli", "deflate"] }
 pulldown-cmark = { workspace = true }
 regex = { workspace = true }
 schemars = { workspace = true }

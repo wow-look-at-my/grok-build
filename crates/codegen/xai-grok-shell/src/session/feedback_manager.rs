@@ -1245,7 +1245,7 @@ mod tests {
     fn test_is_auth_error_detects_401() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::UNAUTHORIZED,
+            status: xai_grok_net::StatusCode::UNAUTHORIZED,
             context: "Signals update",
             body: "Invalid or expired credentials".to_string(),
         }
@@ -1257,7 +1257,7 @@ mod tests {
     fn test_is_auth_error_ignores_other_statuses() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err_500: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            status: xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR,
             context: "Signals update",
             body: "oops".to_string(),
         }
@@ -1265,7 +1265,7 @@ mod tests {
         assert!(!is_auth_error(&err_500));
 
         let err_403: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::FORBIDDEN,
+            status: xai_grok_net::StatusCode::FORBIDDEN,
             context: "Signals update",
             body: "ZDR team".to_string(),
         }
@@ -1283,7 +1283,7 @@ mod tests {
     fn test_is_forbidden_error_detects_403() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::FORBIDDEN,
+            status: xai_grok_net::StatusCode::FORBIDDEN,
             context: "Signals update",
             body: "Access denied: session does not belong to this user".to_string(),
         }
@@ -1295,7 +1295,7 @@ mod tests {
     fn test_is_forbidden_error_ignores_other_statuses() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err_401: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::UNAUTHORIZED,
+            status: xai_grok_net::StatusCode::UNAUTHORIZED,
             context: "Signals update",
             body: "Invalid credentials".to_string(),
         }
@@ -1309,7 +1309,7 @@ mod tests {
         use crate::agent::feedback_client::FeedbackApiError;
         // Verify the FeedbackApiError survives anyhow::Error round-trip (this is the actual path: send_json returns FeedbackApiError.into())
         let api_err = FeedbackApiError {
-            status: reqwest::StatusCode::UNAUTHORIZED,
+            status: xai_grok_net::StatusCode::UNAUTHORIZED,
             context: "Signals update",
             body: "token expired".to_string(),
         };
@@ -1450,11 +1450,12 @@ mod tests {
         use std::sync::Arc;
         use std::time::Instant;
 
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_millis(200))
-            .connect_timeout(Duration::from_millis(100))
-            .build()
-            .unwrap();
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_millis(200))
+                .connect_timeout(Duration::from_millis(100)),
+        )
+        .unwrap();
         // Nothing listening, so the first periodic sync errors quickly
         let client = FeedbackClient::with_client(http, "http://127.0.0.1:1", None);
         let config = FeedbackManagerConfig {
@@ -1508,11 +1509,12 @@ mod tests {
         use std::time::Instant;
 
         let base = blackhole_http_addr().await;
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .expect("reqwest client");
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client");
         let client = FeedbackClient::with_client(http, base, None);
         let config = FeedbackManagerConfig {
             telemetry_enabled: true,
@@ -1537,11 +1539,12 @@ mod tests {
         use std::time::Instant;
 
         let base = blackhole_http_addr().await;
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .expect("reqwest client");
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client");
         let client = FeedbackClient::with_client(http, base, None);
         let config = FeedbackManagerConfig {
             telemetry_enabled: false,
@@ -1571,12 +1574,13 @@ mod tests {
         use std::time::Instant;
 
         let base = blackhole_http_addr().await;
-        let http = reqwest::Client::builder()
-            // Deliberately longer than the shutdown budget so the outer timeout is what fires, not the client's
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .expect("reqwest client");
+        // Deliberately longer than the shutdown budget so the outer timeout is what fires, not the client's
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client");
         let client = FeedbackClient::with_client(http, base, None);
         let config = FeedbackManagerConfig {
             telemetry_enabled: true,

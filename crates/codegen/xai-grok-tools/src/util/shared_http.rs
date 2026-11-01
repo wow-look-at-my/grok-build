@@ -1,17 +1,73 @@
-//! Process-cached reqwest clients for tool backends. The key must cover
+//! Process-cached HTTP clients for tool backends. The key must cover
 //! every input that shapes the client: headers via [`headers_fingerprint`],
 //! constant timeouts via the kind prefix. Cached transports outlive
 //! per-session runtimes; pooled connections are ready-checked on reuse.
+//! A client holds no credential: each request names its own [`Auth`].
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
+use xai_grok_net::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+use xai_grok_net::{Auth, KeyScheme};
+
 /// LRU cap; evicted clients keep working for their holders.
 const MAX_ENTRIES: usize = 32;
 
+/// Move the credential headers out of `headers`. Only `xai-grok-net` writes a
+/// credential, so the caller names them as an [`Auth`].
+pub(crate) fn take_credential_headers(headers: &mut HeaderMap) -> HeaderMap {
+    let names: Vec<_> = headers
+        .keys()
+        .filter(|name| xai_grok_net::is_credential_header(name))
+        .cloned()
+        .collect();
+    let mut credentials = HeaderMap::new();
+    for name in names {
+        for value in headers.get_all(&name) {
+            credentials.append(name.clone(), value.clone());
+        }
+        headers.remove(&name);
+    }
+    credentials
+}
+
+/// The credential for a tool request: `key` as `Authorization: <scheme> <key>`, with the
+/// credential headers the user put in config. `key` wins over a configured `Authorization`.
+pub(crate) fn key_auth(key: Option<&str>, scheme: &str, configured: &HeaderMap) -> Auth {
+    if configured.is_empty()
+        && scheme == "Bearer"
+        && let Some(key) = key
+    {
+        return Auth::ApiKey {
+            key: key.to_owned(),
+            scheme: KeyScheme::Bearer,
+        };
+    }
+    let mut headers = configured.clone();
+    if let Some(key) = key {
+        match HeaderValue::from_str(&format!("{scheme} {key}")) {
+            Ok(value) => {
+                headers.insert(AUTHORIZATION, value);
+            }
+            // An invalid key is refused at send time, never dropped.
+            Err(_) => {
+                return Auth::ApiKey {
+                    key: key.to_owned(),
+                    scheme: KeyScheme::Bearer,
+                };
+            }
+        }
+    }
+    if headers.is_empty() {
+        Auth::None
+    } else {
+        Auth::Configured(headers)
+    }
+}
+
 #[derive(Default)]
 struct Entry {
-    slot: Arc<Mutex<Option<reqwest::Client>>>,
+    slot: Arc<Mutex<Option<xai_grok_net::HttpClient>>>,
     last_used: u64,
 }
 
@@ -24,8 +80,8 @@ pub(crate) struct CacheKey(String);
 /// held across the synchronous `build` (keep builds fast). Errors are not cached.
 pub(crate) fn cached_client<E>(
     key: CacheKey,
-    build: impl FnOnce() -> Result<reqwest::Client, E>,
-) -> Result<reqwest::Client, E> {
+    build: impl FnOnce() -> Result<xai_grok_net::HttpClient, E>,
+) -> Result<xai_grok_net::HttpClient, E> {
     static CACHE: LazyLock<Mutex<(u64, HashMap<CacheKey, Entry>)>> =
         LazyLock::new(Default::default);
     let slot = {
@@ -62,13 +118,13 @@ pub(crate) fn cached_client<E>(
 /// Sole [`CacheKey`] constructor. Because [`cached_client`] takes `CacheKey`
 /// rather than `&str`, the header fingerprint is impossible to skip: the type
 /// is the guarantee.
-pub(crate) fn cache_key(kind: &str, headers: &reqwest::header::HeaderMap) -> CacheKey {
+pub(crate) fn cache_key(kind: &str, headers: &HeaderMap) -> CacheKey {
     CacheKey(format!("{kind}|{}", headers_fingerprint(headers)))
 }
 
 /// Hash of sorted, length-prefixed (name, value-bytes) pairs: collision-resistant
 /// and keeps raw credentials out of the process-lifetime key map.
-fn headers_fingerprint(headers: &reqwest::header::HeaderMap) -> String {
+fn headers_fingerprint(headers: &HeaderMap) -> String {
     use std::hash::{Hash, Hasher};
     let mut pairs: Vec<(&str, &[u8])> = headers
         .iter()
@@ -83,7 +139,6 @@ fn headers_fingerprint(headers: &reqwest::header::HeaderMap) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::header::{HeaderMap, HeaderValue};
 
     // Cache is process-global; serialize so fills/evictions cannot cross tests.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -91,8 +146,9 @@ mod tests {
         TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn test_client() -> reqwest::Client {
-        xai_grok_extra_ca::build_reqwest_client(|builder| builder).expect("test client builds")
+    fn test_client() -> xai_grok_net::HttpClient {
+        xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default())
+            .expect("test client builds")
     }
 
     #[test]

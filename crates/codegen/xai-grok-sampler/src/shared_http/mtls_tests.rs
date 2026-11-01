@@ -16,13 +16,16 @@ fn clients_are_reused_for_the_same_identity() {
     let key = client_cache_key(b"cache-test-certificate", b"cache-test-key", false);
     let build = || {
         BUILD_CALLS.fetch_add(1, Ordering::SeqCst);
-        reqwest::Client::builder().build()
+        xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default())
     };
     assert!(cached_client(key.clone(), build).is_ok());
     assert!(
-        cached_client(key, || -> Result<reqwest::Client, reqwest::Error> {
-            panic!("cached client must be reused")
-        })
+        cached_client(
+            key,
+            || -> Result<xai_grok_net::HttpClient, xai_grok_net::Error> {
+                panic!("cached client must be reused")
+            }
+        )
         .is_ok()
     );
     assert_eq!(BUILD_CALLS.load(Ordering::SeqCst), 1);

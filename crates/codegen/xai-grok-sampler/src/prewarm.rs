@@ -192,13 +192,13 @@ enum DrainOutcome {
 }
 
 async fn dial_and_drain(
-    client: &reqwest::Client,
+    client: &xai_grok_net::HttpClient,
     origin: &str,
-) -> reqwest::Result<(reqwest::StatusCode, DrainOutcome)> {
+) -> Result<(xai_grok_net::StatusCode, DrainOutcome), xai_grok_net::Error> {
     // Redirects may be followed, but hyper pools the origin's connection before following, so the dial still warms it.
-    let mut response = client.get(origin).send().await?;
+    let mut response = client.get(origin, xai_grok_net::Auth::None).send().await?;
     let status = response.status();
-    let pools_at_handshake = response.version() >= reqwest::Version::HTTP_2;
+    let pools_at_handshake = response.version() >= xai_grok_net::Version::HTTP_2;
     let mut drained = 0usize;
     // h1 pools a connection only once its body reaches EOF; h2 pools at the handshake.
     while let Some(chunk) = response.chunk().await? {
@@ -216,7 +216,7 @@ async fn dial_and_drain(
 }
 
 fn endpoint_origin(base_url: &str) -> Option<String> {
-    let url = reqwest::Url::parse(base_url).ok()?;
+    let url = xai_grok_net::Url::parse(base_url).ok()?;
     if !matches!(url.scheme(), "http" | "https") || !url.has_host() {
         return None;
     }

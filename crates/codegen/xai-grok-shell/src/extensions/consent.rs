@@ -45,10 +45,11 @@ async fn handle_record(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             None,
         ),
     );
-    let client = crate::http::with_auth_retry(crate::http::shared_client(), provider);
+    // `X-XAI-Token-Auth` is set below, so the provider's plain headers are not added.
+    let request_auth = crate::http::auth_retry(provider, &url);
 
-    let resp = client
-        .post(&url)
+    let resp = crate::http::shared_client()
+        .post(&url, request_auth.auth)
         .timeout(RECORD_TIMEOUT)
         // The server re-runs the same targeting rules, and those read this header.
         .header(
