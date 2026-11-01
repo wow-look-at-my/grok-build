@@ -4298,7 +4298,7 @@ fn pr14_default_model_picker_commits_resolved_model_id() {
         "Enter must transition to PickingEnum for default_model"
     );
 
-    // Walk down past row 0 ("(no override)") to row 1 ("Grok 4.5").
+    // The picker sorts the catalog, so one row is "Grok 3".
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Down));
     assert!(
         matches!(outcome, SettingsKeyOutcome::Changed),
@@ -4309,11 +4309,7 @@ fn pr14_default_model_picker_commits_resolved_model_id() {
     let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
     match outcome {
         SettingsKeyOutcome::Action(Action::SetDefaultModel(id)) => {
-            assert_eq!(
-                id.0.as_ref(),
-                "grok-4.5",
-                "committed id must match snapshot"
-            );
+            assert_eq!(id.0.as_ref(), "grok-3", "committed id must match snapshot");
         }
         other => panic!("expected SetDefaultModel(<id>) on commit, got {other:?}"),
     }
