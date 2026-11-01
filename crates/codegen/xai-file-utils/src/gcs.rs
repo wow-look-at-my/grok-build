@@ -257,7 +257,7 @@ pub async fn upload_bytes_signed<C: StorageConfig>(
 
 /// Uploads a file by streaming from disk. Preferred for the background queue: never loads the full file.
 /// Proxy + large files use signed-URL multipart (bypass body limits); small files stream through the proxy.
-/// Direct mode streams via the gcloud-storage crate.
+/// Direct mode streams to GCS over xai-grok-net.
 pub async fn upload_file<C: StorageConfig>(
     config: &C,
     object_path: &str,
@@ -483,31 +483,6 @@ async fn upload_file_via_proxy(
     }
 }
 
-/// Build a GCS client with optional service account key, or default ADC.
-async fn build_gcs_client(
-    service_account_key: Option<&str>,
-) -> anyhow::Result<gcloud_storage::client::Client> {
-    use gcloud_storage::client::{Client as GcsClient, ClientConfig as GcsClientConfig};
-
-    let gcs_config = if let Some(key_json) = service_account_key {
-        GcsClientConfig::default()
-            .with_credentials(
-                gcloud_storage::client::google_cloud_auth::credentials::CredentialsFile::new_from_str(key_json)
-                    .await
-                    .context("Failed to parse service account key")?,
-            )
-            .await
-            .context("Failed to configure GCS client with service account")?
-    } else {
-        GcsClientConfig::default()
-            .with_auth()
-            .await
-            .context("Failed to authenticate GCS client")?
-    };
-
-    Ok(GcsClient::new(gcs_config))
-}
-
 /// Upload a file directly to GCS by streaming from disk.
 async fn upload_file_direct(
     bucket: &str,
@@ -516,35 +491,19 @@ async fn upload_file_direct(
     content_type: &str,
     service_account_key: Option<&str>,
 ) -> anyhow::Result<String> {
-    use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
-    use tokio::fs::File as TokioFile;
-    use tokio_util::io::ReaderStream;
-
-    let client = build_gcs_client(service_account_key).await?;
-
-    let file = TokioFile::open(file_path)
+    let client = crate::gcs_net::GcsDirect::new(service_account_key).await?;
+    let file = tokio::fs::File::open(file_path)
         .await
         .with_context(|| format!("Failed to open file: {}", file_path.display()))?;
-    // ReaderStream<TokioFile> yields io::Result<Bytes>; io::Error satisfies
-    // upload_streamed_object's S::Error: Into<Box<dyn Error + Send + Sync>> bound directly.
-    let stream = ReaderStream::new(file);
-
-    let mut media = Media::new(object_path.to_string());
-    media.content_type = content_type.to_owned().into();
-    let upload_type = UploadType::Simple(media);
-    let request = UploadObjectRequest {
-        bucket: bucket.to_string(),
-        ..Default::default()
-    };
+    let body = xai_grok_net::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
     client
-        .upload_streamed_object(&request, stream, &upload_type)
+        .upload(bucket, object_path, content_type, body)
         .await
         .with_context(|| format!("Failed to upload to gs://{}/{}", bucket, object_path))?;
-
     Ok(format!("gs://{}/{}", bucket, object_path))
 }
 
-/// Uploads bytes directly to GCS using the gcloud-storage client.
+/// Uploads bytes directly to GCS.
 async fn upload_bytes_direct(
     bucket: &str,
     object_path: &str,
@@ -552,24 +511,11 @@ async fn upload_bytes_direct(
     content_type: &str,
     service_account_key: Option<&str>,
 ) -> anyhow::Result<String> {
-    use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
-
-    let client = build_gcs_client(service_account_key).await?;
-
-    let mut media = Media::new(object_path.to_string());
-    media.content_type = content_type.to_owned().into();
-    let upload_type = UploadType::Simple(media);
-    let request = UploadObjectRequest {
-        bucket: bucket.to_string(),
-        ..Default::default()
-    };
-
+    let client = crate::gcs_net::GcsDirect::new(service_account_key).await?;
     client
-        .upload_object(&request, content.to_vec(), &upload_type)
+        .upload(bucket, object_path, content_type, content.to_vec().into())
         .await
         .with_context(|| format!("Failed to upload to gs://{}/{}", bucket, object_path))?;
-
-    // Return the full GCS URL
     Ok(format!("gs://{}/{}", bucket, object_path))
 }
 

@@ -1004,30 +1004,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aws-smithy-http-client"
-version = "1.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12fb0abf49ff0cab20fd31ac1215ed7ce0ea92286ba09e2854b42ba5cabe7525"
-dependencies = [
- "aws-smithy-async",
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "h2",
- "http 1.4.0",
- "hyper",
- "hyper-rustls",
- "hyper-util",
- "pin-project-lite",
- "rustls",
- "rustls-native-certs",
- "rustls-pki-types",
- "tokio",
- "tokio-rustls",
- "tower",
- "tracing",
-]
-
-[[package]]
 name = "aws-smithy-json"
 version = "0.61.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13393,8 +13369,10 @@ dependencies = [
  "anyhow",
  "async-compression",
  "aws-config",
+ "aws-lc-rs",
  "aws-sdk-s3",
- "aws-smithy-http-client",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
  "axum",
  "axum-server",
  "base64 0.22.1",
@@ -13404,7 +13382,9 @@ dependencies = [
  "filetime",
  "futures",
  "gcloud-storage",
+ "http 1.4.0",
  "indexmap",
+ "jsonwebtoken",
  "prod-mc-cli-chat-proxy-types",
  "rcgen",
  "reflink-copy",
@@ -13421,7 +13401,6 @@ dependencies = [
  "xai-circuit-breaker",
  "xai-dirs",
  "xai-grok-auth",
- "xai-grok-extra-ca",
  "xai-grok-net",
  "xai-grok-otel",
  "xai-grok-version",

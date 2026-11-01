@@ -1449,4 +1449,88 @@ mod tests {
         .await
         .expect("an abort cancelled mid-send must re-send via the drop backstop");
     }
+
+    /// True when an error chain holds a credential refusal from `xai_grok_net`.
+    pub(crate) fn refused_by_net(err: &anyhow::Error) -> bool {
+        err.chain()
+            .any(|e| e.downcast_ref::<xai_grok_net::AuthRefusal>().is_some())
+    }
+
+    #[tokio::test]
+    async fn s3_put_arrives_with_the_sdk_signature_and_body() {
+        type Seen = Arc<std::sync::Mutex<Vec<(HashMap<String, String>, Vec<u8>)>>>;
+        let seen: Seen = Arc::default();
+        let s = seen.clone();
+        let put_handler = move |headers: axum::http::HeaderMap, body: axum::body::Bytes| {
+            let seen = s.clone();
+            async move {
+                let headers = headers
+                    .iter()
+                    .map(|(n, v)| (n.as_str().to_owned(), v.to_str().unwrap_or("").to_owned()))
+                    .collect();
+                seen.lock().unwrap().push((headers, body.to_vec()));
+                StatusCode::OK
+            }
+        };
+        let router = Router::new().route("/{bucket}/{*key}", put(put_handler));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        upload_bytes(
+            "test-bucket",
+            "signed.txt",
+            b"payload",
+            "text/plain",
+            "us-east-1",
+            Some(
+                r#"{"aws_access_key_id":"AKIDROUTE","aws_secret_access_key":"s","aws_session_token":"session-tok"}"#,
+            ),
+            None,
+            Some(&format!("http://{addr}")),
+        )
+        .await
+        .unwrap();
+
+        let seen = seen.lock().unwrap();
+        let (headers, body) = seen.first().expect("the mock saw the PUT");
+        assert_eq!(body, b"payload");
+        let authorization = headers.get("authorization").expect("SigV4 Authorization");
+        assert!(
+            authorization.starts_with("AWS4-HMAC-SHA256 Credential=AKIDROUTE/"),
+            "{authorization}"
+        );
+        assert_eq!(
+            headers.get("x-amz-security-token").map(String::as_str),
+            Some("session-tok")
+        );
+        assert!(headers.contains_key("x-amz-date"));
+        assert_eq!(
+            headers.get("content-type").map(String::as_str),
+            Some("text/plain")
+        );
+    }
+
+    #[tokio::test]
+    async fn s3_request_carrying_a_session_token_is_refused_by_net() {
+        // The access key id lands in the SigV4 Authorization header.
+        let token = "xai-session-token-for-s3-routing-test";
+        xai_grok_net::register_session_token(token);
+        let creds = format!(r#"{{"aws_access_key_id":"{token}","aws_secret_access_key":"s"}}"#);
+        let err = upload_bytes(
+            "test-bucket",
+            "refused.txt",
+            b"payload",
+            "text/plain",
+            "us-east-1",
+            Some(&creds),
+            None,
+            Some("http://s3.routing-test.invalid"),
+        )
+        .await
+        .expect_err("net must refuse the session token");
+        assert!(refused_by_net(&err), "{err:?}");
+    }
 }

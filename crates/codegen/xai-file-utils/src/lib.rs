@@ -24,8 +24,10 @@ pub fn auth_retry(
     }
 }
 pub mod gcs;
+mod gcs_net;
 pub mod queue;
 pub mod s3;
+mod s3_http;
 pub mod storage_client;
 pub mod upload_config;
 pub mod workspace_classifier;
