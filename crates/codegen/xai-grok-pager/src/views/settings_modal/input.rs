@@ -367,8 +367,8 @@ fn edit_picker_query(
         .as_deref()
         .and_then(|canonical| choices.iter().position(|c| c.canonical == canonical))
         .unwrap_or(0);
-    let same_choice =
-        target == current && Some(choices[target].canonical.as_str()) == focused.as_deref();
+    let same_choice = target == current
+        && choices.get(target).map(|c| c.canonical.as_str()) == focused.as_deref();
     if same_choice {
         return SettingsKeyOutcome::Changed;
     }
