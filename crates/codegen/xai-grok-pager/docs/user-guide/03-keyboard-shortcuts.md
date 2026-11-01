@@ -206,6 +206,8 @@ Actions that affect the agent session, available from the agent screen.
 | `Ctrl+.` (alt: `Ctrl+X`) | Agent screen | Open the keyboard shortcuts help |
 | `F2` (alt: `Ctrl+,` / `Cmd+,`) | Agent screen | Open the settings modal |
 
+In a settings chooser, `/` starts a search, and `Esc` ends it. A model chooser also searches as soon as you type. The model list is in alphabetical order, and the mouse wheel scrolls it from any row.
+
 **Note:** While a **subagent fullscreen view** is open, the composer is hidden. Root-only chords (`Ctrl+P`, `Ctrl+M`, `Ctrl+R`, `Ctrl+O`, `Ctrl+B`, settings, extensions, Shift+Tab) do nothing. `Ctrl+C` cancels the **child's** turn. `q` / `Esc` closes the view. `Ctrl+Q` still quits (`Ctrl+D` on VS Code family). See [Viewing Subagents in the TUI](16-subagents.md#fullscreen-framed-view-the-child-transcript).
 
 **Note:** `Ctrl+M` is context-dependent. When the prompt is focused, it toggles multiline input mode. Otherwise, it opens the model picker.
