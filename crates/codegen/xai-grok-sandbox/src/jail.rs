@@ -869,6 +869,8 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     profile.push_str("(allow file-write* (subpath \"/dev\"))\n");
     // The root itself.
     profile.push_str("(allow file-read* (literal \"/\"))\n");
+    // Only that /Applications exists.
+    profile.push_str("(allow file-read-metadata (literal \"/Applications\"))\n");
     // Path resolution stats each ANCESTOR of every path it is handed, so a
     // grant whose ancestors are denied is unreachable in practice: `getcwd`
     // fails. A tool cannot resolve a path it was given, even inside a mounted
@@ -1789,6 +1791,11 @@ mod tests {
         assert!(
             !profile.contains("(allow file-read* (subpath \"/\"))"),
             "the root grant must name the root, not the whole filesystem: {profile}"
+        );
+        assert!(
+            profile.contains("(allow file-read-metadata (literal \"/Applications\"))")
+                && !profile.contains("(subpath \"/Applications\")"),
+            "an APE must see that /Applications exists, and nothing inside it: {profile}"
         );
     }
 
