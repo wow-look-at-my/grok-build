@@ -14081,6 +14081,7 @@ dependencies = [
 name = "xai-grok-net"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "futures-util",
  "parking_lot",
  "reqwest 0.12.24",

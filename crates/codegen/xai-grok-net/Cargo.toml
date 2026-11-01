@@ -12,6 +12,7 @@ description = "The one HTTP path of the grok CLI: every request is built here, a
 test-loopback-session = []
 
 [dependencies]
+async-trait = { workspace = true }
 futures-util = { workspace = true }
 parking_lot = { workspace = true }
 reqwest = { workspace = true }

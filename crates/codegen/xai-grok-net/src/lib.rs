@@ -9,7 +9,9 @@ mod error;
 mod session;
 pub mod ws;
 
-pub use auth::{Auth, KeyScheme, is_credential_header, is_xai_host};
+pub use auth::{
+    Auth, CredentialSource, KeyScheme, SentBearerSuffix, is_credential_header, is_xai_host,
+};
 pub use blocking::{BlockingHttpClient, BlockingRequest};
 pub use client::{ClientOptions, HttpClient, Request};
 pub use error::{AuthRefusal, Error};

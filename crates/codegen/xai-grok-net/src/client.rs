@@ -174,15 +174,11 @@ impl HttpClient {
     }
 
     pub fn request(&self, method: Method, url: impl IntoUrl, auth: Auth) -> Request {
-        let state = url.into_url().map_err(Error::from).and_then(|url| {
-            let mut headers = HeaderMap::new();
-            auth::apply(&auth, &url, &mut headers)?;
-            Ok(Pending {
-                builder: self.inner.request(method, url.clone()),
-                url,
-                auth_headers: headers,
-                extra_headers: HeaderMap::new(),
-            })
+        let state = url.into_url().map_err(Error::from).map(|url| Pending {
+            builder: self.inner.request(method, url.clone()),
+            url,
+            auth,
+            extra_headers: HeaderMap::new(),
         });
         Request { state }
     }
@@ -216,7 +212,7 @@ impl HttpClient {
 struct Pending {
     builder: reqwest::RequestBuilder,
     url: Url,
-    auth_headers: HeaderMap,
+    auth: Auth,
     extra_headers: HeaderMap,
 }
 
@@ -297,7 +293,7 @@ impl Request {
                 state: Ok(Pending {
                     builder,
                     url: p.url.clone(),
-                    auth_headers: p.auth_headers.clone(),
+                    auth: p.auth.clone(),
                     extra_headers: p.extra_headers.clone(),
                 }),
             }),
@@ -310,21 +306,60 @@ impl Request {
         self.state.as_ref().ok().map(|p| &p.url)
     }
 
+    /// Send the request. The response's extensions hold the
+    /// [`crate::SentBearerSuffix`] of the credential that produced it.
     pub async fn send(self) -> Result<reqwest::Response, Error> {
-        let request = self.finish()?;
-        Ok(request.0.execute(request.1).await?)
-    }
-
-    fn finish(self) -> Result<(reqwest::Client, reqwest::Request), Error> {
         let p = self.state?;
-        let (client, built) = p.builder.build_split();
-        let mut built = built?;
-        let headers = built.headers_mut();
-        headers.extend(p.extra_headers);
-        headers.extend(p.auth_headers);
-        auth::check_outgoing(&p.url, headers)?;
-        Ok((client, built))
+        let (source, retries) = match &p.auth {
+            Auth::Source {
+                source,
+                retries_on_401,
+            } => (Some(source.clone()), *retries_on_401),
+            _ => (None, 0),
+        };
+        let backup = if retries > 0 {
+            p.builder.try_clone()
+        } else {
+            None
+        };
+        let mut response = send_once(p.builder, &p.url, &p.auth, &p.extra_headers).await?;
+        let (Some(source), Some(backup)) = (source, backup) else {
+            return Ok(response);
+        };
+        for _ in 0..retries {
+            if response.status() != reqwest::StatusCode::UNAUTHORIZED
+                || !source.refresh_after_unauthorized().await
+            {
+                break;
+            }
+            let Some(retry) = backup.try_clone() else {
+                break;
+            };
+            tracing::info!(host = %auth::host_of(&p.url), "retrying after a 401 with a refreshed credential");
+            response = send_once(retry, &p.url, &p.auth, &p.extra_headers).await?;
+        }
+        Ok(response)
     }
+}
+
+async fn send_once(
+    builder: reqwest::RequestBuilder,
+    url: &Url,
+    auth: &Auth,
+    extra_headers: &HeaderMap,
+) -> Result<reqwest::Response, Error> {
+    let fixed = auth.resolve();
+    let (client, built) = builder.build_split();
+    let mut built = built?;
+    let headers = built.headers_mut();
+    headers.extend(extra_headers.clone());
+    auth::apply(&fixed, url, headers)?;
+    auth::check_outgoing(url, headers)?;
+    let mut response = client.execute(built).await?;
+    if let Some(suffix) = auth::bearer_suffix(&fixed) {
+        response.extensions_mut().insert(suffix);
+    }
+    Ok(response)
 }
 
 use serde as serde_like;

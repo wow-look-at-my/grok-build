@@ -20,6 +20,33 @@ pub enum Auth {
     XaiSession(String),
     /// Headers the user wrote in config for this endpoint, sent as written.
     Configured(HeaderMap),
+    /// A credential that can change, read when the request is sent.
+    Source {
+        source: std::sync::Arc<dyn CredentialSource>,
+        retries_on_401: u32,
+    },
+}
+
+/// A credential that changes over the life of the process, such as the xAI login token.
+#[async_trait::async_trait]
+pub trait CredentialSource: Send + Sync + 'static {
+    /// The credential to send now. It must not be [`Auth::Source`].
+    fn current(&self) -> Auth;
+    /// True when a different credential is now current.
+    async fn refresh_after_unauthorized(&self) -> bool;
+}
+
+impl Auth {
+    /// The fixed credential to send now: a [`Auth::Source`] is read once.
+    pub(crate) fn resolve(&self) -> Auth {
+        match self {
+            Self::Source { source, .. } => match source.current() {
+                Self::Source { .. } => Self::None,
+                fixed => fixed,
+            },
+            fixed => fixed.clone(),
+        }
+    }
 }
 
 impl std::fmt::Debug for Auth {
@@ -29,9 +56,30 @@ impl std::fmt::Debug for Auth {
             Self::ApiKey { .. } => "ApiKey",
             Self::XaiSession(_) => "XaiSession",
             Self::Configured(_) => "Configured",
+            Self::Source { .. } => "Source",
         };
         f.write_str(kind)
     }
+}
+
+/// The tail of the bearer a request carried, in the response's extensions.
+#[derive(Clone, Debug)]
+pub struct SentBearerSuffix(pub String);
+
+/// JWT heads are a shared constant, so only the tail tells tokens apart.
+const SUFFIX_LEN: usize = 12;
+
+pub(crate) fn bearer_suffix(auth: &Auth) -> Option<SentBearerSuffix> {
+    let token = match auth {
+        Auth::XaiSession(t) => t,
+        Auth::ApiKey { key, .. } => key,
+        _ => return None,
+    };
+    let tail = match token.char_indices().rev().nth(SUFFIX_LEN - 1) {
+        Some((i, _)) => token.get(i..).unwrap_or(token),
+        None => token,
+    };
+    Some(SentBearerSuffix(tail.to_owned()))
 }
 
 /// Which header carries an [`Auth::ApiKey`].
@@ -121,6 +169,7 @@ pub(crate) fn apply(
                 headers.insert(name.clone(), value.clone());
             }
         }
+        Auth::Source { .. } => apply(&auth.resolve(), url, headers)?,
     }
     Ok(())
 }
