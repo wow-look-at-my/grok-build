@@ -1450,11 +1450,12 @@ mod tests {
         use std::sync::Arc;
         use std::time::Instant;
 
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_millis(200))
-            .connect_timeout(Duration::from_millis(100))
-            .build()
-            .unwrap();
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_millis(200))
+                .connect_timeout(Duration::from_millis(100)),
+        )
+        .unwrap();
         // Nothing listening, so the first periodic sync errors quickly
         let client = FeedbackClient::with_client(http, "http://127.0.0.1:1", None);
         let config = FeedbackManagerConfig {
@@ -1508,11 +1509,12 @@ mod tests {
         use std::time::Instant;
 
         let base = blackhole_http_addr().await;
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .expect("reqwest client");
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client");
         let client = FeedbackClient::with_client(http, base, None);
         let config = FeedbackManagerConfig {
             telemetry_enabled: true,
@@ -1537,11 +1539,12 @@ mod tests {
         use std::time::Instant;
 
         let base = blackhole_http_addr().await;
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .expect("reqwest client");
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client");
         let client = FeedbackClient::with_client(http, base, None);
         let config = FeedbackManagerConfig {
             telemetry_enabled: false,
@@ -1571,12 +1574,13 @@ mod tests {
         use std::time::Instant;
 
         let base = blackhole_http_addr().await;
-        let http = reqwest::Client::builder()
-            // Deliberately longer than the shutdown budget so the outer timeout is what fires, not the client's
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .expect("reqwest client");
+        // Deliberately longer than the shutdown budget so the outer timeout is what fires, not the client's
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client");
         let client = FeedbackClient::with_client(http, base, None);
         let config = FeedbackManagerConfig {
             telemetry_enabled: true,

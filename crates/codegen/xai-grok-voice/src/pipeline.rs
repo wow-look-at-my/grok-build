@@ -202,8 +202,8 @@ async fn start_capture_session(
     let _drain = tokio::spawn(forward_pcm(mic_rx, audio_tx_rx));
 
     let connect = async {
-        let bearer = crate::auth::require_bearer(auth).await?;
-        StreamingSttSession::connect(config, &bearer).await
+        let auth = crate::auth::require_auth(auth).await?;
+        StreamingSttSession::connect(config, auth).await
     };
     let (connect_res, capture_res) = tokio::join!(connect, capture_task);
 

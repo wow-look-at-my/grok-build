@@ -4,9 +4,9 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use url::Url;
+use xai_grok_net::Auth;
 use xai_grok_net::header::{HeaderMap, HeaderValue};
 use xai_grok_net::ws::{Message, WsError, WsRequest};
-use xai_grok_net::{Auth, KeyScheme};
 
 use crate::config::VoiceConfig;
 use crate::error::VoiceError;
@@ -31,7 +31,8 @@ pub struct StreamingSttSession {
 
 impl StreamingSttSession {
     /// Connect and wait for `transcript.created` before sending audio.
-    pub async fn connect(config: &VoiceConfig, bearer: &str) -> Result<Self, VoiceError> {
+    /// `auth` is an xAI API key (`Auth::ApiKey`) or the xAI login token (`Auth::XaiSession`).
+    pub async fn connect(config: &VoiceConfig, auth: Auth) -> Result<Self, VoiceError> {
         let url = build_stt_ws_url(config)?;
 
         // These headers identify the client so the backend can attribute and meter voice usage, mirroring the sampler and
@@ -45,12 +46,6 @@ impl StreamingSttSession {
         );
         insert_optional_header(&mut headers, "User-Agent", &config.user_agent);
 
-        // The bearer is an xAI API key or the xAI login token, and this crate
-        // cannot tell which. As a key it goes to the configured host.
-        let auth = Auth::ApiKey {
-            key: bearer.to_owned(),
-            scheme: KeyScheme::Bearer,
-        };
         let request = WsRequest::new(url.as_str(), auth, headers)
             .map_err(|e| VoiceError::WebSocket(format!("request: {e}")))?;
         let (ws, _) = tokio::time::timeout(

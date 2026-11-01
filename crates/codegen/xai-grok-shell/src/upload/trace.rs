@@ -1058,7 +1058,7 @@ impl TraceExportSource for DynamicResolver {
     fn proxy_credentials(&self) -> Option<Arc<dyn xai_grok_auth::AuthCredentialProvider>> {
         xai_file_utils::gcs::StorageConfig::proxy_credentials(&self.with_auth())
     }
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         xai_file_utils::gcs::StorageConfig::proxy_http_client(&self.with_auth())
     }
     fn has_usable_credential(&self) -> bool {
