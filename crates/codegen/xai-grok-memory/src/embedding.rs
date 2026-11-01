@@ -29,7 +29,8 @@ pub struct ApiEmbeddingProvider {
     api_base: String,
     model: String,
     dimensions: usize,
-    client: reqwest_middleware::ClientWithMiddleware,
+    client: xai_grok_net::HttpClient,
+    auth: xai_grok_net::Auth,
     max_batch_size: usize,
 }
 
@@ -38,13 +39,15 @@ impl ApiEmbeddingProvider {
         api_base: String,
         model: String,
         dimensions: usize,
-        client: reqwest_middleware::ClientWithMiddleware,
+        client: xai_grok_net::HttpClient,
+        auth: xai_grok_net::Auth,
     ) -> Self {
         Self {
             api_base,
             model,
             dimensions,
             client,
+            auth,
             max_batch_size: 32,
         }
     }
@@ -52,43 +55,37 @@ impl ApiEmbeddingProvider {
     pub fn from_config(
         config: &xai_grok_config_types::MemoryEmbeddingConfig,
         api_base: String,
-        client: reqwest_middleware::ClientWithMiddleware,
+        auth: xai_grok_net::Auth,
     ) -> Option<Self> {
         let model = config.model.clone().filter(|m| !m.is_empty())?;
-        Some(Self::new(api_base, model, config.dimensions, client))
+        Some(Self::new(
+            api_base,
+            model,
+            config.dimensions,
+            xai_grok_http::shared_client(),
+            auth,
+        ))
     }
 
+    /// `auth_key` is a key for the endpoint, sent as `Authorization: Bearer`.
     pub fn from_session(
         config: &xai_grok_config_types::MemoryEmbeddingConfig,
         proxy_base_url: String,
         auth_key: String,
     ) -> Option<Self> {
-        let client = build_static_middleware_client(Some(auth_key));
-        Self::from_config(config, proxy_base_url, client)
+        let auth = xai_grok_net::Auth::ApiKey {
+            key: auth_key,
+            scheme: xai_grok_net::KeyScheme::Bearer,
+        };
+        Self::from_config(config, proxy_base_url, auth)
     }
 }
 
-pub(super) fn build_middleware_client(
+pub(super) fn retrying_auth(
     credentials: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider>,
-) -> reqwest_middleware::ClientWithMiddleware {
-    xai_grok_http::with_auth_retry(xai_grok_http::shared_client(), credentials)
-}
-
-fn build_static_middleware_client(
-    api_key: Option<String>,
-) -> reqwest_middleware::ClientWithMiddleware {
-    let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> = std::sync::Arc::new(
-        xai_grok_auth::StaticAuthCredentialProvider::new(Box::new(NoopHttpAuth), api_key),
-    );
-    build_middleware_client(provider)
-}
-
-struct NoopHttpAuth;
-
-impl xai_grok_auth::HttpAuth for NoopHttpAuth {
-    fn apply(&self, builder: reqwest::RequestBuilder, _base_url: &str) -> reqwest::RequestBuilder {
-        builder
-    }
+    base_url: &str,
+) -> xai_grok_net::Auth {
+    xai_grok_http::auth_retry(credentials, base_url).auth
 }
 
 #[async_trait]
@@ -130,20 +127,19 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                     tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                 }
 
-                let request = xai_grok_http::shared_client()
-                    .post(&endpoint)
+                let request = self
+                    .client
+                    .post(&endpoint, self.auth.clone())
                     .json(&body_json)
                     .header("X-XAI-Token-Auth", "xai-grok-cli")
                     .header("x-grok-client-version", xai_grok_version::version());
 
-                let req = match request.build() {
+                let response = match request.send().await {
                     Ok(r) => r,
-                    Err(e) => {
-                        return Err(format!("failed to build embedding request: {e}").into());
+                    // A refusal sent nothing, and a retry is refused the same way.
+                    Err(e) if e.auth_refusal().is_some() => {
+                        return Err(format!("embedding request refused: {e}").into());
                     }
-                };
-                let response = match self.client.execute(req).await {
-                    Ok(r) => r,
                     Err(e) => {
                         last_err = format!("request failed: {e}");
                         continue;
@@ -173,7 +169,8 @@ impl EmbeddingProvider for ApiEmbeddingProvider {
                 }
 
                 // Retry on 429 (rate limit) or 5xx (server error)
-                if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                if status == xai_grok_net::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+                {
                     last_err = format!(
                         "HTTP {status}: {}",
                         response.text().await.unwrap_or_default()

@@ -12,10 +12,13 @@ pub mod ws;
 pub use auth::{
     Auth, CredentialSource, KeyScheme, SentBearerSuffix, is_credential_header, is_xai_host,
 };
-pub use blocking::{BlockingHttpClient, BlockingRequest};
+pub use blocking::{BlockingHttpClient, BlockingOptions, BlockingRequest};
 pub use client::{ClientOptions, HttpClient, Request};
 pub use error::{AuthRefusal, Error};
 pub use session::register_session_token;
+
+/// The transport error a response body read (`json`, `text`, `bytes`) returns.
+pub type TransportError = reqwest::Error;
 
 pub use reqwest::{
     Body, Certificate, Identity, Method, Proxy, Response, StatusCode, Url, Version, header,

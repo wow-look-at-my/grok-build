@@ -30,7 +30,7 @@ pub(super) async fn mock_idp_token() -> (String, String, Discovery, tokio::task:
     let (issuer, handle) = start_mock_idp().await;
     let discovery = discover(&issuer).await.unwrap();
     let resp: serde_json::Value = xai_grok_http::shared_client()
-        .post(&discovery.token_endpoint)
+        .post(&discovery.token_endpoint, xai_grok_net::Auth::None)
         .form(&[("grant_type", "authorization_code")])
         .send()
         .await

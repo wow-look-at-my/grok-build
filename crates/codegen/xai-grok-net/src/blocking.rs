@@ -8,6 +8,16 @@ use reqwest::{IntoUrl, Method, Url};
 use crate::auth::{self, Auth, is_credential_header};
 use crate::error::{AuthRefusal, Error};
 
+/// How a blocking client is built. None of it carries a credential.
+#[derive(Clone, Debug, Default)]
+pub struct BlockingOptions {
+    pub timeout: Option<Duration>,
+    pub connect_timeout: Option<Duration>,
+    pub pool_idle_timeout: Option<Duration>,
+    pub tcp_keepalive: Option<Duration>,
+    pub user_agent: Option<String>,
+}
+
 /// The blocking HTTP client. Same credential rules as [`crate::HttpClient`].
 #[derive(Clone, Debug)]
 pub struct BlockingHttpClient {
@@ -17,12 +27,30 @@ pub struct BlockingHttpClient {
 impl BlockingHttpClient {
     /// Build a client with the grok TLS policy.
     pub fn build(timeout: Option<Duration>, user_agent: Option<&str>) -> Result<Self, Error> {
+        Self::build_with(BlockingOptions {
+            timeout,
+            user_agent: user_agent.map(str::to_owned),
+            ..Default::default()
+        })
+    }
+
+    /// Build a client with the grok TLS policy and every option in `options`.
+    pub fn build_with(options: BlockingOptions) -> Result<Self, Error> {
         let inner = xai_grok_extra_ca::build_blocking_reqwest_client(|mut b| {
-            if let Some(t) = timeout {
+            if let Some(t) = options.timeout {
                 b = b.timeout(t);
             }
-            if let Some(ua) = user_agent {
-                b = b.user_agent(ua);
+            if let Some(t) = options.connect_timeout {
+                b = b.connect_timeout(t);
+            }
+            if let Some(t) = options.pool_idle_timeout {
+                b = b.pool_idle_timeout(t);
+            }
+            if let Some(t) = options.tcp_keepalive {
+                b = b.tcp_keepalive(t);
+            }
+            if let Some(ua) = &options.user_agent {
+                b = b.user_agent(ua.as_str());
             }
             b
         })?;

@@ -94,7 +94,7 @@ pub(crate) fn is_xai_side_call_principal(auth: &GrokAuth) -> bool {
 
 /// Host match, not a prefix match: `cursor.com.evil.test` is another domain.
 fn is_foreign_issuer(issuer: &str) -> bool {
-    reqwest::Url::parse(issuer).is_ok_and(|url| {
+    xai_grok_net::Url::parse(issuer).is_ok_and(|url| {
         url.host_str()
             .is_some_and(|host| host == "cursor.com" || host.ends_with(".cursor.com"))
     })

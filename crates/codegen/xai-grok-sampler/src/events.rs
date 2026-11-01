@@ -203,7 +203,7 @@ impl SamplingEvent {
 }
 
 /// Serializable mirror of [`SamplingError`].
-/// The rich `SamplingError` carries non-serializable inner values (`reqwest::Error`, `serde_json::Error`) so it cannot cross a network boundary.
+/// The rich `SamplingError` carries non-serializable inner values (`xai_grok_net::Error`, `serde_json::Error`) so it cannot cross a network boundary.
 /// `SamplingErrorInfo` extracts the bits that downstream consumers (UIs, gRPC adapters) actually need.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SamplingErrorInfo {
@@ -422,7 +422,7 @@ impl From<&SamplingError> for SamplingErrorInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::StatusCode;
+    use xai_grok_net::StatusCode;
     use xai_grok_sampling_types::ApiErrorCode;
 
     #[test]

@@ -23,20 +23,20 @@ pub const MULTIPART_UPLOAD_THRESHOLD: u64 = 50 * 1024 * 1024;
 
 /// Construct a `StorageClient` for proxy-mode uploads.
 /// Uses caller-provided refresh-aware credentials, else a `StaticGrokAuth` from the inline user token.
-/// Optional `http_client` lets the caller pass a shell-tuned client; `None` falls back to `Client::new()`.
+/// Optional `http_client` lets the caller pass a shell-tuned client; `None` falls back to a default client.
 fn build_proxy_client_with_fallback(
     proxy_base_url: &str,
     user_token: &str,
     credentials: Option<Arc<dyn AuthCredentialProvider>>,
     attribution: Option<Arc<dyn Auth401AttributionCallback>>,
-    http_client: Option<reqwest::Client>,
+    http_client: Option<xai_grok_net::HttpClient>,
 ) -> StorageClient {
     let provider = credentials.unwrap_or_else(|| {
         let creds = StaticGrokAuth::new(Some(user_token.to_owned()));
         let bearer = creds.wire_bearer();
         Arc::new(StaticAuthCredentialProvider::new(Box::new(creds), bearer))
     });
-    let http_client = http_client.unwrap_or_default();
+    let http_client = http_client.unwrap_or_else(crate::storage_client::default_upload_client);
     let mut client = StorageClient::with_provider(proxy_base_url, http_client, provider);
     if let Some(cb) = attribution {
         client = client.with_attribution(cb);
@@ -75,10 +75,10 @@ pub trait StorageConfig {
     fn proxy_attribution(&self) -> Option<Arc<dyn Auth401AttributionCallback>> {
         None
     }
-    /// Optional HTTP client for proxy-mode uploads. `None` falls back to `reqwest::Client::new()`.
+    /// Optional HTTP client for proxy-mode uploads. `None` falls back to a default client.
     /// Production should return the shell-tuned client (HTTP/2 keep-alive, aggressive pool eviction).
     /// Upload queues rely on that tuning to avoid stale-connection retries during backoff.
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         None
     }
 }
@@ -446,7 +446,7 @@ async fn upload_file_via_proxy(
     content_type: &str,
     credentials: Option<Arc<dyn AuthCredentialProvider>>,
     attribution: Option<Arc<dyn Auth401AttributionCallback>>,
-    http_client: Option<reqwest::Client>,
+    http_client: Option<xai_grok_net::HttpClient>,
 ) -> anyhow::Result<String> {
     use crate::storage_client::{MultipartUploadOptions, RetryConfig};
 
@@ -595,7 +595,7 @@ async fn upload_bytes_via_proxy(
     content_type: &str,
     credentials: Option<Arc<dyn AuthCredentialProvider>>,
     attribution: Option<Arc<dyn Auth401AttributionCallback>>,
-    http_client: Option<reqwest::Client>,
+    http_client: Option<xai_grok_net::HttpClient>,
 ) -> anyhow::Result<String> {
     use crate::storage_client::RetryConfig;
 
@@ -633,7 +633,7 @@ pub async fn upload_bytes_via_signed_url(
     content_type: &str,
     credentials: Option<Arc<dyn AuthCredentialProvider>>,
     attribution: Option<Arc<dyn Auth401AttributionCallback>>,
-    http_client: Option<reqwest::Client>,
+    http_client: Option<xai_grok_net::HttpClient>,
 ) -> anyhow::Result<String> {
     let storage_client = build_proxy_client_with_fallback(
         proxy_base_url,
