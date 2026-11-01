@@ -75,6 +75,8 @@ pub struct ArgItem {
     pub description: String,
     /// Whether the model this row names is resident in VRAM.
     pub loaded_in_vram: Option<bool>,
+    /// Whether the config marks the model this row names as a favorite.
+    pub favorite: bool,
 }
 
 /// A saved or built-in workflow the `/workflow` picker can launch, sourced from ACP commands that carry `_meta.workflowSource`.
@@ -267,6 +269,12 @@ pub trait SlashCommand: Send + Sync {
     /// unmatched value keeps the first row.
     fn preselected_arg(&self, _ctx: &AppCtx, _args_query: &str) -> Option<String> {
         None
+    }
+
+    /// Whether rows with equal fuzzy scores keep the order `suggest_args` gave them.
+    /// Otherwise they sort by match text.
+    fn keeps_arg_order_on_ties(&self) -> bool {
+        false
     }
 
     /// Whether this command is currently visible / executable.

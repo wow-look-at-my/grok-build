@@ -37,6 +37,7 @@ pub mod mcps;
 pub mod memory;
 pub mod memory_ops;
 pub mod model;
+mod model_order;
 pub mod multiline;
 pub mod new;
 pub mod personas;
