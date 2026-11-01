@@ -490,7 +490,11 @@ pub struct ChatCompletionResponse {
     /// `null` reads as no choices: a gateway written in Go marshals an unset slice as `null`.
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub choices: Vec<ChatChoice>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_reported_usage"
+    )]
     pub usage: Option<Usage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub citations: Option<Vec<String>>,
@@ -510,6 +514,7 @@ pub enum FinishReason {
     Stop,
     Length,
     ToolCalls,
+    #[serde(alias = "refusal", alias = "safety")]
     ContentFilter,
     FunctionCall,
     /// Provider-reported error finish (OpenRouter sends this when the upstream provider fails mid-generation).
@@ -565,6 +570,24 @@ impl ToolCallFunction {
         Self {
             name: name.into(),
             arguments: arguments.to_string(),
+        }
+    }
+}
+
+/// A `usage` object without its token counts is unknown usage. It reads as `None`, so the chunk
+/// that carries it, and that chunk's finish reason, still parse.
+fn deserialize_reported_usage<'de, D>(deserializer: D) -> Result<Option<Usage>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let Some(value) = Option::<serde_json::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match serde_json::from_value(value) {
+        Ok(usage) => Ok(Some(usage)),
+        Err(error) => {
+            tracing::warn!(%error, "response usage has no token counts");
+            Ok(None)
         }
     }
 }
@@ -746,7 +769,11 @@ pub struct ChatCompletionChunk {
     /// `null` reads as no choices.
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub choices: Vec<ChatChunkChoice>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_reported_usage"
+    )]
     pub usage: Option<Usage>,
     #[serde(
         default,
@@ -2050,6 +2077,35 @@ mod tests {
         assert!(chunk.choices.is_empty());
         // The usage riding on that chunk is the whole reason to keep it.
         assert_eq!(chunk.usage.map(|u| u.total_tokens), Some(28));
+    }
+
+    /// A refusal's closing chunk can carry a `usage` with no token counts. Its finish reason has
+    /// to survive the parse, or the client reports a parse error in place of the refusal.
+    #[test]
+    fn a_refusal_chunk_with_empty_usage_keeps_its_finish_reason() {
+        for reason in ["content_filter", "refusal", "safety"] {
+            let body = format!(
+                r#"{{
+                    "id": "chatcmpl-1",
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "m",
+                    "choices": [{{"index": 0, "delta": {{}}, "finish_reason": "{reason}"}}],
+                    "usage": {{}}
+                }}"#
+            );
+            let chunk: ChatCompletionChunk =
+                serde_json::from_str(&body).expect("the refusal chunk must parse");
+            assert_eq!(
+                chunk.choices[0].finish_reason,
+                Some(FinishReason::ContentFilter),
+                "{reason}"
+            );
+            assert!(
+                chunk.usage.is_none(),
+                "no counts is unknown usage, not zero"
+            );
+        }
     }
 
     #[test]

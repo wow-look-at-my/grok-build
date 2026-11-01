@@ -98,6 +98,7 @@ impl SlashCommand for DebugCommand {
                     insert_text: name.to_string(),
                     description: desc.to_string(),
                     loaded_in_vram: None,
+                    favorite: false,
                 })
                 .collect(),
         )

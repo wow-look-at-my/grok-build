@@ -744,7 +744,7 @@ fn session_bearer_resolver(
     auth_method::session_token_auth_gate(
         auth_method::is_session_based_method(&ctx.auth_method_id),
         byok,
-        crate::util::is_xai_api_url(base_url),
+        crate::util::may_carry_xai_session(base_url),
     )
     .then(|| {
         xai_grok_login::credential_provider::WireValidBearerResolver::shared(
