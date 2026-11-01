@@ -151,7 +151,7 @@ fn is_handshake_unauthorized(err: &anyhow::Error) -> bool {
     use tokio_tungstenite::tungstenite::Error as WsError;
     err.downcast_ref::<WsError>()
         .map(|ws_err| {
-            matches!(ws_err, WsError::Http(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED)
+            matches!(ws_err, WsError::Http(resp) if resp.status() == xai_grok_net::StatusCode::UNAUTHORIZED)
         })
         .unwrap_or(false)
 }

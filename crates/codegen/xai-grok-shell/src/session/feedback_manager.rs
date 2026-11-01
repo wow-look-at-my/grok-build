@@ -1245,7 +1245,7 @@ mod tests {
     fn test_is_auth_error_detects_401() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::UNAUTHORIZED,
+            status: xai_grok_net::StatusCode::UNAUTHORIZED,
             context: "Signals update",
             body: "Invalid or expired credentials".to_string(),
         }
@@ -1257,7 +1257,7 @@ mod tests {
     fn test_is_auth_error_ignores_other_statuses() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err_500: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            status: xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR,
             context: "Signals update",
             body: "oops".to_string(),
         }
@@ -1265,7 +1265,7 @@ mod tests {
         assert!(!is_auth_error(&err_500));
 
         let err_403: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::FORBIDDEN,
+            status: xai_grok_net::StatusCode::FORBIDDEN,
             context: "Signals update",
             body: "ZDR team".to_string(),
         }
@@ -1283,7 +1283,7 @@ mod tests {
     fn test_is_forbidden_error_detects_403() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::FORBIDDEN,
+            status: xai_grok_net::StatusCode::FORBIDDEN,
             context: "Signals update",
             body: "Access denied: session does not belong to this user".to_string(),
         }
@@ -1295,7 +1295,7 @@ mod tests {
     fn test_is_forbidden_error_ignores_other_statuses() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err_401: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::UNAUTHORIZED,
+            status: xai_grok_net::StatusCode::UNAUTHORIZED,
             context: "Signals update",
             body: "Invalid credentials".to_string(),
         }
@@ -1309,7 +1309,7 @@ mod tests {
         use crate::agent::feedback_client::FeedbackApiError;
         // Verify the FeedbackApiError survives anyhow::Error round-trip (this is the actual path: send_json returns FeedbackApiError.into())
         let api_err = FeedbackApiError {
-            status: reqwest::StatusCode::UNAUTHORIZED,
+            status: xai_grok_net::StatusCode::UNAUTHORIZED,
             context: "Signals update",
             body: "token expired".to_string(),
         };

@@ -100,7 +100,7 @@ pub(super) fn transient_retry_eligible(error: &xai_grok_sampler::SamplingErrorIn
         // The canonical retryable-status rule; 429 is excluded explicitly because it classifies as `RateLimited`
         SamplingErrorKind::Api => error.status_code.is_some_and(|status| {
             status != 429
-                && reqwest::StatusCode::from_u16(status)
+                && xai_grok_net::StatusCode::from_u16(status)
                     .is_ok_and(xai_grok_sampling_types::is_retryable_api_status)
         }),
         SamplingErrorKind::Auth
@@ -645,9 +645,9 @@ impl SessionActor {
         #[derive(Debug)]
         struct TraceContextInjector;
         impl xai_grok_sampler::HeaderInjector for TraceContextInjector {
-            fn inject(&self, headers: &mut reqwest::header::HeaderMap) {
+            fn inject(&self, headers: &mut xai_grok_net::header::HeaderMap) {
                 if let Some(tp) = xai_grok_otel::current_traceparent()
-                    && let Ok(v) = reqwest::header::HeaderValue::from_str(&tp)
+                    && let Ok(v) = xai_grok_net::header::HeaderValue::from_str(&tp)
                 {
                     headers.insert("traceparent", v);
                 }

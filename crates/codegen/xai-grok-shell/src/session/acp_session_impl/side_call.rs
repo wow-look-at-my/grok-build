@@ -333,7 +333,7 @@ mod aux_retry_tests {
 
     fn api(status: u16, message: &str, should_retry: Option<bool>) -> SamplingError {
         SamplingError::Api {
-            status: reqwest::StatusCode::from_u16(status).unwrap(),
+            status: xai_grok_net::StatusCode::from_u16(status).unwrap(),
             message: message.into(),
             model_metadata: None,
             retry_after_secs: None,

@@ -4,9 +4,9 @@
 #![allow(clippy::unwrap_used)] // Hits predate the gate
 //! Two responsibilities:
 //!
-//!. **Wraps `rmcp`.** rmcp's HTTP goes through `xai_grok_net` ([`net_http_client`]).
-//!    Consumers reach `rmcp` model types through this namespace
-//!    (`xai_grok_mcp::rmcp::*`).
+//! - **Wraps `rmcp`.** rmcp's HTTP goes through `xai_grok_net` ([`net_http_client`]).
+//!   Consumers reach `rmcp` model types through this namespace
+//!   (`xai_grok_mcp::rmcp::*`).
 //!
 //! 2. **Owns MCP-specific integration code**:
 //!    - [`credentials`]: on-disk `$GROK_HOME/mcp_credentials.json` store and the rmcp `CredentialStore` adapter.

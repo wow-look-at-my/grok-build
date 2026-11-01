@@ -3763,7 +3763,7 @@ impl McpClient {
             // Modern-only stdio servers stay unsupported until rmcp tolerates late responses to abandoned requests.
             PendingTransport::Stdio(process) => self.serve_legacy(*process).await,
             PendingTransport::Http(config) => {
-                // One reqwest client for both phases: the probe and the legacy transports stay separate rmcp sessions, but share the connection pool, so a responsive legacy server doesn't pay a second TCP+TLS setup.
+                // One HTTP client for both phases: the probe and the legacy transports stay separate rmcp sessions, but share the connection pool, so a responsive legacy server doesn't pay a second TCP+TLS setup.
                 let http_client =
                     Self::build_http_client(&config, &self.server_name, self.warn_budget.clone())?;
                 self.probe_then_legacy(|| {

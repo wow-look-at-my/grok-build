@@ -34,20 +34,20 @@ impl ModelSource for OaiModelSource {
         let client = crate::http::shared_startup_blocking_client();
         allow_endpoint(&self.endpoint.url)?;
         tracing::info!("Fetching models from {}", self.endpoint.url);
-        let mut request = client.get(&self.endpoint.url);
-        match self.endpoint.auth {
+        let request = match self.endpoint.auth {
             EndpointAuth::ApiKey => {
-                let api_key = crate::agent::auth_method::read_xai_api_key_env()
-                    .or_else(|_| {
-                        auth.map(|a| a.key.clone())
-                            .ok_or(std::env::VarError::NotPresent)
-                    })
-                    .map_err(|_| {
+                let wire = match crate::agent::auth_method::read_xai_api_key_env() {
+                    Ok(key) => xai_grok_net::Auth::ApiKey {
+                        key,
+                        scheme: xai_grok_net::KeyScheme::Bearer,
+                    },
+                    Err(_) => auth.map(GrokAuth::wire_auth).ok_or_else(|| {
                         BackendError::Auth(
                             "No API key for custom models endpoint. Set XAI_API_KEY.".into(),
                         )
-                    })?;
-                request = request.header("Authorization", format!("Bearer {}", api_key));
+                    })?,
+                };
+                client.get(&self.endpoint.url, wire)
             }
             EndpointAuth::Session => {
                 let auth = auth
@@ -55,8 +55,8 @@ impl ModelSource for OaiModelSource {
                     .ok_or_else(|| {
                         BackendError::Auth("No auth credentials for cli-chat-proxy".into())
                     })?;
-                request = request
-                    .header("Authorization", format!("Bearer {}", &auth.key))
+                let mut request = client
+                    .get(&self.endpoint.url, auth.wire_auth())
                     .header("X-XAI-Token-Auth", "xai-grok-cli")
                     .header("x-userid", &auth.user_id)
                     .header("x-grok-client-version", xai_grok_version::version())
@@ -67,8 +67,9 @@ impl ModelSource for OaiModelSource {
                 if let Some(email) = &auth.email {
                     request = request.header("x-email", email);
                 }
+                request
             }
-        }
+        };
         let response = request.send()?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
