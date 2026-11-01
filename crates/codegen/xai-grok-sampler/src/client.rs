@@ -55,18 +55,6 @@ use xai_grok_auth::bearer_suffix;
 
 pub use xai_grok_sampling_types::ApiBackend;
 
-<<<<<<< HEAD
-/// Bifrost reads its virtual key only from this header, not from `Authorization`.
-const VIRTUAL_KEY_HEADER: HeaderName = HeaderName::from_static("x-bf-vk");
-
-/// Copy the credential into [`VIRTUAL_KEY_HEADER`] beside the auth header.
-fn insert_virtual_key(headers: &mut HeaderMap, key: &str) {
-    if let Ok(value) = HeaderValue::from_str(key) {
-        headers.insert(VIRTUAL_KEY_HEADER, value);
-    }
-}
-
-=======
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 
 /// A request this client is about to send. The credential stays an [`Auth`]
@@ -133,7 +121,6 @@ fn wire_fragment(response: &xai_grok_net::Response, captured: Option<String>) ->
         .or(captured)
 }
 
->>>>>>> http-single-path
 /// Process-level fallback for the `x-grok-client-identifier` header.
 const DEFAULT_CLIENT_IDENTIFIER: &str = "grok-shell";
 
@@ -1026,9 +1013,6 @@ impl SamplingClient {
                 }
                 AuthScheme::None => {}
             }
-            if config.auth_scheme != AuthScheme::None {
-                insert_virtual_key(&mut headers, api_key);
-            }
         }
 
         // Apply all extra headers verbatim
@@ -1211,35 +1195,7 @@ impl SamplingClient {
             crate::prewarm::note_first_sampling_use(&self.base_url);
         }
         let mut headers = self.default_headers.clone();
-<<<<<<< HEAD
-        if let Some(resolver) = &self.bearer_resolver {
-            // Sole auth source: without a live bearer, send no credential rather than a stale seed key.
-            headers.remove(AUTHORIZATION);
-            headers.remove(HeaderName::from_static("x-api-key"));
-            headers.remove(VIRTUAL_KEY_HEADER);
-            if let Some(fresh) = resolver.current_bearer() {
-                if self.defaults.auth_scheme != AuthScheme::None {
-                    insert_virtual_key(&mut headers, &fresh);
-                }
-                match self.defaults.auth_scheme {
-                    AuthScheme::XApiKey => {
-                        if let Ok(v) = HeaderValue::from_str(&fresh) {
-                            headers.insert(HeaderName::from_static("x-api-key"), v);
-                        }
-                    }
-                    AuthScheme::Bearer => {
-                        if let Ok(v) = HeaderValue::from_str(&format!("Bearer {fresh}")) {
-                            headers.insert(AUTHORIZATION, v);
-                        }
-                    }
-                    // Already stripped above; a fresh bearer never gets attached.
-                    AuthScheme::None => {}
-                }
-            }
-        }
-=======
         let auth = self.request_auth();
->>>>>>> http-single-path
         // Presence only: this fork never logs a credential, not even a
         // prefix of one. `Auth`'s Debug prints only its kind.
         tracing::info!(
@@ -4337,26 +4293,15 @@ mod tests {
         let client = SamplingClient::new(cfg).expect("client should build");
         let headers = wire_headers(&client).await;
 
-<<<<<<< HEAD
-        assert!(request.headers().get(AUTHORIZATION).is_none());
-        assert!(request.headers().get("x-api-key").is_none());
-        assert!(request.headers().get("x-bf-vk").is_none());
-=======
         assert!(headers.get(AUTHORIZATION).is_none());
         assert!(headers.get("x-api-key").is_none());
         assert!(headers.get("x-bf-vk").is_none());
->>>>>>> http-single-path
         assert_eq!(client.auth_info().auth_type, "none");
         assert!(client.auth_info().auth_prefix.is_none());
     }
 
-<<<<<<< HEAD
-    #[test]
-    fn api_key_is_copied_into_the_virtual_key_header() {
-=======
     #[tokio::test]
     async fn api_key_is_copied_into_the_virtual_key_header() {
->>>>>>> http-single-path
         for scheme in [AuthScheme::Bearer, AuthScheme::XApiKey] {
             let cfg = SamplerConfig {
                 api_key: Some("sk-gateway".to_string()),
@@ -4364,35 +4309,19 @@ mod tests {
                 ..minimal_config()
             };
             let client = SamplingClient::new(cfg).expect("client should build");
-<<<<<<< HEAD
-            let SentRequest { builder, .. } =
-                client.post("https://example.test/v1/chat/completions");
-            let request = builder.build().expect("request should build");
-            assert_eq!(
-                request
-                    .headers()
-                    .get("x-bf-vk")
-                    .and_then(|v| v.to_str().ok()),
-=======
             let headers = wire_headers(&client).await;
             assert_eq!(
                 header(&headers, HeaderName::from_static("x-bf-vk")),
->>>>>>> http-single-path
                 Some("sk-gateway"),
                 "{scheme:?}",
             );
         }
     }
 
-<<<<<<< HEAD
-    #[test]
-    fn live_bearer_replaces_the_virtual_key_header() {
-=======
     /// The live bearer is the xAI session. It replaces the stale seed, and it never
     /// rides the virtual-key header, which a gateway reads.
     #[tokio::test]
     async fn live_bearer_replaces_the_virtual_key_header() {
->>>>>>> http-single-path
         let cfg = SamplerConfig {
             api_key: Some("stale-seed".to_string()),
             auth_scheme: AuthScheme::Bearer,
@@ -4400,17 +4329,10 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-<<<<<<< HEAD
-        let SentRequest { builder, .. } = client.post("https://example.test/v1/chat/completions");
-        let request = builder.build().expect("request should build");
-        let values: Vec<_> = request.headers().get_all("x-bf-vk").iter().collect();
-        assert_eq!(values, [HeaderValue::from_static("fresh-bearer")]);
-=======
         let headers = wire_headers(&client).await;
         let values: Vec<_> = headers.get_all("x-bf-vk").iter().collect();
         assert!(values.is_empty(), "{values:?}");
         assert_eq!(header(&headers, AUTHORIZATION), Some("Bearer fresh-bearer"));
->>>>>>> http-single-path
     }
 
     // Regression: a past change dropped User-Agent from sampling requests.
