@@ -190,6 +190,20 @@ async fn goal_round_sends_follow_up_typed_during_a_foreground_subagent() {
     harness.update(Duration::from_millis(500));
     type_follow_up(&mut harness, &format!("{MARKER} tests are a waste of time"));
     assert_reaches_model_before_release(&content, &harness, MARKER, &flag);
+    // The parent asks for its last reply after the subagent returns. A quit before that leaves the script unfinished.
+    let finished = poll_for(Duration::from_secs(30), || {
+        content
+            .server()
+            .script_violations()
+            .is_empty()
+            .then_some(())
+    });
+    assert!(
+        finished.is_some(),
+        "the parent never finished its script after the release: {:?}\nscreen:\n{}",
+        content.server().script_violations(),
+        harness.screen_contents()
+    );
     harness.inject_keys(b"\x11").expect("ctrl-q once");
     harness.update(Duration::from_millis(200));
     harness.inject_keys(b"\x11").expect("ctrl-q confirm");

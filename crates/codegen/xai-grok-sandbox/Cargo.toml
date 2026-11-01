@@ -81,3 +81,8 @@ harness = false
 [[test]]
 name = "profile_config_write_e2e"
 harness = false
+
+# The child confines itself with the real workspace profile, which no process can undo. It runs as a re-entered binary rather than a libtest case.
+[[test]]
+name = "workspace_gh_slopfix_e2e"
+harness = false

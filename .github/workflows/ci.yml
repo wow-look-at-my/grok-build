@@ -119,6 +119,11 @@ jobs:
         with:
           packages: bubblewrap mold
 
+      # Consider the gh shim e2e tests. Those tests serve sandbox/gh.xml with the real api-cli, and workspace_gh_slopfix_e2e runs slopfix in the sandbox.
+      - uses: ./.github/actions/setup-org-tools
+        with:
+          tools: api-cli slopfix
+
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
         run: |
@@ -418,6 +423,11 @@ jobs:
 
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
+
+      # The gh shim e2e tests need the real api-cli, and workspace_gh_slopfix_e2e needs slopfix.
+      - uses: ./.github/actions/setup-org-tools
+        with:
+          tools: api-cli slopfix
 
       - name: Test xai-grok-sandbox on macOS
         run: cargo test --locked -p xai-grok-sandbox

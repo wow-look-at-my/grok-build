@@ -1808,6 +1808,9 @@ impl xai_tool_runtime::Tool for BashTool {
 
         // --- Prefix ---
         let command = Self::get_prefixed_command(&params.cmd_prefix, &input.command);
+        // A sandboxed login shell rebuilds PATH. This keeps the `gh` shim first.
+        #[cfg(unix)]
+        let command = xai_grok_sandbox::gh_shim::prefix_shell_command(&command);
 
         // No command-wrapping is performed here today; `display_command` is
         // populated only by tools that intentionally surface a friendlier form
