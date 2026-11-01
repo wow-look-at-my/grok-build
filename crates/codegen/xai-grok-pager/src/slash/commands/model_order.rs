@@ -32,9 +32,11 @@ fn compare_chunks(left: &[u8], right: &[u8]) -> Ordering {
     right.len().cmp(&left.len()).then_with(|| right.cmp(left))
 }
 
-fn significant(digits: &[u8]) -> &[u8] {
-    let zeros = digits.iter().take_while(|d| **d == b'0').count();
-    &digits[zeros..]
+fn significant(mut digits: &[u8]) -> &[u8] {
+    while let [b'0', rest @ ..] = digits {
+        digits = rest;
+    }
+    digits
 }
 
 #[cfg(test)]
