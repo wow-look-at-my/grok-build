@@ -56,7 +56,12 @@ fn compute_label_column_w(items: &[SuggestionRow], content_w: usize) -> usize {
         .map(|r| r.display.width() + tag_suffix_width(r))
         .max()
         .unwrap_or(0);
-    (max_display_w + dot_column_w(items)).min(budget)
+    (max_display_w + dot_column_w(items) + star_column_w(items)).min(budget)
+}
+
+/// Columns reserved for the favorite star, for the WHOLE list.
+fn star_column_w(items: &[SuggestionRow]) -> usize {
+    usize::from(items.iter().any(|r| r.favorite)) * (DOT_W + DOT_GAP)
 }
 
 /// Columns reserved for the residency dot, for the WHOLE list.
@@ -79,6 +84,7 @@ fn build_flat_lines(
 ) -> (Vec<Line<'static>>, Vec<usize>) {
     let hover_bg = theme.bg_hover;
     let dot_w = dot_column_w(items);
+    let star_w = star_column_w(items);
     let mut flat: Vec<Line<'static>> = Vec::new();
     let mut starts: Vec<usize> = Vec::new();
 
@@ -101,6 +107,7 @@ fn build_flat_lines(
             is_selected,
             label_col_w,
             dot_w,
+            star_w,
             row_w,
             row_bg,
             theme,
@@ -304,6 +311,7 @@ fn build_item_lines(
     is_selected: bool,
     label_col_w: usize,
     dot_w: usize,
+    star_w: usize,
     total_w: usize,
     row_bg: ratatui::style::Color,
     theme: &Theme,
@@ -348,9 +356,25 @@ fn build_item_lines(
     let tag_text = tag_suffix(item).map(|s| truncate_str(&s, label_col_w));
     let tag_w = tag_text.as_deref().map(|s| s.width()).unwrap_or(0);
 
-    let label = truncate_str(&item.display, label_col_w.saturating_sub(tag_w + dot_w));
+    let marker_w = dot_w + star_w;
+    let label = truncate_str(&item.display, label_col_w.saturating_sub(tag_w + marker_w));
     let label_w = label.width();
-    let padding = label_col_w.saturating_sub(label_w + tag_w + dot_w);
+    let padding = label_col_w.saturating_sub(label_w + tag_w + marker_w);
+
+    // Favorite star, in the column reserved for the whole list.
+    let star_spans: Vec<Span<'static>> = if star_w == 0 {
+        Vec::new()
+    } else if item.favorite {
+        vec![
+            Span::styled(
+                crate::glyphs::star().to_string(),
+                Style::default().fg(theme.accent_plan).bg(row_bg),
+            ),
+            Span::styled(" ".repeat(DOT_GAP), bg_style),
+        ]
+    } else {
+        vec![Span::styled(" ".repeat(star_w), bg_style)]
+    };
 
     // Residency dot, in the column reserved for the whole list. A row that
     // reports nothing draws spaces there so every label still lines up.
@@ -390,6 +414,7 @@ fn build_item_lines(
     // 2. First line: prefix, label, padding, [tag], gap, first desc, then the right badge.
     {
         let mut spans = vec![prefix_span];
+        spans.extend(star_spans);
         spans.extend(dot_spans);
         spans.extend(label_spans);
         if padding > 0 {
@@ -547,6 +572,7 @@ mod tests {
                 tag: None,
                 provenance: None,
                 loaded_in_vram: None,
+                favorite: false,
             })
             .collect();
         assert_eq!(desired_item_rows(&matches, 80), MAX_DROPDOWN_ROWS);
@@ -570,6 +596,7 @@ mod tests {
                 tag: None,
                 provenance: None,
                 loaded_in_vram: None,
+                favorite: false,
             })
             .collect();
         let snap = SlashSnapshot {
@@ -595,6 +622,7 @@ mod tests {
             tag: None,
             provenance: None,
             loaded_in_vram: loaded,
+            favorite: false,
         }
     }
 
@@ -653,7 +681,17 @@ mod tests {
         let mut out = Vec::new();
         let dot_w = dot_column_w(&rows);
         for row in &rows {
-            build_item_lines(&mut out, row, false, 20, dot_w, 76, theme.bg_light, &theme);
+            build_item_lines(
+                &mut out,
+                row,
+                false,
+                20,
+                dot_w,
+                0,
+                76,
+                theme.bg_light,
+                &theme,
+            );
         }
 
         let dot_fg = |line: &Line<'static>| {
@@ -668,6 +706,37 @@ mod tests {
             theme.accent_success, theme.gray_dim,
             "the two states have to be distinguishable at a glance"
         );
+    }
+
+    #[test]
+    fn a_favorite_draws_a_gold_star_and_names_stay_aligned() {
+        let theme = Theme::current();
+        let rows = vec![
+            SuggestionRow {
+                favorite: true,
+                ..model_row("kept", None)
+            },
+            model_row("other", None),
+        ];
+        assert_eq!(star_column_w(&rows), DOT_W + DOT_GAP);
+        let (lines, _) = build_flat_lines(&rows, 1, None, 20, 80, &theme);
+
+        let star = |line: &Line<'static>| {
+            line.spans
+                .iter()
+                .find(|s| s.content.as_ref() == crate::glyphs::star())
+                .and_then(|s| s.style.fg)
+        };
+        assert_eq!(star(&lines[0]), Some(theme.accent_plan));
+        assert_eq!(star(&lines[1]), None);
+
+        let name_col = |line: &Line<'static>, name: &str| {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            text.find(name)
+                .map(|at| text[..at].chars().count())
+                .expect("the row names its model")
+        };
+        assert_eq!(name_col(&lines[0], "kept"), name_col(&lines[1], "other"));
     }
 
     /// A list with no local models in it must look exactly as it did before
@@ -709,6 +778,7 @@ mod tests {
                 tag: None,
                 provenance: Some(CommandProvenance::Builtin),
                 loaded_in_vram: None,
+                favorite: false,
             },
             SuggestionRow {
                 display: "/acme:login".into(),
@@ -720,6 +790,7 @@ mod tests {
                     source: "acme".to_string(),
                 }),
                 loaded_in_vram: None,
+                favorite: false,
             },
         ];
         let snap = SlashSnapshot {
@@ -758,6 +829,7 @@ mod tests {
             tag: None,
             provenance: None,
             loaded_in_vram: None,
+            favorite: false,
         }
     }
 
@@ -1109,6 +1181,7 @@ mod label_column_width_tests {
             tag: None,
             provenance: None,
             loaded_in_vram: None,
+            favorite: false,
         }
     }
 
