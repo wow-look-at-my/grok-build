@@ -454,15 +454,20 @@ impl SessionActor {
             })
     }
 
-    pub(super) fn model_auth_facts(&self, model_id: &str) -> crate::agent::config::ModelAuthFacts {
-        self.model_auth_state(model_id).0
+    pub(super) fn model_auth_facts(
+        &self,
+        model_id: &str,
+        endpoint: Option<&str>,
+    ) -> crate::agent::config::ModelAuthFacts {
+        self.model_auth_state(model_id, endpoint).0
     }
 
     pub(super) fn model_auth_provider(
         &self,
         model_id: &str,
+        endpoint: Option<&str>,
     ) -> Option<xai_grok_login::AuthProviderRef> {
-        self.model_auth_state(model_id).1
+        self.model_auth_state(model_id, endpoint).1
     }
 
     /// Drop the memoized per-model auth state; see [`Self::model_auth_memo`] for why each model/credential chokepoint must call this.
@@ -471,9 +476,11 @@ impl SessionActor {
     }
 
     /// Reads and populates [`Self::model_auth_memo`]; a fresh `Unknown` falls back to the last definite entry (see the field's contract).
+    /// `endpoint` only routes the fresh lookup: the memo stays keyed by model id, so a seeded entry serves every call for that model.
     fn model_auth_state(
         &self,
         model_id: &str,
+        endpoint: Option<&str>,
     ) -> (
         crate::agent::config::ModelAuthFacts,
         Option<xai_grok_login::AuthProviderRef>,
@@ -487,7 +494,7 @@ impl SessionActor {
             return (memo.facts, memo.provider.clone());
         }
         let (fresh, provider) =
-            crate::agent::config::resolve_model_auth_facts_and_provider(model_id);
+            crate::agent::config::resolve_model_auth_facts_and_provider(model_id, endpoint);
         if fresh.byok == ModelByok::Unknown {
             if let Some(memo) = self.model_auth_memo.borrow().as_ref()
                 && memo.model_id == model_id
@@ -593,7 +600,7 @@ impl SessionActor {
     /// See [`crate::agent::auth_method::session_token_auth_gate`] for the rationale.
     /// `base_url` keeps an `Unknown` BYOK status refreshable only against first-party xAI hosts.
     fn auth_gate(&self, model_id: &str, base_url: &str) -> SessionTokenAuthGate {
-        let byok = self.model_auth_facts(model_id).byok;
+        let byok = self.model_auth_facts(model_id, Some(base_url)).byok;
         let auth_method = self.auth_method_id.load();
         SessionTokenAuthGate::new(auth_method.as_deref(), byok, base_url)
     }
@@ -683,7 +690,7 @@ impl SessionActor {
                 extra_body: Default::default(),
             });
         let creds = self.chat_state_handle.get_credentials().await;
-        let model_facts = self.model_auth_facts(cfg.model.as_str());
+        let model_facts = self.model_auth_facts(cfg.model.as_str(), Some(cfg.base_url.as_str()));
         // Gate on the stable session classifier, not `creds.auth_type`; see `crate::agent::auth_method::session_token_auth_gate`
         // `cfg.base_url` keeps an `Unknown` BYOK status refreshable against first-party xAI hosts
         // That avoids leaking the session token to a third-party endpoint
@@ -1471,7 +1478,7 @@ impl SessionActor {
         // The provider is resolved before the eligibility check so its warnings stay quiet for a 401 that 4c handles
         let auth_provider =
             if matches!(error.kind, SamplingErrorKind::Auth) || error.status_code == Some(401) {
-                self.model_auth_provider(&failed_model_id)
+                self.model_auth_provider(&failed_model_id, Some(&failed_base_url))
             } else {
                 None
             };
@@ -2282,15 +2289,16 @@ impl SessionActor {
 
         let creds = self.chat_state_handle.get_credentials().await;
         let current_key = creds.api_key;
-        let current_model_id = self
+        let (current_model_id, current_base_url) = self
             .chat_state_handle
             .get_sampling_config()
             .await
-            .map(|c| c.model)
+            .map(|c| (c.model, c.base_url))
             .unwrap_or_default();
 
         // Provider-backed models mint and refresh here so `resolve_credentials` stays cache-only
-        if let Some(provider) = self.model_auth_provider(&current_model_id) {
+        if let Some(provider) = self.model_auth_provider(&current_model_id, Some(&current_base_url))
+        {
             self.refresh_provider_token_pre_turn(
                 &provider,
                 current_key.as_deref(),
