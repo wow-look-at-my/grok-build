@@ -7,7 +7,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use xai_grok_sandbox::gh_shim::GH_CONTRACT;
+use xai_grok_sandbox::gh_shim::{GH_CONTRACT, command_for};
 
 struct Server {
     dir: PathBuf,
@@ -53,7 +53,7 @@ fn start(name: &str) -> Server {
         host_bin.display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let child = Command::new(&api_cli)
+    let child = command_for(&api_cli)
         .arg("--config")
         .arg(&contract)
         .arg("--server")
@@ -85,7 +85,7 @@ fn start(name: &str) -> Server {
 
 /// Run `gh <args>` as the sandbox does, with no token in the environment.
 fn gh(server: &Server, args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(&server.api_cli)
+    let out = command_for(&server.api_cli)
         .arg("--client")
         .arg(&server.socket)
         .args(args)

@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use xai_grok_sandbox::gh_shim::{GH_CONTRACT, ShimLayout, client_script};
+use xai_grok_sandbox::gh_shim::{GH_CONTRACT, ShimLayout, client_script, command_for};
 use xai_grok_sandbox::jail::{Access, JailDefaults, JailPlan, Mount};
 
 fn fixture_dir(name: &str) -> PathBuf {
@@ -89,7 +89,7 @@ fn the_shim_runs_gh_on_the_host_and_the_jail_holds_no_token() {
         host_bin.display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let mut server = Command::new(&api_cli)
+    let mut server = command_for(&api_cli)
         .arg("--config")
         .arg(&layout.contract)
         .arg("--server")

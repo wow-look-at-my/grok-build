@@ -93,7 +93,7 @@ fn start_server(layout: &ShimLayout) -> Result<(), String> {
     let _ = std::fs::remove_file(&layout.socket);
     // The server lives while this pipe is open. The write end crosses the exec into the sandbox and closes when the session ends.
     let (read_end, write_end) = std::io::pipe().map_err(|e| e.to_string())?;
-    let mut cmd = std::process::Command::new(&host_api_cli);
+    let mut cmd = command_for(&host_api_cli);
     cmd.arg("--config")
         .arg(&layout.contract)
         .arg("--server")
@@ -119,6 +119,28 @@ fn start_server(layout: &ShimLayout) -> Result<(), String> {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     Ok(())
+}
+
+/// The magic every APE opens with. execve on macOS refuses such a file, and a shell runs it.
+const APE_MAGIC: &[u8] = b"MZqFpD='";
+
+/// A command that starts `program`, through `/bin/sh` when it is an APE. The
+/// std fix is in the org's rust fork, and this goes once grok builds with a
+/// std that has it.
+pub fn command_for(program: &Path) -> std::process::Command {
+    use std::io::Read as _;
+    let mut head = [0u8; APE_MAGIC.len()];
+    let is_ape = std::fs::File::open(program)
+        .and_then(|mut file| file.read_exact(&mut head))
+        .is_ok()
+        && head == APE_MAGIC;
+    if is_ape {
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.arg(program);
+        cmd
+    } else {
+        std::process::Command::new(program)
+    }
 }
 
 /// Copy `from` to `to` unless `to` already has the same size and modification time.
@@ -290,6 +312,21 @@ mod tests {
                 "gh api must not take --{flag}"
             );
         }
+    }
+
+    #[test]
+    fn command_for_starts_an_ape_through_sh() {
+        let dir = std::env::temp_dir().join(format!("gh-shim-ape-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ape = dir.join("ape");
+        std::fs::write(&ape, b"MZqFpD='\n").unwrap();
+        let native = dir.join("native");
+        std::fs::write(&native, b"\x7fELF").unwrap();
+        let cmd = command_for(&ape);
+        assert_eq!(cmd.get_program(), "/bin/sh");
+        assert_eq!(cmd.get_args().collect::<Vec<_>>(), vec![ape.as_os_str()]);
+        assert_eq!(command_for(&native).get_program(), native.as_os_str());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
