@@ -38,6 +38,7 @@ impl SlashCommand for RenameCommand {
             insert_text: title.to_owned(),
             description: "current title".to_string(),
             loaded_in_vram: None,
+            favorite: false,
         }])
     }
 

@@ -25,6 +25,7 @@ impl SlashCommand for AnnouncementsCommand {
                 insert_text: "hide".to_string(),
                 description: "Hide the announcement banner".to_string(),
                 loaded_in_vram: None,
+                favorite: false,
             },
             ArgItem {
                 display: "show".to_string(),
@@ -32,6 +33,7 @@ impl SlashCommand for AnnouncementsCommand {
                 insert_text: "show".to_string(),
                 description: "Show the announcement banner".to_string(),
                 loaded_in_vram: None,
+                favorite: false,
             },
         ])
     }

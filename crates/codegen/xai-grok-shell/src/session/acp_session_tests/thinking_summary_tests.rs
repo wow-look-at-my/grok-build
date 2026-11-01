@@ -225,6 +225,19 @@ async fn a_long_thinking_block_is_summarized_keyed_to_its_own_call() {
         .await;
 }
 
+#[test]
+fn a_refusal_names_the_model_and_the_provider_explanation() {
+    use crate::session::helpers::thinking_summary::summary_refusal_text;
+    assert_eq!(
+        summary_refusal_text("m", Some("policy text")),
+        "m refused this as a safety violation: policy text",
+    );
+    assert_eq!(
+        summary_refusal_text("m", None),
+        "m refused this as a safety violation",
+    );
+}
+
 #[tokio::test]
 async fn short_thinking_is_summarized_too() {
     let local = tokio::task::LocalSet::new();

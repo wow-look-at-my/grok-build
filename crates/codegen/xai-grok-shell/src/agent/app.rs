@@ -1,4 +1,7 @@
 use crate::agent::config::{Config as AgentConfig, ModelEntry};
+use crate::agent::config_reload::{
+    apply_reload, recursive_config_watch_enabled, spawn_config_reload, start_config_reload,
+};
 use crate::agent::init::{bootstrap_with_cancel, exit_on_config_error};
 use crate::agent::mvp_agent::MvpAgent;
 use crate::agent::remote_config::{ModelFetchAuth, prefetch_models_blocking};
@@ -202,6 +205,7 @@ pub async fn run_stdio_agent(
             )
             .await?;
             apply_otel_config(&auth_manager, &agent_config.grok_com_config);
+            let reload_config = agent_config.clone();
             let handle_io = spawn_agent_local(
                 agent_config,
                 auth_manager,
@@ -212,6 +216,9 @@ pub async fn run_stdio_agent(
                 incoming,
                 &keepalive_for_spawn,
             );
+            if let Some(agent) = keepalive_for_spawn.borrow().clone() {
+                spawn_config_reload(agent, &reload_config, cancel_for_agent.clone());
+            }
             handle_io.await?;
             Ok::<(), anyhow::Error>(())
         })
@@ -791,6 +798,7 @@ pub async fn run_leader(
     let mut agent_config_for_spawn = agent_config.clone();
     agent_config_for_spawn.remote_settings = None;
     let keepalive_for_spawn = Rc::clone(&agent_keepalive);
+    let keepalive_for_config = Rc::clone(&agent_keepalive);
     crate::util::config::sync_campaign_fields(&mut agent_config_for_spawn);
     let agent_to_ipc_tx_clone = agent_to_ipc_tx.clone();
     let cancel_clone = cancel.clone();
@@ -830,15 +838,7 @@ pub async fn run_leader(
     shared_models_manager.spawn_background_refresh();
     let models_manager_for_agent = shared_models_manager.clone();
     let models_manager_for_config = shared_models_manager;
-    let recursive_config_watch_enabled = {
-        let user_cfg = crate::config::load_from_disk().ok();
-        let requirements = crate::agent::config::read_requirements_toml();
-        crate::util::config::resolve_mcp_recursive_config_watch(
-            requirements.as_ref(),
-            user_cfg.as_ref(),
-            None,
-        )
-    };
+    let recursive_config_watch_enabled = recursive_config_watch_enabled();
     local_set
         .run_until(async move {
             let (config_watcher_path_tx, config_watcher_path_rx_opt) = if recursive_config_watch_enabled {
@@ -1016,32 +1016,13 @@ pub async fn run_leader(
             }
             let update_cancel = cancel_clone.clone();
             let cwd_for_watcher = std::env::current_dir().unwrap_or_default();
-            let mut watch_paths = crate::config::find_project_configs(&cwd_for_watcher);
-            watch_paths
-                .extend(crate::util::config::mcp_json_candidate_paths(&cwd_for_watcher));
-            if let Some(home) = xai_dirs::home_dir() {
-                watch_paths.push(home.join(".claude.json"));
-            }
-            let auth_scope = agent_config.grok_com_config.auth_scope();
-            let initial_auth_key_hash = xai_grok_config::user_grok_home()
-                .map(|g| g.join("auth.json"))
-                .and_then(|auth_path| xai_grok_login::read_auth_json(&auth_path).ok())
-                .and_then(|store| {
-                    xai_grok_login::lookup_auth(&store, &auth_scope)
-                        .map(|a| crate::config::reloader::hash_auth_key(&a.key))
-                })
-                .unwrap_or(0);
-            let (config_update_tx, mut config_update_rx) = mpsc::unbounded_channel::<
-                crate::config::reloader::ConfigUpdate,
-            >();
-            let watcher_cwd = recursive_config_watch_enabled
-                .then_some(cwd_for_watcher.as_path());
-            let _config_watcher = if let Some((watcher, events_rx)) = crate::config::watcher::ConfigFileWatcher::start(
-                &grok_home::grok_home(),
-                &watch_paths,
-                watcher_cwd,
-                None,
-            ) {
+            let (config_watcher, mut config_update_rx) = start_config_reload(
+                &agent_config,
+                &cwd_for_watcher,
+                recursive_config_watch_enabled,
+                cancel_clone.clone(),
+            );
+            let _config_watcher = config_watcher.map(|watcher| {
                 let watcher = std::rc::Rc::new(std::cell::RefCell::new(watcher));
                 if let Some(mut rx) = config_watcher_path_rx.take() {
                     let cancel_for_drain = cancel_clone.clone();
@@ -1059,23 +1040,8 @@ pub async fn run_leader(
                         }
                     });
                 }
-                let initial_config = crate::config::load_from_disk()
-                    .unwrap_or_else(|_| toml::Value::Table(toml::map::Map::new()));
-                let reloader = crate::config::reloader::ConfigReloader::new(
-                    grok_home::grok_home(),
-                    initial_auth_key_hash,
-                    initial_config,
-                    auth_scope,
-                    None,
-                    config_update_tx,
-                    agent_config.memory_enabled_override,
-                );
-                tokio::spawn(reloader.run(events_rx, cancel_clone.clone()));
-                Some(watcher)
-            } else {
-                warn!("Config file watcher failed to start; hot-reload disabled");
-                None
-            };
+                watcher
+            });
             let _skills_watcher = spawn_skills_file_watcher(
                 &acp_incoming_tx,
                 &agent_config.skills.paths,
@@ -1085,6 +1051,12 @@ pub async fn run_leader(
             tokio::task::spawn_local(async move {
                 use crate::config::reloader::ConfigUpdate;
                 while let Some(update) = config_update_rx.recv().await {
+                    let agent = keepalive_for_config.borrow().clone();
+                    if let Some(agent) = agent
+                        && apply_reload(&agent, &update).await
+                    {
+                        continue;
+                    }
                     match update {
                         ConfigUpdate::Auth(auth) => {
                             info!(
@@ -1143,92 +1115,13 @@ pub async fn run_leader(
                             );
                             info!("Auth cleared by config watcher");
                         }
-                        ConfigUpdate::McpServersChanged => {
-                            info!("MCP server config change detected — reloading active sessions");
-                            let line = internal_reload_request_line(
-                                "config-reload-mcp",
-                                InternalMethod::ReloadAllMcpServers,
-                                serde_json::json!({}),
-                            );
-                            let mut tx = acp_tx_for_config.lock().await;
-                            if let Err(e) = tx.write_all(line.as_bytes()).await {
-                                warn!(error = %e, "failed to inject MCP reload into ACP stream");
-                            }
-                        }
-                        ConfigUpdate::ProjectMcpServersChanged { cwd } => {
-                            info!(
-                                cwd = %cwd.display(),
-                                "project MCP config change detected — reloading matching sessions"
-                            );
-                            let line = internal_reload_request_line(
-                                "config-reload-project-mcp",
-                                InternalMethod::ReloadProjectMcpServers,
-                                serde_json::json!({ "cwd": cwd.to_string_lossy() }),
-                            );
-                            let mut tx = acp_tx_for_config.lock().await;
-                            if let Err(e) = tx.write_all(line.as_bytes()).await {
-                                warn!(
-                                    error = %e,
-                                    "failed to inject project MCP reload into ACP stream"
-                                );
-                            }
-                        }
-                        ConfigUpdate::ModelsChanged => {
-                            info!("Model config change detected — reloading agent model list");
-                            let line = internal_reload_request_line(
-                                "config-reload-models",
-                                InternalMethod::ReloadModels,
-                                serde_json::json!({}),
-                            );
-                            let mut tx = acp_tx_for_config.lock().await;
-                            if let Err(e) = tx.write_all(line.as_bytes()).await {
-                                warn!(error = %e, "failed to inject model reload into ACP stream");
-                            }
-                        }
-                        ConfigUpdate::ModelsCacheChanged => {
-                            info!("Models cache change detected — reloading agent model catalog");
-                            let line = internal_reload_request_line(
-                                "config-reload-models-cache",
-                                InternalMethod::ReloadModelsCache,
-                                serde_json::json!({}),
-                            );
-                            let mut tx = acp_tx_for_config.lock().await;
-                            if let Err(e) = tx.write_all(line.as_bytes()).await {
-                                warn!(
-                                    error = %e,
-                                    "failed to inject models-cache reload into ACP stream"
-                                );
-                            }
-                        }
-                        ConfigUpdate::OutputRateFloorChanged => {
-                            info!("Output-rate floor config change detected — reloading active sessions");
-                            let line = internal_reload_request_line(
-                                "config-reload-output-rate-floor",
-                                InternalMethod::ReloadOutputRateFloor,
-                                serde_json::json!({}),
-                            );
-                            let mut tx = acp_tx_for_config.lock().await;
-                            if let Err(e) = tx.write_all(line.as_bytes()).await {
-                                warn!(
-                                    error = %e,
-                                    "failed to inject output-rate floor reload into ACP stream"
-                                );
-                            }
-                        }
-                        ConfigUpdate::ThinkingSummariesChanged => {
-                            info!("Thinking-summary config change detected — reloading active sessions");
-                            let line = internal_reload_request_line(
-                                "config-reload-thinking-summaries",
-                                InternalMethod::ReloadThinkingSummaries,
-                                serde_json::json!({}),
-                            );
-                            let mut tx = acp_tx_for_config.lock().await;
-                            if let Err(e) = tx.write_all(line.as_bytes()).await {
-                                warn!(
-                                    error = %e,
-                                    "failed to inject thinking-summary reload into ACP stream"
-                                );
-                            }
+                        ConfigUpdate::McpServersChanged
+                        | ConfigUpdate::ProjectMcpServersChanged { .. }
+                        | ConfigUpdate::ModelsChanged
+                        | ConfigUpdate::ModelsCacheChanged
+                        | ConfigUpdate::OutputRateFloorChanged
+                        | ConfigUpdate::ThinkingSummariesChanged => {
+                            warn!("config change arrived before the agent was built");
                         }
                         ConfigUpdate::Memory(mem) => {
                             info!(
