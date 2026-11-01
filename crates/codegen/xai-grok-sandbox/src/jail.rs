@@ -1064,7 +1064,7 @@ pub fn seatbelt_command(plan: &JailPlan) -> std::process::Command {
 /// path under a host cache directory gets the same path inside `redirect`.
 /// Otherwise it names a directory the jail cannot write. Go reads no
 /// `XDG_CACHE_HOME` on macOS, so an unset `GOCACHE` gets `redirect/go-build`.
-#[cfg(any(target_os = "macos", test))]
+#[cfg(unix)]
 fn cache_env_redirects(
     env: &[(OsString, OsString)],
     cache_dirs: &[PathBuf],
@@ -1390,6 +1390,50 @@ fn clone_tree(source: &Path, target: &Path) -> std::io::Result<()> {
         return Ok(());
     }
     Err(std::io::Error::last_os_error())
+}
+
+/// A profile confines this process in place, so the host cache stays
+/// write-denied. This points the caches at a session directory in `TMPDIR`,
+/// which every profile can write. On macOS that directory is a copy-on-write
+/// clone of the host cache. Call it before the confinement starts.
+#[cfg(unix)]
+pub fn redirect_caches_in_place() {
+    if is_jailed() {
+        return;
+    }
+    let cache_dirs = match host_cache_dirs() {
+        Ok(dirs) => dirs,
+        Err(error) => {
+            eprintln!("warning: sandbox: the host cache stays read-only: {error}");
+            return;
+        }
+    };
+    let target = std::env::temp_dir().join(format!("grok-cache-{}", std::process::id()));
+    if std::fs::symlink_metadata(&target).is_ok_and(|meta| meta.is_dir()) {
+        let _ = std::fs::remove_dir_all(&target);
+    }
+    #[cfg(target_os = "macos")]
+    let cloned = cache_dirs
+        .first()
+        .is_some_and(|source| clone_tree(source, &target).is_ok());
+    #[cfg(not(target_os = "macos"))]
+    let cloned = false;
+    if !cloned && let Err(error) = std::fs::create_dir_all(&target) {
+        eprintln!(
+            "warning: sandbox: the host cache stays read-only, {} could not be made: {error}",
+            target.display()
+        );
+        return;
+    }
+    let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+    let redirects = cache_env_redirects(&env, &cache_dirs, &target);
+    // SAFETY: this runs on the startup path, before the session starts its threads.
+    unsafe {
+        std::env::set_var("XDG_CACHE_HOME", &target);
+        for (name, value) in redirects {
+            std::env::set_var(name, value);
+        }
+    }
 }
 
 /// Report why the jail did not start, then exit. Never returns.

@@ -250,19 +250,27 @@ fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
         inherit_across_exec(our_fd)?;
     }
     let theirs_fd: RawFd = theirs.into_raw_fd();
+    let door = crate::gh_shim::door_pair();
+    let worker_door_fd = door.as_ref().map(|(_, worker)| worker.as_raw_fd());
 
     let mut cmd = std::process::Command::new(exe);
     cmd.env(CI_HOST_MARKER_ENV, "1");
+    if door.is_some() {
+        cmd.env(crate::gh_shim::WORKER_DOOR_ENV, "1");
+    }
     // `gh` discovers the owning repo from the git remote at its cwd.
     cmd.current_dir(repo_root);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
-        // SAFETY: `theirs_fd` is a valid open fd and the closure only calls
-        // the async-signal-safe `dup2`.
+        // SAFETY: the fds are open, and the closure only calls the
+        // async-signal-safe `dup2` and `fcntl`.
         unsafe {
             cmd.pre_exec(move || {
                 dup2_to_stdin_stdout(theirs_fd);
+                if let Some(fd) = worker_door_fd {
+                    dup2_keep_open(fd, crate::gh_shim::WORKER_DOOR_FD);
+                }
                 Ok(())
             });
         }
@@ -274,6 +282,14 @@ fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
         Ok(_) => {
             // Leak `ours` so the fd stays open across the jail `exec`.
             std::mem::forget(ours);
+            if let Some((sandbox_door, _worker_door)) = door
+                && crate::gh_shim::publish(sandbox_door).is_none()
+            {
+                eprintln!(
+                    "warning: sandbox: could not install the gh shim; gh in this \
+                     session has no GitHub credential"
+                );
+            }
             Some(our_fd)
         }
         Err(_) => {
@@ -281,6 +297,9 @@ fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
             // `ours` drop normally.
             unsafe {
                 OwnedFd::from_raw_fd(theirs_fd);
+                if let Some((sandbox_door, _)) = door {
+                    OwnedFd::from_raw_fd(sandbox_door);
+                }
             }
             None
         }
@@ -323,9 +342,24 @@ fn dup2_to_stdin_stdout(fd: std::os::unix::io::RawFd) {
     }
 }
 
+/// `dup2` that leaves `to` open across exec. `dup2(fd, fd)` keeps the
+/// close-on-exec flag, so that case clears it.
+#[cfg(unix)]
+fn dup2_keep_open(from: std::os::unix::io::RawFd, to: std::os::unix::io::RawFd) {
+    unsafe {
+        if from == to {
+            let flags = libc::fcntl(to, libc::F_GETFD);
+            libc::fcntl(to, libc::F_SETFD, flags & !libc::FD_CLOEXEC);
+        } else {
+            libc::dup2(from, to);
+        }
+    }
+}
+
 /// Run the host CI worker: serve the fixed `gh` status query on stdin/stdout
 /// (both the inherited socket fd) until EOF, then return.
 pub fn run_ci_host_worker() {
+    crate::gh_shim::start_worker_door();
     serve(std::io::stdin(), std::io::stdout());
 }
 
@@ -423,7 +457,7 @@ fn run_allowlisted(json: &str) -> Option<GhHostResponse> {
 }
 
 /// Reduce a finished `gh` run to the wire response, capping both streams.
-fn response_from_output(output: std::process::Output) -> GhHostResponse {
+pub(crate) fn response_from_output(output: std::process::Output) -> GhHostResponse {
     GhHostResponse {
         code: output.status.code().unwrap_or(-1),
         truncated: output.stdout.len() > MAX_RESPONSE_BYTES,
@@ -596,8 +630,18 @@ fn spawn_gh<'a, I>(args: I) -> Option<std::process::Output>
 where
     I: IntoIterator<Item = &'a str>,
 {
+    spawn_gh_in(Path::new("."), args).ok()
+}
+
+/// [`spawn_gh`] in `cwd`. The real `gh` runs, never the shim: a shim
+/// directory on `PATH` is removed, so a call cannot loop back to the door.
+pub(crate) fn spawn_gh_in<'a, I>(cwd: &Path, args: I) -> std::io::Result<std::process::Output>
+where
+    I: IntoIterator<Item = &'a str>,
+{
     let mut cmd = std::process::Command::new("gh");
     cmd.args(args)
+        .current_dir(cwd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -605,7 +649,33 @@ where
     cmd.env("NO_COLOR", "1");
     cmd.env("CLICOLOR_FORCE", "0");
     cmd.env_remove("GH_FORCE_TTY");
-    cmd.output().ok()
+    #[cfg(unix)]
+    if let Some(shim_dir) = std::env::var_os(crate::gh_shim::GH_SHIM_DIR_ENV) {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let kept: Vec<_> = std::env::split_paths(&path)
+            .filter(|entry| entry.as_os_str() != shim_dir)
+            .collect();
+        if let Ok(path) = std::env::join_paths(kept) {
+            cmd.env("PATH", path);
+        }
+        cmd.env_remove(crate::gh_shim::GH_SHIM_DIR_ENV);
+        cmd.env_remove(crate::gh_shim::GH_DOOR_FD_ENV);
+    }
+    cmd.output()
+}
+
+/// The commands the host runs for a sandboxed `gh`, for an error message.
+pub fn allowed_commands_summary() -> String {
+    let mut names: Vec<String> = ALLOWED_COMMANDS
+        .iter()
+        .map(|(cmd, sub)| format!("{cmd} {sub}"))
+        .collect();
+    names.extend(
+        ALLOWED_BARE_COMMANDS
+            .iter()
+            .map(|cmd| format!("{cmd} (GET)")),
+    );
+    names.join(", ")
 }
 
 /// A request may only carry a bounded, git-safe branch token — never a bare

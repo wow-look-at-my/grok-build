@@ -1921,6 +1921,16 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
+    // Inside a sandbox, `gh` on PATH is this binary. The host worker runs the command.
+    #[cfg(unix)]
+    {
+        let mut args = std::env::args_os();
+        if let Some(argv0) = args.next()
+            && xai_grok_sandbox::gh_shim::invoked_as_gh(&argv0)
+        {
+            std::process::exit(xai_grok_sandbox::gh_shim::run_shim(args.collect()));
+        }
+    }
     // A `--sandbox` session starts on the host (outside the jail), where we
     // spawn an unsandboxed `gh` CI-status worker and hand its stream fd into
     // the jail.

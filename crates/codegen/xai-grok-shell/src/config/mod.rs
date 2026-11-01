@@ -1543,6 +1543,10 @@ pub fn apply_sandbox(
     // installed.
     if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
         let _ = xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, reexec_follows);
+        #[cfg(unix)]
+        if !reexec_follows {
+            xai_grok_sandbox::jail::redirect_caches_in_place();
+        }
     }
     #[cfg(target_os = "linux")]
     let requires_read_deny = xai_grok_sandbox::requires_read_deny(&sandbox_profile, &workspace);
