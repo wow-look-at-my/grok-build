@@ -54,6 +54,16 @@ use xai_grok_auth::bearer_suffix;
 
 pub use xai_grok_sampling_types::ApiBackend;
 
+/// Bifrost reads its virtual key only from this header, not from `Authorization`.
+const VIRTUAL_KEY_HEADER: HeaderName = HeaderName::from_static("x-bf-vk");
+
+/// Copy the credential into [`VIRTUAL_KEY_HEADER`] beside the auth header.
+fn insert_virtual_key(headers: &mut HeaderMap, key: &str) {
+    if let Ok(value) = HeaderValue::from_str(key) {
+        headers.insert(VIRTUAL_KEY_HEADER, value);
+    }
+}
+
 /// Process-level fallback for the `x-grok-client-identifier` header.
 const DEFAULT_CLIENT_IDENTIFIER: &str = "grok-shell";
 
@@ -941,6 +951,9 @@ impl SamplingClient {
                 }
                 AuthScheme::None => {}
             }
+            if config.auth_scheme != AuthScheme::None {
+                insert_virtual_key(&mut headers, api_key);
+            }
         }
 
         // Apply all extra headers verbatim
@@ -1112,7 +1125,11 @@ impl SamplingClient {
             // Sole auth source: without a live bearer, send no credential rather than a stale seed key.
             headers.remove(AUTHORIZATION);
             headers.remove(HeaderName::from_static("x-api-key"));
+            headers.remove(VIRTUAL_KEY_HEADER);
             if let Some(fresh) = resolver.current_bearer() {
+                if self.defaults.auth_scheme != AuthScheme::None {
+                    insert_virtual_key(&mut headers, &fresh);
+                }
                 match self.defaults.auth_scheme {
                     AuthScheme::XApiKey => {
                         if let Ok(v) = HeaderValue::from_str(&fresh) {
@@ -4132,8 +4149,47 @@ mod tests {
 
         assert!(request.headers().get(AUTHORIZATION).is_none());
         assert!(request.headers().get("x-api-key").is_none());
+        assert!(request.headers().get("x-bf-vk").is_none());
         assert_eq!(client.auth_info().auth_type, "none");
         assert!(client.auth_info().auth_prefix.is_none());
+    }
+
+    #[test]
+    fn api_key_is_copied_into_the_virtual_key_header() {
+        for scheme in [AuthScheme::Bearer, AuthScheme::XApiKey] {
+            let cfg = SamplerConfig {
+                api_key: Some("sk-gateway".to_string()),
+                auth_scheme: scheme,
+                ..minimal_config()
+            };
+            let client = SamplingClient::new(cfg).expect("client should build");
+            let SentRequest { builder, .. } =
+                client.post("https://example.test/v1/chat/completions");
+            let request = builder.build().expect("request should build");
+            assert_eq!(
+                request
+                    .headers()
+                    .get("x-bf-vk")
+                    .and_then(|v| v.to_str().ok()),
+                Some("sk-gateway"),
+                "{scheme:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn live_bearer_replaces_the_virtual_key_header() {
+        let cfg = SamplerConfig {
+            api_key: Some("stale-seed".to_string()),
+            auth_scheme: AuthScheme::Bearer,
+            bearer_resolver: Some(std::sync::Arc::new(StaticBearerResolver("fresh-bearer"))),
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+        let SentRequest { builder, .. } = client.post("https://example.test/v1/chat/completions");
+        let request = builder.build().expect("request should build");
+        let values: Vec<_> = request.headers().get_all("x-bf-vk").iter().collect();
+        assert_eq!(values, [HeaderValue::from_static("fresh-bearer")]);
     }
 
     // Regression: a past change dropped User-Agent from sampling requests.
