@@ -20,7 +20,10 @@ runs:
         case "$code" in
           302)
             echo "::notice::api-cli follows its branch ${BRANCH}"
-            sudo curl -fsSL -o /usr/local/bin/api-cli "$url"
+            # The raw build is an APE. A Linux runner's binfmt reads its MZ header as a Windows program, and execve on macOS refuses it. An APE is also a shell script, so sh starts it on both.
+            sudo mkdir -p /usr/local/lib/api-cli
+            sudo curl -fsSL -o /usr/local/lib/api-cli/api-cli "$url"
+            printf '#!/bin/sh\nexec sh /usr/local/lib/api-cli/api-cli "$@"\n' | sudo tee /usr/local/bin/api-cli > /dev/null
             sudo chmod +x /usr/local/bin/api-cli
             ;;
           404)
