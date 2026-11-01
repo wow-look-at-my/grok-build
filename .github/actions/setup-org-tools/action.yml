@@ -1,0 +1,41 @@
+name: Set up org tools
+description: Install org tools from buildhost, each from the build of the same-named branch when the tool has one, else from its default branch.
+inputs:
+  tools:
+    description: Space-separated buildhost project names.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install ${{ inputs.tools }}
+      shell: bash
+      env:
+        BRANCH: ${{ github.head_ref || github.ref_name }}
+        TOOLS: ${{ inputs.tools }}
+      run: |
+        set -euo pipefail
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        case "$(uname -m)" in
+          x86_64) arch=amd64 ;;
+          aarch64 | arm64) arch=arm64 ;;
+          *) echo "::error::no org tool build for $(uname -m)"; exit 1 ;;
+        esac
+        branch=$(jq -rn --arg b "$BRANCH" '$b|@uri')
+        for tool in $TOOLS; do
+          url="https://dl.pazer.build/${tool}?branch=${branch}&os=${os}&arch=${arch}"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' "$url")
+          case "$code" in
+            302) echo "::notice::${tool} follows its branch ${BRANCH}" ;;
+            404)
+              echo "::notice::${tool} has no branch ${BRANCH}; installing its default branch"
+              url="https://dl.pazer.build/${tool}?os=${os}&arch=${arch}"
+              ;;
+            *) echo "::error::dl.pazer.build answered ${code} for ${url}"; exit 1 ;;
+          esac
+          # Each build is an APE. A Linux runner's binfmt reads its MZ header as a Windows program, and execve on macOS refuses it. An APE is also a shell script, so sh starts it on both.
+          sudo mkdir -p "/usr/local/lib/${tool}"
+          sudo curl -fsSL -o "/usr/local/lib/${tool}/${tool}" "$url"
+          printf '#!/bin/sh\nexec sh /usr/local/lib/%s/%s "$@"\n' "$tool" "$tool" | sudo tee "/usr/local/bin/${tool}" > /dev/null
+          sudo chmod +x "/usr/local/bin/${tool}"
+          "$tool" --version
+        done

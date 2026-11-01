@@ -1543,10 +1543,6 @@ pub fn apply_sandbox(
     // installed.
     if sandbox_profile != xai_grok_sandbox::ProfileName::Off {
         let _ = xai_grok_sandbox::ci_host::start_ci_host_for_session(&workspace, reexec_follows);
-        #[cfg(unix)]
-        if !reexec_follows {
-            xai_grok_sandbox::jail::redirect_caches_in_place();
-        }
     }
     #[cfg(target_os = "linux")]
     let requires_read_deny = xai_grok_sandbox::requires_read_deny(&sandbox_profile, &workspace);
@@ -1645,6 +1641,9 @@ pub fn apply_sandbox(
                 xai_grok_sandbox::requires_hook_write_deny(&sandbox_profile, &workspace);
             is_custom || needs_hooks
         };
+        // In the process the profile confines, after any bwrap re-exec.
+        #[cfg(unix)]
+        xai_grok_sandbox::jail::redirect_caches_in_place();
         let mut sandbox = xai_grok_sandbox::SandboxManager::new(sandbox_profile, &workspace);
         if let Err(e) = sandbox.apply(&workspace) {
             eprintln!("warning: sandbox could not be applied: {e}");
