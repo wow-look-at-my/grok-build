@@ -27,6 +27,7 @@ xai-grok-extra-ca = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+toml = { workspace = true }
 
 [lints]
 workspace = true

@@ -14087,6 +14087,7 @@ dependencies = [
  "serde",
  "tokio",
  "tokio-tungstenite",
+ "toml",
  "tracing",
  "url",
  "xai-grok-extra-ca",
