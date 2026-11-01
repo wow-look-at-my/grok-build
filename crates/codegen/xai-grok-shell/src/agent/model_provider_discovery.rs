@@ -358,8 +358,14 @@ async fn discover_one_provider(
         let key = discovered_model_key(provider_id, &listed.model);
         let override_for_listed = ConfigModelOverride {
             model: Some(listed.model.clone()),
-            name: listed.name.clone(),
-            description: listed.description.clone(),
+            name: listed.name.as_deref().map(strip_vendor_prefix),
+            // A hosted listing's description is vendor copy that wraps to
+            // several picker lines.
+            description: if dialect.is_local_runtime() {
+                listed.description.clone()
+            } else {
+                None
+            },
             // A value the user wrote on the provider is the value.
             api_backend: provider
                 .api_backend
@@ -528,6 +534,22 @@ fn listing_headers(provider: &ModelProviderConfig) -> Vec<(String, String)> {
         .map(|(name, value)| (name.clone(), value.clone()))
         .chain(from_env)
         .collect()
+}
+
+/// `Anthropic: Claude Fable 5` becomes `Claude Fable 5`. An aggregator puts
+/// the vendor before every model name, and the name already says it.
+fn strip_vendor_prefix(name: &str) -> String {
+    match name.split_once(": ") {
+        Some((vendor, rest))
+            if !vendor.is_empty()
+                && !vendor.contains(':')
+                && vendor.len() <= 32
+                && !rest.trim().is_empty() =>
+        {
+            rest.trim().to_owned()
+        }
+        _ => name.to_owned(),
+    }
 }
 
 /// Fetch and parse a listing off the async path. `reqwest::blocking` builds
@@ -891,6 +913,43 @@ mod tests {
              session token never reaches the provider's endpoint"
         );
         assert!(discovered.contains_key("gateway/small-one"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hosted_listing_loses_its_vendor_prefix_and_its_blurb() {
+        let (base, server) = start_listing_server(serde_json::json!({
+            "data": [{
+                "id": "anthropic/claude-fable-5",
+                "name": "Anthropic: Claude Fable 5",
+                "description": "Claude Fable 5 is a Mythos-class model from Anthropic, built for autonomous knowledge work.\n\nIt supports text, image, and file inputs.",
+                "context_length": 200_000
+            }]
+        }))
+        .await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+            api_key = "sk-provider"
+            "#
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server.abort();
+
+        let fable = discovered
+            .get("gateway/anthropic/claude-fable-5")
+            .expect("the listing names the model");
+        assert_eq!(fable.info.name.as_deref(), Some("Claude Fable 5"));
+        assert_eq!(fable.info.description, None);
+    }
+
+    #[test]
+    fn only_a_short_leading_vendor_is_stripped() {
+        assert_eq!(strip_vendor_prefix("DeepSeek: DeepSeek V3"), "DeepSeek V3");
+        assert_eq!(strip_vendor_prefix("Claude Fable 5"), "Claude Fable 5");
+        assert_eq!(strip_vendor_prefix("Vendor: "), "Vendor: ");
+        assert_eq!(strip_vendor_prefix("a:b: c"), "a:b: c");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
