@@ -86,6 +86,8 @@ fn parent() {
         .env(WORKSPACE_ENV, &workspace)
         .env("GROK_HOME", &grok_home)
         .env("GH_CONFIG_DIR", &gh_config)
+        // A user's session sets no API URL. An Actions runner does, and slopfix then asks the API directly.
+        .env_remove("GITHUB_API_URL")
         .env("GH_TOKEN", "host-only")
         .env("GITHUB_TOKEN", "host-only")
         .env("PATH", path)
