@@ -5,7 +5,7 @@ use super::render::int_step_sizes;
 use super::state::{
     RowEntry, SettingsKeyOutcome, SettingsModalState, SettingsMode, SettingsModeKind,
     action_for_bool, action_for_enum, action_for_enum_commit, action_for_int, action_for_string,
-    effective_enum_choices, group_children, picker_choices_for_query, picker_is_dynamic,
+    effective_enum_choices, group_children, picker_choices_for_query, picker_takes_text,
     query_keeps_choice, validate_string,
 };
 use crate::app::actions::Action;
@@ -83,9 +83,27 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
         _ => unreachable!("picker handler requires PickingEnum state"),
     };
 
-    let dynamic_picker = picker_is_dynamic(state, setting_key);
+    let dynamic_picker = picker_takes_text(state, setting_key);
+    let searching = state.picker_search_active || !state.picker_query.is_empty();
 
     match key.code {
+        // `/` starts a search, as it does in the settings list. Inside a query it is a literal character, because model ids contain it.
+        KeyCode::Char('/') if key.modifiers.is_empty() && !searching => {
+            state.picker_search_active = true;
+            SettingsKeyOutcome::Changed
+        }
+        // Esc leaves the search first. A second Esc leaves the picker.
+        KeyCode::Esc if searching => edit_picker_query(
+            state,
+            setting_key,
+            original_value,
+            supports_preview,
+            |state| {
+                state.picker_query.clear();
+                state.picker_search_active = false;
+                true
+            },
+        ),
         KeyCode::Down => {
             let len = picker_choices_len(state, setting_key);
             if choices_idx + 1 >= len {
@@ -141,15 +159,24 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
                 && !key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::SUPER) =>
         {
-            state.picker_query.push(c);
-            refocus_filtered_picker(state, setting_key, original_value, supports_preview)
+            edit_picker_query(
+                state,
+                setting_key,
+                original_value,
+                supports_preview,
+                |state| {
+                    state.picker_query.push(c);
+                    true
+                },
+            )
         }
-        KeyCode::Backspace if dynamic_picker => {
-            if state.picker_query.pop().is_none() {
-                return SettingsKeyOutcome::Unchanged;
-            }
-            refocus_filtered_picker(state, setting_key, original_value, supports_preview)
-        }
+        KeyCode::Backspace if dynamic_picker => edit_picker_query(
+            state,
+            setting_key,
+            original_value,
+            supports_preview,
+            |state| state.picker_query.pop().is_some(),
+        ),
         KeyCode::Enter => {
             // A filtered list with no matches has nothing to commit.
             if dynamic_picker && picker_choices_len(state, setting_key) == 0 {
@@ -314,32 +341,38 @@ pub(super) fn set_picker_idx(
     SettingsKeyOutcome::Changed
 }
 
-/// Keep the focused row inside the filtered list after the query changes.
-fn refocus_filtered_picker(
+/// Apply `edit` to the picker query, then keep the focus on the same choice.
+/// When the query hides that choice, the focus goes to the first match.
+/// `edit` returns false when it changed nothing.
+fn edit_picker_query(
     state: &mut SettingsModalState,
     setting_key: SettingKey,
     original_value: SettingValue,
     supports_preview: bool,
+    edit: impl FnOnce(&mut SettingsModalState) -> bool,
 ) -> SettingsKeyOutcome {
-    let len = picker_choices_len(state, setting_key);
-    if len == 0 {
-        return SettingsKeyOutcome::Changed;
-    }
     let current = match &state.state.mode {
         SettingsMode::PickingEnum { choices_idx, .. } => *choices_idx,
         _ => return SettingsKeyOutcome::Unchanged,
     };
-    if current < len {
-        // The query narrowed around the focused row; nothing to move.
+    let focused = picker_choice_at_owned(state, setting_key, current);
+    if !edit(state) {
+        return SettingsKeyOutcome::Unchanged;
+    }
+    let choices = picker_choices_for_query(state, setting_key);
+    if choices.is_empty() {
         return SettingsKeyOutcome::Changed;
     }
-    set_picker_idx(
-        state,
-        setting_key,
-        len - 1,
-        original_value,
-        supports_preview,
-    )
+    let target = focused
+        .as_deref()
+        .and_then(|canonical| choices.iter().position(|c| c.canonical == canonical))
+        .unwrap_or(0);
+    let same_choice = target == current
+        && choices.get(target).map(|c| c.canonical.as_str()) == focused.as_deref();
+    if same_choice {
+        return SettingsKeyOutcome::Changed;
+    }
+    set_picker_idx(state, setting_key, target, original_value, supports_preview)
 }
 
 /// Key routing for the inline string/int editor. Esc cancels, Enter commits.
@@ -908,7 +941,7 @@ pub fn handle_settings_mouse(
         return upgrade_if_breadcrumb_flipped(outcome, breadcrumb_hover_flipped);
     }
 
-    // PickingEnum: click-to-pick on choice rects; the scroll wheel is a no-op (the picker is bounded; scrolling there could surprise)
+    // PickingEnum: click-to-pick on choice rects. The wheel moves the focus and the viewport follows it.
     if state.state.mode_kind() == SettingsModeKind::PickingEnum {
         let outcome = handle_picker_mouse(state, kind, column, row);
         return upgrade_if_breadcrumb_flipped(outcome, breadcrumb_hover_flipped);
@@ -1033,10 +1066,12 @@ fn handle_picker_mouse(
     // The wheel moves the focused choice and, through the renderer's
     // scroll-to-focus, the viewport. The picker stays open.
     if matches!(kind, MouseEventKind::ScrollDown | MouseEventKind::ScrollUp) {
-        let over_list = state
-            .picker_choice_rects
-            .iter()
-            .any(|rect| rect.height > 0 && rect_contains(*rect, column, row));
+        // Anywhere in the list scrolls it, the `… N more` row and the blank rows below the last choice included.
+        let over_list = rect_contains(state.list_area, column, row)
+            || state
+                .picker_choice_rects
+                .iter()
+                .any(|rect| rect.height > 0 && rect_contains(*rect, column, row));
         if !over_list {
             return SettingsKeyOutcome::Unchanged;
         }
