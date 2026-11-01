@@ -9,11 +9,12 @@ use xai_grok_net::{Auth, Body, ClientOptions, HttpClient, Url};
 
 pub(crate) const STORAGE_ENDPOINT: &str = "https://storage.googleapis.com";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
-const SCOPES: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/devstorage.full_control";
+const ADC_FILE: &str = "application_default_credentials.json";
+pub(crate) const SCOPES: &str = "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/devstorage.full_control";
 const JWT_BEARER_GRANT: &str = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const METADATA_HOST_ENV: &str = "GCE_METADATA_HOST";
 const METADATA_IP: &str = "169.254.169.254";
-const TOKEN_TIMEOUT: Duration = Duration::from_secs(3);
+pub(crate) const TOKEN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// A GCS client with the bearer for one upload.
 pub(crate) struct GcsDirect {
@@ -27,14 +28,9 @@ impl GcsDirect {
     pub(crate) async fn new(service_account_key: Option<&str>) -> anyhow::Result<Self> {
         let client = HttpClient::build(ClientOptions::default()).context("build the GCS client")?;
         let token = match service_account_key {
-            Some(key_json) => {
-                let cred = CredentialsFile::new_from_str(key_json)
-                    .await
-                    .context("Failed to parse service account key")?;
-                token_for_credentials(&client, &cred)
-                    .await
-                    .context("Failed to configure GCS client with service account")?
-            }
+            Some(key_json) => token_for_json(&client, key_json)
+                .await
+                .context("Failed to configure GCS client with service account")?,
             None => adc_token(&client)
                 .await
                 .context("Failed to authenticate GCS client")?,
@@ -87,7 +83,9 @@ impl GcsDirect {
     }
 }
 
-async fn check_status(response: xai_grok_net::Response) -> anyhow::Result<xai_grok_net::Response> {
+pub(crate) async fn check_status(
+    response: xai_grok_net::Response,
+) -> anyhow::Result<xai_grok_net::Response> {
     let status = response.status();
     if status.is_success() {
         return Ok(response);
@@ -101,32 +99,64 @@ struct TokenResponse {
     access_token: String,
 }
 
-async fn read_token(response: xai_grok_net::Response) -> anyhow::Result<String> {
+pub(crate) async fn read_token(response: xai_grok_net::Response) -> anyhow::Result<String> {
     let token: TokenResponse = check_status(response).await?.json().await?;
     Ok(token.access_token)
 }
 
 /// ADC order, as `gcloud-auth` does it: the credentials file, else the metadata server.
 async fn adc_token(client: &HttpClient) -> anyhow::Result<String> {
-    match CredentialsFile::new().await {
-        Ok(cred) => token_for_credentials(client, &cred).await,
+    match adc_json().await {
+        Ok(json) => token_for_json(client, &json).await,
         Err(file_err) => metadata_token(client).await.map_err(|metadata_err| {
             anyhow::anyhow!(
-                "no GCP credentials: credentials file: {file_err}; metadata server: {metadata_err:#}"
+                "no GCP credentials: credentials file: {file_err:#}; metadata server: {metadata_err:#}"
             )
         }),
     }
 }
 
-/// The access token for a parsed credentials file.
-pub(crate) async fn token_for_credentials(
-    client: &HttpClient,
-    cred: &CredentialsFile,
-) -> anyhow::Result<String> {
+/// The ADC credentials JSON, found where `gcloud-auth` looks: `GOOGLE_APPLICATION_CREDENTIALS_JSON`
+/// (raw or base64), the `GOOGLE_APPLICATION_CREDENTIALS` path, then the gcloud well-known file.
+async fn adc_json() -> anyhow::Result<String> {
+    use base64::Engine as _;
+    if let Ok(json) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS_JSON") {
+        return Ok(base64::engine::general_purpose::STANDARD
+            .decode(&json)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .unwrap_or(json));
+    }
+    let path = match std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS") {
+        Some(path) => std::path::PathBuf::from(path),
+        None if cfg!(target_os = "windows") => {
+            std::path::PathBuf::from(std::env::var_os("APPDATA").context("APPDATA is not set")?)
+                .join("gcloud")
+                .join(ADC_FILE)
+        }
+        None => dirs::home_dir()
+            .context("no home directory")?
+            .join(".config")
+            .join("gcloud")
+            .join(ADC_FILE),
+    };
+    tokio::fs::read_to_string(&path)
+        .await
+        .with_context(|| format!("read {}", path.display()))
+}
+
+/// The access token for a credentials JSON. `gcloud-auth` parses it. Every request goes
+/// through `xai_grok_net`.
+pub(crate) async fn token_for_json(client: &HttpClient, json: &str) -> anyhow::Result<String> {
+    let cred = CredentialsFile::new_from_str(json)
+        .await
+        .context("parse the GCP credentials")?;
     match cred.tp.as_str() {
-        "service_account" => service_account_token(client, cred).await,
-        "authorized_user" => authorized_user_token(client, cred).await,
-        "external_account" => external_account_token(cred).await,
+        "service_account" => service_account_token(client, &cred).await,
+        "authorized_user" => authorized_user_token(client, &cred).await,
+        "external_account" => {
+            crate::gcs_external::external_account_token(client, &cred, json, SCOPES).await
+        }
         other => anyhow::bail!("unsupported GCP credential type `{other}`"),
     }
 }
@@ -213,22 +243,6 @@ async fn metadata_token(client: &HttpClient) -> anyhow::Result<String> {
         .send()
         .await?;
     read_token(response).await
-}
-
-/// Workload identity federation reads a subject token from a file, a URL, or AWS, trades it
-/// at STS, and can impersonate a service account. `gcloud-auth` runs that exchange with its
-/// own HTTP client, because it takes no injected one.
-async fn external_account_token(cred: &CredentialsFile) -> anyhow::Result<String> {
-    use gcloud_storage::client::google_cloud_auth::project::{
-        Config, create_token_source_from_credentials,
-    };
-    let scopes: Vec<&str> = SCOPES.split(' ').collect();
-    let source =
-        create_token_source_from_credentials(cred, &Config::default().with_scopes(&scopes))
-            .await
-            .context("external_account token source")?;
-    let token = source.token().await.context("external_account token")?;
-    Ok(token.access_token)
 }
 
 #[cfg(test)]
