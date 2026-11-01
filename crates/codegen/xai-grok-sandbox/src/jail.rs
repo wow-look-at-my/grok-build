@@ -869,6 +869,8 @@ pub fn seatbelt_profile(plan: &JailPlan) -> String {
     profile.push_str("(allow file-write* (subpath \"/dev\"))\n");
     // The root itself.
     profile.push_str("(allow file-read* (literal \"/\"))\n");
+    // Only that /Applications exists.
+    profile.push_str("(allow file-read-metadata (literal \"/Applications\"))\n");
     // Path resolution stats each ANCESTOR of every path it is handed, so a
     // grant whose ancestors are denied is unreachable in practice: `getcwd`
     // fails. A tool cannot resolve a path it was given, even inside a mounted
@@ -1046,6 +1048,10 @@ pub fn seatbelt_command(plan: &JailPlan) -> std::process::Command {
     cmd.env("TMPDIR", &plan.temp_dir);
     if let Some(cache) = &plan.cache_redirect {
         cmd.env("XDG_CACHE_HOME", cache);
+        let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+        for (name, value) in cache_env_redirects(&env, &plan.cache_dirs, cache) {
+            cmd.env(name, value);
+        }
     }
     // Seatbelt inherits the environment, so the host-worker fd is delivered as
     // a command env setting — never as an argument of the jailed program.
@@ -1054,6 +1060,41 @@ pub fn seatbelt_command(plan: &JailPlan) -> std::process::Command {
     }
     cmd.current_dir(&plan.cwd);
     cmd
+}
+
+/// The variables a macOS jail points into `redirect`. A variable that names a
+/// path under a host cache directory gets the same path inside `redirect`.
+/// Otherwise it names a directory the jail cannot write. Go reads no
+/// `XDG_CACHE_HOME` on macOS, so an unset `GOCACHE` gets `redirect/go-build`.
+#[cfg(unix)]
+fn cache_env_redirects(
+    env: &[(OsString, OsString)],
+    cache_dirs: &[PathBuf],
+    redirect: &Path,
+) -> Vec<(OsString, PathBuf)> {
+    let mut out = Vec::new();
+    for (name, value) in env {
+        if name == "XDG_CACHE_HOME" || name == "TMPDIR" {
+            continue;
+        }
+        let path = Path::new(value);
+        if !path.is_absolute() {
+            continue;
+        }
+        let canonical = dunce::canonicalize(path).ok();
+        let rel = cache_dirs.iter().find_map(|dir| {
+            path.strip_prefix(dir)
+                .ok()
+                .or_else(|| canonical.as_deref()?.strip_prefix(dir).ok())
+        });
+        if let Some(rel) = rel {
+            out.push((name.clone(), redirect.join(rel)));
+        }
+    }
+    if !env.iter().any(|(name, _)| name == "GOCACHE") {
+        out.push(("GOCACHE".into(), redirect.join("go-build")));
+    }
+    out
 }
 
 /// Build the backend command for this platform.
@@ -1351,6 +1392,50 @@ fn clone_tree(source: &Path, target: &Path) -> std::io::Result<()> {
         return Ok(());
     }
     Err(std::io::Error::last_os_error())
+}
+
+/// A profile confines this process in place, so the host cache stays
+/// write-denied. This points the caches at a session directory in `TMPDIR`,
+/// which every profile can write. On macOS that directory is a copy-on-write
+/// clone of the host cache. Call it before the confinement starts.
+#[cfg(unix)]
+pub fn redirect_caches_in_place() {
+    if is_jailed() {
+        return;
+    }
+    let cache_dirs = match host_cache_dirs() {
+        Ok(dirs) => dirs,
+        Err(error) => {
+            eprintln!("warning: sandbox: the host cache stays read-only: {error}");
+            return;
+        }
+    };
+    let target = std::env::temp_dir().join(format!("grok-cache-{}", std::process::id()));
+    if std::fs::symlink_metadata(&target).is_ok_and(|meta| meta.is_dir()) {
+        let _ = std::fs::remove_dir_all(&target);
+    }
+    #[cfg(target_os = "macos")]
+    let cloned = cache_dirs
+        .first()
+        .is_some_and(|source| clone_tree(source, &target).is_ok());
+    #[cfg(not(target_os = "macos"))]
+    let cloned = false;
+    if !cloned && let Err(error) = std::fs::create_dir_all(&target) {
+        eprintln!(
+            "warning: sandbox: the host cache stays read-only, {} could not be made: {error}",
+            target.display()
+        );
+        return;
+    }
+    let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+    let redirects = cache_env_redirects(&env, &cache_dirs, &target);
+    // SAFETY: this runs on the startup path, before the session starts its threads.
+    unsafe {
+        std::env::set_var("XDG_CACHE_HOME", &target);
+        for (name, value) in redirects {
+            std::env::set_var(name, value);
+        }
+    }
 }
 
 /// Report why the jail did not start, then exit. Never returns.
@@ -1706,6 +1791,11 @@ mod tests {
         assert!(
             !profile.contains("(allow file-read* (subpath \"/\"))"),
             "the root grant must name the root, not the whole filesystem: {profile}"
+        );
+        assert!(
+            profile.contains("(allow file-read-metadata (literal \"/Applications\"))")
+                && !profile.contains("(subpath \"/Applications\")"),
+            "an APE must see that /Applications exists, and nothing inside it: {profile}"
         );
     }
 
@@ -2593,6 +2683,45 @@ mod tests {
             cache_dirs_for(Some(home.0.clone()), Some(PathBuf::from("relative"))).unwrap(),
             vec![canonical.join(".cache")],
             "a relative $XDG_CACHE_HOME is invalid per the XDG spec"
+        );
+    }
+
+    #[test]
+    fn cache_env_redirects_moves_cache_paths_into_the_clone() {
+        let env: Vec<(OsString, OsString)> = [
+            ("GOCACHE", "/home/u/.cache/go-build"),
+            ("GOMODCACHE", "/home/u/.cache/go-mod"),
+            ("CARGO_HOME", "/home/u/.cargo"),
+            ("NEAR_MISS", "/home/u/.cachex/y"),
+            ("RELATIVE", ".cache/z"),
+            ("XDG_CACHE_HOME", "/home/u/.cache"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect();
+        let redirect = Path::new("/s/cache");
+        let got = cache_env_redirects(&env, &[PathBuf::from("/home/u/.cache")], redirect);
+        assert_eq!(
+            got,
+            vec![
+                ("GOCACHE".into(), PathBuf::from("/s/cache/go-build")),
+                ("GOMODCACHE".into(), PathBuf::from("/s/cache/go-mod")),
+            ],
+            "only absolute paths under a host cache dir move, and an existing GOCACHE gets no default"
+        );
+    }
+
+    #[test]
+    fn cache_env_redirects_gives_an_unset_gocache_a_writable_default() {
+        let got = cache_env_redirects(
+            &[],
+            &[PathBuf::from("/home/u/.cache")],
+            Path::new("/s/cache"),
+        );
+        assert_eq!(
+            got,
+            vec![("GOCACHE".into(), PathBuf::from("/s/cache/go-build"))],
+            "Go's macOS default is ~/Library/Caches, which the jail cannot write"
         );
     }
 

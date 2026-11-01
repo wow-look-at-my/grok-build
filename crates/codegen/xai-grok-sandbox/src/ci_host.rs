@@ -274,6 +274,8 @@ fn spawn_ci_host_with(repo_root: &Path, survives_exec: bool) -> Option<i32> {
         Ok(_) => {
             // Leak `ours` so the fd stays open across the jail `exec`.
             std::mem::forget(ours);
+            #[cfg(unix)]
+            crate::gh_shim::start();
             Some(our_fd)
         }
         Err(_) => {

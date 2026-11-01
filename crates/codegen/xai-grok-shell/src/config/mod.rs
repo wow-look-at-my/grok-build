@@ -1641,6 +1641,9 @@ pub fn apply_sandbox(
                 xai_grok_sandbox::requires_hook_write_deny(&sandbox_profile, &workspace);
             is_custom || needs_hooks
         };
+        // In the process the profile confines, after any bwrap re-exec.
+        #[cfg(unix)]
+        xai_grok_sandbox::jail::redirect_caches_in_place();
         let mut sandbox = xai_grok_sandbox::SandboxManager::new(sandbox_profile, &workspace);
         if let Err(e) = sandbox.apply(&workspace) {
             eprintln!("warning: sandbox could not be applied: {e}");
