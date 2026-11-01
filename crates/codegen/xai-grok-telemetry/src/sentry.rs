@@ -315,7 +315,7 @@ mod tests {
     /// Pins the hard-disable in [`init`]: even with `SENTRY_DSN` in the
     /// environment (the exact re-arm vector the stub guards against —
     /// sentry's `apply_defaults()` reads it when `dsn.is_none()` and would
-    /// install a real reqwest transport), every captured envelope must land
+    /// install a real transport), every captured envelope must land
     /// in [`NoopTransport`] and nowhere else. Reverting the stub breaks this
     /// test: a real transport would be created and the counter would not
     /// move. No other test in this binary touches `SENTRY_DSN`, so the env

@@ -15,6 +15,7 @@ rmcp = { version = "3.4", features = [
     "reqwest",
 ] }
 xai-grok-extra-ca = { workspace = true }
+xai-grok-net = { workspace = true }
 xai-grok-version = { workspace = true }
 # reqwest 0.13 feature set for MCP transports. Notably:
 # - `blocking` is for build-script style use (not actually used here today, but

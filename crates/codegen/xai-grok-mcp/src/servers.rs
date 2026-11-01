@@ -2298,13 +2298,11 @@ async fn probe_anonymous_access(
     headers: &[(String, String)],
 ) -> AnonymousAccess {
     // Redirects are not followed: a gateway that redirects an anonymous POST to a login page is challenging, not accepting
-    // reqwest 0.13; the policy chokepoint is typed for 0.12 and cannot wrap this builder.
-    #[allow(clippy::disallowed_methods)]
-    let client = match with_extra_root_certificates(reqwest::Client::builder())
-        .timeout(ANONYMOUS_ACCESS_PROBE_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
+    let client = match xai_grok_net::HttpClient::build(
+        xai_grok_net::ClientOptions::default()
+            .timeout(ANONYMOUS_ACCESS_PROBE_TIMEOUT)
+            .no_redirects(),
+    ) {
         Ok(client) => client,
         Err(e) => {
             tracing::warn!(server = server_name, error = %e, "anonymous-access probe: building HTTP client failed");
@@ -2322,22 +2320,23 @@ async fn probe_anonymous_access(
     );
     // Protocol-required values win over configured ones.
     probe_headers.insert(
-        reqwest::header::CONTENT_TYPE,
-        reqwest::header::HeaderValue::from_static("application/json"),
+        http::header::CONTENT_TYPE,
+        http::header::HeaderValue::from_static("application/json"),
     );
     probe_headers.insert(
-        reqwest::header::ACCEPT,
-        reqwest::header::HeaderValue::from_static("application/json, text/event-stream"),
+        http::header::ACCEPT,
+        http::header::HeaderValue::from_static("application/json, text/event-stream"),
     );
     apply_user_agent_policy(&mut probe_headers, server_name, url);
-    let request = client.post(url).headers(probe_headers).body("{}");
+    let auth = configured_auth(&mut probe_headers);
+    let request = client.post(url, auth).headers(probe_headers).body("{}");
     match request.send().await {
         Ok(response) => {
             let status = response.status();
             // 407 signals proxy credentials rather than server auth, but those are still credentials this session cannot supply headlessly
-            if status == reqwest::StatusCode::UNAUTHORIZED
-                || status == reqwest::StatusCode::FORBIDDEN
-                || status == reqwest::StatusCode::PROXY_AUTHENTICATION_REQUIRED
+            if status == xai_grok_net::StatusCode::UNAUTHORIZED
+                || status == xai_grok_net::StatusCode::FORBIDDEN
+                || status == xai_grok_net::StatusCode::PROXY_AUTHENTICATION_REQUIRED
                 || status.is_redirection()
             {
                 AnonymousAccess::AuthChallenged
@@ -2349,11 +2348,36 @@ async fn probe_anonymous_access(
                 AnonymousAccess::Accepted
             }
         }
+        Err(e) if e.auth_refusal().is_some() => {
+            tracing::error!(server = server_name, error = %e, "anonymous-access probe refused its credential");
+            AnonymousAccess::Unreachable
+        }
         Err(e) => {
             tracing::warn!(server = server_name, error = %e, "anonymous-access probe failed");
             AnonymousAccess::Unreachable
         }
     }
+}
+
+/// Move the credential headers the user configured for this server out of `headers`,
+/// as the request's [`xai_grok_net::Auth`].
+fn configured_auth(headers: &mut http::HeaderMap) -> xai_grok_net::Auth {
+    let names: Vec<_> = headers
+        .keys()
+        .filter(|name| xai_grok_net::is_credential_header(name))
+        .cloned()
+        .collect();
+    if names.is_empty() {
+        return xai_grok_net::Auth::None;
+    }
+    let mut credentials = http::HeaderMap::new();
+    for name in names {
+        for value in headers.get_all(&name) {
+            credentials.append(name.clone(), value.clone());
+        }
+        headers.remove(&name);
+    }
+    xai_grok_net::Auth::Configured(credentials)
 }
 
 async fn decide_http_auth_over_network(
@@ -4659,41 +4683,41 @@ fn is_figma_mcp(server_name: &str, url: &str) -> bool {
     {
         return true;
     }
-    reqwest::Url::parse(url)
+    url::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
         .is_some_and(|h| h == "figma.com" || h.ends_with(".figma.com"))
 }
 
-fn ensure_figma_user_agent(headers: &mut reqwest::header::HeaderMap, server_name: &str, url: &str) {
+fn ensure_figma_user_agent(headers: &mut http::header::HeaderMap, server_name: &str, url: &str) {
     if !is_figma_mcp(server_name, url) {
         return;
     }
-    if headers.contains_key(reqwest::header::USER_AGENT) {
+    if headers.contains_key(http::header::USER_AGENT) {
         return;
     }
     headers.insert(
-        reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("grok-cli"),
+        http::header::USER_AGENT,
+        http::header::HeaderValue::from_static("grok-cli"),
     );
 }
 
-static DEFAULT_USER_AGENT: LazyLock<reqwest::header::HeaderValue> = LazyLock::new(|| {
+static DEFAULT_USER_AGENT: LazyLock<http::header::HeaderValue> = LazyLock::new(|| {
     format!("grok-cli/{}", xai_grok_version::version())
         .parse()
-        .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("grok-cli"))
+        .unwrap_or_else(|_| http::header::HeaderValue::from_static("grok-cli"))
 });
 
-fn ensure_default_user_agent(headers: &mut reqwest::header::HeaderMap) {
-    if headers.contains_key(reqwest::header::USER_AGENT) {
+fn ensure_default_user_agent(headers: &mut http::header::HeaderMap) {
+    if headers.contains_key(http::header::USER_AGENT) {
         return;
     }
-    headers.insert(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT.clone());
+    headers.insert(http::header::USER_AGENT, DEFAULT_USER_AGENT.clone());
 }
 
 /// Figma keeps its pinned bare `grok-cli` attribution token; every other server gets the versioned default.
 /// A `User-Agent` already in the map always wins.
-fn apply_user_agent_policy(headers: &mut reqwest::header::HeaderMap, server_name: &str, url: &str) {
+fn apply_user_agent_policy(headers: &mut http::header::HeaderMap, server_name: &str, url: &str) {
     ensure_figma_user_agent(headers, server_name, url);
     ensure_default_user_agent(headers);
 }
@@ -4704,12 +4728,12 @@ fn parse_config_headers<'a>(
     server_name: &str,
     stage: &'static str,
     pairs: impl Iterator<Item = (&'a str, &'a str)>,
-) -> reqwest::header::HeaderMap {
-    let mut headers = reqwest::header::HeaderMap::new();
+) -> http::header::HeaderMap {
+    let mut headers = http::header::HeaderMap::new();
     for (key, value) in pairs {
         match (
-            reqwest::header::HeaderName::from_bytes(key.as_bytes()),
-            value.parse::<reqwest::header::HeaderValue>(),
+            http::header::HeaderName::from_bytes(key.as_bytes()),
+            value.parse::<http::header::HeaderValue>(),
         ) {
             (Ok(name), Ok(val)) => {
                 headers.insert(name, val);
@@ -4904,7 +4928,7 @@ pub async fn start_mcp_server(
             headers.retain(|(name, _)| !name.eq_ignore_ascii_case(GROK_AGENT_ID_HEADER));
             let local_agent_endpoint = ctx.send_grok_agent_id_header;
             if local_agent_endpoint && let Some(session_id) = ctx.session_id {
-                reqwest::header::HeaderValue::try_from(session_id).map_err(|error| {
+                http::header::HeaderValue::try_from(session_id).map_err(|error| {
                     McpError::ClientError(format!("invalid {GROK_AGENT_ID_HEADER} value: {error}"))
                 })?;
                 headers.push((GROK_AGENT_ID_HEADER.to_owned(), session_id.to_owned()));

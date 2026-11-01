@@ -6,7 +6,6 @@ edition.workspace = true
 description = "Session-support modules for the grok shell crate family: managed MCP gateway catalog/call caching and file-access tracking."
 
 [dependencies]
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -14,6 +13,7 @@ tokio = { workspace = true, features = ["sync", "rt", "time", "macros"] }
 tracing = { workspace = true }
 xai-file-utils = { path = "../xai-file-utils", optional = true }
 xai-grok-http = { workspace = true }
+xai-grok-net = { workspace = true }
 xai-grok-version = { workspace = true }
 
 [features]
@@ -21,6 +21,8 @@ default-bazel = []
 
 [dev-dependencies]
 axum = { workspace = true }
+# The tests send the session token to a loopback mock server.
+xai-grok-net = { workspace = true, features = ["test-loopback-session"] }
 tokio = { workspace = true, features = ["net", "rt-multi-thread"] }
 
 [lints]
