@@ -5,7 +5,7 @@
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use xai_grok_sandbox::gh_shim::{GH_CONTRACT, command_for};
 
