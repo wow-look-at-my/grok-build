@@ -1,7 +1,4 @@
 // Tracks what Claude settings have been imported/dismissed so we don't re-prompt.
-//
-// State is persisted to `~/.grok/claude_import_state.json`.
-// Hash is SHA-256 over sorted, concatenated contents of all Claude settings files at a given scope (global or project)
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -117,9 +114,11 @@ fn compute_settings_hash(paths: &[PathBuf]) -> String {
     format!("sha256:{:x}", hasher.finalize())
 }
 
-/// Compute hash for global Claude settings (`~/.claude/settings*.json`, `~/.claude.json`).
-/// `xai_dirs::home_dir()` resolves home the way the imported tool itself does (Node `os.homedir()`: `USERPROFILE` on Windows).
-/// So the hash covers the files that tool actually wrote even under a redirected profile.
+/// Compute hash for global Claude settings (`~/.claude/settings*.json`,
+/// `~/.claude.json`). `xai_dirs::home_dir()` resolves home the way the
+/// imported tool itself does (Node `os.homedir()`: `USERPROFILE` on Windows).
+/// So the hash covers the files that tool wrote even under a redirected
+/// profile.
 fn compute_global_hash() -> (String, Vec<PathBuf>) {
     let mut paths = Vec::new();
     if let Some(home) = xai_dirs::home_dir() {
@@ -131,9 +130,9 @@ fn compute_global_hash() -> (String, Vec<PathBuf>) {
     (hash, paths)
 }
 
-/// Compute hash for project-level Claude settings.
-///
-/// The home used to exclude global paths must match the one the scanner in `claude_import.rs` uses, or a path could hash as both global and project.
+/// Compute hash for project-level Claude settings. The home used to exclude
+/// global paths must match the one the scanner in `claude_import.rs` uses.
+/// Otherwise, a path could hash as both global and project.
 fn compute_project_hash(cwd: &Path) -> (String, Vec<PathBuf>) {
     // Use find_claude_settings_paths but filter to only project-level paths (exclude global ~/.claude/ paths)
     let all_paths = find_claude_settings_paths(cwd);
@@ -152,7 +151,6 @@ fn compute_project_hash(cwd: &Path) -> (String, Vec<PathBuf>) {
         .collect();
 
     // Also include .mcp.json candidate paths from cwd up to repo root.
-    // Non-existent files are skipped by compute_settings_hash(), so we unconditionally add candidates (avoids a TOCTOU race vs .exists())
     let mut all = project_paths;
     let mut current = cwd.to_path_buf();
     loop {
@@ -178,9 +176,8 @@ fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-/// Record the current hash for both global and project scopes.
-///
-/// Called after a successful import or explicit dismiss.
+/// Record the current hash for both global and project scopes. Called after a
+/// successful import or explicit dismiss.
 pub fn mark_imported(cwd: &Path) {
     let mut state = load_import_state();
 
@@ -205,7 +202,8 @@ pub fn mark_imported(cwd: &Path) {
     }
 }
 
-/// Alias for `mark_imported`: dismissing records the same hash so we don't re-prompt until the files actually change.
+/// Alias for `mark_imported`: dismissing records the same hash so we don't
+/// re-prompt until the files change.
 pub fn mark_dismissed(cwd: &Path) {
     mark_imported(cwd);
 }

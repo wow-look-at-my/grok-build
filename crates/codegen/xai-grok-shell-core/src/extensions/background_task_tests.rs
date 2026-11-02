@@ -1,3 +1,5 @@
+// background_task_tests.rs holds the background task tests code.
+
 use std::path::PathBuf;
 use std::time::SystemTime;
 

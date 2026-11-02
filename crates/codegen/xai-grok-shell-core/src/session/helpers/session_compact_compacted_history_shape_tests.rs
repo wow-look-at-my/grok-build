@@ -1,3 +1,5 @@
+// session_compact_compacted_history_shape_tests.rs holds the session compact compacted history shape tests code.
+
 use crate::sampling::{AssistantItem, ConversationItem, Role, ToolCall};
 fn at<T>(xs: &[T], i: usize) -> &T {
     let Some(x) = xs.get(i) else {
@@ -13,8 +15,9 @@ use std::collections::BTreeSet;
 use xai_chat_state::compaction_utils::{
     CompactedHistoryInput, build_compacted_history as build_compacted_history_shared,
 };
-/// Thin wrapper around the shared `build_compacted_history` from `xai-chat-state`.
-/// Renders the system-reminder synchronously (no memory backend) to match the old test-local helper signature.
+/// Thin wrapper around the shared `build_compacted_history` from
+/// `xai-chat-state`. Renders the system-reminder synchronously (no memory
+/// backend) to match the test-local helper signature.
 fn build_compacted_history(
     system_prompt: &str,
     user_message_prefix: &str,
@@ -213,7 +216,6 @@ async fn test_compacted_history_minimal_no_state_context() {
 }
 /// Regression guard: grok-build must DROP the working tail post-compaction.
 /// A prior change routed grok-build to keep `recent_messages`, which survive only as `Tool call omitted...` stubs (dead tokens).
-/// Mirrors `summary_before_recent_compaction_with_no_user_query_yields_three_messages` for grok-build (`summary_before_recent = false`).
 #[tokio::test]
 async fn grok_build_compaction_drops_working_tail_regression_206460() {
     let conversation = vec![

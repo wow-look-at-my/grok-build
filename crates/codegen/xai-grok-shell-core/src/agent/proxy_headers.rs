@@ -1,3 +1,5 @@
+// proxy_headers.rs holds the proxy headers code.
+
 use indexmap::IndexMap;
 /// Every authenticated request to cli-chat-proxy (web search, image gen, and any future tools that go through the proxy) must carry these headers.
 /// Headers injected: `x-grok-client-version`: required by the proxy's version-gate check. Uses `client_version` when provided, otherwise falls back to cli-chat-proxy compile-time `CARGO_PKG_VERSION`.

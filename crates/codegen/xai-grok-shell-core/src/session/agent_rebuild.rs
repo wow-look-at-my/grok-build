@@ -4,7 +4,7 @@
 //! Initial session spawn ([`crate::session::acp_session::spawn_session_actor`]) goes through [`AgentRebuildSpec::build_agent`].
 //! So does the zero-turn harness rebuild ([`crate::session::acp_session::SessionActor::handle_rebuild_agent_for_definition`]).
 //!
-//! ## Why this exists
+//! ## Why this exists.
 //!
 //! [`xai_grok_agent::Agent`] owns an [`xai_grok_tools::bridge::ToolBridge`] that carries session-scoped channels.
 //! Those are the notification handle, terminal/fs backends, subagent senders, scheduler set, plugin registry, and attribution callback.
@@ -12,22 +12,6 @@
 //! A rebuild happens, for example, when the user picks a model with a different `agent_type` before sending any user message.
 //! To rebuild, we must retain every input that the original `AgentBuilder` chain consumed.
 //! `AgentRebuildSpec` is exactly that retained bag of inputs.
-//!
-//! ## WHEN ADDING A NEW [`xai_grok_agent::AgentBuilder`]`::with_*` KNOB
-//!
-//! 1. Add the corresponding field to [`AgentRebuildSpec`].
-//! 2. Pass it through in [`AgentRebuildSpec::build_agent`].
-//!    The destructure pattern at the top of `build_agent` forces every field to be used.
-//!    A forgotten field is a compile error (`#[deny(unused_variables)]`).
-//! 3. Populate the field at the call site in `spawn_session_actor`.
-//!
-//! ## Why some fields are channel senders
-//!
-//! Several `ToolBridge` resources (e.g. `UserQuestionSender`, `SubagentBackendResource`) are backed by the `tx` halves of channels.
-//! The `rx` halves are owned by long-lived coordinator tasks spawned in `spawn_session_actor`.
-//! The subagent channels are wrapped in a `ChannelBackend` behind `SubagentBackendResource`.
-//! On rebuild, we must reuse the **same** senders so the existing coordinator keeps receiving requests.
-//! A fresh channel would orphan the running coordinator.
 use crate::agent::remote_config::task_model_policy::{
     LatchedTaskModelSelection, TaskModelPolicyInputs, latch_task_model_presentation,
     presentation_applied_event, rejection_sink,
@@ -58,7 +42,6 @@ use xai_grok_tools::types::SharedApiKeyProvider;
 use xai_grok_tools::types::compat::CompatConfig;
 use xai_grok_tools::types::memory_backend::MemoryBackend;
 /// Shell-resolved per-tool `ToolConfig.params` JSON maps.
-/// The struct keeps the spawn functions to a single argument instead of adjacent identically-typed positional arguments a caller could transpose.
 #[derive(Debug, Clone, Default)]
 pub struct ResolvedToolParamsJson {
     /// `[toolset.bash]` overrides for the bash tool(s).
@@ -101,13 +84,11 @@ pub struct AgentRebuildSpec {
     pub memory_global_path: Option<String>,
     pub memory_workspace_path: Option<String>,
     pub memory_backend: Option<Arc<dyn MemoryBackend>>,
-    /// Live v2 file-access policy. `None` while v2 memory is off; the `/memory` toggle
-    /// replaces it so a later zero-turn rebuild renders the same prompt as a fresh spawn.
+    /// Live v2 file-access policy.
     pub memory_v2_access: MemoryV2AccessSlot,
     pub memory_v2_exposed: bool,
     pub web_search_config: WebSearchConfig,
     /// `[toolset.web_search]` domain policy, resolved once at spawn.
-    /// It is applied to both search paths (the hosted `tool_overrides` merge and the client-side `WebSearchConfig`) so they never diverge.
     pub web_search_domains: Option<xai_grok_sampling_types::WebSearchOptions>,
     pub backend_search: bool,
     pub web_fetch_config: WebFetchConfig,
@@ -153,8 +134,7 @@ pub struct AgentRebuildSpec {
     pub blocking_wait_depth: Arc<crate::tools::tool_context::BlockingWaitState>,
     pub respect_gitignore: bool,
     pub path_not_found_hints: bool,
-    /// Fire side of the scheduler mode.
-    /// Keep the two on one resolve.
+    /// Fire side of the scheduler mode. Keep both on one resolve.
     pub mcp_state: Arc<tokio::sync::Mutex<crate::session::mcp_servers::McpState>>,
     pub managed_gateway_tool_client:
         Option<xai_grok_tools::types::resources::ManagedGatewayToolClient>,

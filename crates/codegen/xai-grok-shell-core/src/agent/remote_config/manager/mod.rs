@@ -127,8 +127,7 @@ impl Drop for FetchAttemptGuard {
         if self.inner.fetches_in_flight.fetch_sub(1, Ordering::AcqRel) > 1 {
             return;
         }
-        // Last attempt out with no outcome: latch so waiters return
-        // The lock makes the generation check atomic against `clear()`
+        // Last attempt out with no outcome: latch so waiters return.
         let cat = self.inner.catalog.read();
         if cat.generation != self.generation
             || self.inner.fetches_in_flight.load(Ordering::Acquire) > 0
@@ -285,7 +284,7 @@ impl ModelsManager {
         let has_prefetched = prefetched_models.is_some();
         let catalog = resolve_model_catalog(cfg, prefetched_models.clone());
 
-        // Only against a real catalog. A fleet pin on built-ins-only (custom endpoint, cold cache) would reject a valid policy before the first fetch. The catalog still marks unselectable entries; this check runs after prefetch / cache.
+        // Only against a real catalog.
         if has_prefetched {
             validate_selectable(cfg, &catalog)?;
         }
@@ -760,7 +759,7 @@ impl ModelsManager {
         let config = self.inner.cfg.read().clone();
         crate::agent::telemetry_config::update_telemetry_config(&config, &self.inner.auth_manager);
         self.inner.cache.invalidate();
-        // Fetches and the etag from the previous identity are stale now.
+        // Fetches and the etag from the identity are stale now.
         {
             let mut cat = self.inner.catalog.write();
             cat.generation += 1;
@@ -769,7 +768,6 @@ impl ModelsManager {
         let has_session = self.inner.auth_manager.current_or_expired().is_some();
         let fetch_auth = ModelFetchAuth::resolve(&config.endpoints, has_session);
         *self.inner.fetch_auth.write() = fetch_auth;
-        // No session but the endpoint needs one: a fetch would 401, so skip it and reset to this identity's bundled catalog
         if !has_session && fetch_auth == ModelFetchAuth::Session {
             self.clear();
             self.rebuild_bundled(&config);

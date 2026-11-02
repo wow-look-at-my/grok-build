@@ -1,3 +1,5 @@
+// prompt_suggest.rs holds the prompt suggest code.
+
 use crate::util::config::RemoteSettings;
 use toml::Value as TomlValue;
 use xai_grok_sampling_types::ReasoningEffort;
@@ -203,11 +205,9 @@ pub fn prompt_suggest_sampling_defaults(
         .temperature
         .unwrap_or(PROMPT_SUGGEST_TEMPERATURE_DEFAULT);
     // Pass through. Unset stays None so the non-reasoning model pin still applies.
-    // Low is chosen later, and only if the selected model supports reasoning.
     (max_output_tokens, temperature, cfg.reasoning_effort)
 }
 
-/// This alias resolves server-side with `alias_default_effort = none`.
 pub const NON_REASONING_PROMPT_SUGGEST_MODEL: &str = "grok-4-1-fast-non-reasoning";
 
 pub fn prompt_suggest_reasoning_is_off(configured: Option<ReasoningEffort>) -> bool {

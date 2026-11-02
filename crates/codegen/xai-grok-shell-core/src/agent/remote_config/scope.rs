@@ -12,10 +12,8 @@ fn origin_still_current(current_origin: &str, expected_origin: &str) -> bool {
 }
 
 /// The identity half of the commit scope, shared by the settings and models
-/// commits: re-resolve disk auth through the load's config and compare, so a
-/// like-for-like check detects real credential changes only. An empty
-/// `expected_identity` (an unauthenticated fetch) stays current only while disk
-/// auth is still absent.
+/// commits: re-resolve disk auth through the load's config and compare. A
+/// like-for-like check detects real credential changes only.
 fn identity_still_current(
     expected_identity: &str,
     auth_config: Option<&GrokComConfig>,
@@ -32,11 +30,9 @@ fn identity_still_current(
 pub enum Commit {
     /// Origin, policy, and identity all current: write the cache and serve.
     CacheAndServe,
-    /// Origin and policy current, identity not yet persisted to disk: serve in
-    /// memory this boot without writing the cache.
+    /// Origin and policy current, identity not yet persisted to disk.
     ServeInMemory,
-    /// A policy repair is in flight: transient, so re-run a later warm rather
-    /// than record a sticky failure.
+    /// A policy repair is in flight: transient, so re-run a later warm rather than record a sticky failure.
     Retry,
     /// Origin or policy changed for good: abandon the fetch.
     Abandon,
@@ -69,8 +65,8 @@ pub fn evaluate_commit(
 
 /// Commit scope for a models fetch: compare the scope captured at fetch start to
 /// a live re-resolve. Unlike the settings gate, the identity already folds in the
-/// full scope (mode, credential, alpha), so an alpha flip or key rotation mid
-/// fetch yields `ServeInMemory` rather than caching under the wrong scope.
+/// full scope (mode, credential, alpha). An alpha flip or key rotation mid fetch
+/// yields `ServeInMemory` rather than caching under the wrong scope.
 pub fn evaluate_models_commit(expected: &ModelsCacheScope, live: &ModelsCacheScope) -> Commit {
     if crate::managed_config::policy_repair_pending() {
         return Commit::Retry;

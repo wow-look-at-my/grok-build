@@ -1,32 +1,6 @@
-//! This manager coordinates:
-//! - Signal tracking via SessionSignalsHandle
-//! - Heuristics evaluation to determine when to request feedback
-//! - Periodic sync of signals to the feedback/analytics backend
-//! - Background loading of feedback configuration from the backend
-//! - Creating feedback request records when triggered
-//! - Sending feedback request notifications to clients
-//!
-//! ## Usage
-//! ```ignore
-//! // Create the manager when a session starts
-//! let manager = FeedbackManager::new(session_id, feedback_api_url, user_token);
-//!
-//! // Get the signals handle to pass around for event tracking
-//! let signals = manager.signals_handle();
-//!
-//! // Spawn the background sync task (also loads config)
-//! tokio::spawn(manager.run_sync_loop());
-//!
-//! // Track events
-//! signals.increment_turn();
-//! signals.record_tool_call("read_file");
-//!
-//! // Check for feedback after each turn
-//! // This also records the request with the feedback API if triggered
-//! if let Some(request) = manager.maybe_request_feedback(None).await {
-//!     // Send FeedbackRequest notification to client
-//! }
-//! ```
+//! This manager coordinates: - Signal tracking via SessionSignalsHandle. -
+//! Heuristics evaluation to determine when to request feedback., Periodic
+//! sync of signals to the feedback/analytics backend.
 
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -119,9 +93,7 @@ pub async fn submit_feedback_workflow(
     } = opts;
 
     if let Some(mut user_meta) = crate::util::parse_json_object_env("GROK_USER_METADATA") {
-        // `structured_feedback` is reserved for the client's typed envelope. The shallow merge
-        // is later-wins, so an env copy would silently replace the client's enums (or invent
-        // the key on reports that carry none); every other env key keeps later-wins.
+        // `structured_feedback` is reserved for the client's typed envelope.
         if let Some(user_meta) = user_meta.as_object_mut() {
             user_meta.remove("structured_feedback");
         }
@@ -141,9 +113,7 @@ pub async fn submit_feedback_workflow(
     }
 
     if let Some(tx) = persistence_tx {
-        // Persist the image inventory, never the payloads feedback.jsonl rides in trace archives with a hard per-file size cap (one screenshot's base64 would sink the whole record).
-        // The bytes are also cleartext terminal captures.
-        // Take/restore around the clone so the megabytes are never copied either.
+        // Persist the image inventory, never the payloads feedback.jsonl rides in trace archives with a hard per-file size cap.
         let images = std::mem::take(&mut submission.images);
         let mut persisted = submission.clone();
         persisted.images = images
@@ -216,7 +186,6 @@ pub async fn submit_feedback_workflow(
             rating = tracing::field::Empty,
             is_solicited = solicited,
         );
-        // Record `rating` only for star ratings; text-only feedback has no rating and must not export a fake 0
         if let Some(rating) = event.rating_value {
             feedback_span.record("rating", rating);
         }
@@ -243,27 +212,20 @@ pub struct FeedbackFlags {
     pub user: Option<crate::agent::config::FeedbackUserConfig>,
 }
 
-/// Two concerns are gated by separate flags (`feedback_enabled`, `telemetry_enabled`).
+/// Concerns are gated by separate flags (`feedback_enabled`, `telemetry_enabled`).
 /// Both default to `false`.
 #[derive(Debug, Clone)]
 pub struct FeedbackManagerConfig {
     /// Interval for syncing signals to the analytics backend (default: 30s)
     pub sync_interval: Duration,
     /// Whether user-facing feedback features are enabled (popups, `/feedback`, ratings).
-    /// Gated by `GROK_FEEDBACK_ENABLED`.
     pub feedback_enabled: bool,
-    /// Whether session analytics (signal sync, turn deltas) are enabled.
-    /// Gated by `GROK_TELEMETRY_ENABLED`.
-    /// These are analytics data that flow continuously without user action.
+    /// Whether session analytics (signal sync, turn deltas) are enabled. Gated by `GROK_TELEMETRY_ENABLED`.
     pub telemetry_enabled: bool,
     pub client_type: ClientType,
-    /// Whether LOC attribution tracking is enabled for this session.
-    /// Propagated into every `SessionTurnDelta`.
-    /// The server can then distinguish "tracking off" (zeros are noise) from "tracking on, no code changed" (zeros are real data).
+    /// Whether LOC attribution tracking is enabled for this session. Propagated into every `SessionTurnDelta`.
     pub loc_tracking_enabled: bool,
     /// Preferred timeout for draining the upload queue on shutdown (default: 30s).
-    /// Process exit clamps this under [`SHUTDOWN_DRAIN_CAP`] (or `GROK_SESSION_EXIT_DRAIN_SECS`) so a hung upload cannot exceed the agent join grace.
-    /// Abandoned durable pairs are recovered on next-session startup.
     pub drain_timeout: Duration,
     pub user: Option<crate::agent::config::FeedbackUserConfig>,
 }
@@ -293,16 +255,12 @@ pub struct FeedbackManager {
     config: FeedbackManagerConfig,
     config_loaded: Arc<AtomicBool>,
     /// GCS upload queue stats for periodic snapshots into signals.
-    /// Set once after the first upload queue is created via `set_upload_queue_stats()`.
-    /// `OnceLock` because `FeedbackManager` is behind `Arc` and this is set after construction.
     upload_queue_stats: std::sync::OnceLock<Arc<xai_file_utils::queue::UploadQueueStats>>,
-    /// Turn deltas post from one worker in send order, so the backend's append-only rows arrive
-    /// in turn order and [`Self::shutdown`] can wait for an exit cancel's row. `None` without a client.
+    /// Turn deltas post from one worker in send order.
     turn_delta_tx: Option<mpsc::Sender<TurnDeltaJob>>,
 }
 
-/// Queued for the turn-delta worker. Bounded at [`TURN_DELTA_QUEUE_CAPACITY`]: a stalled backend
-/// drops the newest deltas (logged) instead of growing without limit.
+/// Queued for the turn-delta worker.
 enum TurnDeltaJob {
     Post(Box<SessionTurnDelta>),
     /// Answered once every job queued before it has posted.
@@ -312,8 +270,7 @@ enum TurnDeltaJob {
 /// One delta per turn, so this only fills when the backend is unreachable for many turns.
 const TURN_DELTA_QUEUE_CAPACITY: usize = 64;
 
-/// The shared HTTP client bounds only connection setup; without this a stalled response would
-/// hold every later row behind it.
+/// The shared HTTP client bounds only connection setup.
 const TURN_DELTA_POST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Post queued turn deltas in order until every sender is dropped.
@@ -671,9 +628,12 @@ impl FeedbackManager {
         }
     }
 
-    /// The signals actor accumulates tool calls, errors, and latency continuously, so the snapshot captures the full diff since the previous turn's.
-    /// The caller provides the `TurnDeltaSnapshot` it took (each take advances the delta baseline), so this never advances it again.
-    /// The POST runs on the turn-delta worker; errors are logged and never block the turn flow.
+    /// The signals actor accumulates tool calls, errors, and latency
+    /// continuously, so the snapshot captures the full diff since the turn's.
+    /// The caller provides the `TurnDeltaSnapshot` it took (each take
+    /// advances the delta baseline), so this never advances it again. The
+    /// POST runs on the turn-delta worker; errors are logged and never block
+    /// the turn flow.
     #[tracing::instrument(skip_all, fields(session_id = %self.session_id))]
     pub async fn send_turn_delta_with_snapshot(
         &self,
@@ -756,8 +716,8 @@ impl FeedbackManager {
         self.sync_signals_inner(false).await
     }
 
-    /// Force-sync current signals to the analytics backend, bypassing the cooldown check.
-    /// Used for the final sync on shutdown to ensure no data is lost.
+    /// Force-sync current signals to the analytics backend, bypassing the
+    /// cooldown check.
     pub async fn force_sync_signals(&self) -> anyhow::Result<()> {
         self.sync_signals_inner(true).await
     }
@@ -816,9 +776,8 @@ impl FeedbackManager {
         }
     }
 
-    /// Attempt OIDC token refresh after a 401 and retry the signal sync once.
-    /// Returns the classified outcome for `handle_auth_outcome` to act on.
-    /// Prefers waiting for the proactive-refresh task or main-request-path recovery over driving a `ServerRejected` refresh itself.
+    /// Returns the classified outcome for `handle_auth_outcome` to act on. Prefers waiting for the proactive-refresh task or
+    /// main-request-path recovery over driving a `ServerRejected` refresh itself.
     async fn try_refresh_and_retry_sync(&self) -> SyncAuthOutcome {
         let Some(client) = &self.feedback_client else {
             return SyncAuthOutcome::Unrecoverable;
@@ -835,9 +794,6 @@ impl FeedbackManager {
             }
             return SyncAuthOutcome::Transient;
         }
-        // Any error after a successful refresh counts as a transient tick, so the consecutive-failure cap stays in effect
-        // That covers a pathological flap (401, then refresh OK, then 5xx)
-        // It also covers the rare sibling-rotation race where the IdP cache got re-set between our refresh and our retry
         match self.sync_signals().await {
             Ok(_) => SyncAuthOutcome::Recovered,
             Err(e) if client.is_auth_permanently_failed() => {
@@ -873,8 +829,7 @@ impl FeedbackManager {
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => {
-                    // Exit paths that need a final sync call `FeedbackManager::shutdown`, which owns the budgeted force-sync and drain
-                    // Cancel alone must not double-POST or hang on a dead analytics endpoint
+                    // Exit paths that need a final sync call `FeedbackManager::shutdown`.
                     tracing::debug!("Feedback sync loop cancelled");
                     break;
                 }
@@ -944,9 +899,8 @@ impl FeedbackManager {
         }
     }
 
-    /// Shutdown: turn-delta flush and final signal sync (one shared budget), optional upload drain, then signals actor stop.
-    /// For an empty session (no turns or tool calls), `sync_signals_inner(force)` skips the analytics POST; drain is skipped when pending is also 0.
-    /// Non-empty drains use `min(config.drain_timeout, cap)` (default cap 5s, `GROK_SESSION_EXIT_DRAIN_SECS` up to hard max 7s).
+    /// Shutdown: turn-delta flush and final signal sync (one shared budget), optional upload drain, then signals actor stop. Non-empty drains use
+    /// `min(config.drain_timeout, cap)` (default cap 5s, `GROK_SESSION_EXIT_DRAIN_SECS` up to hard max 7s).
     pub async fn shutdown(&self, queue: Option<&xai_file_utils::queue::UploadQueue>) {
         let pending = queue
             .map(|q| q.stats().pending.load(Ordering::Relaxed))
@@ -957,14 +911,10 @@ impl FeedbackManager {
             None => false,
         };
 
-        // (1) Queued turn deltas (an exit cancel's row is the last one), then the final force-sync,
-        // under one budget so exit stays inside the agent join grace.
-        // The telemetry-off and empty-session checks live in sync_signals_inner.
         let deadline = tokio::time::Instant::now() + SHUTDOWN_SIGNAL_SYNC_TIMEOUT;
         self.flush_turn_deltas(deadline).await;
         self.bounded_final_sync(deadline).await;
 
-        // (2) Drain only when needed: an empty session with zero pending is skipped
         if let Some(queue) = queue {
             if pending == 0 && !reportable {
                 tracing::debug!(
@@ -1003,16 +953,12 @@ impl FeedbackManager {
 }
 
 /// Bound on the final signals POST at process exit.
-/// Prefer a fast exit over waiting out a hung analytics endpoint; session metrics are best-effort.
 pub const SHUTDOWN_SIGNAL_SYNC_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Default ceiling on non-empty upload-queue drain at process exit.
-/// Keeps sync and drain under [`crate::agent::activity::SESSION_FLUSH_GRACE`] with residual time for hooks/memory.
-/// Override with `GROK_SESSION_EXIT_DRAIN_SECS` (still hard-capped by [`SHUTDOWN_DRAIN_HARD_MAX`]).
 const SHUTDOWN_DRAIN_CAP: Duration = Duration::from_secs(5);
 
 /// Absolute max non-empty drain at process exit.
-/// The 10s flush grace, less the 2s signal-sync budget and the turn-end queue's two 250ms waits, leaves 7.5s; held at 7s for residual.
 pub const SHUTDOWN_DRAIN_HARD_MAX: Duration = Duration::from_secs(7);
 
 /// When nothing is pending, only wait this long for the upload worker to exit after the shutdown signal; in practice this takes milliseconds.
@@ -1038,10 +984,7 @@ fn signals_are_reportable(s: &crate::session::signals::SessionSignals) -> bool {
     s.turn_count > 0 || s.tool_call_count > 0
 }
 
-// Auth outcome handler used by run_sync_loop on 401.
-
-/// Max consecutive failed sync ticks tolerated before stopping the loop.
-/// ~10 minutes at the default 60s interval.
+/// Max consecutive failed sync ticks tolerated before stopping the loop. Several minutes at the default 60s interval.
 const MAX_CONSECUTIVE_AUTH_FAILURES: u8 = 10;
 
 /// Telemetry `reason` discriminators on the `signals sync loop stopped permanently` event.
@@ -1058,10 +1001,8 @@ enum SyncAuthOutcome {
     /// Refresh and retry succeeded.
     Recovered,
     /// Refresh or retry failed transiently (lock timeout, network, sibling race, post-refresh 5xx).
-    /// Increment the counter and retry next tick.
     Transient,
-    /// IdP confirmed a terminal failure (`invalid_grant` / `invalid_client`).
-    /// Only re-login will recover.
+    /// IdP confirmed a terminal failure (`invalid_grant` / `invalid_client`). Only re-login will recover.
     Permanent,
     /// No client or no refresher configured, so nothing to retry.
     Unrecoverable,
@@ -1146,7 +1087,6 @@ fn handle_auth_outcome(
 }
 
 /// Check if an error is an HTTP 401 Unauthorized response.
-/// Uses typed downcast on [`FeedbackApiError`] instead of string matching, so it stays correct even if error messages change.
 fn is_auth_error(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<FeedbackApiError>()
@@ -1154,16 +1094,14 @@ fn is_auth_error(error: &anyhow::Error) -> bool {
 }
 
 /// Check if an error is an HTTP 403 Forbidden response.
-/// 403 from the signals endpoint means the session does not belong to the current user, a permanent condition that will never self-resolve.
 fn is_forbidden_error(error: &anyhow::Error) -> bool {
     error
         .downcast_ref::<FeedbackApiError>()
         .is_some_and(|e| e.is_forbidden())
 }
 
-/// Run `op` once; on 401, wait for an in-flight refresh to land, then retry once.
 /// Prefers waiting for the proactive-refresh task or main-request-path recovery over driving a `ServerRejected` refresh itself.
-/// That avoids amplifying 401 bursts during token-expiry windows.
+/// That avoids amplifying bursts during token-expiry windows.
 async fn with_one_shot_auth_retry<T, F, Fut>(
     client: &FeedbackClient,
     mut op: F,
@@ -1188,7 +1126,6 @@ where
     }
 }
 
-/// Convert a FeedbackTier to a priority value (1-10, higher is more important).
 fn tier_to_priority(tier: crate::session::feedback::FeedbackTier) -> i32 {
     use crate::session::feedback::FeedbackTier;
     match tier {
@@ -1738,7 +1675,6 @@ mod tests {
 
     // ── handle_auth_outcome tests ──────────────────────────────────────────
 
-    /// 9 transient failures must NOT break, and a subsequent `Recovered` must reset the counter to 0.
     #[test]
     fn test_sync_loop_continues_through_transient_auth_failures() {
         let mut counter: u8 = 0;
@@ -1764,7 +1700,6 @@ mod tests {
                 "iteration {i} should still continue"
             );
         }
-        // The 10th transient outcome reaches MAX_CONSECUTIVE_AUTH_FAILURES and breaks
         let flow = handle_auth_outcome(SyncAuthOutcome::Transient, &mut counter, "s");
         assert_eq!(flow, ControlFlow::Break(()));
         assert_eq!(counter, MAX_CONSECUTIVE_AUTH_FAILURES);
@@ -1779,7 +1714,6 @@ mod tests {
         assert_eq!(counter, 0);
     }
 
-    /// 5 transient, then 1 recovered, then 5 more transient must not break.
     #[test]
     fn test_sync_loop_counter_resets_on_successful_sync() {
         let mut counter: u8 = 0;

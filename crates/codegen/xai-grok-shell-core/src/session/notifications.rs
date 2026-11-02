@@ -1,3 +1,5 @@
+// notifications.rs holds the notifications code.
+
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -26,7 +28,6 @@ impl SessionClientCaps {
 pub struct NotificationSender {
     pub gateway: GatewaySender,
     /// When false, notifications are persisted but NOT forwarded to the client.
-    /// Opened by `MvpAgent::load_session` when the client explicitly loads the session.
     pub gateway_enabled: Arc<AtomicBool>,
     pub persistence_tx: mpsc::UnboundedSender<PersistenceMsg>,
     pub disk_full: watch::Receiver<bool>,

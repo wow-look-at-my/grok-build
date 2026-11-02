@@ -1,3 +1,5 @@
+// announcements.rs holds the announcements code.
+
 use toml::Value as TomlValue;
 
 /// Announcement entry received from cli-chat-proxy `/v1/settings`.

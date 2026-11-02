@@ -1,3 +1,5 @@
+// goal_tracker_tests.rs holds the goal tracker tests code.
+
 use super::*;
 
 fn make_tracker() -> GoalTracker {
@@ -124,7 +126,7 @@ fn premature_stop_event_maps_to_wire_string() {
 #[test]
 fn append_history_caps_oldest_entries() {
     let mut t = make_tracker();
-    activate_tracker(&mut t); // seeds 1 GoalCreated entry
+    activate_tracker(&mut t);
     for i in 0..(GOAL_HISTORY_MAX + 10) {
         t.append_history(GoalHistoryEntry {
             timestamp: format!("t{i}"),
@@ -271,7 +273,8 @@ fn generate_verifier_id_is_short_hex_and_unique() {
     assert_ne!(a, b, "two successive ids must differ");
 }
 
-/// The id is the stable handle the model uses to read verdict files, so any mid-lifecycle reassignment would orphan the previously written verdicts.
+/// The id is the stable handle the model uses to read verdict files, so any
+/// mid-lifecycle reassignment would orphan the written verdicts.
 #[test]
 fn verifier_id_is_stable_across_pause_resume() {
     let mut t = make_tracker();
@@ -444,7 +447,6 @@ fn strategist_fire_resets_classifier_stall_streak() {
     );
 }
 
-/// While the strategist bonus is active, identical gap fingerprints get the relaxed stall window instead of tripping at the default threshold of 2.
 #[test]
 fn relaxed_stall_threshold_applies_while_strategist_bonus_active() {
     let mut t = make_tracker();
@@ -473,7 +475,7 @@ fn relaxed_stall_threshold_reverts_after_strategist_reset() {
     let _ = t.record_not_achieved_streak();
     assert!(t.claim_strategist_fire(|_, _| true).is_some());
 
-    // Two identical fingerprints under the relaxed window: no stall yet.
+    // Identical fingerprints under the relaxed window: no stall yet.
     assert!(!t.record_classifier_stall("fp-x"));
     assert!(!t.record_classifier_stall("fp-x"));
     assert_eq!(t.snapshot().unwrap().classifier_stall_count, 2);
@@ -684,7 +686,7 @@ fn strategist_fire_grants_cap_bonus_then_reset_clears_it() {
     assert_eq!(t.snapshot().unwrap().strategist_cap_bonus, 0);
 }
 
-/// Every branch uses this single reset so they can't drift.
+/// Every branch uses this reset so they can't drift.
 #[test]
 fn reset_strategist_state_clears_streak_marker_and_recommendation() {
     let mut t = make_tracker();
@@ -906,7 +908,7 @@ fn no_progress_paused_round_trips_distinctly_from_back_off() {
     assert_eq!(json, "\"no_progress_paused\"");
     let back: GoalStatus = serde_json::from_str(&json).unwrap();
     assert_eq!(back, GoalStatus::NoProgressPaused);
-    // The cap pause keeps its own wire form; the two must not collapse
+    // The cap pause keeps its own wire form; both must not collapse
     assert_eq!(
         GoalStatus::from_wire_str("back_off_paused"),
         GoalStatus::BackOffPaused
@@ -1206,7 +1208,8 @@ fn unknown_future_paused_status_deserializes_to_user_paused() {
     assert_eq!(parsed, GoalStatus::UserPaused);
 }
 
-/// Any unknown wire status (not just `*_paused` forms) must restore as a resumable paused goal, never an Active self-driving one.
+/// Any unknown wire status (not `*_paused` forms) must restore as a resumable
+/// paused goal, never an Active self-driving one.
 #[test]
 fn unknown_non_paused_status_deserializes_to_user_paused_not_active() {
     for wire in [r#""quarantined""#, r#""v9_super_active""#, r#""""#] {
@@ -1452,9 +1455,9 @@ fn from_snapshot_restore_then_resume_tracks_elapsed() {
     assert!(t.snapshot().unwrap().elapsed_ms >= 5000);
 }
 
-/// A snapshot written by an older shell will omit all nine classifier fields.
-/// Deserialization must succeed and every new field must come back at its `#[serde(default)]` value.
-/// The JSON literal below doubles as the documented v0 schema contract: a raw literal cannot drift in sync with the in-code serialization shape.
+/// A snapshot written by an older shell will omit all of them classifier fields. Deserialization must succeed and every new field must come back
+/// at its `#[serde(default)]` value. The JSON literal below doubles as the documented v0 schema contract: a raw literal cannot drift in sync
+/// with the in-code serialization shape.
 #[test]
 fn classifier_fields_backwards_compat_defaults_on_legacy_snapshot() {
     const LEGACY_SNAPSHOT_JSON: &str = r#"{
@@ -1521,8 +1524,7 @@ fn goal_orchestration_serde_drops_legacy_tokens_used_field() {
         serde_json::from_str(LEGACY).expect("legacy snapshot must deserialize");
     assert_eq!(loaded.goal_id, "g-old");
     assert_eq!(loaded.token_baseline, 0);
-    // Round-trip and verify the dropped keys do not reappear at the top level
-    // `tokens_used` on history entries (Option<i64>) is a distinct field and `history` is empty here so the simple `contains` check is sound
+    // Round-trip and verify the dropped keys do not reappear at the top level `tokens_used` on history entries.
     let round = serde_json::to_string(&loaded).unwrap();
     assert!(
         !round.contains("\"tokens_used\""),
@@ -1603,7 +1605,7 @@ fn classifier_fields_serde_round_trip_preserves_all_fields() {
     }
 }
 
-/// `skeptic0_session_id` must persist across a snapshot save/restore within a session so the next attempt can resume skeptic 0.
+/// `skeptic0_session_id` must persist across a snapshot save/restore within a session so the next attempt can resume the first skeptic.
 #[test]
 fn skeptic0_session_id_round_trips_through_serde() {
     let mut o = make_base_orchestration();
@@ -1636,7 +1638,7 @@ fn first_final_response_round_trips_through_serde() {
     );
 }
 
-/// A later goal then starts verification with a fresh, cold skeptic 0.
+/// A later goal then starts verification with a fresh, cold the first skeptic.
 #[test]
 fn terminal_transitions_clear_skeptic0_session_id() {
     for ending in ["complete", "budget_limit"] {
@@ -1762,7 +1764,7 @@ fn scratch_path_helpers_derive_pinned_layout() {
     );
 }
 
-/// Two skeptics in the SAME goal get DISTINCT scratch dirs so their re-runs never overwrite each other's screenshots.
+/// Skeptics in the SAME goal get DISTINCT scratch dirs so their re-runs never overwrite each other's screenshots.
 #[test]
 fn distinct_skeptics_get_distinct_scratch_dirs() {
     assert_ne!(skeptic_scratch_dir("vid", 0), skeptic_scratch_dir("vid", 1),);
@@ -1786,7 +1788,6 @@ fn create_goal_creates_implementer_scratch_dir() {
     let _ = std::fs::remove_dir_all(goal_scratch_root(&vid));
 }
 
-/// The root is 0700 from the instant it exists (atomic-mode create, no chmod window) and a re-ensure re-applies the mode.
 #[cfg(unix)]
 #[test]
 fn ensure_goal_scratch_root_is_owner_only() {
@@ -1874,7 +1875,7 @@ fn create_goal_over_active_removes_prior_scratch_root() {
     let _ = std::fs::remove_dir_all(goal_scratch_root(&new_vid));
 }
 
-/// All three terminal transitions rescue the details file; the achieved ack reports its path AFTER `complete()`.
+/// All of them terminal transitions rescue the details file; the achieved ack reports its path AFTER `complete()`.
 #[test]
 fn terminal_transitions_rescue_classifier_details_file() {
     for ending in ["complete", "budget_limit", "clear"] {
@@ -1940,7 +1941,6 @@ fn terminal_transitions_rescue_classifier_details_file() {
     }
 }
 
-/// Replacing a still-active goal (`create_goal` over-active) is the 4th root-removal site and must rescue like its terminal siblings.
 #[test]
 fn create_goal_over_active_rescues_prior_details_file() {
     let session = tempfile::tempdir().unwrap();
@@ -2068,13 +2068,13 @@ fn append_skeptic_reports_prefers_latest_attempt_numerically() {
     let scratch = tempfile::tempdir().unwrap();
     let dest = scratch.path().join("canonical.md");
     std::fs::write(&dest, "canonical body").unwrap();
-    // Stale attempt 1: alone larger than the whole budget.
+    // Stale one attempt: alone larger than the whole budget.
     std::fs::write(
         scratch.path().join("goal-classifier-v-1-skeptic-0.md"),
         "s".repeat(crate::session::goal_classifier::GOAL_VERIFIER_PANEL_MAX_BYTES + 1),
     )
     .unwrap();
-    // Final attempt 10: two small reports.
+    // Final a later attempt: small reports.
     std::fs::write(
         scratch.path().join("goal-classifier-v-10-skeptic-0.md"),
         "LATEST_S0_BODY",

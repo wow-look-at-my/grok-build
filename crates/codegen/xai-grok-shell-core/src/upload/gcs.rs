@@ -1,20 +1,4 @@
 //! Shell-side adapter that threads the live `AuthManager` through to the `StorageClient` constructed inside `xai_file_utils::gcs::*` helpers.
-//!
-//! Background: the data-collector helpers (`upload_bytes`, `upload_file`, `upload_stream`, `upload_bytes_signed`) build a `StorageClient` per call.
-//! Without a `StorageConfig` impl that provides `proxy_credentials` / `proxy_attribution`, that client falls back to a static `user_token` snapshot.
-//! The snapshot is baked into `TraceExportConfig` at construction time, and no attribution event is emitted on 401.
-//! That snapshot becomes stale on rotation and is empty during the 5-minute pre-refresh buffer window in `AuthManager`.
-//! Both show up as `POST /v1/storage` 401s at the proxy.
-//!
-//! [`TraceExportConfigWithAuth`] wraps a bare `TraceExportConfig` plus an optional `Arc<AuthManager>` and implements `StorageConfig`.
-//! When the manager is present, the constructed `StorageClient` gets:
-//!
-//!   1. A refresh-aware `ShellAuthCredentialProvider`.
-//!      It serves the live token from `auth_manager.current()` and falls back to `expired_auth()` so the buffer window is covered.
-//!   2. A `StorageClientAttributionBridge` that emits the `auth_401_attribution` event on 401 with the right consumer tag.
-//!
-//! Use [`WithAuth::with_auth`] at every shell-side upload call site that has an `AuthManager` in scope.
-//! Call it immediately before passing the config to an `xai_file_utils::gcs::*` helper.
 use std::sync::Arc;
 use xai_file_utils::gcs::StorageConfig;
 use xai_file_utils::storage_client::Auth401AttributionCallback;
@@ -73,7 +57,6 @@ impl WithAuth for TraceExportConfig {
     }
 }
 /// Upload bytes to the `auth-diagnostics/{version}/{user_id}/{ts}.jsonl` path for easy aggregation across users.
-/// Used by both the auth refresh failure uploader and the 401/404 error trace uploader.
 pub async fn upload_to_auth_diagnostics(
     log_bytes: &[u8],
     user_id: &str,

@@ -1,3 +1,5 @@
+// memory_flush_window.rs holds the memory flush window code.
+
 use xai_grok_sampling_types::ConversationItem;
 
 /// Select a recent window of the conversation history for the flush model.

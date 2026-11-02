@@ -1,6 +1,5 @@
-//! Twin of `cursor_worker` for builds without the `cursor-worker` feature: the same control
-//! surface, with every command answering the "not compiled in" `ControlError`. Keeps
-//! `server.rs` and `run_leader` free of feature gates.
+//! Twin of `cursor_worker` for builds without the `cursor-worker` feature: the same control surface, with every command
+//! answering the "not compiled in" `ControlError`.
 
 use std::path::PathBuf;
 use std::sync::Arc;

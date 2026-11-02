@@ -1,6 +1,5 @@
 //! Round-trip test against the live backend: pushes one session, then pulls it back.
 //!
-//! Run with: `cargo test -p xai-grok-shell -- pull_smoke --ignored --nocapture`
 
 #[cfg(test)]
 mod tests {

@@ -1,4 +1,6 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
+// tests.rs holds the tests code.
+
 use super::*;
 fn with_env_var<T>(name: &str, value: &str, f: impl FnOnce() -> T) -> T {
     let previous = std::env::var(name).ok();
@@ -96,10 +98,9 @@ command = "$$HOME"
     assert_eq!(command, "$HOME");
 }
 /// Mutex to serialize tests that touch the GROK_MEMORY env var.
-/// Env vars are process-global, so parallel tests race on them.
 static MEMORY_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-/// Run `f` with `name` set to `value` (Some) or removed (None).
-/// Saves and restores the previous value, even on panic.
+/// Run `f` with `name` set to `value` (Some) or removed (None). Saves and
+/// restores the value, even on panic.
 fn with_env_var_opt<T>(name: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
     let previous = std::env::var(name).ok();
     match value {
@@ -3570,9 +3571,9 @@ fn apply_requirements_pins_voice_mode_false() {
         );
     assert!(!cfg.is_feature_enabled(crate::agent::config::Feature::VoiceMode));
 }
-/// Two layers pinning one key alike must report the layer that decided, not the first that asked.
-/// Otherwise the operator log names a user's file for an administrator's pin.
-/// Layers apply user first, system last.
+/// Layers pinning one key alike must report the layer that decided, not the first that asked.
+/// Otherwise the operator log names a user's file for an administrator's pin. Layers apply user
+/// first, system last.
 #[test]
 fn a_repeated_pin_is_reported_against_the_layer_that_decided() {
     let mut cfg = crate::agent::config::Config::default();

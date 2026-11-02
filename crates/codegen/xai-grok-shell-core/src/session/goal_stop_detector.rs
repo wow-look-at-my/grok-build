@@ -1,22 +1,5 @@
-//! Heuristic stop-detector for premature "give up" turn endings.
-//!
-//! The model is judged to be bailing out when the LAST non-empty paragraph of its turn-final text starts with one of the patterns below.
-//! The patterns are phrasings commonly used as a bail / hand-off / verdict signal.
-//! On a hit, `maybe_queue_goal_continuation` (reached on the success / continuation path) renders the bail-specific nudge instead of the generic one.
-//! The harness emits `Event::GoalPrematureStopDetected { pattern }` tagged with the matched pattern label.
-//! Dashboards use the pattern label to audit precision / recall of the regex panel.
-//!
-//! Two patterns are expressed in two stages rather than as a single regex:
-//!
-//! 1. [`CHECK_BACK_LATER`]: a single-regex form would need a negative lookahead `(?!your?\b)` that the `regex` crate does not support.
-//!    The same check runs in two stages instead: a broad first-stage regex, then a `your`/`you` post-filter in `check_back_later_matches`.
-//! 2. `STOPPING_HERE`: the base trailer set `(?:\.|$| \u2014| -| until| pending| since| because)` is widened to include `,`, `;`, and ` for `.
-//!    Natural sign-offs like "Stopping here for now.", "Stopping here, will come back later.", and "Paused here; review needed." still fire.
-//!    The widening is bounded by a non-letter boundary in the tests so in-word matches like "Stopping hereafter" stay rejected.
-//!
-//! Intentionally omitted from this panel: a broad catch-all "continuation deferral" pattern (`\b(?:once|when|after|until|as soon as)\b…`).
-//! Stand-alone it fires on routine work narration ("Once the test settles I'll iterate"), and that false-positive rate dwarfs the bail signal.
-//! The more specific patterns below already cover the bail phrasings.
+//! Heuristic stop-detector for premature "give up" turn endings. The model is
+//! judged to be bailing out when the LAST.
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -169,7 +152,6 @@ pub fn matched_stop_pattern(text: &str) -> Option<&'static str> {
 }
 
 /// Used by the boolean-only test assertions.
-/// Production callers use `matched_stop_pattern` so the pattern label can be threaded into `Event::GoalPrematureStopDetected`.
 #[cfg(any(test, feature = "test-util"))]
 fn looks_like_premature_stop(text: &str) -> bool {
     matched_stop_pattern(text).is_some()
@@ -185,8 +167,8 @@ fn normalise_line_endings(text: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
-/// Return the last non-empty paragraph of `text`, where paragraphs are separated by one or more blank lines.
-/// `None` when `text` has no non-whitespace content.
+/// Return the last non-empty paragraph of `text`, where paragraphs are
+/// separated by one or more blank lines.
 fn last_non_empty_paragraph(text: &str) -> Option<&str> {
     text.split("\n\n")
         .map(str::trim)
@@ -384,9 +366,7 @@ mod tests {
                 "should flag commit/push/PR hand-off: {phrase}",
             );
         }
-        // Hex shorter than 7 digits must not fire on the hex-bearing branches: that's the `[0-9a-f]{7,}` length guard
-        // The `Pushed` alternation has two arms: `Pushed to \`` (literal, any branch name) and `Pushed \`[0-9a-f]{7,}` (a backtick then hex)
-        // The negatives below target only the hex-bearing arms.
+        // Hex shorter than multiple digits must not fire on the hex-bearing branches: that's the `[0-9a-f]{7,}` length guard The `Pushed` alternation has arms.
         assert!(matched_stop_pattern("Commit: abc").is_none());
         assert!(
             matched_stop_pattern("Pushed `abc`").is_none(),
@@ -555,7 +535,7 @@ mod tests {
         }
     }
 
-    /// Guards against forgetting to add a new pattern to one of the two lists.
+    /// Guards against forgetting to add a new pattern to one of those lists.
     #[test]
     fn pattern_labels_match_source_table_order() {
         let from_sources: Vec<&'static str> =

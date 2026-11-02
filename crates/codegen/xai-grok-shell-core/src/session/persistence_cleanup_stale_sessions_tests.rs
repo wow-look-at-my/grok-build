@@ -1,3 +1,5 @@
+// persistence_cleanup_stale_sessions_tests.rs holds the persistence cleanup stale sessions tests code.
+
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 

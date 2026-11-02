@@ -92,8 +92,7 @@ fn sweep_stale_tmp(path: &std::path::Path, ttl: std::time::Duration) {
     }
 }
 
-/// Atomic replace via a unique temp file and rename. `private` sets 0600 for the
-/// sensitive settings cache; the models cache uses the default mode.
+/// Atomic replace via a unique temp file and rename.
 pub fn write_atomic(path: &std::path::Path, ttl: std::time::Duration, bytes: &[u8], private: bool) {
     let Some(parent) = path.parent() else {
         return;

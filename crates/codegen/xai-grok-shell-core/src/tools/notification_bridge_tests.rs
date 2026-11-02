@@ -1,3 +1,5 @@
+// notification_bridge_tests.rs holds the notification bridge tests code.
+
 use super::*;
 use xai_grok_tools::computer::types::TaskKind;
 use xai_grok_tools::types::TaskSnapshot;
@@ -832,8 +834,7 @@ async fn monitor_task_completed_suppressed_during_goal_loop() {
 
 #[tokio::test]
 async fn scheduled_task_created_is_persisted() {
-    // A `/loop` create must be persisted (like TaskBackgrounded) so a second terminal that resumes the session restores the loop from replay
-    // Otherwise it stays invisible until the loop next fires
+    // A `/loop` create must be persisted (like TaskBackgrounded).
     let (config, _gateway_rx, mut persistence_rx, _cmd_rx) = make_test_config_full();
     let notification = ToolNotification::ScheduledTaskCreated(
         xai_grok_tools::notification::types::ScheduledTaskCreated {
@@ -1341,8 +1342,7 @@ fn durable_append_mapping_respects_commit_disposition() {
 
 #[tokio::test]
 async fn scheduled_task_fired_is_not_persisted() {
-    // `_fired` recurs on every interval; persisting it would grow the updates log without bound
-    // Loops are restored from create/delete, so the fire stays gateway-only (the pager self-heals the entry on a live fire if needed)
+    // `_fired` recurs on every interval; persisting it would grow the updates log without bound Loops are restored from create/delete.
     let (config, mut gateway_rx, mut persistence_rx, _cmd_rx) = make_test_config_full();
     let notification = ToolNotification::ScheduledTaskFired(
         xai_grok_tools::notification::types::ScheduledTaskFired {
@@ -1398,9 +1398,7 @@ fn make_monitor_event_notification(task_id: &str, owner: Option<&str>) -> ToolNo
 
 #[tokio::test]
 async fn cross_session_monitor_event_is_dropped() {
-    // The bridge belongs to "test-session"; the event is owned by a different session
-    // In leader mode (one agent process, many sessions) this is the cross-session leak
-    // Without the owner guard the foreign monitor would inject a `<monitor-event>` reminder into this session's conversation
+    // The bridge belongs to "test-session"; the event is owned by a different session In leader mode.
     let (config, mut gateway_rx, _persistence_rx, mut cmd_rx) = make_test_config_full();
     let notification = make_monitor_event_notification("mon-foreign", Some("other-session"));
     let mut offsets = HashMap::new();
@@ -1751,7 +1749,8 @@ fn extract_current_mode_id(notification: &acp::SessionNotification) -> Option<&s
 async fn plan_mode_exited_emits_current_mode_update_default() {
     let (config, mut gateway_rx, mut persistence_rx, mut cmd_rx) = make_test_config_full();
 
-    // Pre-condition: agent path requires plan mode to be Active first so `deactivate_approved` actually flips state and triggers the emit
+    // Pre-condition: agent path requires plan mode to be Active first so
+    // `deactivate_approved` flips state and triggers the emit
     {
         let mut tracker = config.plan_mode.lock();
         assert!(tracker.activate_from_tool());

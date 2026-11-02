@@ -1,15 +1,10 @@
 //! Pure builders for prefire two-pass compaction (shell-only).
-//!
-//! Pass1 summarizes ~95% of history (by estimated-token weight) into NOTE₁.
-//! Pass2 rewrites NOTE₁ and the ~5% tail into NOTE₂, the note the successor sees.
-//! Sampling lives in [`super::compaction`]; this module has no I/O.
 
 use xai_chat_state::compaction_utils::format_compact_summary_content;
 use xai_chat_state::estimate_item_tokens;
 use xai_grok_sampling_types::ConversationItem;
 
 /// Default history fraction covered by pass1.
-/// The remainder is the blocking pass2 tail, so keep it small (prod pass2 latency is dominated by tail prefill).
 pub const TWO_PASS_DEFAULT_SPLIT_FRACTION: f64 = 0.95;
 
 /// Minimum char length for a closed `<summary>` block to be preferred as NOTE₁ over the full pass1 response.
@@ -228,9 +223,9 @@ pub fn build_two_pass_pass1_history(
     history
 }
 
-/// Pass2 sample history: the system turns from `prefix`, then the NOTE₁ carrier, the tail, and the compaction instruction.
-///
-/// The successor sees only the model output of *this* history (NOTE₂).
+/// Pass2 sample history: the system turns from `prefix`, then the NOTE₁
+/// carrier, the tail, and the compaction instruction. The successor sees only
+/// the model output of *this* history (NOTE₂).
 pub fn build_two_pass_pass2_history(
     prefix: &[ConversationItem],
     tail: &[ConversationItem],
@@ -272,7 +267,7 @@ mod tests {
         // Pass2 needs recent turns to rewrite against NOTE₁
         let weights = vec![10u64; 40];
         let idx = split_index_by_token_fraction(&weights, TWO_PASS_DEFAULT_SPLIT_FRACTION);
-        assert_eq!(idx, 38); // 38/40 = 95% by weight
+        assert_eq!(idx, 38);
         assert!(idx < weights.len());
     }
 

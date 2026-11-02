@@ -1,5 +1,4 @@
-//! The marketplace SOURCE model: loading configured sources (config.toml + settings JSON +
-//! managed pins) and filtering them through the managed `marketplace_allowlist`.
+//! The marketplace SOURCE model: loading configured sources.
 
 use std::path::Path;
 
@@ -88,8 +87,7 @@ fn managed_extra_marketplace_sources(
             (SourceKind::Git { url: a, .. }, SourceKind::Git { url: b, .. }) => {
                 normalize_git_url(a) == normalize_git_url(b)
             }
-            // Local pins dedupe by exact path (same comparison as the strict-list exemption), so a pin of
-            // an already-configured directory doesn't register a duplicate row.
+            // Local pins dedupe by exact path (same comparison as the strict-list exemption).
             (SourceKind::Local { path: a }, SourceKind::Local { path: b }) => a == b,
             _ => false,
         };
@@ -133,7 +131,7 @@ pub fn load_filtered_marketplace_sources() -> Vec<MarketplaceSource> {
 }
 
 /// Each source is checked at its own origin: an advisory strict list drops only foreign-defined
-/// sources, a native one binds everything; local sources drop unless an exact-path pin exempts.
+/// sources, a native one binds everything. Local sources drop unless an exact-path pin exempts.
 fn filter_sources_by_allowlist(
     mut sources: Vec<(MarketplaceSource, PolicySubjectOrigin)>,
     allowlist: &xai_grok_workspace::permission::resolution::MarketplacePolicy,
@@ -200,8 +198,7 @@ mod tests {
                 },
                 ownership: PolicyLayerOwnership::Admin,
             },
-            // A pin from a user-writable layer must not carve an exception
-            // out of the lockdown.
+            // A pin from a user-writable layer must not carve an exception out of the lockdown.
             ManagedMarketplace {
                 name: "User Pin".into(),
                 kind: ManagedMarketplaceKind::Local {

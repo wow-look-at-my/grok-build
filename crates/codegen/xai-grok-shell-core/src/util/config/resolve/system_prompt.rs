@@ -1,3 +1,5 @@
+// system_prompt.rs holds the system prompt code.
+
 pub const ENV_SYSTEM_PROMPT_LABEL: &str = "GROK_SYSTEM_PROMPT_LABEL";
 
 pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = xai_grok_agent::DEFAULT_SYSTEM_PROMPT_LABEL;

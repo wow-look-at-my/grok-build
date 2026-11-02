@@ -1,3 +1,5 @@
+// turn.rs holds the turn code.
+
 use super::drain::PendingUploadGuard;
 use crate::session::repo_changes::TraceExportConfig;
 use futures::FutureExt as _;
@@ -18,7 +20,6 @@ pub enum UploadOutcome {
     #[allow(dead_code)]
     Confirmed,
     /// Not confirmed within the flush deadline; the upload continues in the live queue worker.
-    /// Cloud restorability is unobserved, so `restorable_turn_number` must not advance on it.
     #[allow(dead_code)]
     Deferred,
     Failed {
@@ -35,9 +36,8 @@ impl UploadOutcome {
 #[derive(Debug, Clone, Copy)]
 pub enum UploadWait {
     /// Await per-artifact cloud confirmation.
-    /// Detached background upload tasks use this mode, where a slow bucket delays nothing the user sees.
     Confirm,
-    /// Durable-accept into the upload queue; `complete_prompt_trace` then flushes the queue with one bounded, non-terminal wait before the prompt response. Each accept/upload/confirmation wait is bounded: by `deadline` directly (the flush; the queue-backed session-state confirm) or by the floored per-attempt budget derived from it (`blocking_attempt_budget`: the session-copy handoff, non-durable- accept direct uploads, the queue-less session-state confirm, the manifest write). Only the `spawn_blocking` archive build precedes the bound.
+    /// Durable-accept into the upload queue.
     Defer { deadline: tokio::time::Instant },
 }
 /// Whether turn-end uploads hold the prompt response or run after it.
@@ -60,11 +60,9 @@ pub enum TurnMessages {
 pub enum MissingTurnMessages {
     /// The actor answered: the turn genuinely captured nothing.
     Empty,
-    /// The actor never answered `TakeTurnMessages` within the bound (wedged
-    /// child teardown): a real miss, recorded as a failure.
+    /// The actor never answered `TakeTurnMessages` within the bound (wedged child teardown): a real miss.
     TakeTimedOut,
-    /// The actor is gone: the command channel or the responder dropped
-    /// without an answer — a real miss, recorded as a failure.
+    /// The actor is gone: the command channel or the responder dropped without an answer — a real miss.
     ChannelDropped,
 }
 impl From<Option<xai_chat_state::TurnCapture>> for TurnMessages {
@@ -194,17 +192,20 @@ where
     let (outcome, _, _) = futures::join!(session_state, permission_events, memory);
     outcome
 }
-/// A turn with this stop reason committed its assistant content: `EndTurn` naturally, `MaxTokens` via Length salvage.
-/// The result drives `turn_result.json`'s `completed` and [`take_streaming_partial`]'s `committed`.
+/// A turn with this stop reason committed its assistant content: `EndTurn`
+/// naturally, `MaxTokens` via Length salvage.
 pub fn stop_reason_commits_turn(stop_reason: agent_client_protocol::StopReason) -> bool {
     matches!(
         stop_reason,
         agent_client_protocol::StopReason::EndTurn | agent_client_protocol::StopReason::MaxTokens
     )
 }
-/// Take the out-of-band streaming capture for `prompt_id`, returning it only when the turn did NOT commit its assistant message. The live slot is always drained (even when committed) so a later turn cannot inherit it.
-/// A committed turn's reasoning is already in `afterStateHistory`, so its capture is dropped. Stamps `model_id` (when absent); the caller stamps the site-specific `reason` lazily on the returned `Some`.
-/// Every turn-end take site (main success / error, synthetic, subagent) calls this.
+/// Take the out-of-band streaming capture for `prompt_id`, returning it only
+/// when the turn did NOT commit its assistant message. The live slot is
+/// always drained (even when committed) so a later turn cannot inherit it.
+/// Stamps `model_id` (when absent); the caller stamps the site-specific
+/// `reason` lazily on the returned `Some`. Every turn-end take site (main
+/// success / error, synthetic, subagent) calls this.
 pub async fn take_streaming_partial(
     cmd_tx: &tokio::sync::mpsc::UnboundedSender<crate::session::SessionCommand>,
     prompt_id: String,
@@ -361,7 +362,8 @@ pub async fn complete_prompt_trace(
     }
     Ok(artifacts_confirmed)
 }
-/// Manifest record and ok-flag when there is no capture to upload: an empty turn keeps the benign skip, while a timed-out take (wedged actor) fails the artifact so `fully_uploaded` and the terminal event cannot report success for a capture the wedge dropped.
+/// Manifest record and ok-flag when there is no capture to upload: an empty turn keeps the benign skip. This happens while a timed-out take (wedged actor) fails the artifact so `fully_uploaded`. The terminal event cannot report success for a capture the
+/// wedge dropped.
 fn record_missing_turn_messages(
     tracker: &super::manifest::ArtifactTracker,
     missing: MissingTurnMessages,

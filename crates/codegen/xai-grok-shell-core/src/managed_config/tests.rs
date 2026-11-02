@@ -1,3 +1,5 @@
+// tests.rs holds the tests code.
+
 use super::policy::*;
 use super::response::ManagedConfigResponse;
 use super::store::*;

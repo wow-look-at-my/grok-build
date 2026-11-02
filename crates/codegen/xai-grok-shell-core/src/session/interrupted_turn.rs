@@ -1,4 +1,5 @@
-//! Records, at session load, a turn the previous process never finished so it does not look like a silent stop.
+//! Records, at session load, a turn the process never finished so it does not
+//! look like a silent stop.
 
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::Path;
@@ -16,7 +17,7 @@ const EVENTS_TAIL_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterruptedTurn {
-    /// Trace turn number the previous process uploaded `metadata.json` under.
+    /// Trace turn number the process uploaded `metadata.json` under.
     pub trace_turn: u64,
     /// Prompt id of that turn; the `request_id` in its `metadata.json`.
     pub prompt_id: String,

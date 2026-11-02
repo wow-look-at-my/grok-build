@@ -1,3 +1,5 @@
+// persistence_session_exists_for_cwd_tests.rs holds the persistence session exists for cwd tests code.
+
 use super::{
     resolve_local_session_any_cwd_in_root, resolve_local_session_ids_any_cwd_in_root,
     session_exists_for_cwd_in_root, session_exists_in_root,
@@ -34,7 +36,6 @@ fn returns_false_when_session_absent_under_cwd() {
 }
 
 /// Regression test for the cross-cwd false-positive.
-/// Before the fix, `restore_if_not_local` used `session_exists_by_id` which scanned ALL cwd directories.
 /// A session present only under cwd-A would cause it to skip remote restore when the user resumed from cwd-B.
 #[test]
 fn session_under_different_cwd_is_not_considered_present() {

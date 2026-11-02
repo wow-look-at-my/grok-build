@@ -1,3 +1,5 @@
+// row.rs holds the row code.
+
 use std::path::PathBuf;
 
 use agent_client_protocol as acp;

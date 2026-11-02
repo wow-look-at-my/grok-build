@@ -1,3 +1,5 @@
+// mod.rs holds the mod code.
+
 pub mod acp_types;
 pub mod actor_types;
 pub mod announcement_state;
@@ -113,13 +115,10 @@ pub enum PromptOrigin {
         completion_id: String,
     },
     /// Server-initiated prompt from the idle-gated notification drain (`maybe_drain_notifications`).
-    /// Batches one or more monitor-event or bash-task-completed notifications into a single turn while the user is idle.
     NotificationDrain,
     /// The goal orchestrator injects a system reminder into context and then triggers a model turn so the model can print a visible progress update.
     GoalSummary,
     /// Nudge injected when the verification stage rejects an `update_goal(completed: true)` attempt.
-    /// Carries the "not yet achieved — keep working" system-reminder body alongside the path to the persisted details file.
-    /// The variant name retains the `Classifier` prefix for wire stability.
     GoalClassifierNudge,
     /// Scheduled task (`/loop`) prompt fired by the scheduler via the pager.
     SchedulerFired,
@@ -127,8 +126,7 @@ pub enum PromptOrigin {
     TodoAdded {
         capture_id: String,
     },
-    /// The shell re-parked `exit_plan_mode` on resume, the user approved/revised, and the shell injects the follow-up turn.
-    /// Synthetic: the user never typed it, so it stays out of prompt history, but it still runs a real turn.
+    /// The shell re-parked `exit_plan_mode` on resume, the user approved/revised, and the shell injects the follow-up turn. Synthetic.
     PlanResume,
 }
 impl PromptOrigin {
@@ -509,7 +507,8 @@ mod tests {
         );
     }
 }
-/// Determines whether the session sends an initial file index to the client or just streams raw file events.
+/// Determines whether the session sends an initial file index to the client
+/// or streams raw file events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum ClientFsMode {
     #[default]

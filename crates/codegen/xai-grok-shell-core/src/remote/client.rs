@@ -1,3 +1,5 @@
+// client.rs holds the client code.
+
 use crate::session::export::{ExportedMessage, ExportedMetadata, ExportedSession};
 use indexmap::IndexMap;
 use prod_mc_cli_chat_proxy_types::SubagentBundle;
@@ -81,9 +83,8 @@ async fn bundle_fetch_request(
         );
     xai_grok_otel::inject_trace_context_into_request(builder)
 }
-/// Fetch the bundled subagent cache payload from cli-chat-proxy `GET /v1/subagents/bundle`.
-///
-/// the user-session token.
+/// Fetch the bundled subagent cache payload from cli-chat-proxy `GET
+/// /v1/subagents/bundle`. the user-session token.
 pub async fn fetch_subagent_bundle(
     cli_chat_proxy_base_url: &str,
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
@@ -115,7 +116,8 @@ pub async fn fetch_subagent_bundle(
     );
     Ok(bundle)
 }
-/// The result of fetching a bundle: either raw tar.gz bytes from the new archive endpoint, or a parsed JSON bundle from the legacy endpoint.
+/// The result of fetching a bundle: either raw tar.gz bytes from the new
+/// archive endpoint, or a parsed JSON bundle from the endpoint.
 #[derive(Debug)]
 pub enum FetchedBundle {
     Archive(Vec<u8>),
@@ -340,9 +342,8 @@ impl BackendClient {
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
-    /// The session data (`save_session_data`) is sent inline to the backend.
-    /// If the backend responds with 413 (payload too large), the error is logged as a warning and the share continues.
-    /// The caller is expected to have already uploaded the data to GCS via a signed URL as a fallback.
+    /// The session data (`save_session_data`) is sent inline to the backend. The caller is expected to have already
+    /// uploaded the data to GCS via a signed URL as a fallback.
     pub async fn share_session(
         &self,
         session: &ExportedSession,
@@ -533,18 +534,15 @@ impl BackendClient {
         Ok(())
     }
 }
-/// Distinguishes the three cases the external-OTEL gate cares about (see [`crate::agent::mvp_agent`]).
+/// Distinguishes the cases the external-OTEL gate cares about (see [`crate::agent::mvp_agent`]).
 #[derive(Debug, Clone)]
 #[must_use]
 #[non_exhaustive]
 pub enum SettingsFetch {
     /// Settings fetched and parsed; carries the policy that resolves the gate.
-    /// Boxed because `RemoteSettings` is large and the other variants are unit-sized.
     Fetched(Box<crate::util::config::RemoteSettings>),
-    /// Credential unambiguously rejected (401): the remote policy will never reach this leader, so the gate may open without waiting.
     Rejected,
     /// Transient/ambiguous (network, 5xx exhausted, 403/429/other 4xx, unparseable 2xx): outcome unknown.
-    /// A completed fetch that failed: the gate may open on local policy.
     Retry,
 }
 impl SettingsFetch {

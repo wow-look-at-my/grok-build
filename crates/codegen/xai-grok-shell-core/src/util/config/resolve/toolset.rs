@@ -1,3 +1,5 @@
+// toolset.rs holds the toolset code.
+
 use crate::util::config::RemoteSettings;
 use toml::Value as TomlValue;
 use xai_grok_tools::implementations::grok_build::ask_user_question;
@@ -116,9 +118,13 @@ struct LoginShellCaptureTiers<'a> {
     remote: Option<bool>,
 }
 
-/// Precedence (highest first): requirements/MDM (clamp, via [`crate::config::load_merged_requirements`]) > `GROK_LOGIN_ENV` env > `GROK_CONFIG` overlay > user `config.toml` > managed layers > remote > default `true`.
-/// `login_shell_capture` is a soft key, so the overlay is merged just above user config, mirroring its place in the disk merge.
-/// That lets a `GROK_CONFIG` toggle reach it while requirements/MDM still clamp the value.
+/// Precedence (highest first): requirements/MDM (clamp, via
+/// [`crate::config::load_merged_requirements`]) > `GROK_LOGIN_ENV` env >
+/// `GROK_CONFIG` overlay > user `config.toml` > managed layers > remote >
+/// default `true`. `login_shell_capture` is a soft key, so the overlay is
+/// merged above user config, mirroring its place in the disk merge. That lets
+/// a `GROK_CONFIG` toggle reach it while requirements/MDM still clamp the
+/// value.
 fn resolve_login_shell_capture_tiers(tiers: LoginShellCaptureTiers<'_>) -> bool {
     let LoginShellCaptureTiers {
         requirements,
@@ -288,8 +294,7 @@ mod login_shell_capture_tests {
     }
 }
 
-/// Env override for `[toolset.ask_user_question] timeout_enabled`. The secs env
-/// var lives in the tools crate (`RESPONSE_TIMEOUT_ENV`), parsed once there.
+/// Env override for `[toolset.ask_user_question] timeout_enabled`.
 const ENV_ASK_USER_QUESTION_TIMEOUT_ENABLED: &str = "GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED";
 
 fn ask_user_question_timeout_enabled_from_toml(v: Option<&TomlValue>) -> Option<bool> {
@@ -358,7 +363,7 @@ fn resolve_ask_user_question_timeout_secs_from_tiers(
 }
 
 /// Precedence: requirements > env (`GROK_ASK_USER_QUESTION_TIMEOUT_SECS`, parsed by the tools crate's canonical parser) > user `config.toml`
-/// > managed (user-level over system-managed, matching `effective_config()`) > remote settings > default 1800 (30 minutes).
+/// > managed (user-level over system-managed, matching `effective_config()`) > remote settings > a later default (many minutes).
 fn resolve_ask_user_question_timeout_secs(
     requirements: Option<&TomlValue>,
     user: Option<&TomlValue>,
@@ -418,16 +423,15 @@ pub fn resolve_ask_user_question_params_from_disk(
 }
 
 /// `[toolset.web_search]` domain keys.
-/// Read here from the raw config layers, not through `ShellToolsetConfig::web_search` (a `SamplerConfig`, which has no such fields).
-/// So they must be exempt from the unrecognized-key scan.
 pub const WEB_SEARCH_DOMAIN_CONFIG_PATHS: &[&str] = &[
     "toolset.web_search.allowed_domains",
     "toolset.web_search.excluded_domains",
 ];
 
-/// Read a `[toolset.web_search] <key>` string array from the already-merged section.
-/// Empty or absent yields `None` (unbounded).
-/// For a setting that affects security, a silent typo must not disable the policy, so a present-but-malformed value is warned (not just dropped).
+/// Read a `[toolset.web_search] <key>` string array from the already-merged
+/// section. Empty or absent yields `None` (unbounded). For a setting that
+/// affects security, a silent typo must not disable the policy, so a
+/// present-but-malformed value is warned (not dropped).
 fn read_domain_array(section: &TomlValue, key: &str) -> Option<Vec<String>> {
     let value = section.get(key)?;
     let Some(arr) = value.as_array() else {
@@ -470,9 +474,8 @@ fn cap_web_search_domains(list: Option<Vec<String>>, field: &str) -> Option<Vec<
     })
 }
 
-/// Layer precedence and the allow/exclude atomicity are handled **upstream** by `ConfigLayers`: per-layer normalization couples the two keys, then the normal `deep_merge_toml` picks the whole policy from the winning layer.
-/// This only shapes the already-merged `[toolset.web_search]` section.
-/// Returns `None` when neither filter is set.
+/// Layer precedence and the allow/exclude atomicity are handled **upstream** by `ConfigLayers`. Per-layer normalization couples both keys, then the normal `deep_merge_toml` picks the whole policy from the winning layer.
+/// This only shapes the already-merged `[toolset.web_search]` section. Returns `None` when neither filter is set.
 pub fn resolve_web_search_domains_from_disk() -> Option<xai_grok_sampling_types::WebSearchOptions> {
     let effective = match crate::config::load_effective_config() {
         Ok(v) => v,
@@ -525,8 +528,8 @@ fn web_search_options_from_section(
 mod web_search_domains_tests {
     use super::*;
 
-    // Cross-layer precedence and allow/exclude atomicity live in ConfigLayers (see `xai_grok_config::loader` normalization tests)
-    // These cover only the section-shaping this module still owns: extraction, the max-5 cap, and the defensive both-set degrade
+    // Cross-layer precedence and allow/exclude atomicity live in ConfigLayers
+    // (see `xai_grok_config::loader` normalization tests).
     fn section(body: &str) -> TomlValue {
         let full: TomlValue = toml::from_str(&format!("[toolset.web_search]\n{body}\n")).unwrap();
         full.get("toolset")
@@ -684,7 +687,6 @@ mod ask_user_question_timeout_tests {
         let _g = guard();
         let d = xai_grok_tools::implementations::grok_build::ask_user_question::RESPONSE_TIMEOUT
             .as_secs();
-        // user 0 and managed negative are dropped; remote fills the gap.
         let zero = toml_ask("timeout_secs = 0");
         let negative = toml_ask("timeout_secs = -5");
         assert_eq!(
@@ -697,7 +699,7 @@ mod ask_user_question_timeout_tests {
             ),
             45
         );
-        // remote 0 is unset too, so the default wins
+        // The first remote is unset too, so the default wins
         assert_eq!(
             resolve_ask_user_question_timeout_secs(None, Some(&zero), None, None, Some(0)),
             d
@@ -756,7 +758,7 @@ mod tests {
     #[test]
     fn resolve_search_tool_enabled_precedence() {
         // args: disable, requirement, env, config, managed
-        assert!(resolve_search_tool_enabled(None, None, None, None, None)); // default on
+        assert!(resolve_search_tool_enabled(None, None, None, None, None));
         // Org requirement wins outright, even over the user DISABLE kill-switch
         assert!(resolve_search_tool_enabled(
             Some(true),

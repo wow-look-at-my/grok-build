@@ -74,8 +74,6 @@ struct BlockingWaitInner {
     depth: usize,
     generation: u64,
     /// Union of waits aborted by a mid-turn interjection.
-    /// Concurrent aborts merge so a side-work wait cannot replace the implement set.
-    /// Extras drop only when the next interruptible wait contains every remembered id plus at least one new one.
     interrupted_wait_ids: Option<Vec<String>>,
 }
 impl BlockingWaitState {
@@ -178,12 +176,10 @@ pub struct ToolContext {
     pub session_env: Arc<HashMap<String, String>>,
     pub hunk_tracker_handle: HunkTrackerHandle,
     /// `false` when the resolved mode is `off`/`disabled`.
-    /// `hunk_tracker_handle` is then a `noop()` and the fs-notify loop skips forwarding to avoid per-event cost.
     pub hunk_tracking_enabled: bool,
     pub prompt_index: Arc<tokio::sync::Mutex<usize>>,
     /// Lock-free mirror of `prompt_index`, read synchronously to attribute an active message to its parent prompt.
     pub active_message_parent_prompt_index: Arc<std::sync::atomic::AtomicUsize>,
-    /// Top-level sessions start at 0; child sessions are parent_depth + 1.
     pub subagent_depth: u32,
     /// Carries spawn, query, cancel, list-active, completions, and outstanding messages to the coordinator.
     /// `None` if subagent support is not enabled.
@@ -204,11 +200,10 @@ pub struct ToolContext {
     /// LSP server names captured at session creation (not updated mid-session).
     pub lsp_server_names: Vec<String>,
     /// Shared turn-active flag: set `true` at turn start, `false` at turn end.
-    /// Used by the between-turn completion drain in `handle_prompt`.
     pub is_turn_active: Option<Arc<std::sync::atomic::AtomicBool>>,
     pub unattributed_background_usage: Arc<std::sync::atomic::AtomicBool>,
-    /// The session turn loop (`inject_pending_monitor_events`) drains events pushed here.
-    /// They are injected as ONE hidden synthetic user message before the next sampling step.
+    /// The session turn loop (`inject_pending_monitor_events`) drains events
+    /// pushed here.
     pub monitor_event_buffer:
         Option<xai_grok_tools::implementations::grok_build::monitor::types::MonitorEventBuffer>,
     pub task_completion_reservations:
@@ -232,7 +227,6 @@ pub struct ToolContext {
         >,
     >,
     /// Resolved name of the `BackgroundTaskAction` tool in the current toolset.
-    /// Used by auto-wake to format completion messages with the correct tool name.
     pub task_output_tool_name: String,
     /// Resolved name of the scheduled-task deletion tool, when available.
     pub scheduler_delete_tool_name: Option<String>,
@@ -240,15 +234,12 @@ pub struct ToolContext {
     /// When `false`, background task and subagent completions fall back to the idle-gated notification drain.
     pub auto_wake_enabled: bool,
     /// When set, bash and subagent auto-wake synthetic prompts are suppressed.
-    /// Shared `Arc` written at one chokepoint; see `SessionActor::set_goal_loop_active_resource` for the rationale.
     pub goal_loop_active_gate: Arc<std::sync::atomic::AtomicBool>,
     /// Count of interruptible blocking waits the running turn is parked in (via [`BlockingWaitGuard`]).
-    /// `queue_input` reads it: a prompt arriving while non-zero takes the send-now path.
     pub blocking_wait_depth: Arc<BlockingWaitState>,
     pub task_output_token_budget: Option<TaskOutputTokenBudget>,
     pub sampler_retry_only_before_output: bool,
-    /// This session's child-process reaper, set at session spawn; `None` for contexts without one (subagents, defaults).
-    /// Spawn sites enroll children into it; enrolled children are killed when the session closes.
+    /// This session's child-process reaper, set at session spawn.
     pub process_scope: Option<ProcessScope>,
     /// Same Arc as `SessionRegistry`'s retained heal lock so the actor tick and tray `list_running` cannot double-emit `SubagentFinished`.
     pub live_orphan_heal_lock: Arc<tokio::sync::Mutex<()>>,

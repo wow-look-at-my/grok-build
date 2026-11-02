@@ -1,3 +1,5 @@
+// ui.rs holds the ui code.
+
 use crate::util::config::RemoteSettings;
 use toml::Value as TomlValue;
 
@@ -74,8 +76,9 @@ pub const ENV_COLLAPSED_EDIT_BLOCKS: &str = "GROK_COLLAPSED_EDIT_BLOCKS";
 #[cfg(any(test, feature = "test-util"))]
 static COLLAPSED_EDIT_BLOCKS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Resolve whether the TUI shows Edit tool calls as a collapsed one-line `+N/-M` diffstat summary by default (expand for the diff).
-/// This is a rollout flag: off keeps the legacy expanded-diff view.
+/// Resolve whether the TUI shows Edit tool calls as a collapsed one-line
+/// `+N/-M` diffstat summary by default (expand for the diff). This is a
+/// rollout flag: off keeps the expanded-diff view.
 pub fn resolve_collapsed_edit_blocks(
     requirements: Option<&TomlValue>,
     user: Option<&TomlValue>,

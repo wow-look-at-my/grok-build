@@ -1,3 +1,5 @@
+// persistence_feedback_tests.rs holds the persistence feedback tests code.
+
 use super::*;
 use prod_mc_cli_chat_proxy_types::feedback_types::{
     ClientType, FeedbackSubmission, FeedbackType, RatingType,

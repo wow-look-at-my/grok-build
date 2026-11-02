@@ -98,7 +98,7 @@ pub async fn upload_session_state(
         status_code: None,
     }
 }
-/// Truth for a Defer-timeout of the blocking session-state upload: `Enqueued` only while the cancellation left the item parked on queue confirmation (the live worker still owns it); a cancelled direct attempt or full-channel inline divert queued nothing durable and must record the loss.
+/// Truth for a Defer-timeout of the blocking session-state upload: `Enqueued` only while the cancellation left the item parked on queue confirmation (the live worker still owns it). A cancelled direct attempt or full-channel inline divert queued nothing durable and must record the loss.
 #[cfg(any(test, feature = "test-util"))]
 fn confirm_timeout_artifact_result(
     direct_attempt_started: bool,
@@ -277,7 +277,7 @@ async fn fill_git_fields(metadata: &mut PromptMetadata, cwd: &str) {
 pub async fn enrich_git_metadata(ctx: &PromptTraceContext, metadata: &mut PromptMetadata) {
     fill_git_fields(metadata, &ctx.session_info.cwd).await;
 }
-/// Bounds the pre-upload git enrichment for Defer callers (child teardown, blocking turn end): discovery walks the repo tree on `spawn_blocking` (a hung NFS/FUSE mount never returns) and the visibility check rides a client with no request timeout, so the enrichment must not park teardown ahead of the bounded upload attempt. On timeout the metadata uploads unenriched.
+/// Bounds the pre-upload git enrichment for Defer callers (child teardown, blocking turn end). Discovery walks the repo tree on `spawn_blocking` (a hung NFS/FUSE mount never returns) and the visibility check rides a client with no request timeout. The enrichment must not park teardown ahead of the bounded upload attempt. On timeout the metadata uploads unenriched.
 async fn bounded_enrichment(enrich: impl std::future::Future<Output = ()>, wait: UploadWait) {
     match wait {
         UploadWait::Confirm => enrich.await,
@@ -337,9 +337,7 @@ pub async fn upload_metadata(ctx: &PromptTraceContext, metadata: PromptMetadata,
     )
     .await;
 }
-/// Bound on one detached `subagent.json` upload: the direct storage clients
-/// carry no request timeout, so without this every spawn/completion against a
-/// tarpit endpoint leaks a parked task pinning an `AuthManager` Arc.
+/// Bound on one detached `subagent.json` upload: the direct storage clients carry no request timeout.
 const SUBAGENT_METADATA_UPLOAD_BOUND: std::time::Duration = std::time::Duration::from_secs(60);
 /// Uploads subagent session metadata to cloud storage as `subagent.json`.
 /// Path format: `{child_session_id}/subagent.json` (session-root, not turn-scoped).
@@ -600,10 +598,9 @@ pub async fn upload_artifact_to_gcs(
         }
     }
 }
-/// One-shot artifact upload and manifest recording.
-///
-/// `Confirm` (detached/interactive contexts) keeps the direct awaited upload.
-/// The recorded status reflects the actual result, and an interactive turn's
+/// One-shot artifact upload and manifest recording. `Confirm`
+/// (detached/interactive contexts) keeps the direct awaited upload. The
+/// recorded status reflects the actual result, and an interactive turn's
 /// manifest never races a queue it does not flush. `Defer` (blocking turn
 /// end) routes through the durable queue accept so the prompt response stays
 /// fast and a process exit cannot lose the artifact.
@@ -652,7 +649,6 @@ pub struct SubagentSpawnedRef {
     pub child_session_id: String,
     pub subagent_type: String,
     /// Human-readable spawn description.
-    /// See [`crate::agent::subagent::SubagentSessionMetadata::description`] for why goal-role subagents need it serialized.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -812,8 +808,8 @@ pub async fn upload_session_metadata(ctx: &PromptTraceContext, metadata_type: Se
     };
     upload_artifact_to_gcs(ctx, &gcs_path, &metadata_json, "application/json", artifact).await;
 }
-/// Uploads the session-scoped unified log to cloud storage. Path format: {session_id}/turn_{N}/unified_log.jsonl Called only from 401/404 auth-failure diagnostics, never per turn.
-/// Only entries belonging to the current session (matching `sid`) are included. The snapshot runs on a blocking thread since `snapshot_session_log` reads and parses the on-disk log file.
+/// Uploads the session-scoped unified log to cloud storage. Only entries belonging to the current session (matching `sid`) are included. The snapshot runs on a blocking thread since
+/// `snapshot_session_log` reads and parses the on-disk log file.
 pub async fn upload_unified_log(ctx: &PromptTraceContext, wait: UploadWait) {
     let session_id = ctx.session_info.id.0.to_string();
     let log_bytes = match xai_spawn::spawn_blocking(move || {
@@ -1006,7 +1002,7 @@ pub struct DynamicResolver {
     base_config: TraceExportConfig,
 }
 impl DynamicResolver {
-    /// Build the auth-bearing wrapper used by all three `proxy_*` methods.
+    /// Build the auth-bearing wrapper used by all of them `proxy_*` methods.
     fn with_auth(&self) -> crate::upload::gcs::TraceExportConfigWithAuth {
         use crate::upload::gcs::WithAuth as _;
         self.base_config.with_auth(Some(self.auth_manager.clone()))
@@ -1083,9 +1079,8 @@ impl TraceExportSource for DynamicResolver {
         })
     }
 }
-/// The spill dir is shared by every session's queue in the process, so the reconcile runs at most once per verdict class.
-/// That is one recovery, and one purge that may escalate over it if data collection is disabled later in the same process.
-/// Re-auth to a ZDR account or a leader session carrying an opt-out can disable it mid-process.
+/// The spill dir is shared by every session's queue in the process, so the
+/// reconcile runs at most once per verdict class.
 static SPILL_RECONCILE_STATE: std::sync::atomic::AtomicU8 =
     std::sync::atomic::AtomicU8::new(SPILL_NOT_RUN);
 const SPILL_NOT_RUN: u8 = 0;
@@ -1364,9 +1359,10 @@ pub async fn upload_trace_artifact_blocking(
     }
     result
 }
-/// Only these accept shapes are durably owned by the queue (temp and recovery sidecar on disk, flushed by the turn-end wait or recovered next run).
-/// `FellBackToInline` is a fire-and-forget task the flush cannot see, and `Failed` was never handed off.
-/// Both need a real awaited attempt before the manifest may claim anything.
+/// Only these accept shapes are durably owned by the queue (temp and recovery
+/// sidecar on disk, flushed by the turn-end wait or recovered next run).
+/// `FellBackToInline` is a fire-and-forget task the flush cannot see, and
+/// `Failed` was never handed off.
 fn enqueue_outcome_is_durable(outcome: &EnqueueOutcome) -> bool {
     match outcome {
         EnqueueOutcome::Enqueued | EnqueueOutcome::Deduplicated => true,
@@ -2127,9 +2123,8 @@ pub mod tests {
             }
         }
     }
-    /// `DynamicResolver` must supply `proxy_credentials` and `proxy_attribution`.
-    /// The queue worker's per-attempt `StorageClient` then gets a refresh-aware credential provider AND emits `auth_401_attribution` on 401.
-    /// Without these, the worker falls back to the static `user_token` snapshot baked into `TraceExportConfig` and emits no attribution.
+    /// `DynamicResolver` must supply `proxy_credentials` and `proxy_attribution`. Without these, the worker falls back to the static
+    /// `user_token` snapshot baked into `TraceExportConfig` and emits no attribution.
     #[test]
     fn dynamic_resolver_supplies_proxy_credentials_and_attribution() {
         use crate::session::repo_changes::UploadMethod;
@@ -2618,7 +2613,8 @@ pub mod tests {
             "enrichment must ride the capped attempt budget"
         );
     }
-    /// Regression: the detached spawn-/completion-time `subagent.json` uploads must be bounded — unbounded, every child against a tarpit endpoint leaked one parked task (and its `AuthManager` Arc) for the process lifetime.
+    /// Regression: the detached spawn-/completion-time `subagent.json` uploads must be bounded. They unbounded, every child against a tarpit endpoint leaked one parked task (and its `AuthManager` Arc) for the process
+    /// lifetime.
     #[tokio::test(start_paused = true)]
     async fn upload_subagent_metadata_is_bounded_against_a_tarpit() {
         let tmp = tempfile::tempdir().unwrap();

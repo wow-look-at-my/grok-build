@@ -510,8 +510,7 @@ impl EffectiveAllowlist<'_> {
     }
 }
 
-/// Catalog-key match is user-config only. A fleet pin matches the routing
-/// slug so a user `[model.grok-4-anything]` cannot satisfy `grok-4*`.
+/// Catalog-key match is user-config only.
 fn model_is_allowlisted(cfg: &config::Config, key: &str, model: &str) -> bool {
     effective_allowlist(cfg).is_selected(key, model)
 }

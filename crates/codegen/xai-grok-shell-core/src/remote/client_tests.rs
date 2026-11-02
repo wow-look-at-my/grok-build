@@ -1,3 +1,5 @@
+// client_tests.rs holds the client tests code.
+
 use super::*;
 use axum::{
     Router,
@@ -39,7 +41,7 @@ async fn start_settings_server(
     (base, handle)
 }
 /// `fetch_settings_blocking` maps each HTTP outcome to the [`SettingsFetch`] variant the external-OTEL gate relies on.
-/// Only 401 yields `Rejected`; every other non-2xx outcome fails closed as `Retry`.
+/// Yields `Rejected`; every other non-2xx outcome fails closed as `Retry`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn settings_fetch_maps_status_to_outcome() {
     let auth = GrokAuth::test_default();

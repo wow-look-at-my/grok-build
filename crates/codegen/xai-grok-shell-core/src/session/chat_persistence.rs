@@ -1,3 +1,5 @@
+// chat_persistence.rs holds the chat persistence code.
+
 use std::io;
 
 use tokio::sync::{mpsc, oneshot};

@@ -1,12 +1,4 @@
 //! ACP conversion functions for `xai-grok-tools`'s `ToolOutput`.
-//!
-//! These standalone functions convert `xai_grok_tools::types::output::ToolOutput`
-//! into ACP protocol types (`acp::ToolCallUpdate`, `acp::Plan`).
-//!
-//! `raw_output` is serialized directly from ToolOutput via serde, with no manual JSON
-//! construction. The TUI deserializes it back into the same ToolOutput type, so
-//! field names must match exactly. Path relativization for display happens on the
-//! TUI side (which already has `base_path` for this purpose).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,11 +11,9 @@ use xai_grok_tools::types::output::{
 use xai_tool_types::{KillTaskOutput, TaskOutputOutput};
 
 /// Rewrites real worktree paths to display paths in serialized output.
-/// In forked sessions, tools produce output containing the worktree directory.
-/// The client UI should instead see the original project path (the `display_cwd`).
 #[derive(Clone, Debug)]
 pub struct PathRewriter {
-    /// The real worktree path (what tools actually see).
+    /// The real worktree path (what tools see).
     real_cwd: String,
     /// The display path (what the client UI should see).
     display_cwd: String,
@@ -31,8 +21,8 @@ pub struct PathRewriter {
 
 impl PathRewriter {
     /// Create a new `PathRewriter` if `display_cwd` differs from `real_cwd`.
-    ///
-    /// Returns `None` if the paths are the same (no rewriting needed) or if `display_cwd` is not set.
+    /// Returns `None` if the paths are the same (no rewriting needed) or if
+    /// `display_cwd` is not set.
     pub fn new(real_cwd: &str, display_cwd: Option<&str>) -> Option<Self> {
         let display_cwd = display_cwd?;
         if real_cwd == display_cwd {
@@ -48,8 +38,7 @@ impl PathRewriter {
     /// Handles both plain paths and URL-encoded paths that appear in session directory structures and `output_file` references.
     pub fn rewrite(&self, text: &str) -> String {
         let plain = text.replace(&self.real_cwd, &self.display_cwd);
-        // Also replace the URL-encoded form: session directory paths use urlencoding::encode(&cwd) as a path component,
-        // so background task output_file paths and similar references embed the encoded real cwd
+        // Also replace the URL-encoded form: session directory paths use urlencoding::encode(&cwd) as a path component.
         let encoded_real = urlencoding::encode(&self.real_cwd);
         if plain.contains(encoded_real.as_ref()) {
             let encoded_display = urlencoding::encode(&self.display_cwd);
@@ -97,8 +86,8 @@ fn maybe_rewrite_path(rewriter: Option<&PathRewriter>, path: PathBuf) -> PathBuf
 }
 
 /// Serialize ToolOutput to JSON for the `raw_output` field in ACP updates.
-///
-/// Uses serde directly: ToolOutput derives Serialize with `#[serde(tag = "type")]`, so the JSON round-trips cleanly with the TUI's deserialization.
+/// Uses serde directly: ToolOutput derives Serialize with `#[serde(tag =
+/// "type")]`, so the JSON round-trips cleanly with the TUI's deserialization.
 pub fn raw_output_json(
     output: &ToolOutput,
     rewriter: Option<&PathRewriter>,
@@ -139,8 +128,8 @@ pub fn acp_tool_update(
                     (content, acp::ToolCallStatus::Failed)
                 }
                 ReadFileOutput::ImageContent(image_content) => {
-                    // Construct the ACP `ImageContent` directly from the tool's local image type rather than going
-                    // through a `From` impl on the tools crate, so that `xai-grok-tools` stays free of an `agent-client-protocol` dependency
+                    // Construct the ACP `ImageContent` directly from the tool's local image type rather than going through a `From` impl on
+                    // the tools crate. Do this so that `xai-grok-tools` stays free of an `agent-client-protocol` dependency
                     let content = Some(vec![acp::ToolCallContent::from(acp::ContentBlock::Image(
                         acp::ImageContent::new(
                             image_content.data.clone(),
@@ -301,8 +290,8 @@ pub fn acp_tool_update(
                     .raw_output(raw_output_json(output, rewriter)),
             ))
         }
-        // Todo also sends a Plan notification, but we still need to complete the tool call so the TUI flushes pending agent messages and avoids concatenating text across tool-call boundaries.
-        // Error variants get `Failed` status so the Python side can distinguish tool-logic errors from infra errors via raw_output.
+        // Todo also sends a Plan notification. However, we still need to complete the tool call so the TUI flushes pending agent messages and avoids concatenating text across tool-call
+        // boundaries. Error variants get `Failed` status so the Python side can distinguish tool-logic errors from infra errors via raw_output.
         ToolOutput::Todo(todo_output) => {
             use xai_grok_tools::types::output::TodoWriteOutput;
             let (status, content) = match todo_output {
@@ -464,8 +453,8 @@ pub fn acp_tool_update(
                 .raw_output(raw_output_json(output, rewriter)),
         )),
         ToolOutput::SubagentCompleted(sub) => {
-            // The text includes the resume handle so users can find it, plus meta for the TUI
-            // Shared with the chat-bidi server via `to_model_text` so both clients present a completed subagent identically
+            // The text includes the resume handle so users can find it, plus
+            // meta for the TUI.
             let content = Some(vec![acp::ToolCallContent::from(acp::ContentBlock::Text(
                 acp::TextContent::new(sub.to_model_text()),
             ))]);
@@ -582,8 +571,8 @@ pub fn acp_tool_update(
                     .raw_output(raw_output_json(output, rewriter)),
             ))
         }
-        // Internal tools (open_page, browse_page, etc.) are not used in the shell; they are server-only
-        // This arm covers variants that appear when Cargo unifies the optional web-tools feature across the workspace
+        // Internal tools (open_page, browse_page, etc.) are not used in the
+        // shell.
         #[allow(unreachable_patterns)]
         _ => None,
     }
@@ -941,8 +930,7 @@ mod tests {
             other => panic!("expected Text content, got {other:?}"),
         }
 
-        // ToolOutput::Text wraps TextOutput { text: String }, which serde can serialize with internal tagging
-        // raw_output carries the JSON
+        // ToolOutput::Text wraps TextOutput { text: String }.
         assert!(update.fields.raw_output.is_some());
     }
 

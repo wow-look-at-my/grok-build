@@ -1,3 +1,5 @@
+// worktree.rs holds the worktree code.
+
 use super::RemoteSettings;
 use serde::{Deserialize, Serialize};
 use toml::Value as TomlValue;
@@ -7,12 +9,10 @@ use xai_fast_worktree::CreationMode;
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum WorktreeType {
-    /// Linked worktree via `git worktree add --no-checkout` and a parallel CoW copy.
-    /// This is the fastest mode for large repos.
+    /// Linked worktree via `git worktree add --no-checkout` and a parallel. CoW copy.
     #[default]
     Linked,
     /// Standalone repository copy with independent `.git/` directory.
-    /// Can be promoted to replace the source via `rename()`.
     Standalone,
     /// Plain `git worktree add` with full checkout.
     Git,
@@ -94,7 +94,6 @@ pub fn worktree_type() -> WorktreeType {
 }
 
 /// Env override for grove vs copy (`grove` | `grove-fuse` | `grove-nfs` | `grove-projfs` | `nfs` | `copy`).
-/// Distinct from [`WorktreeType`] (`linked` | `standalone` | `git`).
 pub const ENV_WORKTREE_TYPE: &str = "GROK_WORKTREE_TYPE";
 
 /// Convenience that enables both `grok clone` and session / `-w` Grove when specific knobs are unset.
@@ -205,7 +204,7 @@ pub fn gate_grove_worktree_layers(
         src = "remote";
     }
     if remote.is_some_and(|r| r.grove_worktree == Some(false)) {
-        // A kill is only the *reason* when a layer actually asked for grove.
+        // A kill is only the *reason* when a layer asked for grove.
         return (false, if enabled { "remote_kill" } else { src });
     }
     (enabled, src)

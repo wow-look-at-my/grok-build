@@ -1,6 +1,4 @@
 //! Receipt settlement for protected parent-message turns.
-//!
-//! A clean turn waits indefinitely for its receipt; only unclean or cancel paths arm the grace deadline.
 
 use std::sync::Arc;
 

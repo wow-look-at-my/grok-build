@@ -79,19 +79,15 @@ pub struct SubagentMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resumed_from: Option<String>,
     /// Effective cwd used by the child session.
-    /// Persisted for durable `resume_from` reconstruction after in-memory cache eviction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_cwd: Option<String>,
-    /// Worktree path if the child used `isolation=worktree`.
-    /// Persisted for durable `resume_from` reconstruction.
+    /// Worktree path if the child used `isolation=worktree`. Persisted for durable `resume_from` reconstruction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_path: Option<String>,
     /// Durable git ref holding a snapshot of the child's worktree working state.
-    /// Persisted so a deleted worktree can be rehydrated on resume.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_ref: Option<String>,
-    /// Effective model ID used by the child session.
-    /// Persisted for durable `resume_from` identity validation.
+    /// Effective model ID used by the child session. Persisted for durable `resume_from` identity validation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_model_id: Option<String>,
 }
@@ -109,9 +105,7 @@ pub struct SubagentSessionMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_prompt_id: Option<String>,
     pub subagent_type: String,
-    /// Human-readable spawn description: the task tool's `description` argument, or the fixed role label for harness-spawned goal subagents.
-    /// Role labels are "goal plan writer", "goal achievement skeptic", and so on.
-    /// All goal roles share `subagent_type = "general-purpose"`, so this is what identifies them in the artifact.
+    /// Human-readable spawn description: the task tool's `description` argument.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]

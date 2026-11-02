@@ -1,3 +1,5 @@
+// update_chunk_merge.rs holds the update chunk merge code.
+
 use agent_client_protocol::{self as acp};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -25,15 +27,14 @@ fn default_max_items() -> u64 {
 }
 
 fn default_max_bytes() -> u64 {
-    1024 * 2 // 2 KB
+    1024 * 2
 }
 
 fn default_max_duration_ms() -> u64 {
-    10 // 10 ms
+    10
 }
 
-/// Low-level buffer for ACP text chunks (agent message/thought chunks). API: `consume_chunk(...) -> Option<SessionNotification>` returns a notification to send now, typically the previously buffered one.
-/// `None` means keep buffering. `flush() -> Option<SessionNotification>` returns any pending buffered notification to send.
+/// Low-level buffer for ACP text chunks (agent message/thought chunks).
 pub struct ReplayBuffer {
     settings: Option<BufferingSettings>,
     pending: Option<SessionNotification>,
@@ -110,7 +111,7 @@ impl ReplayBuffer {
         }
 
         if !incoming_notification_timestamp_in_range {
-            // Pop the previously pending notification and send it immediately
+            // Pop the pending notification and send it immediately
             let prev = self.pending.replace(incoming);
             if let Some(prev) = prev {
                 return Some((prev, None));
@@ -131,7 +132,6 @@ impl ReplayBuffer {
         match (force_send, first, second) {
             (_, pending, Some(next)) => {
                 // Merge wasn't allowed; send both immediately to preserve current chunk order.
-                // (Nothing remains buffered.)
                 self.pending_count = 0;
                 self.pending_bytes = 0;
                 Some((pending, Some(next)))
@@ -350,7 +350,7 @@ fn merge_meta(prev: Option<acp::Meta>, new: Option<acp::Meta>) -> Option<acp::Me
     }
 }
 
-/// Merge two consecutive ACP notifications.
+/// Merge consecutive ACP notifications.
 fn merge_acp_chunks(
     new: acp::SessionNotification,
     prev: acp::SessionNotification,
@@ -414,7 +414,7 @@ fn merge_acp_chunks(
     }
 }
 
-/// Merge two consecutive xAI notifications.
+/// Merge consecutive xAI notifications.
 fn merge_xai_chunks(
     prev: crate::extensions::notification::SessionNotification,
     new: crate::extensions::notification::SessionNotification,
@@ -486,8 +486,6 @@ fn merge_xai_chunks(
     }
 }
 
-/// Two `ToolCallDeltaChunk`s belong to the same tool call if their ids match (when both present), otherwise if their `tool_index`es match.
-/// Continuation chunks omit the id, so the index fallback is what stitches them to the initial chunk carrying the id and name.
 fn same_tool_call(
     prev_id: &Option<String>,
     new_id: &Option<String>,

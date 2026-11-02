@@ -1,3 +1,5 @@
+// session_config.rs holds the session config code.
+
 use agent_client_protocol as acp;
 use serde::Serialize;
 use xai_grok_sampling_types::{ReasoningEffort, ReasoningEffortOption, effort_label};
@@ -55,7 +57,7 @@ impl GrokSessionDetail {
 }
 
 /// The built-in session-picker modes used when the model has no server list.
-/// Reproduces the historical five rows and their labels.
+/// Reproduces the historical a few rows and their labels.
 pub fn legacy_session_effort_options() -> Vec<ReasoningEffortOption> {
     SELECTABLE_REASONING_EFFORTS
         .iter()

@@ -1,3 +1,5 @@
+// persistence_generated_title_tests.rs holds the persistence generated title tests code.
+
 use super::*;
 
 #[test]

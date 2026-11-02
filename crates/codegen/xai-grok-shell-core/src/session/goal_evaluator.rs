@@ -1,3 +1,5 @@
+// goal_evaluator.rs holds the goal evaluator code.
+
 use crate::sampling::{ConversationItem, ConversationRequest};
 use crate::session::goal_tracker::GoalMode;
 use xai_grok_sampling_types::SyntheticReason;

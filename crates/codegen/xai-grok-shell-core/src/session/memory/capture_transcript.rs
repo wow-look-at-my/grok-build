@@ -1,3 +1,5 @@
+// capture_transcript.rs holds the capture transcript code.
+
 use std::sync::Arc;
 
 use xai_grok_sampling_types::{ContentPart, ConversationItem};
@@ -95,8 +97,8 @@ pub struct CondensedTranscript {
     pub stats: CondensationStats,
 }
 
-/// Stages remove what the extractor does not need before touching what it does:
-/// reasoning and images, then tool bodies, then the middle of the tool loop,
+/// Stages remove what the extractor does not need before touching what it does.
+/// Reasoning and images, then tool bodies, then the middle of the tool loop,
 /// then the user's own words. Never fails on size.
 pub fn condense_turn_transcript(
     mut items: Vec<ConversationItem>,

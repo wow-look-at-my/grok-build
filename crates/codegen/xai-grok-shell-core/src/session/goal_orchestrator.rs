@@ -1,12 +1,12 @@
+// goal_orchestrator.rs holds the goal orchestrator code.
+
 use crate::extensions::notification::{
     SessionNotification as XaiSessionNotification, SessionUpdate as XaiSessionUpdate,
 };
 use crate::session::goal_tracker::{GoalOrchestration, GoalPhase, GoalStatus, GoalTracker};
 use crate::session::persistence::PersistenceMsg;
 
-// ---------------------------------------------------------------------------
 // GoalNotifySender: fire-and-forget notification sender
-// ---------------------------------------------------------------------------
 
 /// Lightweight notification sender for goal progress updates.
 #[derive(Clone)]
@@ -53,9 +53,8 @@ impl GoalNotifySender {
             .send(PersistenceMsg::GoalModeState(snapshot.clone()));
     }
 
-    /// Like [`Self::emit_goal_updated`] but fire-and-forget to the gateway ONLY: the update is not appended to the session JSONL.
-    /// The durable goal total survives via `PersistenceMsg::GoalModeState` and the next persisted state-transition `GoalUpdated`.
-    /// The pager self-heals the live figure on the next tick.
+    /// Like [`Self::emit_goal_updated`] but fire-and-forget to the gateway ONLY: the update is not appended to the session JSONL. The durable goal total survives via `PersistenceMsg::GoalModeState` and the next persisted state-transition `GoalUpdated`. The pager
+    /// self-heals the live figure on the next tick.
     pub fn emit_goal_updated_ephemeral(
         &self,
         tracker: &mut GoalTracker,
@@ -70,8 +69,8 @@ impl GoalNotifySender {
         );
     }
 
-    /// Used for snapshot-derived payloads and for the "planning…" / "Verifying…" latch updates.
-    /// Those must not close the rewind window, which `send_xai_notification` does as a side effect.
+    /// Used for snapshot-derived payloads and for the "planning…" /
+    /// "Verifying…" latch updates.
     pub fn send_update(&self, update: XaiSessionUpdate) {
         self.dispatch_update(update, true);
     }
@@ -172,9 +171,8 @@ pub fn build_goal_updated(
         token_baseline: o.token_baseline,
         finished_subagent_tokens,
         live_subagent_tokens: (o.live_subagent_tokens > 0).then_some(o.live_subagent_tokens),
-        // A single-model (or all-inherit) goal collapses to the single tokens line, so a 1-element vec is never sent
-        // `o.live_tokens_by_model` only covers the currently active subagent and is cleared on `SubagentFinished`, like `live_subagent_tokens`
-        // The pager renders it only under the "Active subagent" block, so this producer must populate it on that same condition
+        // A single-model (or all-inherit) goal collapses to the single tokens
+        // line.
         live_tokens_by_model: if o.live_tokens_by_model.len() >= 2 {
             o.live_tokens_by_model.clone()
         } else {
@@ -193,8 +191,7 @@ pub fn build_goal_updated(
         classifier_max_runs: o.classifier_max_runs,
         last_classifier_verdict: o.last_classifier_verdict,
         last_classifier_details_path: o.last_classifier_details_path.clone(),
-        // Both badges are sourced from their `*_in_flight` latches (see the field docs), NOT one-shot wire flags
-        // The token-accounting / continuation `GoalUpdated`s that fire mid-run therefore keep carrying the correct flag instead of clearing it
+        // Both badges are sourced from their `*_in_flight` latches (see the field docs).
         verifying_completion: o.verifying_in_flight.then_some(true),
         planning: o.planning_in_flight.then_some(true),
     }
@@ -416,7 +413,6 @@ mod tests {
             _ => panic!("expected GoalUpdated"),
         }
 
-        // Two or more distinct models are transmitted verbatim
         o.live_tokens_by_model = vec![("grok-4".into(), 5_000), ("grok-3".into(), 3_000)];
         match build_goal_updated(&o, 0, 0) {
             XaiSessionUpdate::GoalUpdated {

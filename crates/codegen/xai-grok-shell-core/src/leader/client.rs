@@ -1,3 +1,5 @@
+// client.rs holds the client code.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -25,13 +27,10 @@ const MAX_RECONNECT_ATTEMPTS: u32 = 3;
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 /// Bounds the wait for the server's registration response; without it a silent server hangs the client forever.
 const REGISTRATION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
-/// Timeout for waiting for `LeaderReady` after a `Registered { ready: false }`. The leader signals readiness right after its bounded sign-in (`STARTUP_AUTH_TIMEOUT`).
-/// Prefetching models and settings runs off the readiness path, and the leader never opens a browser OAuth flow. So the timeout only needs to cover that bounded auth plus margin, matching the client connect ceiling.
+/// Timeout for waiting for `LeaderReady` after a `Registered { ready: false }`.
 const LEADER_READY_TIMEOUT: Duration = crate::http::MIN_CLIENT_CONNECT_TIMEOUT;
 
 /// Reason the client disconnected from the leader server.
-///
-/// Exposed via a `watch` channel so callers (e.g., reconnection logic) can determine why the connection ended and decide whether to retry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DisconnectReason {
     /// Connection is still alive (initial state).
@@ -54,9 +53,13 @@ pub struct LeaderRegistration {
 
 type ControlResponse = Result<ControlPayload, ControlError>;
 
-/// Client-side handle for communicating with the leader server. The client maintains an IPC connection to the leader and provides send/receive channels for ACP messages.
-/// It automatically handles registration and keepalive pings. When the connection ends, the reason is published to a `watch` channel accessible via [`disconnect_reason()`](Self::disconnect_reason).
-/// Callers can use this to decide whether to attempt reconnection. If the server sent [`ServerMessage::ShuttingDown`] before closing, [`shutting_down_reason()`](Self::shutting_down_reason) returns the reason.
+/// Client-side handle for communicating with the leader server. The client
+/// maintains an IPC connection to the leader and provides send/receive
+/// channels for ACP messages. It automatically handles registration and
+/// keepalive pings. When the connection ends, the reason is published to a
+/// `watch` channel accessible via
+/// [`disconnect_reason()`](Self::disconnect_reason). Callers can use this to
+/// decide whether to attempt reconnection.
 pub struct LeaderClient {
     outbound_tx: mpsc::UnboundedSender<ClientMessage>,
     acp_rx: mpsc::UnboundedReceiver<String>,
@@ -66,7 +69,6 @@ pub struct LeaderClient {
     cancel: CancellationToken,
     disconnect_rx: watch::Receiver<DisconnectReason>,
     /// Last `ShuttingDown` reason received from the server.
-    /// `None` means no `ShuttingDown` message has arrived yet (unplanned disconnect or still connected).
     shutting_down_rx: watch::Receiver<Option<super::protocol::ShutdownReason>>,
 }
 
@@ -138,15 +140,14 @@ impl LeaderClient {
         })
     }
 
-    /// `None`: no `ShuttingDown` has arrived yet (still connected, or the server closed without a planned shutdown announcement).
-    /// `Some(reason)`: the server announced a planned shutdown with this reason.
+    /// `None`: no `ShuttingDown` has arrived yet (still connected, or the
+    /// server closed without a planned shutdown announcement).
     pub fn shutting_down_reason(&self) -> watch::Receiver<Option<super::protocol::ShutdownReason>> {
         self.shutting_down_rx.clone()
     }
 
-    /// Send an ACP message payload to the leader server.
-    ///
-    /// Returns an error if the connection has been closed.
+    /// Send an ACP message payload to the leader server. Returns an error if
+    /// the connection has been closed.
     pub fn send(&self, payload: String) -> Result<(), ClientError> {
         self.outbound_tx
             .send(ClientMessage::Acp { payload })
@@ -220,8 +221,8 @@ impl LeaderClient {
         self.cancel.cancel();
     }
 
-    /// Get a receiver for the disconnect reason. The initial value is [`DisconnectReason::Connected`]. When the connection ends, the value changes to the specific reason (shutdown, lost, or client-initiated).
-    /// Callers can use `changed().await` to wait for disconnection, or `borrow()` to check the current state.
+    /// Get a receiver for the disconnect reason. The initial value is
+    /// [`DisconnectReason::Connected`].
     pub fn disconnect_reason(&self) -> watch::Receiver<DisconnectReason> {
         self.disconnect_rx.clone()
     }
@@ -245,9 +246,9 @@ impl LeaderClient {
         (acp_tx, acp_rx)
     }
 
-    /// Decompose into raw channels plus the disconnect reason receiver.
-    ///
-    /// Like [`into_channels()`](Self::into_channels) but also returns the disconnect watch so the caller can observe why the connection ended.
+    /// Decompose into raw channels plus the disconnect reason receiver. Like
+    /// [`into_channels()`](Self::into_channels) but also returns the
+    /// disconnect watch so the caller can observe why the connection ended.
     pub fn into_channels_with_disconnect(
         self,
     ) -> (
@@ -354,8 +355,8 @@ async fn register(
 
     let client_id = registration.client_id;
 
-    // If the leader was still initialising at registration time, block here until it signals `LeaderReady`
-    // `connect_or_spawn` then only returns once the leader can forward ACP traffic
+    // Block here until it signals `LeaderReady` `connect_or_spawn` then only returns once the leader can
+    // forward ACP traffic. Do this if the leader was still initialising at registration time.
     // Callers never need retry logic for `leader_starting` errors on their initial `initialize` request
     if !leader_ready_at_registration {
         debug!(
@@ -419,8 +420,7 @@ async fn register(
                             warn!(?reason, delay_ms, "Leader server shutting down (advance notice)");
                             // Cache the reason so callers can read it without the ACP stream
                             let _ = shutting_down_tx.send(Some(reason));
-                            // Don't break yet; wait for the actual Shutdown message
-                            // Callers watching disconnect_rx will see LeaderShutdown when the Shutdown message arrives
+                            // Do not break yet.
                         }
                         Ok(ServerMessage::Shutdown) => {
                             warn!("Leader server shutdown received");
@@ -430,8 +430,7 @@ async fn register(
                             warn!(client_id, "Unexpected Registered message after initial registration");
                         }
                         Ok(ServerMessage::LeaderReady) => {
-                            // Benign: can arrive if readiness transitions between the borrow-check and the wait_for in run_client_session
-                            // Safe to ignore here; ACP is already forwarding
+                            // Benign.
                             trace!("Received LeaderReady after connect (already ready)");
                         }
                         Ok(ServerMessage::Error { code, message }) => {
@@ -481,8 +480,8 @@ async fn register(
                 }
             }
         };
-        // Only set if the read loop hasn't already set a more specific reason
-        // LeaderShutdown is more informative than ConnectionLost from a write failure caused by the socket already closing
+        // Only set if the read loop has not already set a more specific
+        // reason.
         if *disconnect_tx.borrow() == DisconnectReason::Connected {
             let _ = disconnect_tx.send(reason);
         }
@@ -1034,7 +1033,6 @@ mod tests {
 
         // Receive it on server side; the ID is now namespaced with the client ID
         let payload = handle.acp_rx.recv().await.unwrap();
-        // Verify it's valid JSON with a namespaced ID (format: "clientId|originalIdJson")
         let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
         assert_eq!(json.get("method").and_then(|v| v.as_str()), Some("test"));
         let id_str = json.get("id").and_then(|v| v.as_str()).unwrap();
@@ -1230,8 +1228,7 @@ mod tests {
 
         assert_eq!(*reason_rx.borrow(), DisconnectReason::Connected);
 
-        // Cancel the server; it sends ShuttingDown then Shutdown immediately
-        // The client's read loop handles ShuttingDown (logs, doesn't break), then receives Shutdown and sets DisconnectReason::LeaderShutdown
+        // Cancel the server; it sends ShuttingDown then Shutdown immediately The client's read loop handles ShuttingDown (logs, doesn't break).
         cancel.cancel();
 
         // Wait for disconnect reason to change

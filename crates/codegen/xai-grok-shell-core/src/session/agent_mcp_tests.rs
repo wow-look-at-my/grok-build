@@ -1,3 +1,5 @@
+// agent_mcp_tests.rs holds the agent mcp tests code.
+
 use agent_client_protocol as acp;
 use xai_grok_agent::config::{AgentDefinition, AgentScope, McpServerRef};
 use xai_grok_tools::types::compat::CompatConfig;

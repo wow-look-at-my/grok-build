@@ -1,3 +1,5 @@
+// tool_approvals.rs holds the tool approvals code.
+
 use crate::util::config::RemoteSettings;
 use toml::Value as TomlValue;
 
@@ -46,8 +48,8 @@ pub fn resolve_remember_tool_approvals(
     )
 }
 
-/// Process-global cache of the remote tier, read by [`remember_tool_approvals_from_disk`] at spawn (no live `RemoteSettings` there).
-/// Fail-safe to `None` on lock poisoning.
+/// Process-global cache of the remote tier, read by [`remember_tool_approvals_from_disk`] at spawn (no live
+/// `RemoteSettings` there).
 static REMOTE_REMEMBER_TOOL_APPROVALS: std::sync::RwLock<Option<bool>> =
     std::sync::RwLock::new(None);
 
@@ -109,8 +111,7 @@ mod remember_tool_approvals_gate_tests {
     use super::*;
     use crate::agent::config::ConfigSource;
 
-    // `GROK_REMEMBER_TOOL_APPROVALS` is process-global
-    // Serialize and force it unset at the top of each test so a developer's shell value can't make these flaky
+    // `GROK_REMEMBER_TOOL_APPROVALS` is process-global Serialize and force it unset at the top of each test.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     fn guard() -> std::sync::MutexGuard<'static, ()> {
         let g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());

@@ -1,3 +1,5 @@
+// file_system.rs holds the file system code.
+
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -11,7 +13,7 @@ pub struct FsListParams {
     pub path: String,
     pub depth: usize,
     pub limit: usize,
-    /// Pagination offset applied after the dirs-first sort (default 0).
+    /// Pagination offset applied after the dirs-first sort (the first default).
     pub offset: u64,
     // WalkBuilder options
     pub include_hidden: bool,

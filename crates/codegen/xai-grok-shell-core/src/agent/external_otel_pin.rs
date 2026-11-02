@@ -1,15 +1,4 @@
 //! Requirements pin + destination lock for the external OTEL stream.
-//!
-//! Every present `[telemetry] otel_*` key in merged `requirements.toml` is a
-//! pin (managed-env model). `managed_config.toml` is not a lock.
-//! Collector tokens never live in TOML — keys containing `header` are ignored.
-//!
-//! [`resolve_external_otel_config_with`] overlays pins onto an injected getenv
-//! and **must not** mutate process env. The production path
-//! ([`apply_process_env_strip`]) `remove_var`s conflicting developer `OTEL_*`
-//! so children cannot inherit a decoy endpoint. The same strip matrix also
-//! hides unlisted user/managed file siblings — env-only hide would let
-//! `otel_logs_endpoint` in `config.toml` retarget a pinned generic endpoint.
 
 use std::collections::{HashMap, HashSet};
 
@@ -66,8 +55,8 @@ const PROTOCOL_FAMILY: GenericSignalFamily = GenericSignalFamily {
 
 const GENERIC_SIGNAL_FAMILIES: &[GenericSignalFamily] = &[ENDPOINT_FAMILY, PROTOCOL_FAMILY];
 
-/// Client identity (cert/key): pin any member → strip unlisted siblings *and* unlisted endpoint family members.
-/// CA is a sibling-only family: pin any CA member → strip unlisted CA env names. Does **not** strip endpoints (a fleet can pin a trust store without locking destination).
+/// Client identity (cert/key): pin any member → strip unlisted siblings
+/// *and* unlisted endpoint family members.
 struct ClientIdentityFamily {
     members: &'static [(&'static str, &'static str)],
 }
@@ -238,7 +227,7 @@ fn toml_to_env_value(v: &toml::Value) -> Option<String> {
 pub struct RequirementOtelPins {
     /// Env name → pinned value (from requirements, or `"0"` for omitted gates).
     pub overrides: HashMap<String, String>,
-    /// File keys that were actually present in requirements (not inherit-trap).
+    /// File keys that were present in requirements (not inherit-trap).
     pub listed_file_keys: HashSet<String>,
 }
 

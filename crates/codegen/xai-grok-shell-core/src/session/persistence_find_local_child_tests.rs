@@ -1,3 +1,5 @@
+// persistence_find_local_child_tests.rs holds the persistence find local child tests code.
+
 use super::find_local_child_for_remote_in_root;
 use filetime::{self, FileTime};
 use std::fs;
@@ -89,8 +91,8 @@ fn duplicate_children_returns_newest_by_updated_at() {
     );
 }
 
-/// When two children share the same `updated_at` the tie must be broken deterministically, not by filesystem enumeration order.
-/// The lexicographically largest session id is the final stable tie-breaker.
+/// When children share the same `updated_at` the tie must be broken deterministically, not by filesystem enumeration order. The
+/// lexicographically largest session id is the final stable tie-breaker.
 #[test]
 fn duplicate_children_equal_timestamps_stable_tiebreak() {
     let tmp = TempDir::new().unwrap();
@@ -111,8 +113,7 @@ fn duplicate_children_equal_timestamps_stable_tiebreak() {
         dirs.push(dir);
     }
 
-    // Force all directories to have *exactly* the same mtime so the lexicographic session_id comparison is the actual tie-breaker
-    // Without this, nanosecond-precision filesystem mtimes can differ.
+    // Force all directories to have *exactly* the same mtime so the lexicographic session_id comparison is the actual tie-breaker Without this.
     let fixed_mtime = FileTime::from_unix_time(1700000000, 0);
     for dir in &dirs {
         filetime::set_file_mtime(dir, fixed_mtime).unwrap();

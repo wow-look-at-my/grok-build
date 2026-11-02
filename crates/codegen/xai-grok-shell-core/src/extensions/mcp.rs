@@ -39,8 +39,7 @@ use crate::session::mcp_servers::{MCP_TOOL_NAME_DELIMITER, McpClient, McpState, 
 pub struct McpListRequest {
     #[serde(default)]
     pub session_id: Option<String>,
-    /// When false, bypass cache and refetch from cli-chat-proxy, then sync into live sessions so `search_tool` sees new tools.
-    /// Use after OAuth enrollment or disconnect.
+    /// When false, bypass cache and refetch from cli-chat-proxy, then sync into live sessions.
     #[serde(default = "default_true")]
     pub cache: bool,
 }
@@ -135,8 +134,7 @@ pub struct McpServerSessionState {
     pub auth_required: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub setup_required: bool,
-    /// Managed-policy verdict for a server the merge dropped, so `/mcps` can say "blocked by policy"
-    /// instead of a generic "unavailable"; old pagers ignore the extra field.
+    /// Managed-policy verdict for a server the merge dropped, so `/mcps` can say "blocked by policy" instead of a generic "unavailable".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blocked_reason: Option<String>,
 }
@@ -228,27 +226,25 @@ pub struct McpServersUpdated {
     pub mcp_servers: Vec<McpServerEntry>,
 }
 
-/// Per-server tool-list change push. Emitted by [`crate::session::acp_session::AcpSession`] on the post-handshake, auth-recovery, and toggle-tool paths.
-/// The `session_id` field lets the pager route the push to the owning agent via `find_session_match`. Falling back to `app.active_view` was a latent multi-agent bug.
+/// Per-server tool-list change push. The `session_id` field lets the pager
+/// route the push to the owning agent via `find_session_match`. Falling back
+/// to `app.active_view` was a latent multi-agent bug.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct McpToolsChanged {
     /// Session that owns this push.
-    /// The pager routes via `find_session_match` so a background-agent push does not land on the foregrounded agent's modal.
     pub session_id: String,
-    /// MCP server whose tool list changed. Currently unread by the pager. The pager treats every `tools_changed` push as a trigger to schedule a debounced `mcp/list` refetch and re-reads the full catalog.
-    /// The toggle-tool path therefore leaves this empty for forward-compat. A future field-aware pager optimization would need to special-case empty as "not scoped to one server"; no consumer reads that today.
+    /// MCP server whose tool list changed. unread by the pager.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub server_name: String,
-    /// New tool entries for the named server. Currently unread by the pager for the same reason as `server_name` above. Empty on the toggle-tool path.
-    /// Populated on the post-handshake and auth-recovery paths so future field-aware consumers can avoid the `mcp/list` round trip.
+    /// New tool entries for the named server. unread by the pager for the same reason as `server_name` above.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<McpToolEntry>,
 }
 
-// Re-export the `x.ai/mcp/server_status` schema and method constant from the dispatcher module External callers then have a single import point alongside the other `x.ai/mcp/*` types
-// The canonical definitions stay in [`crate::session::mcp_dispatcher`]: their primary consumer is the dispatcher loop and its unit tests
-// This import from `session` into `extensions` inverts the typical `extensions` to `session` flow Moving the types here would require either making the dispatcher import from `extensions` (the same inversion) or duplicating the schema Leaving the re-export here keeps the single import point without duplicating definitions
+// Re-export the `x.ai/mcp/server_status` schema and method constant from the
+// dispatcher module External callers then have a single import point
+// alongside the other `x.ai/mcp/*` types.
 pub use crate::session::mcp_dispatcher::{
     McpServerStatus, McpServerStatusPayload, McpServerStatusReason, SERVER_STATUS_METHOD,
 };
@@ -294,8 +290,7 @@ pub fn org_policy_message(
     name: &str,
     reason: &xai_grok_workspace::permission::resolution::McpBlockReason,
 ) -> String {
-    // The name is a case-sensitive identifier (long ones middle-truncate). The
-    // policy file appears by name only (doctor/JSON/logs keep full paths).
+    // The name is a case-sensitive identifier (long ones middle-truncate).
     let path = reason.user_facing_source();
     format!(
         "The server {} is blocked by an organization policy ({path}).",
@@ -303,8 +298,9 @@ pub fn org_policy_message(
     )
 }
 
-/// Server names are unbounded user input; middle-truncate very long ones so the reason clause
-/// survives the pager's ~200-char error truncation. Short names print verbatim.
+/// Server names are unbounded user input; middle-truncate long ones so the
+/// reason clause survives the pager's ~200-char error truncation. Short names
+/// print verbatim.
 pub fn clamped_server_name(name: &str) -> std::borrow::Cow<'_, str> {
     const MAX_CHARS: usize = 40;
     if name.chars().count() <= MAX_CHARS {
@@ -316,8 +312,9 @@ pub fn clamped_server_name(name: &str) -> std::borrow::Cow<'_, str> {
     format!("{head}…{tail}").into()
 }
 
-/// User-facing refusal for enabling/spawning a policy-blocked server (`None` when it passes) —
-/// the one chokepoint for the toggle, setup, and upsert paths.
+/// User-facing refusal for enabling/spawning a policy-blocked server (`None`
+/// when it passes) — the chokepoint for the toggle, setup, and upsert
+/// paths.
 pub fn policy_enable_error(
     ms: &xai_grok_workspace::permission::resolution::ManagedSettings,
     server: &acp::McpServer,

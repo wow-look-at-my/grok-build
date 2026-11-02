@@ -1,7 +1,9 @@
 //! Session summary (title) generation.
 //!
-//! Checks whether a summary exists, generates one via the LLM, persists it, syncs to remote, updates the session registry, and notifies the client.
-//! The persistence actor just calls [`SummaryGenerator::update`]; all state transitions are internal.
+//! Checks whether a summary exists, generates one via the LLM, persists it,
+//! syncs to remote, updates the session registry, and notifies the client.
+//! The persistence actor calls [`SummaryGenerator::update`]; all state
+//! transitions are internal.
 
 use crate::extensions::notification::{SessionNotification, SessionUpdate as XaiSessionUpdate};
 use crate::sampling::Client as OaiCompatClient;
@@ -24,7 +26,6 @@ pub struct SummaryConfig {
     pub sampling_client: Option<OaiCompatClient>,
     pub model: String,
     /// Channel back to the persistence actor for sequential storage writes.
-    /// Weak: a strong sender here would keep the actor's own channel and task alive.
     pub persistence_tx: mpsc::WeakUnboundedSender<PersistenceMsg>,
 }
 

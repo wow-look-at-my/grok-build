@@ -1,3 +1,5 @@
+// persistence_worktree_stamp_tests.rs holds the persistence worktree stamp tests code.
+
 use agent_client_protocol as acp;
 use serial_test::serial;
 use xai_grok_test_support::EnvGuard;

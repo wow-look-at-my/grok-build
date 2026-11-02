@@ -45,10 +45,7 @@ pub enum CacheAuthMethod {
     ApiKey,
 }
 
-/// The full disk-cache scope for the model catalog, resolved atomically from the
-/// effective fetch inputs so the load, the write, and the commit gate all agree.
-/// `identity` captures the credential that actually fetches in each mode and
-/// scope change rather than a silent cross-read.
+/// This is the full disk-cache scope for the model catalog.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ModelsCacheScope {
     pub auth_method: CacheAuthMethod,
@@ -76,8 +73,8 @@ impl ModelsCacheScope {
                 scope_hash(&["models-api-key", key.as_str(), alpha.unwrap_or("")])
             }
             // Custom endpoints authenticate with `XAI_API_KEY` or fall back to the session bearer (oai.rs).
-            // A BYOK key is stable so it scopes two keys apart; the session bearer rotates, so key the
-            // session case on the stable account identity (like the settings cache) to survive refresh.
+            // A BYOK key is stable so it scopes keys apart. The session bearer rotates, so key the session
+            // case on the stable account identity (like the settings cache) to survive refresh.
             ModelFetchAuth::CustomEndpoint => match read_xai_api_key_env().ok() {
                 Some(key) => scope_hash(&[
                     "models-custom-endpoint",
@@ -107,11 +104,9 @@ impl ModelsCacheScope {
         }
     }
 
-    /// Re-resolve the scope for the commit gate under the fetch-time mode (so the
-    /// origin reflects what was actually fetched), while reading LIVE disk auth
-    /// for the identity. Re-deriving the mode from live auth would flip the origin
-    /// (e.g. proxy to api.x.ai) in the just-logged-in / sign-out window and wrongly
-    /// abandon a good catalog; the identity still owns real credential changes.
+    /// Re-resolve the scope for the commit gate under the fetch-time mode (so
+    /// the origin reflects what was fetched), while reading LIVE disk auth
+    /// for the identity.
     pub fn resolve_live(fetch_auth: ModelFetchAuth, commit_config: Option<&GrokComConfig>) -> Self {
         let endpoints = super::resolve_startup_endpoints();
         let auth = super::resolve_disk_auth(commit_config.cloned());

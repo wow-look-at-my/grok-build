@@ -1,10 +1,4 @@
 //! REST client for feedback collection via cli-chat-proxy.
-//!
-//! This client handles:
-//! - Syncing session signals to cli-chat-proxy
-//! - Submitting feedback responses
-//! - Completing or dismissing feedback requests
-//! - Creating feedback requests (when triggered by heuristics)
 
 use std::sync::Arc;
 
@@ -23,8 +17,6 @@ use prod_mc_cli_chat_proxy_types::feedback_types::{
 const CLIENT_VERSION_HEADER: &str = "x-grok-client-version";
 
 /// HTTP error from the feedback/signals API with a preserved status code.
-///
-/// Used to let callers distinguish auth failures (401) from transient errors without fragile string matching on error messages.
 #[derive(Debug, thiserror::Error)]
 #[error("{context} failed with status {status}: {body}")]
 pub struct FeedbackApiError {
@@ -34,12 +26,10 @@ pub struct FeedbackApiError {
 }
 
 impl FeedbackApiError {
-    /// Returns `true` if this is a 401 Unauthorized response.
     pub fn is_unauthorized(&self) -> bool {
         self.status == xai_grok_net::StatusCode::UNAUTHORIZED
     }
 
-    /// Returns `true` if this is a 403 Forbidden response.
     pub fn is_forbidden(&self) -> bool {
         self.status == xai_grok_net::StatusCode::FORBIDDEN
     }
@@ -165,9 +155,9 @@ impl FeedbackClient {
             .await
     }
 
-    /// Wait for another consumer (proactive refresh, main request path) to refresh the token.
-    /// Returns `true` if the token changed within the timeout.
-    /// Background consumers call this before driving their own `ServerRejected` recovery to avoid amplifying 401 bursts.
+    /// Wait for another consumer (proactive refresh, main request path) to
+    /// refresh the token. Returns `true` if the token changed within the
+    /// timeout.
     pub async fn wait_for_token_refresh(&self, timeout: std::time::Duration) -> bool {
         let Some(manager) = self.credentials.auth_manager() else {
             return false;
@@ -276,8 +266,7 @@ impl FeedbackClient {
         Ok(())
     }
 
-    /// Update session signals.
-    /// POST /v1/sessions/{session_id}/signals
+    /// Update session signals. POST /v1/sessions/{session_id}/signals
     pub async fn update_signals(
         &self,
         session_id: &str,
@@ -288,8 +277,7 @@ impl FeedbackClient {
         self.send_json(request, "Signals update").await
     }
 
-    /// Submit feedback.
-    /// POST /v1/feedback
+    /// Submit feedback. POST /v1/feedback
     pub async fn submit_feedback(
         &self,
         submission: &FeedbackSubmission,
@@ -387,9 +375,7 @@ pub fn signals_to_update(
         min_time_to_first_token_ms: Some(signals.min_time_to_first_token_ms as i64),
         max_time_to_first_token_ms: Some(signals.max_time_to_first_token_ms as i64),
         latency_sample_count: Some(signals.latency_sample_count as i64),
-        // ITL metrics (session-level aggregates)
-        // Guard p50/p99 with itl_sample_count > 0 so fresh sessions (no ITL measured) send None, which lands as SQL NULL
-        // That preserves the "not yet reported" meaning of the nullable PG columns
+        // ITL metrics (session-level aggregates) Guard p50/p99 with itl_sample_count > 0 so fresh sessions (no ITL measured) send None.
         last_itl_p50_ms: signals.itl_p50_ms.map(|v| v as i64),
         last_itl_p99_ms: signals.itl_p99_ms.map(|v| v as i64),
         worst_itl_max_ms: signals.itl_max_ms.map(|v| v as i64),
@@ -750,7 +736,7 @@ mod tests {
             min_time_to_first_token_ms: 0,
             max_time_to_first_token_ms: 0,
             latency_sample_count: 0,
-            // No ITL measured yet
+            // No ITL measured.
             itl_p50_ms: None,
             itl_p99_ms: None,
             itl_max_ms: None,

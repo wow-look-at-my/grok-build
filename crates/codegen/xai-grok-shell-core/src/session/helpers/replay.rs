@@ -1,7 +1,4 @@
 //! Replay pipeline for cross-compaction rewind.
-//!
-//! When rewinding to a prompt before a compaction boundary, the original messages are gone from the in-memory conversation and `chat_history.jsonl`.
-//! This module reconstructs the conversation by streaming `updates.jsonl` and handling `CompactionCheckpoint` / `RewindMarker` entries.
 
 use std::io;
 use std::path::Path;
@@ -19,8 +16,6 @@ pub struct ReplayResult {
     /// The prompt index that was reached (should equal the target).
     pub prompt_index_reached: usize,
     /// The original User(user_info) text from before the first compaction.
-    /// Extracted from the checkpoint file's `original_user_info` field.
-    /// `None` if no checkpoint was encountered, the checkpoint predates the field (schema_version 1 without it), or it could not be read.
     pub original_user_info: Option<String>,
     /// Compaction marker for the rebuilt conversation: `Some(idx)` if a summary survives, else `None`.
     pub last_compaction_prompt_index: Option<usize>,
@@ -74,14 +69,14 @@ pub fn find_latest_compaction_checkpoint(
     Ok(latest)
 }
 
-/// Replay `updates.jsonl` to reconstruct the conversation at `target_prompt_index`.
-/// `RewindMarker`: discards accumulated state beyond the marker's target.
-/// `CompactionCheckpoint`: loads the checkpoint, or reads only `original_user_info`, based on whether the target is
-/// before or after the compaction boundary.
-///
+/// Replay `updates.jsonl` to reconstruct the conversation at
+/// `target_prompt_index`. `RewindMarker`: discards accumulated state beyond
+/// the marker's target. `CompactionCheckpoint`: loads the checkpoint, or
+/// reads only `original_user_info`, based on whether the target is before or
+/// after the compaction boundary.
 /// # Errors
-/// Fails iff the innermost base still installed at EOF is an unreadable checkpoint; any other unreadable
-/// checkpoint degrades with a warning.
+/// Fails iff the innermost base still installed at EOF is an unreadable
+/// checkpoint; any other unreadable checkpoint degrades with a warning.
 pub fn replay_to_prompt(
     updates_path: &Path,
     session_dir: &Path,
@@ -118,8 +113,6 @@ pub fn replay_to_prompt(
         return Err(e);
     }
 
-    // After processing the entire file, the conversation may extend beyond the target
-    // `target_prompt_index` means "rewind to before prompt N", so keep prompts 0..N-1 (N prompts total)
     if state.prompt_counter > target_prompt_index {
         if let Some(top) = state.bases.last()
             && target_prompt_index >= top.prompt_index
@@ -174,7 +167,6 @@ struct ReplayState {
     current_user_is_interjection: bool,
 
     /// True once any user chunk with `_meta.promptIndex` has been seen.
-    /// Unnumbered user runs after that are mid-turn phantoms (not turns).
     seen_prompt_index_marker: bool,
 
     /// Partial text accumulator for the current agent message.
@@ -182,8 +174,7 @@ struct ReplayState {
 
     has_pending_agent: bool,
 
-    /// Installed checkpoint bases, innermost last: a loaded one clears the stack, an unreadable one stacks on top,
-    /// and a rewind marker pops every base above its target. While non-empty, only real `UserMessageChunk` turns count.
+    /// Installed checkpoint bases, innermost last: a loaded one clears the stack, an unreadable one stacks on top.
     bases: Vec<Base>,
 
     /// The original User(user_info) text from before the first compaction.
@@ -225,19 +216,15 @@ impl ReplayState {
                     _ => {}
                 }
             }
-            SessionUpdate::Acp(notification) => {
-                match &notification.update {
-                    agent_client_protocol::SessionUpdate::UserMessageChunk(chunk) => {
-                        self.handle_user_chunk(chunk);
-                    }
-                    agent_client_protocol::SessionUpdate::AgentMessageChunk(chunk) => {
-                        self.handle_agent_chunk(chunk);
-                    }
-                    _ => {
-                        // Other ACP updates (ToolCall, StatusUpdate, etc.) don't affect prompt counting, so replay skips them
-                    }
+            SessionUpdate::Acp(notification) => match &notification.update {
+                agent_client_protocol::SessionUpdate::UserMessageChunk(chunk) => {
+                    self.handle_user_chunk(chunk);
                 }
-            }
+                agent_client_protocol::SessionUpdate::AgentMessageChunk(chunk) => {
+                    self.handle_agent_chunk(chunk);
+                }
+                _ => {}
+            },
         }
     }
 
@@ -284,8 +271,8 @@ impl ReplayState {
                 }
 
                 self.conversation = file.compacted_history;
-                // Checkpoints predate this binary's validation (or the API's current validators), so heal them like the jsonl loader does
-                // Otherwise a cross-compaction rewind re-injects a stripped poison image and every turn 400s until the next restart
+                // Checkpoints predate this binary's validation (or the API's
+                // current validators).
                 let stripped_images =
                     crate::session::storage::jsonl::strip_invalid_images(&mut self.conversation);
                 if stripped_images > 0 {
@@ -356,7 +343,6 @@ impl ReplayState {
             return;
         }
 
-        // `marker_target = N` means "rewind to before prompt N", keeping prompts 0..N-1 (N prompts total)
         while self
             .bases
             .last()
@@ -1117,7 +1103,6 @@ mod tests {
             make_agent_update("s1", "tests added"),
         ];
 
-        // Replay to prompt 1: keep prompts 0..0 (just "hello")
         let result = replay_updates(&updates, tmp.path(), 1);
         assert_eq!(result.prompt_index_reached, 1);
         assert_eq!(result.conversation.len(), 2);
@@ -1145,10 +1130,8 @@ mod tests {
             make_agent_update("s1", "R1_prime"),
         ];
 
-        // Replay to prompt 2: keep prompts 0..1 (P0, P1')
         let result = replay_updates(&updates, tmp.path(), 2);
-        // After rewind(1): P0 kept, P1 and P2 discarded
-        // P1_prime added as prompt 1, giving [P0, R0, P1_prime, R1_prime]
+        // After rewind(1): P0 kept, P1 and P2 discarded.
         assert_eq!(result.conversation.len(), 4);
         let user_msgs: Vec<String> = result
             .conversation
@@ -1184,8 +1167,6 @@ mod tests {
             make_agent_update("s1", "R2"),
         ];
 
-        // Replay to prompt 1 (pre-compaction): should IGNORE the checkpoint
-        // Keep prompts 0..0 (just P0)
         let result = replay_updates(&updates, tmp.path(), 1);
         let user_msgs: Vec<String> = result
             .conversation
@@ -1200,7 +1181,7 @@ mod tests {
     fn test_replay_post_compaction_target() {
         let tmp = TempDir::new().unwrap();
 
-        // Checkpoint replaces conversation at prompt 2
+        // Checkpoint replaces conversation at a later prompt
         write_checkpoint_file(
             tmp.path(),
             "ckpt1",
@@ -1223,7 +1204,6 @@ mod tests {
             make_agent_update("s1", "R3"),
         ];
 
-        // Replay to prompt 3 (post-compaction): keep prompts 0..2
         // Checkpoint blob and P2 only (P3 removed)
         let result = replay_updates(&updates, tmp.path(), 3);
         assert_eq!(result.conversation.len(), 4);
@@ -1243,7 +1223,6 @@ mod tests {
         use base64::Engine as _;
         let tmp = TempDir::new().unwrap();
 
-        // 16×16 icon: below the API's 512-total-pixel floor.
         let mut png = Vec::new();
         image::ImageBuffer::from_pixel(16, 16, image::Rgba([9u8, 9, 9, 255]))
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
@@ -1318,9 +1297,7 @@ mod tests {
             make_agent_update("s1", "R2"),
         ];
 
-        // Replay to prompt 3: keep prompts 0..2 (checkpoint blob, auto-continue, P2)
         let result = replay_updates(&updates, tmp.path(), 3);
-        // checkpoint sets counter to 2, auto-continue doesn't increment, P2 increments to 3, so prompt_index_reached is 3
         assert_eq!(result.conversation.len(), 5);
         let texts: Vec<_> = result
             .conversation
@@ -1342,8 +1319,6 @@ mod tests {
     }
 
     /// Scenario H: rewind marker after a loaded checkpoint.
-    /// checkpoint(at=2), P2, P3, RewindMarker(2), P2'
-    /// Replaying to prompt 2 should give checkpoint and P2' (not P2 or P3).
     #[test]
     fn test_replay_rewind_marker_after_checkpoint() {
         let tmp = TempDir::new().unwrap();
@@ -1373,10 +1348,9 @@ mod tests {
             make_agent_update("s1", "R2_prime"),
         ];
 
-        // Replay to prompt 3: keep 0..2 (checkpoint and P2', after the rewind marker)
         let result = replay_updates(&updates, tmp.path(), 3);
 
-        // The checkpoint blob has 2 items (system and user summary)
+        // The checkpoint blob has items (system and user summary)
         // After the rewind marker discards P2 and P3, P2' is added
         // Result: [sys, summary, P2_prime, R2_prime]
         let user_msgs: Vec<String> = result
@@ -1406,8 +1380,6 @@ mod tests {
     }
 
     /// Scenario E: multiple compactions, rewind to before the first.
-    /// P0, P1, checkpoint#1(at=2), P2, checkpoint#2(at=3), P3
-    /// Rewind to P1 should ignore both checkpoints.
     #[test]
     fn test_replay_multiple_compactions_rewind_to_before_first() {
         let tmp = TempDir::new().unwrap();
@@ -1444,8 +1416,7 @@ mod tests {
             make_agent_update("s1", "R3"),
         ];
 
-        // Rewind to P1: both checkpoints should be ignored
-        // Keep prompts 0..0 (just P0)
+        // Rewind to P1: both checkpoints should be ignored.
         let result = replay_updates(&updates, tmp.path(), 1);
         assert_eq!(result.conversation.len(), 2);
         let user_msgs: Vec<String> = result
@@ -1457,8 +1428,7 @@ mod tests {
         assert_eq!(user_msgs, vec!["P0"]);
     }
 
-    /// Scenario E variant: rewind to between two compactions.
-    /// Should use checkpoint#1 and replay P2.
+    /// Scenario E variant: rewind to between compactions.
     #[test]
     fn test_replay_multiple_compactions_rewind_between() {
         let tmp = TempDir::new().unwrap();
@@ -1495,9 +1465,6 @@ mod tests {
             make_agent_update("s1", "R3"),
         ];
 
-        // Replay to prompt 3: keep prompts 0..2 via ckpt1 ckpt1 loaded (target 3 >= 2), ckpt2 also loaded (target 3 >= 3).
-        // ckpt2 replaces ckpt1. Then P3 is the first post-ckpt2 prompt.
-        // Keep 3 - 3 = 0 post-ckpt2 prompts, so just the ckpt2 blob.
         let result = replay_updates(&updates, tmp.path(), 3);
         assert_eq!(result.conversation.len(), 2);
         let texts: Vec<_> = result

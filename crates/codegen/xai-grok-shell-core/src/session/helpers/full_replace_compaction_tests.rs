@@ -1,3 +1,5 @@
+// full_replace_compaction_tests.rs holds the full replace compaction tests code.
+
 use super::*;
 use crate::session::helpers::prepared_compaction_history::build_compaction_chat_history;
 

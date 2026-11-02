@@ -16,11 +16,7 @@ pub const SUPPRESS_TURN: u8 = 1;
 /// Fatal failure (size) retrying can never fix: survives turn boundaries, cleared only when the context budget changes — a successful compaction, a rewind (context shrank).
 pub const SUPPRESS_STICKY: u8 = 2;
 /// Credit block: suppress until a model `200` (credits aren't client-observable).
-/// Survives turns; context changes can't fix it.
-/// Token refresh must not clear this.
 pub const SUPPRESS_UNTIL_SUCCESS: u8 = 3;
-/// Auth-expired auto-compact: suppress until login/token refresh, not until 200.
-/// Waiting for a sample deadlocks when context is already over the window.
 pub const SUPPRESS_AUTH: u8 = 4;
 
 /// Compaction REPLACES the conversation wholesale
@@ -41,28 +37,23 @@ pub struct PreviousModelInfo {
     pub context_window: u64,
 }
 
-/// Cached result of an **async** (background / prefire) pass-1 sample for two-pass compaction.
-/// Held on the session actor between the background pass-1 and the synchronous pass-2 apply at compaction time.
+/// Cached result of an **async** (background / prefire) pass-1 sample for
+/// two-pass compaction.
 #[derive(Clone, Debug)]
 pub struct AsyncCompactionCache {
     /// The NOTE₁ text a successor assistant can use (extracted `<summary>` or full pass-1 output).
     pub note1: String,
-    /// Number of leading conversation items pass-1 summarized (the prefix boundary in the LIVE conversation as of pass-1 time).
-    /// The pass-2 tail is `conversation[prefix_len..]`.
+    /// Number of leading conversation items pass-1 summarized.
     pub prefix_len: usize,
     /// Fingerprint of `conversation[..prefix_len]` at pass-1 time.
-    /// Pass-2 only applies NOTE₁ when the current conversation still has this exact prefix.
     pub fingerprint: u64,
     /// Model slug pass-1 ran under; invalidated on model switch.
     pub model_slug: String,
     /// Wall time pass-1 took (ms): latency that ran off the critical path when prefire finished before compact.
-    /// Not counted in telemetry TTFT unless the user waited on an in-flight pass-1.
     pub pass1_latency_ms: u64,
 }
 
 /// Holder count (not a bool): prefire and compact can overlap.
-/// The first `enter` installs a token; nested enters reuse it; `in_flight` stays true until the last scope drops.
-/// A normal turn stop is a no-op when idle.
 #[derive(Default)]
 pub struct CompactCancelGate {
     token: RefCell<tokio_util::sync::CancellationToken>,
@@ -109,8 +100,8 @@ impl CompactCancelGate {
     }
 }
 
-/// `SessionActor` is `!Send` and single-threaded; the `AtomicBool` is only used for its ergonomic `compare_exchange` (no cross-thread sharing).
-/// The `RefCell`s need no locking (the `JoinHandle` is from `spawn_local`, so it is local to this LocalSet and never crosses threads).
+/// `SessionActor` is `!Send` and single-threaded; the `AtomicBool` is only
+/// used for its ergonomic `compare_exchange` (no cross-thread sharing).
 #[derive(Default)]
 pub struct PrefireState {
     /// Set while a background pass-1 sample is running, so the per-turn trigger never spawns a second concurrent job.
@@ -122,7 +113,6 @@ pub struct PrefireState {
 
 impl PrefireState {
     /// Try to claim the single in-flight slot.
-    /// Returns `true` iff this caller won the race and should spawn pass-1 (the caller must later call [`Self::finish`]).
     pub fn try_begin(&self) -> bool {
         self.in_flight
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
@@ -181,8 +171,6 @@ pub enum ContextOverflowRecovery {
 }
 
 pub struct CompactionConfig {
-    /// Context window usage percentage (0-100) at which auto-compact triggers.
-    /// `Cell` so the value can be re-resolved at model-switch time without holding `&mut self` on the actor.
     pub threshold_percent: Cell<u8>,
     /// Debug: when set, next auto-compact check triggers unconditionally.
     pub force_compact: Arc<AtomicBool>,
@@ -194,7 +182,6 @@ pub struct CompactionConfig {
     pub context_window_override: Option<std::num::NonZeroU64>,
     pub count: AtomicU64,
     /// Set at turn end; consumed at next turn start for model-switch compaction.
-    /// `Cell` because `SessionActor` is `!Send`.
     pub previous_model: Cell<Option<PreviousModelInfo>>,
     /// The resolved mode; `Segments` carries its detail level inline.
     pub compaction_mode: xai_chat_state::CompactionMode,
@@ -211,9 +198,7 @@ pub struct CompactionConfig {
 }
 
 impl CompactionConfig {
-    /// Whether AUTO compaction is suppressed. The single gate shared by every
-    /// automatic trigger so a doomed compact request can't re-fire on a
-    /// sibling path; manual `/compact` stays exempt.
+    /// Whether AUTO compaction is suppressed.
     pub fn is_suppressed(&self) -> bool {
         self.auto_compact_suppressed.load(Ordering::Relaxed) != SUPPRESS_NONE
     }

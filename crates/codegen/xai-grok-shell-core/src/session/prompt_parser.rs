@@ -1,3 +1,5 @@
+// prompt_parser.rs holds the prompt parser code.
+
 use crate::session::user_message::user_query;
 use agent_client_protocol::{self as acp, ImageContent};
 use serde::Deserialize;
@@ -11,13 +13,10 @@ use xai_grok_workspace::file_system::{
 #[derive(Debug, Clone)]
 pub struct ParsedPrompt {
     /// Context blocks: `<attached_files>` payloads and resource-link sections.
-    /// Grok mode may include editor open/focus metadata; the compat mode does not.
-    /// Empty string when there is no context.
     pub context: String,
     /// The user's query, already wrapped in `<user_query>` tags (or raw when verbatim).
     pub query: String,
     /// Skill information block: `<skill_information>` envelope with expanded skill content.
-    /// Empty string when no skills were invoked.
     pub skill_information: String,
     pub images: Vec<ImageContent>,
     /// Whether the prompt was parsed in query-last mode.
@@ -33,8 +32,8 @@ impl ParsedPrompt {
         )
     }
     /// Grok mode: `<user_query>`, then `<skill_information>`, then context.
-    /// Query-last mode: context, then `<user_query>`, then `<skill_information>`.
-    /// The `<skill_information>` block always follows `<user_query>` immediately.
+    /// Query-last mode: context, then `<user_query>`, then
+    /// `<skill_information>`.
     pub fn assemble_parts_with_skills(
         context: &str,
         query: &str,
@@ -44,7 +43,7 @@ impl ParsedPrompt {
         Self::assemble_with_layout(context, query, skill_information, is_cursor).0
     }
     /// [`Self::assemble_parts_with_skills`] plus the byte range of each part in the result,
-    /// recorded as the parts are pushed, so a part-relative cut maps back to bytes of the assembled
+    /// recorded as the parts are pushed. A part-relative cut maps back to bytes of the assembled
     /// message.
     pub fn assemble_with_layout(
         context: &str,
@@ -208,8 +207,8 @@ pub async fn parse_prompt_with_skills(
         is_cursor,
     })
 }
-/// Returns `(context, query)`, the two halves of the prompt kept separate.
-/// The caller can truncate context without searching for the query boundary.
+/// Returns `(context, query)`, both halves of the prompt kept separate. The
+/// caller can truncate context without searching for the query boundary.
 fn render_message(
     message: String,
     embedded_contents: Vec<String>,
@@ -297,10 +296,10 @@ struct CursorPosition {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "fileState")]
 enum FileState {
-    /// The file is currently visible in the editor
+    /// The file is visible in the editor
     #[serde(rename = "focused")]
     Focused { cursor: CursorPosition },
-    /// The file is open in a tab but not currently visible
+    /// The file is open in a tab but not visible
     #[serde(rename = "open")]
     Open,
 }
@@ -677,7 +676,7 @@ mod tests {
         );
     }
     /// For every empty/non-empty combination of the parts, in both layouts, the assembled string
-    /// matches an independently built expectation and the layout slices back to the parts.
+    /// matches an independently built expectation. The layout slices back to the parts.
     #[test]
     fn assemble_with_layout_matches_expectation_for_all_part_combinations() {
         let check = |is_cursor: bool| {

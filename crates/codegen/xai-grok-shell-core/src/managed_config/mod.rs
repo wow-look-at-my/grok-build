@@ -63,7 +63,7 @@ pub fn startup_profile() -> LaunchProfile {
 }
 
 /// Test seam: drop the published sample so the next call observes fresh.
-#[cfg(any(test, feature = "test-support"))]
+#[cfg(any(test, feature = "test-support", feature = "test-util"))]
 pub fn clear_startup_profile_for_tests() {
     *PUBLISHED_PROFILE.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
@@ -95,8 +95,8 @@ fn locked_gate_snapshot(
 ) -> Result<policy::GateSnapshot, ManagedPolicyRefusal> {
     let lock_file = match store::try_gate_lock(home) {
         store::GateLockAttempt::Acquired(lock_file) => lock_file,
-        // No `block_in_place`: bootstrap runs inside a `LocalSet`, where tokio panics on it even on a multi-thread runtime.
-        // Plain blocking is safe here: no task ever holds this flock across an await, and the wait is bounded by `lock_wait`.
+        // No `block_in_place`: bootstrap runs inside a `LocalSet`, where
+        // tokio panics on it even on a multi-thread runtime.
         store::GateLockAttempt::Contended(lock_file) => {
             store::wait_for_gate_lock(&lock_file, home, lock_wait)?;
             lock_file

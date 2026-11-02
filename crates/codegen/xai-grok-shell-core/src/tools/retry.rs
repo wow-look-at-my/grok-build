@@ -7,7 +7,8 @@ pub use xai_grok_tools::retry::{BackoffConfig, execute_with_backoff};
 use std::future::Future;
 use std::time::Duration;
 
-/// Backward-compatible wrapper around `execute_with_backoff` that uses `anyhow::Error` as the error type (matching the old signature).
+/// Backward-compatible wrapper around `execute_with_backoff` that uses
+/// `anyhow::Error` as the error type (matching the signature).
 pub async fn execute_with_retry<T, E, EFut, R, RFut>(
     config: &RetryConfig,
     execute: E,

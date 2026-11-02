@@ -1,3 +1,5 @@
+// tips.rs holds the tips code.
+
 use serde::Deserialize;
 use toml::Value as TomlValue;
 

@@ -1,9 +1,4 @@
-//! The single owner of the fail-closed gate that decides whether customer-owned OTEL telemetry may ship.
-//! It drives the process-global flag in [`xai_grok_telemetry::external`]:
-//!
-//! 1. Startup (no leader instance yet): [`suppress`] closes the gate before telemetry init.
-//!    [`open_at_startup`] re-opens it when nothing will deliver a fleet policy to this process ([`should_open_at_startup`]).
-//! 2. After auth or a refresh, per leader: [`OtelGate::resolve`] drives the gate from the [`SettingsFetch`] outcome for the still-live identity.
+//! The owner of the fail-closed gate that decides whether customer-owned OTEL telemetry may ship. It drives the process-global flag in [`xai_grok_telemetry::external`]:
 use crate::remote::SettingsFetch;
 use crate::util::config::RemoteSettings;
 use std::time::Duration;
@@ -39,7 +34,7 @@ pub fn policy_channel(remote_fetch_enabled: bool, proxy_is_xai: bool) -> PolicyC
     }
     PolicyChannel::Applies
 }
-/// [`policy_channel`] resolved against live config for the proxy actually in use.
+/// [`policy_channel`] resolved against live config for the proxy in use.
 pub fn policy_channel_for(proxy_url: &str) -> PolicyChannel {
     policy_channel(
         crate::util::config::resolve_remote_fetch_enabled(),
@@ -50,7 +45,7 @@ pub fn policy_channel_for(proxy_url: &str) -> PolicyChannel {
 pub fn resolved_policy_channel() -> PolicyChannel {
     policy_channel_for(&crate::agent::config::EndpointsConfig::from_effective_config().proxy_url())
 }
-/// Inputs to [`should_open_at_startup`]. Named fields keep the two booleans from being transposed at call sites.
+/// Inputs to [`should_open_at_startup`]. Named fields keep both booleans from being transposed at call sites.
 pub struct StartupGate {
     pub channel: PolicyChannel,
     pub has_session: bool,

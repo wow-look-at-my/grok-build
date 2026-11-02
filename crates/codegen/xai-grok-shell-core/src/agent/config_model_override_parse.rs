@@ -1,16 +1,4 @@
 //! Resilient parsing for `[model.<id>]` TOML overrides.
-//!
-//! It also defines [`ConfigWarning`] and [`WarningTarget`], the shared warning vocabulary.
-//! The `[auth_provider.*]` parser in `config.rs` emits them too.
-//!
-//! A model entry must survive a bad field: warn and skip the field, never drop the model (managed configs must not lose catalog entries).
-//!
-//! Every table is deserialized through `serde_ignored`, so unknown fields warn on every path.
-//! [`ConfigModelOverride`] thus stays the single source of truth for the field set.
-//! When the whole-table parse fails, fields that fail to parse on their own are pruned (one warning each) and the table is parsed again.
-//! Non-table values are dropped with a warning.
-//!
-//! Warnings are retained on `Config::config_warnings` and surfaced by `grok inspect`.
 
 use indexmap::IndexMap;
 use serde::Serialize;
@@ -229,13 +217,14 @@ pub fn parse_model_overrides(raw_config: &toml::Value) -> ParsedModelOverrides {
     ParsedModelOverrides { models, warnings }
 }
 
-/// Logs the warnings when they differ from the previous parse, so a persistently broken config logs once per process instead of once per parse.
+/// Logs the warnings when they differ from the parse, so a persistently
+/// broken config logs once per process instead of once per parse.
 pub fn log_config_warnings(warnings: &[ConfigWarning]) {
     use std::hash::{Hash as _, Hasher as _};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static LAST_LOGGED: AtomicU64 = AtomicU64::new(0);
-    // 0 means "no warnings"; real hashes are clamped to nonzero.
+    // No means "no warnings"; real hashes are clamped to nonzero.
     let hash = if warnings.is_empty() {
         0
     } else {
@@ -315,8 +304,8 @@ fn parse_model_override_table(
     }
 
     if entry.auth_provider.is_some() {
-        // A non-empty `api_key` always shadows; an `env_key` only shadows when its variable resolves at runtime, which parse time can't know
-        // Warn accordingly so the message matches what actually happens
+        // A non-empty `api_key` always shadows; an `env_key` only shadows
+        // when its variable resolves at runtime, which parse time can't know.
         let has_static_api_key = entry
             .api_key
             .as_deref()
@@ -353,11 +342,11 @@ fn parse_model_override_table(
 }
 
 /// `(canonical, legacy)` key pairs that serde rejects as duplicate fields when both appear in one table.
-/// Keep in sync with the `#[serde(alias)]` attributes on [`ConfigModelOverride`].
 const ALIASES: &[(&str, &str)] = &[("compactions_remaining", "send_compactions_remaining")];
 
 /// Removes one key of each [`ALIASES`] pair that appears twice in `table`.
-/// The canonical key wins; when its value doesn't parse, the legacy key is kept instead.
+/// The canonical key wins; when its value doesn't parse, the key is kept
+/// instead.
 fn dedupe_aliases(
     model_key: &str,
     table: &mut toml::map::Map<String, toml::Value>,
@@ -666,7 +655,7 @@ mod tests {
         );
     }
 
-    /// An unknown field warns the same whether or not another field fails to parse.
+    /// An unknown field warns the same whether another field fails to parse.
     #[test]
     fn unknown_field_warning_is_path_independent() {
         let unknown_of = |toml_str: &str| {
@@ -867,8 +856,8 @@ mod tests {
     fn fully_populated_override_round_trips_with_only_the_shadowing_warning() {
         let serialized = toml::Value::try_from(fully_populated_override()).unwrap();
         let (models, warnings) = parse_single_entry(serialized.as_table().unwrap().clone());
-        // The exhaustive literal deliberately sets `api_key`, `env_key`, AND `auth_provider`: the one legal-but-warned combination
-        // Any other warning (skipped/unknown field) still fails the guard
+        // The exhaustive literal deliberately sets `api_key`, `env_key`, AND
+        // `auth_provider`: the legal-but-warned combination.
         let unexpected: Vec<_> = warnings
             .iter()
             .filter(|w| w.kind != ConfigWarningKind::ConflictingFields)

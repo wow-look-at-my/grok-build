@@ -1,3 +1,5 @@
+// active_agent_message_tests.rs holds the active agent message tests code.
+
 use super::*;
 use xai_grok_telemetry::events::TelemetryEvent;
 use xai_grok_tools::types::output::{SearchToolOutput, ToolOutput};

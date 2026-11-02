@@ -1,3 +1,5 @@
+// agent_rebuild_tests.rs holds the agent rebuild tests code.
+
 use super::*;
 
 use xai_grok_tools::implementations::grok_build::task::backend::SubagentBackend;

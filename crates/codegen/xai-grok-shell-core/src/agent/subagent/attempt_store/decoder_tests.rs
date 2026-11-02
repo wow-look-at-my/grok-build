@@ -1,3 +1,5 @@
+// decoder_tests.rs holds the decoder tests code.
+
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
 use super::{

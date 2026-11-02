@@ -1,8 +1,5 @@
-//! Materialize `AgentDefinition.mcp_servers` and overlay them onto a disk/client merge.
-//!
-//! Agent.md servers win over the disk/client merge by name. Rebuild keeps live names
-//! that were not part of the previous overlay; hot-reload and `UpdateMcpServers` replace
-//! wholesale from merge plus overlay.
+//! Materialize `AgentDefinition.mcp_servers` and overlay them onto a
+//! disk/client merge.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -26,11 +23,11 @@ pub struct RematerializeParams<'a> {
     pub definition: &'a AgentDefinition,
 }
 
-/// Plugin ignore, folder-trust, inline/named parse, then managed-policy plus the
-/// `enabled = false` / `disabled_mcp_servers` kill switch.
-///
-/// `named_lookup` is the pre-overlay merge (parent path) or parent snapshot (child).
-/// Disabled names never leave this function, so overlay cannot re-append them.
+/// Plugin ignore, folder-trust, inline/named parse, then managed-policy plus
+/// the `enabled = false` / `disabled_mcp_servers` kill switch. `named_lookup`
+/// is the pre-overlay merge (parent path) or parent snapshot (child).
+/// Disabled names never leave this function, so overlay cannot re-append
+/// them.
 pub fn materialize_agent_mcp_servers(
     definition: &AgentDefinition,
     named_lookup: &[acp::McpServer],
@@ -105,8 +102,8 @@ pub fn rematerialize_with_agent_overlay(params: RematerializeParams<'_>) -> Vec<
     merged
 }
 
-/// Rebuild: rematerialize disk/client + the new seat, then keep live names outside
-/// the previous overlay. The disk/client layer is the actor's admitted seed.
+/// Rebuild: rematerialize disk/client + the new seat, then keep live names
+/// outside the overlay. The disk/client layer is the actor's admitted seed.
 pub fn rematerialize_live_for_agent_seat(
     live: &[acp::McpServer],
     previous_mcp_servers: &[McpServerRef],

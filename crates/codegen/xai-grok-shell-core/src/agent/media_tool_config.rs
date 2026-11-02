@@ -1,13 +1,5 @@
 //! Builds the Imagine tool configs (`image_gen`, `image_edit`, and the video tools) from the
 //! resolved agent config.
-//!
-//! Every host that runs these tools goes through here: the embedded agent and the pager's tool
-//! bridge for the daemon backend. The base URL, the client headers that attribute Build traffic
-//! server-side, and the feature gates come from one place so the two hosts cannot drift.
-//!
-//! The configured `api_key` is the side-call bearer at build time, never `sampling_config.api_key`:
-//! on a foreign-issuer login that field holds the foreign session token, which must not reach a
-//! client that posts to `api.x.ai`. The per-request provider still decides what goes on the wire.
 
 use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
 use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;
@@ -24,14 +16,12 @@ pub struct MediaToolCredentials {
 }
 
 /// The config a host outside the embedded agent builds media tools from.
-///
-/// Parses the effective config and runs the same runtime resolution the agent runs at boot, which is
-/// where the ZDR guard (`disable_zdr_incompatible_tools`, `zdr_video_output_s3`) and the media
-/// concurrency caps are computed; a config that skipped it would advertise video output a ZDR customer
-/// forbids. `remote_settings` is what the host has; `None` leaves the remote layers unset.
-///
-/// # Errors
-///
+/// Parses the effective config. It runs the same runtime resolution the agent
+/// runs at boot, which is where the ZDR guard
+/// (`disable_zdr_incompatible_tools`, `zdr_video_output_s3`) and the media
+/// concurrency caps are computed. A config that skipped it would advertise
+/// video output a ZDR customer forbids. `remote_settings` is what the host
+/// has; `None` leaves the remote layers unset. # Errors
 /// Returns the config parse error text.
 pub fn load_media_tool_config(
     raw_config: &toml::Value,

@@ -1,3 +1,5 @@
+// media_tool_config_tests.rs holds the media tool config tests code.
+
 use pretty_assertions::assert_eq;
 use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
 use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;

@@ -1,3 +1,5 @@
+// session_compact_retain_session_asset_files_tests.rs holds the session compact retain session asset files tests code.
+
 use std::path::Path;
 
 use super::{MAX_COMPACTION_IMAGE_PATHS, retain_session_asset_files};

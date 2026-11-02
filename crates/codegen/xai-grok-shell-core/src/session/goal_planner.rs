@@ -16,9 +16,7 @@ use xai_grok_tools::implementations::grok_build::task::types::{
 
 // Shared per-role model override and spawn-and-retry-once fail-open wrapper
 
-/// The role's configured `agent_type` selects only the harness, threaded as [`SubagentRuntimeOverrides::harness_agent_type`].
-/// The subagent_type stays fixed so the role keeps a capable toolset on whichever harness is chosen.
-/// The three role spawners and the parent-side `describe_subagent_type` probe all read it, so the gated/probed toolset matches the spawned one.
+/// The role's configured `agent_type` selects only the harness.
 pub const GOAL_ROLE_SUBAGENT_TYPE: &str = "general-purpose";
 
 /// Default foreground wait for the goal plan writer.
@@ -49,16 +47,13 @@ mod budget_tests {
 /// Best-effort wait for a subagent cancel to be acknowledged before giving up.
 const GOAL_PLANNER_CANCEL_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// `None`/`None` inherits the current model and the session harness (the historic `SubagentRuntimeOverrides::default()` behavior).
-/// When either field is `Some` the pair is "explicit".
-/// The spawn-and-retry-once wrapper ([`spawn_with_fail_open_retry`]) retries on the current model and session harness if the first attempt fails.
+/// `None`/`None` inherits the current model and the session harness (the
+/// historic `SubagentRuntimeOverrides::default()` behavior).
 #[derive(Debug, Clone, Default)]
 pub struct RoleSpawnOverride {
     /// Resolved, post-auth, post-fail-open model id, or `None` to inherit.
     pub model: Option<String>,
     /// Resolved harness `agent_type`, applied REGARDLESS of the parent agent.
-    /// Its `AgentDefinition` decides the spawned subagent's harness flavor (system prompt and toolset).
-    /// NOT a subagent type: the subagent_type stays fixed at [`GOAL_ROLE_SUBAGENT_TYPE`].
     pub agent_type: Option<String>,
 }
 
@@ -69,16 +64,13 @@ impl RoleSpawnOverride {
     }
 }
 
-/// The model id a `/goal` role actually runs on: the committed override's model when present, else the inherited parent.
-/// Reported as `GoalPlannerFired.model_id`/`GoalStrategistFired.model_id` so a committed remote override isn't under-reported as the parent model.
-/// Not used for the classifier: its skeptic pool has no single representative model.
+/// The model id a `/goal` role runs on: the committed override's model when
+/// present, else the inherited parent.
 pub fn effective_role_model_id<'a>(override_model: Option<&'a str>, parent: &'a str) -> &'a str {
     override_model.unwrap_or(parent)
 }
 
 /// The explicit-pair retry re-runs on the default/parent toolset.
-/// The caller renders both up front and [`spawn_with_fail_open_retry`] picks the matching one per attempt.
-/// On the inherit path no retry occurs and `fallback` is never read, so callers on that path may leave it empty.
 pub struct RoleRenderedPrompt {
     /// Rendered for the role's RESOLVED toolset (the first/only attempt).
     pub primary: String,
@@ -100,7 +92,6 @@ pub struct PlannerSpawnOutput {
 /// is appropriate.
 pub trait RetryableSpawnError {
     /// `true` when the explicit-pair fail-open retry may re-run the spawn on the current model.
-    /// A cancellation (user / turn abort) must propagate as-is so the planner pauses as `Aborted` instead of silently re-running.
     fn is_retryable(&self) -> bool;
 }
 
@@ -242,7 +233,6 @@ where
 // Constants
 
 /// Telemetry value on `GoalPlannerFired`.
-/// It does not cap user-initiated `/goal resume` retries, which re-run the planner unbounded.
 pub const GOAL_PLANNER_MAX_RUNS: u32 = 1;
 
 /// The planner reads and greps the workspace and, when web search is enabled, researches external facts to clarify scope.
@@ -347,10 +337,8 @@ pub struct ChannelSpawner {
     pub parent_prompt_id: Option<String>,
     pub cwd: Option<String>,
     /// Trace-artifact sink and resolved `task` tool name; `None` disables recording.
-    /// See [`super::goal_classifier::record_subagent_trace`].
     pub trace_sink: Option<(xai_chat_state::ChatStateHandle, String)>,
-    /// Resolved per-role model and toolset override.
-    /// Default (inherit) keeps the historic `::default()` spawn behavior.
+    /// Resolved per-role model and toolset override. Default (inherit) keeps the historic `::default()` spawn behavior.
     pub role_override: RoleSpawnOverride,
     pub cancel_token: tokio_util::sync::CancellationToken,
     /// Cell published with the coordinator id this spawn runs under, so a Send Now can address the live planner child.
@@ -497,11 +485,9 @@ pub struct GoalPlannerInputs<'a> {
     pub plan_file: &'a Path,
     pub attempt: u32,
     pub model_id: &'a str,
-    /// Resolved tool names for the planner role's prompt placeholders (`{READ_TOOL}`/`{SEARCH_TOOL}`/`{LIST_TOOL}`/`{WRITE_TOOL}`).
-    /// Built parent-side from the planner's resolved toolset.
+    /// Resolved tool names for the planner role's prompt placeholders.
     pub tool_names: &'a RoleToolNames,
     /// Default/parent-toolset tool names used to render the fail-open RETRY prompt.
-    /// On the inherit path this equals `tool_names`.
     pub inherit_tool_names: &'a RoleToolNames,
 }
 
@@ -536,7 +522,7 @@ pub async fn run_goal_planner(
 
     let plan_file_str = inputs.plan_file.to_string_lossy();
     let with_plan_file = GOAL_PLANNER_PROMPT_TEMPLATE.replace("{PLAN_FILE}", &plan_file_str);
-    // Render once per toolset: `primary` for the resolved toolset, `fallback` for the default/parent toolset the explicit-pair retry falls back to
+    // Render once per toolset: `primary` for the resolved toolset, `fallback` for the default/parent toolset the explicit-pair retry falls back.
     let render = |tool_names: &RoleToolNames| -> String {
         let rendered = tool_names.apply(&with_plan_file);
         let mut full = String::with_capacity(rendered.len() + inputs.objective.len() + 256);
@@ -700,8 +686,8 @@ mod tests {
 
     #[test]
     fn planner_template_cursor_render_names_the_web_search_tool() {
-        // The previously-broken case: on the alternate toolset the web tool is named "WebSearch", so the planner prompt must render THAT
-        // Otherwise the weak model never reaches for it and plans from memory
+        // The previously-broken case: on the alternate toolset the web tool
+        // is named "WebSearch".
         let rendered = RoleToolNames::from_summary(&summary_with(&[
             (ToolKind::WebSearch, "WebSearch"),
             (ToolKind::WebFetch, "WebFetch"),
@@ -1280,8 +1266,8 @@ mod tests {
 
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// A `RoleRenderedPrompt` whose two renders are identical (the inherit / same-toolset case).
-    /// Tests that exercise the distinct-fallback path build the struct inline instead.
+    /// A `RoleRenderedPrompt` whose renders are identical (the inherit /
+    /// same-toolset case).
     fn role_prompt(p: &str) -> RoleRenderedPrompt {
         RoleRenderedPrompt {
             primary: p.to_string(),

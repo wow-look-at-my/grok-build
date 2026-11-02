@@ -1,3 +1,5 @@
+// persistence_resumed_sandbox_profile_tests.rs holds the persistence resumed sandbox profile tests code.
+
 use super::{
     RecentSessionSelection, RelocationError, RelocationView,
     most_recent_local_summary_for_cwd_in_root, most_recent_local_summary_for_cwd_in_view,

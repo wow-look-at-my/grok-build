@@ -1,3 +1,5 @@
+// mod.rs holds the mod code.
+
 use super::{PersistedData, SessionUpdateEnvelope, StorageAdapter};
 use crate::sampling::types::ChatRequestMessage;
 use crate::sampling::{ContentPart, ConversationItem};
@@ -308,11 +310,10 @@ impl JsonlStorageAdapter {
         Ok(summaries)
     }
     /// Extra `summary.json` reads allowed past `limit` while skipping hidden/headless rows.
-    /// The slack lets a mixed store still fill a page without scanning a headless-dominated tree.
     const RECENT_LIST_READ_SLACK: usize = 8;
-    /// Instead of reading every `summary.json` (expensive at scale, ~12K files), this stats each file to get its mtime.
-    /// On a machine with ~12K sessions this reduces cold-boot `workspace_list` from ~3s to ~200ms.
-    /// Final order among candidates uses `last_active_at` else `updated_at`.
+    /// Instead of reading every `summary.json` (expensive at scale, ~12K
+    /// files), this stats each file to get its mtime. On a machine with ~12K
+    /// sessions this reduces cold-boot `workspace_list` from ~3s to ~200ms.
     pub async fn list_sessions_recent(&self, limit: usize) -> io::Result<Vec<Summary>> {
         let adapter = self.clone();
         xai_spawn::spawn_blocking(move || adapter.list_sessions_recent_sync(limit))
@@ -401,9 +402,9 @@ impl JsonlStorageAdapter {
         .await
         .map_err(io::Error::other)?
     }
-    /// Append one JSONL record, healing a torn tail before writing.
-    /// Appends are not crash-atomic: a process kill / `ENOSPC` mid-`write_all` leaves the file ending in a *partial* record with no trailing newline.
-    /// Before writing, check the last byte: if it isn't `\n`, prepend one so the torn record is terminated as its own (single) corrupt line.
+    /// Append one JSONL record, healing a torn tail before writing. Appends
+    /// are not crash-atomic: a process kill / `ENOSPC` mid-`write_all` leaves
+    /// the file ending in a *partial* record with no trailing newline.
     fn append_jsonl_line_sync(
         path: &Path,
         line: Vec<u8>,
@@ -607,8 +608,8 @@ impl JsonlStorageAdapter {
     fn sync_parent_directory(path: &Path) -> io::Result<()> {
         super::sync_parent_dir_durable(path)
     }
-    /// Write a full JSONL file (rewriting all items), crash-atomically: serialize to a temp file then rename over the target.
-    /// A crash / `ENOSPC` mid-write therefore can't truncate the existing file (e.g. lose `rewind_points.jsonl` history).
+    /// Write a full JSONL file (rewriting all items), crash-atomically:
+    /// serialize to a temp file then rename over the target.
     async fn write_jsonl<T: serde::Serialize>(&self, path: PathBuf, items: &[T]) -> io::Result<()> {
         super::write_jsonl_atomic_async(&path, items).await
     }
@@ -956,9 +957,8 @@ impl JsonlStorageAdapter {
         }
         Ok(restored)
     }
-    /// Load `chat_history.jsonl` across legacy and current item formats; skip unparseable lines instead of failing the whole session.
-    /// Appends are not crash-atomic, so one torn or raced line must not brick the load; the raw file is quarantined once as `chat_history.jsonl.corrupt`.
-    /// Legacy inline `reasoning` / `raw_output` is upgraded in memory to sibling items before the assistant; disk is not rewritten, and a skipped corrupt line emits no siblings.
+    /// Load `chat_history.jsonl` across legacy and current item formats; skip
+    /// unparseable lines instead of failing the whole session.
     fn read_chat_history_sync(
         &self,
         path: PathBuf,
@@ -1106,9 +1106,8 @@ impl JsonlStorageAdapter {
         }
         Ok(items)
     }
-    /// Apply a typed [`SummaryPatch`](super::summary_write::SummaryPatch) to this session's `summary.json` under an exclusive sidecar lock.
-    /// The read-modify-write thus serializes against every other writer (including a second persistence actor on reconnect, or another process).
-    /// This is the only path live sessions use to mutate the summary.
+    /// Apply a typed [`SummaryPatch`](super::summary_write::SummaryPatch) to
+    /// this session's `summary.json` under an exclusive sidecar lock.
     pub async fn apply_summary_patch(
         &self,
         info: &Info,
@@ -1167,7 +1166,6 @@ fn transform_session_id_in_update(
         }
     }
 }
-/// Next `segment_NNN` index in `compaction_dir`: one past the highest existing segment, or 0 when none exist.
 /// Resume-safe: the index is derived from disk, not memory.
 async fn next_compaction_segment_index(compaction_dir: &std::path::Path) -> u64 {
     let Ok(mut entries) = tokio::fs::read_dir(compaction_dir).await else {
@@ -1989,7 +1987,6 @@ impl StorageAdapter for JsonlStorageAdapter {
     }
 }
 /// Max decoded size for a data-URI image loaded from persisted history.
-/// Generous (20 MB): fresh images use 5 MB, but loaded ones just need sanity-checking.
 const MAX_LOADED_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 /// Strip data-URI images the API would reject from loaded conversation items, so a poisoned history recovers instead of 400ing on every turn.
 /// The verdicts come from [`persisted_image_reject_reason`](crate::session::image_normalize::persisted_image_reject_reason).

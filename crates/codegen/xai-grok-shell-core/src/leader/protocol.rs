@@ -1,3 +1,5 @@
+// protocol.rs holds the protocol code.
+
 use std::io;
 use std::path::PathBuf;
 
@@ -73,13 +75,11 @@ where
 }
 
 /// Unique identifier assigned to each client connecting to the leader server.
-/// IDs are monotonically increasing and wrap around at u64::MAX.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ClientId(pub u64);
 
 impl ClientId {
     /// Generate a new unique client ID from an atomic counter that wraps at u64::MAX.
-    /// Collisions would need 2^64 IDs, which never happens in practice.
     pub fn new() -> Self {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -116,17 +116,14 @@ pub const LEADER_PROTOCOL_VERSION: u32 = 1;
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ClientCapabilities {
     /// Auto-approve all tool executions without confirmation (YOLO mode).
-    /// When true, the leader will inject `yoloMode: true` into session/new requests.
     #[serde(default)]
     pub yolo_mode: bool,
 
     /// Classifier permission mode (auto).
-    /// When true and not yolo, the leader injects `autoMode: true` into session/new and session/load `_meta`.
     #[serde(default)]
     pub auto_mode: bool,
 
     /// Default model ID to use for new sessions.
-    /// When set, the leader injects `modelId` into session/new requests that don't already specify one.
     #[serde(default)]
     pub default_model: Option<String>,
 
@@ -135,32 +132,24 @@ pub struct ClientCapabilities {
     pub client_version: Option<String>,
 
     /// Whether this client has advertised `x.ai/codeNavigation.enabled`.
-    /// When true, the leader injects `codeNavEnabled: true` into `session/new` and `session/load` requests.
-    /// The agent can then gate code-nav startup per client rather than reading shared last-initialized state.
     #[serde(default)]
     pub code_nav_enabled: bool,
 
-    /// Whether the client handles terminal ACP messages (create, output, kill, etc.). When true, the leader injects `clientTerminal: true` into `session/new` and `session/load`.
-    /// The agent then routes terminal commands to the client via ACP instead of running them locally. Per-client so a TUI (`terminal: false`) and a web client (`terminal: true`) sharing the same leader get independent routing.
+    /// Whether the client handles terminal ACP messages (create, output, kill, etc.).
     #[serde(default)]
     pub terminal: bool,
 
     /// Whether the client handles filesystem ACP read/write messages.
-    /// Same per-client isolation rationale as `terminal`.
     #[serde(default)]
     pub fs_read: bool,
     #[serde(default)]
     pub fs_write: bool,
 
-    /// Whether this client will draw a status row (`x.ai/statusLine`). When true, the leader injects `clientStatusLine: true`.
-    /// The agent then builds the payload for a client that asked, not for whichever one started the process. The flag it sets is per session, so other subscribers of a shared session receive the payload too.
+    /// Whether this client will draw a status row (`x.ai/statusLine`).
     #[serde(default)]
     pub status_line: bool,
 
     /// Whether this client wants live `user_message_chunk` during a prompt (`x.ai/userMessageEcho`).
-    /// When true, the leader injects `clientUserMessageEcho: true`. False is omitted so a client
-    /// that advertised at initialize is not overridden (`grok agent` is persist-only).
-    /// The flag it sets is per session, so other subscribers of a shared session receive the echo too.
     #[serde(default)]
     pub user_message_echo: bool,
 }
@@ -177,20 +166,14 @@ pub struct LeaderCapabilities {
     #[serde(default)]
     pub workspace_exposure: bool,
     /// Whether the leader can run the worker door (`ControlCommand::CursorWorker*`).
-    /// `false` on leaders built without that support, which answer those commands with a `ControlError`.
     #[serde(default)]
     pub cursor_worker: bool,
 }
 
-/// Prefix of the `last_error` a `stopped_link_required` door reports: the worker crate's
-/// `TokenStop::LinkState` text, `<prefix><code> (<reason>)`, forwarded verbatim by the leader.
-/// Clients parse it until the status payload carries the code structurally; the `cursor-worker`
-/// build pins it against the crate's Display in `cursor_worker_tests`.
+/// Clients parse it until the status payload carries the code structurally.
 pub const CURSOR_WORKER_HUB_REFUSAL_PREFIX: &str = "hub refused the cursor session: ";
 
-/// Bound on opening one worker door inside the leader (git in `claim::start`,
-/// the repository URL scan, the bridge spawn). `CursorWorkerStart` can open two
-/// kinds sequentially, so the first reply may take two of these plus a stop.
+/// Bound on opening one worker door inside the leader (git in `claim::start`, the repository URL scan, the bridge spawn).
 pub const CURSOR_WORKER_DOOR_OPEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// One worker claim in [`ControlPayload::CursorWorkerStatus`].
@@ -271,10 +254,7 @@ impl CursorWorkerDoorSummary {
     }
 }
 
-/// Cursor worker summary in [`ControlPayload::LeaderInfo`]. The flat fields mirror the bound
-/// door, else the first running door, else the `none` state. `doors` is empty only from
-/// leaders that predate the two-door split; a current leader that refused before any slot
-/// still emits one `none` row carrying `last_start_error`.
+/// Cursor worker summary in [`ControlPayload::LeaderInfo`].
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CursorWorkerSummary {
     pub state: String,
@@ -283,8 +263,8 @@ pub struct CursorWorkerSummary {
     pub doors: Vec<CursorWorkerDoorSummary>,
 }
 
-/// Arguments of [`ControlCommand::CursorWorkerStart`] and of the leader boot hook. Fields left
-/// empty fall back to the `[cursor_worker]` table on the leader.
+/// Arguments of [`ControlCommand::CursorWorkerStart`] and of the leader boot
+/// hook.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct CursorWorkerStartArgs {
@@ -314,7 +294,7 @@ pub enum ControlCommand {
     WorkspaceResume,
     WorkspaceStop,
     WorkspaceStatus,
-    /// Register the leader as a worker. Idempotent for identical arguments on a live door; different arguments, or a door that stopped, restart it.
+    /// Register the leader as a worker.
     CursorWorkerStart(CursorWorkerStartArgs),
     CursorWorkerStop,
     CursorWorkerStatus,
@@ -373,9 +353,8 @@ pub enum ControlPayload {
         sessions: Vec<String>,
         pid: u32,
     },
-    /// `state` is one of `none`, `connecting`, `registered`, `reconnecting`, `stopped_link_required`, `stopped_hub_unavailable`, `stopped_unimplemented`.
     /// The flat fields mirror the bound door, else the first running door, else the `none` state,
-    /// for clients that predate `doors`; `doors` carries one entry per door and is empty from
+    /// for clients that predate `doors`. `doors` carries one entry per door and is empty from
     /// leaders that predate the two-door split.
     CursorWorkerStatus {
         state: String,
@@ -423,7 +402,6 @@ pub enum ClientMessage {
 #[serde(rename_all = "snake_case")]
 pub enum ShutdownReason {
     /// Reserved for a future idle-timeout feature (no active clients for a configurable duration).
-    /// **Not emitted in the current implementation.**
     IdleTimeout,
     /// Unspecified or externally-triggered shutdown (SIGTERM, programmatic cancel, etc.).
     Manual,
@@ -438,8 +416,8 @@ fn default_ready() -> bool {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    /// Registration confirmation. `ready` indicates whether the leader has already completed its startup (auth and model prefetch).
-    /// When `ready = false` the client **must** wait for a subsequent [`LeaderReady`](Self::LeaderReady) message before sending any ACP traffic. The server holds the connection open until the leader is ready.
+    /// Registration confirmation. `ready` indicates whether the leader has already completed its startup (auth and model prefetch). When `ready = false` the client **must** wait for a subsequent [`LeaderReady`](Self::LeaderReady) message
+    /// before sending any ACP traffic.
     Registered {
         client_id: u64,
         /// Whether the leader is fully initialised and ready to forward ACP traffic.
@@ -464,18 +442,15 @@ pub enum ServerMessage {
         code: i32,
         message: String,
     },
-    /// Advance notice of a planned shutdown.
-    /// Sent before [`Shutdown`](Self::Shutdown) to give clients time to prepare for reconnection.
-    /// Clients should treat this as a signal that [`Shutdown`](Self::Shutdown) is imminent and prepare their reconnection handlers (e.g. show a banner).
+    /// Advance notice of a planned shutdown. Sent before [`Shutdown`](Self::Shutdown) to give clients time to prepare
+    /// for reconnection.
     ShuttingDown {
         reason: ShutdownReason,
-        /// Milliseconds until the actual [`Shutdown`](Self::Shutdown) message. **Currently always `0`**: the server sends `Shutdown` immediately after `ShuttingDown` with no intervening sleep.
-        /// Clients must not rely on this field providing a real grace window. Treat `ShuttingDown` as an imminent `Shutdown` regardless of this value.
+        /// Milliseconds until the actual [`Shutdown`](Self::Shutdown) message.
         delay_ms: u64,
     },
     Shutdown,
     /// Sent by the server after a `Registered { ready: false }` once the leader finishes initialising.
-    /// The client should treat this as the signal that ACP traffic will now be forwarded correctly.
     LeaderReady,
 }
 
@@ -713,9 +688,9 @@ mod tests {
 
     #[test]
     fn profile_artifact_format_serde_names_are_stable() {
-        // Wire compat contract: `svg` must stay decodable (old leaders advertise it)
-        // `folded` is the name new binaries will start advertising once the fleet can decode it
-        // Renaming either variant breaks the Registered handshake across version skew
+        // Wire compat contract: `svg` must stay decodable (old leaders
+        // advertise it) `folded` is the name new binaries will start
+        // advertising once the fleet can decode it.
         assert_eq!(
             serde_json::to_string(&ProfileArtifactFormat::Svg).unwrap(),
             "\"svg\""

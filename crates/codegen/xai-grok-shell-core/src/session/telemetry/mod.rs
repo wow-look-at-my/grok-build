@@ -139,7 +139,7 @@ pub struct SessionHarnessMetrics {
     pub cwd: String,
     /// Filled from the built agent's bridge so `into_event` doesn't re-walk the disk.
     pub skill_names: Vec<String>,
-    /// Resolved vendor-compat config, so recorded AGENTS.md names match what the session actually discovers.
+    /// Resolved vendor-compat config, so recorded AGENTS.md names match what the session discovers.
     pub compat: xai_grok_tools::types::compat::CompatConfig,
     /// `[paths]` config, for the same reason as `compat`.
     pub paths_config: xai_grok_agent::prompt::paths::PathsConfig,

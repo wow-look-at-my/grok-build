@@ -1,6 +1,4 @@
 //! Keeps `x.ai/task_completed` lines short enough for a client to read.
-//! That holds both when this build sends one and when replay reaches one an earlier build wrote.
-//! Bounding the output field alone does not bound the line: the wrapper and the JSON encoding go on top of it.
 
 use serde_json::Value;
 use serde_json::value::RawValue;
@@ -8,7 +6,6 @@ use xai_grok_tools::types::TaskSnapshot;
 
 use crate::extensions::notification::{SessionNotification, SessionUpdate};
 
-/// Half the 64 KiB a Python `asyncio` stream reader allows, the limit that reported this bug ("Separator is not found, and chunk exceed the limit").
 pub const FRAME_MAX_BYTES: usize = 32 * 1024;
 
 /// The method the bridge sends; the budget is derived from it.
@@ -25,7 +22,6 @@ pub fn jsonrpc_line_len(method: &str, params_len: usize) -> usize {
 pub const FIELD_MAX_BYTES: usize = 1024;
 
 /// The replay copy of [`compact`]'s field list.
-/// The path to the log is missing on purpose: a truncated pointer is worse than less output, so it is cut only as a last resort.
 const COMPACTED_FIELDS: [&str; 4] = ["command", "display_command", "description", "cwd"];
 
 fn body_budget() -> usize {
@@ -33,7 +29,6 @@ fn body_budget() -> usize {
 }
 
 /// A message body proven to fit the frame budget.
-/// [`within`] is the only constructor, so a return path that skips the measurement does not compile.
 pub struct FittedFrame(Box<RawValue>);
 
 impl FittedFrame {
@@ -88,7 +83,7 @@ fn fit_into(
     output: &str,
     budget: usize,
 ) -> Option<FittedFrame> {
-    // The output is the field worth keeping, so when it does not fit, the other fields a task can grow give up their room to it first
+    // The output is the field worth keeping, so when it does not fit. The other fields a task can grow give up their room to it first
     let mut room = room_for_output(notification, budget)?;
     if encoded_len(output) > room {
         compact(task_snapshot(notification)?);
@@ -194,8 +189,9 @@ pub enum Refit {
     Unfittable,
 }
 
-/// Shrinks a recorded task completion that is too long to send.
-/// The record is edited in place because an earlier build may have written fields this one does not model, and replay must not drop them.
+/// Shrinks a recorded task completion that is too long to send. The record is
+/// edited in place because an earlier build may have written fields this does
+/// not model, and replay must not drop them.
 pub fn refit_recorded(params: &RawValue) -> Refit {
     let budget = body_budget();
     if params.get().len() <= budget {

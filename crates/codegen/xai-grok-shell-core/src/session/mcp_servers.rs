@@ -25,8 +25,7 @@ fn resolve_overrides(
         Some(cwd) => crate::util::config::get_mcp_server_config_with_project(server_name, cwd),
         None => crate::util::config::get_mcp_server_config(server_name),
     };
-    // Fall back to the globally-resolved startup timeout
-    // Servers without a per-server `startup_timeout_sec` (e.g. `~/.claude.json` imports) still get it.
+    // Fall back to the globally-resolved startup timeout.
     let global_startup = crate::util::config::resolved_mcp_startup_timeout_secs();
     Some(inner::McpClientTimeoutOverrides {
         startup_timeout_sec: config
@@ -129,8 +128,8 @@ pub async fn build_pending_clients(
         ctx,
     )
     .await;
-    // Re-resolve SDK (ACP) config.toml overrides for THIS init, matching HTTP/stdio, so a mid-session config change applies on the next init
-    // The overrides are resolved outside the lock (resolution reads config.toml), then handed to the pure, under-lock builder
+    // Re-resolve SDK (ACP) config.toml overrides for THIS init, matching
+    // HTTP/stdio, so a mid-session config change applies on the next init.
     let acp_overrides: HashMap<String, inner::McpClientTimeoutOverrides> = {
         let names = mcp_state.lock().await.pending_acp_server_names();
         names

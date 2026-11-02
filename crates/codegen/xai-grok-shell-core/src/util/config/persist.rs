@@ -1,3 +1,5 @@
+// persist.rs holds the persist code.
+
 use super::load::load_config_from_toml;
 use super::mcp::{Config, user_config_path};
 use anyhow::Result;
@@ -7,7 +9,6 @@ use toml::map::Map as TomlMap;
 use xai_grok_agent::prompt::skills::SkillsConfig;
 use xai_grok_config::fs_atomic::BoundDest;
 /// Process-wide write lock for `~/.grok/config.toml`.
-/// Serializes the read-modify-write in `save_config` so two rapid settings toggles can't interleave and clobber each other.
 static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// Blank (first-run 0-byte file) is an empty table; other unparseable TOML is an error so a silent fallback cannot drop unmodeled sections.
 pub fn parse_existing_config_toml(s: &str) -> Result<TomlValue, toml::de::Error> {
@@ -93,7 +94,7 @@ async fn save_config_locked(
     Ok(())
 }
 /// Guard for a user `config.toml` read-modify-write: [`SAVE_LOCK`] plus the config-init flock —
-/// without the flock leg, a SAVE_LOCK writer and a flock writer silently drop each other's edits.
+/// without the flock leg, a SAVE_LOCK writer. A flock writer silently drop each other's edits.
 #[must_use]
 pub struct ConfigWriteGuard {
     _save: tokio::sync::MutexGuard<'static, ()>,
@@ -219,9 +220,8 @@ pub fn atomic_write_follow_bound(
     let dest = require_same_user_config_dest(slot, dest)?;
     atomic_write_resolved_string(&dest, content)
 }
-/// Atomic write via temp file then `rename`. Follows a leaf symlink.
-/// Project `.grok/config.toml` must use [`atomic_replace_string`].
-/// User-config RMW must bind dest before load ([`read_follow_bound`] + [`atomic_write_follow_bound`]).
+/// Atomic write via temp file then `rename`. Follows a leaf symlink. Project
+/// `.grok/config.toml` must use [`atomic_replace_string`].
 pub fn atomic_write_string(path: &std::path::Path, content: &str) -> std::io::Result<()> {
     atomic_write_string_inner(path, content, true)
 }

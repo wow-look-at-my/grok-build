@@ -1,19 +1,16 @@
-//! Pure construction of the two turn-terminal signals.
-//!
-//! `TurnCompleted` is the persisted and replayed twin of the fire-and-forget `x.ai/session/prompt_complete` notification.
-//! It rides the `_x.ai/session/update` rail so a viewer that re-attaches mid-turn finalizes the turn from replay instead of stranding on "Waiting…".
-//! Both builders live here and derive their fields from [`crate::sampling::error::prompt_complete_fields`], so the two signals never disagree.
+//! Pure construction of those turn-terminal signals.
 
 use crate::extensions::notification::SessionUpdate;
 use xai_grok_sampler::SamplingErrorKind;
 
-/// Build a `TurnCompleted` from a prompt id and the `(stop_reason, agent_result)` JSON pair from [`crate::sampling::error::prompt_complete_fields`].
-/// `stop_reason` is always a JSON string; `agent_result` is a string or null.
-/// Non-string inputs fall back to their JSON text so a terminal is never
-/// dropped for a shape mismatch.
-///
-/// `session_cost_usd_ticks` is the session ledger's cumulative reported cost
-/// at the terminal, which `usage` (prompt-scoped) cannot express.
+/// Build a `TurnCompleted` from a prompt id and the `(stop_reason,
+/// agent_result)` JSON pair from
+/// [`crate::sampling::error::prompt_complete_fields`]. `stop_reason` is
+/// always a JSON string; `agent_result` is a string or null. Non-string
+/// inputs fall back to their JSON text so a terminal is never dropped for a
+/// shape mismatch. `session_cost_usd_ticks` is the session ledger's
+/// cumulative reported cost at the terminal, which `usage` (prompt-scoped)
+/// cannot express.
 pub fn build_turn_completed(
     prompt_id: String,
     stop_reason: serde_json::Value,

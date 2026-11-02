@@ -1,3 +1,5 @@
+// reloader.rs holds the reloader code.
+
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -16,17 +18,15 @@ use super::watcher::ConfigChangeEvent;
 pub enum ConfigUpdate {
     /// New auth credentials from disk.
     Auth(Box<GrokAuth>),
-    /// Auth scope was removed (user logged out).
+    /// Auth scope.
     AuthCleared,
-    /// A **broadcast** MCP reload; it applies to every active session regardless of cwd. Fires for two cases: The global `[mcp_servers]` table in `~/.grok/config.toml` changed. The user's home-level `~/.claude.json` changed.
-    /// `load_claude_json_mcp_servers_as_configs` reads this file for every session, so the reload cannot be narrowed by cwd.
-    /// Project-scoped changes emit [`Self::ProjectMcpServersChanged`] instead so the reload can be narrowed to matching cwds. Those are `<cwd>/.grok/config.toml`, `<cwd>/.mcp.json`, and the project-level `<cwd>/.claude.json`.
+    /// A **broadcast** MCP reload; it applies to every active session regardless of cwd.
     McpServersChanged,
-    /// A **project-scoped** MCP config file changed (`<cwd>/.grok/config.toml`, `<cwd>/.mcp.json`, or `<cwd>/.claude.json`). The agent should reload MCP only for sessions whose cwd matches `cwd` (or sits beneath it).
-    /// Strictly additive to [`Self::McpServersChanged`]: the unit variant continues to fire for global-config edits. The two cases are split so per-project reloads don't thrash unrelated sessions.
+    /// A **project-scoped** MCP config file changed
+    /// (`<cwd>/.grok/config.toml`, `<cwd>/.mcp.json`, or
+    /// `<cwd>/.claude.json`).
     ProjectMcpServersChanged {
         /// The project root whose `.grok/`, `.mcp.json`, or `.claude.json` file was edited.
-        /// Sessions whose cwd equals this path, or is a descendant of it, are the reload targets.
         cwd: PathBuf,
     },
     /// Updated memory config (boxed to avoid large enum variant).
@@ -34,14 +34,10 @@ pub enum ConfigUpdate {
     /// Updated skills discovery config.
     Skills(xai_grok_agent::prompt::skills::SkillsConfig),
     /// Updated `[compat]` vendor-compatibility config.
-    /// It is applied on the next agent (re)build, which re-resolves `compat_resolved`.
     Compat(Box<xai_grok_tools::types::compat::CompatConfigToml>),
     /// The `[model.*]`, `[models]` or `[model_groups]` tables in config.toml changed.
-    /// The agent should re-resolve its model list (BYOK models added/removed, default or surprise changed).
     ModelsChanged,
-    /// `~/.grok/models_cache.json` was rewritten on disk (possibly by another grok process sharing the home dir). The agent should consult the cache via `ModelsManager::reload_from_disk_cache`.
-    /// That method content-dedupes self-writes (`persist` / `renew_ttl`) before applying.
-    /// The variant carries no payload: validation (TTL, version, auth method) requires `ModelsManager` state the reloader doesn't have.
+    /// The agent should consult the cache via `ModelsManager::reload_from_disk_cache`.
     ModelsCacheChanged,
     /// A key the output-rate floor resolves from changed. Every resident session re-reads its floor.
     OutputRateFloorChanged,
@@ -59,7 +55,6 @@ pub struct ConfigReloader {
     last_global_config: toml::Value,
     last_effective_config: toml::Value,
     /// Per-cwd content hash of the project MCP config files.
-    /// It drops redundant `ProjectMcpServersChanged` dispatches on mtime-only touches (see `hash_project_mcp_config`).
     last_project_mcp_hashes: HashMap<PathBuf, u64>,
     grok_home: PathBuf,
     auth_scope: String,
@@ -124,9 +119,8 @@ impl ConfigReloader {
             let has_project_config = batch
                 .iter()
                 .any(|e| matches!(e, ConfigChangeEvent::ProjectConfigChanged { .. }));
-            // `~/.claude.json` is loaded by every session (it does NOT live in a project root)
-            // Its reload must broadcast through the legacy unit `McpServersChanged` arm
-            // Routing it through the per-cwd variant would silently miss sessions outside `$HOME`
+            // `~/.claude.json` is loaded by every session (it does NOT live
+            // in a project root).
             let has_home_claude_json = batch
                 .iter()
                 .any(|e| matches!(e, ConfigChangeEvent::HomeClaudeJsonChanged));
@@ -135,8 +129,7 @@ impl ConfigReloader {
                 .any(|e| matches!(e, ConfigChangeEvent::ModelsCacheChanged));
             let has_config = has_global_config || has_project_config;
 
-            // Collect the unique cwds whose project files changed to emit one `ConfigUpdate::ProjectMcpServersChanged { cwd }` per project root
-            // The legacy unit `McpServersChanged` swept every session instead
+            // Collect the unique cwds whose project files changed to emit one `ConfigUpdate::ProjectMcpServersChanged { cwd }` per project root.
             let project_cwds = collect_project_cwds(&batch);
 
             if has_auth {
@@ -145,8 +138,7 @@ impl ConfigReloader {
                 match result {
                     Ok(Err(e)) => {
                         error!(error = %e, "auth hot-reload failed, keeping previous credentials");
-                        // Whole-file deletion (NotFound) and corrupt JSON land here
-                        // The resulting memory/disk divergence must be visible in unified.jsonl
+                        // Whole-file deletion (NotFound) and corrupt JSON land here. The resulting memory/disk divergence must be visible in unified.jsonl
                         let path = self.grok_home.join("auth.json");
                         xai_grok_telemetry::unified_log::error(
                             "auth reload: auth.json unreadable, keeping previous credentials",
@@ -179,12 +171,13 @@ impl ConfigReloader {
                 }
             }
 
-            // No unit `McpServersChanged` is emitted here for project `.mcp.json`/`.claude.json` changes
-            // `collect_project_cwds` already includes every `McpConfigChanged` path in `project_cwds`, so a separate emit would double-dispatch
-            // Global `[mcp_servers]` edits are dispatched inside `reload_config`
+            // No unit `McpServersChanged` is emitted here for project
+            // `.mcp.json`/`.claude.json` changes `collect_project_cwds`
+            // already includes every `McpConfigChanged` path in
+            // `project_cwds`.
 
-            // Home-level `~/.claude.json` must broadcast to every session through the unit variant
-            // Sessions outside `$HOME` would otherwise be silently skipped by the per-cwd `cwd_matches` filter
+            // Home-level `~/.claude.json` must broadcast to every session
+            // through the unit variant.
             if has_home_claude_json {
                 info!("~/.claude.json change detected — broadcasting MCP reload");
                 let _ = self.config_update_tx.send(ConfigUpdate::McpServersChanged);
@@ -196,11 +189,13 @@ impl ConfigReloader {
                 let _ = self.config_update_tx.send(ConfigUpdate::ModelsCacheChanged);
             }
 
-            // Fan out one `ProjectMcpServersChanged { cwd }` per affected project root
-            // The legacy unit `McpServersChanged` above stays for global-config edits; both variants can fire in the same tick (e.g. `~/.grok/config.toml` AND `<cwd>/.mcp.json` edited together).
+            // Fan out one `ProjectMcpServersChanged { cwd }` per affected
+            // project root. The unit `McpServersChanged` above stays for
+            // global-config edits; both variants can fire in the same tick
+            // (e.g. `~/.grok/config.toml` AND `<cwd>/.mcp.json` edited
+            // together).
             for cwd in project_cwds {
-                // Skip the dispatch when the project config bytes are unchanged (the watcher fires on mtime-only touches)
-                // On any uncertainty we dispatch; see `hash_project_mcp_config`
+                // Skip the dispatch when the project config bytes are unchanged (the watcher fires on mtime-only touches).
                 let new_hash = hash_project_mcp_config(&cwd);
                 let unchanged = match (new_hash, self.last_project_mcp_hashes.get(&cwd)) {
                     (Some(new), Some(&prev)) => new == prev,
@@ -275,8 +270,7 @@ impl ConfigReloader {
             }
         };
 
-        // MCP servers: compare the [mcp_servers] table in the **global** config (`~/.grok/config.toml`) via toml::Value. Project- scoped changes (`<cwd>/.grok/config.toml`, `<cwd>/.mcp.json`) go out separately as `ConfigUpdate::ProjectMcpServersChanged { cwd }`
-        // That per-cwd dispatch (see `collect_project_cwds`) keeps them from sweeping unrelated sessions
+        // MCP servers: compare the [mcp_servers] table in the **global** config.
         let old_mcp_table = self.last_global_config.get("mcp_servers");
         let new_mcp_table = new_global.get("mcp_servers");
         let mcp_changed = old_mcp_table != new_mcp_table;
@@ -452,9 +446,14 @@ fn collect_project_cwds(batch: &[ConfigChangeEvent]) -> Vec<PathBuf> {
     out
 }
 
-/// Content hash of the cwd-dependent MCP config files a `ProjectMcpServersChanged { cwd }` reload re-reads.
-/// It walks ancestors up to the git root as the loaders do: `find_project_configs` for `.grok/config.toml`, `find_mcp_json_files` for `.mcp.json`.
-/// That keeps the hash from drifting from the set the merge actually reads; `<cwd>/.claude.json` (watched at the project root) is hashed too. Returns `None` on a non-`NotFound` read error so the caller dispatches rather than risk suppressing a real edit.
+/// Content hash of the cwd-dependent MCP config files a
+/// `ProjectMcpServersChanged { cwd }` reload re-reads. It walks ancestors up
+/// to the git root as the loaders do: `find_project_configs` for
+/// `.grok/config.toml`, `find_mcp_json_files` for `.mcp.json`. That keeps the
+/// hash from drifting from the set the merge reads; `<cwd>/.claude.json`
+/// (watched at the project root) is hashed too. Returns `None` on a
+/// non-`NotFound` read error so the caller dispatches rather than risk
+/// suppressing a real edit.
 fn hash_project_mcp_config(cwd: &Path) -> Option<u64> {
     let mut paths = crate::config::find_project_configs(cwd);
     paths.extend(crate::util::config::find_mcp_json_files(cwd));
@@ -484,9 +483,7 @@ pub fn hash_auth_key(key: &str) -> u64 {
     hasher.finish()
 }
 
-/// Extract the `[skills]` table from an effective config. Consumers: the reload dispatch above (change detection into `ConfigUpdate::Skills`) and `grok inspect` (via the `crate::config` re-export).
-/// Both therefore honor the same paths/ignore/disabled as a live session. Session spawn parses the same table separately through the typed `Config.skills` (agent/config.rs).
-/// Keep these in sync rather than adding a fourth parse path.
+/// Extract the `[skills]` table from an effective config.
 pub fn parse_skills_config(config: &toml::Value) -> xai_grok_agent::prompt::skills::SkillsConfig {
     config
         .get("skills")
@@ -1002,9 +999,11 @@ command = "/bin/test"
         assert_ne!(a.get("mcp_servers"), b.get("mcp_servers"));
     }
 
-    /// `ConfigUpdate::ProjectMcpServersChanged { cwd }` must be a distinct variant from the unit `McpServersChanged`.
-    /// The two paths then route through different match arms in `app.rs`.
-    /// This guards against an accidental merge that would force per-cwd reloads through the legacy sweep-all-sessions arm.
+    /// `ConfigUpdate::ProjectMcpServersChanged { cwd }` must be a distinct
+    /// variant from the unit `McpServersChanged`. Both paths then route
+    /// through different match arms in `app.rs`. This guards against an
+    /// accidental merge that would force per-cwd reloads through the
+    /// sweep-all-sessions arm.
     #[test]
     fn project_variant_dispatches_separately() {
         let cwd = PathBuf::from("/tmp/proj-x");
@@ -1040,8 +1039,7 @@ command = "/bin/test"
             },
         ];
         let cwds = collect_project_cwds(&batch);
-        // Only the project entry contributes
-        // The home-level `.claude.json` entry is silently dropped because it routes through the broadcast arm instead
+        // Only the project entry contributes.
         assert_eq!(cwds, vec![PathBuf::from("/repo/x")]);
     }
 

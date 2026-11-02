@@ -1,3 +1,5 @@
+// host_service.rs holds the host service code.
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -1326,7 +1328,7 @@ mod tests {
         };
         succeed(queued);
 
-        // Slot acquisition order between the two dispatched requests is unspecified, so assert both replies only after both agents ran
+        // Slot acquisition order between both dispatched requests is unspecified, so assert both replies only after both agents ran
         assert!(
             first
                 .await

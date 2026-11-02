@@ -1,3 +1,5 @@
+// session_compact_reasoning_compaction_regression_tests.rs holds the session compact reasoning compaction regression tests code.
+
 use super::*;
 use crate::sampling::{Client, ContentPart, ConversationItem, SamplerConfig, ToolCall, rs};
 use axum::Router;

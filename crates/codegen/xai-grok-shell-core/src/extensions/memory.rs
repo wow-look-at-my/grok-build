@@ -14,7 +14,7 @@ pub const MEMORY_FORGET_METHOD: &str = "x.ai/memory/forget";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryDreamDisposition {
-    /// Observations were merged into topics.
+    /// Observations.
     Completed,
     /// Nothing was waiting to be consolidated.
     NoWork,
@@ -64,7 +64,7 @@ impl MemoryDreamResponse {
     }
 
     /// Combine this pass's outcome with a coalesced follow-up pass so the run reports the
-    /// work it did: a later `NoWork` must not hide an earlier merge.
+    /// work it did. A later `NoWork` must not hide an earlier merge.
     pub fn then(self, next: Self) -> Self {
         match (self.did_work(), next.did_work()) {
             (true, true) => Self {
@@ -78,7 +78,7 @@ impl MemoryDreamResponse {
         }
     }
 
-    /// The run did what the user asked, or there was nothing to do.
+    /// The run did what.
     pub fn succeeded(&self) -> bool {
         matches!(
             self.disposition,
@@ -238,7 +238,6 @@ pub struct MemoryToggleResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled_reason: Option<MemoryDisabledReason>,
     /// Files after the toggle, so an open modal can refresh without a second round trip.
-    /// `None` when the store could not be listed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listing: Option<MemoryListing>,
 }

@@ -1,5 +1,5 @@
-//! Binds the `xai-grok-session-search` index to this crate's JSONL session store.
-//! A process that keeps no index holds no manager, so these entry points take the handle rather than reach for a global.
+//! Binds the `xai-grok-session-search` index to this crate's JSONL session
+//! store.
 
 use std::io;
 use std::path::Path;
@@ -58,12 +58,9 @@ impl SearchIndex {
 }
 
 /// The process's one index decision, shared rather than copied.
-/// Sharing means a session created while the remote settings are in flight reads the answer that lands later.
-/// `OnceLock` not `OnceCell`: the persistence actor's clone is `Send`.
 #[derive(Clone, Default)]
 pub struct SharedSearchIndex(Arc<OnceLock<Option<Arc<SearchIndexManager>>>>);
 
-/// Three states, because collapsing the first two is a bug a reader cannot see: an empty answer from `Pending` is not final, and one from `Off` is.
 #[derive(Clone, Copy)]
 pub enum IndexDecision<'a> {
     Pending,
@@ -83,8 +80,6 @@ impl std::fmt::Debug for IndexDecision<'_> {
 
 impl<'a> IndexDecision<'a> {
     /// The manager to write through.
-    /// Treats `Pending` and `Off` alike on purpose: it skips, and the bootstrap after the decision backfills what was missed.
-    /// A read must not, which is why this is not `decision`.
     pub fn writer(self) -> Option<&'a SearchIndexManager> {
         match self {
             Self::On(index) => Some(index),
@@ -168,8 +163,7 @@ impl SessionSource for JsonlSessionSource {
         };
         match self.0.load_summary(&info).await {
             Ok(summary) => Ok(Some(self.to_indexable(&summary))),
-            // A missing session is a delete, not a failure: the index drops its row
-            // Every other error leaves the row alone
+            // A missing session is a delete, not a failure.
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
         }
@@ -184,7 +178,8 @@ pub fn notify_session_updated(index: Option<&SearchIndexManager>, session_id: &s
     index.enqueue(root, session_id.to_string(), cwd.to_string());
 }
 
-/// Remove one session from an index built earlier, whether or not this process still indexes.
+/// Remove one session from an index built earlier, whether this process still
+/// indexes.
 pub async fn evict_session(root_dir: &Path, session_id: &str) {
     xai_grok_session_search::evict_session(root_dir, session_id).await;
 }
@@ -216,7 +211,8 @@ mod tests {
         .to_indexable(summary)
     }
 
-    /// The index stores one title; the store decides which one, and a generated title outranks the session summary.
+    /// The index stores one title; the store decides which, and a generated
+    /// title outranks the session summary.
     #[test]
     fn indexable_prefers_generated_title() {
         let mut summary = test_summary("s1", "/workspace", "session summary");

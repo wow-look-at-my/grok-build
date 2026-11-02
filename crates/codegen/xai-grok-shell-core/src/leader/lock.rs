@@ -1,3 +1,5 @@
+// lock.rs holds the lock code.
+
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -20,8 +22,6 @@ pub fn compute_ws_url_suffix(ws_url: &str) -> String {
     }
 
     // Default production URL doesn't need a suffix.
-    // `grok_ws_url` is always the *relay* endpoint (see [`crate::env::PROD_RELAY_WS_URL`])
-    // The gateway URL never reaches this code
     if ws_url == crate::env::PROD_RELAY_WS_URL {
         return String::new();
     }
@@ -33,9 +33,7 @@ pub fn compute_ws_url_suffix(ws_url: &str) -> String {
     format!("-{:08x}", hash as u32)
 }
 
-/// Env var that overrides the leader socket path and, by extension, the sibling `.lock` path. Set by the `--leader-socket` flag, or exported directly.
-/// Lets a developer sandbox a leader instance away from the default `~/.grok/leader.sock` — e.g. run a local branch build's leader without colliding with an installed stable leader on the same machine.
-/// Both the client (`connect_or_spawn`) and the leader (`run_leader`) honor it, and the spawned leader subprocess inherits it. All parties therefore bind the same path. When set, the WS-URL-derived suffix (`compute_ws_url_suffix`) is bypassed entirely.
+/// Env var that overrides the leader socket path and, by extension, the sibling `.lock` path.
 pub const LEADER_SOCKET_ENV: &str = "GROK_LEADER_SOCKET";
 
 /// The explicit socket-path override, if [`LEADER_SOCKET_ENV`] is set and non-empty.
@@ -45,14 +43,14 @@ fn leader_socket_override() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// The lock path paired with a given socket path: the sibling file with a `.lock` extension (`/x/leader-foo.sock` becomes `/x/leader-foo.lock`).
-/// Matches the default `leader.sock`/`leader.lock` pairing so the two never disagree.
+/// The lock path paired with a given socket path: the sibling file with a
+/// `.lock` extension (`/x/leader-foo.sock` becomes `/x/leader-foo.lock`).
 fn lock_path_for_socket(socket: &Path) -> PathBuf {
     socket.with_extension("lock")
 }
 
-/// Resolve the socket path: the explicit override wins, else the WS-URL-derived default under `root`.
-/// Pure (the override is passed in) so it is unit-testable without touching process env.
+/// Resolve the socket path: the explicit override wins, else the
+/// WS-URL-derived default under `root`.
 fn resolve_socket_path(override_socket: Option<PathBuf>, root: &Path, ws_url: &str) -> PathBuf {
     override_socket.unwrap_or_else(|| socket_path_for_ws_url_in(root, ws_url))
 }
@@ -103,11 +101,7 @@ pub fn ws_url_suffix_from_paths(lock_path: &Path, socket_path: &Path) -> Option<
     }
 }
 
-/// Lock manager for the leader process using OS-level file locking (flock). The lock file serves two purposes: Exclusive lock indicates who is the leader (or who is spawning)
-/// File contents store the leader's PID for diagnostics How the lock is used: Leader holds exclusive lock for its entire lifetime Clients use try_lock to check if leader exists and coordinate spawning
-/// Cleanup behavior: If lock is held when dropped (crash/exit), files are cleaned up If `release()` is called before drop, files are NOT cleaned up (handoff to leader)
-/// Every acquisition runs behind the machine-local acquire slot of `xai_grok_file_lock`, so a grok home on a stalled
-/// network filesystem wedges at most one process inside the lock's `open()`/`flock()`; the others get `AcquireInProgress`.
+/// Lock manager for the leader process using OS-level file locking (flock).
 #[derive(Debug)]
 pub struct LeaderLock {
     lock_path: PathBuf,
@@ -115,7 +109,6 @@ pub struct LeaderLock {
     lock_file: Option<LockedFile>,
     slot: SlotPolicy,
     /// Whether `Drop` should clean up the files: set when the lock is acquired, cleared by `release()`.
-    /// A crash while holding the lock still cleans up; a handoff to another process via `release()` does not.
     was_leader: bool,
 }
 
@@ -148,10 +141,10 @@ impl LeaderLock {
         self.was_leader = true;
     }
 
-    /// Try to acquire exclusive lock without blocking.
-    /// Returns `Ok(true)` if lock acquired, `Ok(false)` if already held by another process; `AcquireInProgress`
-    /// (a sibling wedged inside its own attempt) and open/lock failures surface as `Err`.
-    /// After acquiring, call `write_pid()` to record the leader's PID.
+    /// Try to acquire exclusive lock without blocking. Returns `Ok(true)` if
+    /// lock acquired, `Ok(false)` if already held by another process;
+    /// `AcquireInProgress` (a sibling wedged inside its own attempt) and
+    /// open/lock failures surface as `Err`.
     pub fn try_acquire(&mut self) -> Result<bool, LockError> {
         match lock_file(
             &self.lock_path,
@@ -166,10 +159,14 @@ impl LeaderLock {
         }
     }
 
-    /// Acquire exclusive lock with a bounded wait, re-opening the lock-file path on every attempt. Polls every 200ms until acquired or the timeout elapses (`LockError::Timeout`).
-    /// The re-open matters on the leader path: a client on the old flow unlinks the lock file in its `Drop` when it times out.
-    /// The winner must therefore acquire on the freshly re-created inode; a single held fd would keep polling the stale, unlinked inode forever.
-    /// The poll runs on a blocking thread so it never stalls the runtime; `run_leader` calls this on the multi-thread runtime.
+    /// Acquire exclusive lock with a bounded wait, re-opening the lock-file
+    /// path on every attempt. Polls every 200ms until acquired or the timeout
+    /// elapses (`LockError::Timeout`). The re-open matters on the leader
+    /// path: a client on the flow unlinks the lock file in its `Drop` when it
+    /// times out. The winner must therefore acquire on the freshly re-created
+    /// inode; a single held fd would keep polling the stale, unlinked inode
+    /// forever. The poll runs on a blocking thread so it never stalls the
+    /// runtime; `run_leader` calls this on the multi-thread runtime.
     pub async fn acquire_reopen_timeout(&mut self, timeout: Duration) -> Result<(), LockError> {
         let path = self.lock_path.clone();
         let options = LockOptions::new()
@@ -232,7 +229,7 @@ impl LeaderLock {
         Ok(())
     }
 
-    /// Check if we currently hold the lock.
+    /// Check if we hold the lock.
     pub fn is_held(&self) -> bool {
         self.lock_file.is_some()
     }
@@ -263,8 +260,8 @@ impl LeaderLock {
 
 impl Drop for LeaderLock {
     fn drop(&mut self) {
-        // The flock itself releases when the file closes
-        // `was_leader` is set on acquisition and cleared by `release()`, so a spawner that handed off does not delete the leader's files here
+        // The flock itself releases when the file closes `was_leader` is set
+        // on acquisition.
         if self.was_leader {
             let _ = fs::remove_file(&self.lock_path);
             let _ = fs::remove_file(&self.sock_path);
@@ -470,7 +467,7 @@ mod tests {
     fn read_pid_returns_none_for_missing_lock_file() {
         let temp = TempDir::new().unwrap();
         let lock = test_lock(&temp);
-        // Lock file doesn't exist yet
+        // Lock file doesn't exist.
         assert!(lock.read_pid().is_none());
         assert!(LeaderLock::read_pid_from_path(lock.lock_path()).is_none());
     }
@@ -521,7 +518,6 @@ mod tests {
         assert!(!lock2.is_held());
     }
 
-    /// A 0700 slot directory under `temp`: `TempDir` itself inherits the umask (0755), which the crate refuses.
     #[cfg(unix)]
     fn slot_dir(temp: &TempDir) -> PathBuf {
         use std::os::unix::fs::DirBuilderExt;
@@ -616,7 +612,7 @@ mod tests {
 
         let handle = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
-            // Simulate the old flow, where a client's Drop unlinks the lock file while it still holds the (now-anonymous) inode
+            // Simulate the flow.
             fs::remove_file(&lock_path).unwrap();
             lock1 // return to keep inode A flock-held until the waiter has acquired
         });
@@ -652,7 +648,6 @@ mod tests {
         assert!(try_start_leader(&mut leader1, "leader1-socket"));
         assert!(!try_start_leader(&mut leader2, "leader2-socket"));
 
-        // Leader 1's socket survives untouched.
         assert!(leader1.socket_path().exists());
         assert_eq!(
             fs::read_to_string(leader1.socket_path()).unwrap(),

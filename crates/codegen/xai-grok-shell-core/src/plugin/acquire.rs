@@ -1,5 +1,5 @@
-//! The ONE plugin acquisition pipeline: every code-fetching path resolves sources and gates here.
-//! LocalSet invariant: acquisition blocks — hop via [`run_blocking`], never the session LocalSet.
+//! The plugin acquisition pipeline: every code-fetching path resolves sources
+//! and gates here.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -26,8 +26,7 @@ pub struct Installed {
 /// only the gate refusals (identical on every surface) are pre-formatted.
 #[derive(Debug)]
 pub enum InstallAcquireError {
-    /// An acquisition gate refused the source; `reason` is the full gate
-    /// message ("Plugin install blocked: …").
+    /// An acquisition gate refused the source; `reason` is the full gate message ("Plugin install blocked: …").
     Blocked { reason: String },
     /// The requested identity is not a configured, allowlist-surviving source.
     SourceNotFound { source: String },
@@ -42,11 +41,9 @@ pub enum InstallAcquireError {
 /// [`marketplace_update`] failure.
 #[derive(Debug)]
 pub enum UpdateAcquireError {
-    /// An acquisition gate refused the source; `reason` is the full gate
-    /// message ("Plugin update blocked: …").
+    /// An acquisition gate refused the source; `reason` is the full gate message ("Plugin update blocked: …").
     Blocked { reason: String },
-    /// Update provenance no longer resolves to a configured source. `message`
-    /// is [`ProvenanceUpdateError::NotConfigured`]'s text.
+    /// Update provenance no longer resolves to a configured source.
     NotConfigured { message: String },
     /// The (normalized) plugin path is missing from the synced scan.
     EntryNotFound { plugin_relative_path: String },
@@ -78,12 +75,11 @@ pub struct InstallRegistryLock {
     _file: std::fs::File,
 }
 
-/// Deliberately 30s: a waiter can queue behind a full `update_plugins` sync
-/// loop, and a timeout reads as "another plugin operation is in progress".
+/// Deliberately 30s: a waiter can queue behind a full `update_plugins` sync loop.
 const REGISTRY_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// THE registry-mutation chokepoint: every writer holds this flock from load past save, or
-/// interleaved windows lose entries. Lock order: config-init ⊃ registry ⊃ cache; never on the LocalSet.
+/// THE registry-mutation chokepoint: every writer holds this flock from load
+/// past save, or interleaved windows lose entries.
 pub fn lock_install_registry() -> Result<InstallRegistryLock, String> {
     lock_install_registry_in(
         &InstallRegistry::resolve_install_dir(),
@@ -255,8 +251,9 @@ pub enum EntryInstallError {
     Install(InstallError),
 }
 
-/// The ONE install core for a resolved marketplace entry (remote-vs-local fork, provenance,
-/// installer dispatch), shared by [`marketplace_install`] and the CLI by-name path.
+/// The install core for a resolved marketplace entry (remote-vs-local fork,
+/// provenance, installer dispatch), shared by [`marketplace_install`] and the
+/// CLI by-name path.
 pub fn install_marketplace_entry(
     source: &MarketplaceSource,
     marketplace_root: &Path,
@@ -414,7 +411,7 @@ pub fn marketplace_update(
     .map_err(UpdateAcquireError::Install)
 }
 
-/// Resolve the marketplace root for an update, force-syncing git sources; caches key on the
+/// Resolve the marketplace root for an update, force-syncing git sources. Caches key on the
 /// RESOLVED source identity — a raw-provenance key would re-enter the held source-cache flock.
 fn update_source_root<'cache>(
     source: &MarketplaceSource,
@@ -560,13 +557,12 @@ pub fn provenance_update_source(
     }
 }
 
-/// The require-sha pin for remote plugin code: disk config + env, both tighten-only, read from
-/// the overlay-free layer merge so no `GROK_CONFIG` overlay can relax a disk-set `true`.
+/// The require-sha pin for remote plugin code.
 pub fn marketplace_require_sha() -> bool {
     require_sha_policy(xai_grok_config::ConfigLayers::load())
 }
 
-/// Fail closed: an unreadable config may hide a disk-set `require_sha = true`, so a load error
+/// Fail closed: an unreadable config may hide a disk-set `require_sha = true`. A load error
 /// pins the requirement instead of falling back to the (relaxable) env knob.
 fn require_sha_policy(layers: std::io::Result<xai_grok_config::ConfigLayers>) -> bool {
     match layers {
@@ -803,7 +799,7 @@ mod tests {
             .expect("lock re-acquirable after release");
     }
 
-    /// Update cache key: two provenance spellings of one source share ONE entry — a raw key re-syncs and self-conflicts on the flock.
+    /// Update cache key: provenance spellings of one source share ONE entry — a raw key re-syncs and self-conflicts on the flock.
     #[test]
     fn provenance_spellings_of_one_source_share_one_update_cache_entry() {
         use std::collections::HashMap;

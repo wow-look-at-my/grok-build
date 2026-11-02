@@ -1,3 +1,5 @@
+// tests.rs holds the tests code.
+
 use chrono::{Duration as ChronoDuration, Utc};
 
 use super::super::{
@@ -1952,8 +1954,7 @@ async fn renew_ttl_does_not_shadow_a_newer_content_write() {
     );
     // A TTL renewal bumps only the freshness clock to now.
     cache.renew_ttl(&scope).await;
-    // Content B was fetched after A but before the renewal: it is genuinely
-    // newer content and must win despite the renewal's fresh timestamp.
+    // Content B was fetched after A but before the renewal.
     let b_fetched = Utc::now() - ChronoDuration::seconds(30);
     cache.persist(
         &make_prefetched(&["grok-b"]),
@@ -2229,9 +2230,7 @@ fn models_commit_gate_detects_account_switch() {
 #[serial]
 fn resolve_live_keeps_fetch_origin_when_disk_auth_absent() {
     let _no_legacy = EnvGuard::unset("GROK_CODE_XAI_API_KEY");
-    // Session fetch, then disk auth is gone at commit while XAI_API_KEY is set
-    // (the just-logged-in / sign-out window). The live scope must stay on the
-    // fetch-time Session origin so a good catalog is served, not abandoned.
+    // Session fetch, then disk auth is gone at commit while XAI_API_KEY is set (the just-logged-in / sign-out window).
     let _key = EnvGuard::set("XAI_API_KEY", "boot-window-key");
     let session_auth = GrokAuth {
         user_id: "session-user".to_string(),

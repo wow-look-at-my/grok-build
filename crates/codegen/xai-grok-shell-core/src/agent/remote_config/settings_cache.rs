@@ -5,18 +5,14 @@ use chrono::{DateTime, Utc};
 use super::cache_file::{CacheLoadError, is_fresh, read_capped, write_atomic};
 
 pub const SETTINGS_CACHE_FILE: &str = "settings_cache.json";
-/// 1h: an offline cold start can boot on the last good policy, while
-/// staleness stays bounded by the managed gate's own re-fetch and the
-/// per-session settings reapply.
+/// 1h: an offline cold start can boot on the last good policy.
 pub const SETTINGS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(3600);
 const SETTINGS_CACHE_MAX_BYTES: u64 = 1 << 20;
 
-/// Current signing key. To rotate: set this to the new key and keep the old
-/// key in SETTINGS_CACHE_READ_HMAC_KEYS so already written caches still verify.
+/// Current signing key.
 const SETTINGS_CACHE_WRITE_HMAC_KEY: &[u8] =
     b"grok-shell-settings-cache-hmac-v1-ba6c43d3-404f-4b5c-b0cd-df09b2f5bdf4";
-/// Keys accepted on read, newest first: the write key plus any superseded key
-/// retained for a rotation window.
+/// Keys accepted on read, newest first: the write key plus any superseded key retained for a rotation window.
 const SETTINGS_CACHE_READ_HMAC_KEYS: &[&[u8]] = &[SETTINGS_CACHE_WRITE_HMAC_KEY];
 
 /// The disk settings cache is off when `GROK_SETTINGS_CACHE=false`.
@@ -44,7 +40,7 @@ struct CachedSettings(crate::util::config::RemoteSettings);
 
 impl CachedSettings {
     /// Fields only a live fetch may set: a disarm must not outlive the fetch that
-    /// sent it, and a proxy may have stopped decoding since the cache was written.
+    /// sent it. A proxy may have stopped decoding since the cache was written.
     fn into_settings(self) -> crate::util::config::RemoteSettings {
         let mut settings = self.0;
         settings.managed_config_signature_verification = None;
@@ -214,7 +210,7 @@ impl SettingsCacheManager {
         settings: &crate::util::config::RemoteSettings,
         fetched_at: DateTime<Utc>,
     ) {
-        // Serialize read-check-write so the older of two concurrent fetches cannot win.
+        // Serialize read-check-write so the older of concurrent fetches cannot win.
         static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         if let Ok(existing) = self.load_raw()
@@ -545,8 +541,8 @@ mod settings_cache_tests {
     }
 
     /// Fields that only a live fetch may set: a cache hit must re-arm signature
-    /// verification and must not arm request compression toward a proxy that
-    /// may have stopped decoding since the cache was written.
+    /// verification. The cache hit must not arm request compression toward a
+    /// proxy that may have stopped decoding since the cache was written.
     #[test]
     fn load_drops_live_only_fields_even_from_a_valid_cache() {
         let (dir, manager) = temp_manager(SETTINGS_CACHE_TTL);

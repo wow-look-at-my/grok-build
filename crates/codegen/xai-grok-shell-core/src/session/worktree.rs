@@ -27,9 +27,10 @@ impl From<WorktreeType> for ShellWorktreeType {
         }
     }
 }
-/// Create a worktree for the resume-session flow, detecting jj vs git automatically.
-///
-/// When `git_ref` is set, forces a clean checkout of that ref (same as the manual `create_from_worktree_sync` path used by `grok -w --ref`).
+/// Create a worktree for the resume-session flow, detecting jj vs git
+/// automatically. When `git_ref` is set, forces a clean checkout of that ref
+/// (same as the manual `create_from_worktree_sync` path used by `grok -w
+/// --ref`).
 #[tracing::instrument(skip_all)]
 async fn create_worktree_for_resume(
     source_cwd: &str,

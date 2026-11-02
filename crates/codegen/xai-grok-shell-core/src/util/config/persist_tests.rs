@@ -1,3 +1,5 @@
+// persist_tests.rs holds the persist tests code.
+
 use super::super::load::load_config_from_toml;
 use super::super::mcp::{McpConfig, parse_mcp_config_with_oauth};
 use super::super::settings_writes::{write_dashboard_preview, write_feature_override};
@@ -1267,8 +1269,8 @@ mod resolve_auto_compact {
         let info = model_info(gb_per_model);
         resolve_auto_compact_threshold_percent(cfg, TEST_MODEL, Some(&info))
     }
-    /// RAII guard that swaps the env var for the duration of a test and restores the previous value on drop.
-    /// Acquires `ENV_LOCK` so two env-var tests never run concurrently.
+    /// RAII guard that swaps the env var for the duration of a test and
+    /// restores the value on drop.
     struct EnvVarGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
         prev: Option<String>,
@@ -1720,7 +1722,6 @@ fn no_home_cwd_config_resolves_slot_not_follow() {
     assert_eq!("new\n", std::fs::read_to_string(&link).unwrap());
     assert_eq!("keep\n", std::fs::read_to_string(&outside).unwrap());
 }
-/// A 0600 referent must not be published via a 0644 temp (chmod-ignored).
 #[cfg(unix)]
 #[test]
 fn atomic_write_string_preserves_0600_referent_mode() {

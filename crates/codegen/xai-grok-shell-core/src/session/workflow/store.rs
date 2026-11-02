@@ -1,3 +1,5 @@
+// store.rs holds the store code.
+
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};

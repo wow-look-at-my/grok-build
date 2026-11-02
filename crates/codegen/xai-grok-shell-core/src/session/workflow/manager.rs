@@ -1,3 +1,5 @@
+// manager.rs holds the manager code.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

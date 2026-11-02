@@ -1,3 +1,5 @@
+// completion.rs holds the completion code.
+
 use serde_json::Value;
 
 use super::{
@@ -240,7 +242,6 @@ pub fn account_completion(segments: u64) -> Result<CompletionAccounting> {
     };
     let rows_per_generation =
         PROGRESS_ROWS_PER_GENERATION + PRODUCT_CLAIMS_PER_GENERATION + COMPLETE_ROWS_PER_GENERATION;
-    // Exact Progress bytes for one generation: effects 0..=9 encode a one-digit `i`, one byte shorter per row
     let progress_two_digit_generation_bytes = ONE_DIGIT_EFFECT_COUNT
         * (COMPLETION_ROW_BYTES[0].0 as u64 - 1)
         + TWO_DIGIT_EFFECT_COUNT * COMPLETION_ROW_BYTES[0].0 as u64;

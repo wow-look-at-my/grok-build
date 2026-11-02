@@ -1,3 +1,5 @@
+// child_runtime.rs holds the child runtime code.
+
 use tokio::sync::mpsc;
 use xai_grok_tools::implementations::grok_build::task::coordinator::{
     ActiveMessageAdmission, ChildControl, LocalBoxFuture, SendBoxFuture, SubagentProgress,
@@ -18,7 +20,6 @@ pub struct ShellChildRuntime {
         xai_grok_tools::implementations::grok_build::task::root_control::AgentMessageGeneration,
     pub child_signals: crate::session::signals::SessionSignalsHandle,
     /// Held by the worker until promotion succeeds.
-    /// `None` means the caller still owns the join handle, so a cancel during promotion can wait for the actor to exit.
     pub _child_thread: Option<SessionThread>,
     pub receipt_sink: mpsc::Sender<PromptTurnReceipt>,
     /// Test seam: forces the queue envelope. Always false outside tests.

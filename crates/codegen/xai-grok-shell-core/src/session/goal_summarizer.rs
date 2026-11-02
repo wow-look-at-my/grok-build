@@ -22,8 +22,7 @@ use xai_tool_types::SubagentCapabilityMode;
 
 // Constants
 
-/// Same general-purpose inventory the other goal roles use; the read-only capability mode (set on the spawn) narrows it to inspect-only tools.
-/// A configured `agent_type` selects the HARNESS, not this subagent type.
+/// Same general-purpose inventory the other goal roles use.
 const GOAL_SUMMARIZER_SUBAGENT_TYPE: &str = GOAL_ROLE_SUBAGENT_TYPE;
 
 /// Description shown in the pager subagent strip and matched by the e2e coordinator stub to distinguish summarizer spawns from other roles.
@@ -32,13 +31,12 @@ pub const GOAL_SUMMARIZER_SUBAGENT_DESCRIPTION: &str = "goal summarizer";
 const GOAL_SUMMARIZER_PROMPT_TEMPLATE: &str = include_str!("templates/goal_summarizer_prompt.md");
 
 /// Hard backstop on the surfaced summary length, in chars (`chars().take` is char-boundary-safe).
-/// Sits well above a compliant summary; it only clips a model that ignores the prompt's word cap.
 const GOAL_SUMMARIZER_SUMMARY_MAX_CHARS: usize = 1200;
 
 // Outcome and spawner abstraction
 
-/// `Summarized` carries the closing summary text the caller surfaces to the user.
-/// `FailOpen` carries the reason; every variant is logged and ignored at the call site.
+/// `Summarized` carries the closing summary text the caller surfaces to the
+/// user.
 #[derive(Debug, Clone)]
 #[allow(
     dead_code,
@@ -59,9 +57,8 @@ pub enum GoalSummarizerOutcome {
 /// `SpawnError` is reused from the planner module.
 #[async_trait::async_trait]
 pub trait GoalSummarizerSpawner: Send + Sync {
-    /// Spawn under `id` and return the terminal response (the summary) when the subagent finishes.
-    /// `prompt` carries two renders: `primary` for the configured model and toolset, `fallback` for the retry with the default toolset.
-    /// The summarizer always inherits the parent's model and toolset, so only `primary` is used.
+    /// Spawn under `id` and return the terminal response (the summary) when
+    /// the subagent finishes.
     async fn spawn_summarizer(
         &self,
         id: &str,
@@ -81,7 +78,6 @@ pub struct ChannelSpawner {
     pub parent_prompt_id: Option<String>,
     pub cwd: Option<String>,
     /// Trace-artifact sink and resolved `task` tool name; `None` disables recording.
-    /// See [`crate::session::goal_classifier::record_subagent_trace`].
     pub trace_sink: Option<(xai_chat_state::ChatStateHandle, String)>,
     /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
     pub fallback: RoleFallbackReporter,
@@ -200,12 +196,9 @@ impl ChannelSpawner {
 
 pub struct GoalSummarizerInputs<'a> {
     pub objective: &'a str,
-    /// The verifier-judged plan (acceptance criteria); read for context.
-    /// May not exist on disk (planner disabled).
+    /// The verifier-judged plan (acceptance criteria); read for context. May not exist on disk (planner disabled).
     pub plan_file: &'a Path,
     /// Path string of the verifier's rescued final details file.
-    /// It is used only to substitute `{DETAILS_FILE}` in the prompt; the read-only subagent opens the file itself.
-    /// `None` renders the `(unavailable)` sentinel.
     pub details_file: Option<&'a str>,
     /// Absolute path to the session traces dir; the summarizer may skim `chat_history.jsonl` for intent.
     pub session_traces_dir: &'a Path,
@@ -292,8 +285,7 @@ pub async fn run_goal_summarizer(
         );
     }
 
-    // Backstop the prompt's word cap (a model can ignore it)
-    // A strict char prefix has fewer bytes than the whole, so the byte-length compare below detects a real cut
+    // Backstop the prompt's word cap (a model can ignore it).
     let mut summary: String = trimmed
         .chars()
         .take(GOAL_SUMMARIZER_SUMMARY_MAX_CHARS)

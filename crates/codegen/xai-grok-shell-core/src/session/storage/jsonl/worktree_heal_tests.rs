@@ -1,3 +1,5 @@
+// worktree_heal_tests.rs holds the worktree heal tests code.
+
 use agent_client_protocol as acp;
 use serial_test::serial;
 use tempfile::TempDir;

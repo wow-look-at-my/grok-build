@@ -1,7 +1,4 @@
 //! Wire row + mapper for durable `SessionUpdate::BackgroundTasks` snapshots.
-//!
-//! Incrementals (`task_backgrounded` / `task_completed`) stay on their own
-//! methods; this list is the full-state twin of `SessionUpdate::Plan`.
 
 use chrono::{DateTime, Utc};
 use xai_grok_tools::computer::types::TaskKind;
@@ -75,8 +72,7 @@ impl BackgroundTaskRow {
     }
 }
 
-/// Outcome of awaiting the snapshot listing. Distinguishes timeout (skip emit)
-/// from a missing backend (`Ok(None)` → authoritative clear).
+/// Outcome of awaiting the snapshot listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapshotListOutcome {
     Tasks(Vec<TaskSnapshot>),
@@ -96,9 +92,8 @@ pub fn snapshot_list_outcome(result: Result<Option<Vec<TaskSnapshot>>, ()>) -> S
 
 /// Keep completed tasks still in the registry. Drop foreground-only runs and
 /// rows owned by another session. `owner_session_id == None` counts as this
-/// session — same rule as the Stop-hook snapshot on a shared terminal.
-///
-/// Fits the real `SessionNotification` once (same authority as
+/// session — same rule as the Stop-hook snapshot on a shared terminal. Fits
+/// the real `SessionNotification` once (same authority as
 /// `task_completed_frame::encode`) and returns the wire update directly.
 pub fn background_tasks_update(
     snapshots: impl IntoIterator<Item = TaskSnapshot>,

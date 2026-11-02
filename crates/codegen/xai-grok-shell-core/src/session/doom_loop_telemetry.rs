@@ -78,7 +78,8 @@ impl DoomLoopTurnTally {
         }
     }
 
-    /// Fold recovery-action labels into both `triggers` and the legacy tightest `top_trigger` used by recovery telemetry.
+    /// Fold recovery-action labels into both `triggers` and the tightest
+    /// `top_trigger` used by recovery telemetry.
     pub fn merge_recovery_triggers(&mut self, triggers: &[String]) {
         self.merge_all_triggers(triggers);
         let current = self.top_trigger.take();

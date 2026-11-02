@@ -1,55 +1,11 @@
 //! Leader-follower IPC architecture for grok-shell.
 //!
-//! This module implements a single-leader-per-machine architecture where one leader
-//! process manages the agent state while multiple clients (TUI, IDE extensions, headless)
-//! communicate via Unix domain sockets.
+//! This module implements a single-leader-per-machine architecture where one
+//! leader process manages the agent state. This happens while multiple
+//! clients (TUI, IDE extensions, headless) communicate via Unix domain
+//! sockets.
 //!
 //! # Architecture
-//!
-//! ```text
-//! ┌─────────────────────────────────────────────────────────────┐
-//! │                        Leader Process                        │
-//! │  ┌─────────────────────────────────────────────────────────┐│
-//! │  │                      Agent (MvpAgent)                    ││
-//! │  │   - Shared state across all clients                      ││
-//! │  │   - Persists to ~/.grok/                                 ││
-//! │  └─────────────────────────────────────────────────────────┘│
-//! │                           ▲                                  │
-//! │                           │ ACP                              │
-//! │  ┌────────────────────────┴────────────────────────────────┐│
-//! │  │                   IPC Server (Unix Socket)               ││
-//! │  │   - Routes messages between clients and agent            ││
-//! │  │   - Namespaces request IDs to avoid collisions           ││
-//! │  │   - Tracks session ownership for routing                 ││
-//! │  └────────────────────────┬────────────────────────────────┘│
-//! └───────────────────────────┼──────────────────────────────────┘
-//!                             │ IPC (Unix socket at ~/.grok/leader.sock)
-//!         ┌───────────────────┼───────────────────┐
-//!         ▼                   ▼                   ▼
-//! ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-//! │   TUI Client  │   │  IDE Extension │   │ Headless CLI  │
-//! │   (stdio)     │   │   (stdio)      │   │  (websocket)  │
-//! └───────────────┘   └───────────────┘   └───────────────┘
-//! ```
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use xai_grok_shell::leader::{connect_or_spawn, ClientCapabilities, ClientMode};
-//!
-//! // Connect to existing leader or spawn a new one
-//! let caps = ClientCapabilities {
-//!     yolo_mode: true,
-//!     default_model: Some("grok-3-fast".to_string()),
-//! };
-//! let conn = connect_or_spawn("my-client", ClientMode::Stdio, &env_urls, caps).await?;
-//!
-//! // Send/receive ACP messages
-//! conn.send(r#"{"jsonrpc":"2.0","method":"test","id":1}"#.to_string())?;
-//! if let Some(response) = conn.recv().await {
-//!     println!("Got response: {}", response);
-//! }
-//! ```
 mod client;
 #[path = "cursor_worker_stub.rs"]
 pub mod cursor_worker;
@@ -88,8 +44,7 @@ use tracing::{debug, info, warn};
 pub use transport::listener_is_ready;
 const SPAWN_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
 const SPAWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
-/// Passed by [`spawn_leader_subprocess`] to every auto-spawned leader; its
-/// absence in argv marks an externally supervised daemon (never reclaim).
+/// Passed by [`spawn_leader_subprocess`] to every auto-spawned leader.
 const RELAY_ON_DEMAND_FLAG: &str = "--relay-on-demand";
 /// Same source the leader reports, so adoption compares versions like-for-like.
 fn client_leader_version() -> &'static str {
@@ -97,8 +52,7 @@ fn client_leader_version() -> &'static str {
 }
 /// Max wait for an evicted leader to exit before force-killing.
 const EVICT_WAIT_TIMEOUT: Duration = Duration::from_secs(8);
-/// How long the SAME live grok flock-holder may stay unconnectable before
-/// `connect_or_spawn` treats it as a "zombie leader" and evicts it.
+/// How long the SAME live grok flock-holder may stay unconnectable before `connect_or_spawn` treats it as a "zombie leader" and evicts it.
 const ZOMBIE_EVICT_DEADLINE: Duration = Duration::from_secs(30);
 /// Whether `leader_version` is a strictly-older parseable semver than `baseline`.
 /// Unparseable versions (e.g. dev `"unknown"`) return `false`, so they are left alone.
@@ -111,9 +65,8 @@ pub fn leader_is_older_than(leader_version: &str, baseline: &str) -> bool {
         _ => false,
     }
 }
-/// Evict a discovered leader only if it runs a strictly-older parseable version than this client.
-/// A newer client replaces an older leader, never the reverse, so the machine converges to the newest version without thrash.
-/// A missing or unparseable version keeps the leader.
+/// Evict a discovered leader only if it runs a strictly-older parseable
+/// version than this client.
 fn should_evict(leader_version: Option<&str>, client_version: &str) -> bool {
     leader_version.is_some_and(|v| leader_is_older_than(v, client_version))
 }
@@ -122,7 +75,6 @@ const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
 /// Maximum delay between reconnection attempts (caps exponential backoff).
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(30);
 /// Maximum reconnection attempts for bounded mode (headless/`grok -p`).
-/// TUI mode uses unlimited retries controlled by a cancellation token.
 const RECONNECT_MAX_ATTEMPTS_BOUNDED: u32 = 5;
 /// Environment URLs to pass to the leader subprocess.
 /// These are resolved from the environment (--dev flag) before spawning.
@@ -537,7 +489,8 @@ fn reachable_leader_pids(leaders: &[LeaderDescriptor]) -> Vec<(u32, String)> {
         })
         .collect()
 }
-/// True when the leader was auto-spawned by an interactive client (argv has [`RELAY_ON_DEMAND_FLAG`]). Externally supervised daemons (systemd, devbox supervisors) lack it; killing them drops the host's relay agent, so an unreadable cmdline also counts as not reclaimable.
+/// True when the leader was auto-spawned by an interactive client (argv has
+/// [`RELAY_ON_DEMAND_FLAG`]).
 fn is_policy_reclaimable_leader(pid: u32) -> bool {
     crate::util::process_cmdline_args(pid)
         .is_some_and(|args| args.iter().any(|arg| arg == RELAY_ON_DEMAND_FLAG))
@@ -834,13 +787,12 @@ pub struct LeaderConnection {
     client: LeaderClient,
 }
 impl LeaderConnection {
-    /// Send an ACP message payload to the leader.
-    /// The payload should be a valid JSON-RPC message. Request IDs will be namespaced by the leader to avoid collisions with other clients.
+    /// Send an ACP message payload to the leader. The payload should be a
+    /// valid JSON-RPC message.
     pub fn send(&self, payload: String) -> Result<(), ConnectionError> {
         self.client.send(payload).map_err(ConnectionError::Client)
     }
     /// Send a leader control request over the existing IPC connection.
-    /// This forwards the same capability-aware control requests as [`LeaderClient`], so callers using the public `connect_or_spawn` facade can issue process-level commands without reimplementing leader discovery or socket selection.
     pub async fn send_control(
         &self,
         command: ControlCommand,
@@ -854,21 +806,18 @@ impl LeaderConnection {
     pub fn registration(&self) -> &LeaderRegistration {
         self.client.registration()
     }
-    /// Receive the next ACP message from the leader.
-    ///
-    /// Returns `None` if the connection is closed.
+    /// Receive the next ACP message from the leader. Returns `None` if the
+    /// connection is closed.
     pub async fn recv(&mut self) -> Option<String> {
         self.client.recv().await
     }
-    /// Returns a receiver for the most recent `ShuttingDown` reason sent by the server before a planned shutdown.
-    /// `None`: no `ShuttingDown` message received yet (still connected or connection ended without a planned shutdown announcement).
-    /// `Some(Manual)`: deliberately stopped or unspecified shutdown. This is the primary entry point for first-party callers (TUI bridge, headless path, reconnection logic) because `connect_or_spawn` returns `LeaderConnection`, not `LeaderClient` directly.
+    /// Returns a receiver for the most recent `ShuttingDown` reason sent by
+    /// the server before a planned shutdown.
     pub fn shutting_down_reason(&self) -> watch::Receiver<Option<protocol::ShutdownReason>> {
         self.client.shutting_down_reason()
     }
-    /// Decompose this connection into raw channels.
-    ///
-    /// Useful for integration with other async code that needs direct channel access.
+    /// Decompose this connection into raw channels. Useful for integration
+    /// with other async code that needs direct channel access.
     pub fn into_channels(
         self,
     ) -> (
@@ -878,7 +827,6 @@ impl LeaderConnection {
         self.client.into_channels()
     }
     /// Decompose into raw channels plus the disconnect reason receiver.
-    /// Like [`into_channels()`](Self::into_channels) but also returns a [`watch::Receiver<DisconnectReason>`] so the caller can observe why the connection ended (e.g., `LeaderShutdown` vs `ConnectionLost`).
     pub fn into_channels_with_disconnect(
         self,
     ) -> (
@@ -893,7 +841,6 @@ impl LeaderConnection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionStatus {
     /// Connected to the leader.
-    /// `generation` is 0 for the initial connection and increments on every successful reconnect. Observers compare it against the last generation they handled, so a fast `Reconnecting -> Connected` flip coalesced by the watch channel still registers as a reconnect.
     Connected { generation: u64 },
     /// Attempting to reconnect (includes current attempt number).
     Reconnecting { attempt: u32 },
@@ -904,10 +851,8 @@ pub enum ConnectionStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReconnectPolicy {
     /// Retry indefinitely until the cancellation token fires.
-    /// Suitable for interactive TUI sessions where the user expects persistence.
     Unbounded,
     /// Retry up to a fixed number of attempts, then fail.
-    /// Suitable for headless/`grok -p` where hanging forever is unacceptable.
     Bounded { max_attempts: u32 },
 }
 impl ReconnectPolicy {
@@ -922,8 +867,9 @@ impl ReconnectPolicy {
         Self::Unbounded
     }
 }
-/// Holds the parameters needed to reconnect to a leader process.
-/// Does **not** own the live channels; the caller (bridge) owns those directly and swaps them on reconnect. This matches how `connect_or_spawn()` followed by `conn.into_channels()` works in `run_via_leader()`.
+/// Holds the parameters needed to reconnect to a leader process. Does **not**
+/// own the live channels; the caller (bridge) owns those directly and swaps
+/// them on reconnect.
 pub struct LeaderReconnector {
     client_type: String,
     mode: ClientMode,
@@ -931,14 +877,12 @@ pub struct LeaderReconnector {
     capabilities: ClientCapabilities,
     status_tx: watch::Sender<ConnectionStatus>,
     /// Generation [`notify_connected`](Self::notify_connected) publishes next.
-    /// Starts at 1: generation 0 is the initial connection, pre-seeded by [`status_channel`](Self::status_channel).
-    /// Atomic because `notify_connected` takes `&self`.
     next_generation: std::sync::atomic::AtomicU64,
 }
 impl LeaderReconnector {
-    /// Create a new reconnector with the given connection parameters.
-    ///
-    /// The `status_tx` channel is used to broadcast reconnection status to observers (e.g., TUI banner).
+    /// Create a new reconnector with the given connection parameters. The
+    /// `status_tx` channel is used to broadcast reconnection status to
+    /// observers (e.g., TUI banner).
     pub fn new(
         client_type: impl Into<String>,
         mode: ClientMode,
@@ -955,8 +899,8 @@ impl LeaderReconnector {
             next_generation: std::sync::atomic::AtomicU64::new(1),
         }
     }
-    /// Publish `ConnectionStatus::Connected` with the next reconnect generation.
-    /// Deliberately NOT called by [`reconnect`](Self::reconnect): the caller must first install the fresh channels it returned, then notify, so an observer that reacts to `Connected` by sending requests cannot race the channel swap and write into the dead pre-reconnect sender.
+    /// Publish `ConnectionStatus::Connected` with the next reconnect
+    /// generation.
     pub fn notify_connected(&self) {
         let generation = self
             .next_generation
@@ -965,9 +909,10 @@ impl LeaderReconnector {
             .status_tx
             .send(ConnectionStatus::Connected { generation });
     }
-    /// Attempt to reconnect to the leader (or spawn a new one).
-    /// The caller is responsible for swapping these into its local state, calling [`notify_connected`](Self::notify_connected), and replaying initialization (e.g., `initialize` + `session/load`).
-    /// The `disconnect_rx` allows the caller to observe *why* the new connection ends (e.g., `LeaderShutdown` vs `ConnectionLost`), preserving that signal across reconnection cycles. Uses exponential backoff, doubling from 1s up to a 30s cap. [`ReconnectPolicy::Unbounded`]: retries until `cancel` fires (for TUI). [`ReconnectPolicy::Bounded`]: retries up to `max_attempts`, then returns an error.
+    /// Attempt to reconnect to the leader (or spawn a new one). The caller is
+    /// responsible for swapping these into its local state, calling
+    /// [`notify_connected`](Self::notify_connected), and replaying
+    /// initialization (e.g., `initialize` + `session/load`).
     pub async fn reconnect(
         &self,
         policy: ReconnectPolicy,
@@ -1062,9 +1007,9 @@ impl LeaderReconnector {
             delay = std::cmp::min(delay * 2, RECONNECT_MAX_DELAY);
         }
     }
-    /// Create a `watch` channel pair for connection status.
-    /// Returns `(tx, rx)` initialized to the pre-reconnect `Connected { generation: 0 }` state.
-    /// Pass `tx` to [`LeaderReconnector::new()`], keep `rx` for observing status.
+    /// Create a `watch` channel pair for connection status. Returns `(tx,
+    /// rx)` initialized to the pre-reconnect `Connected { generation: 0 }`
+    /// state.
     pub fn status_channel() -> (
         watch::Sender<ConnectionStatus>,
         watch::Receiver<ConnectionStatus>,
@@ -1121,8 +1066,8 @@ async fn request_leader_vacate(conn: &LeaderConnection, pid: Option<u32>) {
     );
 }
 /// Evict a below-floor leader that holds the socket but NOT the flock (the caller
-/// MUST hold the flock, so this teardown is serialized against other clients).
-/// Signals it to vacate, waits for the pid to exit, then re-sends SIGTERM if it overran the grace window, so the caller can reclaim the socket and respawn.
+/// MUST hold the flock, so this teardown is serialized against other clients). Signals it to vacate, waits for the pid to exit, then re-sends SIGTERM if it
+/// overran the grace window. The caller can reclaim the socket and respawn.
 async fn evict_leader(conn: LeaderConnection, lock: &LeaderLock) {
     let pid = lock.read_pid();
     let leader_version = conn.registration().leader_binary_version.clone();
@@ -1199,26 +1144,22 @@ fn zombie_evict_decision(
         }
     }
 }
-/// The live *grok* PID that ACTUALLY holds the flock on the lock file, if any.
-/// `None` for a dead / non-grok PID, OR when the file PID can't be confirmed to be the real flock holder, so the auto-kill zombie net never SIGKILLs a process that does not hold the flock (a stale-but-live PID left in `leader.lock`, or a brief spawner that held the flock without rewriting the file).
-/// Uses the stricter (name-matching) grok check since this drives the auto-kill path. macOS/BSD have no `/proc/locks`, so the holder is unconfirmable and this returns `None` (eviction skipped), accepting that a genuine zombie there is not auto-killed.
+/// The live *grok* PID that holds the flock on the lock file, if any.
 fn live_grok_lock_holder(lock: &LeaderLock) -> Option<u32> {
     let file_pid = lock.read_pid()?;
     let pid = evictable_holder(file_pid, confirmed_flock_holder(lock.lock_path()))?;
     (crate::util::is_process_alive(pid) && crate::util::is_grok_process_strict(pid)).then_some(pid)
 }
-/// Safety gate: a file PID is evictable only when the confirmed flock `holder` is
-/// known AND equals it. An unknown holder, or a file PID that differs from the real
-/// holder, is NOT evictable. Pure so the "do not evict" invariant is unit-testable.
+/// Safety gate: a file PID is evictable only when the confirmed flock
+/// `holder` is known AND equals it.
 fn evictable_holder(file_pid: u32, holder: Option<u32>) -> Option<u32> {
     match holder {
         Some(h) if h == file_pid => Some(file_pid),
         _ => None,
     }
 }
-/// PID that actually holds the exclusive flock on the lock file, or `None` when it can't be determined.
-/// Linux reads `/proc/locks`; other platforms lack that interface,
-/// so the holder is unknowable there and we return `None` (callers must not auto-kill a PID they can't confirm holds the flock).
+/// PID that holds the exclusive flock on the lock file, or `None` when it
+/// can't be determined.
 fn confirmed_flock_holder(lock_path: &Path) -> Option<u32> {
     #[cfg(target_os = "linux")]
     {
@@ -1241,8 +1182,6 @@ fn flock_holder_pid(lock_path: &Path) -> Option<u32> {
     let (major, minor) = glibc_dev_major_minor(meta.dev());
     parse_flock_holder(&proc_locks, major, minor, meta.ino())
 }
-/// Decode a glibc 64-bit `dev_t` into (major, minor), the same bit layout glibc's `gnu_dev_major`/`gnu_dev_minor` use, matching the numbers the kernel prints in `/proc/locks`.
-/// (libc 0.2 dropped `major`/`minor` for the gnu target.)
 /// Pure, so it and the parser below compile and test on all hosts even though only Linux consumes them.
 #[cfg(any(target_os = "linux", test))]
 fn glibc_dev_major_minor(dev: u64) -> (u64, u64) {
@@ -1285,12 +1224,9 @@ fn parse_flock_holder(proc_locks: &str, major: u64, minor: u64, inode: u64) -> O
     }
     None
 }
-/// Max zombie-eviction attempts against the SAME PID before `connect_or_spawn`
-/// surfaces an error instead of looping forever.
+/// Max zombie-eviction attempts against the SAME PID before `connect_or_spawn` surfaces an error instead of looping forever.
 const MAX_ZOMBIE_EVICT_ATTEMPTS: u32 = 3;
 /// Max times `connect_or_spawn` will self-spawn a leader that fails to become connectable before surfacing an error.
-/// Bounds a persistent spawn/bind failure (bad socket-dir perms, exec fault in `run_leader`) that would otherwise
-/// re-fork every `SPAWN_WAIT_TIMEOUT` forever; still allows the intended single-retry after a transient same-version sibling race.
 const MAX_SELF_SPAWN_ATTEMPTS: u32 = 3;
 /// Records an eviction attempt against `pid`; returns `false` once the per-PID budget is exhausted.
 /// Attempts reset when the target PID changes.
@@ -1302,7 +1238,9 @@ fn register_evict_attempt(state: &mut Option<(u32, u32)>, pid: u32, max_attempts
     *state = Some((pid, count));
     count <= max_attempts
 }
-/// A connect-level failure: never became connectable (`Timeout`) or the socket file exists but refuses connections (`Connect`, e.g. ECONNREFUSED against a stale socket / dead IPC task). Both drive the zombie net. Registration- and protocol-level errors mean the socket ANSWERED and must surface instead.
+/// A connect-level failure: never became connectable (`Timeout`) or the
+/// socket file exists but refuses connections (`Connect`, e.g. ECONNREFUSED
+/// against a stale socket / dead IPC task).
 fn is_connect_level_failure(error: &ConnectionError) -> bool {
     matches!(
         error,
@@ -1352,7 +1290,7 @@ async fn evict_zombie_leader(pid: u32, sock_path: &Path, waited: Duration) {
     );
 }
 /// Connect to existing leader or spawn a new one. Uses OS-level file locking (flock) to coordinate: Try to connect to existing socket (fast path) If connection fails, try to acquire exclusive lock
-/// If lock acquired, we are responsible for spawning the leader If lock not acquired, another process is leader/spawning; wait and retry The `env_urls.grok_ws_url` determines which leader instance to connect to.
+/// If lock acquired, we are responsible for spawning the leader If lock not acquired, another process is leader/spawning. Wait and retry The `env_urls.grok_ws_url` determines which leader instance to connect to.
 /// Different WS URLs get different leader processes (via hashed socket paths).
 pub async fn connect_or_spawn(
     client_type: &str,
@@ -1546,9 +1484,8 @@ pub async fn connect_or_spawn(
         }
     }
 }
-/// For a **managed install** — the running binary lives under `grok_home` (e.g. `~/.grok/...`) — prefer the managed `~/.grok/bin/grok` symlink. After a reinstall swaps that symlink, `current_exe()` still resolves (via `/proc/self/exe` on Linux) to the *old* versioned target, so spawning it would start the stale binary.
-/// The symlink always points to the installed version.
-/// For a **dev / out-of-tree binary** (`cargo run`, integration tests, installs not under `grok_home`), keep `current_exe()` so the spawned leader matches the calling binary. Falls back to `~/.grok/bin/grok` only when `current_exe()` is unavailable.
+/// For a **managed install** — the running binary lives under `grok_home` (e.g. `~/.grok/...`) — prefer the managed `~/.grok/bin/grok` symlink. After a reinstall swaps that symlink, `current_exe()` still resolves (via `/proc/self/exe` on Linux) to the *old* versioned target,
+/// so spawning it would start the stale binary.
 fn resolve_exe_for_spawn() -> Result<std::path::PathBuf, ConnectionError> {
     resolve_binary_with_home(&crate::util::grok_home::grok_home())
 }
@@ -1792,7 +1729,6 @@ mod tests {
         assert_eq!(evictable_holder(100, None), None);
     }
     /// glibc `dev_t` decode matches the logical major:minor the kernel prints.
-    /// makedev(253, 1) is 0xfd01, which decodes back to (253, 1).
     #[test]
     fn glibc_dev_major_minor_decodes_makedev() {
         assert_eq!(glibc_dev_major_minor(0xfd01), (253, 1));
@@ -1821,7 +1757,8 @@ mod tests {
         assert_eq!(parse_flock_holder(sample, 253, 1, 1000), Some(592));
     }
     /// A stale-but-live PID in the lock file, one that differs from the real flock holder,
-    /// is classified "do not evict" end-to-end through the parse and gate helpers.
+    /// is classified "do not evict" end-to-end. This holds through the parse and gate
+    /// helpers.
     #[test]
     fn stale_file_pid_not_matching_holder_is_not_evictable() {
         let sample = "1: FLOCK  ADVISORY  WRITE 592 fd:01:1000 0 EOF\n";
@@ -1978,8 +1915,9 @@ mod tests {
         assert!(should_evict(Some("0.1.218"), "0.1.219"));
         assert!(!should_evict(Some("unknown"), client));
     }
-    /// Under-lock eviction decision for the concurrent-clients race: against one stale leader, only clients strictly newer than it evict; same-or-older clients keep it.
-    /// With flock mutual exclusion (lock.rs `try_acquire_fails_when_held`) and eviction running only under the flock, this yields exactly one client that evicts and spawns, so no split-brain.
+    /// Under-lock eviction decision for the concurrent-clients race: against
+    /// one stale leader, only clients strictly newer than it evict.
+    /// Same-or-older clients keep it.
     #[test]
     fn concurrent_clients_only_newer_evict_same_stale_leader() {
         let stale_leader = "0.1.219";
@@ -2025,8 +1963,8 @@ mod tests {
         );
         fake.cancel();
     }
-    /// Reconnect attempts against a hung leader exhaust the bounded policy and publish `Failed`;
-    /// the reconnector never falls back to evicting the hung leader and spawning a healthy one.
+    /// Reconnect attempts against a hung leader exhaust the bounded policy and publish `Failed`.
+    /// The reconnector never falls back to evicting the hung leader and spawning a healthy one.
     #[tokio::test(start_paused = true)]
     async fn reconnect_against_hung_leader_exhausts_attempts_without_respawn() {
         let temp = TempDir::new().unwrap();

@@ -1,4 +1,6 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
+// tests.rs holds the tests code.
+
 use super::*;
 use crate::session::info::Info;
 use crate::session::persistence::default_model_id;
@@ -399,7 +401,8 @@ async fn merge_rewind_points_from_aborts_on_malformed_without_writing() {
             "rewind_points.jsonl must be preserved when the merge aborts"
         );
 }
-/// File-content `file_snapshots` must round-trip through the on-disk read-modify-write merge (not just index/count).
+/// File-content `file_snapshots` must round-trip through the on-disk
+/// read-modify-write merge (not index/count).
 #[tokio::test]
 async fn merge_rewind_points_from_round_trips_file_snapshots() {
     use xai_grok_paths::RelPathBuf;
@@ -877,7 +880,6 @@ async fn test_load_prompts_only_nonexistent_session() {
     let prompts = adapter.load_prompts_only(&info).await.unwrap();
     assert!(prompts.is_empty());
 }
-/// A user prompt streamed as two consecutive `UserMessageChunk` updates must be merged into a single prompt string, not split into two.
 #[tokio::test]
 async fn test_load_prompts_only_merges_multi_chunk_prompt() {
     let temp_dir = TempDir::new().unwrap();
@@ -1863,9 +1865,10 @@ fn load_lines(lines: &[&str]) -> Vec<ConversationItem> {
     std::fs::write(&chat_path, lines.join("\n") + "\n").unwrap();
     adapter.read_chat_history_sync(chat_path, CHAT_FORMAT_VERSION).unwrap()
 }
-/// Real-shape legacy fixture from a web-search session.
-/// The assistant carries `reasoning: { text, encrypted, id }` inline, the legacy grok-build / Opus / chat-completions shape.
-/// BackendToolCall sits as its own sibling line (it was already a sibling variant in the legacy shape).
+/// Real-shape legacy fixture from a web-search session. The assistant carries
+/// `reasoning: { text, encrypted, id }` inline, the grok-build / Opus /
+/// chat-completions shape. BackendToolCall sits as its own sibling line (it
+/// was already a sibling variant in the shape).
 #[test]
 fn read_chat_history_upgrades_legacy_singular_reasoning_to_sibling() {
     let items = load_lines(
@@ -1944,9 +1947,11 @@ fn read_chat_history_upgrades_raw_output_parallel_tco_reasoning() {
         .collect();
     assert_eq!(reasoning_ids, vec!["tco_1", "tco_2", "rs_main"]);
 }
-/// The legacy turn's `reasoning` field is reconstructed as a sibling *before* the legacy assistant.
-/// The post-PR sibling Reasoning row passes through unchanged and lands before the post-PR assistant (no double-emission).
-/// Final item order is a uniform sibling-shape `Vec<ConversationItem>` that downstream code can replay without knowing about the seam.
+/// The turn's `reasoning` field is reconstructed as a sibling *before* the
+/// assistant. The post-PR sibling Reasoning row passes through unchanged and
+/// lands before the post-PR assistant (no double-emission). Final item order
+/// is a uniform sibling-shape `Vec<ConversationItem>` that downstream code
+/// can replay without knowing about the seam.
 #[test]
 fn read_chat_history_handles_hybrid_legacy_and_post_pr_lines() {
     let items = load_lines(
@@ -1975,13 +1980,11 @@ fn read_chat_history_handles_hybrid_legacy_and_post_pr_lines() {
     assert_eq!(
             kinds,
             vec![
-                // Turn 1 (legacy lifted)
                 "system",
                 "user",
                 "backend_tool_call", // ws_legacy_1 (passthrough sibling row)
                 "reasoning",         // reconstructed from assistant.reasoning
                 "assistant",         // legacy assistant with legacy fields stripped
-                // Turn 2 (post-PR passthrough)
                 "user",
                 "reasoning",         // passthrough sibling
                 "backend_tool_call", // passthrough sibling
@@ -2600,9 +2603,9 @@ async fn append_update_terminates_torn_trailing_line() {
     let updates = adapter.read_updates_jsonl(updates_path).unwrap();
     assert_eq!(updates.len(), 2, "torn line skipped, real updates kept");
 }
-/// End-to-end resume-path regression for the incident: a live session with a merged record in `chat_history.jsonl` must still load.
-/// (Merged record: crash mid-append, then log-and-continue appended the next record onto the partial line.).
-/// Previously `load_session_without_updates` returned.
+/// End-to-end resume-path regression for the incident: a live session with a
+/// merged record in `chat_history.jsonl` must still load.
+/// `load_session_without_updates` returned.
 #[tokio::test]
 async fn load_session_without_updates_survives_merged_chat_line() {
     let temp_dir = TempDir::new().unwrap();

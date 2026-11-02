@@ -1,3 +1,5 @@
+// repo_status_prefix.rs holds the repo status prefix code.
+
 use std::path::PathBuf;
 
 /// Discover the VCS root for templated prefixes (`vcs_root` / "Is directory a git repo").

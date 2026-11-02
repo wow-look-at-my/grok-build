@@ -1,16 +1,4 @@
 //! Rows the leader adds to the roster without hosting them in `MvpAgent`.
-//!
-//! The worker door publishes its claims into an [`ExternalRoster`];
-//! [`RosterListMerge`] sits on the `run_leader` agent boundary, remembers the
-//! id of every `x.ai/sessions/list` request that passes inbound (IPC and relay
-//! alike), and appends the roster's rows to the matching response before the
-//! fan-out. [`run_changed_notifier`] turns each roster generation into an
-//! `x.ai/sessions/changed` broadcast on the same fan-out. Pending ids are
-//! compared as JSON values because IPC ids are namespaced strings while relay
-//! ids are whatever grok.com sent, and they expire after
-//! [`PENDING_LIST_TTL`] so an unanswered request cannot leak. Compiled in
-//! every build: without the worker door the roster is simply empty and
-//! every line passes through untouched.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -135,8 +123,7 @@ impl Drop for ExternalRosterPublisher {
     }
 }
 
-/// Appends [`ExternalRoster`] rows to `x.ai/sessions/list` responses. Pending ids are a
-/// linear scan: a dashboard polls the list a few times a second at most.
+/// Appends [`ExternalRoster`] rows to `x.ai/sessions/list` responses.
 pub struct RosterListMerge {
     roster: ExternalRoster,
     pending: Mutex<Vec<(Value, Instant)>>,
@@ -178,8 +165,7 @@ impl RosterListMerge {
     /// unchanged (and unparsed where the cheap checks allow).
     pub fn filter_outbound<'a>(&self, line: &'a str) -> Cow<'a, str> {
         if self.roster.is_empty() {
-            // Ids recorded while the door was live would otherwise wait for a reused JSON-RPC id
-            // after a restart; with no rows there is nothing they could merge into.
+            // Ids recorded while the door was live would otherwise wait for a reused JSON-RPC id after a restart.
             self.pending.lock().clear();
             return Cow::Borrowed(line);
         }
@@ -276,8 +262,8 @@ pub fn changed_notification(upserted: Vec<RosterEntry>, removed: Vec<String>) ->
 }
 
 /// Writes one `x.ai/sessions/changed` line into `sink` per roster generation that changed a
-/// row, carrying only the rows that differ from the last emission plus the removals. Runs for
-/// the leader's lifetime: the owning task is dropped with the `LocalSet`.
+/// row, carrying only the rows. Those rows differ from the last emission plus the removals.
+/// Runs for the leader's lifetime: the owning task is dropped with the `LocalSet`.
 pub async fn run_changed_notifier(roster: ExternalRoster, mut sink: impl FnMut(String)) {
     let mut changes = roster.changes();
     // A generation published between spawn and first poll must not be skipped.

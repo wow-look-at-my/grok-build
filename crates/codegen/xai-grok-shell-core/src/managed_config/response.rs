@@ -78,9 +78,9 @@ impl ManagedConfigResponse {
         self.deployment_id.is_some() || self.team_id.is_some()
     }
 
-    /// The signed envelope to verify, when the server included any.
-    /// Picks the first `signatures` entry whose key_id is in the embedded trusted set, else the first entry.
-    /// The outer key_id only picks; verification re-selects the key from the signed bytes.
+    /// The signed envelope to verify, when the server included any. Picks the
+    /// first `signatures` entry whose key_id is in the embedded trusted set,
+    /// else the first entry.
     pub fn signature_sidecar(&self) -> Option<xai_grok_config::signed_policy::SignatureEnvelope> {
         pick_trusted_envelope(
             self.signatures.as_deref(),
@@ -180,8 +180,9 @@ pub struct VerifiedEnvelope {
     pub payload: xai_grok_config::signed_policy::SignedPayload,
 }
 
-/// Verify the signed envelope without persisting anything.
-/// The legacy body fields must equal the signed copy, so what lands on disk is exactly what was signed (and the load-time gate can re-verify it).
+/// Verify the signed envelope without persisting anything. The body fields
+/// must equal the signed copy, so what lands on disk is exactly what was
+/// signed (and the load-time gate can re-verify it).
 pub fn verify_signed_envelope(
     body: &ManagedConfigResponse,
     active_team_id: Option<&str>,

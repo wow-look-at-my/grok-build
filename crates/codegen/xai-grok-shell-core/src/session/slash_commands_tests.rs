@@ -1,3 +1,5 @@
+// slash_commands_tests.rs holds the slash commands tests code.
+
 use super::*;
 use xai_grok_tools::implementations::skills::types::SkillScope;
 
@@ -509,7 +511,6 @@ fn resolve_loop_without_args_uses_bare_command_display_text() {
 #[test]
 fn resolve_passthrough_preserves_original_blocks() {
     // External-harness agents: blocks are passed through verbatim.
-    // The prompt assembly layer decides how to format them.
     let skills = vec![make_skill("commit", true)];
     let outcome = resolve(
         vec![text_block("/commit fix typo")],
@@ -735,7 +736,7 @@ fn goal_does_not_resolve_when_host_capability_is_off() {
 
 #[test]
 fn loop_does_not_resolve_when_scheduler_unavailable() {
-    // Routing /loop without the scheduler would produce a "call scheduler_create" prompt the model can't act on
+    // Routing /loop without the scheduler would produce a "call scheduler_create" prompt the model can't act.
     let availability = CommandAvailability {
         scheduler: false,
         ..CommandAvailability::all_enabled()
@@ -840,8 +841,8 @@ fn pre_session_builtin_commands_excludes_gated_entries() {
 
 #[test]
 fn pre_session_builtin_commands_advertises_goal_when_flag_enabled() {
-    // `/goal` is gated on a config feature flag known at initialize time (not a live toolset)
-    // Without pre-session advertising it would only show up after the first user turn created a session
+    // `/goal` is gated on a config feature flag known at initialize time (not
+    // a live toolset).
     let availability = CommandAvailability {
         goal: true,
         ..CommandAvailability::default()
@@ -1425,9 +1426,12 @@ fn advertised_names_with(availability: CommandAvailability) -> Vec<String> {
         .collect()
 }
 
-/// `CommandAvailability::default()` must be fail-closed: every gated command is hidden, only `BuiltinGate::AlwaysOn` survives.
-/// The pre-session `MvpAgent::command_availability()` builds on this value (only flipping config-derived gates like `goal` on).
-/// A regression here would re-expose `/flush`, `/loop`, etc. on the home screen for harnesses that won't actually run them.
+/// `CommandAvailability::default()` must be fail-closed: every gated command
+/// is hidden, only `BuiltinGate::AlwaysOn` survives. The pre-session
+/// `MvpAgent::command_availability()` builds on this value (only flipping
+/// config-derived gates like `goal` on). A regression here would re-expose
+/// `/flush`, `/loop`, etc. on the home screen for harnesses that won't run
+/// them.
 #[test]
 fn default_availability_is_fail_closed_on_every_gate() {
     let names = advertised_names_with(CommandAvailability::default());
@@ -1992,8 +1996,7 @@ fn workflow_manage_parses_both_orders_and_optional_id() {
 
 #[test]
 fn workflow_named_runs_is_shadowed_by_the_runs_op() {
-    // `/workflow runs` is always the overview op, even with a workflow named `runs` installed
-    // That workflow still launches via its advertised bare `/runs` command or `/workflow runs <args>`
+    // `/workflow runs` is always the overview op.
     let workflows = vec![listing("runs")];
     assert!(matches!(
         resolve(
@@ -2298,7 +2301,6 @@ fn goal_tracker_account_elapsed_flushes_delta() {
     use crate::session::goal_tracker::GoalTracker;
     let mut tracker = GoalTracker::new(std::path::PathBuf::from("/tmp/test"));
     tracker.create_goal("g1".into(), "obj".into(), None, 0, "now".into(), None);
-    // After create_goal, elapsed_ms is 0 but active_since is set.
     let before = tracker.snapshot().unwrap().elapsed_ms;
     assert_eq!(before, 0);
     // account_elapsed flushes pending wall-clock time.

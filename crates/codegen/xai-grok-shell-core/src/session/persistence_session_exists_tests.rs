@@ -57,7 +57,6 @@ fn returns_false_for_different_session_id() {
 fn finds_session_across_multiple_cwd_dirs() {
     let tmp = make_root();
     let root = tmp.path().join("sessions");
-    // Two persisted sessions under different cwd directories.
     let other = root.join("cwd1").join("other-session");
     let target = root.join("cwd2").join("target-session");
     fs::create_dir_all(&other).unwrap();

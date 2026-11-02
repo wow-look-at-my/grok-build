@@ -1,3 +1,5 @@
+// roster_merge_tests.rs holds the roster merge tests code.
+
 use std::time::Duration;
 
 use pretty_assertions::assert_eq;
@@ -54,7 +56,7 @@ fn parsed(line: &str) -> Value {
     serde_json::from_str(line).unwrap()
 }
 
-/// A JSON-RPC response whose body is what `handle_roster_list` really emits.
+/// A JSON-RPC response whose body is what `handle_roster_list` emits.
 fn list_response(id: Value, result: &ExtMethodResult<RosterListResponse>) -> String {
     let body: Value = serde_json::from_str(result.to_ext_response().unwrap().0.get()).unwrap();
     json!({"jsonrpc": "2.0", "id": id, "result": body}).to_string()

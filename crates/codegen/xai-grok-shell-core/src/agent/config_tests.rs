@@ -1,3 +1,5 @@
+// config_tests.rs holds the config tests code.
+
 use super::*;
 use serial_test::serial;
 use xai_grok_test_support::EnvGuard;
@@ -125,8 +127,8 @@ fn laziness_detector_block_round_trips_through_serde() {
     assert_eq!(cfg.min_confidence, Some(0.8));
     assert_eq!(cfg.include_reasoning, Some(false));
 }
-/// Pins all three states of the per-model `include_reasoning` override (`Some(true)`, `Some(false)`, and absent giving `None`).
-/// A future drift on the `#[serde(default)]` attribute or the field type fails the test rather than silently changing the resolved default.
+/// Pins all states of the per-model `include_reasoning` override (`Some(true)`, `Some(false)`, and absent giving `None`). A future drift on
+/// the `#[serde(default)]` attribute or the field type fails the test rather than silently changing the resolved default.
 #[test]
 fn laziness_detector_include_reasoning_serde_states() {
     let some_true: LazinessDetectorPerModelConfig =
@@ -1125,8 +1127,9 @@ fn test_model_entry(
         api_base_url: api_base_url.map(|s| s.to_string()),
     }
 }
-/// The effective-model RE-support lookup must use the model ACTUALLY used: the resolved aux model when present, else the session model.
-/// An unresolvable slug resolves aux to `None`, so the session model's capability wins.
+/// The effective-model RE-support lookup must use the model used: the
+/// resolved aux model when present, else the session model. An unresolvable
+/// slug resolves aux to `None`, so the session model's capability wins.
 #[test]
 fn effective_classifier_supports_re_uses_actually_used_model() {
     let mut re_model = test_model_entry("v9", "https://x/v1", None, None, None);
@@ -1572,8 +1575,8 @@ fn enforce_disable_api_key_auth_blocks_first_party_only() {
     enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
 }
-/// Regression for the OVERRIDE_MODEL kill-switch bypass. A first-party model with its own api_key resolves to `ApiKey` (priority 1, beating the session).
-/// The kill switch, now applied inside `try_resolve_model_credentials`, swaps it for the session token. BYOK (non-x.ai) own keys are preserved.
+/// Regression for the OVERRIDE_MODEL kill-switch bypass. A first-party model with its own api_key resolves to `ApiKey` (one priority, beating the
+/// session). The kill switch, now applied inside `try_resolve_model_credentials`, swaps it for the session token. BYOK (non-x.ai) own keys are preserved.
 /// (`try_resolve_model_credentials` loads global config, so this exercises its resolve and enforce core.)
 #[test]
 fn try_resolve_model_credentials_swaps_first_party_own_key_under_kill_switch() {
@@ -4112,9 +4115,7 @@ fn model_mtls_configuration_requires_one_explicit_https_destination() {
         );
     }
 }
-/// A field holding a registered key is read as of whenever it was written, and these three are built before the value's last writer runs.
-/// `auto_wake` shipped that way and lost every pin.
-/// Catches the spelling, not the class: a mirror under another name still gets through.
+/// `auto_wake` shipped that way and lost every pin. Catches the spelling, not the class: a mirror under another name still gets through.
 #[test]
 fn no_registered_feature_is_mirrored_by_a_config_field() {
     const SRC: &str = include_str!("config.rs");
@@ -6586,7 +6587,8 @@ fn malformed_permission_rules_do_not_fail_config_load() {
     let unused = unused_keys_from_toml(toml_str);
     assert!(unused.is_empty(), "got: {unused:?}");
 }
-/// A non-table `[permission]` value still fails Config load: a fundamentally broken security section should be loud.
+/// A non-table `[permission]` value still fails Config load: a broken
+/// security section should be loud.
 #[test]
 fn non_table_permission_value_fails_config_load() {
     let raw: toml::Value = toml::from_str(r#"permission = "foo""#).unwrap();
@@ -6711,7 +6713,7 @@ fn internal_otlp_endpoint_grok_internal_wins_regardless_of_switch() {
         );
     }
 }
-/// Master switch unset: the legacy fallback is preserved (back-compat).
+/// Master switch unset: the fallback is preserved (back-compat).
 #[test]
 fn internal_otlp_endpoint_legacy_fallback_when_switch_unset() {
     let traces = EndpointsConfig {
@@ -7477,7 +7479,7 @@ fn external_otel_pin_prompts_true_omitted_assistant_stays_off() {
         "omitted CONTENT sibling must default off across the requirements boundary"
     );
 }
-/// Regression: an org enable via `[telemetry].otel_enabled` (managed config / requirements — no `GROK_EXTERNAL_OTEL` env var) must flip the master switch the *internal* pipeline keys off, so legacy `OTEL_EXPORTER_OTLP_*` repointing shuts off in lockstep with the external stream activating. A desync would point the internally-authed firehose at the customer collector while `internal_pipeline_consumed_otel_vars` blocks the external stream.
+/// Regression: an org enable via `[telemetry].otel_enabled` (managed config / requirements — no `GROK_EXTERNAL_OTEL` env var) must flip the master switch the *internal* pipeline keys off. Legacy `OTEL_EXPORTER_OTLP_*` repointing shuts off in lockstep with the external stream activating. A desync would point the internally-authed firehose at the customer collector while `internal_pipeline_consumed_otel_vars` blocks the external stream.
 #[test]
 fn external_otel_master_switch_resolves_from_all_layers() {
     let enabled_table: toml::Value = toml::from_str("[telemetry]\notel_enabled = true").unwrap();
@@ -8189,7 +8191,7 @@ default = "grok-4.5"
     assert_eq!(cfg.models.default.as_deref(), Some("grok-4.5"));
 }
 /// Reproduce the enterprise managed config bug: [model.grok-build] sets context_window=500k for model="grok-4.5". [models].default="grok-4.5" still resolves to the bare prefetched entry (256k).
-/// Layer 3 only overrides key "grok-build", not key "grok-4.5". After the Layer 4 slug propagation fix, both keys should have 500k.
+/// After a later layer slug propagation fix, both keys should have 500k.
 #[test]
 fn slug_propagation_enterprise_managed_config_key_mismatch() {
     let default_cw = DEFAULT_CONTEXT_WINDOW;
@@ -8291,8 +8293,8 @@ fn slug_propagation_does_not_overwrite_explicit_context_window() {
         "explicitly-set context_window must not be overwritten by slug propagation"
     );
 }
-/// Resolves a prefetched `custom-model` (default context window, ChatCompletions) against a same-slug `[model.alias]` donor at 500000 / `responses`, plus whatever `extra_toml` adds.
-/// The slug is absent from the built-in catalog so Layer 2 cannot pre-fill the prefetched entry and turn it into its own donor.
+/// Resolves a prefetched `custom-model` (default context window, ChatCompletions) against a same-slug `[model.alias]` donor at a set value / `responses`, plus whatever `extra_toml`
+/// adds. The slug is absent from the built-in catalog so a later layer cannot pre-fill the prefetched entry. It turn it into its own donor.
 fn resolve_custom_model_with_alias_donor(extra_toml: &str) -> ModelEntry {
     let raw: toml::Value = toml::from_str(&format!(
         r#"
@@ -8753,7 +8755,7 @@ fn prefetched_menu_donor() -> ModelEntry {
     entry
 }
 /// Resolves `config_toml` (rows pointing at `model = "grok-4.6-build"`) against `donor` prefetched under the wire id.
-/// A custom models endpoint keeps the built-in `grok-4.6` catalog row (which has its own menu) out of Layer 1.
+/// A custom models endpoint keeps the built-in `grok-4.6` catalog row (which has its own menu) out of one layer.
 fn resolve_with_menu_donor(config_toml: &str, donor: ModelEntry) -> IndexMap<String, ModelEntry> {
     let raw: toml::Value = toml::from_str(config_toml).unwrap();
     let mut cfg = Config::new_from_toml_cfg(&raw).expect("config should parse");
@@ -8790,7 +8792,7 @@ fn slug_propagation_inherits_reasoning_efforts_and_derives_legacy_fields() {
     assert!(info.supports_reasoning_effort);
     assert_eq!(info.reasoning_effort, Some(ReasoningEffort::High));
 }
-/// A config alias with its own restricted menu is that row's choice, not a donor: the same-key fetched row
+/// A config alias with its own restricted menu is that row's choice, not a donor. The same-key fetched row
 /// keeps feeding the other empty aliases of the wire id.
 #[test]
 fn slug_propagation_prefers_same_key_menu_donor_over_restricted_alias() {
@@ -8816,8 +8818,8 @@ fn slug_propagation_prefers_same_key_menu_donor_over_restricted_alias() {
     );
     assert_eq!(effort_ids(info("grok-4.6-cheap")), ["low"]);
 }
-/// Inheriting an unmarked `capabilities` menu must carry the server-default flag along, or the alias would
-/// derive `.first()` (`low`) where the same-key row sends nothing.
+/// Inheriting an unmarked `capabilities` menu must carry the server-default flag along. Otherwise, the
+/// alias would derive `.first()` (`low`) where the same-key row sends nothing.
 #[test]
 fn slug_inherited_unmarked_capabilities_menu_keeps_no_default_effort() {
     let row = serde_json::json!({
@@ -8835,7 +8837,7 @@ fn slug_inherited_unmarked_capabilities_menu_keeps_no_default_effort() {
     assert_eq!(resolve_sampling(&entry, None).reasoning_effort, None);
 }
 /// An explicit `supports_reasoning_effort = false` in config discards the menu whether it arrives through the
-/// same-key base (wire-id key) or through slug propagation (alias key), and the scalar whether it came from the
+/// same-key base (wire-id key) or through slug propagation (alias key). The scalar whether it came from the
 /// catalog row or from the config row itself, so nothing reaches the wire.
 #[test]
 fn explicit_supports_reasoning_effort_false_discards_inherited_menu() {
@@ -8861,7 +8863,7 @@ fn explicit_supports_reasoning_effort_false_discards_inherited_menu() {
         );
     }
 }
-/// A `/v1/models` row whose `capabilities` names no default keeps the menu but sends no effort, so the
+/// A `/v1/models` row whose `capabilities` names no default keeps the menu but sends no effort. The
 /// server applies its own instead of the lowest listed tier.
 #[test]
 fn capabilities_menu_without_default_resolves_to_no_reasoning_effort() {

@@ -1,3 +1,5 @@
+// task_completed_frame_tests.rs holds the task completed frame tests code.
+
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -66,7 +68,7 @@ fn a_multi_megabyte_log_fits_and_points_at_the_file() {
     assert!(snapshot.output.contains("/tmp/bg-1.log"));
 }
 
-/// Limiting the output field alone misses this: JSON encoding makes each of these bytes six times larger.
+/// Limiting the output field alone misses this: JSON encoding makes each of these bytes several times larger.
 #[test]
 fn escaped_output_fits_too() {
     let mut notification = notification(&"\u{7}".repeat(30 * 1024));
@@ -76,7 +78,7 @@ fn escaped_output_fits_too() {
     assert!(!task_snapshot(&mut notification).unwrap().output.is_empty());
 }
 
-/// The output is not the only field a task can grow: with no output at all, the frame must still fit once the other variable fields are capped.
+/// The output is not the only field a task can grow. With no output at all, the frame must still fit once the other variable fields are capped.
 #[test]
 fn oversized_non_output_fields_are_capped_too() {
     let mut notification = notification("");

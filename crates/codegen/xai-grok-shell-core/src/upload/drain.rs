@@ -1,3 +1,5 @@
+// drain.rs holds the drain code.
+
 const DEFAULT_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 static LAST_FLUSH_TIMEOUT_SECS: std::sync::atomic::AtomicU64 =

@@ -1,6 +1,4 @@
 //! Wire-shape parsers for ext-notification params handled by `MvpAgent`.
-//!
-//! Pure parsing only (params JSON into `SessionCommand`); session lookup and command dispatch stay in `mvp_agent::ext_notification`.
 
 use crate::session::SessionCommand;
 
@@ -15,9 +13,7 @@ pub fn parse_queue_edit_command(
     match method {
         "x.ai/queue/remove" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
-            // The client supplies the version it last saw; the handler removes only on an exact match
-            // A stale version is a benign no-op plus a rebroadcast
-            // Default 0 covers never-edited prompts (the common case).
+            // The client supplies the version it last saw.
             let expected_version = params
                 .get("expectedVersion")
                 .and_then(|v| v.as_u64())
@@ -111,7 +107,7 @@ mod tests {
             _ => panic!("expected RemoveQueuedPrompt"),
         }
 
-        // remove without expectedVersion defaults to 0.
+        // remove without expectedVersion defaults to a set limit.
         let p = serde_json::json!({ "sessionId": "s1", "id": "p8" });
         match parse_queue_edit_command("x.ai/queue/remove", &p, None) {
             Some(SessionCommand::RemoveQueuedPrompt {
@@ -231,7 +227,7 @@ mod tests {
             _ => panic!("expected InterjectQueuedPrompt"),
         }
 
-        // interject without expectedVersion defaults to 0.
+        // interject without expectedVersion defaults to a set limit.
         match parse_queue_edit_command(
             "x.ai/queue/interject",
             &serde_json::json!({ "sessionId": "s1", "id": "p11" }),

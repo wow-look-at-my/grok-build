@@ -1,8 +1,4 @@
 //! Mid-session settings refresh coalescer.
-//!
-//! Concurrent live refreshes for one credential share a single in-flight fetch;
-//! nothing is cached here (cross-launch reuse is the disk cache's job, see
-//! `settings_cache`).
 
 use tokio::sync::watch;
 use xai_grok_login::GrokAuth;
@@ -30,8 +26,7 @@ impl From<&GrokAuth> for CredentialIdentity {
 
 #[derive(Default)]
 struct RefreshState {
-    /// Bumped on every credential switch and never reset, so an A->B->A churn
-    /// gives a new epoch and a stale leader cannot be taken for the live flight.
+    /// Bumped on every credential switch and never reset, so an A->B->A churn gives a new epoch.
     epoch: u64,
     identity: Option<CredentialIdentity>,
     in_flight: Option<watch::Receiver<Option<crate::remote::SettingsFetch>>>,
@@ -55,9 +50,10 @@ impl SettingsRefresh {
 
     /// Coalesce concurrent live refreshes for `auth` onto one `leader` fetch:
     /// the first caller leads and runs the fetch inline (it may borrow the
-    /// caller and be `!Send`); the rest join its published outcome. `None` means
-    /// the leader kept dropping before it published, so the caller must not
-    /// resolve the fail-closed OTEL gate on cancellation churn.
+    /// caller and be `!Send`). This also covers the rest join its published
+    /// outcome. `None` means the leader kept dropping before it published, so
+    /// the caller must not resolve the fail-closed OTEL gate on cancellation
+    /// churn.
     pub async fn refresh<F, Fut>(
         &self,
         auth: &GrokAuth,
@@ -224,7 +220,7 @@ mod tests {
     }
 
     /// A follower that keeps joining leaders which drop before publishing must eventually give up
-    /// with `None` — never a fabricated `Retry` that would open the fail-closed OTEL gate on churn.
+    /// with `None`. Never a fabricated `Retry` that would open the fail-closed OTEL gate on churn.
     #[tokio::test(flavor = "current_thread")]
     async fn refresh_returns_none_after_repeated_leader_drops() {
         let refresh = SettingsRefresh::default();

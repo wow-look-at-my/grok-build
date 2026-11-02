@@ -1,3 +1,5 @@
+// prompt_turn_result_tests.rs holds the prompt turn result tests code.
+
 use super::*;
 
 const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -48,7 +50,7 @@ fn reduce(
 
 /// The truncation contract: a MaxTokens child marks every non-Ok surface —
 /// the free-text note, the error suffixes — while a validated document stays
-/// raw JSON and a non-truncated turn carries no note anywhere.
+/// raw JSON. A non-truncated turn carries no note anywhere.
 #[test]
 fn max_tokens_turn_marks_every_non_ok_surface() {
     let truncated_turn = |completion, structured| {
