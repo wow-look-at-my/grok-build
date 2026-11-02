@@ -2355,6 +2355,9 @@ mod harness_slot_side_call_tests;
 #[path = "acp_session_tests/interjection_tests.rs"]
 mod interjection_tests;
 #[cfg(test)]
+#[path = "acp_session_tests/model_mention_spawn_tests.rs"]
+mod model_mention_spawn_tests;
+#[cfg(test)]
 #[path = "acp_session_tests/recap_display_only_tests.rs"]
 mod recap_display_only_tests;
 #[cfg(test)]
