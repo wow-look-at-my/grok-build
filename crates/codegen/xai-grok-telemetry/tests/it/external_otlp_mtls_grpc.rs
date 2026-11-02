@@ -1,9 +1,8 @@
 //! A complete gRPC mTLS double opt-in must still activate nothing.
-mod otlp_collector;
 
 use std::time::Duration;
 
-use otlp_collector as col;
+use crate::otlp_collector as col;
 use xai_grok_test_support::OtelRecorder;
 
 fn write_temp(contents: &str) -> (tempfile::NamedTempFile, String) {
@@ -15,6 +14,7 @@ fn write_temp(contents: &str) -> (tempfile::NamedTempFile, String) {
 
 #[test]
 fn external_stream_grpc_mtls_end_to_end() {
+    own_process!(external_stream_grpc_mtls_end_to_end);
     col::init_test_tracing();
 
     let tls = col::generate_tls_material();

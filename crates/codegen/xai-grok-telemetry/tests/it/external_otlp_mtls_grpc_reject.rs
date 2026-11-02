@@ -1,24 +1,27 @@
-//! HTTPS (TLS) gRPC transport coverage of the **build-baseline disabled contract** for the external OTEL stream.
+//! A gRPC mTLS double opt-in with no client identity activates nothing.
 
-mod otlp_collector;
+use std::time::Duration;
 
-use otlp_collector as col;
-use xai_grok_test_support::OtelRecorder;
+use crate::otlp_collector as col;
+use xai_grok_test_support::{OtelExport, OtelRecorder};
 
 #[test]
-fn external_stream_grpc_over_tls_end_to_end() {
+fn external_stream_grpc_mtls_fails_without_client_identity() {
+    own_process!(external_stream_grpc_mtls_fails_without_client_identity);
+    col::init_test_tracing();
+
     let tls = col::generate_tls_material();
     let ca_file = tempfile::NamedTempFile::new().expect("CA temp file");
     std::fs::write(ca_file.path(), &tls.ca_cert_pem).expect("write CA pem");
     let ca_path = ca_file.path().to_str().expect("utf-8 CA path").to_string();
 
     let recorder = OtelRecorder::new();
-    let endpoint = col::start_grpc_tls_collector(
+    let endpoint = col::start_grpc_mtls_collector(
         recorder.clone(),
         tls.server_cert_pem.clone(),
         tls.server_key_pem.clone(),
+        tls.ca_cert_pem.clone(),
     );
-    assert!(endpoint.starts_with("https://"), "{endpoint}");
 
     let mut cfg = xai_grok_telemetry::external::ExternalOtelConfig::resolve_with(
         |name| match name {
@@ -33,8 +36,8 @@ fn external_stream_grpc_over_tls_end_to_end() {
         },
         None,
     )
-    .expect("double opt-in must resolve");
-    assert_eq!(cfg.logs_ca_certificate.as_deref(), Some(ca_path.as_str()));
+    .expect("config must resolve without client identity");
+    assert!(cfg.logs_client_certificate.is_none());
     cfg.client = xai_grok_telemetry::external::config::ExternalClientInfo {
         service_version: "0.0.0-test".into(),
         client_version: "0.0.0-test".into(),
@@ -44,21 +47,11 @@ fn external_stream_grpc_over_tls_end_to_end() {
     xai_grok_telemetry::external::init(Some(cfg));
     assert!(
         !xai_grok_telemetry::external::is_active(),
-        "external OTLP stream is hard-disabled in the build baseline (gRPC over TLS)"
+        "external OTLP stream is hard-disabled in the build baseline (gRPC mTLS, no client identity)"
     );
 
-    // `SessionNew` maps to the `session.count` metric. `SessionHarness` maps
-    // to the `session_start` log record — emit both so neither signal's TLS
-    // export path can be the one that leaks.
-    xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionNew {
-        session_id: "sess-grpc-tls-1".into(),
-        client_identifier: None,
-        client_version: None,
-        is_git_repo: true,
-        permission_mode: xai_grok_telemetry::enums::PermissionMode::Ask,
-    });
     xai_grok_telemetry::log_event(xai_grok_telemetry::events::SessionHarness {
-        session_id: "sess-grpc-tls-1".into(),
+        session_id: "sess-grpc-mtls-no-client".into(),
         client_identifier: Some("grok-pager".into()),
         model_id: "grok-4".into(),
         agent_name: "grok-build-plan".into(),
@@ -74,21 +67,17 @@ fn external_stream_grpc_over_tls_end_to_end() {
         is_git_repo: true,
         auto_update: None,
     });
-
     xai_grok_telemetry::external::flush();
 
-    // Give any (erroneous) TLS exporter ample time to complete a handshake and phone home.
-    std::thread::sleep(std::time::Duration::from_millis(600));
-    assert_eq!(
-        recorder.log_records().len(),
-        0,
-        "disabled external stream must export no logs over TLS"
+    col::block_on(
+        recorder.wait_for_silence(Duration::from_millis(800), |events| !events.is_empty()),
+    )
+    .expect("disabled external stream must reach no collector");
+    assert!(
+        xai_grok_telemetry::external::export_health().is_none(),
+        "a stream that never built has no export health to report"
     );
-    assert_eq!(
-        recorder.metric_points().len(),
-        0,
-        "disabled external stream must export no metrics over TLS"
-    );
+    assert_eq!(Vec::<OtelExport>::new(), recorder.exports());
 
     xai_grok_telemetry::external::shutdown();
     assert!(!xai_grok_telemetry::external::is_active());

@@ -8,6 +8,7 @@ use xai_grok_test_support::MockOtelServer;
 
 #[tokio::test]
 async fn ambient_ctx_injects_session_turn_and_prompt_id() {
+    own_process!(ambient_ctx_injects_session_turn_and_prompt_id);
     let server = MockOtelServer::start().await.unwrap();
 
     let env = server.exporter_env();

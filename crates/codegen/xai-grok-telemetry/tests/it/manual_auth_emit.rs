@@ -14,6 +14,7 @@ use xai_grok_telemetry::process_info::{
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn manual_auth_does_not_post_when_product_telemetry_disabled() {
+    own_process!(manual_auth_does_not_post_when_product_telemetry_disabled);
     let bodies: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
     let captured = bodies.clone();
     let app = axum::Router::new().route(

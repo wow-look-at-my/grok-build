@@ -7,9 +7,10 @@ use xai_grok_telemetry::{process_metrics, session_ctx};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_gated_emit_takes_no_snapshot_and_the_second_snapshot_reports_cpu() {
+    own_process!(a_gated_emit_takes_no_snapshot_and_the_second_snapshot_reports_cpu);
     assert!(
         !xai_grok_telemetry::is_enabled(),
-        "this binary must never install a telemetry client"
+        "this process must never install a telemetry client"
     );
     xai_grok_telemetry::log_event(ShellTrueNoop {
         tool_name: "bash".into(),

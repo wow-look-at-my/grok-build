@@ -47,6 +47,7 @@ fn deny_decision(
 
 #[tokio::test]
 async fn external_stream_end_to_end() {
+    own_process!(external_stream_end_to_end);
     let server = MockOtelServer::start().await.unwrap();
 
     let env = server.exporter_env();

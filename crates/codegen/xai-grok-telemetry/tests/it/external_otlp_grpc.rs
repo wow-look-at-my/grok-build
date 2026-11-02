@@ -1,8 +1,6 @@
 //! gRPC-transport coverage of the **build-baseline disabled contract** for the external OTEL stream.
 
-mod otlp_collector;
-
-use otlp_collector as col;
+use crate::otlp_collector as col;
 use xai_grok_test_support::OtelRecorder;
 
 const CANARY_MODEL: &str = "sk-CANARYgrpcabcdefghij1234567890";
@@ -11,6 +9,7 @@ const CANARY_MCP: &str = "canary-grpc-internal-mcp-server";
 
 #[test]
 fn external_stream_grpc_end_to_end() {
+    own_process!(external_stream_grpc_end_to_end);
     let recorder = OtelRecorder::new();
     let endpoint = col::start_grpc_collector(recorder.clone());
 

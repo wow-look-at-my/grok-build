@@ -12,6 +12,7 @@ use xai_grok_test_support::{MockOtelServer, OtelExport};
 
 #[tokio::test]
 async fn refuses_to_activate_when_internal_consumed_standard_vars() {
+    own_process!(refuses_to_activate_when_internal_consumed_standard_vars);
     let server = MockOtelServer::start().await.unwrap();
 
     let env = server.exporter_env();

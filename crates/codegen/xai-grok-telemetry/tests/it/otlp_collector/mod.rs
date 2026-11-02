@@ -1,10 +1,6 @@
 //! The OTLP transports `xai_grok_test_support::MockOtelServer` does not serve: gRPC, gRPC over TLS
 //! and mutual TLS, and HTTP over mutual TLS. Each runs on its own thread and runtime, so a sync
 //! test can block on `flush` and `shutdown`, and records into the `OtelRecorder` it started with.
-#![allow(
-    dead_code,
-    reason = "each test binary includes this module and calls a different subset"
-)]
 
 use std::future::Future;
 use std::net::SocketAddr;

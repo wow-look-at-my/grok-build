@@ -2,6 +2,7 @@
 
 #[test]
 fn env_override_pins_the_agent_id_without_persisting_it() {
+    own_process!(env_override_pins_the_agent_id_without_persisting_it);
     let home = tempfile::tempdir().expect("tempdir");
     // SAFETY: single-threaded here; set before anything caches `grok_home()`.
     unsafe {

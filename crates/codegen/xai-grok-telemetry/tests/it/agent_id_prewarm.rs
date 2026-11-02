@@ -2,6 +2,7 @@
 
 #[test]
 fn prefetched_agent_id_resolves_and_persists() {
+    own_process!(prefetched_agent_id_resolves_and_persists);
     let home = tempfile::tempdir().expect("tempdir");
     // SAFETY: single-threaded here; set before anything caches `grok_home()`.
     unsafe {

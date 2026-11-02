@@ -10,6 +10,7 @@ use xai_grok_test_support::MockOtelServer;
 
 #[tokio::test]
 async fn external_stream_carries_no_first_party_credential() {
+    own_process!(external_stream_carries_no_first_party_credential);
     let server = MockOtelServer::start().await.unwrap();
     let env = server.exporter_env();
     let mut cfg = ExternalOtelConfig::resolve_with(|name| env.get(name).cloned(), None)

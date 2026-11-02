@@ -17,6 +17,7 @@ const CLIENT_VERSION: &str = "9.9.9-cv";
 
 #[tokio::test]
 async fn external_stream_gates_on_end_to_end() {
+    own_process!(external_stream_gates_on_end_to_end);
     let server = MockOtelServer::start().await.unwrap();
 
     let mut env = server.exporter_env();
@@ -37,7 +38,7 @@ async fn external_stream_gates_on_end_to_end() {
     assert!(cfg.gates.log_tool_content, "content gate must be on");
     assert!(
         cfg.gates.log_assistant_responses,
-        "assistant gate must be on in this binary"
+        "assistant gate must be on in this process"
     );
     cfg.client = external::config::ExternalClientInfo {
         service_version: "0.0.0-test".into(),
