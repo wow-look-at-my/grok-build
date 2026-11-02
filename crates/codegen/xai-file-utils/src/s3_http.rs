@@ -142,7 +142,22 @@ fn body_is_error(body: &[u8]) -> bool {
         Some(rest) => rest.split_once("?>").map_or("", |(_, r)| r.trim_start()),
         None => text,
     };
+<<<<<<< HEAD
     root.starts_with("<Error>")
+=======
+
+    let response = client
+        .request(method, url, Auth::Configured(credential))
+        .headers(plain)
+        .body(body)
+        .send()
+        .await
+        .map_err(connector_error)?;
+
+    let response = http::Response::<xai_grok_net::Body>::from(response);
+    let response = response.map(SdkBody::from_body_1_x);
+    HttpResponse::try_from(response).map_err(|e| ConnectorError::other(Box::new(e), None))
+>>>>>>> origin/master
 }
 
 /// Path style under `endpoint` when one is set.
