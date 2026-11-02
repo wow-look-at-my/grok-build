@@ -2,22 +2,17 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::Context;
+use bytes::Bytes;
 use futures::StreamExt;
+use xai_grok_net::Method;
+
+use crate::s3_http::{Addressing, ObjectRequest, S3Client, S3Error, xml_escape, xml_text};
+use crate::s3_sigv4::Credentials;
 
 /// Map an S3 HeadObject error to NotFound / Unauthorized / ProbeFailed.
-/// `ServiceError` and `ResponseError` both carry a status; everything else
-/// (construction, dispatch, timeout) is transient.
-fn classify_head_error<E>(err: &aws_sdk_s3::error::SdkError<E>) -> HeadOutcome
-where
-    E: std::fmt::Debug,
-{
-    use aws_sdk_s3::error::SdkError;
-    let status = match err {
-        SdkError::ServiceError(ctx) => Some(ctx.raw().status().as_u16()),
-        SdkError::ResponseError(ctx) => Some(ctx.raw().status().as_u16()),
-        _ => None,
-    };
-    match status {
+/// An error with no status (build, dispatch, timeout) is transient.
+fn classify_head_error(err: &S3Error) -> HeadOutcome {
+    match err.status() {
         Some(404) => HeadOutcome::NotFound,
         Some(401) | Some(403) => HeadOutcome::Unauthorized,
         _ => HeadOutcome::ProbeFailed,
@@ -36,103 +31,16 @@ enum HeadOutcome {
 const MULTIPART_THRESHOLD: usize = 8 * 1024 * 1024;
 const MULTIPART_PART_SIZE: usize = 8 * 1024 * 1024;
 
-/// Parse credential content (JSON or INI format) into AWS SDK credentials.
-fn parse_aws_credentials(content: &str) -> anyhow::Result<aws_sdk_s3::config::Credentials> {
-    #[derive(serde::Deserialize)]
-    struct JsonCreds {
-        aws_access_key_id: String,
-        aws_secret_access_key: String,
-        #[serde(default)]
-        aws_session_token: Option<String>,
-    }
-
-    if let Ok(parsed) = serde_json::from_str::<JsonCreds>(content) {
-        return Ok(aws_sdk_s3::config::Credentials::new(
-            &parsed.aws_access_key_id,
-            &parsed.aws_secret_access_key,
-            parsed.aws_session_token,
-            None,
-            "grok-shell-trace-upload",
-        ));
-    }
-
-    let strip_comment = |v: &str| {
-        v.split_once('#')
-            .map_or(v, |(before, _)| before)
-            .trim()
-            .to_owned()
-    };
-    let mut key_id = None;
-    let mut secret = None;
-    let mut token = None;
-    for line in content.lines() {
-        if let Some((k, v)) = line.split_once('=') {
-            match k.trim() {
-                "aws_access_key_id" => key_id = Some(strip_comment(v)),
-                "aws_secret_access_key" => secret = Some(strip_comment(v)),
-                "aws_session_token" => token = Some(strip_comment(v)),
-                _ => {}
-            }
-        }
-    }
-
-    match (key_id, secret) {
-        (Some(k), Some(s)) => Ok(aws_sdk_s3::config::Credentials::new(
-            &k,
-            &s,
-            token,
-            None,
-            "grok-shell-trace-upload",
-        )),
-        _ => anyhow::bail!(
-            "AWS credentials are neither valid JSON \
-             nor contain aws_access_key_id and aws_secret_access_key"
-        ),
-    }
-}
-
 /// Build an S3 client. Uses path-style addressing when `endpoint_url` is set.
-/// Every request, credential lookups included, goes through `xai_grok_net`, which reads
-/// the proxy from the environment.
+/// Every request goes through `xai_grok_net`, which reads the proxy from the environment.
 pub(crate) async fn build_s3_client(
     region: &str,
     credentials_content: Option<&str>,
     credentials_file: Option<&str>,
     endpoint_url: Option<&str>,
-) -> anyhow::Result<aws_sdk_s3::Client> {
-    let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .http_client(crate::s3_http::NetSmithyClient::default())
-        .region(aws_config::Region::new(region.to_owned()));
-
-    let resolved_content = match (credentials_content, credentials_file) {
-        (Some(inline), _) => Some(inline.to_owned()),
-        (None, Some(path)) => Some(
-            tokio::fs::read_to_string(path)
-                .await
-                .with_context(|| format!("Failed to read AWS credentials file: {path}"))?,
-        ),
-        (None, None) => None,
-    };
-
-    if let Some(ref content) = resolved_content {
-        config_loader = config_loader.credentials_provider(parse_aws_credentials(content)?);
-    } else if endpoint_url.is_some() {
-        config_loader = config_loader.credentials_provider(aws_sdk_s3::config::Credentials::new(
-            "test",
-            "test",
-            None,
-            None,
-            "grok-shell-test",
-        ));
-    }
-
-    let sdk_config = config_loader.load().await;
-    let mut builder =
-        aws_sdk_s3::config::Builder::from(&sdk_config).force_path_style(endpoint_url.is_some());
-    if let Some(url) = endpoint_url {
-        builder = builder.endpoint_url(url);
-    }
-    Ok(aws_sdk_s3::Client::from_conf(builder.build()))
+) -> anyhow::Result<S3Client> {
+    let creds = crate::s3_credentials::resolve(credentials_content, credentials_file).await?;
+    S3Client::new(creds, Addressing::new(region, endpoint_url)?)
 }
 
 /// Static access-key credentials for presigning S3 URLs.
@@ -154,12 +62,12 @@ impl std::fmt::Debug for S3StaticCredentials {
 }
 
 impl S3StaticCredentials {
-    fn to_credentials_content(&self) -> String {
-        serde_json::json!({
-            "aws_access_key_id": self.access_key_id,
-            "aws_secret_access_key": self.secret_access_key,
-        })
-        .to_string()
+    fn to_credentials(&self) -> Credentials {
+        Credentials {
+            access_key_id: self.access_key_id.clone(),
+            secret_access_key: self.secret_access_key.clone(),
+            session_token: None,
+        }
     }
 }
 
@@ -172,17 +80,16 @@ pub async fn presign_put_url(
     content_type: &str,
     expires_in: std::time::Duration,
 ) -> anyhow::Result<String> {
-    let content = creds.to_credentials_content();
-    let client = build_s3_client(region, Some(&content), None, endpoint_url).await?;
-    let presigning_config = aws_sdk_s3::presigning::PresigningConfig::expires_in(expires_in)?;
-    let presigned = client
-        .put_object()
-        .bucket(bucket)
-        .key(key)
-        .content_type(content_type)
-        .presigned(presigning_config)
-        .await?;
-    Ok(presigned.uri().to_string())
+    crate::s3_http::presign_url(
+        &creds.to_credentials(),
+        &Addressing::new(region, endpoint_url)?,
+        &Method::PUT,
+        bucket,
+        key,
+        Some(content_type),
+        expires_in,
+        chrono::Utc::now(),
+    )
 }
 
 pub async fn presign_get_url(
@@ -193,23 +100,72 @@ pub async fn presign_get_url(
     key: &str,
     expires_in: std::time::Duration,
 ) -> anyhow::Result<String> {
-    let content = creds.to_credentials_content();
-    let client = build_s3_client(region, Some(&content), None, endpoint_url).await?;
-    let presigning_config = aws_sdk_s3::presigning::PresigningConfig::expires_in(expires_in)?;
-    let presigned = client
-        .get_object()
-        .bucket(bucket)
-        .key(key)
-        .presigned(presigning_config)
-        .await?;
-    Ok(presigned.uri().to_string())
+    crate::s3_http::presign_url(
+        &creds.to_credentials(),
+        &Addressing::new(region, endpoint_url)?,
+        &Method::GET,
+        bucket,
+        key,
+        None,
+        expires_in,
+        chrono::Utc::now(),
+    )
+}
+
+fn upload_id_query(upload_id: &str) -> Vec<(String, String)> {
+    vec![("uploadId".to_owned(), upload_id.to_owned())]
+}
+
+fn abort_request<'a>(bucket: &'a str, key: &'a str, upload_id: &str) -> ObjectRequest<'a> {
+    ObjectRequest {
+        operation: "AbortMultipartUpload",
+        method: Method::DELETE,
+        bucket,
+        key,
+        query: upload_id_query(upload_id),
+        content_type: None,
+        body: Bytes::new(),
+    }
+}
+
+fn head_request<'a>(bucket: &'a str, key: &'a str) -> ObjectRequest<'a> {
+    ObjectRequest {
+        operation: "HeadObject",
+        method: Method::HEAD,
+        bucket,
+        key,
+        query: Vec::new(),
+        content_type: None,
+        body: Bytes::new(),
+    }
+}
+
+async fn put_object(
+    client: &S3Client,
+    bucket: &str,
+    key: &str,
+    content_type: &str,
+    body: Bytes,
+) -> Result<(), S3Error> {
+    client
+        .send(&ObjectRequest {
+            operation: "PutObject",
+            method: Method::PUT,
+            bucket,
+            key,
+            query: Vec::new(),
+            content_type: Some(content_type),
+            body,
+        })
+        .await
+        .map(|_| ())
 }
 
 /// Aborts a created multipart upload when its future is dropped before completion.
 /// Callers cancel by drop; a dropped future skips Complete and the error-path abort.
 /// That leaves orphaned billable parts in the (possibly customer-managed) bucket.
 struct AbortMultipartOnDrop {
-    client: aws_sdk_s3::Client,
+    client: S3Client,
     bucket: String,
     key: String,
     upload_id: String,
@@ -227,11 +183,7 @@ impl AbortMultipartOnDrop {
     async fn abort(mut self) {
         let _ = self
             .client
-            .abort_multipart_upload()
-            .bucket(&self.bucket)
-            .key(&self.key)
-            .upload_id(&self.upload_id)
-            .send()
+            .send(&abort_request(&self.bucket, &self.key, &self.upload_id))
             .await;
         self.armed = false;
     }
@@ -247,14 +199,14 @@ impl Drop for AbortMultipartOnDrop {
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
             return;
         };
-        let abort = self
-            .client
-            .abort_multipart_upload()
-            .bucket(&self.bucket)
-            .key(&self.key)
-            .upload_id(&self.upload_id);
+        let client = self.client.clone();
+        let bucket = std::mem::take(&mut self.bucket);
+        let key = std::mem::take(&mut self.key);
+        let upload_id = std::mem::take(&mut self.upload_id);
         handle.spawn(async move {
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(30), abort.send()).await;
+            let request = abort_request(&bucket, &key, &upload_id);
+            let abort = client.send(&request);
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(30), abort).await;
         });
     }
 }
@@ -263,27 +215,30 @@ impl Drop for AbortMultipartOnDrop {
 /// Splits into [`MULTIPART_PART_SIZE`] chunks. Aborts on any part failure or cancellation
 /// so incomplete multipart uploads are not leaked.
 async fn multipart_upload_bytes(
-    client: &aws_sdk_s3::Client,
+    client: &S3Client,
     bucket: &str,
     object_path: &str,
     content: &[u8],
     content_type: &str,
 ) -> anyhow::Result<()> {
     let create = client
-        .create_multipart_upload()
-        .bucket(bucket)
-        .key(object_path)
-        .content_type(content_type)
-        .send()
+        .send(&ObjectRequest {
+            operation: "CreateMultipartUpload",
+            method: Method::POST,
+            bucket,
+            key: object_path,
+            query: vec![("uploads".to_owned(), String::new())],
+            content_type: Some(content_type),
+            body: Bytes::new(),
+        })
         .await
         .with_context(|| {
             format!("Failed to create multipart upload for s3://{bucket}/{object_path}")
         })?;
 
-    let upload_id = create
-        .upload_id()
-        .context("CreateMultipartUpload response missing upload_id")?
-        .to_owned();
+    let upload_id = xml_text(&String::from_utf8_lossy(&create.body), "UploadId")
+        .filter(|id| !id.is_empty())
+        .context("CreateMultipartUpload response missing upload_id")?;
     let abort_guard = AbortMultipartOnDrop {
         client: client.clone(),
         bucket: bucket.to_owned(),
@@ -292,9 +247,9 @@ async fn multipart_upload_bytes(
         armed: true,
     };
 
-    let mut completed_parts = Vec::new();
+    let mut completed_parts: Vec<(u32, String)> = Vec::new();
     let mut offset = 0usize;
-    let mut part_number = 1i32;
+    let mut part_number = 1u32;
 
     let result: anyhow::Result<()> = async {
         while offset < content.len() {
@@ -303,46 +258,57 @@ async fn multipart_upload_bytes(
                 break;
             };
 
+            let mut query = upload_id_query(&upload_id);
+            query.push(("partNumber".to_owned(), part_number.to_string()));
             let upload_part = client
-                .upload_part()
-                .bucket(bucket)
-                .key(object_path)
-                .upload_id(&upload_id)
-                .part_number(part_number)
-                .body(aws_sdk_s3::primitives::ByteStream::from(chunk.to_vec()))
-                .send()
+                .send(&ObjectRequest {
+                    operation: "UploadPart",
+                    method: Method::PUT,
+                    bucket,
+                    key: object_path,
+                    query,
+                    content_type: None,
+                    body: Bytes::copy_from_slice(chunk),
+                })
                 .await
                 .with_context(|| {
                     format!("Failed to upload part {part_number} for s3://{bucket}/{object_path}")
                 })?;
 
             let etag = upload_part
-                .e_tag()
+                .headers
+                .get("etag")
+                .and_then(|v| v.to_str().ok())
                 .context("UploadPart response missing ETag")?
                 .to_owned();
 
-            completed_parts.push(
-                aws_sdk_s3::types::CompletedPart::builder()
-                    .part_number(part_number)
-                    .e_tag(etag)
-                    .build(),
-            );
+            completed_parts.push((part_number, etag));
 
             offset = end;
             part_number += 1;
         }
 
-        let completed = aws_sdk_s3::types::CompletedMultipartUpload::builder()
-            .set_parts(Some(completed_parts))
-            .build();
+        let mut body = String::from(
+            "<CompleteMultipartUpload xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+        );
+        for (number, etag) in &completed_parts {
+            body.push_str(&format!(
+                "<Part><PartNumber>{number}</PartNumber><ETag>{}</ETag></Part>",
+                xml_escape(etag)
+            ));
+        }
+        body.push_str("</CompleteMultipartUpload>");
 
         client
-            .complete_multipart_upload()
-            .bucket(bucket)
-            .key(object_path)
-            .upload_id(&upload_id)
-            .multipart_upload(completed)
-            .send()
+            .send(&ObjectRequest {
+                operation: "CompleteMultipartUpload",
+                method: Method::POST,
+                bucket,
+                key: object_path,
+                query: upload_id_query(&upload_id),
+                content_type: Some("application/xml"),
+                body: Bytes::from(body),
+            })
             .await
             .with_context(|| {
                 format!("Failed to complete multipart upload for s3://{bucket}/{object_path}")
@@ -377,20 +343,21 @@ pub async fn upload_bytes(
     if content.len() >= MULTIPART_THRESHOLD {
         multipart_upload_bytes(&client, bucket, object_path, content, content_type).await?;
     } else {
-        client
-            .put_object()
-            .bucket(bucket)
-            .key(object_path)
-            .content_type(content_type)
-            .body(aws_sdk_s3::primitives::ByteStream::from(content.to_vec()))
-            .send()
-            .await
-            .with_context(|| format!("Failed to upload to s3://{bucket}/{object_path}"))?;
+        put_object(
+            &client,
+            bucket,
+            object_path,
+            content_type,
+            Bytes::copy_from_slice(content),
+        )
+        .await
+        .with_context(|| format!("Failed to upload to s3://{bucket}/{object_path}"))?;
     }
     Ok(format!("s3://{bucket}/{object_path}"))
 }
 
-/// Upload a file to an S3-compatible bucket by streaming from disk.
+/// Upload a file to an S3-compatible bucket. The file is read into memory,
+/// because the signature covers the SHA-256 of the body.
 pub async fn upload_file(
     bucket: &str,
     object_path: &str,
@@ -403,30 +370,21 @@ pub async fn upload_file(
 ) -> anyhow::Result<String> {
     let client =
         build_s3_client(region, credentials_content, credentials_file, endpoint_url).await?;
-    let file_size = tokio::fs::metadata(file_path)
+    let content = tokio::fs::read(file_path)
         .await
-        .map(|m| m.len() as usize)
-        .unwrap_or(0);
-    if file_size >= MULTIPART_THRESHOLD {
-        let content = tokio::fs::read(file_path).await.with_context(|| {
-            format!("Failed to read file for S3 upload: {}", file_path.display())
-        })?;
+        .with_context(|| format!("Failed to read file for S3 upload: {}", file_path.display()))?;
+    if content.len() >= MULTIPART_THRESHOLD {
         multipart_upload_bytes(&client, bucket, object_path, &content, content_type).await?;
     } else {
-        let body = aws_sdk_s3::primitives::ByteStream::from_path(file_path)
-            .await
-            .with_context(|| {
-                format!("Failed to open file for S3 upload: {}", file_path.display())
-            })?;
-        client
-            .put_object()
-            .bucket(bucket)
-            .key(object_path)
-            .content_type(content_type)
-            .body(body)
-            .send()
-            .await
-            .with_context(|| format!("Failed to upload to s3://{bucket}/{object_path}"))?;
+        put_object(
+            &client,
+            bucket,
+            object_path,
+            content_type,
+            Bytes::from(content),
+        )
+        .await
+        .with_context(|| format!("Failed to upload to s3://{bucket}/{object_path}"))?;
     }
     Ok(format!("s3://{bucket}/{object_path}"))
 }
@@ -471,11 +429,11 @@ pub struct S3ExistsResponse {
     pub size: i64,
 }
 
-/// S3-native storage client providing batch operations via concurrent SDK calls.
-/// Caches the AWS SDK `Client` for the lifetime of the struct.
+/// S3-native storage client providing batch operations via concurrent requests.
+/// Holds one [`S3Client`] for the lifetime of the struct.
 #[allow(dead_code)] // Used once the S3 storage backend is wired up.
 pub struct S3StorageClient {
-    client: aws_sdk_s3::Client,
+    client: S3Client,
     bucket: String,
 }
 
@@ -508,8 +466,7 @@ impl S3StorageClient {
         let client = &self.client;
         let bucket = &*self.bucket;
 
-        // Collect into owned strings up front: HeadObject requires owned keys
-        // and this keeps closures HRTB-clean for callers passing both
+        // Owned strings keep the closures HRTB-clean for callers passing both
         // `&[String]` and `&[&str]` from the same async fn.
         let owned_paths: Vec<String> = paths
             .iter()
@@ -527,7 +484,7 @@ impl S3StorageClient {
 
         let outcomes: Vec<PathOutcome> = futures::stream::iter(owned_paths)
             .map(|path| async move {
-                match client.head_object().bucket(bucket).key(&path).send().await {
+                match client.send(&head_request(bucket, &path)).await {
                     Ok(_) => PathOutcome::Exists(path),
                     Err(e) => match classify_head_error(&e) {
                         HeadOutcome::NotFound => PathOutcome::NotFound,
@@ -584,15 +541,8 @@ impl S3StorageClient {
             let upload_result = if content.len() >= MULTIPART_THRESHOLD {
                 multipart_upload_bytes(client, bucket, &path, &content, &content_type).await
             } else {
-                client
-                    .put_object()
-                    .bucket(bucket)
-                    .key(&path)
-                    .content_type(&content_type)
-                    .body(aws_sdk_s3::primitives::ByteStream::from(content))
-                    .send()
+                put_object(client, bucket, &path, &content_type, Bytes::from(content))
                     .await
-                    .map(|_| ())
                     .map_err(|e| anyhow::anyhow!(e))
             };
             match upload_result {
@@ -627,18 +577,16 @@ impl S3StorageClient {
 
     /// Check if a single object exists via HeadObject.
     pub async fn check_exists(&self, path: &str) -> Option<S3ExistsResponse> {
-        match self
-            .client
-            .head_object()
-            .bucket(&self.bucket)
-            .key(path)
-            .send()
-            .await
-        {
-            Ok(output) => Some(S3ExistsResponse {
+        match self.client.send(&head_request(&self.bucket, path)).await {
+            Ok(response) => Some(S3ExistsResponse {
                 bucket: self.bucket.clone(),
                 path: path.to_string(),
-                size: output.content_length().unwrap_or(0),
+                size: response
+                    .headers
+                    .get("content-length")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0),
             }),
             Err(_) => None,
         }
@@ -677,6 +625,81 @@ mod tests {
             .into_response()
     }
 
+    fn s3_error(status: u16, code: &str, message: &str) -> axum::response::Response {
+        xml_response(
+            status,
+            format!("<Error><Code>{code}</Code><Message>{message}</Message></Error>"),
+        )
+    }
+
+    /// Recompute the SigV4 signature of the request as received, with secret `test`.
+    async fn verify_sigv4(
+        req: axum::extract::Request,
+        next: axum::middleware::Next,
+    ) -> axum::response::Response {
+        let (parts, body) = req.into_parts();
+        let body = axum::body::to_bytes(body, 4 * MULTIPART_PART_SIZE)
+            .await
+            .unwrap();
+        let header = |n: &str| {
+            parts
+                .headers
+                .get(n)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_owned()
+        };
+        let auth = header("authorization");
+        let Some(rest) = auth.strip_prefix("AWS4-HMAC-SHA256 Credential=test/") else {
+            return s3_error(403, "AccessDenied", "unsigned request");
+        };
+        let mut fields = rest.split(", ");
+        let region = fields
+            .next()
+            .and_then(|scope| scope.split('/').nth(1))
+            .unwrap_or("")
+            .to_owned();
+        let signed = fields
+            .next()
+            .and_then(|f| f.strip_prefix("SignedHeaders="))
+            .unwrap_or("");
+        let payload_hash = header("x-amz-content-sha256");
+        if payload_hash != crate::s3_sigv4::sha256_hex(&body) {
+            return s3_error(400, "XAmzContentSHA256Mismatch", "payload hash");
+        }
+        let time = chrono::NaiveDateTime::parse_from_str(&header("x-amz-date"), "%Y%m%dT%H%M%SZ")
+            .unwrap()
+            .and_utc();
+        let headers: Vec<(String, String)> = signed
+            .split(';')
+            .map(|n| (n.to_owned(), header(n)))
+            .collect();
+        let query: Vec<(String, String)> =
+            url::form_urlencoded::parse(parts.uri.query().unwrap_or("").as_bytes())
+                .into_owned()
+                .collect();
+        let creds = Credentials {
+            access_key_id: "test".into(),
+            secret_access_key: "test".into(),
+            session_token: None,
+        };
+        let expected = crate::s3_sigv4::Signer::new(&creds, &region, time).authorization(
+            parts.method.as_str(),
+            parts.uri.path(),
+            &query,
+            &headers,
+            &payload_hash,
+        );
+        if expected != auth {
+            return s3_error(403, "SignatureDoesNotMatch", "signature mismatch");
+        }
+        next.run(axum::extract::Request::from_parts(
+            parts,
+            axum::body::Body::from(body),
+        ))
+        .await
+    }
+
     /// Mock S3 server with PUT/GET/HEAD/POST/DELETE and multipart upload support.
     fn mock_s3_router() -> (Router, Arc<MockS3State>) {
         let state = Arc::new(MockS3State {
@@ -707,7 +730,8 @@ mod tests {
                     let mut uploads = state.multipart_uploads.write().await;
                     if let Some((_, parts)) = uploads.get_mut(uid) {
                         parts.insert(part_num, body.to_vec());
-                        return xml_response(200, "<UploadPartResult/>".into());
+                        return (StatusCode::OK, [("etag", format!("\"etag-{part_num}\""))])
+                            .into_response();
                     }
                     return StatusCode::NOT_FOUND.into_response();
                 }
@@ -755,6 +779,15 @@ mod tests {
                 if let Some(uid) = query.get("uploadId") {
                     let mut uploads = state.multipart_uploads.write().await;
                     if let Some((stored_key, parts)) = uploads.remove(uid) {
+                        let listed = String::from_utf8_lossy(&body);
+                        let all_listed = parts.keys().all(|n| {
+                            listed.contains(&format!(
+                                "<Part><PartNumber>{n}</PartNumber><ETag>&quot;etag-{n}&quot;</ETag></Part>"
+                            ))
+                        });
+                        if !all_listed {
+                            return s3_error(400, "InvalidPart", "part list mismatch");
+                        }
                         let mut sorted: Vec<_> = parts.into_iter().collect();
                         sorted.sort_by_key(|(n, _)| *n);
                         let combined: Vec<u8> = sorted.into_iter().flat_map(|(_, d)| d).collect();
@@ -783,14 +816,19 @@ mod tests {
                 }
             };
 
-        let router = Router::new().route(
-            "/{bucket}/{*key}",
-            head(head_handler)
-                .put(put_handler)
-                .get(get_handler)
-                .post(post_handler)
-                .delete(delete_handler),
-        );
+        let router = Router::new()
+            .route(
+                "/{bucket}/{*key}",
+                head(head_handler)
+                    .put(put_handler)
+                    .get(get_handler)
+                    .post(post_handler)
+                    .delete(delete_handler),
+            )
+            .layer(axum::extract::DefaultBodyLimit::max(
+                2 * MULTIPART_PART_SIZE,
+            ))
+            .layer(axum::middleware::from_fn(verify_sigv4));
         (router, state)
     }
 
@@ -1448,5 +1486,144 @@ mod tests {
         )
         .await
         .expect("an abort cancelled mid-send must re-send via the drop backstop");
+    }
+
+    const TEST_CREDS: &str = r#"{"aws_access_key_id":"test","aws_secret_access_key":"test"}"#;
+
+    #[tokio::test]
+    async fn upload_bytes_multipart_round_trip() {
+        let (endpoint, state) = start_mock_server().await;
+        let content: Vec<u8> = (0..MULTIPART_THRESHOLD + 1234)
+            .map(|i| (i % 251) as u8)
+            .collect();
+        let url = upload_bytes(
+            "test-bucket",
+            "dir/multi part.bin",
+            &content,
+            "application/octet-stream",
+            "us-east-1",
+            Some(TEST_CREDS),
+            None,
+            Some(&endpoint),
+        )
+        .await
+        .unwrap();
+        assert_eq!(url, "s3://test-bucket/dir/multi part.bin");
+        let objects = state.objects.read().await;
+        assert_eq!(objects.get("dir/multi part.bin").unwrap(), &content);
+        assert!(state.multipart_uploads.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn upload_file_sends_the_file() {
+        let (endpoint, state) = start_mock_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, b"file body").unwrap();
+        upload_file(
+            "test-bucket",
+            "f.txt",
+            &path,
+            "text/plain",
+            "us-east-1",
+            Some(TEST_CREDS),
+            None,
+            Some(&endpoint),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            state.objects.read().await.get("f.txt").unwrap(),
+            b"file body"
+        );
+    }
+
+    #[tokio::test]
+    async fn error_response_carries_the_s3_code_and_message() {
+        let put_handler = |_: AxumPath<(String, String)>| async {
+            s3_error(403, "AccessDenied", "Access Denied")
+        };
+        let router = Router::new().route("/{bucket}/{*key}", put(put_handler));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let err = upload_bytes(
+            "test-bucket",
+            "k",
+            b"x",
+            "text/plain",
+            "us-east-1",
+            Some(TEST_CREDS),
+            None,
+            Some(&format!("http://{addr}")),
+        )
+        .await
+        .unwrap_err();
+        let text = format!("{err:#}");
+        assert!(text.contains("HTTP 403"), "{text}");
+        assert!(text.contains("AccessDenied"), "{text}");
+        assert!(text.contains("Access Denied"), "{text}");
+    }
+
+    /// The mock checks signatures, so a wrong secret must be refused.
+    #[tokio::test]
+    async fn wrong_secret_fails_the_signature_check() {
+        let (endpoint, state) = start_mock_server().await;
+        let err = upload_bytes(
+            "test-bucket",
+            "k",
+            b"x",
+            "text/plain",
+            "us-east-1",
+            Some(r#"{"aws_access_key_id":"test","aws_secret_access_key":"wrong"}"#),
+            None,
+            Some(&endpoint),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("SignatureDoesNotMatch"),
+            "{err:#}"
+        );
+        assert!(state.objects.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn head_reports_the_content_length_through_the_signed_mock() {
+        let (endpoint, state) = start_mock_server().await;
+        state
+            .objects
+            .write()
+            .await
+            .insert("a/b c.txt".into(), b"12345".to_vec());
+        let client = make_test_client(&endpoint).await;
+        let resp = client.check_exists("a/b c.txt").await.unwrap();
+        assert_eq!(resp.size, 5);
+    }
+
+    #[tokio::test]
+    async fn presign_get_url_points_at_the_endpoint() {
+        let creds = S3StaticCredentials {
+            access_key_id: "AK".into(),
+            secret_access_key: "SK".into(),
+        };
+        let url = presign_get_url(
+            "us-east-1",
+            Some("https://s3.example.com"),
+            &creds,
+            "bucket",
+            "videos/out.mp4",
+            std::time::Duration::from_secs(300),
+        )
+        .await
+        .unwrap();
+        assert!(
+            url.starts_with("https://s3.example.com/bucket/videos/out.mp4?"),
+            "{url}"
+        );
+        assert!(url.contains("X-Amz-SignedHeaders=host"), "{url}");
+        assert!(url.contains("X-Amz-Signature="), "{url}");
     }
 }
