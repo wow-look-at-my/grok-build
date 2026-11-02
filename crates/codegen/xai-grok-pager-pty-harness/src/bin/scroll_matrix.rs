@@ -2,7 +2,7 @@
 //! Runs matrix cells (`scroll_matrix::CELLS`) against a real pager binary in a PTY and prints the per-cell verdict table.
 //! Writes `report.json` into the artifacts dir, next to each cell's recorder capture.
 //! Exits nonzero iff any cell failed or an xfail cell passed.
-//! The curated tier also runs in CI as `tests/scroll_matrix_curated.rs`.
+//! The curated tier also runs in CI as `tests/it/scroll_matrix_curated.rs`.
 //! This binary is the local entry point for the full sweep and for one-off cell reruns (`--filter`).
 
 use std::path::PathBuf;

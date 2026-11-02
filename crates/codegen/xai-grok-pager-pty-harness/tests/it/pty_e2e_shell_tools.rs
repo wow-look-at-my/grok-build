@@ -2,13 +2,9 @@
 //!
 //! All cases are ignored for ordinary Cargo runs; Bazel opts in and caps this process-heavy family at four concurrent libtest workers.
 
-// Shared support intentionally serves all PTY family crates.
-#[allow(dead_code, unused_imports)]
-#[path = "pty_e2e/common.rs"]
-mod common;
-#[allow(dead_code, unused_imports)]
-#[path = "pty_e2e/scroll.rs"]
-mod scroll;
+use crate::common;
+#[allow(unused_imports)]
+use crate::scroll;
 
 #[path = "pty_e2e/bash_mode_file_completion_shell_like.rs"]
 mod bash_mode_file_completion_shell_like;

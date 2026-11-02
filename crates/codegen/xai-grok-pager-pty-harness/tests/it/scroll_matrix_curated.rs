@@ -1,5 +1,5 @@
 //! Curated scroll-matrix tier: one test per curated cell, exact-filterable by cell id.
-//! Example: `cargo test --test scroll_matrix_curated c5_tmux_g9a -- --exact`.
+//! Example: `cargo test --test it scroll_matrix_curated::c5_tmux_g9a -- --exact`.
 //!
 //! Each test drives `scroll_matrix::run_cell` against the real pager binary (PAGER_BINARY / a local debug build).
 //! That is the same contract as `scroll_correctness_ptyctl.rs`, and like it these tests are NOT `#[ignore]`d.

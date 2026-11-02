@@ -3,10 +3,7 @@
 //! This is the narrow retry unit for the suite's historically timing-sensitive cases.
 //! All cases are ignored for ordinary Cargo runs; Bazel opts in and caps the family at four concurrent libtest workers.
 
-// Shared support intentionally serves all PTY family crates.
-#[allow(dead_code, unused_imports)]
-#[path = "pty_e2e/common.rs"]
-mod common;
+use crate::common;
 
 #[path = "pty_e2e/auto_wake_cancel_preserves_queued_user_prompt.rs"]
 mod auto_wake_cancel_preserves_queued_user_prompt;

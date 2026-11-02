@@ -2,10 +2,7 @@
 //!
 //! All cases are ignored for ordinary Cargo runs; Bazel opts in and caps this process-heavy family at four concurrent libtest workers.
 
-// Shared support intentionally serves all PTY family crates.
-#[allow(dead_code, unused_imports)]
-#[path = "pty_e2e/common.rs"]
-mod common;
+use crate::common;
 
 #[path = "pty_e2e/agent_response.rs"]
 mod agent_response;

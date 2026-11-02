@@ -2,10 +2,7 @@
 //!
 //! This family is isolated from ordinary PTY scheduling and serialized by Bazel because its platform cases touch host-global clipboard state.
 
-// Shared support intentionally serves all PTY family crates.
-#[allow(dead_code, unused_imports)]
-#[path = "pty_e2e/common.rs"]
-mod common;
+use crate::common;
 
 #[path = "pty_e2e/bracketed_ime_paste_skips_clipboard_image_linux.rs"]
 mod bracketed_ime_paste_skips_clipboard_image_linux;
