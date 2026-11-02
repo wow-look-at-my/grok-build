@@ -6,6 +6,9 @@ edition.workspace = true
 description = "Protobuf API definitions for Grok tools"
 
 [dependencies]
+tonic-prost = { workspace = true }
+# Protobuf runtime
+prost = { workspace = true }
 tonic = { workspace = true }
 
 serde = { workspace = true }

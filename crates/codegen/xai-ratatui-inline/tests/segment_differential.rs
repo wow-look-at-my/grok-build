@@ -170,6 +170,113 @@ fn corpus_matches_reference() {
     }
 }
 
+fn encode<'a>(input: &str, segs: impl Iterator<Item = (&'a str, bool)>) -> String {
+    let base = input.as_ptr() as usize;
+    segs.map(|(s, crlf)| {
+        let start = s.as_ptr() as usize - base;
+        format!("{start}+{}{}", s.len(), if crlf { "|" } else { "" })
+    })
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+#[test]
+#[ignore]
+fn dump_reference() {
+    let mut out = String::new();
+    for (input, width) in all_cases() {
+        let segs = reference_split(&input, width);
+        out.push_str(&format!(
+            "{width}\t{}\n",
+            encode(&input, segs.iter().map(|s| (s.content, s.ends_with_crlf)))
+        ));
+    }
+    std::fs::write(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/segment_reference.txt"
+        ),
+        out,
+    )
+    .unwrap();
+}
+
+fn all_cases() -> Vec<(String, usize)> {
+    let mut cases = Vec::new();
+    for input in CORPUS {
+        for &w in WIDTHS {
+            cases.push((input.to_string(), w));
+        }
+    }
+    let mut state = 0x243F_6A88_85A3_08D3_u64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    for _ in 0..2000 {
+        let mut input = String::new();
+        let len = (next() % 30) as usize;
+        for _ in 0..len {
+            input.push_str(PIECES[(next() % PIECES.len() as u64) as usize]);
+        }
+        let width = 1 + (next() % 40) as usize;
+        cases.push((input, width));
+    }
+    cases
+}
+
+const CORPUS: &[&str] = &[
+    "",
+    "hello",
+    "hello world, this is a longer line that will wrap several times",
+    "line1\nline2\nline3",
+    "line1\r\nline2\r\n",
+    "12345\r67",
+    "\r\r\n\n\r",
+    "😊😊😊 emoji wall 😊😊😊",
+    "hello 你好 混合 width",
+    "\x1b[31mred\x1b[0m plain \x1b[1;32;44mstyled\x1b[m",
+    "\x1b[31m\x1b[1m\x1b[4mnested styles no text\x1b[0m",
+    "12345678\x1b[0m90",
+    "text\x1b]8;;https://example.com\x07link\x1b]8;;\x07 after",
+    "osc title\x1b]0;window title\x07body",
+    "cursor \x1b[2Amoves \x1b[10;20H everywhere",
+    "tab\tand\x08backspace and \x07bell",
+    "\x1b[38;5;196mext colors\x1b[38;2;10;20;30m truecolor\x1b[0m",
+    "interrupted \x1b[3\nmid-sequence",
+    "\x1b[31m\nstyle then newline",
+    "trailing style 12345678\x1b[0m",
+    "\x1b(Bcharset\x1b)0 escapes",
+    "zero\u{200b}width\u{fe0f}chars",
+    "combining a\u{0301}e\u{0301} accents",
+];
+
+const PIECES: &[&str] = &[
+    "word",
+    "a",
+    "longer-token",
+    " ",
+    "  ",
+    "\n",
+    "\r",
+    "\r\n",
+    "😊",
+    "你好",
+    "é",
+    "\u{200b}",
+    "\x1b[31m",
+    "\x1b[0m",
+    "\x1b[1;44;38;5;10m",
+    "\x1b[2K",
+    "\x1b[10D",
+    "\x1b]0;title\x07",
+    "\x1b]8;;http://x\x07",
+    "\t",
+    "\x07",
+];
+
 /// Deterministic pseudo-random ANSI soup (xorshift, no extra deps).
 #[test]
 fn randomized_ansi_soup_matches_reference() {

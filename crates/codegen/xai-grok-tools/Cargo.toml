@@ -45,7 +45,8 @@ indexmap = { workspace = true, features = ["serde"] }
 minijinja = { version = "2", features = ["custom_syntax"] }
 parking_lot = { workspace = true }
 htmd = { workspace = true }
-scraper = { workspace = true }
+html5ever = { workspace = true }
+markup5ever_rcdom = { workspace = true }
 reqwest = { workspace = true, features = ["rustls-tls", "json", "gzip", "brotli", "deflate"] }
 pulldown-cmark = { workspace = true }
 regex = { workspace = true }
