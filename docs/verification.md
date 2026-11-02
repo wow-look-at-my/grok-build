@@ -17,6 +17,6 @@ CC_x86_64_unknown_linux_gnu=ci/zig-linux-cc.sh \
     --target x86_64-unknown-linux-gnu
 ```
 
-Cross-clippy links nothing, but ring and aws-lc compile C in their build scripts and need a compiler for the TARGET. `ci/zig-linux-cc.sh` is `ci/zig-target-cc.sh`'s trick pointed at Linux: zig ships the cross toolchain. Cc-rs's own target flags are dropped because zig spells them differently. Run it through rustup's pinned 1.94.1 (`PATH=/opt/homebrew/opt/rustup/bin:$PATH`): a Homebrew `cargo` is a different rustfmt and a different clippy. It reported a file clean that CI's Rustfmt job then rejected over import order.
+Cross-clippy links nothing, but ring and other C build scripts need a compiler for the TARGET. `ci/zig-linux-cc.sh` is `ci/zig-target-cc.sh`'s trick pointed at Linux: zig ships the cross toolchain. Cc-rs's own target flags are dropped because zig spells them differently. Run it through rustup's pinned 1.94.1 (`PATH=/opt/homebrew/opt/rustup/bin:$PATH`): a Homebrew `cargo` is a different rustfmt and a different clippy. It reported a file clean that CI's Rustfmt job then rejected over import order.
 - `Lint (workspace)` passes `--keep-going` for that reason. A denied lint is a compile error, which stops the crate that hit it and leaves every crate behind it unlinted. On a graph where several crates have Linux-only code, one CI cycle per crate is the alternative.
 - The runner's clippy is not the clippy on a development machine, and the lint tables differ between the two. Where a lint's verdict matters, read CI rather than concluding from a local run.

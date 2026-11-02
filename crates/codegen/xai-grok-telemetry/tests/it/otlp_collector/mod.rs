@@ -172,8 +172,8 @@ fn start_grpc_tls_collector_inner(
     use opentelemetry_proto::tonic::collector::logs::v1::logs_service_server::LogsServiceServer;
     use opentelemetry_proto::tonic::collector::metrics::v1::metrics_service_server::MetricsServiceServer;
 
-    // The test binary links both ring and aws-lc-rs, so rustls cannot pick a process default on its own. The server-side acceptor needs one pinned.
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    // The server-side acceptor uses the process-default provider, so pin ring.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
     let (addr_tx, addr_rx) = std::sync::mpsc::channel::<SocketAddr>();
     std::thread::spawn(move || {
@@ -224,8 +224,8 @@ pub fn start_http_mtls_collector(
     use rustls::server::WebPkiClientVerifier;
     use std::sync::Arc;
 
-    // Same process-level CryptoProvider pin as gRPC mTLS tests: the binary links both ring and aws-lc-rs.
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    // Same process-level CryptoProvider pin as the gRPC mTLS tests.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
     let (addr_tx, addr_rx) = std::sync::mpsc::channel::<SocketAddr>();
     std::thread::spawn(move || {

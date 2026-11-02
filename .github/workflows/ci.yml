@@ -222,7 +222,7 @@ jobs:
           echo "${{ runner.temp }}/zig" >> "$GITHUB_PATH"
           "${{ runner.temp }}/zig/zig" version
 
-      # aws-lc-sys and its siblings include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
+      # C build scripts in the graph include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
       - name: Install the macOS SDK (pinned 14.5)
         if: matrix.darwin
         run: |

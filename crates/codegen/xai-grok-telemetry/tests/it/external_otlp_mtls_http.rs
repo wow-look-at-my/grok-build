@@ -17,8 +17,8 @@ fn external_stream_http_mtls_end_to_end() {
     own_process!(external_stream_http_mtls_end_to_end);
     col::init_test_tracing();
 
-    // Pin aws-lc (same provider as the workspace `rustls` / gRPC mTLS tests).
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    // Pin ring, the same provider as the gRPC mTLS tests.
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
     let tls = col::generate_tls_material();
     let (_ca_file, ca_path) = write_temp(&tls.ca_cert_pem);
