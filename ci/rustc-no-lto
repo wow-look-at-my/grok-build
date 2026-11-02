@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# A RUSTC_WORKSPACE_WRAPPER: turns off LTO across codegen units for workspace crates. Bash, because dash drops CARGO_BIN_EXE_<name> when the name holds a hyphen.
+exec "$@" -Clto=off
