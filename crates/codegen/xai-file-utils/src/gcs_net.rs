@@ -166,7 +166,10 @@ async fn service_account_token(
     let response = client
         .post(token_url, Auth::None)
         .timeout(TOKEN_TIMEOUT)
-        .form(&[("grant_type", JWT_BEARER_GRANT), ("assertion", assertion.as_str())])
+        .form(&[
+            ("grant_type", JWT_BEARER_GRANT),
+            ("assertion", assertion.as_str()),
+        ])
         .send()
         .await?;
     read_token(response).await
