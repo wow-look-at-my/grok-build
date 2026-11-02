@@ -171,9 +171,7 @@ jobs:
           - { name: "PTY 1/2", partition: "hash:1/2", pty: true }
           - { name: "PTY 2/2", partition: "hash:2/2", pty: true }
     env:
-      PAGER_BINARY: ${{ github.workspace }}/.nextest-extract/target/debug/xai-grok-pager
-      # Tests that look up a workspace binary (xai_grok_test_support::ensure_cargo_bin) find the archived one here instead of running cargo build.
-      CARGO_TARGET_DIR: ${{ github.workspace }}/.nextest-extract/target
+      PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -204,22 +202,19 @@ jobs:
           name: nextest-archive
           path: dist
 
-      # nextest extracts only into a directory that already exists.
-      - name: Make the extract directory
-        run: mkdir -p .nextest-extract
-
+      # The archive unpacks its target/ into the checkout, at the same path the build runner used. Test binaries carry CARGO_BIN_EXE_* and CARGO_MANIFEST_DIR as compiled-in absolute paths, so any other location breaks them.
       - name: Run tests (workspace)
         if: ${{ !matrix.pty }}
         run: |
           cargo nextest run --archive-file dist/nextest-archive.tar.zst --workspace-remap . \
-            --extract-to .nextest-extract --profile ci --partition ${{ matrix.partition }}
+            --extract-to . --extract-overwrite --profile ci --partition ${{ matrix.partition }}
 
       # The PTY cases are #[ignore]d, so the workspace shards skip every case; this is the only thing that executes them.
       - name: Test (PTY end-to-end)
         if: ${{ matrix.pty }}
         run: |
           cargo nextest run --archive-file dist/nextest-archive.tar.zst --workspace-remap . \
-            --extract-to .nextest-extract --profile ci --partition ${{ matrix.partition }} \
+            --extract-to . --extract-overwrite --profile ci --partition ${{ matrix.partition }} \
             -E 'binary_id(xai-grok-pager-pty-harness::it) and (test(/^pty_e2e_smoke::/) or test(/^pty_e2e_config_ui::/) or test(/^pty_e2e_queue::/) or test(/^common::/))' \
             --run-ignored all --test-threads 4
 
