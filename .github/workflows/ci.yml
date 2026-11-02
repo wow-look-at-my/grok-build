@@ -92,7 +92,7 @@ jobs:
     env:
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
-      # No global CARGO_BUILD_JOBS: the -j3 compile-RAM cap belongs to the build step alone.
+      # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build steps alone.
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -123,10 +123,9 @@ jobs:
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
           echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
 
-      # -j3 is the widest -j the runner's 15 GiB holds.
       - name: Build test harnesses (compile, no-run)
         env:
-          CARGO_BUILD_JOBS: "3"
+          CARGO_BUILD_JOBS: "4"
         run: |
           start=$(date +%s)
           # This also builds the pager binary: xai-grok-pager-bin has an integration test.
@@ -153,15 +152,14 @@ jobs:
         with:
           name: cargo-timings-build-test
 
-  clippy:
+  # Clippy shares no artifact with the test build, so it needs nothing from build-test.
+  lint:
     name: Clippy
-    # Its own job, so the lint compile runs beside the test compile, not after the tests.
     runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       id-token: write
       contents: read
-      actions: write
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -202,6 +200,7 @@ jobs:
     env:
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
+      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-no-lto
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -324,7 +323,7 @@ jobs:
   # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
   release:
     name: Create buildhost release
-    needs: [slopfix, fmt, build-test, clippy, test-darwin-sandbox, build-release, link-darwin]
+    needs: [slopfix, fmt, lint, build-test, test-darwin-sandbox, build-release, link-darwin]
     runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     timeout-minutes: 10
     permissions:
