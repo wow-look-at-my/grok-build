@@ -397,6 +397,19 @@ panic = "abort"
 # `release-dist-jemalloc` and `x-prod` inherit this.
 overflow-checks = true
 
+# Heavy crates that run only when a user reads a PDF or Office file or runs a
+# workflow script. A later opt-level doubles their compile time for no felt speed.
+[profile.release.package.pdf_oxide]
+opt-level = 1
+[profile.release.package.office_oxide]
+opt-level = 1
+[profile.release.package.write-fonts]
+opt-level = 1
+[profile.release.package.subsetter]
+opt-level = 1
+[profile.release.package.rhai]
+opt-level = 1
+
 [profile.release.package.xai-grok-shell]
 opt-level = 2
 codegen-units = 256
