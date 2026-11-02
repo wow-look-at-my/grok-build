@@ -171,7 +171,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## The todo list cannot be discarded or overwritten
 
-- A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Text is changed by sending that id with new content.
+- A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Sending that id with new content changes text.
 - Every `todo_write` is a merge, and an item the call omits survives with its status untouched. `merge: false` used to clear the list and keep only what the call resent. This is how a status update that forgot the flag erased the user's list.
 - `merge` is still accepted on the wire and ignored. It is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
 - `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.

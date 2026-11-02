@@ -1,3 +1,5 @@
+// tests.rs holds the tests code.
+
 use super::*;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;

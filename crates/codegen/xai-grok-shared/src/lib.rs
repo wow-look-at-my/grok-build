@@ -1,4 +1,5 @@
 #![allow(clippy::cast_possible_truncation)]
+// lib.rs holds the lib code.
 #![allow(clippy::cast_sign_loss)] // Hits predate the gate
 #![allow(clippy::expect_used)] // Hits predate the gate
 //! Shared utilities used by both `xai-grok-shell` and its downstream clients (e.g. `xai-grok-pager-render`).
