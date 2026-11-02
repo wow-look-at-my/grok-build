@@ -14,6 +14,7 @@
     dead_code
 )]
 #![warn(unreachable_pub)]
+#![recursion_limit = "256"]
 #![deny(clippy::indexing_slicing)]
 #[cfg(all(test, feature = "dhat-heap"))]
 #[global_allocator]
