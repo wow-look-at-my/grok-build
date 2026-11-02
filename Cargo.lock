@@ -13255,8 +13255,10 @@ version = "0.1.220-alpha.4"
 dependencies = [
  "anyhow",
  "clap",
+ "dunce",
  "fastrace",
  "reqwest 0.12.24",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

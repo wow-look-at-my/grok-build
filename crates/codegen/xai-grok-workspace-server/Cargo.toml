@@ -12,8 +12,10 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+dunce = { workspace = true }
 fastrace = { workspace = true, features = ["enable"] }
 reqwest = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = [
     "macros",
