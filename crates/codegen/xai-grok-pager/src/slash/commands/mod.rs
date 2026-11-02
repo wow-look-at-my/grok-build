@@ -37,6 +37,7 @@ pub mod mcps;
 pub mod memory;
 pub mod memory_ops;
 pub mod model;
+pub mod model_agent;
 mod model_order;
 pub mod multiline;
 pub mod new;
@@ -84,6 +85,9 @@ pub fn builtin_commands() -> Vec<Arc<dyn SlashCommand>> {
         Arc::new(plugin::PluginsCommand),
         Arc::new(btw::BtwCommand),
         Arc::new(todo::TodoCommand),
+        Arc::new(model_agent::ModelAgentCommand::new("sonnet")),
+        Arc::new(model_agent::ModelAgentCommand::new("haiku")),
+        Arc::new(model_agent::ModelAgentCommand::new("opus")),
         Arc::new(voice::VoiceCommand),
         Arc::new(new::NewCommand),
         // Per turn.

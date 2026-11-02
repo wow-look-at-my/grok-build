@@ -2122,6 +2122,15 @@ pub(super) async fn run_session(
                                 let _ = respond_to.send(result);
                             });
                         }
+                        SessionCommand::SpawnModelAgent { family, effort, prompt, respond_to } => {
+                            let s = session.clone();
+                            tokio::task::spawn_local(async move {
+                                let result = s
+                                    .handle_spawn_model_agent(&family, effort.as_deref(), &prompt)
+                                    .await;
+                                let _ = respond_to.send(result);
+                            });
+                        }
                         SessionCommand::TodoCapture { request, urgent, capture_id, respond_to } => {
                             let s = session.clone();
                             tokio::task::spawn_local(async move {

@@ -2014,6 +2014,11 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             request,
             result,
         } => handle_todo_captured(app, agent_id, request, result),
+        TaskResult::ModelAgentSpawned {
+            agent_id,
+            family,
+            result,
+        } => super::notes::handle_model_agent_spawned(app, agent_id, &family, result),
         TaskResult::InterjectQueued { .. } => vec![],
         TaskResult::RecapRequested {
             session_id,
