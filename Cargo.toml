@@ -276,9 +276,6 @@ tempfile = "3"
 terminput = "0.3"
 textwrap = "0.16"
 thiserror = "2"
-tikv-jemalloc-ctl = "0.7"
-tikv-jemalloc-sys = "0.7"
-tikv-jemallocator = { version = "0.7", features = ["profiling", "unprefixed_malloc_on_supported_platforms"] }
 tiny-skia = "0.12"
 tokio = { version = "1", features = ["full"] }
 tokio-retry = "0.3"
