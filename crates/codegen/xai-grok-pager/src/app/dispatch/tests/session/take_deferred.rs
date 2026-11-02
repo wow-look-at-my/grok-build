@@ -1,3 +1,5 @@
+// take_deferred.rs holds the take deferred code.
+
 use crate::acp::model_state::{EffortTokenError, ModelState, UnsupportedEffortDiagnosis};
 use crate::app::agent::DeferredModelSwitch;
 use crate::app::dispatch::session::lifecycle::{DeferredSwitchOutcome, take_deferred_model_switch};

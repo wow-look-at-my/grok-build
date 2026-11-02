@@ -1,4 +1,6 @@
 #![allow(clippy::cast_lossless)]
+// lib.rs holds the lib code.
+
 #![allow(
     unused_imports,
     unused_variables,

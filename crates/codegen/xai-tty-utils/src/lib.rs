@@ -1,4 +1,6 @@
 #![allow(clippy::cast_possible_truncation)]
+// lib.rs holds the lib code.
+
 #![allow(clippy::cast_possible_wrap)] // Hits predate the gate
 
 //! Lightweight process-spawning utilities for TTY safety.

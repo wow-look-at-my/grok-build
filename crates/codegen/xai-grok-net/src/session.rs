@@ -1,3 +1,5 @@
+// session.rs holds the session code.
+
 use std::collections::{HashSet, VecDeque};
 use std::sync::LazyLock;
 

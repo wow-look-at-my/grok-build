@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+// sentry.rs holds the sentry code.
+
 use std::borrow::Cow;
 use std::sync::Arc;
 use std::sync::OnceLock;

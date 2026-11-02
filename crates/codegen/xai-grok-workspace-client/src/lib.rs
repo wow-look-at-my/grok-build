@@ -1,4 +1,6 @@
 #![allow(clippy::expect_used)]
+// lib.rs holds the lib code.
+
 #![allow(
     unused_imports,
     unused_variables,

@@ -1,4 +1,6 @@
 #![allow(clippy::expect_used)] // Hits predate the gate
+// code_graph.rs holds the code graph code.
+
 #![allow(clippy::unwrap_used)]
 
 //! CLI tool for code graph navigation.

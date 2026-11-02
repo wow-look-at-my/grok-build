@@ -1,3 +1,5 @@
+// http_client.rs holds the http client code.
+
 use http::HeaderMap;
 use opentelemetry::global;
 use opentelemetry_http::HeaderInjector;

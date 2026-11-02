@@ -1,4 +1,6 @@
 #![allow(clippy::cast_lossless)] // Hits predate the gate
+// lib.rs holds the lib code.
+
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)] // Hits predate the gate
 #![allow(clippy::unwrap_used)] // Hits predate the gate

@@ -1,4 +1,6 @@
 #![allow(clippy::cast_sign_loss)]
+// main.rs holds the main code.
+
 #![allow(clippy::expect_used)] // Hits predate the gate
 #![allow(
     unused_imports,
