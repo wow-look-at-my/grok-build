@@ -1,0 +1,83 @@
+//! Error reports on the exit path must exit 1 when a later fd is dead, not panic.
+
+use std::process::{Command, Stdio};
+
+use xai_grok_pager_pty_harness::pager_binary;
+
+/// `grok <args>` in an isolated, credential-less home.
+fn grok_command(home: &std::path::Path, args: &[&str]) -> Command {
+    let mut cmd = Command::new(pager_binary().expect("resolve pager binary"));
+    cmd.args(args)
+        .env_clear()
+        .env("HOME", home)
+        .env("GROK_HOME", home)
+        .env("PATH", std::env::var("PATH").unwrap_or_default())
+        .env("GROK_MANAGED_CONFIG", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null());
+    cmd
+}
+
+/// A pipe whose read end is already closed: every write fails with EPIPE.
+fn dead_stderr() -> std::io::PipeWriter {
+    let (reader, writer) = std::io::pipe().expect("pipe");
+    drop(reader);
+    writer
+}
+
+/// Run once with a live stderr to confirm the invocation exits 1. The invocation writes a line
+/// starting with each of `expected_lines`, then again with a dead stderr. The invocation assert
+/// it still exits 1 instead of dying by signal.
+fn assert_exit_error_survives_dead_stderr(args: &[&str], expected_lines: &[&str]) {
+    let home = tempfile::tempdir().unwrap();
+
+    let control = grok_command(home.path(), args)
+        .stderr(Stdio::piped())
+        .output()
+        .expect("spawn control run");
+    let control_stderr = String::from_utf8_lossy(&control.stderr);
+    assert_eq!(
+        control.status.code(),
+        Some(1),
+        "control run {args:?} must exit 1\nstderr:\n{control_stderr}"
+    );
+    for expected in expected_lines {
+        // Line-anchored so `main()`'s `Error: `-prefixed copy cannot stand in for the emitter's line.
+        assert!(
+            control_stderr.lines().any(|l| l.starts_with(expected)),
+            "control run {args:?} must write a line starting with {expected:?}\nstderr:\n{control_stderr}"
+        );
+    }
+
+    let status = grok_command(home.path(), args)
+        .stderr(dead_stderr())
+        .status()
+        .expect("spawn run with dead stderr");
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "{args:?} reporting to a dead stderr must still exit 1, got {status}"
+    );
+}
+
+#[test]
+fn exit_error_report_survives_dead_stderr() {
+    assert_exit_error_survives_dead_stderr(
+        &["--memory-flush"],
+        &["Error: --memory-flush without a prompt"],
+    );
+}
+
+#[test]
+fn headless_error_report_survives_dead_stderr() {
+    assert_exit_error_survives_dead_stderr(
+        &[
+            "-p",
+            "hi",
+            "--output-format",
+            "plain",
+            "--include-partial-messages",
+        ],
+        &["warning: --include-partial-messages", "Not signed in"],
+    );
+}

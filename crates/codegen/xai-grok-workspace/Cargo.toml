@@ -70,8 +70,6 @@ chrono = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-bash = "0.25"
 url = { workspace = true }
-xai-grok-env = { workspace = true }
-humantime-serde = { workspace = true }
 prometheus = { workspace = true }
 glob = "0.3"
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
@@ -93,8 +91,6 @@ xai-tool-types = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 urlencoding = "2"
 xai-fast-worktree = { path = "../xai-fast-worktree", features = ["metadata"] }
-# tonic: Status/Code mapping for deploy errors in workspace_ops.
-tonic = { workspace = true }
 sha1 = { workspace = true, optional = true }
 zip = { workspace = true, optional = true }
 
@@ -141,9 +137,6 @@ tempfile = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 xai-test-utils = { path = "../../common/xai-test-utils" }
-# Decode tar.gz archives produced by workspace upload helpers in tests.
-flate2 = { workspace = true }
-tar = { workspace = true }
 # The binary tests read the diag server over plain HTTP.
 reqwest = { workspace = true }
 

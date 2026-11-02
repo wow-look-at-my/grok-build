@@ -573,12 +573,9 @@ fn user_block(text: &str, pi: Option<usize>) -> RenderBlock {
     RenderBlock::UserPrompt(b)
 }
 
-/// A successful conversation rewind truncates the transcript tail (`remove_from`); the purge must fire exactly once.
+/// A successful conversation rewind truncates the transcript tail (`remove_from`).
 #[test]
-fn rewind_success_truncation_releases_retained_memory() {
-    use crate::memory_release::test_support;
-    test_support::install_counting_hook();
-
+fn rewind_success_truncates_the_transcript_tail() {
     let response = crate::views::rewind::RewindResponse {
         success: true,
         target_prompt_index: 0,
@@ -597,7 +594,6 @@ fn rewind_success_truncation_releases_retained_memory() {
         agent.scrollback.push_block(RenderBlock::agent_message("a"));
     }
     let len_before = agent_ref(&app, id).scrollback.len();
-    let before = test_support::calls();
     dispatch(
         Action::TaskComplete(TaskResult::RewindExecuteComplete {
             agent_id: id,
@@ -607,12 +603,7 @@ fn rewind_success_truncation_releases_retained_memory() {
     );
     assert!(
         agent_ref(&app, id).scrollback.len() < len_before,
-        "fixture sanity: the conversation rewind must truncate entries"
-    );
-    assert_eq!(
-        test_support::calls(),
-        before + 1,
-        "the rewound tail dropped — exactly one purge"
+        "the conversation rewind must truncate entries"
     );
 }
 

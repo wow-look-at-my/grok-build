@@ -136,6 +136,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The evaluator judges the claim first (`build_blocked_claim_request` in `goal_evaluator.rs`). A rejection must list concrete untried steps, and `is_vague_step` refuses "try harder" steps. An upheld claim must name the user action. The next review gets the last rejected steps.
 - Both modes send an upheld claim to the panel a completion candidate gets (`verify_goal_candidate(Some(claim))`). A lite goal's panel is one skeptic and no summarizer. The `## Cannot complete` rule in `goal_verifier_prompt.md` tells the skeptics how to judge it.
 
+## `@sonnet` / `@haiku` / `@opus` subagents
+
+- A prompt that starts with `@sonnet [level] <task>` runs as `/sonnet` (`rewrite_model_mention` in `slash/commands/model_agent.rs`). The same goes for `@haiku` and `@opus`. The level is an optional `ReasoningEffort` word. Like `/btw`, it skips the queue and works mid-turn.
+- The pager sends `x.ai/model_agent`. The shell picks the newest eligible catalog model whose id names the family (`resolve_family_model` in `acp_session_impl/model_mention.rs`). It spawns a background `general-purpose` child with that model and effort and no owning prompt. A Stop does not cancel it. Its completion reaches the main agent like a background `task` child's.
+- No model of the family in the catalog is an error that lists the available ids. It never falls back to the parent model.
+
 ## `/todo` capture feature notes
 
 [docs/todo-capture-feature-notes.md](docs/todo-capture-feature-notes.md) holds this section.
@@ -227,13 +233,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `output_config.effort` is 4.6-and-later too. So the older dialect sends the effort as `budget_tokens` instead and nothing beside it. `output_config.format` is untouched — structured outputs are not what 4.6 changed.
 - A budget must clear the API's 1024 floor and stay under `max_tokens`. One that cannot do both leaves thinking off with a warning, rather than sending a request the API answers with a 400.
 
-## CI compile-cache notes
+## CI builds from clean
 
-[docs/ci-compile-cache-notes.md](docs/ci-compile-cache-notes.md) holds this section.
-
-## The dependency tar: one cache entry per dependency set, and why it cannot grow
-
-[docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md](docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md) holds this section.
+- A crate's integration tests build as one `it` binary (`tests/it/main.rs`, one module per former file). Select tests by module path (`cargo nextest run -E 'binary(it) and test(/^module::/)'`). Run them with nextest: several set process-global state (`grok_home()`, env vars, the tracer) and pass only one test per process.
+- CI has no compile cache. Every job compiles the whole dependency graph, so the number of registry crates is what sets its build time. Check what a new dependency pulls in (`cargo tree -e normal,build,dev -i <crate>`) before adding it.
 
 ## Why build-test is not on the self-hosted runner
 

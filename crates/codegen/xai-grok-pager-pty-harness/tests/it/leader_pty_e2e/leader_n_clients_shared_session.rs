@@ -1,0 +1,91 @@
+// Per-test-case module for the `leader_pty_e2e` integration test crate.
+#[allow(unused_imports)]
+use super::common::*;
+
+/// The leader and the viewers must survive the spawning client's exit. NOT a superset of
+/// `leader_two_clients_shared_session`, so that test must not be deleted as redundant. Only it drives a turn from a
+/// viewer back to the driver. Only it checks that every turn of a multi-turn scrollback appears exactly once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it leader_pty_e2e:: -- --ignored --test-threads=1"]
+async fn leader_n_clients_shared_session() {
+    // One driver plus VIEWERS viewers.
+    const VIEWERS: usize = 2;
+
+    let cluster = LeaderCluster::start(DEFAULT_ROWS, DEFAULT_COLS)
+        .await
+        .expect("start cluster");
+    cluster
+        .content()
+        .set_response(format!("{} first turn payload.", turn_sentinel(1)));
+
+    let mut a = cluster.spawn_leader(&[]).expect("spawn driver");
+    a.wait_for_text(WELCOME_SCREEN_SENTINEL, LEADER_TIMEOUT)
+        .expect("driver welcome");
+    a.inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("driver submit turn 1");
+    a.wait_for_text(&turn_sentinel(1), STREAM_TIMEOUT)
+        .expect("driver turn 1");
+
+    // Every viewer attaches through the shared leader.
+    let mut viewers: Vec<PtyHarness> = Vec::new();
+    for i in 0..VIEWERS {
+        let mut v = cluster
+            .attach(&[])
+            .unwrap_or_else(|e| panic!("spawn viewer {i}: {e}"));
+        v.wait_for_text(&turn_sentinel(1), LEADER_TIMEOUT)
+            .unwrap_or_else(|e| panic!("viewer {i} replayed driver's transcript: {e}"));
+        // Settle the PTY before counting: wait_for_text returns on first match.
+        v.update(Duration::from_millis(500));
+        let screen = v.screen_contents();
+        assert_eq!(
+            screen.matches(&turn_sentinel(1)).count(),
+            1,
+            "turn 1 must appear in viewer {i} exactly once (duplicated replay?)\nscreen:\n{screen}"
+        );
+        viewers.push(v);
+    }
+
+    cluster
+        .content()
+        .set_response(format!("{} second turn payload.", turn_sentinel(2)));
+    a.inject_keys(b"again\r").expect("driver submit turn 2");
+    a.wait_for_text(&turn_sentinel(2), STREAM_TIMEOUT)
+        .expect("driver turn 2");
+    for (i, v) in viewers.iter_mut().enumerate() {
+        v.wait_for_text(&turn_sentinel(2), STREAM_TIMEOUT)
+            .unwrap_or_else(|e| panic!("viewer {i} received driver's live turn: {e}"));
+        // Same settle-then-count guard as the replay check, now for the LIVE stream: a duplicated fan-out frame must fail too
+        v.update(Duration::from_millis(500));
+        let screen = v.screen_contents();
+        assert_eq!(
+            screen.matches(&turn_sentinel(2)).count(),
+            1,
+            "turn 2 must appear in viewer {i} exactly once (duplicated live stream?)\nscreen:\n{screen}"
+        );
+    }
+
+    // The spawning client's exit must not take the leader (or the viewers) down: each viewer keeps its transcript and stays attached
+    drop(a);
+    for (i, v) in viewers.iter_mut().enumerate() {
+        v.update(Duration::from_secs(3));
+        assert!(
+            v.is_running().expect("poll pager liveness"),
+            "viewer {i} exited after the driver quit\nscreen:\n{}",
+            v.screen_contents()
+        );
+        assert!(
+            !v.contains_text("panicked"),
+            "viewer {i} rendered a panic\nscreen:\n{}",
+            v.screen_contents()
+        );
+        assert!(
+            v.contains_text(&turn_sentinel(2)),
+            "viewer {i} lost its transcript after the driver quit\nscreen:\n{}",
+            v.screen_contents()
+        );
+    }
+
+    for mut v in viewers {
+        v.quit().expect("quit viewer");
+    }
+}

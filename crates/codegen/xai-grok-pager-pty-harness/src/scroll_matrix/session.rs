@@ -1,5 +1,5 @@
 //! Marker-session preambles: spawn the pager into the primed state a matrix cell's gesture assumes.
-//! They port `spawn_bottom_pinned_marker_scrollback[_with_env]` and `spawn_streaming_marker_turn` from the pager's `tests/pty_e2e/scroll.rs`.
+//! They port `spawn_bottom_pinned_marker_scrollback[_with_env]` and `spawn_streaming_marker_turn` from the pager's `tests/it/pty_e2e/scroll.rs`.
 //! The A13 runner lives here, not in the pager's test tree, so the port lets it reuse the proven construction.
 //!
 //! ## Controller-drop footgun (kept from the originals)

@@ -4,15 +4,11 @@
 # Per-test timeout: a hung test (e.g. a PTY test waiting for a shell that
 # doesn't exist on a lean runner) blocks the whole test binary and wastes
 # the entire CI job timeout. nextest runs each test in its own process and
-# enforces a per-test timeout via slow-timeout, so a hung test fails fast
+# enforces a per-test timeout via slow-timeout. A hung test fails fast
 # instead of blocking the rest.
 #
-# slow-timeout: after `period` (60s) with no output, mark the test as slow;
-# after `terminate-after` (1) slow period, kill the test process and fail
-# it. Most tests finish in <1s; the slowest legitimate tests (PTY e2e,
-# integration suites) finish in <30s. 60s gives headroom while catching
-# true hangs (the shell's PTY tests blocked for 29+ min on a lean runner
-# with no /bin/bash).
+# Most tests finish in <1s; the slowest legitimate tests (PTY e2e,
+# integration suites) finish in <30s.
 
 [profile.ci]
 slow-timeout = { period = "60s", terminate-after = 1 }
@@ -26,17 +22,14 @@ retries = 0
 # every test regardless of individual failures.
 fail-fast = false
 
-# The curated scroll-matrix cells are host-paced PTY sessions: they measure
+# The curated scroll-matrix cells are host-paced PTY sessions. They measure
 # real scroll timing against a live pager, so running several at once stretches
 # the gesture gaps they assert on. The suite serializes them with a static
 # mutex, which works under `cargo test` (one process, many threads) and NOT
 # under nextest, which gives every test its own process. This group restores
-# that guarantee — without it the mutex is a no-op and the cells go flaky.
-# A 25 Mpx compress in a debug build is slow by itself. It takes 33s on a
-# 4-core box with nothing else running. The CI runner has 2 physical cores
-# and runs the whole workspace at once, so the 60s cap above has no margin
-# and kills the test mid-compress. The test is not hung. It gets its own
-# deadline instead of a cap that measures the runner's load.
+# that guarantee — without it the mutex is a no-op and the cells go flaky. It
+# takes 33s on a 4-core box with nothing else running. The test is not hung. It
+# gets its own deadline instead of a cap that measures the runner's load.
 [[profile.ci.overrides]]
 filter = 'test(compress_camera_sized_photo_succeeds)'
 slow-timeout = { period = "300s", terminate-after = 1 }
@@ -46,7 +39,7 @@ scroll-matrix = { max-threads = 1 }
 disabled-hooks-file = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(scroll_matrix_curated)'
+filter = 'binary_id(xai-grok-pager-pty-harness::it) and test(/^scroll_matrix_curated::/)'
 test-group = 'scroll-matrix'
 
 # These tests write the real user `$GROK_HOME/disabled-hooks`. `grok_home()`

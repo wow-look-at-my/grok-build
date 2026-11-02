@@ -472,10 +472,6 @@ fn replay_inherited_updates(
         }
     };
 
-    // Purge only after real work: nothing emitted means nothing to reclaim.
-    if outcome == ReplayEmission::Emitted {
-        crate::memory_release::release_retained_memory("subagent-replay");
-    }
     Ok(outcome)
 }
 
@@ -822,7 +818,7 @@ pub(crate) fn evict_finished_child_view(
         }
         return EvictOutcome::Evicted;
     };
-    // Purge only after a real drop: re-evicting a bare view frees nothing.
+    // A bare view holds nothing a replay must recover, so it needs no replay probe.
     let had_content =
         !child_view.scrollback.is_empty() || !child_view.inline_media_cache.is_empty();
     if !info.transcript.evictable() && had_content {
@@ -842,10 +838,6 @@ pub(crate) fn evict_finished_child_view(
         info.transcript.evicted();
     }
     drop(detach_child_view_content(parent, child_sid));
-    if had_content {
-        // Deferred so the purge cost lands between frames, not inside this notification.
-        crate::memory_release::request_release_after_draw("subagent-evict");
-    }
     EvictOutcome::Evicted
 }
 

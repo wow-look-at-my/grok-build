@@ -260,6 +260,9 @@ mod side_call;
 #[path = "acp_session_impl/todo_capture.rs"]
 mod todo_capture;
 pub use todo_capture::{TodoCaptureError, TodoCaptureOutcome};
+#[path = "acp_session_impl/model_mention.rs"]
+mod model_mention;
+pub use model_mention::{MODEL_MENTION_FAMILIES, ModelMentionSpawn};
 #[path = "acp_session_impl/status_line.rs"]
 pub(crate) mod status_line;
 #[path = "acp_session_impl/thinking_summary.rs"]
@@ -2356,6 +2359,9 @@ mod harness_slot_side_call_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/interjection_tests.rs"]
 mod interjection_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/model_mention_spawn_tests.rs"]
+mod model_mention_spawn_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/recap_display_only_tests.rs"]
 mod recap_display_only_tests;

@@ -21,9 +21,6 @@ colored_json = { workspace = true }
 criterion = { workspace = true }
 lipsum = { workspace = true }
 serde_json = { workspace = true }
-# Dev-only reference implementation for tests/segment_differential.rs.
-# Not linked into shipped binaries.
-termwiz = { workspace = true }
 
 [[bench]]
 name = "bench"

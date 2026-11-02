@@ -4,6 +4,7 @@ version = "1.0.41"
 edition.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
+autotests = false
 
 [dependencies]
 # TTY safety — detach subprocesses from the controlling terminal
@@ -80,7 +81,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 # Binary hardening: compile-time string obfuscation.
-# (cryptify / rustls / semver / tikv-jemallocator moved to the composition-root
+# (cryptify / rustls / semver moved to the composition-root
 # binary `xai-grok-pager-bin` with `main.rs`; this lib no longer references them.)
 obfstr = { workspace = true }
 
@@ -188,7 +189,6 @@ xai-grok-gboom = { path = "../xai-grok-gboom", features = ["test-support"] }
 xai-grok-login = { workspace = true, features = ["test-support"] }
 xai-grok-shell = { workspace = true, features = ["test-support"] }
 pretty_assertions = { workspace = true }
-wiremock = { workspace = true }
 insta = { workspace = true }
 criterion = { workspace = true }
 tempfile = { workspace = true }
@@ -216,12 +216,21 @@ harness = false
 name = "resize"
 harness = false
 
-# Settings modal regression tests — keyboard/mouse dispatch + registry
-# contracts. Not gated by `--ignored`; runs on every `cargo test`.
-# Spawn-only pager tests live in `xai-grok-pager-pty-harness`.
+# Every integration test links into this one binary. Each former test file is a
+# module of it. Spawn-only pager tests live in `xai-grok-pager-pty-harness`.
 [[test]]
-name = "settings_e2e"
-path = "tests/settings_e2e.rs"
+name = "it"
+path = "tests/it/main.rs"
+
+# Each of these sets `GROK_HOME`, and `grok_home()` reads it once per process.
+# So each needs a process of its own under `cargo test`.
+[[test]]
+name = "plugin_marketplace_remove_locked"
+path = "tests/plugin_marketplace_remove_locked.rs"
+
+[[test]]
+name = "plugin_marketplace_remove_official"
+path = "tests/plugin_marketplace_remove_official.rs"
 
 # Opt into [workspace.lints.clippy] (too_many_arguments etc.). Without this,
 # `cargo clippy --workspace -- -D warnings` on this package is stricter than
@@ -230,20 +239,13 @@ path = "tests/settings_e2e.rs"
 workspace = true
 
 [features]
-default = ["jemalloc", "sandbox-enforce"]
+default = ["sandbox-enforce"]
 default-bazel = [
-    "jemalloc",
     "sandbox-enforce",
     "test-support",
     "local-workspace",
     ]
 local-workspace = ["xai-grok-shell/local-workspace"]
-# No-op on this crate: the actual `#[global_allocator]` (and the
-# `tikv-jemallocator` dep) live on the composition-root binary
-# `xai-grok-pager-bin`, which owns `main.rs`. Kept as an empty feature so the
-# workspace-uniform `[jemalloc, sandbox-enforce]` default set resolves
-# here too and the generated `crate_features` stay valid.
-jemalloc = []
 sandbox-enforce = ["xai-grok-sandbox/enforce"]
 release-dist = []
 # Exposes test-only view-model constructors/setters (e.g. `test_agent_view`,

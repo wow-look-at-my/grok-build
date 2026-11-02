@@ -20,7 +20,7 @@ env:
   # xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84 under a non-UTF-8 locale.
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
-  # Cargo reuses its own per-package artifacts in target/, which a compilation cache in front of it cannot do. A hit there still runs a process and writes the object out.
+  # Every job builds from a clean target/ one time, so incremental state is never read back.
   CARGO_INCREMENTAL: "0"
   # Debuginfo on every test binary needs >37 GB of target/ against a runner's ~14 GB, and ld then dies on a bus error.
   CARGO_PROFILE_DEV_DEBUG: "0"
@@ -103,15 +103,11 @@ jobs:
 
       - uses: ./.github/actions/setup-cargo-timings
 
-      # rg_path() ends at a bare "rg" on PATH, so without this the grep and glob tests fail on empty output.
-      - name: Install ripgrep
-        uses: wow-look-at-my/actions@cache-rg#latest
-
-      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
-      - name: Install bubblewrap and mold
-        uses: wow-look-at-my/actions@cached-apt#latest
-        with:
-          packages: bubblewrap mold
+      # ripgrep: rg_path() ends at a bare "rg" on PATH, so without it the grep and glob tests fail on empty output. bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it.
+      - name: Install ripgrep, bubblewrap and mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep bubblewrap mold
 
       # Consider the gh shim e2e tests. Those tests serve sandbox/gh.xml with the real api-cli, and workspace_gh_slopfix_e2e runs slopfix in the sandbox.
       - uses: ./.github/actions/setup-org-tools
@@ -126,23 +122,6 @@ jobs:
             https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
           echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
-
-      # The registry dependencies, cached by cached-run's cargo mode. See AGENTS.md, "The dependency tar". The script runs on a hit too, so the workspace compiles here once and the next step finds it fresh.
-      - name: Build the dependencies
-        uses: wow-look-at-my/actions@cached-run#latest
-        env:
-          CARGO_BUILD_JOBS: "4"
-        with:
-          key: rustdeps-dev
-          skip-on-hit: false
-          paths: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/debug/deps
-            target/debug/build
-            target/debug/.fingerprint
-          run: cargo test --locked --workspace --no-run --no-fail-fast
 
       - name: Build test harnesses (compile, no-run)
         env:
@@ -166,7 +145,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           cargo nextest run --locked --workspace --profile ci \
-            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_queue)' \
+            -E 'binary_id(xai-grok-pager-pty-harness::it) and (test(/^pty_e2e_smoke::/) or test(/^pty_e2e_config_ui::/) or test(/^pty_e2e_queue::/) or test(/^common::/))' \
             --run-ignored all --test-threads 4
 
       - uses: ./.github/actions/upload-cargo-timings
@@ -186,25 +165,15 @@ jobs:
 
       - uses: ./.github/actions/setup-protoc
 
+      # Build scripts and proc-macros still link, and .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
       - name: Install mold
-        uses: wow-look-at-my/actions@cached-apt#latest
-        with:
-          packages: mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mold
 
       # The check that turns a banned pattern into a red branch. An entry set to `deny` in `[workspace.lints.clippy]` is a compile error here. The lint names the file that reintroduced it. `clippy.toml`'s `disallowed-methods` list covers the calls no lint of clippy's covers, and is denied through the same table. A deny lands only with the per-crate exceptions for the hits that predate it. The tree is green the moment the entry is added. Warnings that are not denied stay warnings. `-D warnings` over a workspace this size buries the one line that matters, and this repo has never gated on clippy style before. `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process. A test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build. The deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here. `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally, and the lint tables differ between versions. One crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
       - name: Lint (workspace)
-        uses: wow-look-at-my/actions@cached-run#latest
-        with:
-          key: rustdeps-clippy
-          skip-on-hit: false
-          paths: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/debug/deps
-            target/debug/build
-            target/debug/.fingerprint
-          run: cargo clippy --locked --workspace --lib --bins --keep-going
+        run: cargo clippy --locked --workspace --lib --bins --keep-going
 
   build-release:
     name: Build release (${{ matrix.name }})
@@ -263,11 +232,11 @@ jobs:
           mkdir -p "$SDKROOT"
           tar -xJf "${{ runner.temp }}/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
 
-      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
       - name: Install mold
-        uses: wow-look-at-my/actions@cached-apt#latest
-        with:
-          packages: mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mold
 
       # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
       - name: Point the C toolchain at zig
@@ -289,24 +258,6 @@ jobs:
         run: |
           cargo build --locked --release -p xai-darwin-link
           echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
-
-      # The registry dependencies for this row's target, the way build-test caches its own. The target is in the label so a fallback restore never takes the other row's entry.
-      - name: Build the dependencies
-        uses: wow-look-at-my/actions@cached-run#latest
-        with:
-          key: rustdeps-release-${{ matrix.target }}
-          skip-on-hit: false
-          paths: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/${{ matrix.target }}/release/deps
-            target/${{ matrix.target }}/release/build
-            target/${{ matrix.target }}/release/.fingerprint
-            target/release/deps
-            target/release/build
-            target/release/.fingerprint
-          run: cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
 
       # On the darwin row the link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Build release binary
@@ -474,9 +425,9 @@ jobs:
 
       # .cargo/config.toml links x86_64-unknown-linux-gnu with mold, and this job compiles the stamper. Without it `cc` answers "cannot find 'ld'".
       - name: Install mold
-        uses: wow-look-at-my/actions@cached-apt#latest
-        with:
-          packages: mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mold
 
       - name: Build the stamper
         run: cargo build --locked --release -p xai-grok-stamp
