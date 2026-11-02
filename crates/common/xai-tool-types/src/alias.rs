@@ -144,7 +144,7 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["otel_transport"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/agent/config.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/agent/config.rs",
         ty: "EndpointsConfig",
         canonical: "models_list_url",
         aliases: &["models_endpoint"],
@@ -206,7 +206,7 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["sessionId"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/extensions/hooks.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/extensions/hooks.rs",
         ty: "ClientHookResponse",
         canonical: "systemMessage",
         aliases: &["reason"],
@@ -250,25 +250,25 @@ pub const WIRED: &[WireAlias] = &[
         aliases: &["family_name"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/session/acp_types.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/session/acp_types.rs",
         ty: "CompactConversationRequest",
         canonical: "session_id",
         aliases: &["sessionId"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/session/acp_types.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/session/acp_types.rs",
         ty: "CompactConversationRequest",
         canonical: "user_context",
         aliases: &["userContext"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/session/acp_types.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/session/acp_types.rs",
         ty: "ClientFeedbackInput",
         canonical: "turn_number",
         aliases: &["turnNumber"],
     },
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/session/acp_types.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/session/acp_types.rs",
         ty: "ClientFeedbackInput",
         canonical: "request_trace_upload_token",
         aliases: &["requestTraceUploadToken"],
@@ -276,7 +276,7 @@ pub const WIRED: &[WireAlias] = &[
     // A struct variant cannot take `try_from`, so a variant-level
     // `deserialize_with` reads the variant through its own shadow.
     WireAlias {
-        file: "crates/codegen/xai-grok-shell/src/extensions/notification.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/extensions/notification.rs",
         ty: "SessionUpdate",
         canonical: "agentAddress",
         aliases: &["agent_address"],
@@ -409,7 +409,7 @@ pub struct LocalAlias {
 /// Every locally-written field that keeps a bare `#[serde(alias)]`.
 pub const LOCAL: &[LocalAlias] = &[
     LocalAlias {
-        file: "crates/codegen/xai-grok-shell/src/agent/config.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/agent/config.rs",
         ty: "ConfigModelOverride",
         canonical: "compactions_remaining",
         aliases: &["send_compactions_remaining"],
@@ -418,7 +418,7 @@ pub const LOCAL: &[LocalAlias] = &[
               before serde sees it",
     },
     LocalAlias {
-        file: "crates/codegen/xai-grok-shell/src/session/persistence.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/session/persistence.rs",
         ty: "PendingCwdSwitchReminder",
         canonical: "destination_cwd",
         aliases: &["cwd"],
@@ -591,7 +591,7 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
               program wrote as well",
     },
     EnumVariantAlias {
-        file: "crates/codegen/xai-grok-shell/src/session/goal_tracker.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/session/goal_tracker.rs",
         ty: "GoalStatus",
         aliases: &["Active", "Paused", "BudgetLimited", "Complete"],
         why: "a status is one string key, and this enum's Deserialize is \
@@ -599,13 +599,13 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
               that string, so the derived alias table never runs at all",
     },
     EnumVariantAlias {
-        file: "crates/codegen/xai-grok-shell/src/session/acp_types.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/session/acp_types.rs",
         ty: "RewindMode",
         aliases: &["code_only"],
         why: "a rewind mode is one string key; see ToolNamespace",
     },
     EnumVariantAlias {
-        file: "crates/codegen/xai-grok-shell/src/extensions/hooks.rs",
+        file: "crates/codegen/xai-grok-shell-core/src/extensions/hooks.rs",
         ty: "ClientHookDecision",
         aliases: &["block"],
         why: "a decision is one string key, and `#[serde(other)]` catches every \
@@ -1271,7 +1271,8 @@ pub struct Late {
     #[test]
     fn the_override_dedupe_list_and_these_tables_name_the_same_pairs() {
         let root = workspace_root();
-        let parse_file = "crates/codegen/xai-grok-shell/src/agent/config_model_override_parse.rs";
+        let parse_file =
+            "crates/codegen/xai-grok-shell-core/src/agent/config_model_override_parse.rs";
         let source = read_table_file(&root, parse_file);
         let declared = table_pairs_for("ConfigModelOverride");
 
