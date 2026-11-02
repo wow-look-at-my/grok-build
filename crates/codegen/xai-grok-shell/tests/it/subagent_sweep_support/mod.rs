@@ -220,7 +220,7 @@ pub async fn warm_mock(origin: &str, k: usize) {
     let mut handles = Vec::with_capacity(k);
     for _ in 0..k {
         let addr = addr.clone();
-        handles.push(tokio::task::spawn_local(async move {
+        handles.push(xai_spawn::spawn_local(async move {
             let Ok(Ok(mut s)) = tokio::time::timeout(
                 Duration::from_secs(5),
                 tokio::net::TcpStream::connect(&addr),

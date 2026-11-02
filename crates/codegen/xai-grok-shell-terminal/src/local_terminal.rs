@@ -20,7 +20,7 @@ impl PipeReader {
     fn spawn(mut stream: impl AsyncReadExt + Unpin + Send + 'static) -> Self {
         let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let task_buffer = std::sync::Arc::clone(&buffer);
-        let task = tokio::spawn(async move {
+        let task = xai_spawn::spawn(async move {
             let mut chunk = [0u8; 8192];
             loop {
                 match stream.read(&mut chunk).await {

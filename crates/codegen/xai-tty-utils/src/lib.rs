@@ -689,7 +689,7 @@ impl ProcessGroup {
             let group = std::sync::Arc::clone(self);
             let reap = move || reap_group(&group, bound);
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                return Some(handle.spawn_blocking(reap));
+                return Some(xai_spawn::spawn_blocking_on(&handle, reap));
             }
             let _ = std::thread::Builder::new()
                 .name("process-group-reaper".into())

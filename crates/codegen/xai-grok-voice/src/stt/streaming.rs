@@ -64,7 +64,7 @@ impl StreamingSttSession {
         // and aborted by `teardown`. Each task's death closes the channel its
         // consumer is reading, so neither panic nor loss goes unreported.
         #[allow(clippy::disallowed_methods)]
-        let writer_task = tokio::spawn(async move {
+        let writer_task = xai_spawn::spawn(async move {
             while let Some(chunk) = audio_rx.recv().await {
                 if ws_write.send(Message::Binary(chunk.into())).await.is_err() {
                     break;
@@ -76,7 +76,7 @@ impl StreamingSttSession {
         });
 
         #[allow(clippy::disallowed_methods)] // handle stored + aborted by teardown
-        let reader_task = tokio::spawn(async move {
+        let reader_task = xai_spawn::spawn(async move {
             loop {
                 match ws_read.next().await {
                     Some(Ok(Message::Text(text))) => {

@@ -34,7 +34,7 @@ impl MockServer {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
                     let _ = shutdown_rx.await;
@@ -197,7 +197,7 @@ async fn queue_time_does_not_count_toward_the_first_token_limit() {
     });
     let fast_handle = SamplerActor::spawn(fast_cfg, RetryPolicy::default(), fast_tx);
 
-    let slow_call = tokio::spawn(async move {
+    let slow_call = xai_spawn::spawn(async move {
         slow_handle
             .submit_and_collect(RequestId::from("req-slow"), user_request("hi"))
             .await
@@ -254,7 +254,7 @@ async fn an_outer_deadline_excludes_the_queue_across_the_actor() {
 
     let first = {
         let handle = handle.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             handle
                 .submit_and_collect(RequestId::from("req-first"), user_request("hi"))
                 .await
@@ -288,7 +288,7 @@ async fn a_direct_client_call_queues_and_excludes_the_queue() {
 
     let first = {
         let client = client.clone();
-        tokio::spawn(async move { client.conversation_collect(user_request("hi")).await })
+        xai_spawn::spawn(async move { client.conversation_collect(user_request("hi")).await })
     };
     while counting.served.load(Ordering::SeqCst) == 0 {
         tokio::time::sleep(Duration::from_millis(10)).await;

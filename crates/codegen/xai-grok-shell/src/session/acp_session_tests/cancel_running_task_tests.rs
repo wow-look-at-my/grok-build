@@ -349,7 +349,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
             ))];
             let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
             let actor_for_prompt = actor.clone();
-            let prompt_task = tokio::task::spawn_local(async move {
+            let prompt_task = xai_spawn::spawn_local(async move {
                 actor_for_prompt
                     .handle_prompt(
                         "persist-ack-test",
@@ -397,7 +397,7 @@ async fn plain_user_prompt_without_persist_ack_still_sends_flush_barrier_behind_
                 tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let observed = std::rc::Rc::new(std::cell::RefCell::new(Vec::<&'static str>::new()));
             let recorder = observed.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = persistence_rx.recv().await {
                     match msg {
                         PersistenceMsg::FlushAndAck { respond_to } => {
@@ -417,7 +417,7 @@ async fn plain_user_prompt_without_persist_ack_still_sends_flush_barrier_behind_
                 create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await,
             );
             let actor_for_prompt = actor.clone();
-            let turn = tokio::task::spawn_local(async move {
+            let turn = xai_spawn::spawn_local(async move {
                 actor_for_prompt
                     .handle_prompt(
                         "plain-user-prompt",
@@ -1294,7 +1294,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                 state.running_task = Some(
                     AgentTask::new(
                         "running",
-                        tokio::task::spawn_local(async move {
+                        xai_spawn::spawn_local(async move {
                                 tokio::time::sleep(std::time::Duration::from_secs(60))
                                     .await;
                             })
@@ -1383,7 +1383,7 @@ async fn cancel_records_mid_turn_abort_interrupt_marker() {
                 let mut state = actor.state.lock().await;
                 state.running_task = Some(AgentTask::new(
                     "running",
-                    tokio::task::spawn_local(async {
+                    xai_spawn::spawn_local(async {
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     })
                     .abort_handle(),
@@ -1477,7 +1477,7 @@ async fn cancel_mid_stream_keeps_the_streamed_text_in_history() {
                 let mut state = actor.state.lock().await;
                 state.running_task = Some(AgentTask::new(
                     "running",
-                    tokio::task::spawn_local(async {
+                    xai_spawn::spawn_local(async {
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     })
                     .abort_handle(),
@@ -1527,7 +1527,7 @@ async fn cancel_without_assistant_text_skips_interrupt_reminder() {
                 let mut state = actor.state.lock().await;
                 state.running_task = Some(AgentTask::new(
                     "running",
-                    tokio::task::spawn_local(async {
+                    xai_spawn::spawn_local(async {
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     })
                     .abort_handle(),
@@ -1572,7 +1572,7 @@ async fn send_now_cancel_arms_no_interrupt_signals_and_resets_wait_depth() {
                 let mut state = actor.state.lock().await;
                 state.running_task = Some(AgentTask::new(
                     "running",
-                    tokio::task::spawn_local(async {
+                    xai_spawn::spawn_local(async {
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     })
                     .abort_handle(),
@@ -1634,7 +1634,7 @@ async fn cancel_with_dangling_tool_call_skips_interrupt_reminder() {
                 let mut state = actor.state.lock().await;
                 state.running_task = Some(AgentTask::new(
                     "running",
-                    tokio::task::spawn_local(async {
+                    xai_spawn::spawn_local(async {
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     })
                     .abort_handle(),
@@ -1710,7 +1710,7 @@ async fn handle_prompt_frames_interrupt_on_user_message() {
             ))];
             let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
             let actor_for_prompt = actor.clone();
-            let prompt_task = tokio::task::spawn_local(async move {
+            let prompt_task = xai_spawn::spawn_local(async move {
                 actor_for_prompt
                     .handle_prompt(
                         "interrupt-wiring-test",
@@ -1759,7 +1759,7 @@ async fn handle_prompt_verbatim_skips_interrupt_envelope() {
             ))];
             let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
             let actor_for_prompt = actor.clone();
-            let prompt_task = tokio::task::spawn_local(async move {
+            let prompt_task = xai_spawn::spawn_local(async move {
                 actor_for_prompt
                     .handle_prompt(
                         "interrupt-verbatim-test",
@@ -1807,7 +1807,7 @@ async fn handle_prompt_send_now_frames_interjection_envelope() {
             ))];
             let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
             let actor_for_prompt = actor.clone();
-            let prompt_task = tokio::task::spawn_local(async move {
+            let prompt_task = xai_spawn::spawn_local(async move {
                 actor_for_prompt
                     .handle_prompt(
                         "send-now-envelope-test",
@@ -1861,7 +1861,7 @@ async fn handle_prompt_synthetic_origin_preserves_interrupt_reminder() {
             ))];
             let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
             let actor_for_prompt = actor.clone();
-            let prompt_task = tokio::task::spawn_local(async move {
+            let prompt_task = xai_spawn::spawn_local(async move {
                 actor_for_prompt
                     .handle_prompt(
                         "scheduler-fired-test-1",
@@ -1954,7 +1954,7 @@ async fn cancel_running_task_interactive_preserves_queued_work() {
                 let mut state = actor.state.lock().await;
                 state.running_task = Some(AgentTask::new(
                     "running",
-                    tokio::task::spawn_local(async move {
+                    xai_spawn::spawn_local(async move {
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     })
                     .abort_handle(),
@@ -2574,7 +2574,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 );
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
-            let server_task = tokio::spawn(async move {
+            let server_task = xai_spawn::spawn(async move {
                 let _ = axum::serve(listener, app).await;
             });
             let cfg = xai_grok_sampler::SamplerConfig {
@@ -2943,7 +2943,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                     )],
                 ..Default::default()
             };
-            let task = tokio::task::spawn_local(async move {
+            let task = xai_spawn::spawn_local(async move {
                 let _ = sampler_for_task
                     .submit_and_collect(request_id_for_task, request)
                     .await;
@@ -3111,7 +3111,7 @@ async fn cancel_keeps_remaining_queued_prompts_visible_to_clients() {
                 let mut state = actor.state.lock().await;
                 state.running_task = Some(AgentTask::new(
                     "running",
-                    tokio::task::spawn_local(async move {
+                    xai_spawn::spawn_local(async move {
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                     })
                     .abort_handle(),
@@ -3164,7 +3164,7 @@ async fn send_now_answers_blocking_spawn_with_background_notice() {
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
             let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
             let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(event) = event_rx.recv().await {
                     match event {
                         SubagentEvent::HandOffForeground(SubagentHandOffForegroundRequest {

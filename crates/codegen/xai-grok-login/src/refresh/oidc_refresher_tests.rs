@@ -60,7 +60,7 @@ async fn start_mock_oidc_and_proxy() -> (String, tokio::task::JoinHandle<()>) {
             }),
         );
 
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, handle)
 }
 
@@ -278,7 +278,7 @@ async fn oidc_refresher_attributes_the_refresh_token_it_spent_on_invalid_grant()
                 )
             }),
         );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(
@@ -349,7 +349,7 @@ async fn oidc_refresher_e2e_near_expiry_idp_rejects_refresh() {
             }),
         );
 
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(
@@ -420,7 +420,7 @@ async fn oidc_refresher_e2e_invalid_client_retains_credentials() {
             }),
         );
 
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(
@@ -497,7 +497,7 @@ async fn oidc_refresher_e2e_invalid_client_adopts_valid_sibling_disk_token() {
             }),
         );
 
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let dir = tempfile::tempdir().unwrap();
     let cfg = GrokComConfig::default();
@@ -649,7 +649,7 @@ async fn oidc_refresh_uses_disk_refresh_token() {
                 axum::Json(serde_json::json!({ "userId": "user-42", "email": "test@corp.com" }))
             }),
         );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let dir = tempfile::tempdir().unwrap();
     let cfg = GrokComConfig::default();
@@ -848,7 +848,7 @@ async fn start_mock_oidc_with_disk_rotation(
             }),
         );
 
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, handle)
 }
 
@@ -1000,7 +1000,7 @@ async fn refresher_disk_retry_invalid_client_with_different_client_id_preserves_
             }),
         );
 
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let mgr = Arc::new(AuthManager::new(dir.path(), cfg).with_proxy_base_url(&base_url));
 
@@ -1150,7 +1150,7 @@ async fn start_counting_mock_oidc(
             }),
         );
 
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, handle)
 }
 
@@ -1259,7 +1259,7 @@ async fn sleep_gate_e2e_in_flight_refresh_completes_across_imminent_sleep() {
                 axum::Json(serde_json::json!({ "userId": "user-42", "email": "test@corp.com" }))
             }),
         );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let dir = tempfile::tempdir().unwrap();
     let mgr = Arc::new(
@@ -1269,7 +1269,7 @@ async fn sleep_gate_e2e_in_flight_refresh_completes_across_imminent_sleep() {
     mgr.set_refresher(Arc::new(OidcRefresher::new(mgr.clone())));
 
     let m = mgr.clone();
-    let handle = tokio::spawn(async move { m.auth().await });
+    let handle = xai_spawn::spawn(async move { m.auth().await });
 
     idp_hit.notified().await;
 

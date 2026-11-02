@@ -688,7 +688,7 @@ mod tests {
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
-        let handle = tokio::spawn(reloader.run(event_rx, cancel.clone()));
+        let handle = xai_spawn::spawn(reloader.run(event_rx, cancel.clone()));
 
         event_tx
             .send(ConfigChangeEvent::ModelsCacheChanged)
@@ -727,7 +727,7 @@ mod tests {
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
-        let handle = tokio::spawn(reloader.run(event_rx, cancel.clone()));
+        let handle = xai_spawn::spawn(reloader.run(event_rx, cancel.clone()));
 
         let evt = || ConfigChangeEvent::McpConfigChanged {
             path: mcp_json.clone(),

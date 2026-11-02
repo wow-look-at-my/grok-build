@@ -27,7 +27,7 @@ impl SessionActor {
         let generation = self.turn_summary_generation.get().wrapping_add(1);
         self.turn_summary_generation.set(generation);
         let actor = self.clone();
-        let task = tokio::task::spawn_local(async move {
+        let task = xai_spawn::spawn_local(async move {
             actor.generate_turn_summary(&prompt_id, generation).await;
             // Drop the slot only if we are still the registered task
             // An abort-and-respawn can replace the handle before we finish

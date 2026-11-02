@@ -337,7 +337,7 @@ impl TerminalBackend for AcpTerminalAdapter {
 
         let recorder = OutputRecorder::new(output_file.clone(), request.output_byte_limit);
         recorder.initialize().await;
-        tokio::spawn(watch_for_exit_releasing_task(
+        xai_spawn::spawn(watch_for_exit_releasing_task(
             self.gateway.clone(),
             self.session_id.clone(),
             task_id.clone(),

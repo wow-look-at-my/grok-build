@@ -301,7 +301,7 @@ async fn handle_ws_connection(socket: WebSocket, state: AppState) {
 
     // Task: forward PTY output -> WebSocket (binary frames).
     let state_output = state.clone();
-    let mut send_task = tokio::spawn(async move {
+    let mut send_task = xai_spawn::spawn(async move {
         loop {
             match output_rx.recv().await {
                 Ok(bytes) => {
@@ -334,7 +334,7 @@ async fn handle_ws_connection(socket: WebSocket, state: AppState) {
 
     // Task: receive WebSocket messages -> PTY input / control.
     let state_input = state.clone();
-    let mut recv_task = tokio::spawn(async move {
+    let mut recv_task = xai_spawn::spawn(async move {
         while let Some(Ok(msg)) = ws_rx.next().await {
             match msg {
                 Message::Binary(bytes) => {
@@ -416,13 +416,13 @@ mod tests {
         let router = super::build_router(session);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = axum::serve(listener, router).await;
         });
 
         let start = Instant::now();
         // Long-poll for text that only appears if /control/send gets through mid-wait.
-        let wait_task = tokio::spawn(async move {
+        let wait_task = xai_spawn::spawn(async move {
             http(port, &get("/wait?text=WAIT_DONE_77&timeout_ms=30000")).await
         });
 

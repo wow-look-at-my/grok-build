@@ -121,7 +121,7 @@ pub(crate) fn spawn_workflow_host_service(
     oneshot::Receiver<HostDrainOutcome>,
 ) {
     let (drained_tx, drained_rx) = oneshot::channel();
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let service = host_service(params);
         loop {
             let req = tokio::select! {
@@ -311,7 +311,7 @@ impl HostService {
             }
             WorkflowHostRequest::SpawnAgent { opts, reply } => {
                 let svc = self.clone();
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     // The script parks on `reply` for this whole round. A
                     // panic has to be sent as the failure it is rather than
                     // close the channel.
@@ -401,7 +401,7 @@ impl HostService {
                 reply,
             } => {
                 let svc = self.clone();
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     let _ = reply.send(
                         xai_grok_tools::util::detached::guarded(
                             "workflow scratch write",
@@ -417,7 +417,7 @@ impl HostService {
             }
             WorkflowHostRequest::ReadScratchFile { name, reply } => {
                 let svc = self.clone();
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     let _ = reply.send(
                         xai_grok_tools::util::detached::guarded(
                             "workflow scratch read",
@@ -433,7 +433,7 @@ impl HostService {
             }
             WorkflowHostRequest::GitDiffSince { commit, reply } => {
                 let svc = self.clone();
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     let _ = reply.send(
                         xai_grok_tools::util::detached::guarded(
                             "workflow git diff",
@@ -963,7 +963,7 @@ impl HostService {
 
         let scratch_dir = self.params.scratch_dir.clone();
         let body = content.as_bytes().to_vec();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             use std::io::Write as _;
             let mut tmp = tempfile::NamedTempFile::new_in(&scratch_dir)
                 .map_err(|e| HostError::Failed(format!("scratch temp file: {e}")))?;

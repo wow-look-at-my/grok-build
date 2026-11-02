@@ -311,7 +311,7 @@ fn spawn_registry_title_update(agent: &MvpAgent, session_id: &str, title: Option
         return;
     };
     let sid = session_id.to_string();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let update = crate::agent::session_registry_client::UpdateRequest {
             summary: title,
             first_prompt: None,
@@ -853,7 +853,7 @@ async fn handle_plugins_reload(agent: &MvpAgent) -> ExtResult {
     let cwd = session_cwd.unwrap_or_else(|| agent.launch_cwd().to_path_buf());
     let remote_settings = agent.cfg.borrow().remote_settings.clone();
     let handle = agent.plugin_registry_handle().clone();
-    let rebuilt = tokio::task::spawn_blocking(move || {
+    let rebuilt = xai_spawn::spawn_blocking(move || {
         let (project_trusted, disk_cfg) =
             MvpAgent::registry_build_inputs(&cwd, remote_settings.as_ref());
         // Explicit desktop `x.ai/plugins/reload`: force a full local-install re-copy.

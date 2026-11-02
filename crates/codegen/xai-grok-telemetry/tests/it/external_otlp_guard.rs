@@ -33,7 +33,7 @@ async fn refuses_to_activate_when_internal_consumed_standard_vars() {
         is_git_repo: true,
         permission_mode: xai_grok_telemetry::enums::PermissionMode::Ask,
     });
-    tokio::task::spawn_blocking(external::flush).await.unwrap();
+    xai_spawn::spawn_blocking(external::flush).await.unwrap();
 
     server
         .recorder()
@@ -42,7 +42,5 @@ async fn refuses_to_activate_when_internal_consumed_standard_vars() {
         .expect("nothing may be exported when refused");
     assert_eq!(Vec::<OtelExport>::new(), server.recorder().exports());
 
-    tokio::task::spawn_blocking(external::shutdown)
-        .await
-        .unwrap();
+    xai_spawn::spawn_blocking(external::shutdown).await.unwrap();
 }

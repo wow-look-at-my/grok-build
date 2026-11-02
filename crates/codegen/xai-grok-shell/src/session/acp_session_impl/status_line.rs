@@ -149,7 +149,7 @@ impl SessionActor {
         let transcript = self.transcript_path();
         let (repo_state, transcript_path, turn_start_ms) = tokio::join!(
             Self::repo_state(cwd.clone()),
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 transcript
                     .exists()
                     .then(|| transcript.to_string_lossy().into_owned())
@@ -221,7 +221,7 @@ impl SessionActor {
     }
 
     async fn repo_state(cwd: PathBuf) -> RepoState {
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             use xai_gix_status::discover;
             let Some(repo) = discover::discover(&cwd) else {
                 return RepoState::default();

@@ -485,7 +485,7 @@ mod tests {
             None,
             None,
         );
-        let writer = tokio::spawn(async move {
+        let writer = xai_spawn::spawn(async move {
             let Some(PersistenceMsg::WorkflowRunStateAndAck { respond_to, .. }) = rx.recv().await
             else {
                 panic!("expected acknowledged workflow manifest");

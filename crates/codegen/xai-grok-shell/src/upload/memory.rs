@@ -61,9 +61,9 @@ fn join_or_start_memory_archive_build(
     }
     let (tx, rx) = tokio::sync::watch::channel(None);
     builds.insert(cwd.clone(), rx.clone());
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let build_cwd = cwd.clone();
-        let result = match tokio::task::spawn_blocking(move || {
+        let result = match xai_spawn::spawn_blocking(move || {
             #[cfg(test)]
             apply_test_archive_fault()?;
             let storage = crate::session::memory::MemoryStorage::new(

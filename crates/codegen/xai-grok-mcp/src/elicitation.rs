@@ -277,7 +277,7 @@ mod tests {
             requested_schema: schema,
         };
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let job = inbox.recv().await.expect("job");
             assert_eq!(job.server_name, "srv");
             let _ = job.response_tx.send(accept_result(Some(serde_json::json!({
@@ -310,7 +310,7 @@ mod tests {
             url: "https://example.com".into(),
             elicitation_id: "e1".into(),
         };
-        let task = tokio::spawn(async move { bridge_elicit(&bridge, "srv", params).await });
+        let task = xai_spawn::spawn(async move { bridge_elicit(&bridge, "srv", params).await });
         let mut job = inbox.recv().await.expect("job");
         task.abort();
         let _ = task.await;

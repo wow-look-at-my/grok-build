@@ -203,7 +203,7 @@ async fn concurrent_waiters_share_one_parked_flock_wait() {
     let holder = crate::manager::lock::test_support::hold_backdated_stale_lock(&lock_path);
 
     let spawn_waiter = |p: std::path::PathBuf| {
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             try_lock_auth_file_async(&p, StdDuration::from_secs(10), Heartbeat::Skip)
                 .await
                 .into_guard()

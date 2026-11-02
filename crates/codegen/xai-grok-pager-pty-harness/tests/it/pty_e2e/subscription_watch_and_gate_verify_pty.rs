@@ -77,14 +77,14 @@ async fn start_local_oidc_paid_refresh() -> tokio::task::JoinHandle<()> {
     }))
     .expect("token json");
 
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((mut socket, _)) = listener.accept().await else {
                 break;
             };
             let discovery_body = discovery_body.clone();
             let token_body = token_body.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let mut buf = vec![0u8; 4096];
                 let n = match socket.read(&mut buf).await {
                     Ok(0) | Err(_) => return,

@@ -265,7 +265,7 @@ fn spawn_fake_agent(
     let log = Arc::new(Mutex::new(FakeAgentLog::default()));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AcpAgentMessage>();
     let log_for_task = log.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 AcpAgentMessage::ExtMethod(args) => {

@@ -145,7 +145,7 @@ impl SearchIndexManager {
             extract,
         });
 
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut state = SearchManagerState {
                 workers: HashMap::new(),
                 bootstrapped: HashSet::new(),
@@ -216,7 +216,7 @@ impl SearchIndexManager {
             let (tx, rx) = mpsc::unbounded_channel();
             let root_owned = root.clone();
             let context = Arc::clone(context);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let source = (context.source_factory)(root_owned.clone());
                 run_worker(&root_owned, source.as_ref(), &context, rx).await;
             });
@@ -260,7 +260,7 @@ pub async fn execute_search(
     let include_content = req.include_content;
     let query_owned = query.to_string();
 
-    let (query_result, claim_in_flight) = tokio::task::spawn_blocking(move || {
+    let (query_result, claim_in_flight) = xai_spawn::spawn_blocking(move || {
         with_search_index(&db_path, |index| {
             let result =
                 index.query(&query_owned, cwd.as_deref(), limit, offset, include_content)?;
@@ -448,7 +448,7 @@ async fn upsert_session(
     extract: ContentExtractor,
 ) -> io::Result<UpsertOutcome> {
     let (content, bytes_read) = if let Some(updates_path) = session.updates_path.clone() {
-        tokio::task::spawn_blocking(move || extract(&updates_path))
+        xai_spawn::spawn_blocking(move || extract(&updates_path))
             .await
             .map_err(io::Error::other)??
     } else {
@@ -457,7 +457,7 @@ async fn upsert_session(
     let doc = build_session_doc(session, content);
     let db_path = search_db_path(root_dir);
 
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         with_search_index(&db_path, |index| {
             upsert_unless_unchanged(index, &doc, bytes_read)
         })
@@ -469,7 +469,7 @@ async fn upsert_session(
 async fn delete_session(root_dir: &Path, session_id: &str) -> io::Result<()> {
     let db_path = search_db_path(root_dir);
     let session_id = session_id.to_string();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         with_search_index(&db_path, |index| index.delete_doc(&session_id))
     })
     .await

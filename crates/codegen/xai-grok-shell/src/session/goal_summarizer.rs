@@ -625,7 +625,7 @@ mod tests {
             fallback: Default::default(),
             model_override: None,
         };
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let _ = spawner
                 .spawn_summarizer(
                     "sum-id",

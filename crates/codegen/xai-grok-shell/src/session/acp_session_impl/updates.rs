@@ -980,7 +980,7 @@ impl SessionActor {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         self.permissions.set_user_prompt_notify(tx);
         let session = std::sync::Arc::downgrade(self);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while rx.recv().await.is_some() {
                 let Some(session) = session.upgrade() else {
                     break;

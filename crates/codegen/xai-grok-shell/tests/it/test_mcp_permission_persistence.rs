@@ -79,7 +79,7 @@ fn fake_gateway() -> (FakeGateway, tokio::task::JoinHandle<()>) {
     let (script_tx, mut script_rx) =
         mpsc::unbounded_channel::<(String, Option<serde_json::Value>)>();
 
-    let join = tokio::task::spawn_local(async move {
+    let join = xai_spawn::spawn_local(async move {
         while let Some(msg) = gw_rx.recv().await {
             if let AcpClientMessage::RequestPermission(args) = msg {
                 let (option_id, meta) = script_rx

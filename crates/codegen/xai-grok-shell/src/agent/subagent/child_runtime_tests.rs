@@ -194,8 +194,8 @@ async fn send_active_message_freezes_parent_turn_before_first_poll() {
                 runner,
                 config,
             );
-        let coordinator_task = tokio::task::spawn_local(coordinator.run());
-        let spawn_task = tokio::task::spawn_local({
+        let coordinator_task = xai_spawn::spawn_local(coordinator.run());
+        let spawn_task = xai_spawn::spawn_local({
             let backend = backend.clone();
             async move { backend.spawn(request(), None).await }
         });
@@ -269,8 +269,8 @@ async fn rejected_delivery(
                 ..Default::default()
             },
         );
-        let coordinator_task = tokio::task::spawn_local(coordinator.run());
-        let spawn_task = tokio::task::spawn_local({
+        let coordinator_task = xai_spawn::spawn_local(coordinator.run());
+        let spawn_task = xai_spawn::spawn_local({
             let backend = backend.clone();
             async move { backend.spawn(request(), None).await }
         });
@@ -280,7 +280,7 @@ async fn rejected_delivery(
 
         // Poll send on the LocalSet while this task waits for the child command.
         // A pinned-but-unpolled future deadlocks Steer dispatch on current_thread.
-        let send_task = tokio::task::spawn_local({
+        let send_task = xai_spawn::spawn_local({
             let backend = backend.clone();
             async move {
                 backend

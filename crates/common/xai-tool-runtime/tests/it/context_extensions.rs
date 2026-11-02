@@ -126,7 +126,7 @@ async fn context_is_send_across_spawn() {
     let mut ctx = ToolCallContext::default();
     ctx.extensions.insert(AuthToken("for-task".into()));
     let handle =
-        tokio::spawn(async move { ctx.extensions.get::<AuthToken>().map(|t| t.0.clone()) });
+        xai_spawn::spawn(async move { ctx.extensions.get::<AuthToken>().map(|t| t.0.clone()) });
     let value = handle.await.unwrap();
     assert_eq!(value.as_deref(), Some("for-task"));
 }

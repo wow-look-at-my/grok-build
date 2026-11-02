@@ -52,7 +52,7 @@ fn spawn_run_responder(
     mut gateway_rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
     reply: impl Fn(&serde_json::Value) -> serde_json::Value + 'static,
 ) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -214,7 +214,7 @@ async fn subagent_inherits_parent_pre_tool_use_client_hook() {
 
             let seen_subagent_type = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
             let seen = seen_subagent_type.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = child_gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -297,7 +297,7 @@ async fn pre_tool_use_slow_callback_does_not_starve_a_deny() {
                 &["slow_cb", "deny_cb"],
             );
 
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 let mut held = Vec::new();
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
@@ -424,7 +424,7 @@ async fn post_tool_use_and_failure_never_double_fire() {
 
             let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
             let seen_task = seen.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -570,7 +570,7 @@ async fn mcp_error_result_fires_only_failure_and_delivers_original_output() {
 
             let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
             let seen_task = seen.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -880,7 +880,7 @@ async fn post_tool_use_client_gate_records_failure_and_orders_contributions() {
                 &["cb_ctx_a", "cb_fail", "cb_ctx_b"],
             );
 
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 let mut buffered = Vec::new();
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
@@ -1158,7 +1158,7 @@ async fn file_force_stop_skips_client_gate_but_notifies() {
             let run_requests = std::rc::Rc::new(std::cell::Cell::new(0u32));
             let observe_events = std::rc::Rc::new(std::cell::Cell::new(0u32));
             let (runs, observes) = (run_requests.clone(), observe_events.clone());
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -1219,7 +1219,7 @@ async fn client_force_stop_attribution_is_registration_ordered() {
                 &["cb_first", "cb_second"],
             );
 
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -1229,7 +1229,7 @@ async fn client_force_stop_attribution_is_registration_ordered() {
                                 .pointer("/hookCallbackId")
                                 .unwrap_or(&serde_json::Value::Null)
                                 == "cb_first";
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 if is_first {
                                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                                 }
@@ -1298,7 +1298,7 @@ async fn subagent_session_gates_on_subagent_stop() {
                 r#"echo '{"decision":"block","reason":"verify the summary"}'"#,
             )));
 
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg {
                         let _ = args.response_tx.send(Ok(()));
@@ -1403,7 +1403,7 @@ async fn an_unanswered_client_gate_leaves_the_report_unspent() {
                 &["cb_stop"],
             );
 
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     if let xai_acp_lib::AcpClientMessage::ExtMethod(args) = msg {
                         drop(args.response_tx);

@@ -58,13 +58,13 @@ where
 {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((mut sock, _)) = listener.accept().await else {
                 return;
             };
             let respond = respond.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let mut buf: Vec<u8> = Vec::new();
                 while let Some(head) = read_http_request(&mut sock, &mut buf).await {
                     if sock.write_all(&respond(&head)).await.is_err() {
@@ -84,14 +84,14 @@ pub async fn spawn_counting_server() -> (String, Arc<AtomicUsize>, Arc<Mutex<Vec
     let accepts = Arc::new(AtomicUsize::new(0));
     let heads: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let (accepts_l, heads_l) = (Arc::clone(&accepts), Arc::clone(&heads));
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((mut sock, _)) = listener.accept().await else {
                 return;
             };
             accepts_l.fetch_add(1, Ordering::SeqCst);
             let heads = Arc::clone(&heads_l);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let mut buf: Vec<u8> = Vec::new();
                 while let Some(head) = read_http_request(&mut sock, &mut buf).await {
                     heads.lock().unwrap().push(head);

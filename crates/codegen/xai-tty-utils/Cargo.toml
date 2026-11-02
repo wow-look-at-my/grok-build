@@ -7,6 +7,7 @@ description = "Lightweight process-spawning utilities for TTY safety — detach 
 
 [dependencies]
 tokio = { workspace = true, features = ["process", "rt", "time"] }
+xai-spawn = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["signal", "process"] }

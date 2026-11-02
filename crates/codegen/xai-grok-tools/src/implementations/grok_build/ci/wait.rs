@@ -229,7 +229,7 @@ pub(super) async fn start_background_wait(
     let poller_terminal = std::sync::Arc::downgrade(&terminal);
     drop(terminal);
     #[allow(clippy::disallowed_methods)]
-    tokio::spawn(crate::util::detached::fire_and_forget(
+    xai_spawn::spawn(crate::util::detached::fire_and_forget(
         "ci wait poller",
         run_wait_poller(
             task_id.clone(),

@@ -176,7 +176,7 @@ async fn client_that_cannot_draw_the_row_never_builds_one() {
 
             let (session, mut painted) = emitter_fixture(Client::WithoutTheRow).await;
             let emitter =
-                tokio::task::spawn_local(super::run_status_emitter(Arc::downgrade(&session)));
+                xai_spawn::spawn_local(super::run_status_emitter(Arc::downgrade(&session)));
             session.emit_status_snapshot_detached();
             // Lets the emitter consume the wake while the row is still off.
             tokio::task::yield_now().await;
@@ -222,7 +222,7 @@ async fn a_dropped_session_ends_its_parked_emitter() {
         .run_until(async {
             let (session, _painted) = emitter_fixture(Client::WithoutTheRow).await;
             let emitter =
-                tokio::task::spawn_local(super::run_status_emitter(Arc::downgrade(&session)));
+                xai_spawn::spawn_local(super::run_status_emitter(Arc::downgrade(&session)));
             // Parks the emitter on the wake: without the yield it has not reached one, and the test would pass on the loop's first pass
             tokio::task::yield_now().await;
             assert!(

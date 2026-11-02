@@ -1586,7 +1586,7 @@ async fn restore_effort_via_load(
         .insert_test_entry("effort-model", entry);
     let sid = acp::SessionId::new("restore-precedence-sess");
     let (handle, _cmd_tx, mut cmd_rx) = make_live_session_handle(&sid, None);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(cmd) = cmd_rx.recv().await {
             if let crate::session::SessionCommand::SetSessionModel {
                 switch,
@@ -1952,7 +1952,7 @@ async fn mcp_list_gateway_refresh_fans_only_on_committed_uncached_catalog() {
             );
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let proxy_url = format!("http://{}", listener.local_addr().unwrap());
-            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
             let (agent, _rx) = build_agent_with_auth_and_proxy(
                 xai_grok_login::GrokAuth {
                     key: "eligible".into(),
@@ -3043,7 +3043,7 @@ async fn wait_for_in_flight_load_blocks_until_load_completes() {
             let guard = agent.begin_session_load(&sid);
             let waiter_agent = agent.clone();
             let waiter_sid = sid.clone();
-            let waiter = tokio::task::spawn_local(async move {
+            let waiter = xai_spawn::spawn_local(async move {
                 waiter_agent
                     .wait_for_in_flight_session_load(&waiter_sid)
                     .await;
@@ -3077,7 +3077,7 @@ async fn wait_for_in_flight_load_wakes_on_failed_load() {
             let guard = agent.begin_session_load(&sid);
             let waiter_agent = agent.clone();
             let waiter_sid = sid.clone();
-            let waiter = tokio::task::spawn_local(async move {
+            let waiter = xai_spawn::spawn_local(async move {
                 waiter_agent
                     .wait_for_in_flight_session_load(&waiter_sid)
                     .await;
@@ -3981,7 +3981,7 @@ async fn spawn_counting_storage_stub() -> (String, std::sync::Arc<std::sync::ato
             )
         }
     });
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (format!("http://127.0.0.1:{port}"), count)
 }
 /// Regression: the auth-diagnostics uploader was gated only on the trace-upload config switch.
@@ -5497,7 +5497,7 @@ fn a_cancelled_installer_retires_its_thread_when_a_reinstall_takes_the_slot() {
         crate::session::persistence::STAMPS_SERVED.set(0);
         let (_installer_attach, installer_waiter) = agent.session_registry.begin_attach(&sid);
         let (handle, _cmd_tx, mut cmd_rx) = make_live_session_handle(&sid, None);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(cmd) = cmd_rx.recv().await {
                 match cmd {
                     TestSessionCommand::FlushComplete { respond_to } => {
@@ -5736,7 +5736,7 @@ fn cancel_never_overtakes_in_flight_prompt_intake() {
             std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let (intake_parked_tx, intake_parked_rx) = tokio::sync::oneshot::channel::<()>();
         let driver_order = order.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let mut intake_parked_tx = Some(intake_parked_tx);
             while let Some(cmd) = cmd_rx.recv().await {
                 match cmd {
@@ -5781,7 +5781,7 @@ fn prompt_routes_only_non_send_now_through_human_delivery_handle() {
             let sid = acp::SessionId::new(format!("human-route-{send_now}"));
             let (handle, _tx, mut cmd_rx) = make_live_session_handle(&sid, None);
             agent.insert_resident(&sid, handle);
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(command) = cmd_rx.recv().await {
                     match command {
                         SessionCommand::GetCurrentPromptMode { responds_to } => {
@@ -5875,7 +5875,7 @@ fn bash_prompt_reaches_the_actor_when_the_session_model_is_unavailable() {
                 .set_unavailable_model(&sid, acp::ModelId::new(std::sync::Arc::from("gone-model")));
             let saw_prompt = std::rc::Rc::new(std::cell::Cell::new(false));
             let driver_saw = saw_prompt.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(command) = cmd_rx.recv().await {
                     match command {
                         SessionCommand::GetCurrentPromptMode { responds_to } => {
@@ -5946,7 +5946,7 @@ fn spawn_fake_actor(
     busy: bool,
 ) -> tokio::sync::mpsc::UnboundedReceiver<TestSessionCommand> {
     let (observed_tx, observed_rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
                 TestSessionCommand::IsBusy { respond_to } => {
@@ -5969,7 +5969,7 @@ fn spawn_active_work_actor(
     mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<TestSessionCommand>,
     active_work: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(cmd) = cmd_rx.recv().await {
             if let TestSessionCommand::IsBusy { respond_to } = cmd {
                 let _ = respond_to.send(active_work.load(std::sync::atomic::Ordering::Acquire) > 0);

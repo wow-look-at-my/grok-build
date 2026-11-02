@@ -193,13 +193,13 @@ async fn start_capture_session(
     let sample_rate = config.sample_rate;
     // `spawn_pcm_capture` blocks until the device opens; keep it off the runtime.
     let capture_task =
-        tokio::task::spawn_blocking(move || crate::audio::spawn_pcm_capture(sample_rate, mic_tx));
+        xai_spawn::spawn_blocking(move || crate::audio::spawn_pcm_capture(sample_rate, mic_tx));
 
     // Drain mic before connect resolves so capture never backpressures while the socket comes up
     let (audio_tx_tx, audio_tx_rx) = tokio::sync::oneshot::channel::<mpsc::Sender<Vec<u8>>>();
     // Deliberately not awaited: the connect race below must not wait on the drain.
     #[allow(clippy::disallowed_methods)]
-    let _drain = tokio::spawn(forward_pcm(mic_rx, audio_tx_rx));
+    let _drain = xai_spawn::spawn(forward_pcm(mic_rx, audio_tx_rx));
 
     let connect = async {
         let auth = crate::auth::require_auth(auth).await?;
@@ -233,7 +233,7 @@ async fn start_capture_session(
     // The handle is kept in `ActivePtt.reader`: the pipeline aborts it on the next
     // press and at shutdown. The task's lifetime is owned rather than dropped.
     #[allow(clippy::disallowed_methods)]
-    let reader = tokio::spawn(async move {
+    let reader = xai_spawn::spawn(async move {
         // Stop the mic before signalling end-of-utterance so no stray PCM is queued after `audio.done`
         // Stopping releases the device and drops the capture thread's clone of the audio sender. `Option::take` makes it idempotent.
         let stop_capture = |capture: &mut Option<crate::audio::CaptureHandle>| {
@@ -335,7 +335,7 @@ mod tests {
         let (mic_tx, mic_rx) = mpsc::channel::<Vec<u8>>(8);
         let (tx_tx, tx_rx) = tokio::sync::oneshot::channel();
         let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(8);
-        let task = tokio::spawn(forward_pcm(mic_rx, tx_rx));
+        let task = xai_spawn::spawn(forward_pcm(mic_rx, tx_rx));
 
         // These chunks buffer before the live sender is handed over, then flush once it arrives
         // (Keep `mic_tx` open across the handoff: a mic that closes before the socket is ready discards the backlog; see the separate test.)
@@ -359,7 +359,7 @@ mod tests {
     async fn forward_pcm_returns_when_mic_closes_before_connect() {
         let (mic_tx, mic_rx) = mpsc::channel::<Vec<u8>>(8);
         let (_tx_tx, tx_rx) = tokio::sync::oneshot::channel::<mpsc::Sender<Vec<u8>>>();
-        let task = tokio::spawn(forward_pcm(mic_rx, tx_rx));
+        let task = xai_spawn::spawn(forward_pcm(mic_rx, tx_rx));
         drop(mic_tx);
         task.await.unwrap();
     }
@@ -369,7 +369,7 @@ mod tests {
     async fn forward_pcm_returns_when_connect_fails() {
         let (mic_tx, mic_rx) = mpsc::channel::<Vec<u8>>(8);
         let (tx_tx, tx_rx) = tokio::sync::oneshot::channel::<mpsc::Sender<Vec<u8>>>();
-        let task = tokio::spawn(forward_pcm(mic_rx, tx_rx));
+        let task = xai_spawn::spawn(forward_pcm(mic_rx, tx_rx));
         mic_tx.send(vec![1]).await.unwrap();
         drop(tx_tx);
         task.await.unwrap();

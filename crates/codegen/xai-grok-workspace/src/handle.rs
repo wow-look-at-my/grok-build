@@ -1008,7 +1008,7 @@ impl WorkspaceHandle {
         let terminal_backend = session.terminal_backend().clone();
         let truncation =
             crate::session::tool_config::truncation_config_for_host(self.shared.host_kind);
-        let resolve_result = tokio::task::spawn_blocking(move || {
+        let resolve_result = xai_spawn::spawn_blocking(move || {
             crate::session::tool_config::resolve_session_toolset_rebuild(
                 new_config,
                 cap,
@@ -1376,7 +1376,7 @@ impl WorkspaceHandle {
         }
         let activity = self.shared.activity_tracker.clone();
         let tracked = self.shared.producer_tasks.track_future(fut);
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let out = tracked.await;
             activity.poke();
             out
@@ -2325,7 +2325,7 @@ impl WorkspaceHandle {
         let index_root =
             crate::session::git::find_git_root_from_path(&root_cwd).unwrap_or(root_cwd.clone());
         let watch_root = dunce::canonicalize(&root_cwd).unwrap_or(root_cwd);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut rx = shared.events.subscribe();
             loop {
                 match rx.recv().await {
@@ -2378,7 +2378,7 @@ impl WorkspaceHandle {
             return None;
         }
         let handle = self.clone();
-        Some(tokio::spawn(async move {
+        Some(xai_spawn::spawn(async move {
             let mut rx = handle.shared.events.subscribe();
             loop {
                 match rx.recv().await {
@@ -2445,7 +2445,7 @@ impl WorkspaceHandle {
             let identity = self.shared.identity().clone();
             let server_id = self.shared.server_id();
             let sandbox_id = self.shared.server_metadata_typed().sandbox_id;
-            match tokio::task::spawn_blocking(move || {
+            match xai_spawn::spawn_blocking(move || {
                 crate::upload::environment::WorkspaceEnvironment::capture(
                     &session_id_owned,
                     &cwd,
@@ -3027,7 +3027,7 @@ impl WorkspaceHandle {
         const BIND_MOUNT_HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
         match tokio::time::timeout(
             BIND_MOUNT_HOOK_TIMEOUT,
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 hook.on_bind(crate::path_virtualization::BindLifecycleCtx {
                     session_id: &session_id,
                     real_root: &real_root,
@@ -3525,7 +3525,7 @@ impl WorkspaceHandle {
                             if enrolled {
                                 let converge_ws = ws.clone();
                                 let converge_sid = sid_str.clone();
-                                let mut converge = tokio::spawn(async move {
+                                let mut converge = xai_spawn::spawn(async move {
                                     converge_ws
                                         .converge_session_mcp(
                                             &converge_sid,
@@ -3558,7 +3558,7 @@ impl WorkspaceHandle {
                                 if union_grew {
                                     let reclaim_ws = ws.clone();
                                     let reclaim_sid = sid_str.clone();
-                                    tokio::spawn(async move {
+                                    xai_spawn::spawn(async move {
                                         reclaim_ws
                                             .converge_session_mcp(
                                                 &reclaim_sid,
@@ -3749,7 +3749,7 @@ impl WorkspaceHandle {
                 let arrival_generation = session
                     .mcp_bind_generation
                     .load(std::sync::atomic::Ordering::SeqCst);
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     if workspace
                         .teardown_session_mcp_for_event(&session_id, arrival_generation)
                         .await
@@ -3793,7 +3793,7 @@ impl WorkspaceHandle {
         );
         let (activity_notify_handle, activity_notify_rx) =
             xai_grok_tools::notification::types::ToolNotificationHandle::channel();
-        let activity_feed_task = tokio::spawn(run_activity_feed(
+        let activity_feed_task = xai_spawn::spawn(run_activity_feed(
             self.shared.activity_tracker.clone(),
             activity_notify_rx,
         ));
@@ -3803,7 +3803,7 @@ impl WorkspaceHandle {
             .store(Arc::new(Some(activity_notify_handle)));
         crate::scheduler_liveness::spawn_scheduler_liveness_poll(&self.shared);
         let server = handle.server.clone();
-        let server_task = tokio::spawn(async move {
+        let server_task = xai_spawn::spawn(async move {
             if let Err(e) = server.run().await {
                 tracing::warn!(error = %e, "hub tool server run loop exited with error");
             }
@@ -3811,7 +3811,7 @@ impl WorkspaceHandle {
         handle.set_server_task(server_task);
         let mut notification_rx = handle.server.subscribe_notifications();
         let shared = self.shared.clone();
-        let listener_task = tokio::spawn(async move {
+        let listener_task = xai_spawn::spawn(async move {
             while let Some(notification) = notification_rx.recv().await {
                 match notification {
                     xai_computer_hub_sdk::HubNotification::ToolsChanged {
@@ -3843,7 +3843,7 @@ impl WorkspaceHandle {
         }
         let events_rx = self.shared.events.subscribe();
         let server_for_events = handle.server.clone();
-        let event_publisher_task = tokio::spawn(async move {
+        let event_publisher_task = xai_spawn::spawn(async move {
             let mut rx = events_rx;
             let mut consecutive_errors: u32 = 0;
             loop {
@@ -3885,7 +3885,7 @@ impl WorkspaceHandle {
         let server_conn = handle.server.connection().clone();
         let heartbeat = self.shared.status_config.heartbeat;
         let keepalive = self.shared.status_config.keepalive;
-        let status_publisher_task = tokio::spawn(async move {
+        let status_publisher_task = xai_spawn::spawn(async move {
             /// Attempt to send a status frame. `None` means the send was skipped due to a local error (serialization, id allocation) that does not indicate a dead connection.
             async fn send_status(
                 conn: &xai_computer_hub_sdk::HubConnection,
@@ -4023,7 +4023,7 @@ impl WorkspaceHandle {
             let (ext_tx, mut ext_rx) =
                 tokio::sync::mpsc::unbounded_channel::<(String, serde_json::Value)>();
             let server_for_ext = handle.server.clone();
-            let ext_task = tokio::spawn(async move {
+            let ext_task = xai_spawn::spawn(async move {
                 while let Some((method, params)) = ext_rx.recv().await {
                     let frame = xai_tool_protocol::ToolNotificationFrame::custom(
                         xai_tool_protocol::ToolId::new(
@@ -4476,7 +4476,7 @@ pub(crate) async fn build_local_workspace(
         let home = workspace_home.clone();
         // Startup housekeeping: no caller waits on it, so a death is named
         // rather than left as sessions that were never cleaned.
-        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
             "stale session cleanup",
             async move {
                 crate::recovery::cleanup_stale_sessions(
@@ -4489,9 +4489,9 @@ pub(crate) async fn build_local_workspace(
     }
     // Same: the blocking half's `JoinHandle` is not kept, so a panic inside the
     // gc is reported by name here rather than by nothing at all.
-    tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+    xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
         "worktree auto gc",
-        tokio::task::spawn_blocking(|| {
+        xai_spawn::spawn_blocking(|| {
             crate::worktree::run_auto_gc_best_effort();
         }),
     ));

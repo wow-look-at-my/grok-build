@@ -47,7 +47,7 @@ pub(crate) async fn serve_tls(
     let server = axum_server::from_tcp_rustls(listener, tls)
         .context("tls server")?
         .handle(handle.clone());
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::select! {
             result = server.serve(app.into_make_service()) => result.expect("mock TLS serve"),
             _ = shutdown_rx => handle.shutdown(),

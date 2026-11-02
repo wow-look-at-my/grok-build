@@ -92,7 +92,7 @@ fn spawn_async_signal_task() {
     #[cfg(unix)]
     {
         let mut streams = SignalStreams::install();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             // First signal requests the graceful quit; a second forces exit.
             let code = streams.next_code().await;
             request_graceful_or_exit(code);
@@ -109,7 +109,7 @@ fn spawn_async_signal_task() {
         let mut ctrl_close = windows::ctrl_close().ok();
         let mut ctrl_logoff = windows::ctrl_logoff().ok();
         let mut ctrl_shutdown = windows::ctrl_shutdown().ok();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             tokio::select! {
                 code = streams.next_code() => {
                     request_graceful_or_exit(code);
@@ -130,7 +130,7 @@ fn spawn_async_signal_task() {
     }
     #[cfg(not(any(unix, windows)))]
     {
-        tokio::spawn(async {
+        xai_spawn::spawn(async {
             if tokio::signal::ctrl_c().await.is_ok() {
                 request_graceful_or_exit(130);
                 let _ = tokio::signal::ctrl_c().await;

@@ -130,7 +130,7 @@ pub(crate) fn spawn_relay_connection_with_callback(
     let cancel = parent_cancel.map_or(CancellationToken::new(), |c| c.child_token());
     let cancel_clone = cancel.clone();
     let (agent_to_ws_tx, agent_to_ws_rx) = mpsc::unbounded_channel::<String>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         run_relay_loop(
             config,
             to_agent_tx,

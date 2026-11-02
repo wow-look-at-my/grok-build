@@ -110,7 +110,7 @@ pub(crate) async fn with_search_index_blocking<R: Send + 'static>(
     op: impl Fn(&SessionSearchIndex) -> Result<R, rusqlite::Error> + Send + 'static,
 ) -> io::Result<R> {
     let path = db_path.to_path_buf();
-    tokio::task::spawn_blocking(move || with_search_index(&path, op))
+    xai_spawn::spawn_blocking(move || with_search_index(&path, op))
         .await
         .map_err(io::Error::other)?
 }

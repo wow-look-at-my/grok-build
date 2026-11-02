@@ -62,7 +62,7 @@ pub fn acp_bridge_transport(
     // Nothing joins with the pump: it owns both duplex halves. Its death is the bridge's death, and a round-trip that never completes is
     // the only thing rmcp would notice.
     #[allow(clippy::disallowed_methods)]
-    tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+    xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
         "acp mcp bridge pump",
         pump(server_id, invoker, invoke_timeout, pump_read, pump_write),
     ));
@@ -234,7 +234,7 @@ mod tests {
     fn spawn_pump() -> (DuplexStream, DuplexStream) {
         let (test_write, pump_read) = tokio::io::duplex(BRIDGE_BUF);
         let (pump_write, test_read) = tokio::io::duplex(BRIDGE_BUF);
-        tokio::spawn(pump(
+        xai_spawn::spawn(pump(
             "srv".to_string(),
             Arc::new(EchoInvoker),
             Duration::from_secs(60),
@@ -306,7 +306,7 @@ mod tests {
     async fn a_panicking_reverse_invoke_answers_its_request_and_the_bridge_keeps_serving() {
         let (test_write, pump_read) = tokio::io::duplex(BRIDGE_BUF);
         let (pump_write, test_read) = tokio::io::duplex(BRIDGE_BUF);
-        tokio::spawn(pump(
+        xai_spawn::spawn(pump(
             "srv".to_string(),
             Arc::new(PanickingInvoker),
             Duration::from_secs(60),
@@ -368,7 +368,7 @@ mod tests {
 
         let (test_write, pump_read) = tokio::io::duplex(BRIDGE_BUF);
         let (pump_write, test_read) = tokio::io::duplex(BRIDGE_BUF);
-        tokio::spawn(pump(
+        xai_spawn::spawn(pump(
             "srv".to_string(),
             Arc::new(DelayInvoker),
             Duration::from_secs(60),
@@ -428,7 +428,7 @@ mod tests {
 
         let (test_write, pump_read) = tokio::io::duplex(BRIDGE_BUF);
         let (pump_write, test_read) = tokio::io::duplex(BRIDGE_BUF);
-        tokio::spawn(pump(
+        xai_spawn::spawn(pump(
             "srv".to_string(),
             Arc::new(DelayInvoker),
             Duration::from_secs(60),
@@ -517,7 +517,7 @@ mod tests {
 
         let (test_write, pump_read) = tokio::io::duplex(BRIDGE_BUF);
         let (pump_write, test_read) = tokio::io::duplex(BRIDGE_BUF);
-        tokio::spawn(pump(
+        xai_spawn::spawn(pump(
             "srv".to_string(),
             Arc::new(NonObjectInvoker),
             Duration::from_secs(60),
@@ -569,7 +569,7 @@ mod tests {
         let configured = Duration::from_secs(4242);
         let (test_write, pump_read) = tokio::io::duplex(BRIDGE_BUF);
         let (pump_write, test_read) = tokio::io::duplex(BRIDGE_BUF);
-        tokio::spawn(pump(
+        xai_spawn::spawn(pump(
             "srv".to_string(),
             Arc::new(RecordingInvoker(seen.clone())),
             configured,
@@ -638,7 +638,7 @@ mod tests {
 
         let (test_write, pump_read) = tokio::io::duplex(BRIDGE_BUF);
         let (pump_write, test_read) = tokio::io::duplex(BRIDGE_BUF);
-        let pump_handle = tokio::spawn(pump(
+        let pump_handle = xai_spawn::spawn(pump(
             "srv".to_string(),
             Arc::new(SlowInvoker {
                 started: started.clone(),

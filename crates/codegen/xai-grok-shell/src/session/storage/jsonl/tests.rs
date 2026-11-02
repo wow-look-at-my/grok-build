@@ -2458,7 +2458,7 @@ async fn retry_after_lost_ack_converges_memory_and_disk_to_authoritative_item() 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let storage = std::sync::Arc::new(adapter.clone());
     let actor_info = info.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut drop_first_ack = true;
         while let Some(
             crate::session::persistence::PersistenceMsg::AppendCwdSwitchAndAck {

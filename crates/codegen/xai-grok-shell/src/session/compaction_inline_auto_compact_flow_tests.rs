@@ -817,13 +817,13 @@ async fn spawn_capturing_status_body_server(
     };
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = Arc::clone(&captured);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((mut stream, _)) = listener.accept().await else {
                 break;
             };
             let sink = Arc::clone(&sink);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut raw = Vec::new();
                 let mut buf = [0u8; 8192];

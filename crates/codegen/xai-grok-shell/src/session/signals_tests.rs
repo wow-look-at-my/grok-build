@@ -4,7 +4,7 @@ use super::*;
 async fn test_session_signals_basic() {
     let (handle, actor) = SessionSignalsActor::new();
 
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Send some signals
     handle.increment_turn();
@@ -35,7 +35,7 @@ async fn test_session_signals_basic() {
 #[tokio::test]
 async fn test_pr_metrics_counters_and_turn_delta() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // The PR-created signal is recorded BEFORE the commit (parallel tool results can land out of order)
     // Turn-end reconciliation must still attribute it
@@ -86,7 +86,7 @@ async fn test_pr_metrics_counters_and_turn_delta() {
 #[tokio::test]
 async fn test_consecutive_cancellations() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Multiple cancellations
     handle.record_cancellation();
@@ -116,7 +116,7 @@ async fn test_consecutive_cancellations() {
 #[tokio::test]
 async fn test_tool_failure() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.record_tool_failure("bash");
     handle.record_tool_failure("search_replace");
@@ -132,7 +132,7 @@ async fn test_tool_failure() {
 #[tokio::test]
 async fn test_model_tracking() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.set_primary_model("grok-3");
 
@@ -156,7 +156,7 @@ async fn test_model_tracking() {
 #[tokio::test]
 async fn test_assistant_message_count() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.increment_turn();
     handle.record_assistant_message();
@@ -175,7 +175,7 @@ async fn test_assistant_message_count() {
 #[tokio::test]
 async fn test_context_window_usage() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.update_context_usage(50000, 100000);
     let snapshot = handle.snapshot().await.unwrap();
@@ -216,7 +216,7 @@ async fn test_context_window_usage() {
 #[tokio::test]
 async fn test_session_duration() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Small delay to ensure duration > 0
     tokio::time::sleep(Duration::from_millis(10)).await;
@@ -232,7 +232,7 @@ async fn test_session_duration() {
 #[tokio::test]
 async fn test_check_and_mark_sync() {
     let (handle, actor) = SessionSignalsActor::with_sync_interval(Duration::from_millis(50));
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     assert!(handle.check_and_mark_sync().await);
 
@@ -250,7 +250,7 @@ async fn test_check_and_mark_sync() {
 #[tokio::test]
 async fn test_mark_reverted() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     let snapshot = handle.snapshot().await.unwrap();
     assert!(!snapshot.has_reverted);
@@ -282,7 +282,7 @@ async fn test_spawn_convenience() {
 async fn test_handle_clone() {
     let (handle1, actor) = SessionSignalsActor::new();
     let handle2 = handle1.clone();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Both handles should affect the same actor
     handle1.increment_turn();
@@ -298,7 +298,7 @@ async fn test_handle_clone() {
 #[tokio::test]
 async fn test_turn_end_snapshot_first_turn() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Simulate a turn: user prompt, tool calls, assistant response
     handle.increment_turn();
@@ -339,7 +339,7 @@ async fn test_turn_end_snapshot_first_turn() {
 #[tokio::test]
 async fn test_inference_metrics_single_response() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.record_inference_metrics(InferenceLatencyStats {
         time_to_first_token_ms: Some(150),
@@ -376,7 +376,7 @@ async fn test_inference_metrics_single_response() {
 #[tokio::test]
 async fn test_turn_end_snapshot_multi_turn_deltas() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // === Turn 1 ===
     handle.increment_turn();
@@ -437,7 +437,7 @@ async fn test_turn_end_snapshot_multi_turn_deltas() {
 #[tokio::test]
 async fn test_inference_metrics_multi_response_aggregation() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Response 1: 10 intervals
     handle.record_inference_metrics(InferenceLatencyStats {
@@ -511,7 +511,7 @@ async fn test_inference_metrics_multi_response_aggregation() {
 #[tokio::test]
 async fn test_turn_end_snapshot_resets_per_turn_state() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Record some signals
     handle.increment_turn();
@@ -541,7 +541,7 @@ async fn test_turn_end_snapshot_resets_per_turn_state() {
 #[tokio::test]
 async fn test_unfinished_turn_snapshot_keeps_last_completed_turn_tool_outcomes() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.increment_turn();
     handle.record_tool_success("bash");
@@ -575,7 +575,7 @@ async fn test_unfinished_turn_snapshot_keeps_last_completed_turn_tool_outcomes()
 #[tokio::test]
 async fn test_model_fingerprint_reaches_unfinished_snapshot_and_resets_per_turn() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.increment_turn();
     handle.record_model_fingerprint("fp_round_1");
@@ -602,7 +602,7 @@ async fn test_model_fingerprint_reaches_unfinished_snapshot_and_resets_per_turn(
 #[tokio::test]
 async fn test_turn_end_snapshot_consecutive_cancellations() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Turn 1: user cancels twice, then assistant completes
     handle.increment_turn();
@@ -633,7 +633,7 @@ async fn test_turn_end_snapshot_consecutive_cancellations() {
 #[tokio::test]
 async fn test_turn_end_snapshot_error_types_mixed() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.increment_turn();
     // Mix of typed and untyped errors
@@ -656,7 +656,7 @@ async fn test_turn_end_snapshot_error_types_mixed() {
 #[tokio::test]
 async fn test_turn_end_snapshot_tool_outcomes() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Turn 1: bash succeeds twice, read_file succeeds once, search_replace fails once
     handle.increment_turn();
@@ -712,7 +712,7 @@ async fn test_turn_end_snapshot_tool_outcomes() {
 #[tokio::test]
 async fn test_turn_end_snapshot_token_usage() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Turn 1: one response with completion and reasoning tokens
     handle.increment_turn();
@@ -749,7 +749,7 @@ async fn test_turn_end_snapshot_token_usage() {
 #[tokio::test]
 async fn test_seed_counts_restores_all_counters() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Seed counts as if resuming a session with prior tool usage and models
     handle.seed_counts(
@@ -804,7 +804,7 @@ async fn test_seed_counts_restores_all_counters() {
 async fn test_restore_signals_full_round_trip() {
     // Phase 1: Build up state in an actor, then snapshot it
     let (handle1, actor1) = SessionSignalsActor::new();
-    let actor_handle1 = tokio::spawn(actor1.run());
+    let actor_handle1 = xai_spawn::spawn(actor1.run());
 
     // Simulate several turns with diverse signals
     handle1.increment_turn(); // turn 1
@@ -880,7 +880,7 @@ async fn test_restore_signals_full_round_trip() {
 
     // Phase 2: Restore the snapshot into a new actor
     let (handle2, actor2) = SessionSignalsActor::new();
-    let actor_handle2 = tokio::spawn(actor2.run());
+    let actor_handle2 = xai_spawn::spawn(actor2.run());
 
     handle2.restore_signals(snapshot.clone());
 
@@ -991,7 +991,7 @@ async fn test_restore_signals_full_round_trip() {
 #[tokio::test]
 async fn test_loc_change_accumulates_correctly() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Agent adds lines to two files
     handle.record_loc_change(true, 10, 0, "/tmp/a.rs".into());
@@ -1027,7 +1027,7 @@ async fn test_loc_change_accumulates_correctly() {
 #[tokio::test]
 async fn test_loc_revert_is_noop_until_per_author_attribution() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Agent adds 10 lines
     handle.record_loc_change(true, 10, 0, "/tmp/a.rs".into());
@@ -1052,7 +1052,7 @@ async fn test_loc_revert_is_noop_until_per_author_attribution() {
 #[tokio::test]
 async fn test_loc_turn_deltas() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Turn 1: agent adds 10 lines
     handle.increment_turn();
@@ -1089,7 +1089,7 @@ async fn test_loc_turn_deltas() {
 #[tokio::test]
 async fn test_loc_file_dedup() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Agent edits same file multiple times
     handle.record_loc_change(true, 5, 0, "/tmp/a.rs".into());
@@ -1112,7 +1112,7 @@ async fn test_loc_file_dedup() {
 #[tokio::test]
 async fn test_loc_hunk_reshuffle_cancels_out() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // Agent adds 13 lines
     handle.record_loc_change(true, 13, 1, "/tmp/jokes.md".into());
@@ -1145,7 +1145,7 @@ async fn test_loc_hunk_reshuffle_cancels_out() {
 #[tokio::test]
 async fn test_idle_timeout_counter() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.record_idle_timeout();
     handle.record_idle_timeout();
@@ -1160,7 +1160,7 @@ async fn test_idle_timeout_counter() {
 #[tokio::test]
 async fn test_doom_loop_recovery_counters() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.record_doom_loop_recovery_attempt(
         vec!["tail_repetition:8@thinking".to_string()],
@@ -1193,7 +1193,7 @@ async fn test_doom_loop_recovery_counters() {
 #[tokio::test]
 async fn test_set_tracing_config() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.set_tracing_config(300);
 
@@ -1207,7 +1207,7 @@ async fn test_set_tracing_config() {
 #[tokio::test]
 async fn test_gcs_queue_snapshot() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     let _ = handle.tx.send(SignalEvent::RecordGcsQueueSnapshot {
         enqueued: 50,
@@ -1263,7 +1263,7 @@ fn test_sample_rss_bytes_is_stable() {
 #[tokio::test]
 async fn test_peak_rss_recorded_at_turn_end() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.increment_turn();
     let snapshot = handle.take_turn_end_snapshot().await.unwrap();
@@ -1284,7 +1284,7 @@ async fn test_peak_rss_recorded_at_turn_end() {
 #[tokio::test]
 async fn test_restore_signals_with_huge_duration_does_not_panic() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     // A duration larger than any realistic uptime
     let signals = SessionSignals {
@@ -1339,7 +1339,7 @@ fn tool_duration_deserializes_legacy_without_call_id() {
 #[tokio::test]
 async fn record_tool_duration_includes_call_id_in_turn_delta() {
     let (handle, actor) = SessionSignalsActor::new();
-    let actor_handle = tokio::spawn(actor.run());
+    let actor_handle = xai_spawn::spawn(actor.run());
 
     handle.record_tool_duration("bash", "call_1", 5_000);
     let snap = handle.take_turn_end_snapshot().await.unwrap();

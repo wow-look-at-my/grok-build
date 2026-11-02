@@ -9,7 +9,7 @@ use super::*;
 async fn fake_running_turn(actor: &SessionActor) {
     actor.state.lock().await.running_task = Some(AgentTask::new(
         "running-turn",
-        tokio::task::spawn_local(std::future::pending::<()>()).abort_handle(),
+        xai_spawn::spawn_local(std::future::pending::<()>()).abort_handle(),
     ));
 }
 

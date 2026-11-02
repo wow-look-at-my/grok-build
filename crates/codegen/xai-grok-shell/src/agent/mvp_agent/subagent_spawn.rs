@@ -25,11 +25,11 @@ impl MvpAgent {
             crate::upload::turn::SyntheticTurnTraceRequest,
         >();
         self.subagent_presentation.borrow_mut().synthetic_trace_tx = Some(trace_tx);
-        tokio::task::spawn_local({
+        xai_spawn::spawn_local({
             let agent_ref = agent_ref.clone();
             async move {
                 while let Some(request) = trace_rx.recv().await {
-                    tokio::task::spawn_local({
+                    xai_spawn::spawn_local({
                         let agent_ref = agent_ref.clone();
                         async move {
                             handle_synthetic_turn_trace(agent_ref, request).await;
@@ -232,12 +232,7 @@ impl MvpAgent {
             None => (None, None),
         };
         let project_trusted = crate::agent::folder_trust::project_scope_allowed(&parent_cwd);
-        let (
-            base_roles,
-            base_personas,
-            subagent_model_overrides,
-            subagent_toggle,
-        ) = {
+        let (base_roles, base_personas, subagent_model_overrides, subagent_toggle) = {
             let cfg = self.cfg.borrow();
             (
                 cfg.subagent_roles.clone(),

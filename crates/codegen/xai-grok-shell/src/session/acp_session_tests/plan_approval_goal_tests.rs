@@ -35,7 +35,7 @@ async fn approving_actor(goal_harness: bool) -> Harness {
         *tracker = crate::session::plan_mode::PlanModeTracker::new(plan_dir.path().to_path_buf());
         tracker.activate_from_tool();
     }
-    let responder = tokio::task::spawn_local(async move {
+    let responder = xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::ExtMethod(args) => {

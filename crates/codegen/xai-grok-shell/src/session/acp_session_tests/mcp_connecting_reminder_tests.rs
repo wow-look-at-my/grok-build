@@ -352,7 +352,7 @@ fn blocking_prompt_mid_handshake_gets_no_stale_connecting_reminder() {
 
         let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
         let actor_for_prompt = actor.clone();
-        let prompt_task = tokio::task::spawn_local(async move {
+        let prompt_task = xai_spawn::spawn_local(async move {
             actor_for_prompt
                 .handle_prompt(
                     "gb5503-blocking",
@@ -402,7 +402,7 @@ fn progressive_prompt_mid_handshake_still_announces_connecting() {
 
         let (ack_tx, _ack_rx) = tokio::sync::oneshot::channel();
         let actor_for_prompt = actor.clone();
-        let prompt_task = tokio::task::spawn_local(async move {
+        let prompt_task = xai_spawn::spawn_local(async move {
             actor_for_prompt
                 .handle_prompt(
                     "gb5503-progressive",

@@ -717,7 +717,7 @@ pub(crate) async fn run_shell_child(
             Parent::Explicit(spawn_prepare_span.span())
         );
         let create_span = worktree_create_span.span().clone();
-        let created = match tokio::task::spawn_blocking(move || {
+        let created = match xai_spawn::spawn_blocking(move || {
             create_span.in_scope(|| {
                 let mut builder = xai_fast_worktree::WorktreeBuilder::new(&source_clone, &dest)
                     .working_tree_mode(xai_fast_worktree::WorkingTreeMode::PreserveWorkingTree)
@@ -2534,7 +2534,7 @@ pub(crate) async fn dispose_worktree_after_completion(
     let checked_source_repo = source_repo.to_path_buf();
     let checked_snapshot = snapshot_ref.clone();
     let reclaim_span = region!("worktree.reclaim_check", Parent::Inherit);
-    let reclaim = tokio::task::spawn_blocking(move || {
+    let reclaim = xai_spawn::spawn_blocking(move || {
         xai_fast_worktree::reclaimable_after_snapshot(
             &checked_path,
             Some(&checked_source_repo),

@@ -390,7 +390,7 @@ impl ToolServer {
     ) -> (LogDonationSender, LogDonationPump) {
         let (tx, rx) = mpsc::channel::<PumpMsg>(PENDING_FLUSHES);
         let server = self.downgrade();
-        tokio::spawn(run_pump(rx, move |payload: String| {
+        xai_spawn::spawn(run_pump(rx, move |payload: String| {
             let server = server.clone();
             async move {
                 let Some(server) = server.upgrade() else {

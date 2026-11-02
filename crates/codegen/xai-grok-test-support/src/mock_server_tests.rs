@@ -378,7 +378,7 @@ async fn overlapping_duplicate_replays_but_sequential_identical_request_claims_n
         response = &mut primary => panic!("primary completed before barrier: {:?}", response.0),
         _ = first.wait_blocked() => {}
     }
-    let replay = tokio::spawn({
+    let replay = xai_spawn::spawn({
         let url = endpoint_url(&server, InferenceEndpoint::Responses);
         let body = foreground_body(InferenceEndpoint::Responses, "same body");
         async move {
@@ -518,7 +518,7 @@ async fn cancelling_replay_waits_for_primary_before_satisfaction() {
         _ = expected.wait_blocked() => {}
     }
 
-    let replay = tokio::spawn({
+    let replay = xai_spawn::spawn({
         let url = endpoint_url(&server, InferenceEndpoint::Responses);
         let body = foreground_body(InferenceEndpoint::Responses, "same body");
         async move {

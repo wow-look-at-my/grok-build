@@ -204,7 +204,7 @@ mod tests {
         mut rx: tokio::sync::mpsc::UnboundedReceiver<SessionCommand>,
         delay: Duration,
     ) -> tokio::task::JoinHandle<bool> {
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(cmd) = rx.recv().await {
                 if matches!(cmd, SessionCommand::Shutdown(_)) {
                     tokio::time::sleep(delay).await;
@@ -334,7 +334,7 @@ mod tests {
 
         // Actor 2 registers AFTER the flush has started (a relay-driven prompt racing the shutdown); it must still receive Shutdown
         let activity_late = activity.clone();
-        let late = tokio::spawn(async move {
+        let late = xai_spawn::spawn(async move {
             tokio::time::sleep(Duration::from_millis(100)).await;
             let (mut rx2, _p2, _i2) = activity_late.register_for_test("s2");
             while let Some(cmd) = rx2.recv().await {

@@ -71,7 +71,7 @@ pub async fn image_read_output(
     use crate::types::output::{ImageContent, ReadFileOutput};
     use base64::Engine as _;
 
-    let (encoded_bytes, mime) = match tokio::task::spawn_blocking(move || {
+    let (encoded_bytes, mime) = match xai_spawn::spawn_blocking(move || {
         compress_image_for_conversation(file_bytes, mime_type)
     })
     .await

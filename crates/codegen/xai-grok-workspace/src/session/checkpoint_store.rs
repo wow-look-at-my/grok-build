@@ -108,7 +108,7 @@ impl CheckpointStore {
         if src != dest.as_path() && src.exists() {
             let dest_copy = dest.clone();
             let copy_ok =
-                tokio::task::spawn_blocking(move || copy_checkpoint_blobs(&src, &dest_copy))
+                xai_spawn::spawn_blocking(move || copy_checkpoint_blobs(&src, &dest_copy))
                     .await
                     .unwrap_or(false);
             if !copy_ok {

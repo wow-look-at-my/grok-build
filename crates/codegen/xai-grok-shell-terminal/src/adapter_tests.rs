@@ -68,7 +68,7 @@ fn to_snapshot_derives_completed_and_end_time() {
 fn scripted_gateway(outputs: Vec<(String, bool)>) -> GatewaySender {
     use xai_acp_lib::AcpClientMessage;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut next = 0usize;
         let mut wait_reply: Option<
             tokio::sync::oneshot::Sender<xai_acp_lib::AcpResult<acp::WaitForTerminalExitResponse>>,
@@ -190,7 +190,7 @@ async fn run_background_records_snapshots_and_threads_task_kind() {
 fn output_unavailable_gateway() -> GatewaySender {
     use xai_acp_lib::AcpClientMessage;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpClientMessage::ReleaseTerminal(args) = msg {
                 let _ = args
@@ -240,7 +240,7 @@ fn kill_wait_gateway(
 ) -> GatewaySender {
     use xai_acp_lib::AcpClientMessage;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 AcpClientMessage::TerminalOutput(args) => {
@@ -303,7 +303,7 @@ async fn kill_task_unknown_id_probe_transport_failure_still_kills() {
     let sent = std::sync::Arc::new(Mutex::new(Vec::new()));
     let recorded = Arc::clone(&sent);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 AcpClientMessage::TerminalOutput(args) => {
@@ -536,7 +536,7 @@ async fn client_ui_kill_does_not_mark_delivered_if_waiter_drops_during_kill() {
     let kill_seen = std::sync::Arc::new(tokio::sync::Notify::new());
     let kill_seen_gateway = Arc::clone(&kill_seen);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut hold_kill = Some(hold_kill);
         while let Some(msg) = rx.recv().await {
             if let AcpClientMessage::KillTerminalCommand(args) = msg {
@@ -614,7 +614,7 @@ async fn model_tool_kill_marks_delivered_before_kill_rpc_returns() {
     let kill_seen = std::sync::Arc::new(tokio::sync::Notify::new());
     let kill_seen_gateway = Arc::clone(&kill_seen);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut hold_kill = Some(hold_kill);
         while let Some(msg) = rx.recv().await {
             if let AcpClientMessage::KillTerminalCommand(args) = msg {
@@ -850,7 +850,7 @@ async fn wait_for_completion_untracked_probe_transport_failure_still_waits() {
     let sent = std::sync::Arc::new(Mutex::new(Vec::new()));
     let recorded = Arc::clone(&sent);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 AcpClientMessage::TerminalOutput(args) => {
@@ -890,7 +890,7 @@ async fn wait_for_completion_race_with_exit_watcher_skips_the_polling_fallback()
     let tasks = Arc::clone(&adapter.tasks);
     let output_polls = std::sync::Arc::new(Mutex::new(0usize));
     let polls = Arc::clone(&output_polls);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 AcpClientMessage::WaitForTerminalExit(args) => {
@@ -957,7 +957,7 @@ async fn get_task_running_fills_output_from_log() {
 fn output_hangs_gateway() -> GatewaySender {
     use xai_acp_lib::AcpClientMessage;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut held = Vec::new();
         while let Some(msg) = rx.recv().await {
             match msg {
@@ -1047,7 +1047,7 @@ async fn list_tasks_preserves_running_output_from_log() {
 fn output_hangs_for_id_gateway(hang_id: &'static str) -> GatewaySender {
     use xai_acp_lib::AcpClientMessage;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut held = Vec::new();
         while let Some(msg) = rx.recv().await {
             match msg {

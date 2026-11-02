@@ -72,7 +72,7 @@ pub(crate) fn start_config_reload(
         update_tx,
         agent_config.memory_enabled_override,
     );
-    tokio::spawn(reloader.run(events_rx, cancel));
+    xai_spawn::spawn(reloader.run(events_rx, cancel));
     (Some(watcher), update_rx)
 }
 
@@ -136,7 +136,7 @@ pub fn spawn_config_reload(
         recursive_config_watch_enabled(),
         cancel.clone(),
     );
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let _watcher = watcher;
         loop {
             tokio::select! {

@@ -92,6 +92,7 @@ xai-file-utils = { path = "../xai-file-utils" }
 xai-grok-otel = { workspace = true }
 dhat = { workspace = true, optional = true }
 zstd = { workspace = true }
+xai-spawn = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 command-fds = { version = "0.3", features = ["tokio"] }

@@ -29,7 +29,7 @@ pub(super) fn drain_gateway(
     use crate::extensions::notification::{SessionNotification, SessionUpdate};
     let captured: CapturedRetries = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = captured.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::SessionNotification(args) => {
@@ -54,7 +54,7 @@ pub(super) fn drain_gateway(
 }
 
 pub(super) fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Ok(()));
@@ -127,7 +127,7 @@ pub(super) async fn actor_under_test(
         // Sampler-event drainer, matching the production run loop.
         let drainer = actor.clone();
         let mut sampler_event_rx = sampler_event_rx;
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(event) = sampler_event_rx.recv().await {
                 drainer.handle_sampling_event(event).await;
             }
@@ -483,7 +483,7 @@ async fn run_burst(n: usize, cap: usize) -> BurstMetrics {
     let handles: Vec<_> = turns
         .into_iter()
         .map(|(actor, request)| {
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 let mut budget = actor.rate_limit_wait_budget(None);
                 tokio::time::timeout(
                     Duration::from_secs(60),

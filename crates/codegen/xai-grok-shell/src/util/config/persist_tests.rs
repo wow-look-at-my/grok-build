@@ -1948,7 +1948,7 @@ async fn cancelled_blocking_save_holds_write_guard_until_worker_finishes() {
     let finished = Arc::new(AtomicBool::new(false));
     let started_w = started.clone();
     let finished_w = finished.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         guard
             .run_blocking(move || {
                 started_w.store(true, Ordering::SeqCst);

@@ -1120,7 +1120,7 @@ mod tests {
         let requests = Arc::new(AtomicUsize::new(0));
         let server_requests = Arc::clone(&requests);
 
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else {
                     return;

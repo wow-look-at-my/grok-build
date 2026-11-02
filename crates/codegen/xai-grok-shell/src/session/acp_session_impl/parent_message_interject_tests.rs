@@ -105,7 +105,7 @@ async fn interject_drains_ahead_of_an_earlier_steer_in_one_batch() {
         .await;
         let actor = Arc::new(actor);
         let persistence_log = Rc::new(RefCell::new(Vec::new()));
-        tokio::task::spawn_local({
+        xai_spawn::spawn_local({
             let persistence_log = Rc::clone(&persistence_log);
             async move {
                 while let Some(message) = persistence_rx.recv().await {

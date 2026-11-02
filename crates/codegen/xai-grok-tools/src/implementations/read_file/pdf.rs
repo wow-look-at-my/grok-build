@@ -48,7 +48,7 @@ where
 
     let result = tokio::time::timeout(
         timeout,
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| extract_fn(file_bytes)))
         }),
     )

@@ -227,7 +227,7 @@ pub async fn write_file(abs_path: &Path, content: &str, create_dirs: bool) -> Re
     let abs_path = abs_path.to_path_buf();
     let content = content.to_string();
 
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         if create_dirs && let Some(parent) = abs_path.parent() {
             std::fs::create_dir_all(parent)?;
         }

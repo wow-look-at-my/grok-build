@@ -1814,7 +1814,7 @@ mod tests {
         res.register_state::<ReportedTaskCompletions>();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         res.insert(SubagentEventSender(tx));
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(event) = rx.recv().await {
                 if let SubagentEvent::Completions(req) = event {
                     let filtered: Vec<_> = completions
@@ -2015,7 +2015,7 @@ mod tests {
         res.insert(crate::implementations::grok_build::task::types::GoalLoopActive(true));
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         res.insert(SubagentEventSender(tx));
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(SubagentEvent::Completions(req)) = rx.recv().await {
                 let _ = req
                     .respond_to

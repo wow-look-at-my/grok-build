@@ -425,7 +425,7 @@ async fn run(
             .preview
             .into_preview_args(cwd.clone(), status_config.preview_discovery_refresh_ms());
         let (tx, rx) = tokio::sync::watch::channel(false);
-        tokio::spawn(preview_supervisor::supervise_preview(cfg, rx));
+        xai_spawn::spawn(preview_supervisor::supervise_preview(cfg, rx));
         Some((tx, control_port))
     } else {
         None
@@ -461,7 +461,7 @@ async fn run(
         }
     };
     if let Some((tx, control_port)) = &preview_shutdown {
-        tokio::spawn(preview_supervisor::supervise_preview_activity(
+        xai_spawn::spawn(preview_supervisor::supervise_preview_activity(
             *control_port,
             std::sync::Arc::new(TrackerSink(ws_handle.activity_tracker().clone())),
             preview_scrape_interval,
@@ -499,7 +499,7 @@ async fn run(
     if metric_donation_pump.is_some()
         && let Some((tx, control_port)) = &preview_shutdown
     {
-        tokio::spawn(preview_supervisor::supervise_preview_metrics(
+        xai_spawn::spawn(preview_supervisor::supervise_preview_metrics(
             *control_port,
             tx.subscribe(),
         ));

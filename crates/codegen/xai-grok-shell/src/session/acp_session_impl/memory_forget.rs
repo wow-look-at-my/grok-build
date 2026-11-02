@@ -26,7 +26,7 @@ impl SessionActor {
         let path = PathBuf::from(path);
         let hash = expected_content_hash.to_owned();
         let session_id = self.session_info.id.to_string();
-        let result = tokio::task::spawn_blocking(move || forget_blocking(&storage, &path, &hash))
+        let result = xai_spawn::spawn_blocking(move || forget_blocking(&storage, &path, &hash))
             .await
             .unwrap_or_else(|error| {
                 rejected(

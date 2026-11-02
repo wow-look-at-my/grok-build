@@ -15,7 +15,7 @@ pub async fn git_status(working_directory: impl Into<PathBuf>) -> Result<String,
     let working_directory = working_directory.into();
     let permit = crate::git_odb::try_acquire_odb();
 
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let _permit = permit;
         git_status_impl(&working_directory)
     })
@@ -61,7 +61,7 @@ pub async fn git_status_short_pinned(
 
     // The git config read is blocking; keep it off the async scheduler.
     let pin_cwd = working_directory.clone();
-    let filter_pins = tokio::task::spawn_blocking(move || {
+    let filter_pins = xai_spawn::spawn_blocking(move || {
         crate::git_content_filters::content_filter_config_pins(&pin_cwd)
     })
     .await

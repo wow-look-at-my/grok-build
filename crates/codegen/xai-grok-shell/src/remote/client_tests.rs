@@ -35,7 +35,7 @@ async fn start_settings_server(
             async move { (status, body) }
         }),
     );
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, handle)
 }
 /// `fetch_settings_blocking` maps each HTTP outcome to the [`SettingsFetch`] variant the external-OTEL gate relies on.
@@ -54,7 +54,7 @@ async fn settings_fetch_maps_status_to_outcome() {
     for (status, body, expected) in cases {
         let (base, server) = start_settings_server(status, body.to_string()).await;
         let a = auth.clone();
-        let outcome = tokio::task::spawn_blocking(move || {
+        let outcome = xai_spawn::spawn_blocking(move || {
             fetch_settings_blocking_with_attempts(&base, &a, None, 1)
         })
         .await
@@ -171,7 +171,7 @@ async fn start_bundle_server(
             ),
         )
         .with_state(state);
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (format!("{base}/v1"), seen_headers, handle)
 }
 fn test_auth() -> GrokAuth {
@@ -890,7 +890,7 @@ async fn start_dual_bundle_server(
             }),
         )
         .with_state(state);
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (format!("{base}/v1"), handle)
 }
 #[tokio::test(flavor = "current_thread")]
@@ -981,7 +981,7 @@ async fn backend_client_resolves_auth_from_auth_manager() {
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let am = test_auth_manager();
     let client = BackendClient::with_base_url(format!("http://{addr}")).with_auth_manager(am);
     client
@@ -1374,7 +1374,7 @@ async fn start_models_listing_server(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     let app = axum::Router::new().route("/v1/models", get(move || async move { axum::Json(body) }));
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, handle)
 }
 /// The blocking /v1/models fetch parses per-model `context_window` and the
@@ -1396,7 +1396,7 @@ async fn fetch_models_for_api_base_blocking_parses_per_model_windows() {
     .await;
     let mock_url = format!("{base}/v1");
 
-    let entries = tokio::task::spawn_blocking(move || {
+    let entries = xai_spawn::spawn_blocking(move || {
         fetch_models_for_api_base_blocking(&mock_url, Some("test-key"))
             .expect("mock /v1/models should be reachable")
     })
@@ -1458,7 +1458,7 @@ async fn resolve_context_window_from_provider_reads_openrouter_context_length() 
     // own base, then matches the requested slug.
     let resolved = {
         let api_base = api_base.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             crate::agent::remote_config::resolve_context_window_from_provider(
                 "deepseek/deepseek-v4-pro-0813",
                 &api_base,
@@ -1490,7 +1490,7 @@ async fn resolve_context_window_from_provider_absent_slug_returns_none() {
     let api_base = format!("{base}/v1");
     let resolved = {
         let api_base = api_base.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             crate::agent::remote_config::resolve_context_window_from_provider(
                 "deepseek/deepseek-v4-pro-0813",
                 &api_base,
@@ -1532,7 +1532,7 @@ async fn start_counting_listing_server(
             }
         }),
     );
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, hits, handle)
 }
 
@@ -1542,7 +1542,7 @@ async fn resolve_all(api_base: &str, models: &[&str]) -> Vec<Option<std::num::No
     for model in models {
         let (api_base, model) = (api_base.to_owned(), (*model).to_owned());
         out.push(
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 crate::agent::remote_config::resolve_context_window_from_provider(
                     &model,
                     &api_base,

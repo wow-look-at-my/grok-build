@@ -97,7 +97,7 @@ fn park_blocking_workers(
     for _ in 0..n {
         let ready_tx = ready_tx.clone();
         let release = Arc::clone(release);
-        handle.spawn_blocking(move || {
+        xai_spawn::spawn_blocking_on(&handle, move || {
             let _ = ready_tx.send(std::thread::current());
             while !release.load(Ordering::Acquire) {
                 std::thread::park();

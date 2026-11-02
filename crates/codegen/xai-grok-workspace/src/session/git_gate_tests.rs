@@ -83,13 +83,13 @@ async fn concurrent_identical_status_joins_one_walk_from_subdir_or_root() {
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&walks), release.clone());
-        tokio::spawn(async move { gate.run(&root, status_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&root, status_op(), walk).await })
     };
     wait_for_count(&walks, 1).await;
     let t2 = {
         let gate = gate.clone();
         let walk = mk_walk(Arc::clone(&walks), release.clone());
-        tokio::spawn(async move { gate.run(&sub, status_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&sub, status_op(), walk).await })
     };
 
     tokio::time::sleep(Duration::from_millis(20)).await;
@@ -152,7 +152,7 @@ async fn joiners_do_not_start_a_second_walk() {
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&walks), release.clone());
-        tokio::spawn(async move { gate.run(&root, status_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&root, status_op(), walk).await })
     };
     wait_for_count(&walks, 1).await;
 
@@ -161,7 +161,7 @@ async fn joiners_do_not_start_a_second_walk() {
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&walks), release.clone());
-        joiners.push(tokio::spawn(async move {
+        joiners.push(xai_spawn::spawn(async move {
             gate.run(&root, status_op(), walk).await
         }));
     }
@@ -204,13 +204,13 @@ async fn status_and_diffs_never_overlap_odb_walks() {
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&in_walk), Arc::clone(&max_in_walk), 1);
-        tokio::spawn(async move { gate.run(&root, status_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&root, status_op(), walk).await })
     };
     let diffs = {
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&in_walk), Arc::clone(&max_in_walk), 2);
-        tokio::spawn(async move { gate.run(&root, diff_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&root, diff_op(), walk).await })
     };
 
     let a = status.await.unwrap().unwrap();
@@ -421,7 +421,7 @@ async fn invalidate_during_inflight_does_not_return_stale_walk() {
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&walks), release.clone());
-        tokio::spawn(async move { gate.run(&root, status_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&root, status_op(), walk).await })
     };
     wait_for_count(&walks, 1).await;
     gate.invalidate(repo.path());
@@ -430,7 +430,7 @@ async fn invalidate_during_inflight_does_not_return_stale_walk() {
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&walks), release.clone());
-        tokio::spawn(async move { gate.run(&root, status_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&root, status_op(), walk).await })
     };
 
     release.send(true).unwrap();
@@ -471,7 +471,7 @@ async fn waiter_timeout_after_invalidate_does_not_return_stale_ok() {
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&walks), release.clone());
-        tokio::spawn(async move { gate.run(&root, status_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&root, status_op(), walk).await })
     };
     wait_for_count(&walks, 1).await;
     gate.invalidate(repo.path());
@@ -480,7 +480,7 @@ async fn waiter_timeout_after_invalidate_does_not_return_stale_ok() {
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&walks), release.clone());
-        tokio::spawn(async move { gate.run(&root, status_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&root, status_op(), walk).await })
     };
 
     let second_result = tokio::time::timeout(Duration::from_secs(2), second)
@@ -539,7 +539,7 @@ async fn sustained_invalidate_during_inflight_run_returns_after_at_most_two_walk
         let gate = gate.clone();
         let root = repo.path().to_path_buf();
         let walk = mk_walk(Arc::clone(&walks), release.clone());
-        tokio::spawn(async move { gate.run(&root, status_op(), walk).await })
+        xai_spawn::spawn(async move { gate.run(&root, status_op(), walk).await })
     };
     wait_for_count(&walks, 1).await;
     gate.invalidate(repo.path());

@@ -38,6 +38,7 @@ xai-grok-workspace = { path = "../xai-grok-workspace" }
 xai-grok-workspace-daemon = { path = "../xai-grok-workspace-daemon" }
 xai-tool-protocol = { workspace = true }
 xai-tty-utils = { workspace = true }
+xai-spawn = { workspace = true }
 
 [features]
 default = ["sandbox-enforce"]

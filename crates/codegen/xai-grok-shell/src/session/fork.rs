@@ -103,7 +103,7 @@ pub async fn fork_session(
         ..Default::default()
     };
 
-    let result = tokio::task::spawn_blocking(move || {
+    let result = xai_spawn::spawn_blocking(move || {
         storage.copy_session_data_sync(&source_info, &target_info, options)
     })
     .await
@@ -121,7 +121,7 @@ pub async fn fork_session(
         let model = request.new_model_id.clone();
         let aid = agent_id.to_string();
         let session_agent_id = result.agent_id.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             if let Err(e) = sync_forked_session_to_backend(
                 &sid,
                 &cwd,

@@ -203,7 +203,7 @@ impl Drop for AbortMultipartOnDrop {
         let bucket = std::mem::take(&mut self.bucket);
         let key = std::mem::take(&mut self.key);
         let upload_id = std::mem::take(&mut self.upload_id);
-        handle.spawn(async move {
+        xai_spawn::spawn_on(&handle, async move {
             let request = abort_request(&bucket, &key, &upload_id);
             let abort = client.send(&request);
             let _ = tokio::time::timeout(std::time::Duration::from_secs(30), abort).await;
@@ -837,7 +837,7 @@ mod tests {
         let (router, state) = mock_s3_router();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         (format!("http://{addr}"), state)
@@ -869,7 +869,7 @@ mod tests {
         let router = Router::new().route("/{bucket}/{*key}", put(put_handler));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         format!("http://{addr}")
@@ -947,7 +947,7 @@ mod tests {
         let router = Router::new().route("/{bucket}/{*key}", axum_head(h));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         format!("http://{addr}")
@@ -1041,7 +1041,7 @@ mod tests {
         let router = Router::new().route("/{bucket}/{*key}", axum_head(head_handler));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         let endpoint = format!("http://{addr}");
@@ -1349,7 +1349,7 @@ mod tests {
             ));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
 
@@ -1452,7 +1452,7 @@ mod tests {
             ));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
 
@@ -1546,7 +1546,7 @@ mod tests {
         let router = Router::new().route("/{bucket}/{*key}", put(put_handler));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         let err = upload_bytes(

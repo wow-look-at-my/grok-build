@@ -2117,7 +2117,7 @@ impl Drop for CancelOnDrop {
             return;
         };
         let peer = self.peer.clone();
-        runtime.spawn(async move {
+        xai_spawn::spawn_on(&runtime, async move {
             let params = rmcp::model::CancelledNotificationParam::new(
                 Some(request_id.clone()),
                 Some("client cancelled".to_owned()),
@@ -2663,7 +2663,7 @@ impl SafeTokioChildProcess {
         // Launch the child on a background thread so the session thread is never blocked
         // Take ownership of its group in that same step so the returned guard owns the child from the moment it exists
         // See `SpawnGuard` for what happens if the launch is cancelled
-        let mut guard = tokio::task::spawn_blocking(move || -> std::io::Result<SpawnGuard> {
+        let mut guard = xai_spawn::spawn_blocking(move || -> std::io::Result<SpawnGuard> {
             #[allow(clippy::disallowed_methods)] // group ownership is taken below, in this task
             let child = cmd.spawn()?;
             // Best effort: without a group we can still clean up the child itself.
@@ -2784,7 +2784,7 @@ impl Drop for SafeTokioChildProcess {
         };
 
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
+            xai_spawn::spawn_on(&handle, async move {
                 if let Err(e) = child.kill().await {
                     tracing::warn!("Error killing MCP child process: {e}");
                 }
@@ -4271,7 +4271,7 @@ impl McpClient {
         // Write each descriptor atomically (temp file + rename) so a concurrent reader never sees a half-written JSON
         // Overlapping writers converge without a lock
         let tools_dir = server_dir.join("tools");
-        tokio::task::spawn_blocking(move || -> Result<usize, McpError> {
+        xai_spawn::spawn_blocking(move || -> Result<usize, McpError> {
             std::fs::create_dir_all(&tools_dir).map_err(|e| {
                 McpError::ClientError(format!(
                     "failed to create MCP tools descriptor dir {}: {e}",
@@ -4553,7 +4553,7 @@ fn drain_mcp_stderr_to_log(server_name: &str, mut stderr: tokio::process::ChildS
     // Guarded so the drain dying is attributed to this server: the log file
     // stops growing otherwise, which reads as a server that printed nothing.
     #[allow(clippy::disallowed_methods)]
-    tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+    xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
         "mcp stderr drain",
         async move {
             if let Err(e) = tokio::io::copy(&mut stderr, &mut file).await {

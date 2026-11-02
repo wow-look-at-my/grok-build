@@ -84,7 +84,7 @@ pub async fn run_cell(cell: &MatrixCell, binary: &Path, artifacts_dir: &Path) ->
         Ok(()) => {
             let handle = tokio::runtime::Handle::current();
             let (binary, inner_log) = (binary.to_path_buf(), log_path.clone());
-            let task = tokio::task::spawn_blocking(move || {
+            let task = xai_spawn::spawn_blocking(move || {
                 handle.block_on(run_cell_inner(cell, &binary, &inner_log))
             });
             match tokio::time::timeout(CELL_HARD_CAP, task).await {

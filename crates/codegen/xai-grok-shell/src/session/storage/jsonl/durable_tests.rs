@@ -34,7 +34,7 @@ async fn ordinary_and_durable_appends_keep_every_physical_line_parseable() {
     let durable = adapter.clone();
     let info_a = info.clone();
     let info_b = info.clone();
-    let ordinary = tokio::spawn(async move {
+    let ordinary = xai_spawn::spawn(async move {
         for index in 0..N {
             ordinary
                 .append_update(&info_a, &update(&info_a, format!("ordinary-{index}")))
@@ -42,7 +42,7 @@ async fn ordinary_and_durable_appends_keep_every_physical_line_parseable() {
                 .unwrap();
         }
     });
-    let durable = tokio::spawn(async move {
+    let durable = xai_spawn::spawn(async move {
         for index in 0..N {
             durable
                 .append_update_durable_commit_aware(

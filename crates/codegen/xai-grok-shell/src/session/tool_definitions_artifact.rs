@@ -61,7 +61,7 @@ fn write_tool_definitions_bytes(dir: &Path, bytes: &[u8]) -> io::Result<()> {
 ///
 /// Any `io::Error` from creating the directory or writing the file; a blocking-task join failure surfaces as `Other`.
 async fn write_tool_definitions_artifact(info: Info, bytes: Vec<u8>) -> io::Result<()> {
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let dir = crate::session::persistence::ensure_owner_only_session_dir(&info)?;
         write_tool_definitions_bytes(&dir, &bytes)
     })

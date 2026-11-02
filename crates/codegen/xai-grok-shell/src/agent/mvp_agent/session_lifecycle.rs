@@ -140,7 +140,7 @@ impl MvpAgent {
         self.finalize_spy.borrow_mut().push(id.0.to_string());
         if let Some(client) = self.session_registry_client() {
             let sid = id.0.to_string();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 if let Err(e) = client.finalize(&sid).await {
                     tracing::warn!(error = %e, "session registry finalize failed (non-fatal)");
                 }
@@ -545,7 +545,7 @@ impl MvpAgent {
         self.supervisor_spawn_count
             .set(self.supervisor_spawn_count.get() + 1);
         let agent_ref = LocalRef::new(self);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             loop {
                 tokio::time::sleep(SESSION_SUPERVISOR_TICK).await;
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

@@ -59,7 +59,7 @@ impl Harness {
             tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
         // Drop each message rather than hold the queue: that drops any ack channel inside it
         // A writer waiting on one then fails fast instead of waiting forever
-        tokio::task::spawn_local(async move { while persistence.recv().await.is_some() {} });
+        xai_spawn::spawn_local(async move { while persistence.recv().await.is_some() {} });
         let (mut actor, events) =
             create_test_actor_ex(0, 256_000, 85, gateway_tx, persistence_tx).await;
         if let Some(dir) = hook_workspace.as_ref() {
@@ -121,7 +121,7 @@ impl Harness {
         let fired = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let sink = fired.clone();
         let mut gateway = self.gateway.take().expect("the loop owns the gateway");
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(msg) = gateway.recv().await {
                 match msg {
                     xai_acp_lib::AcpClientMessage::ExtNotification(args) => {
@@ -137,7 +137,7 @@ impl Harness {
                 }
             }
         });
-        tokio::task::spawn_local(super::run_session(
+        xai_spawn::spawn_local(super::run_session(
             self.actor.clone(),
             cmd_rx,
             chat_rx,
@@ -173,7 +173,7 @@ impl Harness {
         prompt_id: &str,
     ) -> tokio::sync::oneshot::Receiver<PromptTurnResult> {
         let (item, rx) = super::turn_completion_emit_tests::pending_input(prompt_id);
-        let handle = tokio::task::spawn_local(async {
+        let handle = xai_spawn::spawn_local(async {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         })
         .abort_handle();
@@ -182,7 +182,7 @@ impl Harness {
     }
 
     async fn start_turn(&self, prompt_id: &str) {
-        let handle = tokio::task::spawn_local(async {
+        let handle = xai_spawn::spawn_local(async {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         })
         .abort_handle();
@@ -298,7 +298,7 @@ async fn interrupting_a_parked_stop_gate_still_reports() {
             h.listen(&[HookEventName::Stop, HookEventName::StopCancelled]);
 
             let actor = h.actor.clone();
-            let gate = tokio::task::spawn_local(async move { actor.run_stop_gate("p1", 0).await });
+            let gate = xai_spawn::spawn_local(async move { actor.run_stop_gate("p1", 0).await });
             h.run_turn("p1", user_item("p1", "test"), gate.abort_handle())
                 .await;
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -950,7 +950,7 @@ async fn stale_completion_does_not_post_process_the_successor_turn() {
 
         let live_epoch = h.actor.turn_report.start_next_turn();
         let (item, mut response_rx) = super::turn_completion_emit_tests::pending_input("same");
-        let handle = tokio::task::spawn_local(std::future::pending::<()>()).abort_handle();
+        let handle = xai_spawn::spawn_local(std::future::pending::<()>()).abort_handle();
         {
             let mut state = h.actor.state.lock().await;
             state.pending_inputs.push_back(item);

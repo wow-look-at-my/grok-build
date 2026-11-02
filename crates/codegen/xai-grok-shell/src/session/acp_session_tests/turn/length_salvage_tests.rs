@@ -149,7 +149,7 @@ async fn salvage_test_actor_on_backend(
     {
         let drainer = actor.clone();
         let mut sampler_event_rx = sampler_event_rx;
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(event) = sampler_event_rx.recv().await {
                 drainer.handle_sampling_event(event).await;
             }

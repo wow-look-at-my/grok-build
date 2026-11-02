@@ -119,7 +119,7 @@ fn lock_install_registry_at(
 pub(crate) async fn run_blocking<T: Send + 'static>(
     f: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, tokio::task::JoinError> {
-    tokio::task::spawn_blocking(f).await
+    xai_spawn::spawn_blocking(f).await
 }
 
 /// Registry lock + fresh load + `op`, on the blocking pool. Marketplace
@@ -761,7 +761,7 @@ mod tests {
         let ticks = Rc::new(Cell::new(0u32));
         let ticker_ticks = Rc::clone(&ticks);
         rt.block_on(local.run_until(async move {
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 loop {
                     tokio::time::sleep(Duration::from_millis(5)).await;
                     ticker_ticks.set(ticker_ticks.get() + 1);

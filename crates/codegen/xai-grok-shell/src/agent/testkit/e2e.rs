@@ -50,22 +50,22 @@ pub async fn load_session_via_agent<C: acp::Client + 'static>(
     let agent_incoming = LineBufferedRead::spawn_local(c2a_b.compat());
     let (agent_conn, agent_io) =
         acp::AgentSideConnection::new(agent, a2c_a.compat_write(), agent_incoming, |fut| {
-            tokio::task::spawn_local(fut);
+            xai_spawn::spawn_local(fut);
         });
-    tokio::task::spawn_local(
+    xai_spawn::spawn_local(
         GatewayReceiver::new(gw_rx, agent_conn)
             .with_on_meta(xai_grok_otel::span_from_meta_traceparent)
             .run(),
     );
-    tokio::task::spawn_local(agent_io);
+    xai_spawn::spawn_local(agent_io);
 
     // Client side.
     let client_incoming = LineBufferedRead::spawn_local(a2c_b.compat());
     let (client_conn, client_io) =
         acp::ClientSideConnection::new(client, c2a_a.compat_write(), client_incoming, |fut| {
-            tokio::task::spawn_local(fut);
+            xai_spawn::spawn_local(fut);
         });
-    tokio::task::spawn_local(client_io);
+    xai_spawn::spawn_local(client_io);
 
     use acp::Agent as _;
 

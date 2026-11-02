@@ -285,7 +285,7 @@ impl AuthProvider for LeaderAuthProvider {
             let guard = ClaimGuard(Arc::clone(&self.refresh_in_flight));
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 let am = Arc::clone(&self.auth_manager);
-                handle.spawn(async move {
+                xai_spawn::spawn_on(&handle, async move {
                     let _guard = guard;
                     if let Err(e) = am.auth().await {
                         tracing::debug!(error = %e, "leader hub auth: background refresh failed");
@@ -1314,7 +1314,7 @@ async fn handle_stop_cpu_profile(
         manager.take_stop_handle()?
     };
     let pid = control_state.metadata.pid;
-    let result = tokio::task::spawn_blocking(move || stop_handle.finish()).await;
+    let result = xai_spawn::spawn_blocking(move || stop_handle.finish()).await;
     control_state.cpu_profile.lock().complete_stop();
     let result = result.map_err(|join_error| ControlError {
         code: ControlErrorCode::InternalError,
@@ -1361,7 +1361,7 @@ async fn finalize_cpu_profile_on_shutdown(control_state: LeaderServerControlStat
         }
         return;
     };
-    let result = tokio::task::spawn_blocking(move || stop_handle.finish()).await;
+    let result = xai_spawn::spawn_blocking(move || stop_handle.finish()).await;
     control_state.cpu_profile.lock().complete_stop();
     match result {
         Ok(Ok(result)) => {
@@ -1641,7 +1641,7 @@ pub async fn run_leader_server(
                         let client_tx = client.tx.clone();
                         let control_state = control_state.clone();
                         let cancel = cancel.clone();
-                        tokio::spawn(async move {
+                        xai_spawn::spawn(async move {
                             let result = match command {
                                 ControlCommand::StopCpuProfile => {
                                     handle_stop_cpu_profile(control_state).await
@@ -2239,7 +2239,7 @@ fn spawn_client_handler(
     ready_rx: watch::Receiver<bool>,
     control_state: LeaderServerControlState,
 ) {
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let result = run_client_session(
             client_id,
             stream,
@@ -2521,7 +2521,7 @@ pub async fn spawn_leader_server(socket_path: PathBuf) -> Result<ServerHandle, S
     let agent_busy_clone = agent_busy.clone();
     let control_state_for_server = control_state.clone();
     let shutdown_tx_for_server = shutdown_tx.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         if let Err(e) = run_leader_server(
             socket_path_clone,
             acp_tx,

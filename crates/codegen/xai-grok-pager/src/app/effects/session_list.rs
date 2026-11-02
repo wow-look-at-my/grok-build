@@ -84,7 +84,7 @@ pub(super) async fn parse_session_picker_entries_blocking(
     payload: Value,
     presence: LocalPresence,
 ) -> Result<Vec<SessionPickerEntry>, String> {
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         parse_session_picker_entries_with(payload, presence, |ids| {
             resolve_local_session_ids_any_cwd(ids).map_err(|error| error.to_string())
         })

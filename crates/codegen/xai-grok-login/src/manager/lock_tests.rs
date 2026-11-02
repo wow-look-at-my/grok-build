@@ -578,7 +578,7 @@ async fn waiter_survives_sibling_recovery_on_live_inode() {
     let inode_before = inode_of(&lock_path);
 
     let waiter_path = path.clone();
-    let waiter = tokio::spawn(async move {
+    let waiter = xai_spawn::spawn(async move {
         try_lock_auth_file_async(&waiter_path, StdDuration::from_secs(10), Heartbeat::Skip)
             .await
             .into_guard()

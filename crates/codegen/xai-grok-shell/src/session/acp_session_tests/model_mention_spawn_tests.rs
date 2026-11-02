@@ -54,7 +54,7 @@ fn recording_coordinator(
     actor.tool_context.subagent_event_tx = Some(tx);
     let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let sink = seen.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let mut running = Vec::new();
         while let Some(event) = rx.recv().await {
             if let SubagentEvent::Spawn(mut spawn) = event {

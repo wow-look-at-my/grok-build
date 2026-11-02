@@ -50,7 +50,7 @@ impl WorkspaceOp for FsListReq {
         let (abs, confine_root) = ws.confine_to_workspace_root(&abs_unconfined).await?;
         // `list` does a synchronous walk and metadata syscalls
         let req = self.clone();
-        tokio::task::spawn_blocking(move || list(&abs, &req, confine_root))
+        xai_spawn::spawn_blocking(move || list(&abs, &req, confine_root))
             .await
             .map_err(|e| WorkspaceError::HubError(e.to_string()))?
     }
@@ -123,7 +123,7 @@ impl WorkspaceOp for FsWriteFileReq {
         let (abs, _) = ws.confine_to_workspace_root(&abs_unconfined).await?;
         let content = self.content.clone();
         let create_dirs = self.create_dirs;
-        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        xai_spawn::spawn_blocking(move || -> std::io::Result<()> {
             if create_dirs && let Some(parent) = abs.parent() {
                 std::fs::create_dir_all(parent)?;
             }

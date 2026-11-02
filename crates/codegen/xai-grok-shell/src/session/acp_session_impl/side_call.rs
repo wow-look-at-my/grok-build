@@ -355,13 +355,13 @@ mod aux_retry_tests {
         let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
         let on_bad = Arc::new(AtomicUsize::new(0));
         let on_bad_server = Arc::clone(&on_bad);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut accepted = 0usize;
             while let Ok((mut sock, _)) = listener.accept().await {
                 accepted += 1;
                 let bad = accepted == 1;
                 let on_bad = Arc::clone(&on_bad_server);
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     let mut buf: Vec<u8> = Vec::new();
                     loop {
                         let head_end = loop {

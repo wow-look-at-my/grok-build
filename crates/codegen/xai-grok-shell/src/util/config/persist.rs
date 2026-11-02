@@ -107,7 +107,7 @@ impl ConfigWriteGuard {
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let _guard = self;
             f()
         })
@@ -120,7 +120,7 @@ impl ConfigWriteGuard {
 pub(crate) async fn lock_config_writes() -> std::io::Result<ConfigWriteGuard> {
     let save = SAVE_LOCK.lock().await;
     let grok_home = crate::util::grok_home::grok_home();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let flock = acquire_init_lock(&grok_home)?;
         Ok(ConfigWriteGuard {
             _save: save,

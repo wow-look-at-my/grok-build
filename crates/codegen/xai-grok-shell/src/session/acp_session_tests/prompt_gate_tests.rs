@@ -43,7 +43,7 @@ fn spawn_persistence_drain(
 ) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
     let annotations = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let sink = annotations.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 PersistenceMsg::FlushAndAck { respond_to } => {
@@ -253,7 +253,7 @@ async fn synthetic_prompt_ignores_hook_block() {
 
             // `task-completed-*` derives a TaskCompleted (synthetic) origin.
             let turn_actor = actor.clone();
-            let turn = tokio::task::spawn_local(async move {
+            let turn = xai_spawn::spawn_local(async move {
                 Box::pin(turn_actor.handle_prompt(
                     "task-completed-t1",
                     text_prompt("task finished"),
@@ -320,7 +320,7 @@ async fn subagent_session_ignores_hook_block() {
             )));
 
             let turn_actor = actor.clone();
-            let turn = tokio::task::spawn_local(async move {
+            let turn = xai_spawn::spawn_local(async move {
                 Box::pin(turn_actor.handle_prompt(
                     "p-user",
                     text_prompt("a real user prompt"),
@@ -650,7 +650,7 @@ async fn synthetic_prompt_commits_despite_blocking_hook() {
 
             // `task-completed-*` derives a TaskCompleted (synthetic) origin.
             let turn_actor = actor.clone();
-            let turn = tokio::task::spawn_local(async move {
+            let turn = xai_spawn::spawn_local(async move {
                 Box::pin(turn_actor.handle_prompt(
                     "task-completed-t1",
                     text_prompt("the wake text must commit"),
@@ -782,7 +782,7 @@ fn spawn_persistence_capture(
 ) -> std::rc::Rc<std::cell::RefCell<Vec<String>>> {
     let captured = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let sink = captured.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 PersistenceMsg::FlushAndAck { respond_to } => {

@@ -241,15 +241,15 @@ pub fn spawn_agent_thread(name: &str) -> (acp_harness::AgentPipes, AgentThread) 
                     a2c_agent.compat_write(),
                     agent_incoming,
                     |fut| {
-                        tokio::task::spawn_local(fut);
+                        xai_spawn::spawn_local(fut);
                     },
                 );
-                tokio::task::spawn_local(
+                xai_spawn::spawn_local(
                     GatewayReceiver::new(gw_rx, agent_conn)
                         .with_on_meta(xai_grok_otel::span_from_meta_traceparent)
                         .run(),
                 );
-                tokio::task::spawn_local(agent_io);
+                xai_spawn::spawn_local(agent_io);
                 let _ = shutdown_rx.await;
             });
         })

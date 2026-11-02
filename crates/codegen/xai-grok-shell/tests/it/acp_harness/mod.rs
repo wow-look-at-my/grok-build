@@ -140,14 +140,14 @@ fn spawn_agent_local(remote: Option<xai_grok_shell::util::config::RemoteSettings
     let agent_incoming = LineBufferedRead::spawn_local(c2a_b.compat());
     let (agent_conn, agent_io) =
         acp::AgentSideConnection::new(agent, a2c_a.compat_write(), agent_incoming, |fut| {
-            tokio::task::spawn_local(fut);
+            xai_spawn::spawn_local(fut);
         });
-    tokio::task::spawn_local(
+    xai_spawn::spawn_local(
         GatewayReceiver::new(gw_rx, agent_conn)
             .with_on_meta(xai_grok_otel::span_from_meta_traceparent)
             .run(),
     );
-    tokio::task::spawn_local(agent_io);
+    xai_spawn::spawn_local(agent_io);
 
     AgentPipes {
         to_agent: c2a_a,
@@ -197,9 +197,9 @@ where
     let client_incoming = LineBufferedRead::spawn_local(from_agent.compat());
     let (client_conn, client_io) =
         acp::ClientSideConnection::new(client, to_agent.compat_write(), client_incoming, |fut| {
-            tokio::task::spawn_local(fut);
+            xai_spawn::spawn_local(fut);
         });
-    tokio::task::spawn_local(client_io);
+    xai_spawn::spawn_local(client_io);
 
     let init = tokio::time::timeout(
         RPC_TIMEOUT,

@@ -168,7 +168,7 @@ impl PullDiagnostics {
         // The handle has no waiter by design: every round inside is `guarded`, and
         // the `finish` below releases the slot whether the round answered or died.
         #[allow(clippy::disallowed_methods)]
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 // Guarded so the slot cannot outlive its task: `begin`
                 // reports a pull running until `finish` says otherwise.

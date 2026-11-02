@@ -1443,7 +1443,7 @@ impl StorageClient {
             let client = self.raw_http_client.clone();
             let retry_config = self.retry_config.clone();
 
-            let task = tokio::spawn(async move {
+            let task = xai_spawn::spawn(async move {
                 let _permit = permit;
                 tracing::debug!(
                     "Part {} starting direct upload: offset={}, length={} bytes",
@@ -1510,7 +1510,7 @@ impl StorageClient {
             let file = shared_file.clone();
             let retry_config = self.retry_config.clone();
 
-            let task = tokio::spawn(async move {
+            let task = xai_spawn::spawn(async move {
                 let _permit = permit;
                 tracing::debug!(
                     "Part {} starting proxy upload: offset={}, length={} bytes",
@@ -1966,7 +1966,7 @@ fn create_read_at_stream(
 ) -> ReceiverStream<Result<Bytes, std::io::Error>> {
     let (tx, rx) = tokio::sync::mpsc::channel(4); // Small buffer for backpressure
 
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let mut current_offset = start_offset;
         let end_offset = start_offset + length;
         let mut buf = vec![0u8; READ_AT_CHUNK_SIZE];
@@ -2175,7 +2175,7 @@ mod download_blob_tests {
     async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         (addr, handle)
@@ -2279,7 +2279,7 @@ mod batch_check_exists_tests {
     async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         (addr, handle)
@@ -2500,7 +2500,7 @@ mod check_exists_tests {
     async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         (addr, handle)
@@ -2623,7 +2623,7 @@ mod batch_upload_tests {
     async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         (addr, handle)
@@ -2952,7 +2952,7 @@ mod batch_upload_json_tests {
     async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         (addr, handle)
@@ -3175,7 +3175,7 @@ mod forbidden_tests {
     async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
         (addr, handle)

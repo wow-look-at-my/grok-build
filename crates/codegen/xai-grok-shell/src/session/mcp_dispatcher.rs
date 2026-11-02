@@ -695,7 +695,7 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async move {
-                let dispatcher = tokio::task::spawn_local(run_dispatcher(
+                let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                     "sess-1".to_string(),
                     rx,
                     gateway,
@@ -1314,7 +1314,7 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async move {
-                let dispatcher = tokio::task::spawn_local(run_dispatcher(
+                let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                     "sess-1".to_string(),
                     rx,
                     gateway,
@@ -1389,7 +1389,7 @@ mod tests {
         let local = tokio::task::LocalSet::new();
         local
             .run_until(async move {
-                let dispatcher = tokio::task::spawn_local(run_dispatcher(
+                let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                     "sess-1".to_string(),
                     rx,
                     gateway,

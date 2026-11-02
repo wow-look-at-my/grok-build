@@ -59,7 +59,7 @@ pub(crate) async fn initialize_v2_memory(
         })?;
     // SQLite migration/reconciliation and root canonicalization: keep them off the actor's LocalSet.
     let blocking_storage = storage.clone();
-    let policy = tokio::task::spawn_blocking(move || {
+    let policy = xai_spawn::spawn_blocking(move || {
         let storage = blocking_storage;
         let clock = xai_grok_memory::system_v2_clock();
         for (scope_dir, scope) in [

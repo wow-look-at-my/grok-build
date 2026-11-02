@@ -785,7 +785,7 @@ async fn rmw_mcp_toml(
             .await
             .map_err(|e| anyhow::anyhow!("config write task failed: {e}"))?
     } else {
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             rmw_mcp_toml_project(&path, missing, f, skip_if_unchanged)
         })
         .await
@@ -812,7 +812,7 @@ async fn persist_mcp_toml(path: &std::path::Path, toml_str: &str) -> Result<()> 
             .await
             .map_err(|e| anyhow::anyhow!("config write task failed: {e}"))?
     } else {
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             super::persist::atomic_replace_string(&path, &toml_str)
                 .map_err(|e| anyhow::anyhow!("failed to write {}: {e}", path.display()))
         })

@@ -240,7 +240,7 @@ pub(crate) fn strip_url_credentials(url_str: &str) -> String {
 /// Runs repository discovery off-thread since it walks parent directories.
 pub(crate) async fn resolve_git_repo_info(cwd: &str) -> (Option<String>, Option<String>) {
     let cwd = cwd.to_owned();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         use xai_gix_status::discover;
         let repo = discover::discover(std::path::Path::new(&cwd))?;
         let repo_root = discover::workdir(&repo).map(|p| p.to_string_lossy().to_string());
@@ -274,7 +274,7 @@ async fn fill_git_fields(metadata: &mut PromptMetadata, cwd: &str) {
         "git".to_owned()
     } else {
         let cwd = cwd.to_owned();
-        tokio::task::spawn_blocking(move || classify_workspace(&cwd))
+        xai_spawn::spawn_blocking(move || classify_workspace(&cwd))
             .await
             .unwrap_or_else(|_| "non_project".to_owned())
     });
@@ -835,7 +835,7 @@ pub(crate) async fn upload_session_metadata(
 /// Only entries belonging to the current session (matching `sid`) are included. The snapshot runs on a blocking thread since `snapshot_session_log` reads and parses the on-disk log file.
 pub(crate) async fn upload_unified_log(ctx: &PromptTraceContext, wait: UploadWait) {
     let session_id = ctx.session_info.id.0.to_string();
-    let log_bytes = match tokio::task::spawn_blocking(move || {
+    let log_bytes = match xai_spawn::spawn_blocking(move || {
         xai_grok_telemetry::unified_log::snapshot_session_log(&session_id)
     })
     .await
@@ -873,7 +873,7 @@ pub(crate) async fn upload_unified_log(ctx: &PromptTraceContext, wait: UploadWai
     )
     .await;
     let full_log_bytes =
-        tokio::task::spawn_blocking(xai_grok_telemetry::unified_log::snapshot_log).await;
+        xai_spawn::spawn_blocking(xai_grok_telemetry::unified_log::snapshot_log).await;
     let user_id = ctx
         .auth_manager
         .current_or_expired()
@@ -997,7 +997,7 @@ pub(crate) async fn build_chat_history_session_state(
     messages: &[xai_grok_sampling_types::conversation::ConversationItem],
 ) -> Result<Vec<u8>, SessionStateBuildError> {
     let jsonl = serialize_chat_history_jsonl(messages)?;
-    match tokio::task::spawn_blocking(move || compress_chat_history_archive(jsonl)).await {
+    match xai_spawn::spawn_blocking(move || compress_chat_history_archive(jsonl)).await {
         Ok(result) => result,
         Err(e) => Err(session_state_archive_join_error(e)),
     }
@@ -1141,7 +1141,7 @@ pub(crate) fn spawn_startup_spill_reconcile(
     if !claim_spill_reconcile(&SPILL_RECONCILE_STATE, queue.is_some()) {
         return;
     }
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         match queue {
             Some(queue) => {
                 let report =
@@ -1150,7 +1150,7 @@ pub(crate) fn spawn_startup_spill_reconcile(
                 queue.cleanup_orphans(xai_file_utils::queue::DEFAULT_MAX_AGE);
             }
             None => {
-                let purged = tokio::task::spawn_blocking(move || {
+                let purged = xai_spawn::spawn_blocking(move || {
                     xai_grok_workspace::recovery::purge_spilled_items(&grok_home)
                 })
                 .await;
@@ -1263,7 +1263,7 @@ pub(crate) fn spawn_purge_stale_upload_scratch() {
             }
         };
         if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::task::spawn_blocking(run);
+            xai_spawn::spawn_blocking(run);
         } else {
             std::thread::spawn(run);
         }
@@ -2747,7 +2747,7 @@ pub(crate) mod tests {
         ));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut held = Vec::new();
             while let Ok((stream, _)) = listener.accept().await {
                 held.push(stream);

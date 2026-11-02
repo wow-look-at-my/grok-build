@@ -168,7 +168,7 @@ impl ManagedConfigRefresher {
     ) -> Self {
         let cancel = parent.child_token();
         let stop = cancel.clone();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             tokio::select! {
                 // Biased: an already-cancelled token must not even start the work.
                 biased;
@@ -471,7 +471,7 @@ pub async fn ensure_managed_policy_present(
 async fn refreshed_team_principal(
     auth_manager: &std::sync::Arc<xai_grok_login::AuthManager>,
 ) -> Option<GrokAuth> {
-    let refresh = tokio::spawn({
+    let refresh = xai_spawn::spawn({
         let auth_manager = auth_manager.clone();
         async move { auth_manager.auth().await }
     });

@@ -205,7 +205,7 @@ impl HunkTrackerActor {
             cancellation_token,
         );
 
-        tokio::spawn(actor.run());
+        xai_spawn::spawn(actor.run());
 
         HunkTrackerHandle::new(cmd_tx)
     }

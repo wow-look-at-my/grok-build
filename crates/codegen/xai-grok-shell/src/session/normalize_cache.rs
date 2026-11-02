@@ -153,7 +153,7 @@ where
     F: FnOnce() -> Result<T, NormalizeError> + Send + 'static,
     T: Send + 'static,
 {
-    match tokio::task::spawn_blocking(work).await {
+    match xai_spawn::spawn_blocking(work).await {
         Ok(r) => r,
         Err(e) => Err(NormalizeError(format!("join error: {e}"))),
     }
@@ -257,7 +257,7 @@ mod tests {
             let cache = cache.clone();
             let counter = counter.clone();
             let raw = raw.clone();
-            handles.push(tokio::spawn(async move {
+            handles.push(xai_spawn::spawn(async move {
                 cache
                     .get_or_try_insert_with(raw, HarnessVariant::Default, move |_| async move {
                         counter.fetch_add(1, Ordering::SeqCst);

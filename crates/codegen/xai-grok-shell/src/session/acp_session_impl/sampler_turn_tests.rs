@@ -181,7 +181,7 @@ mod subagent_sampling_gate_tests {
             let gate = Some(semaphore.clone());
             let probe = probe.clone();
             let ran = ran.clone();
-            handles.push(tokio::spawn(async move {
+            handles.push(xai_spawn::spawn(async move {
                 let permit = acquire_subagent_sampling_permit(&gate).await;
                 assert!(permit.is_some(), "a subagent turn must receive a permit");
                 probe.enter();
@@ -213,7 +213,7 @@ mod subagent_sampling_gate_tests {
         let held = acquire_subagent_sampling_permit(&gate).await;
         assert!(held.is_some());
 
-        let waiter = tokio::spawn({
+        let waiter = xai_spawn::spawn({
             let gate = gate.clone();
             async move {
                 let _permit = acquire_subagent_sampling_permit(&gate).await;

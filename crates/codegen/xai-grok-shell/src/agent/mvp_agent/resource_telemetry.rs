@@ -88,7 +88,7 @@ impl MvpAgent {
             return;
         }
         let agent_ref = LocalRef::new(self);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             loop {
                 tokio::time::sleep(REPORT_POLL_INTERVAL).await;
                 let reported = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

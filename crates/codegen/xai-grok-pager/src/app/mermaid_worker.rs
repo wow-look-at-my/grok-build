@@ -1083,7 +1083,9 @@ impl AgentView {
         };
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
-                handle.spawn_blocking(move || sweep_session_cache(&dir, SESSION_DISK_CAP_BYTES));
+                xai_spawn::spawn_blocking_on(&handle, move || {
+                    sweep_session_cache(&dir, SESSION_DISK_CAP_BYTES)
+                });
             }
             Err(_) => sweep_session_cache(&dir, SESSION_DISK_CAP_BYTES),
         }

@@ -133,7 +133,7 @@ fn spawn_cwd_git_refresh(cwd: PathBuf) {
         return;
     };
     let refresh_span = region!(debug, "git_info.refresh", Parent::Root);
-    handle.spawn_blocking(move || {
+    xai_spawn::spawn_blocking_on(&handle, move || {
         let _region = refresh_span;
         // A panic in the git read must not take down the pager.
         let info =

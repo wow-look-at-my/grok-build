@@ -116,7 +116,7 @@ pub(crate) fn spawn_queue_stats_sampler(
 ) -> QueueStatsSamplerGuard {
     let stats = queue.stats_arc();
     let sample_period_secs = interval.as_secs();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         let mut tick = tokio::time::interval(interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {

@@ -167,7 +167,7 @@ async fn completed_wake_waits_for_terminal_publication() {
         },
     );
     let backend = parent_backend(&harness);
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = backend.clone();
         async move { backend.spawn(request("identity-source", true), None).await }
     });
@@ -181,7 +181,7 @@ async fn completed_wake_waits_for_terminal_publication() {
         .await
         .expect("initial completion");
 
-    let send = tokio::spawn({
+    let send = xai_spawn::spawn({
         let backend = backend.clone();
         async move {
             backend
@@ -214,7 +214,7 @@ async fn park_wake_until_terminal_publication(
     backend: &ChannelBackend,
 ) -> tokio::task::JoinHandle<ActiveAgentMessageOutcome> {
     complete_child(harness, backend, "identity-source").await;
-    let send = tokio::spawn({
+    let send = xai_spawn::spawn({
         let backend = backend.clone();
         async move {
             backend
@@ -305,7 +305,7 @@ async fn completed_agent_message_wakes_same_id_and_queues_next_turn() {
     ] {
         let mut harness = harness(false, std::time::Duration::from_secs(60));
         let backend = parent_backend(&harness);
-        let spawn = tokio::spawn({
+        let spawn = xai_spawn::spawn({
             let backend = backend.clone();
             async move { backend.spawn(request(CHILD_ID, true), None).await }
         });
@@ -328,7 +328,7 @@ async fn completed_agent_message_wakes_same_id_and_queues_next_turn() {
         spawn.await.unwrap().unwrap();
         harness.completions.recv().await.unwrap();
 
-        let send = tokio::spawn({
+        let send = xai_spawn::spawn({
             let backend = backend.clone();
             async move {
                 backend
@@ -378,7 +378,7 @@ async fn completed_agent_message_wakes_same_id_and_queues_next_turn() {
 }
 
 async fn complete_child(harness: &mut Harness, backend: &ChannelBackend, id: &str) {
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = backend.clone();
         let request = request(id, true);
         async move { backend.spawn(request, None).await }
@@ -433,7 +433,7 @@ async fn run_pre_start_wake_restore_scenario(origin: WakeAdmissionOrigin, exit: 
         if is_failure {
             complete_child(&mut harness, &backend, CHILD_ID).await;
         } else {
-            let source = tokio::spawn({
+            let source = xai_spawn::spawn({
                 let backend = backend.clone();
                 async move { backend.spawn(request(CHILD_ID, true), None).await }
             });
@@ -448,7 +448,7 @@ async fn run_pre_start_wake_restore_scenario(origin: WakeAdmissionOrigin, exit: 
 
         let mut held = None;
         if matches!(origin, WakeAdmissionOrigin::Dequeued) {
-            let spawn = tokio::spawn({
+            let spawn = xai_spawn::spawn({
                 let backend = backend.clone();
                 async move { backend.spawn(request("held", true), None).await }
             });
@@ -460,7 +460,7 @@ async fn run_pre_start_wake_restore_scenario(origin: WakeAdmissionOrigin, exit: 
             held = Some(spawn);
         }
 
-        let wake = tokio::spawn({
+        let wake = xai_spawn::spawn({
             let backend = backend.clone();
             async move {
                 backend
@@ -506,7 +506,7 @@ async fn run_pre_start_wake_restore_scenario(origin: WakeAdmissionOrigin, exit: 
                 respond_to,
             }))
             .expect("query queued");
-        let barrier = tokio::spawn({
+        let barrier = xai_spawn::spawn({
             let backend = harness.backend.clone();
             async move { backend.registry_counts().await }
         });
@@ -569,7 +569,7 @@ async fn failed_wake_refuses_sends_until_runner_teardown_completes() {
         complete_child(&mut harness, &backend, "identity-source").await;
         let _ = buffered_completions(&harness, Some("parent")).await;
 
-        let failed = tokio::spawn({
+        let failed = xai_spawn::spawn({
             let backend = backend.clone();
             async move {
                 backend
@@ -610,7 +610,7 @@ async fn failed_wake_refuses_sends_until_runner_teardown_completes() {
         }
         assert_eq!(harness.backend.registry_counts().await.active, 0);
 
-        let retry = tokio::spawn({
+        let retry = xai_spawn::spawn({
             let backend = backend.clone();
             async move {
                 backend
@@ -649,7 +649,7 @@ async fn pre_start_wake_exits_restore_prior_observers() {
 async fn completed_wake_queues_at_concurrent_limit_until_slot_frees() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Queue));
     let backend = parent_backend(&harness);
-    let source = tokio::spawn({
+    let source = xai_spawn::spawn({
         let backend = backend.clone();
         async move { backend.spawn(request("identity-source", true), None).await }
     });
@@ -659,14 +659,14 @@ async fn completed_wake_queues_at_concurrent_limit_until_slot_frees() {
     source.await.unwrap().unwrap();
     harness.completions.recv().await.unwrap();
 
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
     harness.wake_runs.recv().await.unwrap();
     harness.started.recv().await.unwrap();
 
-    let wake = tokio::spawn({
+    let wake = xai_spawn::spawn({
         let backend = backend.clone();
         async move {
             backend
@@ -720,7 +720,7 @@ async fn completed_wake_queues_at_concurrent_limit_until_slot_frees() {
 async fn completed_wake_rejects_at_concurrent_limit_without_losing_terminal_record() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Fail));
     let backend = parent_backend(&harness);
-    let source = tokio::spawn({
+    let source = xai_spawn::spawn({
         let backend = backend.clone();
         async move { backend.spawn(request("identity-source", true), None).await }
     });
@@ -730,7 +730,7 @@ async fn completed_wake_rejects_at_concurrent_limit_without_losing_terminal_reco
     source.await.unwrap().unwrap();
     harness.completions.recv().await.unwrap();
 
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });

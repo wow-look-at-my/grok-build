@@ -287,7 +287,7 @@ async fn strict_switch_append_preserves_prefix_and_deduplicates_generation() {
 async fn strict_switch_append_ack_waits_for_persistence() {
     let mut h = TestHarness::with_manual_persistence_ack(vec![]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack(
                 "moved".into(),
@@ -316,7 +316,7 @@ async fn strict_switch_append_ack_waits_for_persistence() {
 async fn committed_storage_result_converges_actor_memory() {
     let mut h = TestHarness::with_manual_persistence_ack(vec![]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack(
                 "moved".into(),
@@ -358,7 +358,7 @@ async fn already_present_replaces_stale_switch_in_actor_memory() {
             generation.get(),
         )]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack("candidate".into(), generation)
             .await
@@ -393,7 +393,7 @@ async fn committed_already_present_replaces_retry_candidate_in_actor_memory() {
             generation.get(),
         )]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack("another retry".into(), generation)
             .await
@@ -429,7 +429,7 @@ async fn committed_already_present_replaces_retry_candidate_in_actor_memory() {
 async fn dropped_storage_reply_is_indeterminate_and_leaves_memory_unchanged() {
     let mut h = TestHarness::with_manual_persistence_ack(vec![]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack(
                 "moved".into(),
@@ -449,7 +449,7 @@ async fn dropped_storage_reply_is_indeterminate_and_leaves_memory_unchanged() {
 async fn uncommitted_storage_error_leaves_actor_memory_unchanged() {
     let mut h = TestHarness::with_manual_persistence_ack(vec![]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack(
                 "moved".into(),

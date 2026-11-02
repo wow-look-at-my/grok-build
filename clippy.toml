@@ -66,4 +66,6 @@ disallowed-methods = [
     # A dropped JoinHandle is a dropped failure: the task panicked and the caller
     # keeps waiting on work that already died.
     { path = "tokio::spawn", reason = "a dropped JoinHandle loses the task's panic, leaving its callers waiting on work that already died -- await and check the result, or run the future through xai_grok_tools::util::detached::guarded so a panicked task still releases what others wait on" },
+    # allow-invalid: crates that do not depend on xai-spawn cannot resolve this path.
+    { path = "xai_spawn::spawn", reason = "a dropped JoinHandle loses the task's panic, leaving its callers waiting on work that already died -- await and check the result, or run the future through xai_grok_tools::util::detached::guarded so a panicked task still releases what others wait on", allow-invalid = true },
 ]

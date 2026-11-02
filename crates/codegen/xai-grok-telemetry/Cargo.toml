@@ -88,6 +88,7 @@ webpki-roots = { workspace = true }
 base64 = { workspace = true }
 http = { workspace = true }
 tokio-stream = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 # `#[async_trait]` on the in-process OTLP collector test fixture.

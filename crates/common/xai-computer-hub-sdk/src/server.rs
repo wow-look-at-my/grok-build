@@ -1058,7 +1058,7 @@ impl ToolServer {
         let loop_sid = sid.clone();
         let admission = self.inner().admission.clone();
         let cancels_owner = self.inner().cancels.clone();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             run_session_loop(
                 loop_sid,
                 rx,
@@ -1480,7 +1480,7 @@ impl ToolServer {
         if let Some(event_tx) = self.inner().parsed_notif_tx.lock().take() {
             let (fwd_tx, mut fwd_rx) = mpsc::channel::<Value>(64);
             *self.inner().notification_fwd.lock() = Some(fwd_tx);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 while let Some(value) = fwd_rx.recv().await {
                     if let Some(event) = crate::notification::HubNotification::parse(&value)
                         && event_tx.send(event).await.is_err()
@@ -1510,7 +1510,7 @@ impl ToolServer {
         // bind task completes.
         let server_for_notif = Arc::new(self.clone());
         let connection_for_notif = connection.clone();
-        let notif_handle = tokio::spawn(async move {
+        let notif_handle = xai_spawn::spawn(async move {
             loop {
                 let frame = match notif_rx.recv().await {
                     Ok(frame) => frame,
@@ -1546,7 +1546,7 @@ impl ToolServer {
                         let bind_params = frame.get("params").cloned();
                         let server = Arc::clone(&server_for_notif);
                         let conn = connection_for_notif.clone();
-                        tokio::spawn(async move {
+                        xai_spawn::spawn(async move {
                             let result = server
                                 .bind_session_local_with_metadata(sid.clone(), bind_params)
                                 .await;
@@ -1631,7 +1631,7 @@ impl ToolServer {
 
                         let server = server_for_notif.clone();
                         let conn = connection_for_notif.clone();
-                        tokio::spawn(async move {
+                        xai_spawn::spawn(async move {
                             // Unbind precedes hibernate: flush while up.
                             server.flush_donations().await;
                             let _ = server.unbind_session(&sid).await;
@@ -1689,7 +1689,7 @@ impl ToolServer {
                         );
                         let server = Arc::clone(&server_for_notif);
                         let conn = connection_for_notif.clone();
-                        tokio::spawn(async move {
+                        xai_spawn::spawn(async move {
                             // Ack first (best-effort) so the server's request
                             // resolves promptly; the drain runs in the background.
                             if let Some(id) = request_id {
@@ -1728,7 +1728,7 @@ impl ToolServer {
             let notify = Arc::clone(&self.inner().reconnect_notify);
             let settled = self.inner().on_reconnect_settled.clone();
             let epoch = Arc::clone(&self.inner().disconnect_epoch);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 loop {
                     notify.notified().await;
                     // Snapshot the disconnect epoch for the connection we are
@@ -1884,7 +1884,7 @@ impl Drop for ToolServer {
             return;
         }
         if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 flush_donations_inner(&owned, true).await;
                 teardown_sessions(&owned).await;
             });
@@ -2007,7 +2007,7 @@ async fn run_session_loop(
                 let conn = connection.clone();
                 let adm = admission.clone();
                 let cancels = cancels.clone();
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     execute_call(&sid, value, &conn, &handlers, &adm, token).await;
                     // Always deregister on completion/cancel,
                     // regardless of which path `execute_call` returned by.
@@ -2095,7 +2095,7 @@ async fn handle_notification(
             let session_id = session_id.clone();
             let handlers = handlers.to_vec();
             let connection = connection.clone();
-            tokio::spawn(
+            xai_spawn::spawn(
                 async move {
                     let mut result = None;
                     for handler in &handlers {
