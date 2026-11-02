@@ -191,18 +191,16 @@ impl WorkspaceEnvironment {
     }
 }
 
-/// Resolve `(repo_root, origin_remote_url)` for `cwd` via libgit2; both `None` outside a git repository.
+/// Resolve `(repo_root, origin_remote_url)` for `cwd`; both `None` outside a git repository.
 /// The `origin` URL has embedded credentials stripped before it is stored.
 /// HTTPS remotes can carry a token in the userinfo, and this artifact is uploaded, so the raw URL must never be persisted.
 fn git_repo_facts(cwd: &Path) -> (Option<String>, Option<String>) {
-    let Ok(repo) = git2::Repository::discover(cwd) else {
+    let Ok(repo) = crate::git_repo::discover(cwd) else {
         return (None, None);
     };
-    let repo_root = repo.workdir().map(|p| p.to_string_lossy().into_owned());
-    let remote_url = repo
-        .find_remote("origin")
-        .ok()
-        .and_then(|r| r.url().ok().map(crate::session::git::strip_url_credentials));
+    let repo_root = crate::git_repo::workdir(&repo).map(|p| p.to_string_lossy().into_owned());
+    let remote_url = crate::git_repo::remote_url(&repo, "origin".into())
+        .map(|url| crate::session::git::strip_url_credentials(&url));
     (repo_root, remote_url)
 }
 
@@ -414,13 +412,16 @@ mod tests {
     #[test]
     fn git_repo_facts_strips_remote_url_credentials() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(dir.path()).unwrap();
-        repo.remote(
-            "origin",
-            "https://x-access-token:secret-token@github.com/xai-org/example.git",
-        )
-        .unwrap();
-        drop(repo);
+        xai_test_utils::git::init_git_repo(dir.path());
+        xai_test_utils::git::run_git(
+            dir.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://x-access-token:secret-token@github.com/xai-org/example.git",
+            ],
+        );
 
         let (repo_root, remote_url) = git_repo_facts(dir.path());
         assert!(

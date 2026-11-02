@@ -1,6 +1,6 @@
 //! Process-wide gate for in-process git status/diff walks.
 //!
-//! libgit2 `statuses()` and diffs `pread` the same ODB packs under a process mutex.
+//! Status and diff walks `pread` the same ODB packs under a process mutex.
 //! Concurrent walks on a shallow monorepo pin CPU and tens of GB of footprint.
 //! Identical in-flight work is joined and a short snapshot is reused so client spam cannot start a second pack walk.
 //! Waiter timeout does not cancel or detach the walk: this `run()` returns timeout and later callers join the same inflight.
@@ -435,7 +435,7 @@ impl GitGate {
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T>> + Send + 'static,
     {
-        // libgit2 statuses/diffs are not cooperative; aborting this task would drop the ODB permit while spawn_blocking still preads packs
+        // Status and diff walks are not cooperative; aborting this task would drop the ODB permit while spawn_blocking still preads packs
         // Waiters time out locally; the walk stays attached to the slot until it ends
         let this = self.clone();
         tokio::spawn(async move {

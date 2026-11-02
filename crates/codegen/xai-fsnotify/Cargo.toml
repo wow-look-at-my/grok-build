@@ -15,12 +15,13 @@ tokio = { workspace = true, features = ["sync", "time", "rt"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
+gix = { workspace = true, features = ["attributes"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 serial_test = "3"
+xai-test-utils = { path = "../../common/xai-test-utils" }
 criterion = { workspace = true }
 xai-tracing-macros = { path = "../xai-tracing-macros" }
 

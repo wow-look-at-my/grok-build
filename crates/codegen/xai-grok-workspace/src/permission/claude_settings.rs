@@ -358,7 +358,7 @@ pub fn project_claude_settings_present(cwd: &Path) -> bool {
 }
 
 /// Collect `.claude` settings from cwd up to repo root.
-/// Root is `.git` existence, not `git2` validity, so a bare or empty `.git` still bounds the walk; loader and trust detector share this so they cannot drift.
+/// Root is `.git` existence, not repository validity, so a bare or empty `.git` still bounds the walk; loader and trust detector share this so they cannot drift.
 fn collect_project_claude_paths(cwd: &Path) -> Vec<PathBuf> {
     // When `$HOME` is itself a git repo, drop that root so `~/.claude` is not treated as project-tier for every cwd under home
     // Fall back to cwd; this is the shared choke point for `project_claude_settings_present` and `find_claude_settings_paths`

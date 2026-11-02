@@ -96,7 +96,7 @@ pub fn decide_inputs_with_interactive(
 ) -> DecideInputs {
     DecideInputs {
         store_trusted: is_trusted_this_process(key),
-        // Deliberate second discover: the caller's `key` came from `workspace_key`, its own git2 discover
+        // Deliberate second discover: the caller's `key` came from `workspace_key`, its own git discover
         // `repo_configs_present` runs `RepoDirChain::resolve`, which discovers the same repo again
         // Collapsing the two would mean threading the resolved root into key derivation, rippling `workspace_key` repo-wide
         repo_configs_present: repo_configs_present(cwd),
@@ -567,7 +567,7 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
         hit!("envrc");
     }
     // Detect `.claude` along the same cwd-to-root walk the env/permission loaders use, or a subdir `env` loads ungated
-    // Own `.git`-existence walk, not the git2 chain, so detection matches the loader on a bare or empty `.git`
+    // Own `.git`-existence walk, not the repository discovery chain, so detection matches the loader on a bare or empty `.git`
     if crate::permission::claude_settings::project_claude_settings_present(cwd) {
         hit!("claude");
     }
@@ -741,7 +741,7 @@ mod tests {
     /// `find_mcp_json_files` / `find_project_configs` discover the enclosing repo and walk to its root.
     fn repo_tmp() -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         tmp
     }
 
@@ -821,7 +821,7 @@ mod tests {
                 let tmp = repo_tmp();
                 let repo = tmp.path().join("repo");
                 std::fs::create_dir_all(&repo).unwrap();
-                git2::Repository::init(&repo).unwrap();
+                crate::test_git::init(&repo);
                 let outside = tmp.path().join(config).join(leaf);
                 std::fs::create_dir_all(outside).unwrap();
                 let subdir = repo.join("nested");
@@ -1544,7 +1544,7 @@ mod tests {
         let shown = dunce::canonicalize(&shown).unwrap();
         let other = fixture.join("other-root");
         std::fs::create_dir_all(&other).unwrap();
-        git2::Repository::init(&other).unwrap();
+        crate::test_git::init(&other);
 
         let outcome = grant_folder_trust_key_in(&fixture, &shown);
         assert!(matches!(
@@ -1603,7 +1603,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home = EnvVarGuard::set("HOME", home.path());
         let _userprofile = EnvVarGuard::set("USERPROFILE", home.path());
-        git2::Repository::init(home.path()).unwrap();
+        crate::test_git::init(home.path());
 
         let home_key = crate::trust::workspace_key(home.path());
         let home_inputs = decide_inputs_with_interactive(home.path(), &home_key, true);

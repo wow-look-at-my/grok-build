@@ -63,7 +63,7 @@ tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 # Fixture helpers for the spawn tests. All of these are already in the pager
 # binary's graph the tests exec, so they add no crate compiles.
-git2 = { workspace = true }
+xai-test-utils = { path = "../../common/xai-test-utils" }
 serial_test = { workspace = true }
 toml = { workspace = true }
 unicode-width = { workspace = true }

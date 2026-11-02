@@ -1,4 +1,4 @@
-//! Session `-w` create: Grove parent probe before libgit2 discover.
+//! Session `-w` create: Grove parent probe before git discovery.
 //!
 //! is enough to identify the parent.
 
@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use xai_fast_worktree::{NfsStatusView, NfsWorktreeClient};
 
-/// Dest-layout root and optional source identity when libgit2 is skipped.
+/// Dest-layout root and optional source identity when git discovery is skipped.
 #[derive(Debug, Clone)]
 pub(crate) struct GroveParentLayout {
     pub slug_root: PathBuf,
@@ -19,7 +19,7 @@ pub(crate) struct GroveParentLayout {
 pub(crate) struct CreateSourceLayout {
     pub git_root: PathBuf,
     pub source_git_root: Option<String>,
-    pub skipped_libgit2: bool,
+    pub skipped_git_discovery: bool,
 }
 
 #[cfg(test)]
@@ -271,7 +271,7 @@ fn layout_from_status(source: &Path, status: Option<&NfsStatusView>) -> GrovePar
     }
 }
 
-/// Covering Grove dest used as git root when libgit2 cannot open `extensions.partialclone`.
+/// Covering Grove dest used as git root when git discovery cannot open `extensions.partialclone`.
 /// Walks `dest_is_projected_mount` so a ProjFS subdirectory matches Unix FUSE/NFS prefix.
 #[must_use]
 pub fn grove_visible_git_root(path: &Path) -> Option<PathBuf> {
@@ -290,7 +290,7 @@ pub fn grove_visible_git_root(path: &Path) -> Option<PathBuf> {
     Some(mount.unwrap_or_else(|| path.to_path_buf()))
 }
 
-/// Nested clones keep libgit2; Grove dest is the fallback when discover fails.
+/// Nested clones keep git discovery; Grove dest is the fallback when discover fails.
 #[must_use]
 pub fn git_or_grove_root(path: &Path, grove: bool) -> Option<PathBuf> {
     crate::session::git::find_git_root_from_path(path)
@@ -310,7 +310,7 @@ pub(crate) fn jj_slug_and_source_git_root(
     (slug, nearest)
 }
 
-/// `git_or_grove_root` off the async runtime (libgit2 discover can stall on a dest).
+/// `git_or_grove_root` off the async runtime (git discovery can stall on a dest).
 pub async fn git_or_grove_root_async(path: &Path, grove: bool) -> Option<PathBuf> {
     let path = path.to_path_buf();
     crate::worktree::blocking_copy_on_write(move || git_or_grove_root(&path, grove))
@@ -332,7 +332,7 @@ pub async fn git_or_grove_is_jj_async(path: &Path, grove: bool) -> bool {
 
 ///
 /// Grove-on ordinary git still waits on Status (ping timeout 250ms) before
-/// libgit2: the RPC is the skip decision when the mount table is unavailable.
+/// git discovery: the RPC is the skip decision when the mount table is unavailable.
 pub(crate) fn probe_grove_parent_sync(source: &Path) -> Option<GroveParentLayout> {
     #[cfg(test)]
     {
@@ -390,7 +390,7 @@ pub(crate) fn create_source_layout_after_probe(
         return Ok(CreateSourceLayout {
             git_root: layout.slug_root,
             source_git_root: layout.source_git_root,
-            skipped_libgit2: true,
+            skipped_git_discovery: true,
         });
     }
     let git_root = crate::session::git::find_main_repo_root_from_path(source)?;
@@ -400,7 +400,7 @@ pub(crate) fn create_source_layout_after_probe(
     Ok(CreateSourceLayout {
         git_root,
         source_git_root,
-        skipped_libgit2: false,
+        skipped_git_discovery: false,
     })
 }
 

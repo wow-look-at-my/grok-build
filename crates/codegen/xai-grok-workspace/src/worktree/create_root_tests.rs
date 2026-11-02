@@ -163,7 +163,7 @@ fn dest_slug_from_mountpoint_groups_subdirectory_cwd() {
     let layout =
         create_source_layout_after_probe(cwd, Some(layout_from_status(cwd, Some(&status))))
             .expect("grove parent");
-    assert!(layout.skipped_libgit2);
+    assert!(layout.skipped_git_discovery);
     assert_eq!(layout.git_root, PathBuf::from("/mnt/grove/acme"));
     assert_eq!(layout.source_git_root.as_deref(), Some("/mnt/grove/acme"));
     let home = PathBuf::from("/tmp/grok-home");
@@ -181,7 +181,7 @@ fn dest_slug_from_mountpoint_groups_subdirectory_cwd() {
 }
 
 #[test]
-fn grove_parent_skips_libgit2_on_partialclone() {
+fn grove_parent_skips_git_discovery_on_partialclone() {
     xai_test_utils::require_git!();
     let temp = tempfile::TempDir::new().unwrap();
     let repo = temp.path().join("org").join("acme-app");
@@ -190,12 +190,12 @@ fn grove_parent_skips_libgit2_on_partialclone() {
     write_partialclone_extension(&repo);
     assert!(
         crate::session::git::find_main_repo_root_from_path(&repo).is_err(),
-        "precondition: libgit2 must reject extensions.partialclone"
+        "precondition: git discovery must reject extensions.partialclone"
     );
 
     let layout = create_source_layout_after_probe(&repo, Some(super::layout_from_source(&repo)))
         .expect("grove parent");
-    assert!(layout.skipped_libgit2);
+    assert!(layout.skipped_git_discovery);
     assert_eq!(layout.git_root, repo);
 }
 
@@ -210,7 +210,7 @@ fn non_grove_still_uses_git_discovery() {
     xai_test_utils::git::git_commit_all(&repo, "initial");
 
     let layout = create_source_layout_after_probe(&repo, None).expect("git discover");
-    assert!(!layout.skipped_libgit2);
+    assert!(!layout.skipped_git_discovery);
     assert_eq!(
         dunce::canonicalize(&layout.git_root).unwrap(),
         dunce::canonicalize(&repo).unwrap()
@@ -221,7 +221,7 @@ fn non_grove_still_uses_git_discovery() {
     let msg = err.to_string();
     assert!(
         msg.contains("partialclone") || msg.contains("unsupported"),
-        "non-Grove must still hit libgit2: {err}"
+        "non-Grove must still hit git discovery: {err}"
     );
 }
 
@@ -249,7 +249,7 @@ fn dest_from_source_path_is_under_the_grok_home_bucket() {
 }
 
 #[tokio::test]
-async fn prepare_grove_parent_skips_libgit2_discover() {
+async fn prepare_grove_parent_skips_git_discovery_discover() {
     let temp = tempfile::TempDir::new().unwrap();
     let root = dunce::canonicalize(temp.path()).unwrap();
     let home = root.join("grok-home");
@@ -325,7 +325,7 @@ async fn prepare_grove_off_still_discovers_git() {
     .await;
     let err = bad
         .response
-        .expect_err("Grove off must still fail libgit2 discover on partialclone");
+        .expect_err("Grove off must still fail git discovery on partialclone");
     let msg = err.to_string();
     assert!(
         msg.contains("partialclone")
@@ -351,7 +351,7 @@ async fn prepare_grove_probe_negative_still_discovers() {
     .await;
     let err = result
         .response
-        .expect_err("negative Grove probe must fall through to libgit2 discover");
+        .expect_err("negative Grove probe must fall through to git discovery");
     let msg = err.to_string();
     assert!(
         msg.contains("Invalid source path") || msg.contains(&discover_err.to_string()),
@@ -369,7 +369,7 @@ async fn resolve_grove_parent_uses_spawn_blocking_inject() {
     let layout = resolve_create_source_layout(&source, true)
         .await
         .expect("injected grove parent");
-    assert!(layout.skipped_libgit2);
+    assert!(layout.skipped_git_discovery);
     assert_eq!(layout.git_root, source);
 }
 
@@ -389,7 +389,7 @@ async fn resolve_injected_status_uses_mountpoint_for_dest_and_source_git_root() 
     let layout = resolve_create_source_layout(&source, true)
         .await
         .expect("status grove parent");
-    assert!(layout.skipped_libgit2);
+    assert!(layout.skipped_git_discovery);
     assert_eq!(layout.git_root, mountpoint);
     assert_eq!(
         layout.source_git_root.as_deref(),
@@ -411,12 +411,12 @@ async fn projected_without_status_skips_discover_on_partialclone() {
     let layout = resolve_create_source_layout(&repo, true)
         .await
         .expect("projected grove parent");
-    assert!(layout.skipped_libgit2);
+    assert!(layout.skipped_git_discovery);
     assert_eq!(layout.git_root, repo);
 }
 
 #[tokio::test]
-async fn sync_fork_grove_parent_skips_libgit2_on_partialclone() {
+async fn sync_fork_grove_parent_skips_git_discovery_on_partialclone() {
     xai_test_utils::require_git!();
     let temp = tempfile::TempDir::new().unwrap();
     let root = dunce::canonicalize(temp.path()).unwrap();
@@ -430,7 +430,7 @@ async fn sync_fork_grove_parent_skips_libgit2_on_partialclone() {
     write_partialclone_extension(&repo);
     assert!(
         crate::session::git::find_main_repo_root_from_path(&repo).is_err(),
-        "precondition: libgit2 must reject extensions.partialclone"
+        "precondition: git discovery must reject extensions.partialclone"
     );
     assert!(crate::session::git::find_git_root_from_path(&repo).is_err());
 
@@ -588,7 +588,7 @@ fn probe_status_fixture_without_keeps_grove_create_is_none() {
     let source = Path::new("/mnt/grove/acme/crates/foo");
     assert!(
         probe_grove_parent_sync(source).is_none(),
-        "store-only Status must not skip libgit2"
+        "store-only Status must not skip git discovery"
     );
 }
 
@@ -680,7 +680,7 @@ fn probe_status_nested_git_inside_dest_is_none() {
     let _inject = inject_grove_status(mount_status_json(&dest.to_string_lossy()));
     assert!(
         probe_grove_parent_sync(&nested).is_none(),
-        "Status keeps_grove_create must not skip libgit2 for a nested clone"
+        "Status keeps_grove_create must not skip git discovery for a nested clone"
     );
 }
 
