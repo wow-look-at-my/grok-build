@@ -34,7 +34,7 @@ fn compare_chunks(left: &[u8], right: &[u8]) -> Ordering {
 
 fn significant(digits: &[u8]) -> &[u8] {
     let zeros = digits.iter().take_while(|d| **d == b'0').count();
-    &digits[zeros..]
+    digits.get(zeros..).unwrap_or(&[])
 }
 
 #[cfg(test)]
