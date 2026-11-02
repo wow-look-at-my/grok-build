@@ -2235,7 +2235,6 @@ impl xai_file_utils::queue::TraceExportSource for UnreachableSource {
     fn resolve(&self) -> xai_file_utils::TraceExportConfig {
         xai_file_utils::TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             upload_method: xai_file_utils::UploadMethod::Proxy {
                 proxy_base_url: "http://127.0.0.1:1/v1".to_string(),
                 user_token: String::new(),

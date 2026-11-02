@@ -1,6 +1,38 @@
 use super::*;
 use crate::UploadMethod;
 
+/// The base URL of a proxy stub that rejects every request with a terminal Bad Request.
+/// A stub that refuses connections is no substitute: the client retries a network error with backoff.
+fn rejecting_proxy_url() -> &'static str {
+    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URL.get_or_init(|| {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                std::thread::spawn(move || {
+                    let mut stream = stream;
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                    let mut buf = [0u8; 8192];
+                    let mut seen = Vec::new();
+                    while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match stream.read(&mut buf) {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => seen.extend_from_slice(buf.get(..n).unwrap_or_default()),
+                        }
+                    }
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                    while matches!(stream.read(&mut buf), Ok(n) if n > 0) {}
+                });
+            }
+        });
+        format!("http://{addr}/v1")
+    })
+}
+
 /// Mock credential resolver for tests.
 struct MockResolver;
 
@@ -8,13 +40,14 @@ impl TraceExportSource for MockResolver {
     fn resolve(&self) -> TraceExportConfig {
         TraceExportConfig {
             bucket_url: Some("gs://test-bucket".to_string()),
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: None,
             absolute_paths: false,
             archive_name_override: None,
-            upload_method: UploadMethod::Direct {
-                service_account_key: None,
+            upload_method: UploadMethod::Proxy {
+                proxy_base_url: rejecting_proxy_url().to_string(),
+                user_token: "tok".to_string(),
+                alpha_test_key: None,
             },
         }
     }
@@ -1761,7 +1794,6 @@ impl TraceExportSource for CountingResolver {
         self.count.fetch_add(1, Ordering::SeqCst);
         TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: None,
             absolute_paths: false,
@@ -1883,9 +1915,8 @@ fn upload_disposition_breaker_open_is_retryable() {
 }
 
 #[test]
-fn upload_disposition_direct_mode_auth_fallback() {
-    // Direct-mode (gcloud) errors are unstructured strings; the 401/403
-    // message scrape routes them to a credential refresh.
+fn upload_disposition_unstructured_auth_fallback() {
+    // An unstructured / error string routes to a credential refresh.
     assert_eq!(
         upload_disposition(&anyhow::anyhow!("403 Forbidden")),
         Disposition::AuthRefresh
@@ -2070,7 +2101,6 @@ impl TraceExportSource for ParkingResolver {
     fn resolve(&self) -> TraceExportConfig {
         TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: None,
             absolute_paths: false,
@@ -3442,7 +3472,6 @@ async fn inline_fallback_semaphore_bounds_concurrency() {
         fn resolve(&self) -> TraceExportConfig {
             TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,

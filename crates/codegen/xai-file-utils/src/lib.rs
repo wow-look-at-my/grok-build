@@ -12,7 +12,7 @@
     unreachable_code,
     dead_code
 )]
-//! Local data collection: upload queueing and S3-compatible blob storage.
+//! Local data collection: upload queueing and blob storage through the xAI proxy.
 #![deny(clippy::indexing_slicing)]
 pub(crate) mod circuit_breaker_observer;
 pub fn auth_retry(
@@ -24,10 +24,8 @@ pub fn auth_retry(
     }
 }
 pub mod gcs;
-mod gcs_net;
 pub mod queue;
-pub mod s3;
-mod s3_http;
+pub mod s3_presign;
 pub mod storage_client;
 pub mod upload_config;
 pub mod workspace_classifier;
