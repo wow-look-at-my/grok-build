@@ -305,7 +305,7 @@ pub enum PersistenceMsg {
         prior: WakeSummaryState,
         respond_to: tokio::sync::oneshot::Sender<io::Result<()>>,
     },
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     HoldForTest {
         entered: tokio::sync::oneshot::Sender<()>,
         release: tokio::sync::oneshot::Receiver<()>,
@@ -633,7 +633,7 @@ pub fn find_any_session_dir_by_id_result(session_id: &str) -> io::Result<Option<
         .map_err(io::Error::other)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 fn session_exists_in_root(session_id: &str, sessions_root: &Path) -> bool {
     find_persisted_session_dir_by_id_in_root_result(session_id, sessions_root)
         .is_ok_and(|path| path.is_some())
@@ -648,17 +648,17 @@ pub fn title_is_manual_in_dir(session_dir: &Path) -> bool {
         .is_some_and(|summary| summary.title_is_manual)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 thread_local! {
     static FIND_SUMMARY_BY_SESSION_ID_FORBIDDEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn set_find_summary_by_session_id_forbidden(forbidden: bool) {
     FIND_SUMMARY_BY_SESSION_ID_FORBIDDEN.set(forbidden);
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 thread_local! {
     // Per-thread so a current-thread test runtime observes only the actors it spawned.
     pub static STAMPS_SERVED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -667,7 +667,7 @@ thread_local! {
 
 /// Find and read a session summary given only its ID (scans all CWD directories).
 pub fn find_summary_by_session_id(session_id: &str) -> Option<Summary> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     assert!(
         !FIND_SUMMARY_BY_SESSION_ID_FORBIDDEN.get(),
         "sessions-index walk invoked from a forbidden path"
@@ -1505,12 +1505,12 @@ impl From<crate::session::storage::AppendUpdateError> for DurableAppendError {
 }
 
 impl PersistenceHandle {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn from_sender_for_test(tx: mpsc::UnboundedSender<PersistenceMsg>) -> Self {
         Self::from_parts_for_test(tx, watch::channel(false).1)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn from_parts_for_test(
         tx: mpsc::UnboundedSender<PersistenceMsg>,
         disk_full_rx: watch::Receiver<bool>,
@@ -1535,7 +1535,7 @@ impl PersistenceHandle {
         self.noop
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn is_disk_full(&self) -> bool {
         *self.disk_full_rx.borrow()
     }
@@ -2208,7 +2208,7 @@ impl SessionPersistence {
                     identity,
                     respond_to,
                 } => {
-                    #[cfg(test)]
+                    #[cfg(any(test, feature = "test-util"))]
                     {
                         STAMPS_SERVED.set(STAMPS_SERVED.get() + 1);
                         if FAIL_NEXT_STAMP.replace(false) {
@@ -2468,7 +2468,7 @@ impl SessionPersistence {
                     };
                     let _ = respond_to.send(result);
                 }
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-util"))]
                 PersistenceMsg::HoldForTest {
                     entered,
                     mut release,

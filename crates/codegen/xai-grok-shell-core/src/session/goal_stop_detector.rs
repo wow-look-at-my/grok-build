@@ -106,7 +106,7 @@ fn is_user_pronoun(token: &str) -> bool {
 
 /// Source string for each regex. Locked against the live `Regex::as_str()` value in `regex_sources_match_compiled_regex`.
 /// Each tuple is `(label, source)`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 const STOP_REGEX_SOURCES: &[(&str, &str)] = &[
     (PATTERN_UNABLE_TO_PROCEED, UNABLE_TO_PROCEED_SRC),
     (PATTERN_GIVING_UP, GIVING_UP_SRC),
@@ -170,7 +170,7 @@ pub fn matched_stop_pattern(text: &str) -> Option<&'static str> {
 
 /// Used by the boolean-only test assertions.
 /// Production callers use `matched_stop_pattern` so the pattern label can be threaded into `Event::GoalPrematureStopDetected`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 fn looks_like_premature_stop(text: &str) -> bool {
     matched_stop_pattern(text).is_some()
 }

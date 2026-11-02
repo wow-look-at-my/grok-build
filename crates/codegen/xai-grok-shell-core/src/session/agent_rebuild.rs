@@ -479,7 +479,7 @@ impl AgentRebuildSpec {
     }
 }
 /// Every field is set to a minimal default suitable for test `SessionActor` literals and focused `build_agent` tests.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn test_rebuild_spec_default() -> Arc<AgentRebuildSpec> {
     let (uq_tx, _uq_rx) = tokio::sync::mpsc::unbounded_channel();
     Arc::new(AgentRebuildSpec {

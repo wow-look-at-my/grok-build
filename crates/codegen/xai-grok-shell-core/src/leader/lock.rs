@@ -238,7 +238,7 @@ impl LeaderLock {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl LeaderLock {
     /// Bind a lock to explicit paths for tests running outside the default home. No acquire slot, so tests never
     /// touch the host's slot directory.

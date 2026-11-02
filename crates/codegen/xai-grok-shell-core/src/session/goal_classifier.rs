@@ -2183,7 +2183,7 @@ async fn write_details_file(path: &Path, body: &str) {
 /// Pull the runner-allocated `{VERDICT_FILE}` path out of a rendered verifier prompt.
 /// `None` if the prompt doesn't contain one (e.g. a non-verifier mock).
 /// Shared by `goal_classifier::tests::MockSpawner` and `acp_session::goal_classifier_e2e_tests::MockCoordinator`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn parse_verdict_path_from_prompt(prompt: &str) -> Option<String> {
     parse_prompt_path(prompt, "goal-verdict-", ".json")
 }
@@ -2191,7 +2191,7 @@ pub fn parse_verdict_path_from_prompt(prompt: &str) -> Option<String> {
 /// Extract an absolute artifact path from a rendered prompt.
 /// The files live under the per-goal scratch root (an arbitrary temp-dir path).
 /// Anchor on a stable file-name `marker`, walk back to the start of the whitespace/backtick-delimited token, and end at `suffix`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 fn parse_prompt_path(prompt: &str, marker: &str, suffix: &str) -> Option<String> {
     let marker = prompt.find(marker)?;
     let start = prompt

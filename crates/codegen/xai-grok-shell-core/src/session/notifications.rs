@@ -44,7 +44,7 @@ impl NotificationSender {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn for_tests(
         gateway: GatewaySender,
         persistence_tx: mpsc::UnboundedSender<PersistenceMsg>,
@@ -59,7 +59,7 @@ impl NotificationSender {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn idle_disk_full_rx() -> watch::Receiver<bool> {
     watch::channel(false).1
 }

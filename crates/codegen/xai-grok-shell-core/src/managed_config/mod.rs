@@ -35,7 +35,7 @@ pub enum LaunchProfile {
 static PUBLISHED_PROFILE: std::sync::Mutex<Option<LaunchProfile>> = std::sync::Mutex::new(None);
 
 fn observe_startup_profile() -> LaunchProfile {
-    if !cfg!(test) && store::managed_principal_present() {
+    if !cfg!(any(test, feature = "test-util")) && store::managed_principal_present() {
         LaunchProfile::Managed
     } else {
         LaunchProfile::Personal
@@ -79,7 +79,7 @@ pub fn managed_policy_gate_with_lock_wait(
     lock_wait: std::time::Duration,
 ) -> Result<(), ManagedPolicyRefusal> {
     // Unit tests would hit the host's real home.
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-util")) {
         return Ok(());
     }
     if !store::managed_principal_present() {

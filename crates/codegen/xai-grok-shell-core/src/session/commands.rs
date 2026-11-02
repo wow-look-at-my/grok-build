@@ -591,11 +591,11 @@ pub enum SessionCommand {
     FlushComplete {
         respond_to: oneshot::Sender<std::io::Result<()>>,
     },
-    #[cfg(test)]
+    /// Test seam: hands the actor a finished turn. Nothing sends it outside tests.
     InjectTurnCompletion {
         prompt_id: String,
         #[allow(private_interfaces)]
-        epoch: crate::session::TurnEpoch,
+        epoch: crate::session::actor_types::TurnEpoch,
         result: Box<PromptTurnResult>,
         elapsed_ms: Option<u64>,
         processed: oneshot::Sender<()>,

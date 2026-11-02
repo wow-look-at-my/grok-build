@@ -126,7 +126,7 @@ impl SessionCreatePrefetch {
         if self.plugins.is_started() {
             return;
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-util"))]
         {
             REFRESH_STARTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if let Ok(mut verdicts) = REFRESH_VERDICTS.lock() {
@@ -141,7 +141,7 @@ impl SessionCreatePrefetch {
         ));
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     fn launch_for_test(
         scan: TrustScan,
         plugins: impl std::future::Future<Output = Option<Arc<xai_grok_agent::plugins::PluginRegistry>>>
@@ -161,7 +161,7 @@ impl SessionCreatePrefetch {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     fn refresh_started(&self) -> bool {
         self.plugins.is_started()
     }
@@ -187,7 +187,7 @@ async fn refresh_plugins_for_cwd(
     session_plugin_dirs: Vec<PathBuf>,
     project_trusted: bool,
 ) -> Option<Arc<xai_grok_agent::plugins::PluginRegistry>> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     if CAPTURE_TRUST_ONLY.load(std::sync::atomic::Ordering::SeqCst) {
         return Some(Arc::new(xai_grok_agent::plugins::PluginRegistry::empty()));
     }
@@ -256,11 +256,11 @@ impl<T: Clone + Default + Send + 'static> PrefetchSlot<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub static REFRESH_STARTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub static REFRESH_VERDICTS: std::sync::Mutex<Vec<bool>> = std::sync::Mutex::new(Vec::new());
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 static CAPTURE_TRUST_ONLY: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 

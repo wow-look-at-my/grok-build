@@ -310,7 +310,7 @@ impl WorkflowTracker {
         Some(run.state.clone())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn remaining_agents(&self, run_id: &str) -> Option<Option<u64>> {
         let run = self.runs.iter().find(|run| run.state.run_id == run_id)?;
         Some(
@@ -362,7 +362,7 @@ impl WorkflowTracker {
         Some(run.state.clone())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn fail_budget_accounting(
         &mut self,
         run_id: &str,

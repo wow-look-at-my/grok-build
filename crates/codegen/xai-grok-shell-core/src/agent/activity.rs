@@ -159,7 +159,7 @@ impl AgentActivity {
 
     /// Register a synthetic session from raw parts (no full `SessionHandle`).
     /// Returns the command receiver (the "actor" side) plus the shared running-turn and pending-interaction slots.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn register_for_test(
         &self,
         id: &str,

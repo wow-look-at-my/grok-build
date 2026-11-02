@@ -4,6 +4,10 @@ use crate::sampling::SamplingError;
 /// Worker rounds a refuted goal may run without re-running verification before the continuation directive escalates to a forceful "re-verify now" block.
 pub const GOAL_REVERIFY_AFTER_DEFAULT: u32 = 8;
 
+/// Bumped when a turn is promoted. A report carrying an older epoch is refused.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TurnEpoch(pub u64);
+
 /// What a mention spawned.
 #[derive(Debug, Clone)]
 pub struct ModelMentionSpawn {

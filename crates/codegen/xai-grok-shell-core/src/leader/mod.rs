@@ -57,7 +57,7 @@ mod lock;
 pub mod protocol;
 pub mod roster_merge;
 mod server;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub mod test_support;
 mod transport;
 use crate::env::GrokBuildEnvironment;

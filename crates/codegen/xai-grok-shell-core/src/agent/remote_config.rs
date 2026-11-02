@@ -40,13 +40,13 @@ pub use settings_refresh::SettingsRefresh;
 pub use synthetic::{is_synthetic_listing, parse_synthetic_model_entry};
 
 // Re-exports reached only through the manager test module.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub use cache::{CACHE_TTL, MODELS_CACHE_FILE, ModelsCache};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub use endpoint::ModelsFetchFuture;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub use fetch::build_prefetched_map;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub use metrics::degraded_log_level;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub use prefetch::resolve_prefetch_inputs_from_parts;

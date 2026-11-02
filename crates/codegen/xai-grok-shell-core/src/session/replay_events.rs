@@ -73,7 +73,7 @@ impl From<XaiSessionNotification> for SessionNotification {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl SessionNotification {
     pub fn expect_acp(&self) -> &AcpSessionNotification {
         match self {

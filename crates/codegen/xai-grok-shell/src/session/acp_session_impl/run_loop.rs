@@ -1525,6 +1525,9 @@ pub(super) async fn run_session(
                                 .notifications.persistence_tx
                                 .send(PersistenceMsg::FlushAndAck { respond_to });
                         }
+                        // A test seam: the variant exists in every build, but only tests send it.
+                        #[cfg(not(test))]
+                        SessionCommand::InjectTurnCompletion { .. } => {}
                         #[cfg(test)]
                         SessionCommand::InjectTurnCompletion {
                             prompt_id,

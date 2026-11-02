@@ -36,7 +36,7 @@ pub fn model_origin(
     )
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn direct_origin(
     source: xai_grok_tools::types::tool_call_origin::InvocationSource,
     invocation_id: &str,

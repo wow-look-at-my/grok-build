@@ -43,7 +43,7 @@ impl ResolvedUserIdentity {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     fn is_empty(&self) -> bool {
         self.name.is_none() && self.email.is_none()
     }

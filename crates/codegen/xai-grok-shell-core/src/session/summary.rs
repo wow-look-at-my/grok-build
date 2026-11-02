@@ -106,7 +106,7 @@ impl SummaryGenerator {
         self.state = State::Idle;
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn is_idle(&self) -> bool {
         matches!(self.state, State::Idle)
     }

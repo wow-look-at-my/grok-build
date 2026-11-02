@@ -389,7 +389,7 @@ impl FeedbackHeuristics {
     }
 
     /// Tier criteria without the sampling step.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     fn check_tier(&self, tier: FeedbackTier, signals: &SessionSignals) -> bool {
         match tier {
             FeedbackTier::Tier1 => self.check_tier1(signals).is_some(),

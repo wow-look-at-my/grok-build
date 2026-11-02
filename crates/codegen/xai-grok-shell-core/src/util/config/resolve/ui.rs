@@ -3,7 +3,7 @@ use toml::Value as TomlValue;
 
 pub const ENV_SHOW_THINKING_BLOCKS: &str = "GROK_SHOW_THINKING_BLOCKS";
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 static SHOW_THINKING_BLOCKS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Shared precedence core for `[ui]` bool flags: requirement > env > `[ui].<ui_key>` config > managed > remote (already extracted) > `default`.
@@ -47,7 +47,7 @@ pub fn resolve_show_thinking_blocks(
 
 pub const ENV_GROUP_TOOL_VERBS: &str = "GROK_GROUP_TOOL_VERBS";
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 static GROUP_TOOL_VERBS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Resolve whether the TUI folds runs of consecutive non-destructive tool calls (reads/searches/lists) into one transcript row.
@@ -71,7 +71,7 @@ pub fn resolve_group_tool_verbs(
 
 pub const ENV_COLLAPSED_EDIT_BLOCKS: &str = "GROK_COLLAPSED_EDIT_BLOCKS";
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 static COLLAPSED_EDIT_BLOCKS_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Resolve whether the TUI shows Edit tool calls as a collapsed one-line `+N/-M` diffstat summary by default (expand for the diff).

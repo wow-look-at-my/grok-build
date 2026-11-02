@@ -29,5 +29,5 @@ pub use toolset::*;
 pub use ui::*;
 
 // One crate-wide mutex serializes env mutation; `permissions.rs` tests name it via this module's path
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub use auto_mode::AUTO_PERMISSION_MODE_ENV_LOCK;

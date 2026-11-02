@@ -99,7 +99,7 @@ pub async fn upload_session_state(
     }
 }
 /// Truth for a Defer-timeout of the blocking session-state upload: `Enqueued` only while the cancellation left the item parked on queue confirmation (the live worker still owns it); a cancelled direct attempt or full-channel inline divert queued nothing durable and must record the loss.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 fn confirm_timeout_artifact_result(
     direct_attempt_started: bool,
 ) -> super::manifest::ArtifactResult<'static> {
@@ -946,7 +946,7 @@ fn compress_chat_history_archive(jsonl: Vec<u8>) -> Result<Vec<u8>, SessionState
             error: error.into(),
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     apply_test_archive_fault().map_err(archive_failed)?;
     let mut archive_data = Vec::new();
     {
@@ -1530,7 +1530,7 @@ pub async fn upload_trace_artifact(
         );
     }
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 fn sort_session_files_by_priority(files: &mut [crate::session::persistence::CopiedSessionFile]) {
     files.sort_by_key(|f| match f.name.as_str() {
         "summary.json" => 0,
@@ -1540,28 +1540,28 @@ fn sort_session_files_by_priority(files: &mut [crate::session::persistence::Copi
         _ => 4,
     });
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 #[derive(Clone, Copy)]
 pub enum ArchiveBuildFault {
     Panic = 1,
     Io = 2,
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 static ARCHIVE_BUILD_FAULT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub struct ArchiveFaultGuard;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl Drop for ArchiveFaultGuard {
     fn drop(&mut self) {
         ARCHIVE_BUILD_FAULT.store(0, std::sync::atomic::Ordering::SeqCst);
     }
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn set_archive_build_fault(fault: ArchiveBuildFault) -> ArchiveFaultGuard {
     ARCHIVE_BUILD_FAULT.store(fault as u8, std::sync::atomic::Ordering::SeqCst);
     ArchiveFaultGuard
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn apply_test_archive_fault() -> std::io::Result<()> {
     match ARCHIVE_BUILD_FAULT.swap(0, std::sync::atomic::Ordering::SeqCst) {
         1 => panic!("test-forced archive panic"),
@@ -1569,14 +1569,14 @@ pub fn apply_test_archive_fault() -> std::io::Result<()> {
         _ => Ok(()),
     }
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 fn build_session_state_archive(
     mut session_copy: crate::session::persistence::SessionStateCopy,
     session_id: &str,
 ) -> std::io::Result<Vec<u8>> {
     use flate2::Compression;
     use flate2::write::GzEncoder;
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     apply_test_archive_fault()?;
     sort_session_files_by_priority(&mut session_copy.files);
     let mut archive_data = Vec::new();

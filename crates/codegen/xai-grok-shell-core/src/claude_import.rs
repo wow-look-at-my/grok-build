@@ -488,7 +488,7 @@ pub fn refresh_marker_cache(value: bool) {
 }
 
 /// Reset the marker cache to uninitialised. Test-only.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn reset_marker_cache_for_test() {
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = None;
 }

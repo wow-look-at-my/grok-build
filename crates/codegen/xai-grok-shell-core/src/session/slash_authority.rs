@@ -57,7 +57,7 @@ pub fn parse_slash_prefix(prompt_blocks: &[acp::ContentBlock]) -> Option<(&str, 
 
 // Regression tests read these test-only counters around real `SessionActor::handle_turn_input` calls
 // An authority-gate reorder therefore cannot silently reintroduce host catalog I/O
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DynamicResolutionCalls {
     pub skill_catalog: usize,
@@ -65,7 +65,7 @@ pub struct DynamicResolutionCalls {
     pub workflow_discovery: usize,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 std::thread_local! {
     static DYNAMIC_RESOLUTION_CALLS: std::cell::Cell<DynamicResolutionCalls> = const {
         std::cell::Cell::new(DynamicResolutionCalls {
@@ -76,7 +76,7 @@ std::thread_local! {
     };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn record_skill_catalog_call() {
     DYNAMIC_RESOLUTION_CALLS.set(DynamicResolutionCalls {
         skill_catalog: DYNAMIC_RESOLUTION_CALLS.get().skill_catalog + 1,
@@ -84,7 +84,7 @@ pub fn record_skill_catalog_call() {
     });
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn record_command_availability_call() {
     DYNAMIC_RESOLUTION_CALLS.set(DynamicResolutionCalls {
         command_availability: DYNAMIC_RESOLUTION_CALLS.get().command_availability + 1,
@@ -92,7 +92,7 @@ pub fn record_command_availability_call() {
     });
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn record_workflow_discovery_call() {
     DYNAMIC_RESOLUTION_CALLS.set(DynamicResolutionCalls {
         workflow_discovery: DYNAMIC_RESOLUTION_CALLS.get().workflow_discovery + 1,
@@ -100,7 +100,7 @@ pub fn record_workflow_discovery_call() {
     });
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn dynamic_resolution_calls() -> DynamicResolutionCalls {
     DYNAMIC_RESOLUTION_CALLS.get()
 }

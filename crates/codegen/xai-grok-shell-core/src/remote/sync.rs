@@ -46,7 +46,7 @@ pub struct RemoteSync {
 }
 
 impl RemoteSync {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn test_identity_observer() -> (Self, mpsc::UnboundedReceiver<String>) {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (observed_tx, observed_rx) = mpsc::unbounded_channel();
@@ -60,7 +60,7 @@ impl RemoteSync {
         (RemoteSync { tx }, observed_rx)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn test_observer() -> (Self, mpsc::UnboundedReceiver<acp::SessionNotification>) {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (observed_tx, observed_rx) = mpsc::unbounded_channel();

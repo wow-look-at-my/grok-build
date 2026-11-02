@@ -301,7 +301,7 @@ pub fn collect_all_indexable_content_single_pass(updates_path: &Path) -> io::Res
 }
 
 /// Summary fixture shared by this module's tests and `search.rs`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn test_summary(
     session_id: &str,
     cwd: &str,

@@ -530,12 +530,12 @@ fn add_model_usage(
 }
 
 #[must_use]
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub struct FlushLockGuard {
     is_flushing: Arc<AtomicBool>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl FlushLockGuard {
     fn try_acquire(is_flushing: Arc<AtomicBool>) -> Option<Self> {
         is_flushing
@@ -550,7 +550,7 @@ impl FlushLockGuard {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl Drop for FlushLockGuard {
     fn drop(&mut self) {
         self.is_flushing

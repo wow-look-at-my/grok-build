@@ -80,7 +80,7 @@ impl ExternalRoster {
     }
 
     /// Replaces the default partition and bumps the generation; tests and single publishers use it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn replace(&self, rows: Vec<RosterEntry>) {
         self.replace_partition(0, rows);
     }
@@ -243,7 +243,7 @@ impl RosterListMerge {
         Some(json)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     fn pending_len(&self) -> usize {
         self.pending.lock().len()
     }

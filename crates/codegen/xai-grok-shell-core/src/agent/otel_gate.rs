@@ -120,7 +120,7 @@ impl OtelGate {
         xai_grok_telemetry::external::mark_external_otel_settings_resolved();
         *self.resolved_for.borrow_mut() = Some(identity.to_owned());
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn set_resolved_for(&self, identity: &str) {
         *self.resolved_for.borrow_mut() = Some(identity.to_owned());
     }

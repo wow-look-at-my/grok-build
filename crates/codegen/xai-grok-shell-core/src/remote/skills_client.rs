@@ -701,7 +701,7 @@ impl SkillsClient {
             .unwrap_or_default()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_base_url(auth: Arc<AuthManager>, base_url: impl Into<String>) -> Self {
         Self {
             http: crate::http::shared_client(),

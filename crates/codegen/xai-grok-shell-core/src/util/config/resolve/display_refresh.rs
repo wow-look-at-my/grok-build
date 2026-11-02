@@ -25,7 +25,7 @@ pub const DISPLAY_REFRESH_DEFAULT_MAX_HZ: u32 = 240;
 const CADENCE_MS_MIN: u32 = 1;
 const CADENCE_MS_MAX: u32 = 100;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 static DISPLAY_REFRESH_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Effective display-refresh policy after layered resolve (compiled defaults applied).

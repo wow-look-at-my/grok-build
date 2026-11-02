@@ -792,7 +792,7 @@ async fn rmw_mcp_toml(
 /// reactor under the write guard. Project slots replace the inode.
 /// Production MCP saves go through [`rmw_mcp_toml`]; this remains for the
 /// follow-symlink regression that pins the one-shot path.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 async fn persist_mcp_toml(path: &std::path::Path, toml_str: &str) -> Result<()> {
     let is_user = is_user_config_path(path);
     let path = path.to_path_buf();

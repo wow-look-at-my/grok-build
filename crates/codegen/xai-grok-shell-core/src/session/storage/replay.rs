@@ -148,7 +148,7 @@ impl ReplayToolCollapser {
             .map(acp::SessionUpdate::ToolCall)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn pending_len(&self) -> usize {
         self.pending.len()
     }

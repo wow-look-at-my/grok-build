@@ -180,7 +180,7 @@ where
         );
     }
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub async fn join_required_restore_artifacts<Fs, Fp, Fm>(
     session_state: Fs,
     permission_events: Fp,

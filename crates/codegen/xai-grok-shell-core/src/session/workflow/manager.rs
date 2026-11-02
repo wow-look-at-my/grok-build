@@ -141,7 +141,7 @@ impl WorkflowManager {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn test_set_max_concurrent_agents(&mut self, n: usize) {
         self.max_concurrent_agents = n.max(1);
         self.agent_slots = Arc::new(tokio::sync::Semaphore::new(self.max_concurrent_agents));
@@ -532,7 +532,7 @@ impl WorkflowManager {
         Ok((run_id, outcome_rx))
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn test_bundle() -> (
         Arc<tokio::sync::Mutex<WorkflowManager>>,
         Arc<parking_lot::Mutex<WorkflowTracker>>,
@@ -540,7 +540,7 @@ impl WorkflowManager {
         Self::test_bundle_with_session_dir(None)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn test_bundle_with_session_dir(
         session_dir: Option<PathBuf>,
     ) -> (
@@ -817,7 +817,7 @@ impl WorkflowManager {
         Err(timed_out)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn test_insert_active_run(&mut self, run_id: String, done: oneshot::Receiver<()>) {
         self.active.insert(
             run_id,

@@ -464,18 +464,18 @@ fn write_summary_atomic(summary_path: &Path, summary: &Summary) -> io::Result<()
     crate::session::storage::write_bytes_atomic(summary_path, &bytes)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 thread_local! {
     static RESTORE_MTIME_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn fail_next_restore_summary_mtime() {
     RESTORE_MTIME_FAULT.set(true);
 }
 
 fn restore_summary_mtime(path: &Path, mtime: std::time::SystemTime) -> io::Result<()> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     if RESTORE_MTIME_FAULT.replace(false) {
         return Err(io::Error::other("injected mtime restore failure"));
     }

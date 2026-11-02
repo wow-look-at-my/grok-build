@@ -143,7 +143,7 @@ impl StreamingTurnCapture {
     /// Open a fresh in-progress generation within the current turn.
     /// Fold the previous in-progress slot into `segments` (if it streamed anything), stamp the new generation's start time, and count the attempt.
     /// Same-turn restarts call this without `begin_turn`, so each generation is retained and counted separately.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn start_stream(&mut self, started_at_ms: i64) {
         self.start_request_stream("test-request", started_at_ms);
     }

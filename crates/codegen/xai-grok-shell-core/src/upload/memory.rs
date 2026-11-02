@@ -7,7 +7,7 @@
 use super::trace::{UploadFailure, record_upload_failure, upload_small_artifact};
 use super::turn::{PromptTraceContext, UploadWait};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 use super::trace::apply_test_archive_fault;
 
 /// A failed memory-archive build still gets a manifest entry and the shared
@@ -64,7 +64,7 @@ fn join_or_start_memory_archive_build(
     xai_spawn::spawn(async move {
         let build_cwd = cwd.clone();
         let result = match xai_spawn::spawn_blocking(move || {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             apply_test_archive_fault()?;
             let storage = crate::session::memory::MemoryStorage::new(
                 std::path::Path::new(&build_cwd),

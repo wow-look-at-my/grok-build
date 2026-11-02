@@ -85,7 +85,7 @@ impl BlockingWaitState {
     pub fn depth(&self) -> usize {
         self.0.lock().depth
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn set_depth_for_test(&self, depth: usize) {
         self.0.lock().depth = depth;
     }
@@ -105,7 +105,7 @@ impl BlockingWaitState {
         }
         Some(f(&mut inner.interrupted_wait_ids))
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn note_interrupted_wait(&self, ids: Vec<String>) {
         self.update_interrupted_wait(self.generation(), |remembered| {
             if ids.is_empty() {
@@ -123,7 +123,7 @@ impl BlockingWaitState {
             }
         });
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn interrupted_wait_ids(&self) -> Option<Vec<String>> {
         self.0.lock().interrupted_wait_ids.clone()
     }
@@ -278,7 +278,7 @@ impl ToolContext {
     }
     /// Test-only: empty session env.
     /// Production goes through [`Self::with_preloaded_env`].
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn new(
         cwd: AbsPathBuf,
         gateway: Option<GatewaySender>,
@@ -387,8 +387,8 @@ mod output_budget_tests {
         assert_eq!(budget.clamp_request(None), Some(0));
     }
 }
-#[cfg(test)]
-mod tests {
+#[cfg(any(test, feature = "test-util"))]
+mod test_constructors {
     use super::BlockingWaitState;
     use crate::{terminal::AsyncTerminalRunner, tools::ToolContext};
     use std::collections::HashMap;

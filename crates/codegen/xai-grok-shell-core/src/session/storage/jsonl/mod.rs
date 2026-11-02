@@ -27,22 +27,22 @@ pub enum AppendDurability {
 #[derive(Clone)]
 pub struct JsonlStorageAdapter {
     dir_mode: SessionDirMode,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     update_append_probe: Option<std::sync::Arc<AppendProbe>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     session_sync_probe: Option<std::sync::Arc<SessionSyncProbe>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     file_sync_probe: Option<std::sync::Arc<FileSyncProbe>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     parent_sync_probe: Option<std::sync::Arc<ParentSyncProbe>>,
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 type AppendProbe = dyn Fn(AppendDurability) -> io::Result<()> + Send + Sync;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 type SessionSyncProbe = dyn Fn(super::SessionFileSet) -> io::Result<()> + Send + Sync;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 type FileSyncProbe = dyn Fn() -> io::Result<()> + Send + Sync;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 type ParentSyncProbe = dyn Fn() -> io::Result<()> + Send + Sync;
 /// `Committed` means `write_all` succeeded: the record is in the file (at least the page cache) and a later fsync can still make it durable.
 #[derive(Debug)]
@@ -79,26 +79,26 @@ impl JsonlStorageAdapter {
     pub fn new() -> Self {
         Self {
             dir_mode: SessionDirMode::FromRoot(crate::util::grok_home::grok_home()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             update_append_probe: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             session_sync_probe: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             file_sync_probe: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             parent_sync_probe: None,
         }
     }
     pub fn with_root(root_dir: PathBuf) -> Self {
         Self {
             dir_mode: SessionDirMode::FromRoot(root_dir),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             update_append_probe: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             session_sync_probe: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             file_sync_probe: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             parent_sync_probe: None,
         }
     }
@@ -107,17 +107,17 @@ impl JsonlStorageAdapter {
     pub fn with_explicit_session_dir(session_dir: PathBuf) -> Self {
         Self {
             dir_mode: SessionDirMode::Explicit(session_dir),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             update_append_probe: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             session_sync_probe: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             file_sync_probe: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             parent_sync_probe: None,
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_update_append_probe(
         session_dir: PathBuf,
         append_probe: impl Fn(AppendDurability) -> io::Result<()> + Send + Sync + 'static,
@@ -132,7 +132,7 @@ impl JsonlStorageAdapter {
     }
     /// [`Self::with_update_append_probe`] plus a probe observing (and able to fail) every [`StorageAdapter::sync_session_files_selected`] barrier.
     /// That probe receives the file set the barrier flushes.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_probes(
         session_dir: PathBuf,
         append_probe: impl Fn(AppendDurability) -> io::Result<()> + Send + Sync + 'static,
@@ -147,7 +147,7 @@ impl JsonlStorageAdapter {
         }
     }
     /// Fail (or observe) the per-append file barrier after `write_all`.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_file_sync_probe(
         mut self,
         file_sync_probe: impl Fn() -> io::Result<()> + Send + Sync + 'static,
@@ -156,7 +156,7 @@ impl JsonlStorageAdapter {
         self
     }
     /// Fail (or observe) the first-create `summary.json` parent-directory sync.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn with_parent_sync_probe(
         mut self,
         parent_sync_probe: impl Fn() -> io::Result<()> + Send + Sync + 'static,
@@ -637,7 +637,7 @@ impl JsonlStorageAdapter {
         update: &super::SessionUpdate,
         durability: AppendDurability,
     ) -> Result<(), super::AppendUpdateError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-util"))]
         if let Some(append_probe) = &self.update_append_probe {
             append_probe(durability).map_err(super::AppendUpdateError::NotCommitted)?;
         }
@@ -648,7 +648,7 @@ impl JsonlStorageAdapter {
             super::AppendUpdateError::NotCommitted(io::Error::new(io::ErrorKind::InvalidData, e))
         })?;
         line.push(b'\n');
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-util"))]
         let file_sync_probe = self.file_sync_probe.clone();
         xai_spawn::spawn_blocking(move || {
             Self::append_jsonl_line_sync_with(
@@ -656,7 +656,7 @@ impl JsonlStorageAdapter {
                 line,
                 durability,
                 |file| {
-                    #[cfg(test)]
+                    #[cfg(any(test, feature = "test-util"))]
                     if let Some(probe) = &file_sync_probe {
                         probe()?;
                     }
@@ -752,7 +752,7 @@ impl JsonlStorageAdapter {
         if !only_first_create {
             return Ok(());
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-util"))]
         if let Some(probe) = &self.parent_sync_probe {
             probe()?;
         }
@@ -1762,7 +1762,7 @@ impl StorageAdapter for JsonlStorageAdapter {
         xai_spawn::spawn_blocking(move || -> io::Result<()> {
             use std::fs::OpenOptions;
             let adapter = adapter_clone;
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-util"))]
             if let Some(session_sync_probe) = &adapter.session_sync_probe {
                 session_sync_probe(files)?;
             }

@@ -125,7 +125,7 @@ impl NormalizeCache {
         self.inner.try_get_with(key, compute(raw_bytes)).await
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub async fn get_for_tests(
         &self,
         raw_bytes: &[u8],

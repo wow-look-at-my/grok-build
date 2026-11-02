@@ -85,7 +85,7 @@ impl McpDefinitionIndex {
             .map(|(name, (server, subject))| (name.as_str(), server, *subject))
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn from_entries(entries: HashMap<String, acp::McpServer>) -> Self {
         use xai_grok_workspace::permission::resolution::PolicySubjectOrigin;
         // Test entries default to foreign: every policy source binds.
@@ -108,12 +108,12 @@ impl McpDefinitionIndex {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn contains(&self, name: &str) -> bool {
         self.entries.contains_key(name)
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn transport(&self, name: &str) -> Option<&acp::McpServer> {
         self.entries.get(name).map(|(server, _)| server)
     }

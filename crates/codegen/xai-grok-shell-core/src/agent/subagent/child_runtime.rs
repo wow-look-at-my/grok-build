@@ -21,7 +21,7 @@ pub struct ShellChildRuntime {
     /// `None` means the caller still owns the join handle, so a cancel during promotion can wait for the actor to exit.
     pub _child_thread: Option<SessionThread>,
     pub receipt_sink: mpsc::Sender<PromptTurnReceipt>,
-    #[cfg(test)]
+    /// Test seam: forces the queue envelope. Always false outside tests.
     pub force_queue_envelope: bool,
     pub active_message_parent_session_id: String,
     pub active_message_parent_prompt_index: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -58,13 +58,13 @@ impl ChildControl for ShellChildRuntime {
         let message = delivery.message();
         let envelope = DeliveryEnvelope::from_agent(
             {
-                #[cfg(test)]
+                #[cfg(any(test, feature = "test-util"))]
                 if self.force_queue_envelope {
                     xai_message_delivery_core::Operation::Queue
                 } else {
                     xai_message_delivery_core::Operation::from(delivery.operation())
                 }
-                #[cfg(not(test))]
+                #[cfg(not(any(test, feature = "test-util")))]
                 xai_message_delivery_core::Operation::from(delivery.operation())
             },
             message.text.clone(),

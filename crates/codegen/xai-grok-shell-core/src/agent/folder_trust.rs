@@ -143,7 +143,7 @@ fn record(workspace_key: &Path, allowed: bool) {
 /// Test-only: force the recorded decision for `cwd`'s workspace key.
 /// Tests use UNIQUE temp-dir keys and never globally clear `DECISIONS`, so they can run in parallel without clobbering each other's decisions.
 /// Consumed by the MCP project-scope gate tests here and in `managed_mcp`.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn record_for_test(cwd: &Path, allowed: bool) {
     record(&workspace_key(cwd), allowed);
 }

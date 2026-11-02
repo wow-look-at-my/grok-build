@@ -66,7 +66,7 @@ impl ResolvedHarnessModels {
     }
 
     /// Build a map directly. Tests use this to pin one slot.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn from_pairs(pairs: &[(&'static str, &str)]) -> Self {
         Self {
             by_slot: RefCell::new(pairs.iter().map(|(k, v)| (*k, (*v).to_string())).collect()),

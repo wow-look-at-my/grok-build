@@ -193,13 +193,13 @@ impl ModelsManagerBuilder {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn endpoint(mut self, endpoint: Arc<dyn ModelsEndpoint>) -> Self {
         self.endpoint = endpoint;
         self
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn cache(mut self, cache: ModelsCacheManager) -> Self {
         self.cache = cache;
         self
@@ -495,7 +495,7 @@ impl ModelsManager {
             .unwrap_or_default()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn insert_test_entry(&self, id: impl Into<String>, entry: ModelEntry) {
         self.inner.catalog.write().models.insert(id.into(), entry);
     }
@@ -672,12 +672,12 @@ impl ModelsManager {
         resolve_catalog_key(models, &acp::ModelId::new(model_id)).is_some()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     fn prefetched(&self) -> Option<IndexMap<String, ModelEntry>> {
         self.inner.catalog.read().prefetched.clone()
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     fn has_fetched_real_catalog(&self) -> bool {
         self.inner.catalog.read().has_fetched_real_catalog
     }
@@ -1291,7 +1291,7 @@ impl ModelsManager {
     }
 
     /// A same-identity refresh, as the fetch paths see it.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     fn apply_refresh_result(
         &self,
         config: &config::Config,

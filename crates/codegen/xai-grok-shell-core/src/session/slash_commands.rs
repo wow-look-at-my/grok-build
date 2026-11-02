@@ -467,7 +467,7 @@ impl CommandAvailability {
             BuiltinGate::WorkflowManagement => self.workflows || self.workflow_management,
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn all_enabled() -> Self {
         Self {
             feedback: true,
@@ -1051,7 +1051,7 @@ fn clear_negative_cache_for_auth(auth: &xai_grok_login::GrokAuth) {
 fn product_skills_fetch_gate() -> &'static tokio::sync::Mutex<()> {
     PRODUCT_SKILLS_FETCH_GATE.get_or_init(|| tokio::sync::Mutex::new(()))
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn clear_product_skills_cache_for_test() {
     *PRODUCT_SKILLS_CACHE.lock() = None;
     *PRODUCT_SKILLS_DEGRADED_CACHE.lock() = None;

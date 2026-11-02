@@ -1231,7 +1231,7 @@ impl GoalTracker {
 
 // Test helpers (shared across goal_tracker and goal_orchestrator tests)
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn make_base_orchestration() -> GoalOrchestration {
     GoalOrchestration {
         goal_id: "g-test".into(),

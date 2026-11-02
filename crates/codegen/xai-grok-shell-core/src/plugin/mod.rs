@@ -1521,7 +1521,7 @@ fn try_remove_from_json_object(
 }
 
 /// Shared fixtures for the `plugin` module's test splits.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub mod test_fixtures {
     use std::path::PathBuf;
 

@@ -10,7 +10,7 @@ const AUTO_MODE_CLASSIFY_TIMEOUT_MAX_MS: u64 = 120_000;
 /// Crate-wide serialization lock for tests that mutate `GROK_AUTO_PERMISSION_MODE`.
 /// Every test reading the gate locks this so a concurrent setter can't make them flaky.
 /// That includes the tests in `permissions.rs`, which compile into the same test binary.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub static AUTO_PERMISSION_MODE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn auto_permission_mode_from_toml(v: Option<&TomlValue>) -> Option<bool> {

@@ -1724,7 +1724,7 @@ impl SessionSignalsActor {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     pub fn snapshot(&self) -> SessionSignals {
         self.signals.clone()
     }

@@ -10,12 +10,12 @@ use xai_message_delivery_core::{
 
 use super::SessionCommand;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 thread_local! {
     static HUMAN_SENDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn take_human_send_count() -> usize {
     HUMAN_SENDS.with(|count| count.replace(0))
 }
@@ -115,7 +115,7 @@ impl MessageDeliveryHandle {
             HumanDeliveryIdentity,
         >,
     ) -> Result<(), HumanDeliveryError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-util"))]
         HUMAN_SENDS.with(|count| count.set(count.get() + 1));
         let (operation, content, identity, grant) = envelope.into_parts();
         let (HumanMessageId(message_id), HumanPromptId(prompt_id)) = identity.into_parts();

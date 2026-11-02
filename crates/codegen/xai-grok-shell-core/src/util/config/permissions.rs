@@ -147,7 +147,7 @@ fn selected_permission_mode_from_layers(
 }
 
 /// What production callers inline (the display path, `load_permission_mode`): select a mode, then fall back to Ask.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 fn permission_mode_from_layers(
     layers: &crate::config::ConfigLayers,
     remote: Option<&str>,

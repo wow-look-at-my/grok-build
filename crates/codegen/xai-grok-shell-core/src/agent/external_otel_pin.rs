@@ -23,13 +23,13 @@ const CONTENT_GATE_KEYS: &[&str] = &[
 const GENERIC_ENDPOINT: &str = "OTEL_EXPORTER_OTLP_ENDPOINT";
 const LOGS_ENDPOINT: &str = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT";
 const METRICS_ENDPOINT: &str = "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT";
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 const ENDPOINT_ENV: &[&str] = &[GENERIC_ENDPOINT, LOGS_ENDPOINT, METRICS_ENDPOINT];
 
 const GENERIC_PROTOCOL: &str = "OTEL_EXPORTER_OTLP_PROTOCOL";
 const LOGS_PROTOCOL: &str = "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL";
 const METRICS_PROTOCOL: &str = "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL";
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 const PROTOCOL_ENV: &[&str] = &[GENERIC_PROTOCOL, LOGS_PROTOCOL, METRICS_PROTOCOL];
 
 /// Generic + per-signal siblings: pin the generic key → strip unlisted

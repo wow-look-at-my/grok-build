@@ -237,7 +237,7 @@ pub fn record_completed_tool_output(
         return;
     }
     let requested_operation = requested_operation_from_args(parsed_args);
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-util"))]
     if try_emit_test_event(output, requested_operation, duration_ms) {
         return;
     }
@@ -250,13 +250,13 @@ pub fn record_completed_tool_output(
     );
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 thread_local! {
     static TEST_EVENT_SINK: std::cell::RefCell<Option<Box<dyn ActiveAgentMessageEventSink>>> =
         const { std::cell::RefCell::new(None) };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 fn try_emit_test_event(
     output: &ToolOutput,
     requested_operation: ActiveAgentMessageOperation,
@@ -271,22 +271,22 @@ fn try_emit_test_event(
     })
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 struct CapturedEventSink {
     events: std::rc::Rc<std::cell::RefCell<Vec<ActiveAgentMessageEvent>>>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl ActiveAgentMessageEventSink for CapturedEventSink {
     fn emit(&mut self, event: ActiveAgentMessageEvent) {
         self.events.borrow_mut().push(event);
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 struct TestEventSinkGuard(Option<Box<dyn ActiveAgentMessageEventSink>>);
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl Drop for TestEventSinkGuard {
     fn drop(&mut self) {
         let previous = self.0.take();
@@ -294,7 +294,7 @@ impl Drop for TestEventSinkGuard {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub async fn capture_product_events<F: std::future::Future>(
     future: F,
 ) -> (F::Output, Vec<ActiveAgentMessageEvent>) {
@@ -314,7 +314,7 @@ pub async fn capture_product_events<F: std::future::Future>(
     (output, captured)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 fn record_completed_tool_output_with_sink(
     output: &ToolOutput,
     requested_operation: ActiveAgentMessageOperation,
