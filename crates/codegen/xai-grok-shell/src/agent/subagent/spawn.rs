@@ -213,7 +213,7 @@ impl coordinator::ChildRunner for ShellChildRunner {
                     subagent_id = %run.request.id,
                 ));
                 xai_spawn::spawn_on(
-                    &handle,
+                    handle,
                     crate::agent::subagent::run_shell_child(
                         run,
                         ctx,
@@ -307,7 +307,7 @@ impl coordinator::ChildRunner for ShellChildRunner {
         };
         match worker_runtime() {
             Ok(handle) => {
-                let task = xai_spawn::spawn_on(&handle, async move { present() });
+                let task = xai_spawn::spawn_on(handle, async move { present() });
                 let mut tasks = self.presentations.borrow_mut();
                 tasks.retain(|t| !t.is_finished());
                 tasks.push(tokio_util::task::AbortOnDropHandle::new(task));
