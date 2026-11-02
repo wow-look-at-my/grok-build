@@ -1,5 +1,4 @@
 //! Bash request-level execution risk: argv flags that spawn programs, and ambient local/worktree git config.
-//! Flag floors run inline; the ambient git config read uses `spawn_blocking` from the permission actor.
 
 use std::path::{Path, PathBuf};
 

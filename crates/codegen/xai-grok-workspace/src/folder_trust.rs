@@ -567,7 +567,7 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
         hit!("envrc");
     }
     // Detect `.claude` along the same cwd-to-root walk the env/permission loaders use, or a subdir `env` loads ungated
-    // Own `.git`-existence walk, not the repository discovery chain, so detection matches the loader on a bare or empty `.git`
+    // loaders use.
     if crate::permission::claude_settings::project_claude_settings_present(cwd) {
         hit!("claude");
     }

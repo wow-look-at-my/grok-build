@@ -1524,7 +1524,7 @@ fn parse_porcelain_v2(
     }
     (staged, unstaged)
 }
-/// Full git-status via CLI only, used as fallback when gix cannot read the index (e.g. **Limitation:** patch content (`patch`, `patch_bytes`, `patch_lines`) is not populated; all entries return `None` for these fields.
+/// Full git-status via CLI only, used as fallback when gix cannot read the index (e.g. **Limitation:** patch content (`patch`, `patch_bytes`, `patch_lines`) is not populated. All entries return `None` for these fields.
 async fn status_via_cli(
     git_root: &Path,
     include_untracked: bool,

@@ -191,7 +191,6 @@ impl WorkspaceEnvironment {
     }
 }
 
-/// Resolve `(repo_root, origin_remote_url)` for `cwd`; both `None` outside a git repository.
 /// The `origin` URL has embedded credentials stripped before it is stored.
 /// HTTPS remotes can carry a token in the userinfo, and this artifact is uploaded, so the raw URL must never be persisted.
 fn git_repo_facts(cwd: &Path) -> (Option<String>, Option<String>) {

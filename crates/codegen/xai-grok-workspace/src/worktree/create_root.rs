@@ -332,7 +332,8 @@ pub async fn git_or_grove_is_jj_async(path: &Path, grove: bool) -> bool {
 
 ///
 /// Grove-on ordinary git still waits on Status (ping timeout 250ms) before
-/// git discovery: the RPC is the skip decision when the mount table is unavailable.
+/// git discovery: the RPC is the skip decision when the mount table is
+/// unavailable.
 pub(crate) fn probe_grove_parent_sync(source: &Path) -> Option<GroveParentLayout> {
     #[cfg(test)]
     {
