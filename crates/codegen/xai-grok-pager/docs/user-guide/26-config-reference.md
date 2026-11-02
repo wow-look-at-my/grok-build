@@ -180,12 +180,7 @@ User-level configuration lives in `$GROK_HOME/config.toml` (default `~/.grok/con
 | `endpoints.managed_config_url` | `string` | `yes` | `user` | Override managed config endpoint. Also GROK_MANAGED_CONFIG_URL. |
 | `endpoints.models_base_url` | `string` | `pin` | `user` | Custom inference base URL. Also GROK_MODELS_BASE_URL. |
 | `endpoints.models_list_url` | `string` | `pin` | `user` | Override model-list URL. Also GROK_MODELS_LIST_URL. Alias `models_endpoint`. |
-| `endpoints.trace_upload_bucket` | `string` | `yes` | `user` | Direct gs:// or s3:// bucket for traces; bypasses the proxy. Also GROK_TRACE_UPLOAD_BUCKET. |
-| `endpoints.trace_upload_credentials` | `string` | `yes` | `user` | Inline GCS service-account JSON or AWS credentials for that bucket; wins over `trace_upload_credentials_file` and has no environment variable. |
-| `endpoints.trace_upload_credentials_file` | `string (path)` | `yes` | `user` | Path to a GCS service-account JSON or AWS credentials file for that bucket. Also GROK_TRACE_UPLOAD_CREDENTIALS_FILE. |
-| `endpoints.trace_upload_endpoint_url` | `string` | `yes` | `user` | Custom S3-compatible endpoint for s3:// bucket uploads. Also GROK_TRACE_UPLOAD_ENDPOINT_URL. |
-| `endpoints.trace_upload_region` | `string` | `yes` | `user` | AWS region for s3:// bucket uploads; default us-east-1. Also GROK_TRACE_UPLOAD_REGION. |
-| `endpoints.trace_upload_url` | `string` | `pin` | `user` | Proxy destination for traces when no direct bucket is set. Also GROK_TRACE_UPLOAD_URL. |
+| `endpoints.trace_upload_url` | `string` | `pin` | `user` | Proxy destination for traces. Also GROK_TRACE_UPLOAD_URL. Trace uploads go through the proxy only: a config that sets a removed direct-bucket key (`trace_upload_bucket`, `trace_upload_region`, `trace_upload_credentials`, `trace_upload_credentials_file`, `trace_upload_endpoint_url`, `gcs_service_account_key`) or env var (`GROK_TRACE_UPLOAD_BUCKET`, `GROK_TRACE_UPLOAD_REGION`, `GROK_TRACE_UPLOAD_CREDENTIALS_FILE`, `GROK_TRACE_UPLOAD_ENDPOINT_URL`, `GROK_TELEMETRY_GCS_BUCKET`) fails to load. |
 | `endpoints.xai_api_base_url` | `string` | `pin` | `user` | Public xAI API base. Also GROK_XAI_API_BASE_URL. |
 
 ### `features`

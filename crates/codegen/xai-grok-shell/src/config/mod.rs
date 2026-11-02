@@ -1421,32 +1421,6 @@ fn apply_requirements_inner(
         config.telemetry.mixpanel_token,
         redacted
     );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_bucket",
-        config.endpoints.trace_upload_bucket
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_region",
-        config.endpoints.trace_upload_region
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_credentials_file",
-        config.endpoints.trace_upload_credentials_file
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_endpoint_url",
-        config.endpoints.trace_upload_endpoint_url
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_credentials",
-        config.endpoints.trace_upload_credentials,
-        redacted
-    );
     if let Some(val) = req.get("features").and_then(|f| f.get("codebase_indexing")) {
         use crate::agent::config::CodebaseIndexingSetting;
         match val {

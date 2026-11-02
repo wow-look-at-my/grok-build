@@ -176,12 +176,8 @@ pub enum TraceUploadReason {
     FeatureOff,
     /// No grok.com auth.
     NoCredentials,
-    /// Direct-to-bucket S3 upload.
-    DirectS3,
     /// Proxy mode via grok.com auth.
     Proxy,
-    /// Direct GCS with service account key.
-    DirectGcs,
     /// Session handle not found (edge case).
     SessionNotFound,
 }
@@ -190,8 +186,6 @@ impl TraceUploadReason {
     pub fn from_upload_method(method: &Option<xai_file_utils::UploadMethod>) -> Self {
         match method {
             Some(xai_file_utils::UploadMethod::Proxy { .. }) => Self::Proxy,
-            Some(xai_file_utils::UploadMethod::S3 { .. }) => Self::DirectS3,
-            Some(xai_file_utils::UploadMethod::Direct { .. }) => Self::DirectGcs,
             None => Self::NoCredentials,
         }
     }
@@ -380,9 +374,7 @@ mod tests {
         assert_eq!(TraceUploadReason::ZdrTeam.as_ref(), "zdr_team");
         assert_eq!(TraceUploadReason::FeatureOff.as_ref(), "feature_off");
         assert_eq!(TraceUploadReason::NoCredentials.as_ref(), "no_credentials");
-        assert_eq!(TraceUploadReason::DirectS3.as_ref(), "direct_s3");
         assert_eq!(TraceUploadReason::Proxy.as_ref(), "proxy");
-        assert_eq!(TraceUploadReason::DirectGcs.as_ref(), "direct_gcs");
         assert_eq!(
             TraceUploadReason::SessionNotFound.as_ref(),
             "session_not_found"
@@ -397,28 +389,12 @@ mod tests {
             TraceUploadReason::NoCredentials
         );
         assert_eq!(
-            TraceUploadReason::from_upload_method(&Some(UploadMethod::Direct {
-                service_account_key: None,
-            })),
-            TraceUploadReason::DirectGcs
-        );
-        assert_eq!(
             TraceUploadReason::from_upload_method(&Some(UploadMethod::Proxy {
                 proxy_base_url: String::new(),
                 user_token: String::new(),
                 alpha_test_key: None,
             })),
             TraceUploadReason::Proxy
-        );
-        assert_eq!(
-            TraceUploadReason::from_upload_method(&Some(UploadMethod::S3 {
-                bucket: String::new(),
-                region: String::new(),
-                credentials_file: None,
-                credentials_content: None,
-                endpoint_url: None,
-            })),
-            TraceUploadReason::DirectS3
         );
     }
 }

@@ -1,6 +1,6 @@
 // auth.rs holds the auth code.
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use request::header::{HeaderMap, HeaderName, HeaderValue};
 
 use crate::error::AuthRefusal;
 use crate::session;
@@ -94,7 +94,7 @@ pub enum KeyScheme {
 
 /// True for a host xAI operates: `x.ai`, `grok.com`, or a subdomain of either, over https.
 /// A loopback mock counts only in a test build that turns on `test-loopback-session`.
-pub fn is_xai_host(url: &reqwest::Url) -> bool {
+pub fn is_xai_host(url: &request::Url) -> bool {
     if cfg!(feature = "test-loopback-session") && is_loopback(url) {
         return true;
     }
@@ -112,7 +112,7 @@ pub fn is_xai_host(url: &reqwest::Url) -> bool {
     })
 }
 
-fn is_loopback(url: &reqwest::Url) -> bool {
+fn is_loopback(url: &request::Url) -> bool {
     match url.host() {
         Some(url::Host::Domain(host)) => host == "localhost",
         Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
@@ -123,9 +123,9 @@ fn is_loopback(url: &reqwest::Url) -> bool {
 
 /// True for a header name that carries a credential. Only [`Auth`] may set one.
 pub fn is_credential_header(name: &HeaderName) -> bool {
-    name == reqwest::header::AUTHORIZATION
-        || name == reqwest::header::PROXY_AUTHORIZATION
-        || name == reqwest::header::COOKIE
+    name == request::header::AUTHORIZATION
+        || name == request::header::PROXY_AUTHORIZATION
+        || name == request::header::COOKIE
         || name.as_str() == X_API_KEY
         || name.as_str() == VIRTUAL_KEY
 }
@@ -133,7 +133,7 @@ pub fn is_credential_header(name: &HeaderName) -> bool {
 /// Write `auth` into `headers` for a request to `url`.
 pub(crate) fn apply(
     auth: &Auth,
-    url: &reqwest::Url,
+    url: &request::Url,
     headers: &mut HeaderMap,
 ) -> Result<(), AuthRefusal> {
     match auth {
@@ -145,7 +145,7 @@ pub(crate) fn apply(
             }
             insert(
                 headers,
-                reqwest::header::AUTHORIZATION,
+                request::header::AUTHORIZATION,
                 &format!("Bearer {token}"),
             )?;
         }
@@ -154,7 +154,7 @@ pub(crate) fn apply(
                 KeyScheme::Bearer => {
                     insert(
                         headers,
-                        reqwest::header::AUTHORIZATION,
+                        request::header::AUTHORIZATION,
                         &format!("Bearer {key}"),
                     )?;
                 }
@@ -176,7 +176,7 @@ pub(crate) fn apply(
 
 /// The last check before a request leaves: no header may carry a session token to a
 /// host xAI does not operate. This covers a token passed as an API key or a configured header.
-pub(crate) fn check_outgoing(url: &reqwest::Url, headers: &HeaderMap) -> Result<(), AuthRefusal> {
+pub(crate) fn check_outgoing(url: &request::Url, headers: &HeaderMap) -> Result<(), AuthRefusal> {
     if is_xai_host(url) {
         return Ok(());
     }
@@ -197,7 +197,7 @@ fn insert(headers: &mut HeaderMap, name: HeaderName, value: &str) -> Result<(), 
     Ok(())
 }
 
-pub(crate) fn host_of(url: &reqwest::Url) -> String {
+pub(crate) fn host_of(url: &request::Url) -> String {
     url.host_str().unwrap_or_default().to_owned()
 }
 
@@ -205,8 +205,8 @@ pub(crate) fn host_of(url: &reqwest::Url) -> String {
 mod tests {
     use super::*;
 
-    fn url(s: &str) -> reqwest::Url {
-        reqwest::Url::parse(s).unwrap()
+    fn url(s: &str) -> request::Url {
+        request::Url::parse(s).unwrap()
     }
 
     #[test]

@@ -197,7 +197,6 @@ impl SessionActor {
                 if let Some(template) = self.trace_config_template.borrow().clone() {
                     let cfg = crate::session::repo_changes::TraceExportConfig {
                         bucket_url: template.bucket_url,
-                        service_account_key: None,
                         prefix_dir: None,
                         gcs_prefix: Some(format!(
                             "{}/turn_{}",

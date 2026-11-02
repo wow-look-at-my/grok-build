@@ -64,7 +64,7 @@ fn handshake_succeeds_against_ca_loaded_from_ssl_cert_file() {
     // Native roots off: the CA is trusted only if the crate's SSL_CERT_FILE loader added it rustls-native-certs also reads
     // SSL_CERT_FILE. Leaving native roots on would let the handshake pass without the loader
     #[expect(clippy::expect_used)]
-    let client = xai_grok_extra_ca::build_blocking_reqwest_client(|builder| {
+    let client = xai_grok_extra_ca::build_raw_blocking_http_client(|builder| {
         builder
             .timeout(std::time::Duration::from_secs(10))
             .no_proxy()

@@ -11,7 +11,6 @@ anyhow = { workspace = true }
 base64.workspace = true
 xai-circuit-breaker = { workspace = true }
 xai-grok-version = { workspace = true }
-bytes = { workspace = true }
 futures = { workspace = true }
 hmac = { workspace = true }
 serde = { workspace = true }
@@ -20,18 +19,14 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
 xai-dirs = { workspace = true }
-xai-grok-extra-ca = { workspace = true }
 xai-grok-net = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time", "io-util", "fs"] }
 sha2 = { workspace = true, features = ["force-soft"] }
 xai-grok-auth = { path = "../xai-grok-auth" }
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
 async-compression = { workspace = true, features = ["tokio"] }
-gcloud-storage = { workspace = true }
-jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 reflink-copy = { workspace = true }
 xai-grok-otel = { workspace = true }
-url = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["io"] }
 zstd.workspace = true

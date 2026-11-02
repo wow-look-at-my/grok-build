@@ -61,7 +61,7 @@ fn http1_only_client_stays_on_http11_against_an_h2_server() {
         }
     });
 
-    let client = xai_grok_extra_ca::build_blocking_reqwest_client(|builder| {
+    let client = xai_grok_extra_ca::build_raw_blocking_http_client(|builder| {
         builder
             .http1_only()
             .timeout(std::time::Duration::from_secs(10))
@@ -74,5 +74,5 @@ fn http1_only_client_stays_on_http11_against_an_h2_server() {
         .send()
         .expect("http1-only client negotiates http/1.1 even when the server offers h2");
     assert_eq!(resp.status(), 204);
-    assert_eq!(resp.version(), reqwest::Version::HTTP_11);
+    assert_eq!(resp.version(), request::Version::HTTP_11);
 }

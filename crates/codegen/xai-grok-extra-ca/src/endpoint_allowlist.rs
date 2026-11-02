@@ -76,7 +76,7 @@ pub fn check(url: &str) -> Result<(), EndpointRefusal> {
 
 /// [`check`] against an explicit list, for callers and tests that hold one.
 pub fn check_against(url: &str, entries: &[String]) -> Result<(), EndpointRefusal> {
-    let Ok(target) = reqwest::Url::parse(url.trim()) else {
+    let Ok(target) = request::Url::parse(url.trim()) else {
         return Err(EndpointRefusal::NoUrl {
             url: url.to_owned(),
         });
@@ -102,12 +102,12 @@ pub fn check_against(url: &str, entries: &[String]) -> Result<(), EndpointRefusa
     })
 }
 
-fn entry_covers(entry: &str, target: &reqwest::Url) -> bool {
+fn entry_covers(entry: &str, target: &request::Url) -> bool {
     let Some(target_host) = target.host_str() else {
         return false;
     };
     if entry.contains("://") {
-        let Ok(allowed) = reqwest::Url::parse(entry) else {
+        let Ok(allowed) = request::Url::parse(entry) else {
             return false;
         };
         let path = allowed.path().trim_end_matches('/');
@@ -127,7 +127,7 @@ fn entry_covers(entry: &str, target: &reqwest::Url) -> bool {
             && host.ends_with(&suffix)
             && host.as_bytes().get(host.len() - suffix.len() - 1) == Some(&b'.');
     }
-    let Ok(allowed) = reqwest::Url::parse(&format!("any://{entry}")) else {
+    let Ok(allowed) = request::Url::parse(&format!("any://{entry}")) else {
         return false;
     };
     if !allowed

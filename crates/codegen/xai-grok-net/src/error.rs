@@ -41,7 +41,7 @@ pub enum Error {
     /// This crate refused the credential. Nothing was sent.
     Auth(AuthRefusal),
     /// The transport, or the response, failed.
-    Http(reqwest::Error),
+    Http(request::Error),
 }
 
 impl Error {
@@ -63,20 +63,20 @@ impl Error {
     pub fn is_status(&self) -> bool {
         matches!(self, Self::Http(e) if e.is_status())
     }
-    pub fn status(&self) -> Option<reqwest::StatusCode> {
+    pub fn status(&self) -> Option<request::StatusCode> {
         match self {
             Self::Http(e) => e.status(),
             Self::Auth(_) => None,
         }
     }
-    pub fn url(&self) -> Option<&reqwest::Url> {
+    pub fn url(&self) -> Option<&request::Url> {
         match self {
             Self::Http(e) => e.url(),
             Self::Auth(_) => None,
         }
     }
     /// The transport error, for code that classifies one.
-    pub fn as_http(&self) -> Option<&reqwest::Error> {
+    pub fn as_http(&self) -> Option<&request::Error> {
         match self {
             Self::Http(e) => Some(e),
             Self::Auth(_) => None,
@@ -108,8 +108,8 @@ impl std::error::Error for Error {
     }
 }
 
-impl From<reqwest::Error> for Error {
-    fn from(e: reqwest::Error) -> Self {
+impl From<request::Error> for Error {
+    fn from(e: request::Error) -> Self {
         Self::Http(e)
     }
 }
