@@ -12459,6 +12459,7 @@ name = "xai-grok-pdf"
 version = "0.1.0"
 dependencies = [
  "pdf_oxide",
+ "serde_json",
  "xai-tool-types",
 ]
 
