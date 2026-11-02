@@ -50,7 +50,7 @@ fn ci_host_worker_serves_a_request_over_an_inherited_socketpair() {
         .env(xai_grok_sandbox::ci_host::CI_HOST_MARKER_ENV, "1")
         .env(WORKER_FD_ENV, WORKER_FD.to_string())
         .arg("--exact")
-        .arg("ci_host_worker_self_entry")
+        .arg("integration_test::ci_host_worker_self_entry")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());

@@ -47,7 +47,7 @@ fn run_scenario(
         .arg("--ignored")
         .arg("--exact")
         .arg("--nocapture")
-        .arg("subprocess_entry")
+        .arg("deny_paths_e2e::subprocess_entry")
         .output()
         .expect("failed to spawn subprocess");
     (
@@ -70,7 +70,7 @@ fn run_hook_write_deny_scenario(
         .arg("--ignored")
         .arg("--exact")
         .arg("--nocapture")
-        .arg("subprocess_entry")
+        .arg("deny_paths_e2e::subprocess_entry")
         .output()
         .expect("failed to spawn subprocess");
     (
@@ -1011,7 +1011,7 @@ fn read_deny_marker_spoof_refused() {
         .arg("--ignored")
         .arg("--exact")
         .arg("--nocapture")
-        .arg("subprocess_entry")
+        .arg("deny_paths_e2e::subprocess_entry")
         .output()
         .expect("failed to spawn subprocess");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1057,7 +1057,12 @@ fn read_deny_forged_mounts_are_refused() {
         .args(["--proc", "/proc"])
         .arg("--")
         .arg(exe)
-        .args(["--ignored", "--exact", "--nocapture", "subprocess_entry"])
+        .args([
+            "--ignored",
+            "--exact",
+            "--nocapture",
+            "deny_paths_e2e::subprocess_entry",
+        ])
         .output()
         .expect("failed to spawn forged bwrap");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1092,7 +1097,7 @@ fn read_deny_empty_set_verifies_inside_bwrap() {
         .arg("--ignored")
         .arg("--exact")
         .arg("--nocapture")
-        .arg("subprocess_entry")
+        .arg("deny_paths_e2e::subprocess_entry")
         .output()
         .expect("failed to spawn subprocess");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1138,7 +1143,12 @@ fn devbox_marker_spoof_does_not_skip_enforcement() {
         .args(["--proc", "/proc"])
         .arg("--")
         .arg(exe)
-        .args(["--ignored", "--exact", "--nocapture", "subprocess_entry"])
+        .args([
+            "--ignored",
+            "--exact",
+            "--nocapture",
+            "deny_paths_e2e::subprocess_entry",
+        ])
         .output()
         .expect("failed to spawn forged bwrap");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1163,7 +1173,7 @@ fn devbox_genuine_reexec_applies_enforcement() {
         .arg("--ignored")
         .arg("--exact")
         .arg("--nocapture")
-        .arg("subprocess_entry")
+        .arg("deny_paths_e2e::subprocess_entry")
         .output()
         .expect("failed to spawn subprocess");
     let stderr = String::from_utf8_lossy(&output.stderr);

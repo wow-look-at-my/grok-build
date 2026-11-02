@@ -29,8 +29,12 @@ fn subprocess_entry() {
 fn spawn_probe(socket: &Path, filtered: bool) -> std::process::Output {
     let exe = std::env::current_exe().expect("current_exe");
     let mut cmd = Command::new(exe);
-    cmd.env(SOCKET_ENV, socket)
-        .args(["--ignored", "--exact", "--nocapture", "subprocess_entry"]);
+    cmd.env(SOCKET_ENV, socket).args([
+        "--ignored",
+        "--exact",
+        "--nocapture",
+        "child_net_e2e::subprocess_entry",
+    ]);
     if filtered {
         // Built in the parent, as production spawns do: the post-fork install must not allocate
         let filter = xai_grok_sandbox::child_net::prebuilt_child_network_filter();
@@ -87,6 +91,8 @@ fn filtered_child_cannot_connect_to_socket_created_after_launch() {
 /// This covers the degraded state (Landlock unavailable, apply failed) where the per-spawn filter is the only remaining child-network control.
 #[test]
 fn restrict_child_network_std_arms_from_config_without_apply() {
+    // `install` arms the process-wide sandbox state the other tests read.
+    own_process!(restrict_child_network_std_arms_from_config_without_apply);
     let manager = xai_grok_sandbox::SandboxManager::new(
         xai_grok_sandbox::ProfileName::ReadOnly,
         Path::new("/tmp"),
@@ -102,8 +108,12 @@ fn restrict_child_network_std_arms_from_config_without_apply() {
     let _listener = std::os::unix::net::UnixListener::bind(&sock).expect("bind");
     let exe = std::env::current_exe().expect("current_exe");
     let mut cmd = Command::new(exe);
-    cmd.env(SOCKET_ENV, &sock)
-        .args(["--ignored", "--exact", "--nocapture", "subprocess_entry"]);
+    cmd.env(SOCKET_ENV, &sock).args([
+        "--ignored",
+        "--exact",
+        "--nocapture",
+        "child_net_e2e::subprocess_entry",
+    ]);
     xai_grok_sandbox::child_net::restrict_child_network_std(&mut cmd);
     let denied = cmd.output().expect("spawn probe");
     assert_eq!(

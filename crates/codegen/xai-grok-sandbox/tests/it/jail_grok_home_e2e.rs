@@ -93,7 +93,12 @@ impl Fixture {
             .env_remove("GROK_HOME")
             .env_remove("XDG_CACHE_HOME")
             .current_dir(self.root.join("work"))
-            .args(["--ignored", "--exact", "--nocapture", "jail_child"])
+            .args([
+                "--ignored",
+                "--exact",
+                "--nocapture",
+                "jail_grok_home_e2e::jail_child",
+            ])
             .output()
             .expect("re-run the test binary");
         (
@@ -196,10 +201,15 @@ fn run_in_jail(symlinked: bool, unfixed: bool) {
         plan.grok_home_links.clear();
     }
     plan.self_exe = std::env::current_exe().unwrap();
-    plan.args = ["--ignored", "--exact", "--nocapture", "jail_child"]
-        .into_iter()
-        .map(OsString::from)
-        .collect();
+    plan.args = [
+        "--ignored",
+        "--exact",
+        "--nocapture",
+        "jail_grok_home_e2e::jail_child",
+    ]
+    .into_iter()
+    .map(OsString::from)
+    .collect();
     #[cfg(target_os = "linux")]
     let mut cmd = xai_grok_sandbox::jail::bwrap_command(&plan);
     #[cfg(target_os = "macos")]

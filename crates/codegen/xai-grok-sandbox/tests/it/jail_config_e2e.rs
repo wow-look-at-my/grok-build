@@ -49,7 +49,7 @@ fn run_capture(home: &Path, section: &str) -> (bool, String) {
         .arg("--ignored")
         .arg("--exact")
         .arg("--nocapture")
-        .arg("config_subprocess")
+        .arg("jail_config_e2e::config_subprocess")
         .output()
         .expect("spawn subprocess");
     (

@@ -217,7 +217,7 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
         .env(xai_grok_sandbox::ci_host::CI_HOST_MARKER_ENV, "1")
         .env(WORKER_FD_ENV, WORKER_FD.to_string())
         .arg("--exact")
-        .arg("seatbelt_worker_self_entry")
+        .arg("jail_seatbelt_e2e::seatbelt_worker_self_entry")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -248,7 +248,7 @@ fn the_jailed_process_reaches_the_host_worker_through_the_seatbelt_jail() {
     jailed.self_exe = std::env::current_exe().expect("current test binary");
     jailed.args = vec![
         OsString::from("--exact"),
-        OsString::from("seatbelt_jailed_child_self_entry"),
+        OsString::from("jail_seatbelt_e2e::seatbelt_jailed_child_self_entry"),
     ];
     jailed.ci_host_fd = Some(client_fd);
 

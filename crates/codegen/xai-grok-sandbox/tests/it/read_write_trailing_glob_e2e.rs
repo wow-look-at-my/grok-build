@@ -88,7 +88,7 @@ fn trailing_glob_read_write_grants_parent_directory() {
         .arg("--ignored")
         .arg("--exact")
         .arg("--nocapture")
-        .arg("subprocess_entry")
+        .arg("read_write_trailing_glob_e2e::subprocess_entry")
         .output()
         .expect("spawn subprocess");
     eprintln!(
