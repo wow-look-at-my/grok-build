@@ -1,0 +1,45 @@
+[package]
+license = "Apache-2.0"
+name = "xai-grok-workspace-server"
+version = "0.1.220-alpha.4"
+edition.workspace = true
+description = "The standalone xai-workspace-server binary"
+
+[[bin]]
+name = "xai-workspace-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+fastrace = { workspace = true, features = ["enable"] }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = [
+    "macros",
+    "process",
+    "rt",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = { workspace = true }
+xai-computer-hub-sdk = { workspace = true, features = ["metrics"] }
+xai-grok-diag-server = { workspace = true }
+xai-grok-extra-ca = { workspace = true }
+xai-grok-pdf = { workspace = true }
+xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
+xai-grok-workspace = { path = "../xai-grok-workspace" }
+xai-grok-workspace-daemon = { path = "../xai-grok-workspace-daemon" }
+xai-tool-protocol = { workspace = true }
+xai-tty-utils = { workspace = true }
+
+[features]
+default = ["sandbox-enforce"]
+sandbox-enforce = ["xai-grok-workspace/sandbox-enforce"]
+
+[lints]
+workspace = true
