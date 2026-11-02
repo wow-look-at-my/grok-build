@@ -12334,6 +12334,7 @@ dependencies = [
  "xai-grok-extra-ca",
  "xai-grok-login",
  "xai-grok-pager",
+ "xai-grok-pdf",
  "xai-grok-sandbox",
  "xai-grok-shell",
  "xai-grok-telemetry",
@@ -12451,6 +12452,14 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "xai-grok-pdf"
+version = "0.1.0"
+dependencies = [
+ "pdf_oxide",
+ "xai-tool-types",
 ]
 
 [[package]]
@@ -12989,6 +12998,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "command-fds",
+ "ctor",
  "derive_more",
  "dhat",
  "dunce",
@@ -13010,7 +13020,6 @@ dependencies = [
  "minijinja",
  "nix 0.30.1",
  "parking_lot",
- "pdf_oxide",
  "pretty_assertions",
  "pulldown-cmark",
  "quick-xml 0.41.0",
@@ -13051,6 +13060,7 @@ dependencies = [
  "xai-grok-image",
  "xai-grok-net",
  "xai-grok-otel",
+ "xai-grok-pdf",
  "xai-grok-sandbox",
  "xai-grok-test-support",
  "xai-grok-tools-api",
@@ -13188,7 +13198,6 @@ dependencies = [
  "xai-grok-tools-api",
  "xai-grok-version",
  "xai-grok-workspace-client",
- "xai-grok-workspace-daemon",
  "xai-grok-workspace-types",
  "xai-hunk-tracker",
  "xai-test-utils",
@@ -13236,6 +13245,30 @@ dependencies = [
  "windows 0.61.3",
  "xai-computer-hub-sdk",
  "xai-grok-net",
+ "xai-tty-utils",
+]
+
+[[package]]
+name = "xai-grok-workspace-server"
+version = "0.1.220-alpha.4"
+dependencies = [
+ "anyhow",
+ "clap",
+ "fastrace",
+ "reqwest 0.12.24",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "xai-computer-hub-sdk",
+ "xai-grok-diag-server",
+ "xai-grok-extra-ca",
+ "xai-grok-pdf",
+ "xai-grok-sandbox",
+ "xai-grok-workspace",
+ "xai-grok-workspace-daemon",
+ "xai-tool-protocol",
  "xai-tty-utils",
 ]
 

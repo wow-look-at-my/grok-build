@@ -236,6 +236,7 @@ struct Capabilities {
 }
 const CAPABILITIES: Capabilities = Capabilities { diag: true };
 fn main() -> anyhow::Result<()> {
+    xai_grok_pdf::install();
     let mut args = Args::parse();
     if args.capabilities {
         println!("{}", serde_json::to_string(&CAPABILITIES)?);

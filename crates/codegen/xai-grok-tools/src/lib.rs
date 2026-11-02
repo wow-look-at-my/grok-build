@@ -13,6 +13,12 @@
 
 pub use xai_grok_version::version;
 
+#[cfg(test)]
+#[ctor::ctor]
+fn install_pdf_engine_for_tests() {
+    xai_grok_pdf::install();
+}
+
 /// Default maximum output size (in bytes) for tool results sent to the model.
 /// 40 KB ≈ 10 000 tokens
 pub const DEFAULT_TOOL_OUTPUT_BYTES: usize = 40_000;

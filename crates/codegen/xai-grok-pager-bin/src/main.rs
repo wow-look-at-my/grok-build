@@ -1791,6 +1791,7 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
+    xai_grok_pdf::install();
     // A `--sandbox` session starts on the host (outside the jail), where we
     // spawn an unsandboxed `gh` CI-status worker and hand its stream fd into
     // the jail.

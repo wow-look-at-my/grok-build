@@ -52,6 +52,8 @@ members = [
     "crates/codegen/xai-grok-models",
     "crates/codegen/xai-grok-otel",
     "crates/codegen/xai-grok-pager",
+    "crates/codegen/xai-grok-pdf",
+    "crates/codegen/xai-grok-workspace-server",
     "crates/codegen/xai-grok-pager-bin",
     "crates/codegen/xai-grok-pager-diff",
     "crates/codegen/xai-grok-pager-pty-harness",
@@ -361,6 +363,7 @@ xai-grok-shell-terminal = { path = "crates/codegen/xai-grok-shell-terminal" }
 xai-grok-status-line = { path = "crates/codegen/xai-grok-status-line" }
 xai-grok-telemetry = { path = "crates/codegen/xai-grok-telemetry" }
 xai-grok-test-support = { path = "crates/codegen/xai-grok-test-support" }
+xai-grok-pdf = { path = "crates/codegen/xai-grok-pdf" }
 xai-grok-tools = { path = "crates/codegen/xai-grok-tools" }
 xai-grok-tools-api = { path = "crates/codegen/xai-grok-tools-api" }
 xai-grok-version = { path = "crates/codegen/xai-grok-version" }

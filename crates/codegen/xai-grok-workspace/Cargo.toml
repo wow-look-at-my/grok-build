@@ -41,9 +41,6 @@ xai-grok-tools-api = { path = "../xai-grok-tools-api" }
 # `DiagHandle`, held by the hub config and threaded through `connect_hub`.
 xai-grok-diag-server = { workspace = true }
 xai-grok-workspace-client = { path = "../xai-grok-workspace-client" }
-# Daemon/process-lifecycle machinery for `bin/workspace_server.rs` only; the
-# library never references it.
-xai-grok-workspace-daemon = { path = "../xai-grok-workspace-daemon" }
 xai-grok-workspace-types = { path = "../xai-grok-workspace-types" }
 xai-grok-config = { workspace = true }
 xai-dirs = { workspace = true }
@@ -113,10 +110,6 @@ libc = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["signal", "process"] }
-
-[[bin]]
-name = "xai-workspace-server"
-path = "src/bin/workspace_server.rs"
 
 [[bin]]
 name = "workspace-server-probe"

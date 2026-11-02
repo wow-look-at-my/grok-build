@@ -7,6 +7,8 @@ use base64::engine::general_purpose;
 
 use crate::types::output::{FileContent, PdfPageImage, PdfPageImages, ReadFileOutput};
 
+use xai_tool_types::pdf::{PdfDocument, open_pdf};
+
 use super::metadata::{bytes_to_metadata, is_pdf_magic};
 
 pub const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
@@ -175,9 +177,10 @@ pub fn parse_page_range(spec: &str, page_count: usize) -> Result<Vec<usize>, Str
     Ok(pages)
 }
 
-fn open_pdf_document(bytes: Vec<u8>) -> Result<(pdf_oxide::PdfDocument, usize), String> {
-    let doc = pdf_oxide::PdfDocument::from_bytes(bytes)
-        .map_err(|e| format!("Failed to open PDF: {e}"))?;
+type Doc = Box<dyn PdfDocument>;
+
+fn open_pdf_document(bytes: Vec<u8>) -> Result<(Doc, usize), String> {
+    let doc = open_pdf(bytes).map_err(|e| format!("Failed to open PDF: {e}"))?;
 
     let page_count = doc
         .page_count()
@@ -193,7 +196,7 @@ fn open_pdf_document(bytes: Vec<u8>) -> Result<(pdf_oxide::PdfDocument, usize), 
 fn open_pdf_and_resolve_pages(
     bytes: Vec<u8>,
     pages_spec: Option<&str>,
-) -> Result<(pdf_oxide::PdfDocument, usize, Vec<usize>), String> {
+) -> Result<(Doc, usize, Vec<usize>), String> {
     let (doc, page_count) = open_pdf_document(bytes)?;
 
     let page_indices = match pages_spec {
@@ -221,15 +224,13 @@ pub(crate) fn render_pdf_pages(
 ) -> Result<ReadFileOutput, String> {
     let (doc, page_count, page_indices) = open_pdf_and_resolve_pages(bytes, pages_spec)?;
 
-    let opts = pdf_oxide::rendering::RenderOptions::with_dpi(PDF_RENDER_DPI)
-        .as_jpeg(PDF_RENDER_JPEG_QUALITY);
-
     let mut page_images = Vec::with_capacity(page_indices.len());
     for &page_idx in &page_indices {
-        let image = pdf_oxide::rendering::render_page(&doc, page_idx, &opts)
+        let jpeg = doc
+            .render_jpeg(page_idx, PDF_RENDER_DPI, PDF_RENDER_JPEG_QUALITY)
             .map_err(|e| format!("Failed to render page {}: {e}", page_idx + 1))?;
 
-        let b64 = general_purpose::STANDARD.encode(&image.data);
+        let b64 = general_purpose::STANDARD.encode(&jpeg);
         page_images.push(PdfPageImage {
             data: b64,
             mime_type: "image/jpeg".to_string(),
@@ -271,7 +272,7 @@ enum PageTextStyle {
     Cursor { total_pages: usize },
 }
 
-fn append_page_body(text: &mut String, doc: &pdf_oxide::PdfDocument, page_idx: usize) {
+fn append_page_body(text: &mut String, doc: &Doc, page_idx: usize) {
     match doc.extract_text(page_idx) {
         Ok(page_text) => text.push_str(&page_text),
         Err(e) => {
@@ -286,7 +287,7 @@ fn append_page_body(text: &mut String, doc: &pdf_oxide::PdfDocument, page_idx: u
 }
 
 fn extract_page_texts(
-    doc: &pdf_oxide::PdfDocument,
+    doc: &Doc,
     page_indices: &[usize],
     style: PageTextStyle,
 ) -> Result<String, String> {

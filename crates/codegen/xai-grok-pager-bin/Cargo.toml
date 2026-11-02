@@ -18,6 +18,7 @@ xai-grok-pager = { path = "../xai-grok-pager" }
 
 # Agent runtime + leader/stdio/headless entry points.
 xai-grok-login = { workspace = true }
+xai-grok-pdf = { workspace = true }
 xai-grok-shell = { workspace = true }
 xai-grok-version = { workspace = true }
 xai-grok-telemetry = { workspace = true }
