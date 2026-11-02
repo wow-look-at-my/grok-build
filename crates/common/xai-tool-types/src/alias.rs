@@ -578,6 +578,12 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
         why: "a client type is one string key; see ToolNamespace",
     },
     EnumVariantAlias {
+        file: "crates/codegen/xai-grok-sampling-types/src/types.rs",
+        ty: "FinishReason",
+        aliases: &["refusal", "safety"],
+        why: "a finish reason is one string key; see ToolNamespace",
+    },
+    EnumVariantAlias {
         file: "crates/codegen/xai-grok-login/src/model.rs",
         ty: "AuthMode",
         aliases: &["grok", "oidc"],
