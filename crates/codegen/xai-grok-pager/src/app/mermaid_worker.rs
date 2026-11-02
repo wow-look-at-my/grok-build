@@ -309,9 +309,9 @@ pub fn render_via_subprocess(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .envs(xai_tty_utils::pager_env());
-    // The child runs under an `RLIMIT_AS` cap (see `cap_child_address_space`)
-    // glibc reserves address space for one malloc arena per thread, up to a
-    // limit.
+    // The child runs under an `RLIMIT_AS` cap (see
+    // `cap_child_address_space`). glibc reserves address space for each
+    // malloc arena.
     #[cfg(target_os = "linux")]
     {
         cmd.env("MALLOC_ARENA_MAX", "1");
