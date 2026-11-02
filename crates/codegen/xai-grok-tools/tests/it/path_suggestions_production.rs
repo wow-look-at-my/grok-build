@@ -10,7 +10,7 @@
 //!
 //! Run:
 //! ```bash
-//! cargo test -p xai-grok-tools --test path_suggestions_production
+//! cargo test -p xai-grok-tools --test it path_suggestions_production::
 //! ```
 
 use std::path::PathBuf;

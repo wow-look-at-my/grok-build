@@ -6,10 +6,10 @@
 //! Run with:
 //! ```bash
 //! # On a Linux machine (as root or with cgroup delegation):
-//! cargo test -p xai-grok-tools --test cgroup_memory_test -- --ignored --nocapture
+//! cargo test -p xai-grok-tools --test it cgroup_memory_test:: -- --ignored --nocapture
 //!
 //! # If you need root:
-//! sudo -E cargo test -p xai-grok-tools --test cgroup_memory_test -- --ignored --nocapture
+//! sudo -E cargo test -p xai-grok-tools --test it cgroup_memory_test:: -- --ignored --nocapture
 //! ```
 //!
 //! The cgroup-dependent tests (1–5) are `#[ignore]`d by default so they don't
@@ -138,7 +138,7 @@ fn print_result(label: &str, result: &TerminalRunResult) {
 
 /// Test 1: A command that stays well under the limit exits normally.
 #[tokio::test]
-#[ignore = "requires Linux cgroupv2 with delegation — run with: cargo test --test cgroup_memory_test -- --ignored --nocapture"]
+#[ignore = "requires Linux cgroupv2 with delegation — run with: cargo test --test it cgroup_memory_test:: -- --ignored --nocapture"]
 async fn test_under_limit_exits_normally() {
     skip_unless_cgroup();
     if !can_create_cgroups() {

@@ -8,6 +8,6 @@
 //! Ignored by default — CI has no Chrome. Run them with:
 //!
 //! ```bash
-//! cargo test -p xai-grok-tools --features browser --test browser_tab_chrome_e2e \
+//! cargo test -p xai-grok-tools --features browser --test it browser_tab_chrome_e2e:: \
 //!     -- --ignored --test-threads=1
 //! ```
