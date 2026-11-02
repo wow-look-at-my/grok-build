@@ -1,0 +1,41 @@
+# VENDORING NOTES
+# Upstream: nono 0.53.0 (https://github.com/always-further/nono), Apache-2.0.
+# Local modifications:
+# - Removed src/trust (sigstore attestation), which nothing here calls. It pulled
+#   sigstore-*, x509-cert, der and aws-lc-rs into every build.
+# - Moved trust/base64.rs to src/base64.rs: keystore.rs decodes with it.
+# - Committed the build.rs output (src/capability_manifest_types.rs, generated
+#   by typify from schema/capability-manifest.schema.json) and removed build.rs.
+# - Dropped the tests and the system-keyring feature.
+[package]
+name = "nono"
+version = "0.53.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Capability-based sandboxing library using Landlock (Linux) and Seatbelt (macOS)"
+autotests = false
+
+[lib]
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+getrandom = "0.4"
+globset = "0.4"
+ignore = "0.4"
+libc = "0.2"
+regress = "0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.149", features = ["preserve_order"] }
+sha2 = "0.11"
+thiserror = "2"
+tracing = "0.1"
+walkdir = "2"
+zeroize = { version = "1", features = ["alloc"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+nix = { version = "0.31.2", features = ["fs", "user"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nix = { version = "0.31.2", features = ["fs", "user"] }
