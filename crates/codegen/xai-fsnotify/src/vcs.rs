@@ -105,7 +105,7 @@ impl GitignoreCache {
 
 /// Locate the `.git` directory governing `watch_path` (ancestor search).
 /// A real non-symlink `.git` dir is returned via `symlink_metadata` (no link-follow).
-/// A `.git` file or symlink is resolved through `git2`, which rejects a non-git target.
+/// A `.git` file or symlink is resolved through `gix`, which rejects a non-git target.
 pub(crate) fn find_git_dir(watch_path: &Path) -> Option<PathBuf> {
     for ancestor in watch_path.ancestors() {
         let dot_git = ancestor.join(".git");
@@ -116,12 +116,23 @@ pub(crate) fn find_git_dir(watch_path: &Path) -> Option<PathBuf> {
             return Some(dunce::canonicalize(&dot_git).unwrap_or(dot_git));
         }
         // A `.git` file or symlink: let git validate the target before watching.
-        if let Ok(repo) = git2::Repository::open(ancestor) {
-            let gd = repo.path().to_path_buf();
+        if let Ok(repo) = gix::open(ancestor) {
+            let gd = repo.git_dir().to_path_buf();
             return Some(dunce::canonicalize(&gd).unwrap_or(gd));
         }
     }
     None
+}
+
+/// The repository that contains `path`, searched upwards across filesystem boundaries.
+pub(crate) fn discover_repo(path: &Path) -> Option<gix::Repository> {
+    let options = gix::discover::upwards::Options {
+        cross_fs: true,
+        ..Default::default()
+    };
+    gix::ThreadSafeRepository::discover_opts(path, options, Default::default())
+        .ok()
+        .map(Into::into)
 }
 
 /// Locate the `.sl` working-copy directory governing `watch_path` (ancestor walk).

@@ -15,7 +15,8 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 fs2 = { workspace = true }
 parking_lot = { workspace = true }
-git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
+gix = { workspace = true, features = ["revision", "index", "status"] }
+xai-gix-status = { workspace = true }
 ignore = { workspace = true }
 regex = { workspace = true }
 rand = { workspace = true }

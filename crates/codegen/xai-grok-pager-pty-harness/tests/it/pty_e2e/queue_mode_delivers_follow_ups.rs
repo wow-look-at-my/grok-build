@@ -506,7 +506,7 @@ async fn queue_mode_folds_skill_typed_during_a_tool() {
     const SKILL_BODY: &str = "QUEUE_SKILL_BODY_XYZ";
     let content = ContentController::start().await.expect("start content");
     let workspace = tempfile::tempdir().expect("workspace tempdir");
-    git2::Repository::init(workspace.path()).expect("git init workspace");
+    xai_test_utils::git::init_git_repo(workspace.path());
     let skill_dir = workspace
         .path()
         .join(".grok")

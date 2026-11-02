@@ -1,5 +1,4 @@
 //! Bash request-level execution risk: argv flags that spawn programs, and ambient local/worktree git config.
-//! Flag floors run inline; ambient git2 uses `spawn_blocking` from the permission actor.
 
 use std::path::{Path, PathBuf};
 
@@ -341,7 +340,7 @@ fn local_git_config_entry_is_exec(name: &str, value: &str) -> bool {
         return false;
     }
     if name == "core.fsmonitor" {
-        return git2::Config::parse_bool(value).is_err();
+        return gix::config::Boolean::try_from(gix::bstr::BStr::new(value)).is_err();
     }
     if name == "diff.external" {
         return true;
@@ -365,7 +364,7 @@ fn local_git_config_entry_is_exec(name: &str, value: &str) -> bool {
     false
 }
 
-/// Local/worktree only via libgit2 (include/includeIf). Fail closed on read errors.
+/// Local/worktree only, with include/includeIf. Fail closed on read errors.
 pub(crate) fn local_repo_config_has_exec_risk(cwd: &Path) -> bool {
     match crate::git_content_filters::read_local_git_config_entries(cwd) {
         None => true,
@@ -774,7 +773,7 @@ mod tests {
             ),
         ] {
             let tmp = tempfile::tempdir().unwrap();
-            git2::Repository::init(tmp.path()).unwrap();
+            crate::test_git::init(tmp.path());
             std::fs::write(tmp.path().join(".git/config"), cfg).unwrap();
             assert_eq!(
                 local_repo_config_has_exec_risk(tmp.path()),
@@ -786,7 +785,7 @@ mod tests {
         // Plain include.
         {
             let tmp = tempfile::tempdir().unwrap();
-            git2::Repository::init(tmp.path()).unwrap();
+            crate::test_git::init(tmp.path());
             std::fs::write(
                 tmp.path().join(".git/extra"),
                 "[core]\nfsmonitor = /tmp/pwn\n",
@@ -802,13 +801,12 @@ mod tests {
         }
 
         // includeIf.gitdir: exact absolute gitdir (no trailing slash).
-        // libgit2 appends `**` when the pattern ends with `/`, and wildmatch `dir/**` does not match `dir` itself, so trailing-slash patterns fail
-        // Use repo.path() as libgit2 reports it (not a re-canonicalized twin).
+        // A pattern that ends with `/` gains `**`, and wildmatch `dir/**` does not match `dir` itself, so trailing-slash patterns fail
         {
             let tmp = tempfile::tempdir().unwrap();
-            let repo = git2::Repository::init(tmp.path()).unwrap();
-            let gitdir_pat = repo
-                .path()
+            crate::test_git::init(tmp.path());
+            let gitdir_pat = dunce::canonicalize(tmp.path().join(".git"))
+                .unwrap()
                 .to_string_lossy()
                 .trim_end_matches(['/', '\\'])
                 .to_owned();
@@ -834,7 +832,7 @@ mod tests {
         // A config path that is a directory opens on Linux but is not a regular file, so it fails closed
         {
             let tmp = tempfile::tempdir().unwrap();
-            git2::Repository::init(tmp.path()).unwrap();
+            crate::test_git::init(tmp.path());
             let cfg = tmp.path().join(".git/config");
             std::fs::remove_file(&cfg).unwrap();
             std::fs::create_dir(&cfg).unwrap();
@@ -848,7 +846,7 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let tmp = tempfile::tempdir().unwrap();
-            git2::Repository::init(tmp.path()).unwrap();
+            crate::test_git::init(tmp.path());
             let cfg = tmp.path().join(".git/config");
             let mut perms = std::fs::metadata(&cfg).unwrap().permissions();
             perms.set_mode(0o000);
@@ -885,8 +883,8 @@ mod tests {
         let evil = root.path().join("evil");
         std::fs::create_dir_all(&clean).unwrap();
         std::fs::create_dir_all(&evil).unwrap();
-        git2::Repository::init(&clean).unwrap();
-        git2::Repository::init(&evil).unwrap();
+        crate::test_git::init(&clean);
+        crate::test_git::init(&evil);
         std::fs::write(evil.join(".git/config"), "[core]\nfsmonitor = /tmp/pwn\n").unwrap();
 
         let plan = ambient_scan_plan_from_cmd("git -C evil status", &clean).unwrap();
@@ -915,24 +913,10 @@ mod tests {
     #[test]
     fn worktree_common_and_config_worktree() {
         let main = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(main.path()).unwrap();
-        let sig = git2::Signature::now("t", "t@t").unwrap();
-        {
-            let mut index = repo.index().unwrap();
-            let tree_id = index.write_tree().unwrap();
-            let tree = repo.find_tree(tree_id).unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-                .unwrap();
-        }
-        let head = repo.head().unwrap().peel_to_commit().unwrap();
-        repo.branch("wt-branch", &head, false).unwrap();
+        crate::test_git::init_with_commit(main.path());
+        crate::test_git::git(main.path(), &["branch", "wt-branch"]);
         let wt_dir = main.path().join("wt");
-        let mut opts = git2::WorktreeAddOptions::new();
-        let branch = repo
-            .find_branch("wt-branch", git2::BranchType::Local)
-            .unwrap();
-        opts.reference(Some(branch.get()));
-        repo.worktree("wt", &wt_dir, Some(&opts)).unwrap();
+        crate::test_git::worktree_add_branch(main.path(), &wt_dir, "wt-branch");
 
         std::fs::write(
             main.path().join(".git/config"),

@@ -5864,7 +5864,7 @@ mod tests {
 
     fn evil_repo() -> (tempfile::TempDir, AbsPathBuf) {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         std::fs::write(
             tmp.path().join(".git/config"),
             "[core]\nfsmonitor = /tmp/pwn\n",
@@ -5876,7 +5876,7 @@ mod tests {
 
     fn clean_repo() -> (tempfile::TempDir, AbsPathBuf) {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         std::fs::write(
             tmp.path().join(".git/config"),
             "[core]\n\trepositoryformatversion = 0\n\tfsmonitor = true\n",

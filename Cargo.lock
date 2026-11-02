@@ -3785,6 +3785,7 @@ dependencies = [
  "gix-date",
  "gix-error",
  "gix-hash",
+ "gix-hashtable",
  "gix-object",
  "gix-revwalk",
  "gix-trace",
@@ -11631,7 +11632,7 @@ name = "xai-fsnotify"
 version = "0.1.0"
 dependencies = [
  "dunce",
- "git2",
+ "gix",
  "globset",
  "ignore",
  "notify",
@@ -11644,6 +11645,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "xai-bench",
+ "xai-test-utils",
  "xai-tracing-macros",
 ]
 
@@ -12228,7 +12230,7 @@ dependencies = [
  "dunce",
  "flate2",
  "gethostname",
- "git2",
+ "gix",
  "image",
  "indexmap",
  "insta",
@@ -12276,6 +12278,7 @@ dependencies = [
  "xai-dirs",
  "xai-fast-worktree",
  "xai-file-utils",
+ "xai-gix-status",
  "xai-grok-active-sessions",
  "xai-grok-agent",
  "xai-grok-announcements",
@@ -12309,6 +12312,7 @@ dependencies = [
  "xai-prompt-queue",
  "xai-ratatui-inline",
  "xai-ratatui-textarea",
+ "xai-test-utils",
  "xai-token-estimation",
  "xai-tool-types",
  "xai-tty-utils",
@@ -12363,7 +12367,6 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "dunce",
- "git2",
  "image",
  "libc",
  "portable-pty",
@@ -12382,6 +12385,7 @@ dependencies = [
  "unicode-width 0.2.0",
  "xai-grok-test-support",
  "xai-interjection-core",
+ "xai-test-utils",
  "xai-tty-utils",
 ]
 
@@ -13139,7 +13143,7 @@ dependencies = [
  "fastrace",
  "fs2",
  "futures",
- "git2",
+ "gix",
  "glob",
  "hashbrown 0.16.1",
  "ignore",
@@ -13182,6 +13186,7 @@ dependencies = [
  "xai-file-utils",
  "xai-fsnotify",
  "xai-fuzzy-file-search",
+ "xai-gix-status",
  "xai-grok-agent",
  "xai-grok-auth",
  "xai-grok-config",

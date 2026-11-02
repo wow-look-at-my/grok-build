@@ -1,8 +1,9 @@
-//! Git operations: CLI for simple actions (stage, commit, push); git2 for structured data (status, diffs).
+//! Git operations: CLI for actions (stage, commit, push) and for diffs; `gix` for status and other structured reads.
 #![allow(dead_code)]
+use crate::git_repo::DiscoverError;
 pub use crate::restore_fetch::git_object_exists;
 use anyhow::Result;
-use git2::{DiffOptions, Reference, Repository, StatusOptions};
+use gix::bstr::ByteSlice;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -343,29 +344,22 @@ pub enum GitDiscoveryResult {
     Found(PathBuf),
     /// The path is definitively not inside a git repository.
     NotARepo,
-    /// libgit2 failed for a reason other than "not found" (e.g. permissions, unsupported extensions, corrupt repo).
+    /// Discovery failed for a reason other than "not found" (e.g. permissions, unsupported extensions, corrupt repo).
     /// The user may or may not be in a git repo; we can't tell.
     DiscoveryFailed(anyhow::Error),
 }
-/// Discover whether `path` is inside a git repository. [`GitDiscoveryResult::DiscoveryFailed`] means libgit2 errored unexpectedly, so callers can avoid false-positive "not a repo" decisions.
+/// Discover whether `path` is inside a git repository. [`GitDiscoveryResult::DiscoveryFailed`] means discovery errored unexpectedly, so callers can avoid false-positive "not a repo" decisions.
 pub fn discover_git_root(path: &Path) -> GitDiscoveryResult {
-    match Repository::discover(path) {
-        Ok(repo) => match repo.workdir() {
-            Some(root) => GitDiscoveryResult::Found(root.to_path_buf()),
+    match crate::git_repo::discover(path) {
+        Ok(repo) => match crate::git_repo::workdir(&repo) {
+            Some(root) => GitDiscoveryResult::Found(root),
             None => GitDiscoveryResult::DiscoveryFailed(anyhow::anyhow!(
                 "bare git repository: {}",
                 path.display()
             )),
         },
-        Err(e) => {
-            let is_not_found =
-                e.code() == git2::ErrorCode::NotFound && e.class() == git2::ErrorClass::Repository;
-            if is_not_found {
-                GitDiscoveryResult::NotARepo
-            } else {
-                GitDiscoveryResult::DiscoveryFailed(e.into())
-            }
-        }
+        Err(DiscoverError::NotARepo(_)) => GitDiscoveryResult::NotARepo,
+        Err(DiscoverError::Failed(e)) => GitDiscoveryResult::DiscoveryFailed(e),
     }
 }
 #[allow(
@@ -466,21 +460,14 @@ fn normalize_parsed_url(parsed: &Url) -> Option<String> {
 ///
 /// Returns an empty vec if `cwd` is not inside a git repo or has no remotes.
 pub fn resolve_normalized_remote_urls(cwd: &Path) -> Vec<String> {
-    let repo = match Repository::discover(cwd) {
+    let repo = match crate::git_repo::discover(cwd) {
         Ok(r) => r,
         Err(_) => return Vec::new(),
     };
-    let mut urls = Vec::new();
-    if let Ok(names) = repo.remotes() {
-        for name in names.iter().flatten().flatten() {
-            if let Ok(remote) = repo.find_remote(name)
-                && let Ok(raw) = remote.url()
-                && let Some(n) = normalize_repo_url(raw)
-            {
-                urls.push(n);
-            }
-        }
-    }
+    let mut urls: Vec<String> = crate::git_repo::remote_urls(&repo)
+        .iter()
+        .filter_map(|raw| normalize_repo_url(raw))
+        .collect();
     urls.sort_unstable();
     urls.dedup();
     urls
@@ -500,7 +487,7 @@ pub fn resolve_persisted_session_git_metadata_sync(cwd: &Path) -> PersistedGitMe
         GitDiscoveryResult::Found(root) => root,
         _ => return PersistedGitMetadata::default(),
     };
-    let repo = match Repository::discover(cwd) {
+    let repo = match crate::git_repo::discover(cwd) {
         Ok(r) => r,
         Err(_) => {
             return PersistedGitMetadata {
@@ -511,27 +498,12 @@ pub fn resolve_persisted_session_git_metadata_sync(cwd: &Path) -> PersistedGitMe
             };
         }
     };
-    let mut remotes = BTreeSet::new();
-    if let Ok(remote_names) = repo.remotes() {
-        for name in remote_names.iter().flatten().flatten() {
-            if let Ok(remote) = repo.find_remote(name)
-                && let Ok(url) = remote.url()
-            {
-                remotes.insert(strip_url_credentials(url));
-            }
-        }
-    }
-    let head_ref = head_reference(&repo);
-    let head_commit = head_ref
-        .as_ref()
-        .and_then(|h| h.target())
-        .map(|oid| oid.to_string());
-    let head_branch = head_ref.as_ref().and_then(|h| {
-        h.shorthand()
-            .ok()
-            .filter(|s| *s != "HEAD")
-            .map(str::to_owned)
-    });
+    let remotes: BTreeSet<String> = crate::git_repo::remote_urls(&repo)
+        .iter()
+        .map(|url| strip_url_credentials(url))
+        .collect();
+    let head_commit = crate::git_repo::head_id(&repo).map(|oid| oid.to_string());
+    let head_branch = crate::git_repo::head_shorthand(&repo).filter(|s| s != "HEAD");
     PersistedGitMetadata {
         git_root_dir: Some(git_root.to_string_lossy().to_string()),
         git_remotes: remotes.into_iter().collect(),
@@ -551,71 +523,215 @@ pub fn find_git_root_from_path(path: &Path) -> Result<PathBuf> {
 /// Find the main repo root (not the worktree working directory). For regular repos this is the same as find_git_root_from_path.
 /// For worktrees, this returns the parent repo's root.
 pub fn find_main_repo_root_from_path(path: &Path) -> Result<PathBuf> {
-    let repo = Repository::discover(path)?;
-    repo.commondir()
+    let repo = crate::git_repo::discover(path).map_err(DiscoverError::into_error)?;
+    crate::git_repo::common_dir(&repo)
         .parent()
         .map(|p| p.to_path_buf())
         .ok_or_else(|| anyhow::anyhow!("Invalid git repository: {}", path.display()))
 }
-pub fn change_type_from_git2_delta(delta: git2::Delta) -> ChangeType {
-    match delta {
-        git2::Delta::Added => ChangeType::Create,
-        git2::Delta::Deleted => ChangeType::Delete,
-        git2::Delta::Modified => ChangeType::Edit,
-        git2::Delta::Renamed => ChangeType::Rename,
-        git2::Delta::Copied => ChangeType::Copy,
-        git2::Delta::Typechange => ChangeType::Typechange,
-        git2::Delta::Untracked => ChangeType::Untracked,
+/// Map a `git diff --name-status` letter to a [`ChangeType`].
+pub fn change_type_from_name_status(status: char) -> ChangeType {
+    match status {
+        'A' => ChangeType::Create,
+        'D' => ChangeType::Delete,
+        'M' => ChangeType::Edit,
+        'R' => ChangeType::Rename,
+        'C' => ChangeType::Copy,
+        'T' => ChangeType::Typechange,
+        '?' => ChangeType::Untracked,
         other => {
             tracing::warn!(?other, "unexpected git delta type, treating as Edit");
             ChangeType::Edit
         }
     }
 }
-fn change_type_from_git2_status(s: git2::Status, staged: bool) -> ChangeType {
-    use git2::Status;
-    if !staged && s.contains(Status::WT_NEW) {
-        return ChangeType::Untracked;
-    }
-    if staged {
-        if s.contains(Status::INDEX_NEW) {
-            ChangeType::Create
-        } else if s.contains(Status::INDEX_DELETED) {
-            ChangeType::Delete
-        } else if s.contains(Status::INDEX_RENAMED) {
-            ChangeType::Rename
-        } else if s.contains(Status::INDEX_TYPECHANGE) {
-            ChangeType::Typechange
-        } else {
-            ChangeType::Edit
-        }
-    } else if s.contains(Status::WT_DELETED) {
-        ChangeType::Delete
-    } else if s.contains(Status::WT_RENAMED) {
-        ChangeType::Rename
-    } else if s.contains(Status::WT_TYPECHANGE) {
-        ChangeType::Typechange
+/// What kind of object an index mode names. A change of kind is a type change; an executable-bit change is not.
+fn mode_kind(mode: gix::index::entry::Mode) -> u8 {
+    use gix::index::entry::Mode;
+    if mode.contains(Mode::SYMLINK) {
+        1
+    } else if mode.contains(Mode::COMMIT) {
+        2
+    } else if mode.contains(Mode::DIR) {
+        3
     } else {
-        ChangeType::Edit
+        0
     }
 }
-fn has_index_changes(s: git2::Status) -> bool {
-    s.intersects(
-        git2::Status::INDEX_NEW
-            | git2::Status::INDEX_MODIFIED
-            | git2::Status::INDEX_DELETED
-            | git2::Status::INDEX_RENAMED
-            | git2::Status::INDEX_TYPECHANGE,
-    )
+/// The index side (`staged`) and the worktree side (`unstaged`) of one path's status.
+/// A conflicted path has neither side.
+#[derive(Default)]
+struct PathStatus {
+    staged: Option<ChangeType>,
+    unstaged: Option<ChangeType>,
 }
-fn has_worktree_changes(s: git2::Status) -> bool {
-    s.intersects(
-        git2::Status::WT_NEW
-            | git2::Status::WT_MODIFIED
-            | git2::Status::WT_DELETED
-            | git2::Status::WT_RENAMED
-            | git2::Status::WT_TYPECHANGE,
-    )
+/// HEAD-to-index and index-to-worktree changes per path, without rename detection.
+fn status_entries(
+    repo: &gix::Repository,
+    include_untracked: bool,
+    ignore_submodules: bool,
+) -> Result<std::collections::BTreeMap<String, PathStatus>> {
+    // An unborn HEAD, or a HEAD whose objects are missing, compares against the empty tree.
+    let head_tree = repo
+        .head_tree_id_or_empty()
+        .map(gix::Id::detach)
+        .unwrap_or_else(|_| gix::ObjectId::empty_tree(repo.object_hash()));
+    let index = crate::git_repo::index(repo)?;
+    let mut entries: std::collections::BTreeMap<String, PathStatus> = Default::default();
+
+    repo.tree_index_status(
+        &head_tree,
+        &index,
+        None,
+        gix::status::tree_index::TrackRenames::Disabled,
+        |change, _, _| {
+            use gix::diff::index::ChangeRef;
+            let (location, change_type, modes) = match &change {
+                ChangeRef::Addition {
+                    location,
+                    entry_mode,
+                    ..
+                } => (location, ChangeType::Create, [*entry_mode, *entry_mode]),
+                ChangeRef::Deletion {
+                    location,
+                    entry_mode,
+                    ..
+                } => (location, ChangeType::Delete, [*entry_mode, *entry_mode]),
+                ChangeRef::Modification {
+                    location,
+                    previous_entry_mode,
+                    entry_mode,
+                    ..
+                } => {
+                    let change_type = if mode_kind(*previous_entry_mode) == mode_kind(*entry_mode) {
+                        ChangeType::Edit
+                    } else {
+                        ChangeType::Typechange
+                    };
+                    (location, change_type, [*previous_entry_mode, *entry_mode])
+                }
+                ChangeRef::Rewrite { location, .. } => (
+                    location,
+                    ChangeType::Rename,
+                    [gix::index::entry::Mode::FILE; 2],
+                ),
+            };
+            let gitlink = modes
+                .iter()
+                .any(|m| m.contains(gix::index::entry::Mode::COMMIT));
+            if !(ignore_submodules && gitlink) {
+                entries.entry(location.to_string()).or_default().staged = Some(change_type);
+            }
+            Ok::<_, std::convert::Infallible>(gix::diff::index::Action::Continue(()))
+        },
+    )?;
+
+    let dirwalk_options = if include_untracked {
+        Some(
+            repo.dirwalk_options()?
+                .emit_untracked(gix::dir::walk::EmissionMode::Matching),
+        )
+    } else {
+        None
+    };
+    let options = gix::status::index_worktree::Options {
+        sorting: None,
+        dirwalk_options,
+        rewrites: None,
+        thread_limit: Some(xai_gix_status::compute_gix_status_thread_limit()),
+    };
+    // The built-in submodule status reads `.gitmodules`, which can mean peeling HEAD.
+    // When that fails, gitlinks report no change, the same as with submodules ignored.
+    let builtin = (!ignore_submodules)
+        .then(|| {
+            gix::status::index_worktree::BuiltinSubmoduleStatus::new(
+                repo.clone().into_sync(),
+                gix::status::Submodule::AsConfigured { check_dirty: false },
+            )
+            .ok()
+        })
+        .flatten();
+    match builtin {
+        Some(submodules) => {
+            worktree_status_entries(repo, &index, submodules, options, &mut entries)?
+        }
+        None => worktree_status_entries(repo, &index, NoSubmoduleStatus, options, &mut entries)?,
+    }
+    Ok(entries)
+}
+/// A submodule status that never reports a change.
+#[derive(Clone)]
+struct NoSubmoduleStatus;
+impl gix::status::plumbing::index_as_worktree::traits::SubmoduleStatus for NoSubmoduleStatus {
+    type Output = ();
+    type Error = std::convert::Infallible;
+    fn status(
+        &mut self,
+        _entry: &gix::index::Entry,
+        _rela_path: &gix::bstr::BStr,
+    ) -> Result<Option<()>, Self::Error> {
+        Ok(None)
+    }
+}
+/// Record the index-to-worktree side of every changed path into `entries`.
+fn worktree_status_entries<S>(
+    repo: &gix::Repository,
+    index: &gix::index::State,
+    submodules: S,
+    options: gix::status::index_worktree::Options,
+    entries: &mut std::collections::BTreeMap<String, PathStatus>,
+) -> Result<()>
+where
+    S: gix::status::plumbing::index_as_worktree::traits::SubmoduleStatus + Send + Clone,
+    S::Output: Send + Clone,
+{
+    use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
+    use gix::status::plumbing::index_as_worktree_with_renames::{Entry, Recorder};
+    let mut recorder = Recorder {
+        records: Vec::new(),
+    };
+    let interrupt = std::sync::atomic::AtomicBool::new(false);
+    repo.index_worktree_status(
+        index,
+        Vec::<gix::bstr::BString>::new(),
+        &mut recorder,
+        gix::status::plumbing::index_as_worktree::traits::FastEq,
+        submodules,
+        &mut gix::progress::Discard,
+        &interrupt,
+        options,
+    )?;
+    for record in recorder.records {
+        let (path, change_type) = match &record {
+            Entry::Modification {
+                rela_path, status, ..
+            } => {
+                let change_type = match status {
+                    EntryStatus::Change(Change::Removed) => ChangeType::Delete,
+                    EntryStatus::Change(Change::Type { .. }) => ChangeType::Typechange,
+                    EntryStatus::Change(_) => ChangeType::Edit,
+                    EntryStatus::IntentToAdd => ChangeType::Untracked,
+                    EntryStatus::Conflict { .. } => {
+                        entries.entry(rela_path.to_string()).or_default();
+                        continue;
+                    }
+                    EntryStatus::NeedsUpdate(_) => continue,
+                };
+                (rela_path.to_string(), change_type)
+            }
+            Entry::DirectoryContents { entry, .. } => {
+                if entry.status != gix::dir::entry::Status::Untracked {
+                    continue;
+                }
+                (entry.rela_path.to_string(), ChangeType::Untracked)
+            }
+            Entry::Rewrite { dirwalk_entry, .. } => {
+                (dirwalk_entry.rela_path.to_string(), ChangeType::Rename)
+            }
+        };
+        entries.entry(path).or_default().unstaged = Some(change_type);
+    }
+    Ok(())
 }
 /// A git reference for diffing: either a working state (Index/Workdir) or a commit-ish.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -663,7 +779,7 @@ fn collapse_home_path(path: &Path, home: Option<&Path>) -> String {
 pub async fn get_worktree_info(cwd: &Path) -> Option<(bool, Option<String>)> {
     let cwd = cwd.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let repo = Repository::discover(&cwd).ok()?;
+        let repo = crate::git_repo::discover(&cwd).ok()?;
         let home = xai_dirs::home_dir();
         let display = |path: &Path| -> String { collapse_home_path(path, home.as_deref()) };
         let mut marker_main = None;
@@ -696,8 +812,8 @@ pub async fn get_worktree_info(cwd: &Path) -> Option<(bool, Option<String>)> {
                 }
             }
         }
-        let linked_main = (repo.path() != repo.commondir())
-            .then(|| repo.commondir().parent().map(display))
+        let linked_main = crate::git_repo::is_linked_worktree(&repo)
+            .then(|| crate::git_repo::common_dir(&repo).parent().map(display))
             .flatten();
         let main_repo = marker_main.or(db_main).or(linked_main);
         let is_worktree = main_repo.is_some() || db_label.is_some();
@@ -711,13 +827,8 @@ pub async fn get_worktree_info(cwd: &Path) -> Option<(bool, Option<String>)> {
 pub async fn checkout_branch(git_root: &Path, branch: &str, create: bool) -> Result<()> {
     let root = git_root.to_path_buf();
     let has_changes = tokio::task::spawn_blocking(move || -> Result<bool> {
-        let repo = Repository::discover(&root)?;
-        let mut opts = StatusOptions::new();
-        opts.include_untracked(false)
-            .include_ignored(false)
-            .exclude_submodules(true);
-        let statuses = repo.statuses(Some(&mut opts))?;
-        Ok(!statuses.is_empty())
+        let repo = crate::git_repo::discover(&root).map_err(DiscoverError::into_error)?;
+        Ok(!status_entries(&repo, false, true)?.is_empty())
     })
     .await??;
     if has_changes {
@@ -742,133 +853,81 @@ async fn get_remote_url(cwd: &Path) -> Option<String> {
 }
 /// Compute how many commits the local branch is ahead/behind its upstream.
 /// Returns (ahead, behind) or None if there's no upstream or an error occurs.
-fn compute_ahead_behind(repo: &Repository) -> Option<(usize, usize)> {
-    let head = repo.head().ok()?;
-    let local_oid = head.target()?;
-    let branch_name = head.shorthand().ok()?;
-    let local_branch = repo
-        .find_branch(branch_name, git2::BranchType::Local)
-        .ok()?;
-    let upstream = local_branch.upstream().ok()?;
-    let upstream_oid = upstream.get().target()?;
-    repo.graph_ahead_behind(local_oid, upstream_oid).ok()
-}
-/// HEAD resolved from refs only. Never peel to the commit: on a huge or corrupt pack that read can hang, allocating until the process dies.
-fn head_reference(repo: &Repository) -> Option<Reference<'_>> {
-    match repo.head() {
-        Ok(head) => Some(head),
-        Err(e) if e.code() == git2::ErrorCode::UnbornBranch => None,
-        Err(e) => {
-            tracing::debug!(
-                path = %repo.path().display(),
-                code = ?e.code(),
-                error = %e,
-                "git.head: unresolvable",
-            );
-            None
-        }
-    }
+fn compute_ahead_behind(repo: &gix::Repository) -> Option<(usize, usize)> {
+    let local_oid = crate::git_repo::head_id(repo)?;
+    let branch = repo.head_name().ok()??;
+    let upstream = crate::git_repo::upstream_ref_name(repo, branch.as_ref())?;
+    let upstream_oid = repo
+        .find_reference(upstream.as_ref())
+        .ok()?
+        .target()
+        .try_id()?
+        .to_owned();
+    crate::git_repo::graph_ahead_behind(repo, local_oid, upstream_oid)
 }
 /// The hash stored in HEAD, as `git rev-parse HEAD` prints it.
-/// Never loads the object, so it may name one this repo does not have (see [`head_reference`]).
-fn head_sha(repo: &Repository) -> Option<String> {
-    Some(head_reference(repo)?.target()?.to_string())
+/// Never loads the object, so it may name one this repo does not have.
+/// A read of a huge or corrupt pack can hang, allocating until the process dies.
+fn head_sha(repo: &gix::Repository) -> Option<String> {
+    crate::git_repo::head_id(repo).map(|id| id.to_string())
 }
-fn read_blob_from_tree(repo: &Repository, tree: &git2::Tree, path: &str) -> Result<Vec<u8>> {
+fn read_blob(repo: &gix::Repository, id: gix::ObjectId) -> Result<Vec<u8>> {
+    let object = repo.find_object(id)?;
+    if object.kind != gix::object::Kind::Blob {
+        anyhow::bail!("object {id} is a {}, not a blob", object.kind);
+    }
+    Ok(object.detach().data)
+}
+fn read_blob_from_tree(repo: &gix::Repository, tree: gix::Tree<'_>, path: &str) -> Result<Vec<u8>> {
     let entry = tree
-        .get_path(Path::new(path))
-        .map_err(|e| anyhow::anyhow!("path '{}' not found in commit: {}", path, e))?;
-    let blob = repo
-        .find_blob(entry.id())
-        .map_err(|e| anyhow::anyhow!("failed to read file content for '{}': {}", path, e))?;
-    Ok(blob.content().to_vec())
+        .lookup_entry_by_path(path)
+        .map_err(|e| anyhow::anyhow!("path '{}' not found in commit: {}", path, e))?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "path '{}' not found in commit: the path does not exist in the given tree",
+                path
+            )
+        })?;
+    read_blob(repo, entry.object_id())
+        .map_err(|e| anyhow::anyhow!("failed to read file content for '{}': {}", path, e))
 }
-fn read_blob_from_index(repo: &Repository, path: &str) -> Result<Vec<u8>> {
-    let index = repo.index()?;
+fn read_blob_from_index(repo: &gix::Repository, path: &str) -> Result<Vec<u8>> {
+    let index = repo.open_index()?;
     let entry = index
-        .get_path(Path::new(path), 0)
+        .entry_by_path_and_stage(path.into(), gix::index::entry::Stage::Unconflicted)
         .ok_or_else(|| anyhow::anyhow!("path '{}' not found in staging area", path))?;
-    let blob = repo.find_blob(entry.id)?;
-    Ok(blob.content().to_vec())
+    read_blob(repo, entry.id)
 }
-fn resolve_tree<'a>(repo: &'a Repository, refspec: &str) -> Option<git2::Tree<'a>> {
-    repo.revparse_single(refspec).ok()?.peel_to_tree().ok()
-}
-fn resolve_oid(repo: &Repository, refspec: &str) -> Option<git2::Oid> {
-    repo.revparse_single(refspec)
+fn resolve_oid(repo: &gix::Repository, refspec: &str) -> Option<gix::ObjectId> {
+    repo.rev_parse_single(refspec)
+        .ok()?
+        .object()
+        .ok()?
+        .peel_to_commit()
         .ok()
-        .and_then(|obj| obj.peel_to_commit().ok())
-        .map(|c| c.id())
+        .map(|c| c.id)
 }
-fn compute_merge_base(repo: &Repository, base: &str, head: &str) -> Option<git2::Oid> {
+fn compute_merge_base(repo: &gix::Repository, base: &str, head: &str) -> Option<gix::ObjectId> {
     let base_oid = resolve_oid(repo, base)?;
     let head_oid = resolve_oid(repo, head)?;
-    repo.merge_base(base_oid, head_oid).ok()
+    repo.merge_base(base_oid, head_oid)
+        .ok()
+        .map(gix::Id::detach)
 }
-/// Diff working state: staging panel use case (Index/Workdir combinations).
-fn diff_working_state<'a>(
-    repo: &'a Repository,
-    base: &GitRef,
-    head: &GitRef,
-    opts: &mut DiffOptions,
-) -> Option<git2::Diff<'a>> {
+/// The `git diff` revision arguments that compare `base` with `head`.
+/// `None` for a pair with no diff, or for a revision that would read as an option.
+fn diff_rev_args(base: &GitRef, head: &GitRef) -> Option<Vec<String>> {
     use GitRef::*;
+    let rev = |r: &String| (!r.starts_with('-')).then(|| r.clone());
     match (base, head) {
-        (Treeish(refspec), Index) => {
-            let tree = resolve_tree(repo, refspec)?;
-            repo.diff_tree_to_index(Some(&tree), None, Some(opts)).ok()
-        }
-        (Index, Workdir) => repo.diff_index_to_workdir(None, Some(opts)).ok(),
-        (Treeish(refspec), Workdir) => {
-            let tree = resolve_tree(repo, refspec)?;
-            repo.diff_tree_to_workdir_with_index(Some(&tree), Some(opts))
-                .ok()
-        }
+        (Treeish(r), Index) => Some(vec!["--cached".to_owned(), rev(r)?]),
+        (Index, Workdir) => Some(Vec::new()),
+        (Treeish(r), Workdir) => Some(vec![rev(r)?]),
+        (Treeish(a), Treeish(b)) => Some(vec![rev(a)?, rev(b)?]),
         _ => None,
     }
 }
-/// Diff refs: PR/branch comparison use case (tree-to-tree).
-/// When `merge_base` is true, uses the common ancestor as base (GitHub PR behavior).
-fn diff_compare<'a>(
-    repo: &'a Repository,
-    base: &str,
-    head: &str,
-    merge_base: bool,
-    opts: &mut DiffOptions,
-) -> Option<git2::Diff<'a>> {
-    let effective_base = if merge_base {
-        compute_merge_base(repo, base, head)
-            .map(|oid| oid.to_string())
-            .unwrap_or_else(|| base.to_string())
-    } else {
-        base.to_string()
-    };
-    let base_tree = resolve_tree(repo, &effective_base)?;
-    let head_tree = resolve_tree(repo, head)?;
-    repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(opts))
-        .ok()
-}
-/// Routes to diff_working_state or diff_compare based on ref types.
-fn create_diff<'a>(
-    repo: &'a Repository,
-    base: &GitRef,
-    head: &GitRef,
-    merge_base: bool,
-    opts: &mut DiffOptions,
-) -> Option<git2::Diff<'a>> {
-    if base.is_working_state() || head.is_working_state() {
-        diff_working_state(repo, base, head, opts)
-    } else {
-        let GitRef::Treeish(base_ref) = base else {
-            return None;
-        };
-        let GitRef::Treeish(head_ref) = head else {
-            return None;
-        };
-        diff_compare(repo, base_ref, head_ref, merge_base, opts)
-    }
-}
-fn read_version_bytes(repo: &Repository, path: &str, version: &str) -> Result<Vec<u8>> {
+fn read_version_bytes(repo: &gix::Repository, path: &str, version: &str) -> Result<Vec<u8>> {
     match GitRef::parse(version) {
         GitRef::Workdir => {
             let full_path = repo
@@ -881,25 +940,35 @@ fn read_version_bytes(repo: &Repository, path: &str, version: &str) -> Result<Ve
         GitRef::Index => read_blob_from_index(repo, path),
         GitRef::Treeish(refspec) => {
             let obj = repo
-                .revparse_single(&refspec)
+                .rev_parse_single(refspec.as_str())
+                .map_err(|e| anyhow::anyhow!("'{}' is not a valid revision: {}", refspec, e))?
+                .object()
                 .map_err(|e| anyhow::anyhow!("'{}' is not a valid revision: {}", refspec, e))?;
             let commit = obj
                 .peel_to_commit()
                 .map_err(|e| anyhow::anyhow!("'{}' does not refer to a commit: {}", refspec, e))?;
             let tree = commit.tree()?;
-            read_blob_from_tree(repo, &tree, path)
+            read_blob_from_tree(repo, tree, path)
         }
     }
 }
 /// Binary files return empty content with is_binary=true.
-fn read_version_content(repo: &Repository, path: &str, version: &str) -> Result<(String, bool)> {
+fn read_version_content(
+    repo: &gix::Repository,
+    path: &str,
+    version: &str,
+) -> Result<(String, bool)> {
     let bytes = read_version_bytes(repo, path, version)?;
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "invalid UTF-8 is the binary-file answer"
+    )]
     match String::from_utf8(bytes) {
         Ok(text) => Ok((text, false)),
         Err(_) => Ok((String::new(), true)),
     }
 }
-fn read_version_text(repo: &Repository, path: &str, version: &str) -> Option<String> {
+fn read_version_text(repo: &gix::Repository, path: &str, version: &str) -> Option<String> {
     read_version_content(repo, path, version)
         .ok()
         .filter(|(_, is_binary)| !is_binary)
@@ -913,100 +982,309 @@ struct DiffFileStats {
     patch_bytes: Option<u64>,
     patch_lines: Option<u64>,
     old_path: Option<String>,
-    delta: Option<git2::Delta>,
-}
-fn extract_old_path(delta: &git2::DiffDelta, new_path: &str) -> Option<String> {
-    if matches!(delta.status(), git2::Delta::Renamed | git2::Delta::Copied) {
-        delta
-            .old_file()
-            .path()
-            .map(|p| p.to_string_lossy().to_string())
-            .filter(|op| op != new_path)
-    } else {
-        None
-    }
+    change: Option<ChangeType>,
 }
 struct DiffStatsResult {
     stats: HashMap<String, DiffFileStats>,
     paths: Vec<String>,
 }
-fn collect_diff_stats(
-    repo: &Repository,
+/// Flags for every `git diff` here: no rename detection, no external diff or textconv, no submodules.
+const DIFF_FLAGS: &[&str] = &[
+    "-c",
+    "core.quotePath=false",
+    "diff",
+    "--no-renames",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--ignore-submodules",
+    "--no-color",
+];
+/// Flags that make a patch match the `a/` and `b/` form whatever the user's diff config says.
+const PATCH_FLAGS: &[&str] = &["-p", "--src-prefix=a/", "--dst-prefix=b/"];
+/// Run git and return its raw output, whatever the exit status. Errors only on spawn failure.
+async fn git_cli_output(cwd: &Path, args: &[&str]) -> Result<std::process::Output> {
+    tracing::debug!(cwd = %cwd.display(), args = ?args, "git_cli_output");
+    let filter_pins = git_cli_content_filter_pins(cwd, args).await?;
+    let mut cmd = Command::new("git");
+    cmd.current_dir(cwd).arg("--no-optional-locks");
+    for &(key, val) in xai_tty_utils::GIT_AUTH_SUPPRESSION_ENVS.iter() {
+        cmd.env(key, val);
+    }
+    cmd.env("LC_ALL", "C");
+    cmd.stdin(std::process::Stdio::null());
+    xai_grok_tools::util::detach_command(&mut cmd);
+    cmd.envs(xai_grok_tools::util::pager_env());
+    git_cli_args_with_filter_pins(&mut cmd, args, filter_pins.as_deref());
+    Ok(cmd.output().await?)
+}
+/// Stdout of `git diff <rev_args> <mode> -- <specs>` in `root`, or `None` when git fails.
+pub(crate) async fn diff_cli(
+    root: &Path,
+    rev_args: &[String],
+    mode: &[&str],
+    specs: &[String],
+) -> Option<Vec<u8>> {
+    let mut args: Vec<&str> = DIFF_FLAGS.to_vec();
+    args.extend(mode);
+    args.extend(rev_args.iter().map(String::as_str));
+    args.push("--");
+    args.extend(specs.iter().map(String::as_str));
+    match git_cli_output(root, &args).await {
+        Ok(out) if out.status.success() => Some(out.stdout),
+        Ok(out) => {
+            tracing::debug!(
+                stderr = %scrub_git_output(&String::from_utf8_lossy(&out.stderr)),
+                "git diff failed"
+            );
+            None
+        }
+        Err(e) => {
+            tracing::debug!(error = %e, "git diff failed to spawn");
+            None
+        }
+    }
+}
+/// Parse `--name-status -z` output into `(path, change)` pairs.
+pub(crate) fn parse_name_status_z(out: &[u8]) -> Vec<(String, ChangeType)> {
+    let mut fields = out.split(|b| *b == 0);
+    let mut entries = Vec::new();
+    while let Some(status) = fields.next() {
+        let Some(&letter) = status.first() else {
+            continue;
+        };
+        let Some(path) = fields.next() else {
+            break;
+        };
+        entries.push((
+            String::from_utf8_lossy(path).into_owned(),
+            change_type_from_name_status(letter as char),
+        ));
+    }
+    entries
+}
+/// Parse `--numstat -z` output into path to (additions, deletions).
+pub(crate) fn parse_numstat_z(out: &[u8]) -> HashMap<String, (u64, u64)> {
+    let mut map = HashMap::new();
+    for record in out.split(|b| *b == 0) {
+        let record = String::from_utf8_lossy(record);
+        let mut parts = record.splitn(3, '\t');
+        let adds = parts.next().and_then(|s| s.parse::<u64>().ok());
+        let dels = parts.next().and_then(|s| s.parse::<u64>().ok());
+        if let Some(path) = parts.next() {
+            map.insert(path.to_string(), (adds.unwrap_or(0), dels.unwrap_or(0)));
+        }
+    }
+    map
+}
+/// Undo git's C-style quotes on a path, as in `"a/tab\there"`. Returns the path and the text after it.
+fn unquote_c_path(text: &str) -> Option<(String, &str)> {
+    let mut bytes = Vec::new();
+    let mut chars = text.strip_prefix('"')?.char_indices();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '"' => {
+                let rest = text.get(i + 2..)?;
+                return Some((String::from_utf8_lossy(&bytes).into_owned(), rest));
+            }
+            '\\' => {
+                let (_, escaped) = chars.next()?;
+                match escaped {
+                    'a' => bytes.push(0x07),
+                    'b' => bytes.push(0x08),
+                    'f' => bytes.push(0x0c),
+                    'n' => bytes.push(b'\n'),
+                    'r' => bytes.push(b'\r'),
+                    't' => bytes.push(b'\t'),
+                    'v' => bytes.push(0x0b),
+                    '0'..='7' => {
+                        let mut value = escaped.to_digit(8)?;
+                        for _ in 0..2 {
+                            let (_, digit) = chars.next()?;
+                            value = value * 8 + digit.to_digit(8)?;
+                        }
+                        bytes.push(u8::try_from(value).ok()?);
+                    }
+                    other => {
+                        let mut buf = [0u8; 4];
+                        bytes.extend_from_slice(other.encode_utf8(&mut buf).as_bytes());
+                    }
+                }
+            }
+            other => {
+                let mut buf = [0u8; 4];
+                bytes.extend_from_slice(other.encode_utf8(&mut buf).as_bytes());
+            }
+        }
+    }
+    None
+}
+/// The path a `diff --git a/<path> b/<path>` header names. Without renames both sides name one path.
+fn patch_header_path(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("diff --git ")?;
+    if rest.starts_with('"') {
+        let (old, _) = unquote_c_path(rest)?;
+        return old.strip_prefix("a/").map(str::to_owned);
+    }
+    let path_len = rest.len().checked_sub(5)? / 2;
+    let path = rest.strip_prefix("a/")?.get(..path_len)?;
+    let tail = rest.get(2 + path_len..)?;
+    (tail.strip_prefix(" b/")? == path).then(|| path.to_owned())
+}
+/// Split a multi-file patch into one patch per path.
+fn split_patch(out: &[u8]) -> HashMap<String, String> {
+    let text = String::from_utf8_lossy(out);
+    let mut patches = HashMap::new();
+    let mut current: Option<(String, String)> = None;
+    for line in text.split_inclusive('\n') {
+        if line.starts_with("diff --git ") {
+            if let Some((path, patch)) = current.take() {
+                patches.insert(path, patch);
+            }
+            current = patch_header_path(line.trim_end_matches('\n')).map(|p| (p, String::new()));
+        }
+        if let Some((_, patch)) = current.as_mut() {
+            patch.push_str(line);
+        }
+    }
+    if let Some((path, patch)) = current {
+        patches.insert(path, patch);
+    }
+    patches
+}
+/// Untracked files under `root` that `.gitignore` does not exclude.
+/// With `recurse` false, a wholly untracked directory is one `dir/` entry.
+pub(crate) async fn untracked_paths(root: &Path, specs: &[String], recurse: bool) -> Vec<String> {
+    let mut args = vec!["ls-files", "--others", "--exclude-standard", "-z"];
+    if !recurse {
+        args.push("--directory");
+    }
+    args.push("--");
+    args.extend(specs.iter().map(String::as_str));
+    match git_cli_output(root, &args).await {
+        Ok(out) if out.status.success() => out
+            .stdout
+            .split(|b| *b == 0)
+            .filter(|p| !p.is_empty())
+            .map(|p| String::from_utf8_lossy(p).into_owned())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+fn is_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(8000).any(|b| *b == 0)
+}
+/// The line count of an untracked file, which is its addition count.
+fn untracked_additions(root: &Path, path: &str) -> u64 {
+    let full = root.join(path);
+    let bytes = match std::fs::symlink_metadata(&full) {
+        Ok(meta) if meta.file_type().is_symlink() => std::fs::read_link(&full)
+            .map(|target| target.to_string_lossy().into_owned().into_bytes())
+            .unwrap_or_default(),
+        Ok(_) => std::fs::read(&full).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    if is_binary(&bytes) {
+        return 0;
+    }
+    let newlines = bytes.iter().filter(|b| **b == b'\n').count() as u64;
+    newlines + u64::from(bytes.last().is_some_and(|b| *b != b'\n'))
+}
+/// The new-file patch of an untracked file, as `git diff --no-index /dev/null <path>` prints it.
+async fn untracked_patch(root: &Path, path: &str) -> Option<String> {
+    let mut args: Vec<&str> = vec![
+        "diff",
+        "--no-index",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-color",
+    ];
+    args.extend(PATCH_FLAGS);
+    args.extend(["--", "/dev/null", path]);
+    let out = git_cli_output(root, &args).await.ok()?;
+    // `--no-index` exits 1 when the files differ, which they always do here.
+    matches!(out.status.code(), Some(0 | 1))
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+/// Per-file change, line counts and (with `include_patch`) patch text between `from` and `to`, read with `git diff` in `root`.
+/// A diff that git cannot compute, such as one from an unknown revision, is empty.
+async fn collect_diff_stats(
+    root: &Path,
     from: &str,
     to: &str,
     pathspecs: Option<&[String]>,
     include_patch: bool,
 ) -> DiffStatsResult {
+    let mut result = DiffStatsResult {
+        stats: HashMap::new(),
+        paths: Vec::new(),
+    };
     let base_ref = GitRef::parse(from);
     let head_ref = GitRef::parse(to);
-    let mut opts = DiffOptions::new();
-    opts.ignore_submodules(true);
-    if matches!(head_ref, GitRef::Workdir) {
-        opts.include_untracked(true)
-            .recurse_untracked_dirs(true)
-            .show_untracked_content(true);
-    }
-    if let Some(specs) = pathspecs {
-        for spec in specs {
-            opts.pathspec(spec);
-        }
-    }
-    let diff = match create_diff(repo, &base_ref, &head_ref, false, &mut opts) {
-        Some(d) => d,
-        None => {
-            return DiffStatsResult {
-                stats: HashMap::new(),
-                paths: Vec::new(),
-            };
-        }
+    let Some(rev_args) = diff_rev_args(&base_ref, &head_ref) else {
+        return result;
     };
-    let mut stats = HashMap::new();
-    let mut paths = Vec::new();
-    for (idx, delta) in diff.deltas().enumerate() {
-        let path = delta
-            .new_file()
-            .path()
-            .or_else(|| delta.old_file().path())
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        if path.is_empty() {
-            continue;
-        }
-        paths.push(path.clone());
-        let (additions, deletions, patch, patch_bytes, patch_lines) =
-            if let Ok(Some(mut patch_obj)) = git2::Patch::from_diff(&diff, idx) {
-                let (_, adds, dels) = patch_obj.line_stats().unwrap_or((0, 0, 0));
-                let (patch_text, p_bytes, p_lines) = if include_patch {
-                    match patch_obj.to_buf() {
-                        Ok(buf) => {
-                            let text = buf.as_str().unwrap_or("");
-                            let bytes = text.len() as u64;
-                            let lines = text.lines().count() as u64;
-                            (Some(text.to_string()), Some(bytes), Some(lines))
-                        }
-                        Err(_) => (None, None, None),
-                    }
-                } else {
-                    (None, None, None)
-                };
-                (adds as u64, dels as u64, patch_text, p_bytes, p_lines)
+    let specs = pathspecs.unwrap_or(&[]);
+    let (name_status, numstat, patches) = tokio::join!(
+        diff_cli(root, &rev_args, &["--name-status", "-z"], specs),
+        diff_cli(root, &rev_args, &["--numstat", "-z"], specs),
+        async {
+            if include_patch {
+                diff_cli(root, &rev_args, PATCH_FLAGS, specs).await
             } else {
-                (0, 0, None, None, None)
-            };
-        stats.insert(
+                None
+            }
+        },
+    );
+    let Some(name_status) = name_status else {
+        return result;
+    };
+    let numstat = numstat.as_deref().map(parse_numstat_z).unwrap_or_default();
+    let mut patches = patches.as_deref().map(split_patch).unwrap_or_default();
+    for (path, change) in parse_name_status_z(&name_status) {
+        let (additions, deletions) = numstat.get(&path).copied().unwrap_or((0, 0));
+        let patch = if include_patch {
+            patches.remove(&path)
+        } else {
+            None
+        };
+        result.stats.insert(
             path.clone(),
             DiffFileStats {
                 additions,
                 deletions,
+                patch_bytes: patch.as_ref().map(|p| p.len() as u64),
+                patch_lines: patch.as_ref().map(|p| p.lines().count() as u64),
                 patch,
-                patch_bytes,
-                patch_lines,
-                old_path: extract_old_path(&delta, &path),
-                delta: Some(delta.status()),
+                old_path: None,
+                change: Some(change),
             },
         );
+        result.paths.push(path);
     }
-    DiffStatsResult { stats, paths }
+    if head_ref == GitRef::Workdir {
+        for path in untracked_paths(root, specs, true).await {
+            let patch = if include_patch {
+                untracked_patch(root, &path).await
+            } else {
+                None
+            };
+            result.stats.insert(
+                path.clone(),
+                DiffFileStats {
+                    additions: untracked_additions(root, &path),
+                    deletions: 0,
+                    patch_bytes: patch.as_ref().map(|p| p.len() as u64),
+                    patch_lines: patch.as_ref().map(|p| p.lines().count() as u64),
+                    patch,
+                    old_path: None,
+                    change: Some(ChangeType::Untracked),
+                },
+            );
+            result.paths.push(path);
+        }
+        result.paths.sort();
+    }
+    result
 }
 /// Payload for the `x.ai/git_head_changed` ACP extension notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1020,27 +1298,16 @@ pub struct GitHeadChanged {
     pub main_repo: Option<String>,
 }
 /// Discover the git root, current branch, and remote URLs.
-/// Uses `git2` (no subprocess).
+/// Reads refs and config in-process (no subprocess).
 pub async fn git_info(cwd: &Path) -> Result<GitInfoData> {
     let cwd = cwd.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let repo = Repository::discover(&cwd)?;
-        let root = dunce::canonicalize(repo.workdir().unwrap_or_else(|| repo.path()))
-            .unwrap_or_else(|_| repo.workdir().unwrap_or_else(|| repo.path()).to_path_buf());
-        let current_branch = repo
-            .head()
-            .ok()
-            .and_then(|h| h.shorthand().ok().map(String::from));
-        let mut remotes_set = BTreeSet::new();
-        if let Ok(remote_names) = repo.remotes() {
-            for name in remote_names.iter().flatten().flatten() {
-                if let Ok(remote) = repo.find_remote(name)
-                    && let Ok(url) = remote.url()
-                {
-                    remotes_set.insert(url.to_string());
-                }
-            }
-        }
+        let repo = crate::git_repo::discover(&cwd).map_err(DiscoverError::into_error)?;
+        let root =
+            crate::git_repo::workdir(&repo).unwrap_or_else(|| crate::git_repo::git_dir(&repo));
+        let current_branch = crate::git_repo::head_shorthand(&repo);
+        let remotes_set: BTreeSet<String> =
+            crate::git_repo::remote_urls(&repo).into_iter().collect();
         let default_branch = detect_default_branch(&repo);
         let vcs = detect_vcs_kind(&root);
         Ok(GitInfoData {
@@ -1054,57 +1321,56 @@ pub async fn git_info(cwd: &Path) -> Result<GitInfoData> {
     .await?
 }
 /// Detect the default branch for this repository. Priority: 1. `refs/remotes/origin/HEAD` symbolic ref (set by `git clone` or `git remote set-head origin --auto`).
-fn detect_default_branch(repo: &Repository) -> Option<String> {
+fn detect_default_branch(repo: &gix::Repository) -> Option<String> {
     if let Some(branch) = detect_remote_default_branch(repo) {
         return Some(branch);
     }
-    if let Ok(config) = repo.config()
-        && let Ok(val) = config.get_string("init.defaultBranch")
-    {
-        return Some(val);
-    }
-    None
+    repo.config_snapshot()
+        .string("init.defaultBranch")
+        .and_then(|val| val.to_str().ok().map(str::to_owned))
 }
 /// Resolve `refs/remotes/origin/HEAD` to the remote's default branch name.
-fn detect_remote_default_branch(repo: &Repository) -> Option<String> {
-    let reference = repo.find_reference("refs/remotes/origin/HEAD").ok()?;
+/// A chain of symbolic refs resolves to its last link; a dangling link still names its target.
+fn detect_remote_default_branch(repo: &gix::Repository) -> Option<String> {
     let prefix = "refs/remotes/origin/";
-    if let Ok(resolved) = reference.resolve()
-        && let Some(branch) = resolved.name().ok().and_then(|n| n.strip_prefix(prefix))
-    {
-        return Some(branch.to_string());
+    let mut name = repo
+        .find_reference("refs/remotes/origin/HEAD")
+        .ok()?
+        .name()
+        .as_bstr()
+        .to_string();
+    for _ in 0..5 {
+        let Ok(reference) = repo.find_reference(name.as_str()) else {
+            break;
+        };
+        match reference.target() {
+            gix::refs::TargetRef::Symbolic(target) => name = target.as_bstr().to_string(),
+            gix::refs::TargetRef::Object(_) => break,
+        }
     }
-    reference
-        .symbolic_target()
-        .ok()
-        .flatten()
-        .and_then(|t| t.strip_prefix(prefix))
-        .map(|b| b.to_string())
+    name.strip_prefix(prefix).map(str::to_owned)
 }
 /// List all local and remote branches.
-/// Uses `git2` (no subprocess, no `git status`).
+/// Reads refs in-process (no subprocess, no `git status`).
 pub async fn list_branches(git_root: &Path) -> Result<GitBranchListData> {
     let root = git_root.to_path_buf();
     tokio::task::spawn_blocking(move || {
-        let repo = Repository::discover(&root)?;
-        let repo_root = dunce::canonicalize(repo.workdir().unwrap_or_else(|| repo.path()))
-            .unwrap_or_else(|_| repo.workdir().unwrap_or_else(|| repo.path()).to_path_buf());
-        let current_branch = repo
-            .head()
-            .ok()
-            .and_then(|h| h.shorthand().ok().map(String::from));
+        let repo = crate::git_repo::discover(&root).map_err(DiscoverError::into_error)?;
+        let repo_root =
+            crate::git_repo::workdir(&repo).unwrap_or_else(|| crate::git_repo::git_dir(&repo));
+        let current_branch = crate::git_repo::head_shorthand(&repo);
         let mut branches = Vec::new();
-        for result in repo.branches(None)? {
-            let (branch, branch_type) = result?;
-            let Some(name) = branch.name()?.map(String::from) else {
+        let references = repo.references()?;
+        let locals = references.local_branches()?.map(|r| r.map(|r| (r, false)));
+        let remotes = references.remote_branches()?.map(|r| r.map(|r| (r, true)));
+        for result in locals.chain(remotes) {
+            let (branch, is_remote) = result.map_err(|e| anyhow::anyhow!("{e}"))?;
+            let Ok(name) = branch.name().shorten().to_str().map(str::to_owned) else {
                 continue;
             };
-            if branch.get().symbolic_target().ok().flatten().is_some()
-                && branch_type == git2::BranchType::Remote
-            {
+            if is_remote && matches!(branch.target(), gix::refs::TargetRef::Symbolic(_)) {
                 continue;
             }
-            let is_remote = branch_type == git2::BranchType::Remote;
             let is_current = !is_remote && current_branch.as_deref() == Some(name.as_str());
             branches.push(GitBranchEntry {
                 name,
@@ -1125,7 +1391,7 @@ pub async fn list_branches(git_root: &Path) -> Result<GitBranchListData> {
 pub async fn get_current_commit(git_root: &Path) -> Option<String> {
     let cwd = git_root.to_path_buf();
     tokio::task::spawn_blocking(move || -> Option<String> {
-        let repo = Repository::discover(&cwd).ok()?;
+        let repo = crate::git_repo::discover(&cwd).ok()?;
         head_sha(&repo)
     })
     .await
@@ -1315,7 +1581,7 @@ fn parse_porcelain_v2(
     }
     (staged, unstaged)
 }
-/// Full git-status via CLI only, used as fallback when libgit2 cannot read the index (e.g. **Limitation:** patch content (`patch`, `patch_bytes`, `patch_lines`) is not populated; all entries return `None` for these fields.
+/// Full git-status via CLI only, used as fallback when gix cannot read the index (e.g. **Limitation:** patch content (`patch`, `patch_bytes`, `patch_lines`) is not populated. All entries return `None` for these fields.
 async fn status_via_cli(
     git_root: &Path,
     include_untracked: bool,
@@ -1495,120 +1761,77 @@ async fn status_ungated(
     let cwd = git_root.to_path_buf();
     let (branch, upstream, remote_url) =
         tokio::join!(get_branch(&cwd), get_upstream(&cwd), get_remote_url(&cwd));
-    let result = tokio::task::spawn_blocking(move || {
-        let repo = match Repository::discover(&cwd) {
+    let blocking_cwd = cwd.clone();
+    let scan = tokio::task::spawn_blocking(move || {
+        let cwd = blocking_cwd;
+        let repo = match crate::git_repo::discover(&cwd) {
             Ok(r) => r,
             Err(e) => {
-                return Err(anyhow::anyhow!("not a git repository: {}", e));
+                return Err(anyhow::anyhow!("not a git repository: {}", e.into_error()));
             }
         };
-        let is_worktree = repo.is_worktree();
-        let root = repo
-            .workdir()
-            .map(|p| p.to_string_lossy().trim_end_matches('/').to_string());
-        let main_root = repo
-            .commondir()
+        let is_worktree = crate::git_repo::is_linked_worktree(&repo);
+        let workdir = crate::git_repo::workdir(&repo);
+        let main_root = crate::git_repo::common_dir(&repo)
             .parent()
             .map(|p| p.to_string_lossy().trim_end_matches('/').to_string());
         let commit = head_sha(&repo);
-        let (ahead, behind) = compute_ahead_behind(&repo)
-            .map(|(a, b)| (Some(a), Some(b)))
-            .unwrap_or((None, None));
-        let mut opts = StatusOptions::new();
-        opts.include_untracked(include_untracked);
-        opts.recurse_untracked_dirs(include_untracked);
-        opts.update_index(false);
-        if ignore_submodules {
-            opts.exclude_submodules(true);
-        }
-        let statuses = repo.statuses(Some(&mut opts))?;
-        let need_stats = include_stats || include_patches;
-        let staged_stats = if need_stats {
-            collect_diff_stats(&repo, "HEAD", "staged", None, include_patches).stats
-        } else {
-            HashMap::new()
-        };
-        let unstaged_stats = if need_stats {
-            collect_diff_stats(&repo, "staged", "working", None, include_patches).stats
-        } else {
-            HashMap::new()
-        };
-        let mut staged = Vec::new();
-        let mut unstaged = Vec::new();
-        for entry in statuses.iter() {
-            let path = entry.path().unwrap_or("").to_string();
-            let status = entry.status();
-            if has_index_changes(status) {
-                let stats = staged_stats.get(&path).cloned().unwrap_or_default();
-                staged.push(GitFileChange {
-                    path: path.clone(),
-                    old_path: stats.old_path,
-                    change_type: change_type_from_git2_status(status, true),
-                    staged: Some(true),
-                    additions: stats.additions,
-                    deletions: stats.deletions,
-                    patch: if include_patches { stats.patch } else { None },
-                    patch_bytes: if include_patches {
-                        stats.patch_bytes
-                    } else {
-                        None
-                    },
-                    patch_lines: if include_patches {
-                        stats.patch_lines
-                    } else {
-                        None
-                    },
-                    old_text: None,
-                    new_text: None,
-                });
-            }
-            if has_worktree_changes(status) {
-                if ignore_submodules
-                    && status.contains(git2::Status::WT_NEW)
-                    && cwd.join(&path).join(".git").exists()
-                {
-                    continue;
-                }
-                let stats = unstaged_stats.get(&path).cloned().unwrap_or_default();
-                unstaged.push(GitFileChange {
-                    path,
-                    old_path: stats.old_path,
-                    change_type: change_type_from_git2_status(status, false),
-                    staged: Some(false),
-                    additions: stats.additions,
-                    deletions: stats.deletions,
-                    patch: if include_patches { stats.patch } else { None },
-                    patch_bytes: if include_patches {
-                        stats.patch_bytes
-                    } else {
-                        None
-                    },
-                    patch_lines: if include_patches {
-                        stats.patch_lines
-                    } else {
-                        None
-                    },
-                    old_text: None,
-                    new_text: None,
-                });
-            }
-        }
-        Ok::<_, anyhow::Error>(GitStatusData {
-            root,
+        let ahead_behind = compute_ahead_behind(&repo);
+        let entries = status_entries(&repo, include_untracked, ignore_submodules)?;
+        Ok::<_, anyhow::Error>((
+            workdir,
             main_root,
-            is_worktree: Some(is_worktree),
-            branch,
+            is_worktree,
             commit,
-            upstream,
-            remote_url,
-            ahead,
-            behind,
-            staged,
-            unstaged,
-        })
+            ahead_behind,
+            entries,
+        ))
     })
     .await?;
-    let libgit2_err = match &result {
+    let result = match scan {
+        Ok((workdir, main_root, is_worktree, commit, ahead_behind, entries)) => {
+            let root = workdir
+                .as_ref()
+                .map(|p| p.to_string_lossy().trim_end_matches('/').to_string());
+            let (ahead, behind) = ahead_behind
+                .map(|(a, b)| (Some(a), Some(b)))
+                .unwrap_or((None, None));
+            let need_stats = include_stats || include_patches;
+            let (staged_stats, unstaged_stats) = match workdir.as_deref() {
+                Some(root) if need_stats => {
+                    let (staged, unstaged) = tokio::join!(
+                        collect_diff_stats(root, "HEAD", "staged", None, include_patches),
+                        collect_diff_stats(root, "staged", "working", None, include_patches),
+                    );
+                    (staged.stats, unstaged.stats)
+                }
+                _ => (HashMap::new(), HashMap::new()),
+            };
+            Ok(status_data_from_entries(
+                &cwd,
+                entries,
+                &staged_stats,
+                &unstaged_stats,
+                ignore_submodules,
+                include_patches,
+                GitStatusData {
+                    root,
+                    main_root,
+                    is_worktree: Some(is_worktree),
+                    branch,
+                    commit,
+                    upstream,
+                    remote_url,
+                    ahead,
+                    behind,
+                    staged: Vec::new(),
+                    unstaged: Vec::new(),
+                },
+            ))
+        }
+        Err(e) => Err(e),
+    };
+    let gix_err = match &result {
         Ok(data) => {
             region
                 .span()
@@ -1627,9 +1850,9 @@ async fn status_ungated(
             tracing::warn!(
                 error = %e,
                 elapsed = ?start.elapsed(),
-                "git.status: libgit2 failed, falling back to CLI"
+                "git.status: gix failed, falling back to CLI"
             );
-            e.to_string()
+            format!("{e:#}")
         }
     };
     status_via_cli(
@@ -1639,11 +1862,58 @@ async fn status_ungated(
         ignore_submodules,
     )
     .await
-    .map_err(|cli_err| {
-        cli_err.context(format!(
-            "CLI fallback also failed (libgit2 error: {libgit2_err})"
-        ))
-    })
+    .map_err(|cli_err| cli_err.context(format!("CLI fallback also failed (gix error: {gix_err})")))
+}
+/// Fill `data.staged` and `data.unstaged` from the status `entries` and their diff stats.
+fn status_data_from_entries(
+    cwd: &Path,
+    entries: std::collections::BTreeMap<String, PathStatus>,
+    staged_stats: &HashMap<String, DiffFileStats>,
+    unstaged_stats: &HashMap<String, DiffFileStats>,
+    ignore_submodules: bool,
+    include_patches: bool,
+    mut data: GitStatusData,
+) -> GitStatusData {
+    let change =
+        |path: String, change_type: ChangeType, staged: bool, stats: DiffFileStats| GitFileChange {
+            path,
+            old_path: stats.old_path,
+            change_type,
+            staged: Some(staged),
+            additions: stats.additions,
+            deletions: stats.deletions,
+            patch: if include_patches { stats.patch } else { None },
+            patch_bytes: if include_patches {
+                stats.patch_bytes
+            } else {
+                None
+            },
+            patch_lines: if include_patches {
+                stats.patch_lines
+            } else {
+                None
+            },
+            old_text: None,
+            new_text: None,
+        };
+    for (path, status) in entries {
+        if let Some(change_type) = status.staged {
+            let stats = staged_stats.get(&path).cloned().unwrap_or_default();
+            data.staged
+                .push(change(path.clone(), change_type, true, stats));
+        }
+        if let Some(change_type) = status.unstaged {
+            if ignore_submodules
+                && change_type == ChangeType::Untracked
+                && cwd.join(&path).join(".git").exists()
+            {
+                continue;
+            }
+            let stats = unstaged_stats.get(&path).cloned().unwrap_or_default();
+            data.unstaged.push(change(path, change_type, false, stats));
+        }
+    }
+    data
 }
 pub async fn read_files(
     git_root: &Path,
@@ -1655,10 +1925,10 @@ pub async fn read_files(
     let paths = paths.to_vec();
     let version = version.to_string();
     let result = tokio::task::spawn_blocking(move || {
-        let repo = Repository::discover(&cwd)?;
-        let git_root = repo
-            .workdir()
+        let repo = crate::git_repo::discover(&cwd).map_err(DiscoverError::into_error)?;
+        let git_root = crate::git_repo::workdir(&repo)
             .ok_or_else(|| anyhow::anyhow!("cannot read files from bare repository"))?;
+        let git_root = git_root.as_path();
         let paths: Vec<String> = paths
             .into_iter()
             .map(|p| {
@@ -1782,72 +2052,82 @@ async fn diffs_ungated(
     let paths = paths.map(|p| p.to_vec());
     let from = from.to_string();
     let to = to.to_string();
-    let result = tokio::task::spawn_blocking(move || {
-        let repo = Repository::discover(&cwd)?;
-        let work_dir = repo
-            .workdir()
-            .ok_or_else(|| anyhow::anyhow!("cannot get diffs from bare repository"))?;
-        let effective_from = if merge_base {
-            match compute_merge_base(&repo, &from, &to) {
-                Some(oid) => oid.to_string(),
-                None => {
-                    tracing::warn!(
-                        from = %from,
-                        to = %to,
-                        "git.diffs: could not compute merge-base, falling back to direct diff"
-                    );
-                    from.clone()
+    let result = async move {
+        let prepared = tokio::task::spawn_blocking(move || {
+            let repo = crate::git_repo::discover(&cwd).map_err(DiscoverError::into_error)?;
+            let work_dir = crate::git_repo::workdir(&repo)
+                .ok_or_else(|| anyhow::anyhow!("cannot get diffs from bare repository"))?;
+            let work_dir = work_dir.as_path();
+            let effective_from = if merge_base {
+                match compute_merge_base(&repo, &from, &to) {
+                    Some(oid) => oid.to_string(),
+                    None => {
+                        tracing::warn!(
+                            from = %from,
+                            to = %to,
+                            "git.diffs: could not compute merge-base, falling back to direct diff"
+                        );
+                        from.clone()
+                    }
                 }
-            }
-        } else {
-            from.clone()
-        };
-        let paths = match paths {
-            Some(ps) => Some(
-                ps.into_iter()
-                    .map(|p| {
-                        if Path::new(&p).is_absolute() {
-                            Path::new(&p)
-                                .strip_prefix(work_dir)
-                                .map(|rel| rel.to_string_lossy().to_string())
-                                .map_err(|_| {
-                                    anyhow::anyhow!(
-                                        "path '{}' is not within git repository '{}'",
-                                        p,
-                                        work_dir.display()
-                                    )
-                                })
-                        } else {
-                            Ok(p)
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-            None => None,
-        };
+            } else {
+                from.clone()
+            };
+            let paths = match paths {
+                Some(ps) => Some(
+                    ps.into_iter()
+                        .map(|p| {
+                            if Path::new(&p).is_absolute() {
+                                Path::new(&p)
+                                    .strip_prefix(work_dir)
+                                    .map(|rel| rel.to_string_lossy().to_string())
+                                    .map_err(|_| {
+                                        anyhow::anyhow!(
+                                            "path '{}' is not within git repository '{}'",
+                                            p,
+                                            work_dir.display()
+                                        )
+                                    })
+                            } else {
+                                Ok(p)
+                            }
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+                None => None,
+            };
+            Ok::<_, anyhow::Error>((repo, work_dir.to_path_buf(), effective_from, paths, to))
+        })
+        .await??;
+        let (repo, work_dir, effective_from, paths, to) = prepared;
         let DiffStatsResult {
             mut stats,
             paths: changed_paths,
-        } = collect_diff_stats(&repo, &effective_from, &to, paths.as_deref(), include_patch);
+        } = collect_diff_stats(
+            &work_dir,
+            &effective_from,
+            &to,
+            paths.as_deref(),
+            include_patch,
+        )
+        .await;
         let final_paths = match paths {
             Some(p) if !p.is_empty() => p,
             _ => changed_paths,
         };
-        let mut files = Vec::new();
-        for path in &final_paths {
-            let file_stats = stats.remove(path).unwrap_or_default();
-            let (old_text, new_text) = if include_content {
-                (
-                    read_version_text(&repo, path, &effective_from),
-                    read_version_text(&repo, path, &to),
-                )
-            } else {
-                (None, None)
-            };
-            let change_type = file_stats
-                .delta
-                .map(change_type_from_git2_delta)
-                .unwrap_or_else(|| {
+        tokio::task::spawn_blocking(move || {
+            let mut files = Vec::new();
+            for path in &final_paths {
+                let file_stats = stats.remove(path).unwrap_or_default();
+                let (old_text, new_text) = if include_content {
+                    (
+                        read_version_text(&repo, path, &effective_from),
+                        read_version_text(&repo, path, &to),
+                    )
+                } else {
+                    (None, None)
+                };
+                let change_type = file_stats.change.unwrap_or_else(|| {
                     let old_exists = old_text.as_ref().is_some_and(|s| !s.is_empty());
                     let new_exists = new_text.as_ref().is_some_and(|s| !s.is_empty());
                     match (old_exists, new_exists) {
@@ -1856,23 +2136,25 @@ async fn diffs_ungated(
                         _ => ChangeType::Edit,
                     }
                 });
-            files.push(GitFileChange {
-                path: path.clone(),
-                old_path: file_stats.old_path,
-                change_type,
-                staged: None,
-                additions: file_stats.additions,
-                deletions: file_stats.deletions,
-                patch: file_stats.patch,
-                patch_bytes: file_stats.patch_bytes,
-                patch_lines: file_stats.patch_lines,
-                old_text,
-                new_text,
-            });
-        }
-        Ok::<_, anyhow::Error>(GitDiffsData { files })
-    })
-    .await?;
+                files.push(GitFileChange {
+                    path: path.clone(),
+                    old_path: file_stats.old_path,
+                    change_type,
+                    staged: None,
+                    additions: file_stats.additions,
+                    deletions: file_stats.deletions,
+                    patch: file_stats.patch,
+                    patch_bytes: file_stats.patch_bytes,
+                    patch_lines: file_stats.patch_lines,
+                    old_text,
+                    new_text,
+                });
+            }
+            Ok::<_, anyhow::Error>(GitDiffsData { files })
+        })
+        .await?
+    }
+    .await;
     match &result {
         Ok(data) => {
             region
@@ -3455,10 +3737,10 @@ pub async fn stage_content(git_root: &Path, path: &str, content: &str) -> Result
     let content = content.to_string();
     tokio::task::spawn_blocking(move || -> Result<()> {
         let git_root = git_root_buf;
-        let repo = Repository::open(&git_root)?;
-        let work_dir = repo
-            .workdir()
+        let repo = crate::git_repo::open(&git_root)?;
+        let work_dir = crate::git_repo::workdir(&repo)
             .ok_or_else(|| anyhow::anyhow!("cannot stage content in bare repository"))?;
+        let work_dir = work_dir.as_path();
         let relative_path = if Path::new(&path).is_absolute() {
             Path::new(&path)
                 .strip_prefix(work_dir)
@@ -3474,28 +3756,35 @@ pub async fn stage_content(git_root: &Path, path: &str, content: &str) -> Result
         } else {
             path.clone()
         };
-        let blob_oid = repo.blob(content.as_bytes())?;
-        let mut index = repo.index()?;
-        let existing_mode = index
-            .get_path(Path::new(&relative_path), 0)
-            .map(|e| e.mode)
-            .unwrap_or(git2::FileMode::Blob.into());
-        let entry = git2::IndexEntry {
-            ctime: git2::IndexTime::new(0, 0),
-            mtime: git2::IndexTime::new(0, 0),
-            dev: 0,
-            ino: 0,
-            mode: existing_mode,
-            uid: 0,
-            gid: 0,
-            file_size: content.len() as u32,
-            id: blob_oid,
-            flags: 0,
-            flags_extended: 0,
-            path: relative_path.as_bytes().to_vec(),
+        use gix::index::entry::{Flags, Mode, Stage, Stat};
+        let blob_oid = repo.write_blob(content.as_bytes())?.detach();
+        let snapshot = crate::git_repo::index(&repo)?;
+        let mut index: gix::index::File = (**snapshot).clone();
+        let rela_path: &gix::bstr::BStr = relative_path.as_str().into();
+        // A zero stat makes git re-read the worktree file instead of trusting the cache.
+        let stat = Stat {
+            size: content.len() as u32,
+            ..Stat::default()
         };
-        index.add(&entry)?;
-        index.write()?;
+        let mode = match index.entry_mut_by_path_and_stage(rela_path, Stage::Unconflicted) {
+            Some(entry) => {
+                entry.id = blob_oid;
+                entry.stat = stat;
+                None
+            }
+            None => Some(Mode::FILE),
+        };
+        // A stage-0 entry resolves any conflict on the path.
+        index.remove_entries(|_, path, entry| {
+            path == rela_path && entry.stage() != Stage::Unconflicted
+        });
+        if let Some(mode) = mode {
+            index.dangerously_push_entry(stat, blob_oid, Flags::empty(), mode, rela_path);
+            index.sort_entries();
+        }
+        // The cached trees no longer match the entries.
+        index.remove_tree();
+        index.write(gix::index::write::Options::default())?;
         Ok(())
     })
     .await??;

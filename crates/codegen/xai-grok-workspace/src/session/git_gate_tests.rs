@@ -9,21 +9,10 @@ use super::{FlightOp, GitGate};
 
 fn init_temp_repo() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
-    repo.config().unwrap().set_str("user.name", "test").unwrap();
-    repo.config()
-        .unwrap()
-        .set_str("user.email", "test@test.com")
-        .unwrap();
+    crate::test_git::init(tmp.path());
     std::fs::write(tmp.path().join("README"), "hi\n").unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(Path::new("README")).unwrap();
-    index.write().unwrap();
-    let oid = index.write_tree().unwrap();
-    let tree = repo.find_tree(oid).unwrap();
-    let sig = git2::Signature::now("test", "test@test.com").unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-        .unwrap();
+    crate::test_git::git(tmp.path(), &["add", "README"]);
+    crate::test_git::commit(tmp.path(), "init");
     tmp
 }
 
@@ -516,7 +505,7 @@ async fn root_cache_expires_so_a_new_nested_repo_is_rediscovered() {
         .unwrap();
 
     let before = super::canonical_git_root(&nested).await.unwrap();
-    git2::Repository::init(&nested).unwrap();
+    crate::test_git::init(&nested);
     tokio::time::sleep(Duration::from_millis(100)).await;
     let after = super::canonical_git_root(&nested).await.unwrap();
     assert_ne!(before, after);

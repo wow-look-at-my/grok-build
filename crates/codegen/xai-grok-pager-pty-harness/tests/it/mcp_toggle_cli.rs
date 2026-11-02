@@ -24,7 +24,7 @@ fn toggle_env(user_config: &str) -> ToggleEnv {
     std::fs::create_dir_all(&grok_home).expect("create GROK_HOME");
     std::fs::create_dir_all(&cwd).expect("create cwd");
     // Bound the project-config walk to the temp dir.
-    git2::Repository::init(&cwd).expect("git init");
+    xai_test_utils::git::init_git_repo(&cwd);
     let config = grok_home.join("config.toml");
     std::fs::write(&config, user_config).expect("write config.toml");
     ToggleEnv {
@@ -233,7 +233,7 @@ fn enable_refuses_denied_server_from_project_path_plugin() {
     let plugin = project.join("tools").join("plugin");
     std::fs::create_dir_all(project.join(".grok")).expect("create project .grok");
     std::fs::create_dir_all(&plugin).expect("create plugin dir");
-    git2::Repository::init(&project).expect("git init");
+    xai_test_utils::git::init_git_repo(&project);
     std::fs::write(plugin.join("plugin.json"), r#"{"name": "corp-plugin"}"#).expect("manifest");
     std::fs::write(
         plugin.join(".mcp.json"),
