@@ -20,105 +20,109 @@ use xai_tool_protocol::{
 };
 
 const ERROR_IDENTITY_UNAVAILABLE: &str =
-    include_str!("../fixtures/bot_relay/error_identity_unavailable.json");
-const ERROR_LINK_REQUIRED: &str = include_str!("../fixtures/bot_relay/error_link_required.json");
-const ERROR_LINK_REMOVED: &str = include_str!("../fixtures/bot_relay/error_link_removed.json");
+    include_str!("../../fixtures/bot_relay/error_identity_unavailable.json");
+const ERROR_LINK_REQUIRED: &str = include_str!("../../fixtures/bot_relay/error_link_required.json");
+const ERROR_LINK_REMOVED: &str = include_str!("../../fixtures/bot_relay/error_link_removed.json");
 const ERROR_CONSENT_REQUIRED: &str =
-    include_str!("../fixtures/bot_relay/error_consent_required.json");
+    include_str!("../../fixtures/bot_relay/error_consent_required.json");
 const ERROR_ENTERPRISE_UNSUPPORTED: &str =
-    include_str!("../fixtures/bot_relay/error_enterprise_unsupported.json");
+    include_str!("../../fixtures/bot_relay/error_enterprise_unsupported.json");
 const ERROR_LEGACY_PRICING_UNSUPPORTED: &str =
-    include_str!("../fixtures/bot_relay/error_legacy_pricing_unsupported.json");
+    include_str!("../../fixtures/bot_relay/error_legacy_pricing_unsupported.json");
 const ERROR_EMAIL_UNVERIFIED: &str =
-    include_str!("../fixtures/bot_relay/error_email_unverified.json");
-const ERROR_LINK_CONFLICT: &str = include_str!("../fixtures/bot_relay/error_link_conflict.json");
+    include_str!("../../fixtures/bot_relay/error_email_unverified.json");
+const ERROR_LINK_CONFLICT: &str = include_str!("../../fixtures/bot_relay/error_link_conflict.json");
 const ERROR_LINK_CONFLICT_SIBLINGS: &str =
-    include_str!("../fixtures/bot_relay/error_link_conflict_siblings.json");
+    include_str!("../../fixtures/bot_relay/error_link_conflict_siblings.json");
 const ERROR_CURSOR_ACCOUNT_UNAVAILABLE: &str =
-    include_str!("../fixtures/bot_relay/error_cursor_account_unavailable.json");
+    include_str!("../../fixtures/bot_relay/error_cursor_account_unavailable.json");
 const ERROR_LINK_UNSUPPORTED: &str =
-    include_str!("../fixtures/bot_relay/error_link_unsupported.json");
+    include_str!("../../fixtures/bot_relay/error_link_unsupported.json");
 const ERROR_LEGACY_PRIVACY_UNSUPPORTED: &str =
-    include_str!("../fixtures/bot_relay/error_legacy_privacy_unsupported.json");
-const ERROR_NO_PLAN: &str = include_str!("../fixtures/bot_relay/error_no_plan.json");
+    include_str!("../../fixtures/bot_relay/error_legacy_privacy_unsupported.json");
+const ERROR_NO_PLAN: &str = include_str!("../../fixtures/bot_relay/error_no_plan.json");
 const ERROR_USAGE_EXHAUSTED: &str =
-    include_str!("../fixtures/bot_relay/error_usage_exhausted.json");
-const ERROR_BOX_MIGRATING: &str = include_str!("../fixtures/bot_relay/error_box_migrating.json");
-const ERROR_BOX_RECREATING: &str = include_str!("../fixtures/bot_relay/error_box_recreating.json");
+    include_str!("../../fixtures/bot_relay/error_usage_exhausted.json");
+const ERROR_BOX_MIGRATING: &str = include_str!("../../fixtures/bot_relay/error_box_migrating.json");
+const ERROR_BOX_RECREATING: &str =
+    include_str!("../../fixtures/bot_relay/error_box_recreating.json");
 const ERROR_BOX_UNAVAILABLE: &str =
-    include_str!("../fixtures/bot_relay/error_box_unavailable.json");
+    include_str!("../../fixtures/bot_relay/error_box_unavailable.json");
 const ERROR_COMMAND_REJECTED: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected.json");
 const ERROR_COMMAND_REJECTED_AGENT_ID_MISMATCH: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_agent_id_mismatch.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_agent_id_mismatch.json");
 const ERROR_COMMAND_REJECTED_ARGS_TOO_LARGE: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_args_too_large.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_args_too_large.json");
 const ERROR_COMMAND_REJECTED_ARGS_INVALID: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_args_invalid.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_args_invalid.json");
 const ERROR_COMMAND_REJECTED_AUDIENCE_UNSUPPORTED: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_audience_unsupported.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_audience_unsupported.json");
 const ERROR_COMMAND_REJECTED_ATTACHMENTS_NOT_SUPPORTED_IN_LIVE: &str = include_str!(
-    "../fixtures/bot_relay/error_command_rejected_attachments_not_supported_in_live.json"
+    "../../fixtures/bot_relay/error_command_rejected_attachments_not_supported_in_live.json"
 );
 const ERROR_COMMAND_REJECTED_ATTACHMENT_CREDENTIAL_UNAVAILABLE: &str = include_str!(
-    "../fixtures/bot_relay/error_command_rejected_attachment_credential_unavailable.json"
+    "../../fixtures/bot_relay/error_command_rejected_attachment_credential_unavailable.json"
 );
 const ERROR_COMMAND_REJECTED_ATTACHMENT_NOT_FOUND: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_attachment_not_found.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_attachment_not_found.json");
 const ERROR_COMMAND_REJECTED_ATTACHMENT_WRONG_SOURCE: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_attachment_wrong_source.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_attachment_wrong_source.json");
 const ERROR_COMMAND_REJECTED_ATTACHMENT_TOO_LARGE: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_attachment_too_large.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_attachment_too_large.json");
 const ERROR_COMMAND_REJECTED_ATTACHMENT_NOT_READY: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_attachment_not_ready.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_attachment_not_ready.json");
 const ERROR_COMMAND_REJECTED_GATEWAY_UNKNOWN_METHOD: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_gateway_unknown_method.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_gateway_unknown_method.json");
 const ERROR_COMMAND_REJECTED_VOICE_CALL_UNAVAILABLE: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_voice_call_unavailable.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_voice_call_unavailable.json");
 const ERROR_COMMAND_REJECTED_MAIN_AGENT_NOT_ENABLED: &str =
-    include_str!("../fixtures/bot_relay/error_command_rejected_main_agent_not_enabled.json");
+    include_str!("../../fixtures/bot_relay/error_command_rejected_main_agent_not_enabled.json");
 const ERROR_COMPUTER_UNAVAILABLE: &str =
-    include_str!("../fixtures/bot_relay/error_computer_unavailable.json");
-const ERROR_UPSTREAM_ERROR: &str = include_str!("../fixtures/bot_relay/error_upstream_error.json");
-const ERROR_UNKNOWN_CODE: &str = include_str!("../fixtures/bot_relay/error_unknown_code.json");
+    include_str!("../../fixtures/bot_relay/error_computer_unavailable.json");
+const ERROR_UPSTREAM_ERROR: &str =
+    include_str!("../../fixtures/bot_relay/error_upstream_error.json");
+const ERROR_UNKNOWN_CODE: &str = include_str!("../../fixtures/bot_relay/error_unknown_code.json");
 const EVENT_HUB_TURN_FINISHED: &str =
-    include_str!("../fixtures/bot_relay/event_hub_turn_finished.json");
+    include_str!("../../fixtures/bot_relay/event_hub_turn_finished.json");
 const EVENT_HUB_RESYNC_REQUIRED: &str =
-    include_str!("../fixtures/bot_relay/event_hub_resync_required.json");
+    include_str!("../../fixtures/bot_relay/event_hub_resync_required.json");
 const EVENT_UPSTREAM_TRANSCRIPT: &str =
-    include_str!("../fixtures/bot_relay/event_upstream_transcript.json");
-const EVENT_WITH_EVENT_ID: &str = include_str!("../fixtures/bot_relay/event_with_event_id.json");
+    include_str!("../../fixtures/bot_relay/event_upstream_transcript.json");
+const EVENT_WITH_EVENT_ID: &str = include_str!("../../fixtures/bot_relay/event_with_event_id.json");
 const EVENT_WITHOUT_EVENT_ID: &str =
-    include_str!("../fixtures/bot_relay/event_without_event_id.json");
+    include_str!("../../fixtures/bot_relay/event_without_event_id.json");
 const EVENT_UNKNOWN_EXTRA_FIELD: &str =
-    include_str!("../fixtures/bot_relay/event_unknown_extra_field.json");
+    include_str!("../../fixtures/bot_relay/event_unknown_extra_field.json");
 const SEQUENCE_SEQ_GAP_NO_RESYNC: &str =
-    include_str!("../fixtures/bot_relay/sequence_seq_gap_no_resync.json");
+    include_str!("../../fixtures/bot_relay/sequence_seq_gap_no_resync.json");
 const SEQUENCE_REDELIVER_FRESH_SEQ: &str =
-    include_str!("../fixtures/bot_relay/sequence_redeliver_fresh_seq.json");
+    include_str!("../../fixtures/bot_relay/sequence_redeliver_fresh_seq.json");
 const SEQUENCE_EXPLICIT_RESYNC: &str =
-    include_str!("../fixtures/bot_relay/sequence_explicit_resync.json");
+    include_str!("../../fixtures/bot_relay/sequence_explicit_resync.json");
 const SEQUENCE_SAME_SEQ_TWO_PAYLOADS: &str =
-    include_str!("../fixtures/bot_relay/sequence_same_seq_two_payloads.json");
+    include_str!("../../fixtures/bot_relay/sequence_same_seq_two_payloads.json");
 const METHOD_COMMAND_PARAMS: &str =
-    include_str!("../fixtures/bot_relay/method_command_params.json");
+    include_str!("../../fixtures/bot_relay/method_command_params.json");
 const METHOD_COMMAND_RESULT: &str =
-    include_str!("../fixtures/bot_relay/method_command_result.json");
+    include_str!("../../fixtures/bot_relay/method_command_result.json");
 const METHOD_VNC_DESCRIPTOR_PARAMS: &str =
-    include_str!("../fixtures/bot_relay/method_vnc_descriptor_params.json");
+    include_str!("../../fixtures/bot_relay/method_vnc_descriptor_params.json");
 const METHOD_VNC_DESCRIPTOR_RESULT: &str =
-    include_str!("../fixtures/bot_relay/method_vnc_descriptor_result.json");
-const METHOD_ROSTER_RESULT: &str = include_str!("../fixtures/bot_relay/method_roster_result.json");
-const METHOD_STATUS_RESULT: &str = include_str!("../fixtures/bot_relay/method_status_result.json");
+    include_str!("../../fixtures/bot_relay/method_vnc_descriptor_result.json");
+const METHOD_ROSTER_RESULT: &str =
+    include_str!("../../fixtures/bot_relay/method_roster_result.json");
+const METHOD_STATUS_RESULT: &str =
+    include_str!("../../fixtures/bot_relay/method_status_result.json");
 const METHOD_SUBSCRIBE_PARAMS: &str =
-    include_str!("../fixtures/bot_relay/method_subscribe_params.json");
+    include_str!("../../fixtures/bot_relay/method_subscribe_params.json");
 const METHOD_BIND_CONVERSATION_PARAMS: &str =
-    include_str!("../fixtures/bot_relay/method_bind_conversation_params.json");
+    include_str!("../../fixtures/bot_relay/method_bind_conversation_params.json");
 const METHOD_TRANSCRIPT_OFFBOX_PARAMS: &str =
-    include_str!("../fixtures/bot_relay/method_transcript_offbox_params.json");
+    include_str!("../../fixtures/bot_relay/method_transcript_offbox_params.json");
 const METHOD_TRANSCRIPT_OFFBOX_RESULT: &str =
-    include_str!("../fixtures/bot_relay/method_transcript_offbox_result.json");
-const METHOD_EMPTY_RESULT: &str = include_str!("../fixtures/bot_relay/method_empty_result.json");
+    include_str!("../../fixtures/bot_relay/method_transcript_offbox_result.json");
+const METHOD_EMPTY_RESULT: &str = include_str!("../../fixtures/bot_relay/method_empty_result.json");
 
 fn parse_object(raw: &str) -> Value {
     let value: Value = serde_json::from_str(raw).unwrap_or_else(|e| {
