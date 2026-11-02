@@ -415,6 +415,10 @@ codegen-units = 256
 opt-level = 2
 codegen-units = 256
 
+[profile.release.package.xai-grok-pager-bin]
+opt-level = 2
+codegen-units = 256
+
 # Hardened release profile for shipping to end users (alpha + stable).
 # Use `cargo build --profile release-dist` for distribution builds.
 # Not used by default `--release` to avoid slowing down local dev builds (~2.2x).
