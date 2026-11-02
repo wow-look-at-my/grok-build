@@ -1,3 +1,5 @@
+// goal_bookkeeping_guard_tests.rs holds the goal bookkeeping guard tests code.
+
 use super::support::*;
 use super::*;
 use xai_grok_tools::implementations::grok_build::read_file::ReadFileTool;

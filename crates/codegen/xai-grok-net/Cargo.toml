@@ -1,0 +1,34 @@
+# Cargo.toml holds the Cargo code.
+
+[package]
+license = "Apache-2.0"
+name = "xai-grok-net"
+version = "0.1.0"
+edition.workspace = true
+description = "The one HTTP path of the grok CLI: every request is built here, and only this crate attaches a credential."
+
+[features]
+# Lets a test send the xAI session to a loopback mock server. Only dev-dependencies turn it on.
+test-loopback-session = []
+
+[dependencies]
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+parking_lot = { workspace = true }
+reqwest = { workspace = true, features = ["gzip", "brotli", "deflate"] }
+serde = { workspace = true }
+tokio ={ workspace = true }
+tokio-tungstenite = { workspace = true, features = [
+    "rustls-tls-native-roots",
+    "rustls-tls-webpki-roots",
+] }
+tracing = { workspace = true }
+url = { workspace = true }
+xai-grok-extra-ca = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+toml = { workspace = true }
+
+[lints]
+workspace = true

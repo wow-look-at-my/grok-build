@@ -245,8 +245,8 @@ impl From<url::ParseError> for ClientError {
     }
 }
 
-impl From<tokio_tungstenite::tungstenite::Error> for ClientError {
-    fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
+impl From<xai_grok_net::ws::WsError> for ClientError {
+    fn from(err: xai_grok_net::ws::WsError) -> Self {
         Self::NetworkError(err.to_string())
     }
 }
@@ -258,8 +258,8 @@ impl ClientError {
     /// transport [`Self::NetworkError`] via the blanket `From` impl. The
     /// distinction must be made here, before `From` collapses the typed
     /// `Http` response (status and body) into an opaque string.
-    pub(crate) fn from_handshake_error(err: tokio_tungstenite::tungstenite::Error) -> Self {
-        if let tokio_tungstenite::tungstenite::Error::Http(resp) = &err {
+    pub(crate) fn from_handshake_error(err: xai_grok_net::ws::WsError) -> Self {
+        if let xai_grok_net::ws::WsError::Http(resp) = &err {
             let status = resp.status().as_u16();
             if status == 401 || status == 403 {
                 let refusal = resp
@@ -302,19 +302,16 @@ mod tests {
         }
     }
 
-    fn http_upgrade_error(status: u16) -> tokio_tungstenite::tungstenite::Error {
+    fn http_upgrade_error(status: u16) -> xai_grok_net::ws::WsError {
         http_upgrade_error_with_body(status, None)
     }
 
-    fn http_upgrade_error_with_body(
-        status: u16,
-        body: Option<&str>,
-    ) -> tokio_tungstenite::tungstenite::Error {
-        let resp = tokio_tungstenite::tungstenite::http::Response::builder()
+    fn http_upgrade_error_with_body(status: u16, body: Option<&str>) -> xai_grok_net::ws::WsError {
+        let resp = http::Response::builder()
             .status(status)
             .body(body.map(|body| body.as_bytes().to_vec()))
             .expect("response builds");
-        tokio_tungstenite::tungstenite::Error::Http(Box::new(resp))
+        xai_grok_net::ws::WsError::Http(Box::new(resp))
     }
 
     #[test]

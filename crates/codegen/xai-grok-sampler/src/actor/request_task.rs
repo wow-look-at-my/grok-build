@@ -1656,8 +1656,8 @@ fn synthesize_from_info(info: &SamplingErrorInfo) -> SamplingError {
         SamplingErrorKind::Api | SamplingErrorKind::RateLimited => {
             let status = info
                 .status_code
-                .and_then(|c| reqwest::StatusCode::from_u16(c).ok())
-                .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+                .and_then(|c| xai_grok_net::StatusCode::from_u16(c).ok())
+                .unwrap_or(xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR);
             SamplingError::Api {
                 status,
                 message: info.message.clone(),
@@ -1884,7 +1884,7 @@ fn send_completion(
 mod tests {
     use super::*;
     use futures_util::stream;
-    use reqwest::StatusCode;
+    use xai_grok_net::StatusCode;
     use xai_grok_sampling_types::ApiErrorCode;
 
     #[test]
@@ -2269,7 +2269,7 @@ mod tests {
     #[test]
     fn synthesize_preserves_error_code_and_image_classification() {
         let original = SamplingError::Api {
-            status: reqwest::StatusCode::BAD_REQUEST,
+            status: xai_grok_net::StatusCode::BAD_REQUEST,
             message: "some future wording without the legacy phrase".to_string(),
             model_metadata: None,
             retry_after_secs: None,

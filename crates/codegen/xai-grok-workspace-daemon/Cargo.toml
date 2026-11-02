@@ -9,7 +9,7 @@ description = "Process lifecycle for the workspace-server daemon: self-daemoniza
 clap = { workspace = true }
 fs2 = { workspace = true }
 prometheus = { workspace = true }
-reqwest = { workspace = true }
+xai-grok-net = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }

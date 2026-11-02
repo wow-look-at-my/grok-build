@@ -505,7 +505,7 @@ pub fn stream_messages<'a>(
                 MessageStreamEvent::Error { error } => {
                     let error_message = format!("{}: {}", error.r#type, error.message);
                     let err = SamplingError::Api {
-                        status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                        status: xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR,
                         message: error_message,
                         model_metadata: None,
                         retry_after_secs: None,

@@ -22,8 +22,8 @@
 //! 3. Download video bytes from the API URL, or an optional presigned GET URL
 
 use base64::Engine as _;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use serde::Deserialize;
+use xai_grok_net::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 
 use crate::attribution::{SharedAttributionCallback, ToolConsumer};
 use crate::types::SharedApiKeyProvider;
@@ -141,8 +141,10 @@ impl std::fmt::Debug for ZdrVideoOutputS3Config {
 /// HTTP client for xAI Video Generation API. Cloned per-request; shares `Arc` state.
 #[derive(Clone)]
 pub struct VideoGenClient {
-    http: reqwest::Client,
-    download_http: reqwest::Client,
+    http: xai_grok_net::HttpClient,
+    /// Credential headers from `extra_headers`.
+    credential_headers: HeaderMap,
+    download_http: xai_grok_net::HttpClient,
     base_url: String,
     writer: super::storage::SessionFileWriter,
     zdr_video_output_s3: Option<ZdrVideoOutputS3Config>,
@@ -182,12 +184,12 @@ impl VideoGenClient {
             ));
         };
 
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         extra_headers.into_iter().try_for_each(|(key, value)| {
-            let header_name =
-                reqwest::header::HeaderName::from_bytes(key.as_bytes()).map_err(|e| {
+            let header_name = xai_grok_net::header::HeaderName::from_bytes(key.as_bytes())
+                .map_err(|e| {
                     xai_tool_runtime::ToolError::invalid_arguments(format!(
                         "Invalid header name '{key}': {e}"
                     ))
@@ -204,11 +206,12 @@ impl VideoGenClient {
         // Process-cached; the session id is attached per request, not here.
         let defaults_have_session_header =
             headers.contains_key(super::image_gen::SESSION_ID_HEADER);
+        let credential_headers = crate::util::shared_http::take_credential_headers(&mut headers);
         let key = crate::util::shared_http::cache_key("video_gen", &headers);
         let http = crate::util::shared_http::cached_client(key, || {
-            xai_grok_extra_ca::build_reqwest_client(|builder| {
-                builder.default_headers(headers.clone())
-            })
+            xai_grok_net::HttpClient::build(
+                xai_grok_net::ClientOptions::default().default_headers(headers.clone()),
+            )
         })
         .map_err(|e| {
             xai_tool_runtime::ToolError::invalid_arguments(format!(
@@ -218,14 +221,13 @@ impl VideoGenClient {
 
         // Distinct client (download timeout, no default headers); an empty
         // header map routes it through the same `CacheKey` constructor.
-        let download_key = crate::util::shared_http::cache_key(
-            "video_gen_download",
-            &reqwest::header::HeaderMap::new(),
-        );
+        let download_key =
+            crate::util::shared_http::cache_key("video_gen_download", &HeaderMap::new());
         let download_http = crate::util::shared_http::cached_client(download_key, || {
-            xai_grok_extra_ca::build_reqwest_client(|builder| {
-                builder.timeout(std::time::Duration::from_secs(VIDEO_DOWNLOAD_TIMEOUT_SECS))
-            })
+            xai_grok_net::HttpClient::build(
+                xai_grok_net::ClientOptions::default()
+                    .timeout(std::time::Duration::from_secs(VIDEO_DOWNLOAD_TIMEOUT_SECS)),
+            )
         })
         .map_err(|e| {
             xai_tool_runtime::ToolError::invalid_arguments(format!(
@@ -235,6 +237,7 @@ impl VideoGenClient {
 
         Ok(Self {
             http,
+            credential_headers,
             download_http,
             base_url: base_url.clone(),
             writer: super::storage::SessionFileWriter::new(DEFAULT_VIDEO_DIR, "mp4"),
@@ -256,14 +259,16 @@ impl VideoGenClient {
     /// (the presigned download client stays separate: its URLs carry their own auth).
     fn request(
         &self,
-        method: reqwest::Method,
+        method: xai_grok_net::Method,
         url: &str,
         sent_bearer: &str,
-    ) -> reqwest::RequestBuilder {
-        let mut req = self
-            .http
-            .request(method, url)
-            .header(AUTHORIZATION, format!("Bearer {sent_bearer}"));
+    ) -> xai_grok_net::Request {
+        let auth = crate::util::shared_http::key_auth(
+            Some(sent_bearer),
+            "Bearer",
+            &self.credential_headers,
+        );
+        let mut req = self.http.request(method, url, auth);
         if let Some(ref session) = self.session_header {
             req = req.header(super::image_gen::SESSION_ID_HEADER, session.clone());
         }
@@ -363,7 +368,7 @@ impl VideoGenClient {
         };
 
         let req = self
-            .request(reqwest::Method::POST, &start_url, &sent_bearer)
+            .request(xai_grok_net::Method::POST, &start_url, &sent_bearer)
             .timeout(std::time::Duration::from_secs(VIDEO_START_TIMEOUT_SECS))
             .json(&payload);
 
@@ -374,7 +379,7 @@ impl VideoGenClient {
         })?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
+        if status == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(ToolConsumer::VideoGenStart, Some(&sent_bearer));
         }
         if !status.is_success() {
@@ -430,7 +435,7 @@ impl VideoGenClient {
 
             let poll_sent_bearer = self.current_bearer().await?;
             let poll_req = self
-                .request(reqwest::Method::GET, &poll_url, &poll_sent_bearer)
+                .request(xai_grok_net::Method::GET, &poll_url, &poll_sent_bearer)
                 .timeout(poll_timeout);
 
             let poll_response = poll_req.send().await.map_err(|e| {
@@ -440,7 +445,7 @@ impl VideoGenClient {
             })?;
 
             let poll_status = poll_response.status();
-            if poll_status == reqwest::StatusCode::UNAUTHORIZED {
+            if poll_status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 self.record_401_attribution(ToolConsumer::VideoGenPoll, Some(&poll_sent_bearer));
             }
             if !poll_status.is_success() && poll_status.as_u16() != 202 {
@@ -518,9 +523,16 @@ impl VideoGenClient {
 
     /// Download video bytes from a pre-signed temporary URL (no auth headers).
     async fn download_video(&self, url: &str) -> Result<Vec<u8>, xai_tool_runtime::ToolError> {
-        let response = self.download_http.get(url).send().await.map_err(|e| {
-            xai_tool_runtime::ToolError::invalid_arguments(format!("Failed to download video: {e}"))
-        })?;
+        let response = self
+            .download_http
+            .get(url, xai_grok_net::Auth::None)
+            .send()
+            .await
+            .map_err(|e| {
+                xai_tool_runtime::ToolError::invalid_arguments(format!(
+                    "Failed to download video: {e}"
+                ))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -781,7 +793,7 @@ fn is_zdr_upload_url_error(body: &str) -> bool {
         .contains("must provide output.upload_url")
 }
 
-fn video_http_error(status: reqwest::StatusCode, body: &str) -> xai_tool_runtime::ToolError {
+fn video_http_error(status: xai_grok_net::StatusCode, body: &str) -> xai_tool_runtime::ToolError {
     if is_zdr_upload_url_error(body) {
         return zdr_restricted_error();
     }
@@ -1454,22 +1466,27 @@ mod tests {
         let client = VideoGenClient::new(&cfg, None)
             .unwrap()
             .with_session_id("sess-7");
-        let req = client
-            .request(reqwest::Method::POST, "https://api.x.ai/v1/videos", "tok")
-            .build()
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::header(
+                super::super::image_gen::SESSION_ID_HEADER,
+                "sess-7",
+            ))
+            .and(wiremock::matchers::header("authorization", "Bearer tok"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let response = client
+            .request(
+                xai_grok_net::Method::POST,
+                &format!("{}/v1/videos", server.uri()),
+                "tok",
+            )
+            .send()
+            .await
             .unwrap();
-        assert_eq!(
-            req.headers()
-                .get(super::super::image_gen::SESSION_ID_HEADER)
-                .and_then(|v| v.to_str().ok()),
-            Some("sess-7")
-        );
-        assert_eq!(
-            req.headers()
-                .get(reqwest::header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok()),
-            Some("Bearer tok")
-        );
+        assert_eq!(response.status(), xai_grok_net::StatusCode::OK);
     }
 
     use super::*;
@@ -1733,13 +1750,13 @@ mod tests {
     #[test]
     fn video_http_error_rewrites_zdr_storage_400() {
         let zdr = video_http_error(
-            reqwest::StatusCode::BAD_REQUEST,
+            xai_grok_net::StatusCode::BAD_REQUEST,
             r#"{"code":"invalid-argument","error":"Zero Data Retention teams must provide output.upload_url for video generation."}"#,
         );
         assert_eq!(zdr.to_string(), ZDR_RESTRICTED_MESSAGE);
 
         let invalid_url = video_http_error(
-            reqwest::StatusCode::BAD_REQUEST,
+            xai_grok_net::StatusCode::BAD_REQUEST,
             r#"{"code":"invalid-argument","error":"The output.upload_url field is invalid."}"#,
         );
         assert_ne!(invalid_url.to_string(), ZDR_RESTRICTED_MESSAGE);

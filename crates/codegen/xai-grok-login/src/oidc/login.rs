@@ -584,11 +584,14 @@ mod tests {
             state: received_state,
         } = tokio::join!(race_callback_and_stdin(listener, false), async {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-            reqwest::get(format!(
-                "http://127.0.0.1:{port}/callback?code=mock-auth-code&state={state}"
-            ))
-            .await
-            .unwrap();
+            xai_grok_http::shared_client()
+                .get(
+                    format!("http://127.0.0.1:{port}/callback?code=mock-auth-code&state={state}"),
+                    xai_grok_net::Auth::None,
+                )
+                .send()
+                .await
+                .unwrap();
         })
         .0
         .unwrap();

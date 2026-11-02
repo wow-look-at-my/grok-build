@@ -67,7 +67,7 @@ impl StorageConfig for TraceExportConfigWithAuth {
             None,
         )))
     }
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         Some(crate::http::shared_upload_client())
     }
 }

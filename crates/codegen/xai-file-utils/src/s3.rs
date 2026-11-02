@@ -92,33 +92,16 @@ fn parse_aws_credentials(content: &str) -> anyhow::Result<aws_sdk_s3::config::Cr
 }
 
 /// Build an S3 client. Uses path-style addressing when `endpoint_url` is set.
-/// Reads proxy env vars so S3 traffic can route through a corporate HTTP proxy.
+/// Every request, credential lookups included, goes through `xai_grok_net`, which reads
+/// the proxy from the environment.
 pub(crate) async fn build_s3_client(
     region: &str,
     credentials_content: Option<&str>,
     credentials_file: Option<&str>,
     endpoint_url: Option<&str>,
 ) -> anyhow::Result<aws_sdk_s3::Client> {
-    let proxy_config = aws_smithy_http_client::proxy::ProxyConfig::from_env();
-    let tls_context = extra_ca_tls_context()?;
-    let http_client = aws_smithy_http_client::Builder::new().build_with_connector_fn(
-        move |settings, _runtime_components| {
-            let mut builder =
-                aws_smithy_http_client::Connector::builder().proxy_config(proxy_config.clone());
-            if let Some(s) = settings {
-                builder.set_connector_settings(Some(s.clone()));
-            }
-            builder
-                .tls_provider(aws_smithy_http_client::tls::Provider::Rustls(
-                    aws_smithy_http_client::tls::rustls_provider::CryptoMode::Ring,
-                ))
-                .tls_context(tls_context.clone())
-                .build()
-        },
-    );
-
     let mut config_loader = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .http_client(http_client)
+        .http_client(crate::s3_http::NetSmithyClient::default())
         .region(aws_config::Region::new(region.to_owned()));
 
     let resolved_content = match (credentials_content, credentials_file) {
@@ -150,18 +133,6 @@ pub(crate) async fn build_s3_client(
         builder = builder.endpoint_url(url);
     }
     Ok(aws_sdk_s3::Client::from_conf(builder.build()))
-}
-
-fn extra_ca_tls_context() -> anyhow::Result<aws_smithy_http_client::tls::TlsContext> {
-    use aws_smithy_http_client::tls::{TlsContext, TrustStore};
-    let mut trust_store = TrustStore::default();
-    for pem in xai_grok_extra_ca::extra_root_pems() {
-        trust_store = trust_store.with_pem_certificate(pem.clone());
-    }
-    TlsContext::builder()
-        .with_trust_store(trust_store)
-        .build()
-        .context("build S3 TLS context with extra CA roots")
 }
 
 /// Static access-key credentials for presigning S3 URLs.

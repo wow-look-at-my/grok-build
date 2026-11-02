@@ -6,12 +6,12 @@
 //! This module provides:
 //! - [`resolve_proxy_for_host`]: reads proxy env vars and `NO_PROXY` and returns the proxy URL for a given target host, or `None` for direct.
 //! - [`connect_via_proxy`]: opens TCP to the proxy, sends an HTTP CONNECT request to create a tunnel, and wraps the result in TLS.
-//!   The returned stream is suitable for `tokio_tungstenite::client_async`.
+//!   The returned stream is suitable for `xai_grok_net::ws::connect_ws_over`.
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
-use tokio_tungstenite::MaybeTlsStream;
 use tracing::debug;
+use xai_grok_net::ws::MaybeTlsStream;
 
 // ---------------------------------------------------------------------------
 // Environment-variable resolution
@@ -104,7 +104,7 @@ fn is_host_bypassed(host: &str, no_proxy: &str) -> bool {
 
 /// Establish a TLS-wrapped TCP stream through an HTTP CONNECT proxy.
 /// Opens the tunnel, wraps it in TLS (rustls with native root certificates), and returns a `MaybeTlsStream<TcpStream>`.
-/// The result is ready for `tokio_tungstenite::client_async`.
+/// The result is ready for `xai_grok_net::ws::connect_ws_over`.
 pub(crate) async fn connect_via_proxy(
     proxy_url: &str,
     target_host: &str,

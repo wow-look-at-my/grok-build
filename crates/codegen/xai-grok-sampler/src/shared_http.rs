@@ -1,4 +1,4 @@
-//! Shared `reqwest::Client`s for uncredentialed sampling requests.
+//! Shared `HttpClient`s for uncredentialed sampling requests.
 //!
 //! Sharing the uncredentialed clients is safe because their builders take no config-derived input.
 //! Auth, extra headers, base URL, and User-Agent are applied per-request in `SamplingClient::post`.
@@ -11,14 +11,16 @@
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use xai_grok_net::{ClientOptions, HttpClient};
+
 mod mtls;
 
 pub(crate) use mtls::client as mtls_client;
 
-static SHARED_H2: OnceLock<reqwest::Client> = OnceLock::new();
-static SHARED_HTTP1: OnceLock<reqwest::Client> = OnceLock::new();
+static SHARED_H2: OnceLock<HttpClient> = OnceLock::new();
+static SHARED_HTTP1: OnceLock<HttpClient> = OnceLock::new();
 
-/// Kill switch: `GROK_SAMPLER_SHARED_CLIENT=0` (or `false`, any case) builds a fresh `reqwest::Client` per `SamplingClient` instead.
+/// Kill switch: `GROK_SAMPLER_SHARED_CLIENT=0` (or `false`, any case) builds a fresh client per `SamplingClient` instead.
 /// Resolved once per process: the environment cannot change externally after spawn.
 /// Latching keeps the rollback consistent with the pool knobs, which are also read only once.
 fn sharing_disabled() -> bool {
@@ -38,11 +40,11 @@ fn sharing_disabled() -> bool {
 /// Clone the shared client out of `cell`, building it on first use.
 /// Build failures are not cached: on `Err` the cell stays empty and the next call retries.
 /// A racing loser's freshly built client is dropped.
-fn shared(
-    cell: &OnceLock<reqwest::Client>,
-    build: fn() -> Result<reqwest::Client, reqwest::Error>,
+fn shared<T: Clone, E>(
+    cell: &OnceLock<T>,
+    build: fn() -> Result<T, E>,
     disabled: bool,
-) -> Result<reqwest::Client, reqwest::Error> {
+) -> Result<T, E> {
     if disabled {
         return build();
     }
@@ -54,14 +56,14 @@ fn shared(
 }
 
 /// Shared HTTP/2 sampling client (connection pooling and h2 keepalive).
-pub(crate) fn client() -> Result<reqwest::Client, reqwest::Error> {
+pub(crate) fn client() -> Result<HttpClient, xai_grok_net::Error> {
     shared(&SHARED_H2, build_http_client, sharing_disabled())
 }
 
 pub(crate) enum PooledClient {
     SharingDisabled,
-    Unavailable(reqwest::Error),
-    Ready(reqwest::Client),
+    Unavailable(xai_grok_net::Error),
+    Ready(HttpClient),
 }
 
 /// The pooled client worth prewarming, or why there is none.
@@ -88,17 +90,17 @@ pub(crate) fn pool_idle_timeout() -> Duration {
 
 /// Shared HTTP/1.1 fallback client.
 /// It has no connection pool, so sharing it behaves the same as building a fresh one.
-pub(crate) fn client_http1() -> Result<reqwest::Client, reqwest::Error> {
+pub(crate) fn client_http1() -> Result<HttpClient, xai_grok_net::Error> {
     shared(&SHARED_HTTP1, build_http_client_http1, sharing_disabled())
 }
 
-/// Build a `reqwest::Client` for sampling with HTTP/2 and connection pooling.
+/// Build a sampling client with HTTP/2 and connection pooling.
 /// Env knobs are read once, when the shared client is first built.
-fn build_http_client() -> Result<reqwest::Client, reqwest::Error> {
-    xai_grok_extra_ca::build_reqwest_client(configure_http2)
+fn build_http_client() -> Result<HttpClient, xai_grok_net::Error> {
+    HttpClient::build(configure_http2(ClientOptions::default()))
 }
 
-fn configure_http2(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+fn configure_http2(builder: ClientOptions) -> ClientOptions {
     let pool_max_idle: usize = std::env::var("GROK_POOL_MAX_IDLE")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -112,19 +114,19 @@ fn configure_http2(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
         .pool_max_idle_per_host(pool_max_idle)
         .pool_idle_timeout(pool_idle_timeout())
         .connect_timeout(Duration::from_secs(connect_timeout_secs))
-        .tcp_nodelay(true)
+        .tcp_nodelay()
         .http2_keep_alive_interval(Duration::from_secs(15))
         .http2_keep_alive_timeout(Duration::from_secs(5))
-        .http2_keep_alive_while_idle(true)
+        .http2_keep_alive_while_idle()
 }
 
-/// Build a `reqwest::Client` constrained to HTTP/1.1 with pooling disabled.
+/// Build a client constrained to HTTP/1.1 with pooling disabled.
 /// Used as a fallback after HTTP/2 transport failures.
-fn build_http_client_http1() -> Result<reqwest::Client, reqwest::Error> {
-    xai_grok_extra_ca::build_reqwest_client(configure_http1)
+fn build_http_client_http1() -> Result<HttpClient, xai_grok_net::Error> {
+    HttpClient::build(configure_http1(ClientOptions::default()))
 }
 
-fn configure_http1(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+fn configure_http1(builder: ClientOptions) -> ClientOptions {
     let connect_timeout_secs: u64 = std::env::var("GROK_CONNECT_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -135,30 +137,34 @@ fn configure_http1(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
         .pool_max_idle_per_host(0)
         .pool_idle_timeout(Duration::from_secs(0))
         .connect_timeout(Duration::from_secs(connect_timeout_secs))
-        .tcp_nodelay(true)
+        .tcp_nodelay()
 }
 
-#[allow(clippy::disallowed_methods)] // test clients hit localhost mocks
 #[cfg(test)]
 mod tests {
     use std::sync::OnceLock;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use xai_grok_net::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+    use xai_grok_net::{ClientOptions, HttpClient};
+
     use super::shared;
 
     static BUILD_CALLS: AtomicUsize = AtomicUsize::new(0);
 
-    /// Fails on the first call (a real `reqwest::Error`, no I/O), then builds.
-    fn flaky_build() -> Result<reqwest::Client, reqwest::Error> {
+    /// Fails on the first call (a real build error, no I/O), then builds.
+    fn flaky_build() -> Result<HttpClient, xai_grok_net::Error> {
         if BUILD_CALLS.fetch_add(1, Ordering::SeqCst) == 0 {
-            return Err(reqwest::Proxy::all("not a proxy url").unwrap_err());
+            let mut credential = HeaderMap::new();
+            credential.insert(AUTHORIZATION, HeaderValue::from_static("Bearer x"));
+            return HttpClient::build(ClientOptions::default().default_headers(credential));
         }
-        reqwest::Client::builder().build()
+        HttpClient::build(ClientOptions::default())
     }
 
     #[test]
     fn shared_does_not_cache_build_failures() {
-        static CELL: OnceLock<reqwest::Client> = OnceLock::new();
+        static CELL: OnceLock<HttpClient> = OnceLock::new();
         assert!(shared(&CELL, flaky_build, false).is_err());
         assert!(CELL.get().is_none(), "failure must leave the cell empty");
         assert!(shared(&CELL, flaky_build, false).is_ok());
@@ -173,8 +179,8 @@ mod tests {
 
     #[test]
     fn shared_disabled_bypasses_cell() {
-        static CELL: OnceLock<reqwest::Client> = OnceLock::new();
-        assert!(shared(&CELL, || reqwest::Client::builder().build(), true).is_ok());
+        static CELL: OnceLock<HttpClient> = OnceLock::new();
+        assert!(shared(&CELL, || HttpClient::build(ClientOptions::default()), true).is_ok());
         assert!(
             CELL.get().is_none(),
             "disabled mode must never touch the cell"

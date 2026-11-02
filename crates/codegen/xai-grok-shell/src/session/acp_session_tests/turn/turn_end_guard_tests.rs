@@ -1,3 +1,5 @@
+// turn_end_guard_tests.rs holds the turn end guard tests code.
+
 use super::MAX_STOP_HOOK_CONTINUATIONS_PER_TURN;
 use super::stop_gate::todo_stop_gate_blocks;
 use super::{

@@ -48,9 +48,9 @@ pub trait TraceExportSource: Send + Sync {
     fn proxy_credentials(&self) -> Option<Arc<dyn AuthCredentialProvider>> {
         None
     }
-    /// Tuned `reqwest::Client` for the per-upload `StorageClient`. Default
-    /// `None` falls back to `reqwest::Client::new()` inside the helpers.
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    /// Tuned HTTP client for the per-upload `StorageClient`. Default
+    /// `None` falls back to a default client inside the helpers.
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         None
     }
     /// Park-on-401 recovery: a future resolving `true` iff credentials changed within `timeout`.
@@ -77,7 +77,7 @@ struct ResolvedStorageConfig {
     config: TraceExportConfig,
     attribution: Option<Arc<dyn Auth401AttributionCallback>>,
     credentials: Option<Arc<dyn AuthCredentialProvider>>,
-    http_client: Option<reqwest::Client>,
+    http_client: Option<xai_grok_net::HttpClient>,
 }
 impl ResolvedStorageConfig {
     /// Resolve config with fresh auth via `resolve_async`.
@@ -90,7 +90,7 @@ impl ResolvedStorageConfig {
         }
     }
     /// Bearer this resolved config puts on the wire — `snapshot()` mirrors
-    /// `HttpAuth::apply` for provider-backed configs; the static fallback
+    /// `AuthCredentialProvider::current_auth` for provider-backed configs; the static fallback
     /// is the inline user token.
     fn wire_bearer(&self) -> Option<String> {
         if let Some(ref creds) = self.credentials {
@@ -117,7 +117,7 @@ impl StorageConfig for ResolvedStorageConfig {
     fn proxy_credentials(&self) -> Option<Arc<dyn AuthCredentialProvider>> {
         self.credentials.clone()
     }
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         self.http_client.clone()
     }
 }

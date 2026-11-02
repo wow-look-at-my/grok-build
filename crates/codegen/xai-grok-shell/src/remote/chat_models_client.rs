@@ -62,16 +62,22 @@ pub enum ChatModelsError {
     #[error("request timed out")]
     Timeout,
     #[error("network error: {0}")]
-    Network(#[from] reqwest::Error),
+    Network(#[from] xai_grok_net::Error),
     #[error("request failed: {status}")]
     Http { status: u16 },
     #[error("parse error: {0}")]
     Parse(#[from] serde_json::Error),
 }
 
+impl From<xai_grok_net::TransportError> for ChatModelsError {
+    fn from(e: xai_grok_net::TransportError) -> Self {
+        Self::Network(e.into())
+    }
+}
+
 /// Stateless transport for `POST /rest/modes`; caching lives in [`crate::agent::chat_modes::ChatModesManager`].
 pub struct ChatModelsClient {
-    http: reqwest::Client,
+    http: xai_grok_net::HttpClient,
     base_url: String,
     auth: Arc<AuthManager>,
 }
@@ -115,9 +121,8 @@ impl ChatModelsClient {
         let body = serde_json::json!({ "locale": locale });
         let mut builder = self
             .http
-            .post(&url)
+            .post(&url, auth.wire_auth())
             .json(&body)
-            .header("Authorization", format!("Bearer {}", auth.key))
             .header(
                 "X-XAI-Token-Auth",
                 self.auth.grok_com_config().token_header.clone(),
@@ -132,7 +137,7 @@ impl ChatModelsClient {
                 crate::http::CLIENT_MODE_HEADER,
                 crate::http::process_client_mode(),
             )
-            .header(reqwest::header::ACCEPT, "application/json");
+            .header(xai_grok_net::header::ACCEPT, "application/json");
         if let Some(email) = &auth.email {
             builder = builder.header("x-email", email);
         }

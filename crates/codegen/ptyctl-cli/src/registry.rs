@@ -1,5 +1,4 @@
 //! Named session registry stored at ~/.local/state/ptyctl/sessions/.
-#![allow(clippy::disallowed_methods)] // talks to the local pty daemon; TLS policy N/A
 
 use std::fs;
 use std::path::PathBuf;
@@ -73,19 +72,21 @@ pub fn unregister_session(name: &str) -> Result<()> {
 /// Requires a 200 with the ptyctl status body — a bare TCP connect would misread a recycled port.
 /// Not PID-based: the recorded PID is the child, which may exit while a `--linger` server is up.
 pub async fn server_alive(port: u16) -> bool {
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(500))
-        .build()
-    else {
+    let Ok(client) = xai_grok_net::HttpClient::build(
+        xai_grok_net::ClientOptions::default().timeout(std::time::Duration::from_millis(500)),
+    ) else {
         return false;
     };
     match client
-        .get(format!("http://127.0.0.1:{port}/query/status"))
+        .get(
+            format!("http://127.0.0.1:{port}/query/status"),
+            xai_grok_net::Auth::None,
+        )
         .send()
         .await
     {
         // Require the status body shape, not just a 200, so wildcard-200 servers read dead.
-        Ok(resp) if resp.status() == reqwest::StatusCode::OK => resp
+        Ok(resp) if resp.status() == xai_grok_net::StatusCode::OK => resp
             .json::<serde_json::Value>()
             .await
             .is_ok_and(|v| v.get("size").is_some()),

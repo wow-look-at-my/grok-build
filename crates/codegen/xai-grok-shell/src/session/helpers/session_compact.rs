@@ -8,7 +8,7 @@ use crate::sampling::{
 use agent_client_protocol as acp;
 use async_openai::types::responses::ResponseStreamEvent;
 use futures_util::StreamExt;
-use reqwest::StatusCode;
+use xai_grok_net::StatusCode;
 use xai_grok_sampler::SamplerConfig as SamplingConfig;
 
 // Re-export compaction utilities from xai-chat-state so existing callers that import from this module continue to work

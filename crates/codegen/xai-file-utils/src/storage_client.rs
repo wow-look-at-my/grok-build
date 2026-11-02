@@ -7,10 +7,10 @@
 //! upload API which splits files into chunks and composes them server-side.
 
 use anyhow::{Context, Result};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::File as StdFile;
+use xai_grok_net::HttpClient;
 // Positional read traits live in different modules per platform; the
 // methods we use (read_at on Unix, seek_read on Windows) have the same
 // signature, so the call site cfg-branches on the method name only.
@@ -198,7 +198,7 @@ struct ResponseCheck {
 
 impl ResponseCheck {
     /// Check an HTTP response and determine retry behavior.
-    async fn from_response(response: reqwest::Response, operation: &str) -> Self {
+    async fn from_response(response: xai_grok_net::Response, operation: &str) -> Self {
         let status = response.status();
         let status_code = status.as_u16();
         let retry_after = parse_retry_after(&response);
@@ -304,7 +304,7 @@ pub struct UploadLimits {
 
 /// Parse the Retry-After header value into a Duration.
 /// Supports delay-seconds format (most common from GCS).
-fn parse_retry_after(response: &reqwest::Response) -> Option<Duration> {
+fn parse_retry_after(response: &xai_grok_net::Response) -> Option<Duration> {
     let header_value = response.headers().get("retry-after")?;
     let header_str = header_value.to_str().ok()?;
 
@@ -360,14 +360,38 @@ impl StaticGrokAuth {
 }
 
 impl xai_grok_auth::HttpAuth for StaticGrokAuth {
-    fn apply(&self, builder: reqwest::RequestBuilder, _base_url: &str) -> reqwest::RequestBuilder {
-        if let Some(ref token) = self.user_token {
-            builder
-                .header("Authorization", format!("Bearer {}", token))
-                .header("X-XAI-Token-Auth", "xai-grok-cli")
-        } else {
-            builder
+    fn request_auth(&self, _base_url: &str) -> xai_grok_auth::RequestAuth {
+        let Some(ref token) = self.user_token else {
+            return xai_grok_auth::RequestAuth::none();
+        };
+        let mut headers = xai_grok_net::header::HeaderMap::new();
+        headers.insert(
+            "X-XAI-Token-Auth",
+            xai_grok_net::header::HeaderValue::from_static("xai-grok-cli"),
+        );
+        xai_grok_auth::RequestAuth {
+            auth: xai_grok_net::Auth::XaiSession(token.clone()),
+            headers,
         }
+    }
+}
+
+/// An HTTP client and the credential every request it makes carries.
+#[derive(Clone)]
+struct AuthedClient {
+    http: HttpClient,
+    auth: xai_grok_net::Auth,
+}
+
+impl AuthedClient {
+    fn get(&self, url: &str) -> xai_grok_net::Request {
+        self.http.get(url, self.auth.clone())
+    }
+    fn post(&self, url: &str) -> xai_grok_net::Request {
+        self.http.post(url, self.auth.clone())
+    }
+    fn put(&self, url: &str) -> xai_grok_net::Request {
+        self.http.put(url, self.auth.clone())
     }
 }
 
@@ -385,20 +409,17 @@ mod static_grok_auth_tests {
 /// Default reqwest client used by `StorageClient::new`. Plain defaults --
 /// production callers should instead pass a tuned client (e.g. shell's
 /// `crate::http::shared_upload_client()`) to `with_provider`.
-fn default_upload_client() -> Client {
+pub(crate) fn default_upload_client() -> HttpClient {
     #[expect(clippy::expect_used)]
-    xai_grok_extra_ca::build_reqwest_client(|builder| builder)
-        .expect("default reqwest client builds")
+    HttpClient::build(xai_grok_net::ClientOptions::default()).expect("default HTTP client builds")
 }
 
 /// Client for uploading files to GCS via cli-chat-proxy.
 #[derive(Clone)]
 pub struct StorageClient {
-    http_client: reqwest_middleware::ClientWithMiddleware,
-    /// Plain `reqwest::Client` for requests that must NOT go through the
-    /// auth middleware (direct GCS uploads via signed URLs, signed-URL
-    /// downloads, etc.).
-    raw_http_client: Client,
+    http_client: AuthedClient,
+    /// Requests that carry no credential: a signed URL carries its own auth.
+    raw_http_client: AuthedClient,
     /// Base URL for the proxy (e.g., "https://cli-chat-proxy.grok.com/v1")
     base_url: String,
     /// Retry configuration for handling transient failures (especially 429 errors)
@@ -440,15 +461,22 @@ impl StorageClient {
     /// the HTTP client (shell passes `crate::http::shared_upload_client()`).
     pub fn with_provider(
         proxy_base_url: &str,
-        http_client: Client,
+        http_client: HttpClient,
         credentials: Arc<dyn AuthCredentialProvider>,
     ) -> Self {
-        let middleware_client = crate::with_auth_retry(http_client.clone(), credentials.clone());
+        let proxy_client = AuthedClient {
+            http: http_client.clone(),
+            auth: crate::auth_retry(credentials.clone()),
+        };
+        let raw_client = AuthedClient {
+            http: http_client,
+            auth: xai_grok_net::Auth::None,
+        };
         let breaker = CircuitBreaker::new(storage_breaker_config())
             .with_observer(TracingObserver::new(STORAGE_BREAKER_NAME));
         Self {
-            http_client: middleware_client,
-            raw_http_client: http_client,
+            http_client: proxy_client,
+            raw_http_client: raw_client,
             base_url: proxy_base_url.to_owned(),
             retry_config: RetryConfig::default(),
             attribution: None,
@@ -587,15 +615,17 @@ impl StorageClient {
                     }
                 }
             }
-            Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+            Ok(resp) if resp.status() == xai_grok_net::StatusCode::UNAUTHORIZED => {
                 self.fire_401_attribution("check_exists");
                 self.breaker.record(Outcome::Failure);
                 ExistsResult::Unauthorized
             }
-            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => ExistsResult::NotFound,
+            Ok(resp) if resp.status() == xai_grok_net::StatusCode::NOT_FOUND => {
+                ExistsResult::NotFound
+            }
             // 403 fires attribution but, per the breaker contract, does
             // NOT count toward the 401 counter.
-            Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
+            Ok(resp) if resp.status() == xai_grok_net::StatusCode::FORBIDDEN => {
                 self.fire_401_attribution("check_exists");
                 ExistsResult::Unauthorized
             }
@@ -638,14 +668,16 @@ impl StorageClient {
             .json(&Request { paths: paths_ref });
 
         match request.send().await {
-            Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+            Ok(resp) if resp.status() == xai_grok_net::StatusCode::UNAUTHORIZED => {
                 self.fire_401_attribution("batch_check_exists");
                 self.breaker.record(Outcome::Failure);
                 ExistsResult::Unauthorized
             }
-            Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => ExistsResult::NotFound,
+            Ok(resp) if resp.status() == xai_grok_net::StatusCode::NOT_FOUND => {
+                ExistsResult::NotFound
+            }
             // 403 fires attribution; does NOT count toward the breaker.
-            Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
+            Ok(resp) if resp.status() == xai_grok_net::StatusCode::FORBIDDEN => {
                 self.fire_401_attribution("batch_check_exists");
                 ExistsResult::Unauthorized
             }
@@ -691,14 +723,15 @@ impl StorageClient {
         let mut attempt = 0u32;
         loop {
             // Rebuild the multipart form on each attempt (consumed by send).
-            let mut form = reqwest::multipart::Form::new();
+            let mut form = xai_grok_net::multipart::Form::new();
             for (path, content, content_type) in &files {
                 let ct = if content_type.is_empty() {
                     "application/octet-stream"
                 } else {
                     content_type.as_str()
                 };
-                let part = match reqwest::multipart::Part::bytes(content.clone()).mime_str(ct) {
+                let part = match xai_grok_net::multipart::Part::bytes(content.clone()).mime_str(ct)
+                {
                     Ok(part) => part.file_name(path.clone()),
                     Err(e) => {
                         tracing::warn!("batch_upload: invalid MIME type '{ct}': {e}");
@@ -713,19 +746,19 @@ impl StorageClient {
                 .multipart(form);
 
             match request.send().await {
-                Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                Ok(resp) if resp.status() == xai_grok_net::StatusCode::UNAUTHORIZED => {
                     self.fire_401_attribution("batch_upload");
                     self.breaker.record(Outcome::Failure);
                     return None;
                 }
-                Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => return None,
-                Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
+                Ok(resp) if resp.status() == xai_grok_net::StatusCode::NOT_FOUND => return None,
+                Ok(resp) if resp.status() == xai_grok_net::StatusCode::FORBIDDEN => {
                     tracing::debug!("batch_upload rejected (403), skipping");
                     return None;
                 }
                 // 422: server detected the body was stripped in transit
                 // (Content-Length: 0). Retry with exponential backoff.
-                Ok(resp) if resp.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY => {
+                Ok(resp) if resp.status() == xai_grok_net::StatusCode::UNPROCESSABLE_ENTITY => {
                     if attempt < self.retry_config.max_retries {
                         wait_for_network_retry(
                             &self.retry_config,
@@ -849,13 +882,13 @@ impl StorageClient {
                 .body(compressed.clone());
 
             match request.send().await {
-                Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                Ok(resp) if resp.status() == xai_grok_net::StatusCode::UNAUTHORIZED => {
                     self.fire_401_attribution("batch_upload_json");
                     self.breaker.record(Outcome::Failure);
                     return None;
                 }
-                Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => return None,
-                Ok(resp) if resp.status() == reqwest::StatusCode::FORBIDDEN => {
+                Ok(resp) if resp.status() == xai_grok_net::StatusCode::NOT_FOUND => return None,
+                Ok(resp) if resp.status() == xai_grok_net::StatusCode::FORBIDDEN => {
                     tracing::debug!("batch_upload_json rejected (403), skipping");
                     return None;
                 }
@@ -907,7 +940,7 @@ impl StorageClient {
             .await
             .context("Failed to contact storage download endpoint")?;
 
-        if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        if resp.status() == xai_grok_net::StatusCode::FORBIDDEN {
             anyhow::bail!(
                 "Dedup blob download is not authorized for this account \
                  (server returned 403 for path '{}')",
@@ -935,8 +968,8 @@ impl StorageClient {
             .context("Failed to parse storage download response")?;
 
         // Step 2: fetch the object via the signed URL, streaming to dest.
-        // Use the raw client — signed URLs carry their own auth and must
-        // NOT go through the AuthRetryMiddleware.
+        // Use the raw client: a signed URL carries its own auth and must
+        // NOT carry the proxy credential.
         let object_resp = self
             .raw_http_client
             .get(&download_resp.signed_url)
@@ -981,10 +1014,7 @@ impl StorageClient {
         Ok(())
     }
 
-    fn add_common_headers(
-        &self,
-        builder: reqwest_middleware::RequestBuilder,
-    ) -> reqwest_middleware::RequestBuilder {
+    fn add_common_headers(&self, builder: xai_grok_net::Request) -> xai_grok_net::Request {
         // Prefer caller-provided identity so proxy logs see the real end-user client.
         // Falls back to the library's own version for bins/tests.
         let version = self
@@ -1064,7 +1094,7 @@ impl StorageClient {
                         .await
                         .map_err(|e| anyhow::anyhow!("Failed to parse upload response: {}", e));
                 }
-                Ok(response) if response.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                Ok(response) if response.status() == xai_grok_net::StatusCode::UNAUTHORIZED => {
                     self.fire_401_attribution("upload");
                     self.breaker.record(Outcome::Failure);
                     return Err(HttpUploadError {
@@ -1073,7 +1103,7 @@ impl StorageClient {
                     }
                     .into());
                 }
-                Ok(response) if response.status() == reqwest::StatusCode::FORBIDDEN => {
+                Ok(response) if response.status() == xai_grok_net::StatusCode::FORBIDDEN => {
                     let body = response.text().await.unwrap_or_default();
                     tracing::warn!("storage upload rejected (403): {body}");
                     return Err(HttpUploadError {
@@ -1157,7 +1187,7 @@ impl StorageClient {
             }
 
             let stream = create_read_at_stream(shared_file.clone(), 0, file_size, 0);
-            let body = reqwest::Body::wrap_stream(stream);
+            let body = xai_grok_net::Body::wrap_stream(stream);
 
             let request = self.add_common_headers(
                 self.http_client
@@ -1175,7 +1205,7 @@ impl StorageClient {
                         .await
                         .map_err(|e| anyhow::anyhow!("Failed to parse upload response: {}", e));
                 }
-                Ok(response) if response.status() == reqwest::StatusCode::UNAUTHORIZED => {
+                Ok(response) if response.status() == xai_grok_net::StatusCode::UNAUTHORIZED => {
                     self.fire_401_attribution("upload_file");
                     self.breaker.record(Outcome::Failure);
                     return Err(HttpUploadError {
@@ -1184,7 +1214,7 @@ impl StorageClient {
                     }
                     .into());
                 }
-                Ok(response) if response.status() == reqwest::StatusCode::FORBIDDEN => {
+                Ok(response) if response.status() == xai_grok_net::StatusCode::FORBIDDEN => {
                     let body = response.text().await.unwrap_or_default();
                     tracing::warn!("storage upload_file rejected (403): {body}");
                     return Err(HttpUploadError {
@@ -1242,7 +1272,7 @@ impl StorageClient {
         }
 
         let stream = ReaderStream::new(reader);
-        let body = reqwest::Body::wrap_stream(stream);
+        let body = xai_grok_net::Body::wrap_stream(stream);
 
         let request = self
             .http_client
@@ -1257,12 +1287,12 @@ impl StorageClient {
             .context("Failed to send streaming upload request")?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
+        if status == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.fire_401_attribution("upload_stream");
             self.breaker.record(Outcome::Failure);
             anyhow::bail!("Failed to upload to '{}': HTTP 401 Unauthorized", path);
         }
-        if status == reqwest::StatusCode::FORBIDDEN {
+        if status == xai_grok_net::StatusCode::FORBIDDEN {
             let body = response.text().await.unwrap_or_default();
             tracing::warn!("storage upload_stream rejected (403): {body}");
             return Err(HttpUploadError {
@@ -1577,7 +1607,7 @@ impl StorageClient {
                         .await
                         .context("Failed to parse multipart init response");
                 }
-                Ok(response) if response.status() == reqwest::StatusCode::FORBIDDEN => {
+                Ok(response) if response.status() == xai_grok_net::StatusCode::FORBIDDEN => {
                     tracing::debug!("storage upload rejected (403), skipping");
                     return Ok(MultipartInitResponse {
                         upload_id: String::new(),
@@ -1691,7 +1721,7 @@ impl StorageClient {
             .await
             .context("Failed to request signed upload URL")?;
 
-        if response.status() == reqwest::StatusCode::FORBIDDEN {
+        if response.status() == xai_grok_net::StatusCode::FORBIDDEN {
             tracing::debug!("storage upload rejected (403), skipping");
             return Ok(prod_mc_cli_chat_proxy_types::SignedUploadUrlResponse {
                 signed_url: String::new(),
@@ -1764,7 +1794,7 @@ const READ_AT_CHUNK_SIZE: usize = 5 << 20;
 /// Uses `read_at` so multiple parts can stream from the same file concurrently.
 /// On retry, the stream is recreated from the same offset.
 async fn upload_part_streaming(
-    client: &reqwest_middleware::ClientWithMiddleware,
+    client: &AuthedClient,
     base_url: &str,
     upload_id: &str,
     part_number: u32,
@@ -1783,7 +1813,7 @@ async fn upload_part_streaming(
     loop {
         let stream_start = std::time::Instant::now();
         let stream = create_read_at_stream(file.clone(), offset, length, part_number);
-        let body = reqwest::Body::wrap_stream(stream);
+        let body = xai_grok_net::Body::wrap_stream(stream);
         tracing::debug!(
             "Part {} stream created in {:?}",
             part_number,
@@ -1852,7 +1882,7 @@ async fn upload_part_streaming(
 /// Upload a single part directly to GCS using a pre-signed URL.
 /// Bypasses the proxy; no authorization headers — the signed URL includes auth.
 async fn upload_part_direct(
-    client: &Client,
+    client: &AuthedClient,
     signed_url: &str,
     file: Arc<StdFile>,
     offset: u64,
@@ -1865,7 +1895,7 @@ async fn upload_part_direct(
     let mut attempt = 0u32;
     loop {
         let stream = create_read_at_stream(file.clone(), offset, length, part_number);
-        let body = reqwest::Body::wrap_stream(stream);
+        let body = xai_grok_net::Body::wrap_stream(stream);
 
         tracing::debug!(
             "Part {} starting network transmission to GCS ({:.1} MB)",

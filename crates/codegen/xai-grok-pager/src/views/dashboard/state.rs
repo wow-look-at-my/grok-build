@@ -3568,8 +3568,7 @@ impl DashboardState {
                 .map(|(id, _)| id.clone())
             {
                 self.manual_scroll_active = false;
-                // The dispatcher decides by the row's current state: Idle rows move to Inactive
-                // with no confirmation, Inactive rows arm the permanent-delete confirmation.
+                // The dispatcher decides by the row's current state: Idle rows move to Inactive with no confirmation.
                 self.focus_row(id.clone());
                 self.set_list_focused(true);
                 return InputOutcome::Action(Action::DashboardDismissRow(id));

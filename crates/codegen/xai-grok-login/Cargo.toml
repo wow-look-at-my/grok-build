@@ -27,7 +27,6 @@ jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 obfstr = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
-reqwest = { workspace = true, features = ["stream", "blocking"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -52,12 +51,13 @@ urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
 webbrowser = { workspace = true }
 xai-file-utils = { path = "../xai-file-utils" }
-xai-grok-auth = { workspace = true, features = ["middleware"] }
+xai-grok-auth = { workspace = true }
 xai-grok-config = { workspace = true }
 xai-grok-config-types = { workspace = true }
 xai-grok-env = { workspace = true }
 xai-grok-http = { workspace = true }
 xai-grok-memory = { workspace = true }
+xai-grok-net = { workspace = true }
 xai-grok-sampler = { workspace = true }
 xai-grok-shell-base = { workspace = true }
 xai-grok-telemetry = { workspace = true }
@@ -85,6 +85,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"
 tokio = { workspace = true, features = ["test-util"] }
 xai-grok-test-support = { workspace = true }
 xai-grok-extra-ca = { workspace = true }
+xai-grok-net = { workspace = true, features = ["test-loopback-session"] }
 wiremock = { workspace = true }
 pretty_assertions = { workspace = true }
 indexmap = { workspace = true }

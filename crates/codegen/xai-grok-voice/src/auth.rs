@@ -10,6 +10,8 @@ use std::future::{Future, ready};
 use std::pin::Pin;
 use std::sync::Arc;
 
+use xai_grok_net::{Auth, KeyScheme};
+
 #[cfg(feature = "audio")]
 use crate::error::VoiceError;
 
@@ -25,15 +27,16 @@ pub enum VoiceAuthError {
 }
 
 pub trait VoiceAuthProvider: std::fmt::Debug + Send + Sync + 'static {
-    fn bearer(&self) -> Pin<Box<dyn Future<Output = Result<String, VoiceAuthError>> + Send + '_>>;
+    /// The credential for the next STT connection.
+    fn auth(&self) -> Pin<Box<dyn Future<Output = Result<Auth, VoiceAuthError>> + Send + '_>>;
 }
 
 /// Shared provider handed to the voice pipeline.
 pub type SharedVoiceAuth = Arc<dyn VoiceAuthProvider>;
 
 #[cfg(feature = "audio")]
-pub(crate) async fn require_bearer(auth: &SharedVoiceAuth) -> Result<String, VoiceError> {
-    auth.bearer()
+pub(crate) async fn require_auth(auth: &SharedVoiceAuth) -> Result<Auth, VoiceError> {
+    auth.auth()
         .await
         .map_err(|error| VoiceError::Auth(error.to_string()))
 }
@@ -51,8 +54,11 @@ impl std::fmt::Debug for StaticVoiceAuth {
 }
 
 impl VoiceAuthProvider for StaticVoiceAuth {
-    fn bearer(&self) -> Pin<Box<dyn Future<Output = Result<String, VoiceAuthError>> + Send + '_>> {
-        Box::pin(ready(Ok(self.0.clone())))
+    fn auth(&self) -> Pin<Box<dyn Future<Output = Result<Auth, VoiceAuthError>> + Send + '_>> {
+        Box::pin(ready(Ok(Auth::ApiKey {
+            key: self.0.clone(),
+            scheme: KeyScheme::Bearer,
+        })))
     }
 }
 
@@ -72,9 +78,15 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn static_provider_resolves() {
+    async fn static_provider_resolves_as_an_api_key() {
         let provider = StaticVoiceAuth::shared("  sk-test  ").unwrap();
-        assert_eq!(provider.bearer().await.as_deref(), Ok("sk-test"));
+        match provider.auth().await {
+            Ok(Auth::ApiKey { key, scheme }) => {
+                assert_eq!(key, "sk-test");
+                assert_eq!(scheme, KeyScheme::Bearer);
+            }
+            other => panic!("expected an API key, got {other:?}"),
+        }
     }
 
     #[test]

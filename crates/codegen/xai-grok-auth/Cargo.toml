@@ -7,19 +7,18 @@ description = "Auth dependency-inversion seam: HttpAuth + AuthCredentialProvider
 authors = ["xAI"]
 
 [features]
-middleware = ["dep:reqwest-middleware", "dep:http"]
+# Kept so dependents that name it still build.
+middleware = []
 
 [dependencies]
 async-trait = { workspace = true }
-http = { workspace = true, optional = true }
-reqwest = { workspace = true }
-reqwest-middleware = { workspace = true, optional = true }
 tracing = { workspace = true }
+xai-grok-net = { workspace = true }
 
 [dev-dependencies]
 mockito = { workspace = true }
-reqwest-middleware = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+xai-grok-net = { workspace = true, features = ["test-loopback-session"] }
 
 [lints]
 workspace = true

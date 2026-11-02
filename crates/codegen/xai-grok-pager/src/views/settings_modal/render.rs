@@ -2790,8 +2790,7 @@ pub(super) fn build_shortcuts(state: &SettingsModalState) -> Vec<Shortcut<'stati
                 clickable: false,
                 id: 0,
             });
-            // Consent choosers hide reset; the key is disabled there too, so this stays a description of what actually works on the pane
-            // A filtering picker spends printable keys on the query, so `d` no longer resets there.
+            // Consent choosers hide reset. The key is disabled there too.
             if !consent && !filtering {
                 shortcuts.push(Shortcut {
                     label: "d reset",
