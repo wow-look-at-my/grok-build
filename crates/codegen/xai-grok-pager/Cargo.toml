@@ -223,6 +223,16 @@ harness = false
 name = "it"
 path = "tests/it/main.rs"
 
+# Each of these sets `GROK_HOME`, and `grok_home()` reads it once per process.
+# So each needs a process of its own under `cargo test`.
+[[test]]
+name = "plugin_marketplace_remove_locked"
+path = "tests/plugin_marketplace_remove_locked.rs"
+
+[[test]]
+name = "plugin_marketplace_remove_official"
+path = "tests/plugin_marketplace_remove_official.rs"
+
 # Opt into [workspace.lints.clippy] (too_many_arguments etc.). Without this,
 # `cargo clippy --workspace -- -D warnings` on this package is stricter than
 # the workspace-default clippy allows used in CI.
