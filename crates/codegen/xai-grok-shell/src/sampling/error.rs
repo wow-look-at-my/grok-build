@@ -95,7 +95,7 @@ pub(crate) fn idle_timeout_user_message(elapsed_secs: u64) -> String {
 /// Map a `SamplingError` to an ACP `Error` for client-facing responses.
 /// This stays in xai-grok-shell because it depends on `agent_client_protocol::Error`.
 pub(crate) fn map_sampling_err_to_acp(err: SamplingError) -> acp::Error {
-    use reqwest::StatusCode;
+    use xai_grok_net::StatusCode;
     // Capacity/overload gets the same short copy everywhere
     // Message only, `data` unset: `Display` appends JSON-encoded `data`, and this string is meant for direct display
     if err.is_overloaded() {
@@ -430,7 +430,7 @@ pub(crate) fn prompt_complete_fields(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::StatusCode;
+    use xai_grok_net::StatusCode;
 
     #[test]
     fn rewrite_service_names_is_ascii_case_insensitive() {

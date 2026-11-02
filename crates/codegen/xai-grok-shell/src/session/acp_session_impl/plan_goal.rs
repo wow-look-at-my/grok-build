@@ -1,3 +1,5 @@
+// plan_goal.rs holds the plan goal code.
+
 use super::*;
 
 /// The objective of a goal made from an approved plan. It names the plan's

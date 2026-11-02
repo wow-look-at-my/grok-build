@@ -1,3 +1,5 @@
+// types.rs holds the types code.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::num::NonZeroU64;

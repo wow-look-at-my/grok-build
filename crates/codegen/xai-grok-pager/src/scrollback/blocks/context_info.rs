@@ -1535,7 +1535,6 @@ mod tests {
         let block = ContextInfoBlock::new(snapshot(), "grok-4");
         let theme = test_theme();
         let lines = block.build_lines(&theme, BarLayout::NARROW);
-        // The data row for the first legend entry sits at index 17 (16 is the "Cache read" header row, 17 its data row)
         let Some(data_row) = lines.get(17) else {
             panic!("expected data row at index 17");
         };

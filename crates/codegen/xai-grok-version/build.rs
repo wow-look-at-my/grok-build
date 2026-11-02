@@ -1,3 +1,5 @@
+// build.rs holds the build code.
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

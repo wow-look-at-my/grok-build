@@ -402,15 +402,18 @@ pub async fn delete_sent_draft(cleanup: Option<DraftCleanup>) -> FeedbackOutcome
 fn is_feedback_outcome_unknown(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
-            .downcast_ref::<reqwest::Error>()
+            .downcast_ref::<xai_grok_net::Error>()
             .is_some_and(request_may_have_arrived)
     })
 }
 
-/// False only when the request never left (bad URL, connection refused) or the proxy answered.
-/// A retry after false cannot send a duplicate.
-pub fn request_may_have_arrived(error: &reqwest::Error) -> bool {
-    !error.is_builder() && !error.is_connect() && !error.is_status()
+/// False only when the request never left (bad URL, connection refused, a refused
+/// credential) or the proxy answered. A retry after false cannot send a duplicate.
+pub fn request_may_have_arrived(error: &xai_grok_net::Error) -> bool {
+    match error.as_http() {
+        Some(e) => !e.is_builder() && !e.is_connect() && !e.is_status(),
+        None => false,
+    }
 }
 
 /// Tells the proxy that the user dismissed a solicited feedback request.

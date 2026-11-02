@@ -29,7 +29,7 @@ chrono = { workspace = true }
 git2 = { version = "0.21", default-features = false, features = [
     "vendored-libgit2",
 ] }
-reqwest = { workspace = true }
+xai-grok-net = { workspace = true }
 xai-grok-secrets = { workspace = true }
 xai-mixpanel = { workspace = true }
 xai-grok-config = { workspace = true }
@@ -47,8 +47,6 @@ sentry = { version = "0.42.0", default-features = false, features = [
     "tracing",
     "backtrace",
     "contexts",
-    "reqwest",
-    "rustls",
     "debug-images",
 ] }
 # Single cross-edge: `events::ToolCallCompleted.outcome` reuses
@@ -84,7 +82,7 @@ opentelemetry_sdk = { workspace = true, features = [
 opentelemetry-otlp = { workspace = true, features = ["tls-aws-lc"] }
 # Embedded Mozilla trust anchors for the gRPC TLS fallback: keeps `https://`
 # collectors working on hosts with no readable system CA store (parity with
-# the HTTP transport's embedded-roots reqwest client in `otlp_http.rs`).
+# the HTTP transport client in `xai_grok_otel::otlp`).
 webpki-roots = { workspace = true }
 # Re-encodes the validated GROK_EXTRA_CA_BUNDLE DERs as PEM for tonic's
 # `Certificate::from_pem` (the gRPC transport's extra-CA parity with HTTP).

@@ -273,19 +273,18 @@ async fn tokenize_texts_parallel(
 }
 
 async fn tokenize_one(
-    client: &reqwest::Client,
+    client: &xai_grok_net::HttpClient,
     url: &str,
     api_key: &str,
     model: &str,
     text: &str,
 ) -> Option<u64> {
-    let Ok(auth) = reqwest::header::HeaderValue::from_str(&format!("Bearer {api_key}")) else {
-        tracing::debug!("session_context_snapshot: invalid api key header");
-        return None;
+    let auth = xai_grok_net::Auth::ApiKey {
+        key: api_key.to_owned(),
+        scheme: xai_grok_net::KeyScheme::Bearer,
     };
     let resp = client
-        .post(url)
-        .header(reqwest::header::AUTHORIZATION, auth)
+        .post(url, auth)
         .header("x-grok-client-version", xai_grok_version::version())
         .json(&serde_json::json!({
             "text": text,

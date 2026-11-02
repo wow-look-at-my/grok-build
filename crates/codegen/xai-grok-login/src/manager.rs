@@ -385,6 +385,10 @@ impl AuthManager {
         proxy_base_url: String,
         disk_state: Option<DiskAuthState>,
     ) -> Self {
+        // An inline `GROK_AUTH` token never passes `lookup_auth`.
+        if let Some(auth) = inner.as_ref() {
+            auth.register_session();
+        }
         Self {
             inner: Arc::new(RwLock::new(inner)),
             path,
@@ -638,7 +642,11 @@ impl AuthManager {
     #[inline]
     pub(crate) fn with_inner_write<R>(&self, f: impl FnOnce(&mut Option<GrokAuth>) -> R) -> R {
         let mut guard = self.inner.write();
-        f(&mut guard)
+        let out = f(&mut guard);
+        if let Some(auth) = guard.as_ref() {
+            auth.register_session();
+        }
+        out
     }
     /// Closure-scoped read counterpart to [`Self::with_inner_write`].
     #[inline]

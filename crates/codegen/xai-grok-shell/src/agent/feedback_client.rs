@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use reqwest::RequestBuilder;
 use serde::de::DeserializeOwned;
+use xai_grok_net::Request as RequestBuilder;
 
 use prod_mc_cli_chat_proxy_types::feedback_types::{
     ClientType, CreateFeedbackRequestInput, CreateFeedbackRequestResponse,
@@ -28,7 +28,7 @@ const CLIENT_VERSION_HEADER: &str = "x-grok-client-version";
 #[derive(Debug, thiserror::Error)]
 #[error("{context} failed with status {status}: {body}")]
 pub(crate) struct FeedbackApiError {
-    pub status: reqwest::StatusCode,
+    pub status: xai_grok_net::StatusCode,
     pub context: &'static str,
     pub body: String,
 }
@@ -36,20 +36,20 @@ pub(crate) struct FeedbackApiError {
 impl FeedbackApiError {
     /// Returns `true` if this is a 401 Unauthorized response.
     pub(crate) fn is_unauthorized(&self) -> bool {
-        self.status == reqwest::StatusCode::UNAUTHORIZED
+        self.status == xai_grok_net::StatusCode::UNAUTHORIZED
     }
 
     /// Returns `true` if this is a 403 Forbidden response.
     pub(crate) fn is_forbidden(&self) -> bool {
-        self.status == reqwest::StatusCode::FORBIDDEN
+        self.status == xai_grok_net::StatusCode::FORBIDDEN
     }
 }
 
 /// Client for the feedback collection API via cli-chat-proxy.
 #[derive(Clone)]
 pub struct FeedbackClient {
-    http: reqwest::Client,
-    client: reqwest_middleware::ClientWithMiddleware,
+    http: xai_grok_net::HttpClient,
+    provider: Arc<dyn xai_grok_auth::AuthCredentialProvider>,
     base_url: String,
     credentials: crate::util::grok_auth_credentials::GrokAuthCredentials,
     session_id: Option<String>,
@@ -57,16 +57,7 @@ pub struct FeedbackClient {
 
 impl FeedbackClient {
     pub fn new(base_url: impl Into<String>, user_token: Option<String>) -> Self {
-        let http = crate::http::shared_client();
-        let credentials = crate::util::grok_auth_credentials::GrokAuthCredentials::new(user_token);
-        let client = Self::build_middleware_client(&http, &credentials);
-        Self {
-            http,
-            client,
-            base_url: base_url.into(),
-            credentials,
-            session_id: None,
-        }
+        Self::with_client(crate::http::shared_client(), base_url, user_token)
     }
 
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
@@ -81,15 +72,15 @@ impl FeedbackClient {
     }
 
     pub fn with_client(
-        http: reqwest::Client,
+        http: xai_grok_net::HttpClient,
         base_url: impl Into<String>,
         user_token: Option<String>,
     ) -> Self {
         let credentials = crate::util::grok_auth_credentials::GrokAuthCredentials::new(user_token);
-        let client = Self::build_middleware_client(&http, &credentials);
+        let provider = Self::make_auth_provider(&credentials);
         Self {
             http,
-            client,
+            provider,
             base_url: base_url.into(),
             credentials,
             session_id: None,
@@ -112,23 +103,17 @@ impl FeedbackClient {
             .is_some_and(|am| am.has_refresher_attached())
     }
 
-    /// Rebuild the middleware-wrapped client from the current credentials.
-    /// Called by each builder method so the middleware sees the final state.
+    /// Rebuild the credential provider from the current credentials.
+    /// Called by each builder method so requests see the final state.
     fn rebuild_middleware(&mut self) {
-        self.client = Self::build_middleware_client(&self.http, &self.credentials);
+        self.provider = Self::make_auth_provider(&self.credentials);
     }
 
-    fn build_middleware_client(
-        http: &reqwest::Client,
-        credentials: &crate::util::grok_auth_credentials::GrokAuthCredentials,
-    ) -> reqwest_middleware::ClientWithMiddleware {
-        let provider = Self::make_auth_provider(credentials);
-        // max_retries=0: the middleware stamps the auth header but does NOT drive its own ServerRejected recovery on 401
-        // Background consumers (signals sync, turn deltas) retry at the application level via with_one_shot_auth_retry or try_refresh_and_retry_sync
-        // Those first wait for the proactive refresh to complete before falling back to active recovery Otherwise the middleware's eager ServerRejected refresh would race every other auth consumer during token-expiry windows and amplify 401s
-        reqwest_middleware::ClientBuilder::new(http.clone())
-            .with(xai_grok_auth::AuthRetryMiddleware::new(provider, 0))
-            .build()
+    /// A request to `url` that reads the credential at send time.
+    fn request(&self, method: xai_grok_net::Method, url: &str) -> RequestBuilder {
+        // `add_common_headers` sets `X-XAI-Token-Auth`, the plain header the provider adds.
+        let request_auth = xai_grok_auth::retrying_auth(self.provider.clone(), url, 0);
+        self.http.request(method, url, request_auth.auth)
     }
 
     fn make_auth_provider(
@@ -152,14 +137,14 @@ impl FeedbackClient {
 
     fn record_401_attribution_if_needed(
         &self,
-        response: &reqwest::Response,
-        stamp: Option<&xai_grok_auth::StampedBearerSuffix>,
+        response: &xai_grok_net::Response,
+        stamp: Option<&xai_grok_auth::SentBearerSuffix>,
         op: &str,
     ) {
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED
+        if response.status() == xai_grok_net::StatusCode::UNAUTHORIZED
             && let Some(am) = self.credentials.auth_manager()
         {
-            // Attribute what the middleware stamped, never a re-resolved or constructor-time credential (see `StampedBearerSuffix`)
+            // Attribute the bearer that went on the wire, never a re-resolved or constructor-time credential
             // `None` means the request went out with no bearer
             xai_grok_login::attribution::record_consumer_401(
                 am.as_ref(),
@@ -199,12 +184,12 @@ impl FeedbackClient {
 
     /// Create a POST request builder with common headers.
     fn post(&self, url: &str) -> RequestBuilder {
-        self.add_common_headers(self.http.post(url))
+        self.add_common_headers(self.request(xai_grok_net::Method::POST, url))
     }
 
     /// Create a GET request builder with common headers.
     fn get(&self, url: &str) -> RequestBuilder {
-        self.add_common_headers(self.http.get(url))
+        self.add_common_headers(self.request(xai_grok_net::Method::GET, url))
     }
 
     fn add_common_headers(&self, builder: RequestBuilder) -> RequestBuilder {
@@ -228,14 +213,12 @@ impl FeedbackClient {
         anyhow::bail!("{context} disabled: this build does not report to xAI");
         #[allow(unreachable_code)]
         let request = xai_grok_otel::inject_trace_context_into_request(request);
-        let req = request.build().context(context)?;
-        let (response, stamp) = xai_grok_auth::execute_with_stamp(&self.client, req)
-            .await
-            .context(context)?;
+        let response = request.send().await.context(context)?;
+        let stamp = xai_grok_auth::sent_bearer_suffix(&response);
 
         self.record_401_attribution_if_needed(&response, stamp.as_ref(), context);
 
-        if response.status() == reqwest::StatusCode::FORBIDDEN {
+        if response.status() == xai_grok_net::StatusCode::FORBIDDEN {
             tracing::debug!("{context} rejected (403), skipping");
             anyhow::bail!("{context} rejected (403)");
         }
@@ -266,14 +249,12 @@ impl FeedbackClient {
         anyhow::bail!("{context} disabled: this build does not report to xAI");
         #[allow(unreachable_code)]
         let request = xai_grok_otel::inject_trace_context_into_request(request);
-        let req = request.build().context(context)?;
-        let (response, stamp) = xai_grok_auth::execute_with_stamp(&self.client, req)
-            .await
-            .context(context)?;
+        let response = request.send().await.context(context)?;
+        let stamp = xai_grok_auth::sent_bearer_suffix(&response);
 
         self.record_401_attribution_if_needed(&response, stamp.as_ref(), context);
 
-        if response.status() == reqwest::StatusCode::FORBIDDEN {
+        if response.status() == xai_grok_net::StatusCode::FORBIDDEN {
             tracing::debug!("{context} rejected (403), skipping");
             return Ok(());
         }

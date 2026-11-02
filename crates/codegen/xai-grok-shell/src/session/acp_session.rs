@@ -525,9 +525,9 @@ fn managed_gateway_error_to_tool_error(
     match error {
         crate::session::managed_mcp::ManagedMcpFetchError::Status { status, message } => {
             let detail = format!("Managed MCP gateway tool call failed: {message}");
-            let mut err = if status == reqwest::StatusCode::UNAUTHORIZED {
+            let mut err = if status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 xai_tool_runtime::ToolError::unauthorized(detail)
-            } else if status == reqwest::StatusCode::FORBIDDEN {
+            } else if status == xai_grok_net::StatusCode::FORBIDDEN {
                 xai_tool_runtime::ToolError::permission_denied(detail)
             } else {
                 let tool_id = xai_tool_protocol::ToolId::new(caller)
@@ -550,9 +550,12 @@ fn managed_gateway_error_to_tool_error(
             err
         }
         crate::session::managed_mcp::ManagedMcpFetchError::Transport(e) => {
+            let detail = match e {
+                xai_grok_net::Error::Http(h) => h.without_url().to_string(),
+                other => other.to_string(),
+            };
             xai_tool_runtime::ToolError::network_error(format!(
-                "Managed MCP gateway tool call failed: {}",
-                e.without_url()
+                "Managed MCP gateway tool call failed: {detail}"
             ))
         }
         crate::session::managed_mcp::ManagedMcpFetchError::NoAuth => {
@@ -566,7 +569,7 @@ mod managed_gateway_error_tests {
     use super::*;
     fn status_error(code: u16, message: &str) -> crate::session::managed_mcp::ManagedMcpFetchError {
         crate::session::managed_mcp::ManagedMcpFetchError::Status {
-            status: reqwest::StatusCode::from_u16(code).unwrap(),
+            status: xai_grok_net::StatusCode::from_u16(code).unwrap(),
             message: message.to_string(),
         }
     }
@@ -628,7 +631,9 @@ mod managed_gateway_error_tests {
             .await
             .expect_err("connection to a dead port should fail");
         let err = managed_gateway_error_to_tool_error(
-            crate::session::managed_mcp::ManagedMcpFetchError::Transport(transport),
+            crate::session::managed_mcp::ManagedMcpFetchError::Transport(
+                xai_grok_net::Error::from(transport),
+            ),
             "use_tool",
         );
         assert_eq!(err.kind, xai_tool_runtime::ToolErrorKind::NetworkError);

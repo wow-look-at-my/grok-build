@@ -87,7 +87,6 @@ xai-grok-session-events = { workspace = true }
 xai-grok-auth = { path = "../xai-grok-auth" }
 xai-grok-telemetry = { workspace = true }
 xai-tty-utils = { workspace = true }
-reqwest = { workspace = true }
 xai-tool-protocol = { workspace = true }
 xai-tool-runtime = { workspace = true }
 xai-tool-types = { workspace = true }
@@ -106,7 +105,7 @@ tracing-subscriber = { workspace = true }
 fastrace = { workspace = true, features = ["enable"] }
 xai-tracing = { workspace = true }
 xai-grok-extra-ca = { workspace = true }
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+xai-grok-net = { workspace = true }
 tempfile = { workspace = true }
 zstd = { workspace = true }
 wait-timeout = { workspace = true }
@@ -145,9 +144,8 @@ xai-test-utils = { path = "../../common/xai-test-utils" }
 # Decode tar.gz archives produced by workspace upload helpers in tests.
 flate2 = { workspace = true }
 tar = { workspace = true }
-
-[package.metadata.cargo-shear]
-ignored = ["tokio-tungstenite"]
+# The binary tests read the diag server over plain HTTP.
+reqwest = { workspace = true }
 
 [lints]
 workspace = true

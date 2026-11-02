@@ -406,7 +406,7 @@ impl xai_tool_runtime::Tool for ImageEditTool {
         })?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
+        if status == xai_grok_net::StatusCode::UNAUTHORIZED {
             client.record_401_attribution(ToolConsumer::ImageGen, Some(&sent_bearer));
         }
         if !status.is_success() {

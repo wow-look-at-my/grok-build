@@ -5518,7 +5518,7 @@ pub(crate) fn resolve_credentials(
             xai_chat_state::AuthType::ApiKey,
         )
     } else if let Some(key) = session_key
-        && crate::util::may_carry_xai_session(&info.base_url)
+        && crate::util::is_xai_api_url(&info.base_url)
         && xai_grok_login::backend::AuthBackend::may_receive_session(
             &xai_grok_login::backend::ActiveAuthBackend::default(),
             &info.base_url,
@@ -5679,7 +5679,7 @@ pub(crate) struct ConfiguredPricing {
     pub(crate) catalog_url: String,
 }
 
-/// Read both halves off ONE config load. A model call resolves this per
+/// Read both halves off ONE config load. A model call resolves this.
 /// response, and `ConfigLayers::load` reads the config files each time. So a
 /// second load here doubles that cost for every message the session sends.
 pub(crate) fn resolve_configured_pricing(model_id: &str) -> ConfiguredPricing {

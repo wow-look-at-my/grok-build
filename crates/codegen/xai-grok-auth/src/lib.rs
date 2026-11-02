@@ -5,12 +5,14 @@
 
 pub mod auth_provider;
 pub mod bearer_fragment;
-#[cfg(feature = "middleware")]
-pub mod retry_middleware;
+#[cfg(test)]
+mod source_tests;
 pub mod visibility;
 
-pub use auth_provider::{AuthCredentialProvider, CredentialSnapshot, StaticAuthCredentialProvider};
+pub use auth_provider::{
+    AuthCredentialProvider, CredentialSnapshot, StaticAuthCredentialProvider, credential_source,
+    retrying_auth, sent_bearer_suffix,
+};
 pub use bearer_fragment::{BEARER_SUFFIX_LEN, bearer_suffix};
-#[cfg(feature = "middleware")]
-pub use retry_middleware::{AuthRetryMiddleware, StampedBearerSuffix, execute_with_stamp};
-pub use visibility::HttpAuth;
+pub use visibility::{HttpAuth, RequestAuth};
+pub use xai_grok_net::SentBearerSuffix;

@@ -1,3 +1,5 @@
+// interval.rs holds the interval code.
+
 use super::types::{SchedulerError, interval_duration};
 
 const MINIMUM_INTERVAL_SECS: u64 = 60;

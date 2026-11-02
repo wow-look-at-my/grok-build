@@ -8,8 +8,7 @@ description = "Runtime hook system for Grok — file-based discovery, command ex
 [dependencies]
 fastrand = { workspace = true }
 regex = { workspace = true }
-reqwest = { workspace = true }
-xai-grok-extra-ca = { workspace = true }
+xai-grok-net = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 shellexpand = "3.1"

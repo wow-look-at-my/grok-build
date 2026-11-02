@@ -1,5 +1,7 @@
 #![allow(clippy::cast_possible_truncation)]
 
+// scrollback_selection_playground.rs holds the scrollback selection playground code.
+
 use std::collections::VecDeque;
 use std::io::{self, stdout};
 use std::time::{Duration, Instant};

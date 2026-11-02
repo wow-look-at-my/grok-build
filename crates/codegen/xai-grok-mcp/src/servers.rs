@@ -59,22 +59,6 @@ pub use xai_grok_workspace_types::MCP_TOOL_NAME_DELIMITER;
 /// Caller-supplied configs cannot smuggle it: the header is stripped from every HTTP/SSE config and re-added only when the spawn context asks for it (mirroring the `GROK_SESSION_ID` env protection on stdio servers).
 pub const GROK_AGENT_ID_HEADER: &str = "X-Grok-Agent-ID";
 
-/// Reqwest 0.13 twin of the 0.12 adapters in `xai_grok_extra_ca`.
-fn with_extra_root_certificates(mut builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
-    xai_grok_extra_ca::ensure_default_crypto_provider();
-    builder = builder.tls_backend_rustls();
-    for der in xai_grok_extra_ca::extra_root_ders() {
-        match reqwest::Certificate::from_der(der) {
-            Ok(cert) => builder = builder.add_root_certificate(cert),
-            Err(e) => tracing::warn!(
-                error = %e,
-                "extra CA bundle: validated DER rejected by reqwest 0.13; skipping cert"
-            ),
-        }
-    }
-    builder
-}
-
 /// Max protocol icons kept per server/tool at ingest.
 pub const MAX_MCP_ICONS_PER_ENTITY: usize = 8;
 
@@ -1348,7 +1332,7 @@ fn init_error_is_connect_phase(err: &ClientInitializeError) -> bool {
     matches!(
         error
             .error
-            .downcast_ref::<StreamableHttpError<reqwest::Error>>(),
+            .downcast_ref::<StreamableHttpError<crate::net_http_client::McpHttpError>>(),
         Some(StreamableHttpError::Client(e)) if e.is_connect()
     )
 }
@@ -2226,7 +2210,7 @@ async fn discover_and_prepare_auth(
         crate::credentials::McpCredentialStoreAdapter::new(server_name.to_string(), parsed_url);
     let observed = adapter.observed();
 
-    let mut manager = match rmcp::transport::auth::AuthorizationManager::new(server_url).await {
+    let mut manager = match crate::net_http_client::new_authorization_manager(server_url).await {
         Ok(m) => m,
         Err(e) => {
             tracing::warn!(server = server_name, %e, "Failed to create OAuth manager");
@@ -2298,13 +2282,11 @@ async fn probe_anonymous_access(
     headers: &[(String, String)],
 ) -> AnonymousAccess {
     // Redirects are not followed: a gateway that redirects an anonymous POST to a login page is challenging, not accepting
-    // reqwest 0.13; the policy chokepoint is typed for 0.12 and cannot wrap this builder.
-    #[allow(clippy::disallowed_methods)]
-    let client = match with_extra_root_certificates(reqwest::Client::builder())
-        .timeout(ANONYMOUS_ACCESS_PROBE_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
+    let client = match xai_grok_net::HttpClient::build(
+        xai_grok_net::ClientOptions::default()
+            .timeout(ANONYMOUS_ACCESS_PROBE_TIMEOUT)
+            .no_redirects(),
+    ) {
         Ok(client) => client,
         Err(e) => {
             tracing::warn!(server = server_name, error = %e, "anonymous-access probe: building HTTP client failed");
@@ -2322,22 +2304,23 @@ async fn probe_anonymous_access(
     );
     // Protocol-required values win over configured ones.
     probe_headers.insert(
-        reqwest::header::CONTENT_TYPE,
-        reqwest::header::HeaderValue::from_static("application/json"),
+        http::header::CONTENT_TYPE,
+        http::header::HeaderValue::from_static("application/json"),
     );
     probe_headers.insert(
-        reqwest::header::ACCEPT,
-        reqwest::header::HeaderValue::from_static("application/json, text/event-stream"),
+        http::header::ACCEPT,
+        http::header::HeaderValue::from_static("application/json, text/event-stream"),
     );
     apply_user_agent_policy(&mut probe_headers, server_name, url);
-    let request = client.post(url).headers(probe_headers).body("{}");
+    let auth = configured_auth(&mut probe_headers);
+    let request = client.post(url, auth).headers(probe_headers).body("{}");
     match request.send().await {
         Ok(response) => {
             let status = response.status();
             // 407 signals proxy credentials rather than server auth, but those are still credentials this session cannot supply headlessly
-            if status == reqwest::StatusCode::UNAUTHORIZED
-                || status == reqwest::StatusCode::FORBIDDEN
-                || status == reqwest::StatusCode::PROXY_AUTHENTICATION_REQUIRED
+            if status == xai_grok_net::StatusCode::UNAUTHORIZED
+                || status == xai_grok_net::StatusCode::FORBIDDEN
+                || status == xai_grok_net::StatusCode::PROXY_AUTHENTICATION_REQUIRED
                 || status.is_redirection()
             {
                 AnonymousAccess::AuthChallenged
@@ -2349,11 +2332,25 @@ async fn probe_anonymous_access(
                 AnonymousAccess::Accepted
             }
         }
+        Err(e) if e.auth_refusal().is_some() => {
+            tracing::error!(server = server_name, error = %e, "anonymous-access probe refused its credential");
+            AnonymousAccess::Unreachable
+        }
         Err(e) => {
             tracing::warn!(server = server_name, error = %e, "anonymous-access probe failed");
             AnonymousAccess::Unreachable
         }
     }
+}
+
+/// Move the credential headers the user configured for this server out of `headers`,
+/// as the request's [`xai_grok_net::Auth`].
+fn configured_auth(headers: &mut http::HeaderMap) -> xai_grok_net::Auth {
+    let credentials = crate::net_http_client::take_credential_headers(headers);
+    if credentials.is_empty() {
+        return xai_grok_net::Auth::None;
+    }
+    xai_grok_net::Auth::Configured(credentials)
 }
 
 async fn decide_http_auth_over_network(
@@ -3766,7 +3763,8 @@ impl McpClient {
             // Modern-only stdio servers stay unsupported until rmcp tolerates late responses to abandoned requests.
             PendingTransport::Stdio(process) => self.serve_legacy(*process).await,
             PendingTransport::Http(config) => {
-                // One reqwest client for both phases: the probe and the legacy transports stay separate rmcp sessions, but share the connection pool, so a responsive legacy server doesn't pay a second TCP+TLS setup.
+                // One HTTP client for both phases: the probe and the transports stay separate rmcp sessions, but share
+                // the connection pool.
                 let http_client =
                     Self::build_http_client(&config, &self.server_name, self.warn_budget.clone())?;
                 self.probe_then_legacy(|| {
@@ -3973,7 +3971,9 @@ impl McpClient {
         config: &HttpConfig,
         auth_manager: &Arc<tokio::sync::Mutex<rmcp::transport::auth::AuthorizationManager>>,
     ) -> Result<
-        crate::mcp_http_client::McpHttpClient<rmcp::transport::auth::AuthClient<reqwest::Client>>,
+        crate::mcp_http_client::McpHttpClient<
+            rmcp::transport::auth::AuthClient<crate::net_http_client::NetHttpClient>,
+        >,
         McpError,
     > {
         let name = &self.server_name;
@@ -3994,19 +3994,14 @@ impl McpClient {
                 .map(|(key, value)| (key.as_str(), value.as_str())),
         );
         apply_user_agent_policy(&mut headers, name, &config.url);
-        // reqwest 0.13; the policy chokepoint is typed for 0.12 and cannot wrap this builder.
-        #[allow(clippy::disallowed_methods)]
-        let http_client = with_extra_root_certificates(
-            reqwest::Client::builder()
-                .default_headers(headers)
-                .connect_timeout(HTTP_CONNECT_TIMEOUT),
-        )
-        .build()
-        .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
+        let http_client = Self::build_net_http_client(
+            headers,
+            xai_grok_net::ClientOptions::default().connect_timeout(HTTP_CONNECT_TIMEOUT),
+        )?;
         // `AuthClient::new` wants an owned manager, but ours is shared (`Arc`) with the OAuth flow
         // The struct is non_exhaustive, so build with a throwaway manager and swap in the shared one
         let placeholder_manager =
-            rmcp::transport::auth::AuthorizationManager::new(config.url.as_str())
+            crate::net_http_client::new_authorization_manager(config.url.as_str())
                 .await
                 .map_err(|e| McpError::ClientError(format!("Failed to build OAuth client: {e}")))?;
         let mut auth_client =
@@ -4144,7 +4139,10 @@ impl McpClient {
         config: &HttpConfig,
         server_name: &str,
         warn_budget: crate::mcp_http_client::WarnBudget,
-    ) -> Result<crate::mcp_http_client::McpHttpClient<reqwest::Client>, McpError> {
+    ) -> Result<
+        crate::mcp_http_client::McpHttpClient<crate::net_http_client::NetHttpClient>,
+        McpError,
+    > {
         let mut headers = parse_config_headers(
             server_name,
             "transport",
@@ -4154,29 +4152,32 @@ impl McpClient {
                 .map(|(key, value)| (key.as_str(), value.as_str())),
         );
         apply_user_agent_policy(&mut headers, server_name, &config.url);
-        // reqwest 0.13; the policy chokepoint is typed for 0.12 and cannot wrap this builder.
-        #[allow(clippy::disallowed_methods)]
-        let mut builder = with_extra_root_certificates(
-            reqwest::Client::builder()
-                .default_headers(headers)
-                .connect_timeout(HTTP_CONNECT_TIMEOUT),
-        );
+        let mut options =
+            xai_grok_net::ClientOptions::default().connect_timeout(HTTP_CONNECT_TIMEOUT);
         if config.local_agent_endpoint {
             // A local app endpoint must never see its agent-id header travel
             // through a proxy or follow a redirect off the machine.
-            builder = builder
-                .no_proxy()
-                .redirect(reqwest::redirect::Policy::none());
+            options = options.no_proxy().no_redirects();
         }
-        // rmcp requires reqwest 0.13; the approved xai helper is typed for 0.12.
-        #[allow(clippy::disallowed_methods)]
-        let client = builder
-            .build()
-            .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
+        let client = Self::build_net_http_client(headers, options)?;
         Ok(crate::mcp_http_client::McpHttpClient::new(
             client,
             server_name,
             warn_budget,
+        ))
+    }
+
+    /// The configured credential headers leave `headers` and go on each request as an `Auth`.
+    /// The other headers are the client's default headers.
+    fn build_net_http_client(
+        mut headers: http::HeaderMap,
+        options: xai_grok_net::ClientOptions,
+    ) -> Result<crate::net_http_client::NetHttpClient, McpError> {
+        let configured = crate::net_http_client::take_credential_headers(&mut headers);
+        let client = xai_grok_net::HttpClient::build(options.default_headers(headers))
+            .map_err(|e| McpError::ClientError(format!("Failed to build HTTP client: {e}")))?;
+        Ok(crate::net_http_client::NetHttpClient::new(
+            client, configured,
         ))
     }
 
@@ -4659,41 +4660,41 @@ fn is_figma_mcp(server_name: &str, url: &str) -> bool {
     {
         return true;
     }
-    reqwest::Url::parse(url)
+    url::Url::parse(url)
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_ascii_lowercase()))
         .is_some_and(|h| h == "figma.com" || h.ends_with(".figma.com"))
 }
 
-fn ensure_figma_user_agent(headers: &mut reqwest::header::HeaderMap, server_name: &str, url: &str) {
+fn ensure_figma_user_agent(headers: &mut http::header::HeaderMap, server_name: &str, url: &str) {
     if !is_figma_mcp(server_name, url) {
         return;
     }
-    if headers.contains_key(reqwest::header::USER_AGENT) {
+    if headers.contains_key(http::header::USER_AGENT) {
         return;
     }
     headers.insert(
-        reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("grok-cli"),
+        http::header::USER_AGENT,
+        http::header::HeaderValue::from_static("grok-cli"),
     );
 }
 
-static DEFAULT_USER_AGENT: LazyLock<reqwest::header::HeaderValue> = LazyLock::new(|| {
+static DEFAULT_USER_AGENT: LazyLock<http::header::HeaderValue> = LazyLock::new(|| {
     format!("grok-cli/{}", xai_grok_version::version())
         .parse()
-        .unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("grok-cli"))
+        .unwrap_or_else(|_| http::header::HeaderValue::from_static("grok-cli"))
 });
 
-fn ensure_default_user_agent(headers: &mut reqwest::header::HeaderMap) {
-    if headers.contains_key(reqwest::header::USER_AGENT) {
+fn ensure_default_user_agent(headers: &mut http::header::HeaderMap) {
+    if headers.contains_key(http::header::USER_AGENT) {
         return;
     }
-    headers.insert(reqwest::header::USER_AGENT, DEFAULT_USER_AGENT.clone());
+    headers.insert(http::header::USER_AGENT, DEFAULT_USER_AGENT.clone());
 }
 
 /// Figma keeps its pinned bare `grok-cli` attribution token; every other server gets the versioned default.
 /// A `User-Agent` already in the map always wins.
-fn apply_user_agent_policy(headers: &mut reqwest::header::HeaderMap, server_name: &str, url: &str) {
+fn apply_user_agent_policy(headers: &mut http::header::HeaderMap, server_name: &str, url: &str) {
     ensure_figma_user_agent(headers, server_name, url);
     ensure_default_user_agent(headers);
 }
@@ -4704,12 +4705,12 @@ fn parse_config_headers<'a>(
     server_name: &str,
     stage: &'static str,
     pairs: impl Iterator<Item = (&'a str, &'a str)>,
-) -> reqwest::header::HeaderMap {
-    let mut headers = reqwest::header::HeaderMap::new();
+) -> http::header::HeaderMap {
+    let mut headers = http::header::HeaderMap::new();
     for (key, value) in pairs {
         match (
-            reqwest::header::HeaderName::from_bytes(key.as_bytes()),
-            value.parse::<reqwest::header::HeaderValue>(),
+            http::header::HeaderName::from_bytes(key.as_bytes()),
+            value.parse::<http::header::HeaderValue>(),
         ) {
             (Ok(name), Ok(val)) => {
                 headers.insert(name, val);
@@ -4904,7 +4905,7 @@ pub async fn start_mcp_server(
             headers.retain(|(name, _)| !name.eq_ignore_ascii_case(GROK_AGENT_ID_HEADER));
             let local_agent_endpoint = ctx.send_grok_agent_id_header;
             if local_agent_endpoint && let Some(session_id) = ctx.session_id {
-                reqwest::header::HeaderValue::try_from(session_id).map_err(|error| {
+                http::header::HeaderValue::try_from(session_id).map_err(|error| {
                     McpError::ClientError(format!("invalid {GROK_AGENT_ID_HEADER} value: {error}"))
                 })?;
                 headers.push((GROK_AGENT_ID_HEADER.to_owned(), session_id.to_owned()));

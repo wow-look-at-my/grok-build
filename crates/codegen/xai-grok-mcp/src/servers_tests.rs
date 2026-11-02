@@ -357,44 +357,35 @@ fn is_figma_mcp_matches_name_and_host() {
 
 #[test]
 fn ensure_figma_user_agent_sets_grok_cli_when_missing() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     ensure_figma_user_agent(&mut headers, "figma", "https://mcp.figma.com/mcp");
-    assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "grok-cli"
-    );
+    assert_eq!(headers.get(http::header::USER_AGENT).unwrap(), "grok-cli");
 
-    let mut host_only = reqwest::header::HeaderMap::new();
+    let mut host_only = http::header::HeaderMap::new();
     ensure_figma_user_agent(&mut host_only, "other", "https://mcp.figma.com/mcp");
-    assert_eq!(
-        host_only.get(reqwest::header::USER_AGENT).unwrap(),
-        "grok-cli"
-    );
+    assert_eq!(host_only.get(http::header::USER_AGENT).unwrap(), "grok-cli");
 }
 
 #[test]
 fn ensure_figma_user_agent_does_not_overwrite_existing() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     headers.insert(
-        reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("custom-ua"),
+        http::header::USER_AGENT,
+        http::header::HeaderValue::from_static("custom-ua"),
     );
     ensure_figma_user_agent(&mut headers, "figma", "https://mcp.figma.com/mcp");
-    assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "custom-ua"
-    );
+    assert_eq!(headers.get(http::header::USER_AGENT).unwrap(), "custom-ua");
 }
 
 #[test]
 fn ensure_figma_user_agent_skips_non_figma() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     ensure_figma_user_agent(&mut headers, "linear", "https://mcp.linear.app/mcp");
-    assert!(!headers.contains_key(reqwest::header::USER_AGENT));
+    assert!(!headers.contains_key(http::header::USER_AGENT));
 
-    let mut invalid_url = reqwest::header::HeaderMap::new();
+    let mut invalid_url = http::header::HeaderMap::new();
     ensure_figma_user_agent(&mut invalid_url, "linear", "not-a-url");
-    assert!(!invalid_url.contains_key(reqwest::header::USER_AGENT));
+    assert!(!invalid_url.contains_key(http::header::USER_AGENT));
 }
 
 #[test]
@@ -412,37 +403,31 @@ fn parse_config_headers_skips_invalid_and_keeps_last_duplicate() {
 
 #[test]
 fn apply_user_agent_policy_sets_versioned_grok_cli() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     apply_user_agent_policy(&mut headers, "linear", "https://mcp.linear.app/mcp");
     let expected = format!("grok-cli/{}", xai_grok_version::version());
     assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
+        headers.get(http::header::USER_AGENT).unwrap(),
         expected.as_str()
     );
 }
 
 #[test]
 fn apply_user_agent_policy_preserves_configured_user_agent() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     headers.insert(
-        reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("custom-ua"),
+        http::header::USER_AGENT,
+        http::header::HeaderValue::from_static("custom-ua"),
     );
     apply_user_agent_policy(&mut headers, "linear", "https://mcp.linear.app/mcp");
-    assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "custom-ua"
-    );
+    assert_eq!(headers.get(http::header::USER_AGENT).unwrap(), "custom-ua");
 }
 
 #[test]
 fn apply_user_agent_policy_preserves_figma_attribution() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     apply_user_agent_policy(&mut headers, "other", "https://mcp.figma.com/mcp");
-    assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "grok-cli"
-    );
+    assert_eq!(headers.get(http::header::USER_AGENT).unwrap(), "grok-cli");
 }
 
 #[cfg(unix)]

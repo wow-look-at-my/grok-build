@@ -5,8 +5,8 @@
 //! The read methods (`search`, `get_session`, `download_file`) return typed results.
 
 use anyhow::{Context, Result};
-use reqwest::RequestBuilder;
 use serde::{Deserialize, Serialize};
+use xai_grok_net::Request as RequestBuilder;
 
 // ============================================================================
 // Request and response types. They live here rather than in cli-chat-proxy because only the agent uses them.
@@ -133,8 +133,9 @@ pub struct DownloadResponse {
 
 #[derive(Clone)]
 pub struct SessionRegistryClient {
-    raw_client: reqwest::Client,
-    client: reqwest_middleware::ClientWithMiddleware,
+    raw_client: xai_grok_net::HttpClient,
+    /// Set by [`Self::with_auth`]. Without it, requests carry no credential.
+    provider: Option<std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider>>,
     base_url: String,
     credentials: crate::util::grok_auth_credentials::GrokAuthCredentials,
     session_id: Option<String>,
@@ -142,10 +143,9 @@ pub struct SessionRegistryClient {
 
 impl SessionRegistryClient {
     pub fn new(base_url: impl Into<String>, user_token: impl Into<String>) -> Self {
-        let http_client = crate::http::shared_client();
         Self {
-            raw_client: http_client.clone(),
-            client: reqwest_middleware::ClientBuilder::new(http_client).build(),
+            raw_client: crate::http::shared_client(),
+            provider: None,
             base_url: base_url.into(),
             credentials: crate::util::grok_auth_credentials::GrokAuthCredentials::new(Some(
                 user_token.into(),
@@ -174,28 +174,41 @@ impl SessionRegistryClient {
                 ),
             );
         self.credentials = self.credentials.with_auth_manager(auth_manager);
-        self.client = crate::http::with_auth_retry(self.raw_client.clone(), provider);
+        self.provider = Some(provider);
         self
     }
 
-    /// Execute with auth middleware, returning the response and the bearer suffix the middleware stamped.
+    /// Send, returning the response and the bearer suffix that went on the
     /// [`Self::check_response`] uses that suffix to attribute a 401 to the token actually sent.
     async fn send_authed(
         &self,
         builder: RequestBuilder,
         op: &'static str,
     ) -> Result<(
-        reqwest::Response,
-        Option<xai_grok_auth::StampedBearerSuffix>,
+        xai_grok_net::Response,
+        Option<xai_grok_auth::SentBearerSuffix>,
     )> {
         let builder = xai_grok_otel::inject_trace_context_into_request(builder);
-        let request = builder.build().context(op)?;
-        xai_grok_auth::execute_with_stamp(&self.client, request)
-            .await
-            .map_err(|e| match e {
-                reqwest_middleware::Error::Middleware(e) => e.context(op),
-                reqwest_middleware::Error::Reqwest(e) => anyhow::Error::from(e).context(op),
-            })
+        let response = builder.send().await.context(op)?;
+        let stamp = xai_grok_auth::sent_bearer_suffix(&response);
+        Ok((response, stamp))
+    }
+
+    /// A request to `url`.
+    fn request(&self, method: xai_grok_net::Method, url: &str) -> RequestBuilder {
+        match &self.provider {
+            Some(provider) => {
+                let request_auth = crate::http::auth_retry(provider.clone(), url);
+                request_auth.headers_on(self.raw_client.request(
+                    method,
+                    url,
+                    request_auth.auth.clone(),
+                ))
+            }
+            None => self
+                .raw_client
+                .request(method, url, xai_grok_net::Auth::None),
+        }
     }
 
     /// Non-auth headers only; the `Authorization` header lives in `send_authed` so it picks up freshly refreshed tokens.
@@ -205,11 +218,11 @@ impl SessionRegistryClient {
 
     fn check_response(
         &self,
-        response: reqwest::Response,
-        stamp: Option<&xai_grok_auth::StampedBearerSuffix>,
+        response: xai_grok_net::Response,
+        stamp: Option<&xai_grok_auth::SentBearerSuffix>,
         op: &str,
     ) -> anyhow::Error {
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if response.status() == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(op, stamp);
             anyhow::anyhow!("{op}: {}", self.credentials.auth_error_hint())
         } else {
@@ -219,8 +232,8 @@ impl SessionRegistryClient {
 
     /// Emit a single `auth 401 attribution` log entry tagged with `consumer = "SessionRegistryClient.<op>"`.
     /// The op string is the operation name passed to `check_response`, e.g. `"session register"`.
-    /// `stamp` is what the middleware put on the wire; [`xai_grok_auth::StampedBearerSuffix`] explains why it is never re-resolved.
-    fn record_401_attribution(&self, op: &str, stamp: Option<&xai_grok_auth::StampedBearerSuffix>) {
+    /// `stamp` is the bearer that went on the wire. It is never re-resolved.
+    fn record_401_attribution(&self, op: &str, stamp: Option<&xai_grok_auth::SentBearerSuffix>) {
         if let Some(manager) = self.credentials.auth_manager() {
             xai_grok_login::attribution::record_consumer_401(
                 manager.as_ref(),
@@ -233,11 +246,11 @@ impl SessionRegistryClient {
     }
 
     fn post(&self, url: &str) -> RequestBuilder {
-        self.add_common_headers(self.raw_client.post(url))
+        self.add_common_headers(self.request(xai_grok_net::Method::POST, url))
     }
 
     fn get(&self, url: &str) -> RequestBuilder {
-        self.add_common_headers(self.raw_client.get(url))
+        self.add_common_headers(self.request(xai_grok_net::Method::GET, url))
     }
 
     /// POST /v1/sessions/register (idempotent via ON CONFLICT)
@@ -344,7 +357,7 @@ impl SessionRegistryClient {
         // Stream from the signed GCS URL directly to disk (archives can be hundreds of MB)
         let mut gcs_response = self
             .raw_client
-            .get(&resp.download_url)
+            .get(&resp.download_url, xai_grok_net::Auth::None)
             .send()
             .await
             .context("download from GCS")?;

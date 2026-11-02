@@ -1,3 +1,5 @@
+// model_input.rs holds the model input code.
+
 use super::*;
 use xai_grok_sampling_types::SyntheticReason;
 
