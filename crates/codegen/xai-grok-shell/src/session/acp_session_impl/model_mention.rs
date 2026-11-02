@@ -88,7 +88,7 @@ impl SessionActor {
             return Err(format!("@{family} needs a task after it."));
         }
         if let Some(raw) = effort
-            && let Err(err) = raw.parse::<ReasoningEffort>()
+            && let Err(err) = raw.parse::<crate::sampling::ReasoningEffort>()
         {
             return Err(format!("'{raw}' is not an effort level: {err}"));
         }
