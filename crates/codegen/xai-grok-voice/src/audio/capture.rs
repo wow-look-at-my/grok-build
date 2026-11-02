@@ -63,7 +63,7 @@ pub fn spawn_pcm_capture(
     // The `recv()` blocks between audio chunks for the whole session, so it runs on the blocking pool (`spawn_blocking` and
     // `blocking_send`). The loop exits on its own when capture stops (sync_tx is dropped) or the STT consumer goes away
     // (`blocking_send` errors). The `abort()` in `CaptureHandle`'s teardown is only a backstop
-    let bridge = tokio::task::spawn_blocking(move || {
+    let bridge = xai_spawn::spawn_blocking(move || {
         while let Ok(bytes) = sync_rx.recv() {
             if pcm_tx.blocking_send(bytes).is_err() {
                 break;

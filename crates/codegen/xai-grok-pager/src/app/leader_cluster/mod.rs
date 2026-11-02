@@ -376,7 +376,7 @@ impl PagerLeaderCluster {
         let cancel_for_server = cancel.clone();
         let client_count_for_server = self.client_count.clone();
         let mut generation_tasks = Vec::new();
-        generation_tasks.push(tokio::task::spawn_local(async move {
+        generation_tasks.push(xai_spawn::spawn_local(async move {
             let _ = run_leader_server(
                 sock_for_server,
                 acp_tx,

@@ -715,7 +715,7 @@ mod tests {
         let (resources, mut cancel_rx) = resources_with_backend_cancel();
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let req = unwrap_cancel(cancel_rx.recv().await.unwrap());
             match &req.target {
                 SubagentCancelTarget::SubagentId(id) => assert_eq!(id, "sub-1"),
@@ -756,7 +756,7 @@ mod tests {
         let (resources, mut cancel_rx) = resources_with_backend_cancel();
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let req = unwrap_cancel(cancel_rx.recv().await.unwrap());
             req.respond_to
                 .send(SubagentCancelOutcome::AlreadyFinished {
@@ -795,7 +795,7 @@ mod tests {
         let (resources, mut cancel_rx) = resources_with_backend_cancel();
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let req = unwrap_cancel(cancel_rx.recv().await.unwrap());
             req.respond_to
                 .send(SubagentCancelOutcome::NotFound)

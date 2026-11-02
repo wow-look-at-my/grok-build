@@ -127,7 +127,7 @@ async fn draft_op<T: Send + 'static>(
     store_op: impl FnOnce() -> xai_grok_feedback::Result<T> + Send + 'static,
     respond: impl FnOnce(T) -> (ExtResult, DraftOpOutcome),
 ) -> ExtResult {
-    let result = tokio::task::spawn_blocking(store_op)
+    let result = xai_spawn::spawn_blocking(store_op)
         .await
         .map_err(|error| acp::Error::internal_error().data(error.to_string()))?;
     let (response, outcome) = match result {

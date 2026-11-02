@@ -83,7 +83,7 @@ impl SessionActor {
                     &command_line,
                     false,
                 );
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     if let Ok(outcome) = outcome_rx.await {
                         tracing::info!(run_id, ?outcome, "named workflow finished");
                     }
@@ -272,7 +272,7 @@ impl SessionActor {
                 };
                 match self.workflow_manager.lock().await.launch(resolved, spec) {
                     Ok((rid, outcome_rx)) => {
-                        tokio::spawn(async move {
+                        xai_spawn::spawn(async move {
                             if let Ok(outcome) = outcome_rx.await {
                                 tracing::info!(run_id = rid, ?outcome, "resumed workflow finished");
                             }

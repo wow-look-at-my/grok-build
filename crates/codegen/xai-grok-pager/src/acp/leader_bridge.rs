@@ -111,7 +111,7 @@ pub(crate) fn bridge_channels(
                 // Reader: forwards leader IPC lines into the incoming simplex pipe read by ClientSideConnection
                 let cancel_r = bridge_cancel.clone();
                 let leader_tx_for_reader = leader_tx_shared.clone();
-                let reader_task = tokio::task::spawn_local(async move {
+                let reader_task = xai_spawn::spawn_local(async move {
                     let mut incoming_write = incoming_write;
                     let mut leader_rx = leader_rx;
                     loop {
@@ -161,7 +161,7 @@ pub(crate) fn bridge_channels(
                 // Writer: forwards ClientSideConnection output from the outgoing simplex pipe to leader IPC
                 let cancel_w = bridge_cancel.clone();
                 let leader_tx_for_writer = leader_tx_shared;
-                let writer_task = tokio::task::spawn_local(async move {
+                let writer_task = xai_spawn::spawn_local(async move {
                     let mut reader = BufReader::new(outgoing_read);
                     let mut line = String::new();
                     loop {
@@ -223,11 +223,11 @@ pub(crate) fn bridge_channels(
                     gw_tx,
                     outgoing_write.compat_write(),
                     incoming,
-                    |fut| { tokio::task::spawn_local(fut); },
+                    |fut| { xai_spawn::spawn_local(fut); },
                 );
                 let gw_rx = AcpGatewayReceiver::new(agent_channel.rx, conn).with_tracing(true);
-                tokio::task::spawn_local(handle_io);
-                tokio::task::spawn_local(gw_rx.run());
+                xai_spawn::spawn_local(handle_io);
+                xai_spawn::spawn_local(gw_rx.run());
                 tokio::task::yield_now().await;
 
                 bridge_cancel.cancelled().await;
@@ -276,7 +276,7 @@ mod tests {
         let swapped = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let swapper_shared = shared.clone();
         let swapper_swapped = swapped.clone();
-        let swapper = tokio::spawn(async move {
+        let swapper = xai_spawn::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             // Flag BEFORE the swap: a `DroppedStale` return implies the new tx was observed, which happens-after this store
             swapper_swapped.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -339,7 +339,7 @@ mod tests {
         .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        let fake_leader = tokio::spawn(async move {
+        let fake_leader = xai_spawn::spawn(async move {
             let msg = fake_leader_rx.recv().await.expect("expected a message");
             let req: serde_json::Value =
                 serde_json::from_str(&msg).expect("invalid JSON from bridge");
@@ -421,7 +421,7 @@ mod tests {
         // acp_send blocks for a response that will never arrive (the outbound receiver is dropped)
         // The writer task should survive the failed send rather than breaking the simplex pipe
         let tx = bridge.channel.tx.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = acp_send(
                 acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_capabilities(
                     acp::ClientCapabilities::new()

@@ -61,7 +61,7 @@ impl SessionActor {
         // One summarization request runs at a time per session.
         let previous = self.thinking_summary_tail.lock().unwrap().take();
         let actor = self.clone();
-        let handle = tokio::task::spawn_local(async move {
+        let handle = xai_spawn::spawn_local(async move {
             if let Some(previous) = previous {
                 let _ = previous.await;
             }

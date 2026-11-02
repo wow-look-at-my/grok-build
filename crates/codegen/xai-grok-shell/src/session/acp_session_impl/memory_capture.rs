@@ -65,7 +65,7 @@ impl Drop for CaptureLeaseGuard {
             return;
         };
         let store = self.store.clone();
-        let release = runtime.spawn_blocking(move || {
+        let release = xai_spawn::spawn_blocking_on(&runtime, move || {
             if let Err(error) = store.release_retryable(&lease, "capture worker interrupted")
                 && !matches!(error, xai_grok_memory::V2CaptureError::StaleLease)
             {
@@ -120,7 +120,7 @@ fn should_continue_capture_worker_after_failure(work: &xai_grok_memory::CaptureW
 async fn has_pending_capture_work(store: &V2CaptureStore, session_id: &str) -> bool {
     let store = store.clone();
     let session_id = session_id.to_owned();
-    match tokio::task::spawn_blocking(move || {
+    match xai_spawn::spawn_blocking(move || {
         let target = store.cursors(&session_id)?.requested;
         store.work_state(&session_id, target)
     })
@@ -452,7 +452,7 @@ async fn load_durable_capture_transcript(
             "capture worker cancelled".to_owned(),
         ));
     }
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let adapter =
             crate::session::storage::jsonl::JsonlStorageAdapter::with_explicit_session_dir(
                 session_dir.clone(),
@@ -533,7 +533,7 @@ impl SessionActor {
                 return;
             }
         };
-        let range = match tokio::task::spawn_blocking(move || {
+        let range = match xai_spawn::spawn_blocking(move || {
             let store = V2CaptureStore::open(workspace_dir, V2MemoryScope::Workspace)?;
             store.ensure_session(&session_id)?;
             let cursors = store.cursors(&session_id)?;
@@ -671,7 +671,7 @@ impl SessionActor {
         let session_dir = crate::session::persistence::session_dir(&session_snapshot.session_info);
         drop(session_snapshot);
         let store_clock = clock.clone();
-        let store = match tokio::task::spawn_blocking(move || {
+        let store = match xai_spawn::spawn_blocking(move || {
             V2CaptureStore::open_with_clock(
                 open_workspace_dir,
                 V2MemoryScope::Workspace,
@@ -695,7 +695,7 @@ impl SessionActor {
         }
         let owner = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
         let reconcile_store = store.clone();
-        match tokio::task::spawn_blocking(move || reconcile_store.reconcile()).await {
+        match xai_spawn::spawn_blocking(move || reconcile_store.reconcile()).await {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 tracing::warn!(error = %error, "memory-v2 initial reconciliation failed");
@@ -716,7 +716,7 @@ impl SessionActor {
                 now: clock.now_unix_seconds(),
                 duration: CAPTURE_LEASE,
             };
-            let lease = match tokio::task::spawn_blocking(move || {
+            let lease = match xai_spawn::spawn_blocking(move || {
                 claim_store.claim_for_session(&claim_session_id, &request)
             })
             .await
@@ -776,7 +776,7 @@ impl SessionActor {
                     let persist_lease = lease.clone();
                     let persist_workspace_dir = workspace_dir.clone();
                     let now = clock.now_unix_seconds();
-                    let persisted = tokio::task::spawn_blocking(move || {
+                    let persisted = xai_spawn::spawn_blocking(move || {
                         match persist_store.commit(&persist_lease, &outcome, now) {
                             Ok(result) => {
                                 let memories = capture_debug_entries(
@@ -892,7 +892,7 @@ impl SessionActor {
                     let failure_detail = error.detail.clone();
                     let now = clock.now_unix_seconds();
                     let terminal = capture_failure_is_terminal(lease.job.attempt, error.retry);
-                    let failure = tokio::task::spawn_blocking(move || {
+                    let failure = xai_spawn::spawn_blocking(move || {
                         let failure = if terminal {
                             failure_store.fail_terminal(&failure_lease, now, &failure_detail)
                         } else {
@@ -1093,7 +1093,7 @@ impl SessionActor {
         let session_id = self.session_info.id.to_string();
         let workspace_dir = storage.workspace_dir().to_path_buf();
         let open_session_id = session_id.clone();
-        let (store, target) = match tokio::task::spawn_blocking(move || {
+        let (store, target) = match xai_spawn::spawn_blocking(move || {
             let store = V2CaptureStore::open(workspace_dir, V2MemoryScope::Workspace)?;
             store.ensure_session(&open_session_id)?;
             let target = store.cursors(&open_session_id)?.requested;
@@ -1126,7 +1126,7 @@ impl SessionActor {
             loop {
                 let poll_store = store.clone();
                 let poll_session_id = session_id.clone();
-                let poll = tokio::task::spawn_blocking(move || {
+                let poll = xai_spawn::spawn_blocking(move || {
                     let mut cursors = poll_store.cursors(&poll_session_id)?;
                     if cursors.captured >= target && cursors.indexed >= target {
                         return Ok(CaptureFlushPoll::Success);
@@ -1757,7 +1757,7 @@ mod tests {
         let cancel = tokio_util::sync::CancellationToken::new();
         let read_cancel = cancel.clone();
         let read_session_dir = session_dir.path().to_path_buf();
-        let read = tokio::spawn(async move {
+        let read = xai_spawn::spawn(async move {
             load_durable_capture_transcript(persistence_tx, read_session_dir, 7, 1, &read_cancel)
                 .await
         });
@@ -1790,7 +1790,7 @@ mod tests {
         let cancel = tokio_util::sync::CancellationToken::new();
         let read_cancel = cancel.clone();
         let read_session_dir = session_dir.path().to_path_buf();
-        let read = tokio::spawn(async move {
+        let read = xai_spawn::spawn(async move {
             load_durable_capture_transcript(persistence_tx, read_session_dir, 0, 1, &read_cancel)
                 .await
         });
@@ -1818,7 +1818,7 @@ mod tests {
         let cancel = tokio_util::sync::CancellationToken::new();
         let read_cancel = cancel.clone();
         let read_session_dir = session_dir.path().to_path_buf();
-        let read = tokio::spawn(async move {
+        let read = xai_spawn::spawn(async move {
             load_durable_capture_transcript(persistence_tx, read_session_dir, 0, 1, &read_cancel)
                 .await
         });
@@ -2047,7 +2047,7 @@ mod tests {
         runtime.block_on(async {
             let (occupied_tx, occupied_rx) = std::sync::mpsc::channel::<()>();
             let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
-            let occupant = tokio::task::spawn_blocking(move || {
+            let occupant = xai_spawn::spawn_blocking(move || {
                 occupied_tx.send(()).unwrap();
                 release_rx.recv().unwrap();
             });
@@ -2149,7 +2149,7 @@ mod tests {
                 // and replace the recorded class before its deadline.
                 let parked_cancel = tokio_util::sync::CancellationToken::new();
                 let worker_cancel = parked_cancel.clone();
-                let parked = tokio::task::spawn_local(async move {
+                let parked = xai_spawn::spawn_local(async move {
                     worker_cancel.cancelled().await;
                 });
                 actor.memory.track_capture_worker(parked_cancel, parked);
@@ -2165,7 +2165,7 @@ mod tests {
                     )
                     .await;
 
-                let flush = tokio::task::spawn_local({
+                let flush = xai_spawn::spawn_local({
                     let actor = Arc::clone(&actor);
                     async move { actor.flush_v2_capture().await }
                 });

@@ -273,7 +273,7 @@ impl xai_tool_runtime::Tool for SendFeedbackTool {
             .filter(|id| !id.is_empty())
             .map(|id| FeedbackDraftId::from(id.to_owned()));
         let input = FeedbackDraftInput::from(input.without_draft_id_in_text());
-        let result = tokio::task::spawn_blocking(move || {
+        let result = xai_spawn::spawn_blocking(move || {
             let store = FeedbackDraftStore::new(session_folder);
             match draft_id {
                 Some(draft_id) => match store.update_from_input(&draft_id, input)? {

@@ -34,7 +34,7 @@ pub(crate) fn spawn_signal_flush() -> AgentSignals {
     let cancelled = cancel.clone();
     let mut streams = SignalStreams::install();
     // Signal observation must remain independent of synchronous agent startup
-    let listener = AbortOnDropHandle::new(tokio::spawn(async move {
+    let listener = AbortOnDropHandle::new(xai_spawn::spawn(async move {
         let code = tokio::select! {
             () = cancelled.cancelled() => return,
             code = streams.next_code() => code,

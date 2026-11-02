@@ -399,7 +399,7 @@ fn scripted_outstanding_responder(
 > {
     use xai_grok_tools::implementations::grok_build::task::types::SubagentEvent;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let mut queue = replies.into_iter();
         let mut last = None;
         let mut parked = Vec::new();
@@ -766,7 +766,7 @@ fn immediate_drain_responder() -> (
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
     let requests = std::rc::Rc::new(std::cell::Cell::new(0usize));
     let counter = requests.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(event) = rx.recv().await {
             if let SubagentEvent::WaitPromptDrained(req) = event {
                 counter.set(counter.get() + 1);
@@ -816,7 +816,7 @@ async fn drain_timeout_forfeits_background_and_sticky() {
             let mut actor = make_actor().await;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
             actor.tool_context.subagent_event_tx = Some(tx);
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 let mut answered = false;
                 let mut parked = Vec::new();
                 while let Some(event) = rx.recv().await {

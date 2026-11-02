@@ -236,7 +236,7 @@ async fn e2e_crash_recovers_drops_client_then_restart_succeeds() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -315,7 +315,7 @@ async fn e2e_crash_permanently_dead_exhausts_after_three_attempts() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -387,7 +387,7 @@ async fn e2e_handshake_failed_schedules_restart_without_dropping_client() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -448,7 +448,7 @@ async fn e2e_config_removed_keeps_replacement_client_marks_shutdown_no_restart()
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -509,7 +509,7 @@ async fn e2e_intentional_shutdown_suppresses_restart_on_transport_closed() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -581,7 +581,7 @@ async fn e2e_unconfigured_http_server_drops_client_but_no_restart() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -640,7 +640,7 @@ async fn e2e_server_disabled_mid_backoff_emits_disabled_no_respawn() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -701,7 +701,7 @@ async fn e2e_burst_transport_closed_coalesces_to_single_restart() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -766,7 +766,7 @@ async fn e2e_flapping_server_restarts_on_each_crash_cycle() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -848,7 +848,7 @@ async fn e2e_intermittently_healthy_recovers_after_transient_failure() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -914,7 +914,7 @@ async fn e2e_auto_restart_disabled_drops_client_but_schedules_nothing() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -976,7 +976,7 @@ async fn e2e_remove_readd_race_keeps_replacement_client() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),
@@ -1069,7 +1069,7 @@ async fn e2e_http_transport_closed_recovers_in_place_not_evicted() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async move {
-            let dispatcher = tokio::task::spawn_local(run_dispatcher(
+            let dispatcher = xai_spawn::spawn_local(run_dispatcher(
                 "sess-1".to_string(),
                 rx,
                 discard_gateway(),

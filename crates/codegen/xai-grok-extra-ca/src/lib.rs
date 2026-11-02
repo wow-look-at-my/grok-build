@@ -21,32 +21,12 @@ pub const ENV_GROK_EXTRA_CA_BUNDLE: &str = "GROK_EXTRA_CA_BUNDLE";
 
 pub const ENV_SSL_CERT_FILE: &str = "SSL_CERT_FILE";
 
-/// ring on Windows ARM64: aws-lc-sys's jitterentropy is miscompiled for that target and overflows the stack on the first TLS handshake (xai-org/plugin-marketplace#426).
-const IS_RING_TARGET: bool = cfg!(all(windows, target_arch = "aarch64"));
-
-/// Installs aws-lc-rs, or ring where `IS_RING_TARGET`.
-/// First install wins; without a default, `ClientConfig::builder()` panics when `ring` and `aws-lc-rs` are both compiled in.
+/// Installs ring as the process crypto provider. ring is the only provider the build compiles in.
+/// An earlier install wins, so a host that set its own provider keeps it.
 pub fn ensure_default_crypto_provider() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        let provider = if IS_RING_TARGET {
-            rustls::crypto::ring::default_provider()
-        } else {
-            rustls::crypto::aws_lc_rs::default_provider()
-        };
-        if provider.install_default().is_err() {
-            let supports_p521 = rustls::crypto::CryptoProvider::get_default().is_some_and(|p| {
-                p.signature_verification_algorithms
-                    .supported_schemes()
-                    .contains(&rustls::SignatureScheme::ECDSA_NISTP521_SHA512)
-            });
-            if !supports_p521 {
-                tracing::warn!(
-                    "a rustls provider without ECDSA P-521 support was installed first; \
-                     some enterprise proxy certificates will not verify"
-                );
-            }
-        }
+        let _ = rustls::crypto::ring::default_provider().install_default();
     });
 }
 

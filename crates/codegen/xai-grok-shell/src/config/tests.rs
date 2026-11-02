@@ -3373,7 +3373,7 @@ fn project_config_never_sources_feedback_user() {
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
@@ -4065,7 +4065,7 @@ fn simulate_release_build() -> xai_grok_test_support::EnvGuard {
 fn project_overlay_tracks_authoritative_trust_transitions() {
     let source_root = tempfile::tempdir().unwrap();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     write_subagent_definitions(
         &repo.path().join(".grok"),
         &[("shared", "Project"), ("project-only", "Project")],
@@ -4168,7 +4168,7 @@ fn resolve_effective_plugins_config_gates_project_paths_on_folder_trust() {
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
@@ -4222,7 +4222,7 @@ fn discover_plugins_excludes_untrusted_configpath_plugin_end_to_end() {
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let cwd = repo.path();
     let plugin_dir = cwd.join("cfgpath-probe");
     std::fs::create_dir_all(&plugin_dir).unwrap();
@@ -4291,7 +4291,7 @@ fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./proj-plugin\"]\n")
@@ -4472,7 +4472,7 @@ fn plugin_config_writes_keep_the_caller_local_set_live() {
     rt.block_on(
         local
             .run_until(async move {
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     loop {
                         tokio::time::sleep(Duration::from_millis(5)).await;
                         ticker_ticks.set(ticker_ticks.get() + 1);

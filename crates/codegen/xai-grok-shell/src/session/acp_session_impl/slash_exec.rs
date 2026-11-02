@@ -332,7 +332,7 @@ impl SessionActor {
 
                 let summary_path = crate::session::persistence::session_dir(&self.session_info)
                     .join("summary.json");
-                let title = tokio::task::spawn_blocking(move || {
+                let title = xai_spawn::spawn_blocking(move || {
                     std::fs::read_to_string(&summary_path)
                         .ok()
                         .and_then(|raw| {
@@ -506,7 +506,7 @@ impl SessionActor {
                         .await;
                     } else {
                         // Registry flock (bounded 30s poll) + clone — never on the LocalSet (invariant: plugin/acquire.rs).
-                        let installed = match tokio::task::spawn_blocking({
+                        let installed = match xai_spawn::spawn_blocking({
                             let source = source.clone();
                             let cwd = cwd.to_path_buf();
                             move || crate::plugin::install_plugin(&source, &cwd)
@@ -597,7 +597,7 @@ impl SessionActor {
                     use crate::plugin::UninstallError;
                     // Takes the registry flock + removes directories — never
                     // on the LocalSet (invariant: plugin/acquire.rs).
-                    let uninstalled = match tokio::task::spawn_blocking({
+                    let uninstalled = match xai_spawn::spawn_blocking({
                         let name = name.clone();
                         move || crate::plugin::uninstall_plugin(&name, confirm, false)
                     })
@@ -674,7 +674,7 @@ impl SessionActor {
 
                 // Sync git fetches never run on the session actor's LocalSet
                 // (invariant: plugin/acquire.rs).
-                let update_result = match tokio::task::spawn_blocking(move || {
+                let update_result = match xai_spawn::spawn_blocking(move || {
                     crate::plugin::update_plugins(name.as_deref())
                 })
                 .await
@@ -806,7 +806,7 @@ impl SessionActor {
                              Use /workflow runs to follow progress."
                         ))
                         .await;
-                        tokio::spawn(async move {
+                        xai_spawn::spawn(async move {
                             if let Ok(outcome) = outcome_rx.await {
                                 tracing::info!(run_id, ?outcome, "deep-research finished");
                             }

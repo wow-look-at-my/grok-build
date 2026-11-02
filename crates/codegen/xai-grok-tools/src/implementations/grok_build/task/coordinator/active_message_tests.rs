@@ -448,7 +448,7 @@ async fn unregistered_granted_child_is_not_active_and_releases_capacity() {
     let sender = AgentMessageSender::mint_for_child(Some(factory), &child_id, true)
         .sender
         .unwrap();
-    let send = tokio::spawn({
+    let send = xai_spawn::spawn({
         let sender = sender.clone();
         async move {
             sender
@@ -835,7 +835,7 @@ async fn runner_panic_parks_until_uncertain_admission_terminalizes_failed() {
     let panic = std::sync::Arc::new(tokio::sync::Notify::new());
     let (completion_tx, mut completions) = mpsc::unbounded_channel();
     let (reporter_tx, mut reporters) = mpsc::unbounded_channel();
-    let actor = tokio::spawn(
+    let actor = xai_spawn::spawn(
         SubagentCoordinator::from_channel(
             command_rx,
             PanickingRunner {
@@ -853,7 +853,7 @@ async fn runner_panic_parks_until_uncertain_admission_terminalizes_failed() {
         crate::implementations::grok_build::task::backend::ChannelBackend::for_coordinator_session(
             command_tx, "parent",
         );
-    let mut spawn = tokio::spawn({
+    let mut spawn = xai_spawn::spawn({
         let backend = backend.clone();
         async move {
             let mut request = crate::implementations::grok_build::task::coordinator::tests::request(
@@ -869,7 +869,7 @@ async fn runner_panic_parks_until_uncertain_admission_terminalizes_failed() {
     });
     recv_with_timeout(&mut started).await;
     let reporter = recv_with_timeout(&mut reporters).await;
-    let response = tokio::spawn({
+    let response = xai_spawn::spawn({
         let backend = backend.clone();
         async move {
             crate::implementations::grok_build::task::backend::SubagentBackend::send_active_message(

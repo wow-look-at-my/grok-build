@@ -994,7 +994,7 @@ async fn spawn_discovery<T: Send + 'static>(
     compat: xai_grok_tools::types::compat::CompatConfig,
     walk: impl FnOnce(&crate::session::managed_mcp::McpDiscoveryInputs<'_>) -> T + Send + 'static,
 ) -> Result<T, tokio::task::JoinError> {
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         walk(&crate::session::managed_mcp::McpDiscoveryInputs {
             cwd: &cwd,
             plugin_registry: plugin_registry.as_deref(),
@@ -2024,7 +2024,7 @@ async fn enable_mcp_server_gated(
         let cwd = cwd.to_path_buf();
         let server_name = server_name.to_string();
         // Full config walk: blocking pool, never the session actor's LocalSet.
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             crate::session::managed_mcp::merge_managed_mcp_servers_with_policy(
                 vec![],
                 &cwd,

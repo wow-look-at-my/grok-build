@@ -362,7 +362,7 @@ impl LeaderFixture {
     /// Reap the concrete initial leader after a crash test killed it.
     pub async fn reap_exited_concrete_leaders(&self) -> io::Result<()> {
         let state = self.inner.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
             let Some(leader) = state.leader.as_mut() else {
                 return Ok(());
@@ -395,7 +395,7 @@ impl LeaderFixture {
     /// Detached replacements are intentionally untouched.
     pub async fn close(&self) -> io::Result<()> {
         let state = self.inner.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
             if state.active_clients != 0 {
                 return Err(io::Error::other(format!(

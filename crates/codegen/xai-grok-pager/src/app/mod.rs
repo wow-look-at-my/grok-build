@@ -635,7 +635,7 @@ pub async fn run(mut args: PagerArgs) -> anyhow::Result<()> {
         );
     }
     xai_grok_shell::agent::mvp_agent::warm_async_http_client();
-    tokio::task::spawn_blocking(|| {});
+    xai_spawn::spawn_blocking(|| {});
     if let Ok(cwd) = std::env::current_dir() {
         crate::git_info::populate_from_cwd_async(cwd);
     }
@@ -717,7 +717,7 @@ pub async fn run(mut args: PagerArgs) -> anyhow::Result<()> {
         }
     }
     if let Some(reason) = policy_disable_reason {
-        tokio::spawn(xai_grok_shell::leader::kill_stale_reachable_leaders(reason));
+        xai_spawn::spawn(xai_grok_shell::leader::kill_stale_reachable_leaders(reason));
     }
     if let Some(err) =
         session_startup::chat_mode_flag_conflict(args.chat(), args.fork_session, args.restore_code)

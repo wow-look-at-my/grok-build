@@ -3,6 +3,8 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use gix::bstr::ByteSlice;
+
 pub(crate) fn filter_command_driver(name: &str) -> Option<&str> {
     // `get` is None on a non-char boundary; a byte slice would panic.
     let head = name.get(..7)?;
@@ -59,66 +61,101 @@ fn path_unreadable(path: &Path) -> bool {
 
 /// Local/worktree only (include/includeIf). `None` on read errors; empty if not a repo.
 pub(crate) fn read_local_git_config_entries(cwd: &Path) -> Option<Vec<(String, String)>> {
-    let repo = match git2::Repository::discover(cwd) {
+    let repo = match crate::git_repo::discover_with_filter_drivers(cwd) {
         Ok(repo) => repo,
-        Err(e)
-            if e.code() == git2::ErrorCode::NotFound
-                && e.class() == git2::ErrorClass::Repository =>
-        {
-            return Some(Vec::new());
-        }
-        Err(_) => return None,
+        Err(crate::git_repo::DiscoverError::NotARepo(_)) => return Some(Vec::new()),
+        Err(crate::git_repo::DiscoverError::Failed(_)) => return None,
     };
-    // `repo.config()` can still open global levels when local is unreadable.
-    let git_dir = repo.path();
-    let common = repo.commondir();
+    // The config snapshot still holds the global levels when the local file is unreadable.
+    let git_dir = repo.git_dir();
+    let common = repo.common_dir();
     if path_unreadable(&common.join("config"))
         || path_unreadable(&git_dir.join("config"))
         || path_unreadable(&git_dir.join("config.worktree"))
     {
         return None;
     }
-    let config = match repo.config() {
-        Ok(c) => c,
-        Err(_) => return None,
-    };
-    let mut entries = match config.entries(None) {
-        Ok(e) => e,
-        Err(_) => return None,
-    };
+    let config = repo.config_snapshot();
     let mut out = Vec::new();
-    while let Some(entry) = entries.next() {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => return None,
+    for section in config.plumbing().sections() {
+        if !matches!(
+            section.meta().source,
+            gix::config::Source::Local | gix::config::Source::Worktree
+        ) {
+            continue;
+        }
+        let header = section.header();
+        // A non-UTF-8 name cannot be matched. Dropping that entry would hide a filter Git can still run.
+        let section_name = header.name().to_str().ok()?.to_ascii_lowercase();
+        let prefix = match header.subsection_name() {
+            Some(sub) => format!("{section_name}.{}", sub.to_str().ok()?),
+            None => section_name,
         };
-        match entry.level() {
-            git2::ConfigLevel::Local | git2::ConfigLevel::Worktree => {}
-            _ => continue,
-        }
-        // git2 yields an error for a non-UTF-8 name. Dropping that entry would hide a filter Git can still run.
-        let name = entry.name().ok()?;
-        // libgit2 does not evaluate `includeIf.hasconfig:remote.*.url`.
-        if local_includeif_unsupported(name) {
-            return None;
-        }
-        // A bare key is boolean true. `value()` panics when no value is defined.
-        let value = if entry.has_value() {
-            let Ok(value) = entry.value() else {
-                if filter_command_driver(name).is_some() {
-                    return None;
-                }
-                continue;
+        for (key, value) in section_entries(section).ok()? {
+            let name = format!("{prefix}.{}", key.to_ascii_lowercase());
+            // Only these `includeIf` conditions are read here.
+            if local_includeif_unsupported(&name) {
+                return None;
+            }
+            // A bare key is boolean true.
+            let value = match value {
+                Some(value) => match value.to_str() {
+                    Ok(value) => value.to_owned(),
+                    Err(_) if filter_command_driver(&name).is_some() => return None,
+                    Err(_) => continue,
+                },
+                None if filter_command_driver(&name).is_some() => return None,
+                None => "true".to_owned(),
             };
-            value
-        } else if filter_command_driver(name).is_some() {
-            return None;
-        } else {
-            "true"
-        };
-        out.push((name.to_owned(), value.to_owned()));
+            out.push((name, value));
+        }
     }
     Some(out)
+}
+
+/// Every key of `section` in file order, with `None` for a bare key that has no `=`.
+fn section_entries(
+    section: &gix::config::file::Section<'_>,
+) -> Result<Vec<(String, Option<gix::bstr::BString>)>, gix::config::parse::Error> {
+    use gix::config::parse::Event;
+    let text = section.to_bstring();
+    let events = gix::config::parse::Events::from_bytes(text.as_ref(), None)?;
+    let mut out = Vec::new();
+    let mut pending: Option<(String, bool)> = None;
+    let mut partial = gix::bstr::BString::default();
+    for event in events.into_iter() {
+        match event {
+            Event::SectionValueName(key) => {
+                pending = Some((key.to_string(), false));
+                partial.clear();
+            }
+            Event::KeyValueSeparator => {
+                if let Some((_, explicit)) = pending.as_mut() {
+                    *explicit = true;
+                }
+            }
+            Event::Value(value) => {
+                if let Some((key, explicit)) = pending.take() {
+                    let value = explicit
+                        .then(|| gix::config::value::normalize_bstr(value.as_ref()).into_owned());
+                    out.push((key, value));
+                }
+            }
+            Event::ValueNotDone(value) => partial.extend_from_slice(value.as_ref()),
+            Event::ValueDone(value) => {
+                partial.extend_from_slice(value.as_ref());
+                if let Some((key, _)) = pending.take() {
+                    let joined = std::mem::take(&mut partial);
+                    out.push((
+                        key,
+                        Some(gix::config::value::normalize_bstring(joined).into_owned()),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(out)
 }
 
 pub(crate) fn local_content_filter_drivers(cwd: &Path) -> Option<Vec<String>> {
@@ -165,7 +202,7 @@ mod tests {
     #[test]
     fn pins_unsupported_includeif_fail_closed() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         std::fs::write(
             tmp.path().join(".git/config"),
             "[core]\n\trepositoryformatversion = 0\n\
@@ -179,7 +216,7 @@ mod tests {
     #[test]
     fn pins_valueless_boolean_key_does_not_panic() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         std::fs::write(
             tmp.path().join(".git/config"),
             "[core]\n\trepositoryformatversion = 0\n\tignorecase\n\
@@ -193,7 +230,7 @@ mod tests {
     #[test]
     fn pins_valueless_filter_command_fail_closed() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         std::fs::write(
             tmp.path().join(".git/config"),
             "[core]\n\trepositoryformatversion = 0\n\
@@ -206,7 +243,7 @@ mod tests {
     #[test]
     fn pins_unreadable_config_are_none() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         let cfg = tmp.path().join(".git/config");
         std::fs::remove_file(&cfg).unwrap();
         std::fs::create_dir(&cfg).unwrap();
@@ -216,7 +253,7 @@ mod tests {
     #[test]
     fn pins_safe_lfs_process_driver() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         std::fs::write(
             tmp.path().join(".git/config"),
             "[core]\n\trepositoryformatversion = 0\n\
@@ -238,7 +275,7 @@ mod tests {
     #[test]
     fn pins_non_utf8_filter_value_fail_closed() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         let mut cfg =
             b"[core]\n\trepositoryformatversion = 0\n[filter \"pwn\"]\n\tclean = ".to_vec();
         cfg.extend_from_slice(&[0xff, 0xfe]);
@@ -250,7 +287,7 @@ mod tests {
     #[test]
     fn pins_mixed_case_driver_keeps_spelling() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         std::fs::write(
             tmp.path().join(".git/config"),
             "[core]\n\trepositoryformatversion = 0\n\
@@ -266,7 +303,7 @@ mod tests {
     fn pins_hostile_driver_names_fail_closed() {
         for section in ["pwn=x", "pwn x", "pwn.x"] {
             let tmp = tempfile::tempdir().unwrap();
-            git2::Repository::init(tmp.path()).unwrap();
+            crate::test_git::init(tmp.path());
             std::fs::write(
                 tmp.path().join(".git/config"),
                 format!(

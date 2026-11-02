@@ -11,7 +11,7 @@ async fn folder_trust_home_git_repo_subdir_keys_on_subdir() {
     let content = ContentController::start().await.expect("start content");
 
     // $HOME is a dotfiles-style git repo. The launch dir is a subdir with its own repo-local `.mcp.json`. The subdir has something to gate
-    git2::Repository::init(content.home()).expect("git init $HOME");
+    xai_test_utils::git::init_git_repo(content.home());
     let proj = content.home().join("proj");
     std::fs::create_dir_all(&proj).expect("create proj subdir");
     std::fs::write(proj.join(".mcp.json"), "{}").expect("write proj/.mcp.json");

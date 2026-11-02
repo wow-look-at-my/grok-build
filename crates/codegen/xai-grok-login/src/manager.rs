@@ -1661,7 +1661,7 @@ impl AuthManager {
         #[cfg(test)]
         self.proactive_starts.fetch_add(1, Ordering::SeqCst);
         let this = self.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut consecutive_failures: u32 = 0;
             loop {
                 let sleep_dur = compute_proactive_sleep(&this)

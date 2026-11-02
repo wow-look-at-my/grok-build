@@ -963,7 +963,7 @@ async fn e2e_restart_monitor_preserves_replacement_client() {
             mgr.clients.insert("mock-ts".to_string(), replacement);
 
             let lsp_manager = Arc::new(tokio::sync::Mutex::new(mgr));
-            let monitor = tokio::task::spawn_local(restart_monitor(
+            let monitor = xai_spawn::spawn_local(restart_monitor(
                 Arc::downgrade(&lsp_manager),
                 "mock-ts".to_string(),
             ));
@@ -1030,7 +1030,7 @@ async fn restart_monitor_exits_when_manager_arc_dropped() {
             // A live client keeps the monitor polling (rather than exiting on a
             // missing client), so the only way out is a failed `Weak` upgrade.
             let lsp_manager = Arc::new(tokio::sync::Mutex::new(mgr));
-            let monitor = tokio::task::spawn_local(restart_monitor(
+            let monitor = xai_spawn::spawn_local(restart_monitor(
                 Arc::downgrade(&lsp_manager),
                 "mock-ts".to_string(),
             ));
@@ -1203,7 +1203,7 @@ async fn e2e_restart_monitor_emits_failed_on_restart_init_error() {
             mgr.clients.insert("failing".to_string(), healthy_client);
 
             let lsp_manager = Arc::new(tokio::sync::Mutex::new(mgr));
-            let monitor = tokio::task::spawn_local(restart_monitor(
+            let monitor = xai_spawn::spawn_local(restart_monitor(
                 Arc::downgrade(&lsp_manager),
                 "failing".to_string(),
             ));
@@ -1498,7 +1498,7 @@ async fn a_server_that_starts_answering_is_waited_on_again() {
         .notify_file_changed(&next, "const y = 2;\n");
 
     let late = store.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         late.install(
             &next_uri,
@@ -2171,7 +2171,7 @@ async fn e2e_real_roslyn_survives_editing() {
     // The restart monitor is what would rebuild a torn-down server, and
     // rebuilding is what the bug cost. Without it running, this test could not
     // observe the failure it is here to rule out.
-    let monitor = tokio::spawn(super::restart_monitor(
+    let monitor = xai_spawn::spawn(super::restart_monitor(
         std::sync::Arc::downgrade(&mgr),
         "csharp".to_string(),
     ));

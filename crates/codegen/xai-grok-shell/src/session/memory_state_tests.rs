@@ -39,7 +39,7 @@ async fn aborting_worker_drops_flush_guard() {
         .run_until(async {
             let is_flushing = Arc::new(AtomicBool::new(false));
             let guard = FlushLockGuard::try_acquire(Arc::clone(&is_flushing)).unwrap();
-            let task = tokio::task::spawn_local(async move {
+            let task = xai_spawn::spawn_local(async move {
                 let _guard = guard;
                 std::future::pending::<()>().await;
             });
@@ -60,13 +60,13 @@ async fn capture_worker_cancels_cooperatively_and_waits_for_join() {
             let task_cancel = cancel.clone();
             let (cancelled_tx, cancelled_rx) = tokio::sync::oneshot::channel();
             let (release_tx, release_rx) = tokio::sync::oneshot::channel();
-            let task = tokio::task::spawn_local(async move {
+            let task = xai_spawn::spawn_local(async move {
                 task_cancel.cancelled().await;
                 let _ = cancelled_tx.send(());
                 let _ = release_rx.await;
             });
             let worker = CaptureWorker::new(cancel, task);
-            let stop = tokio::task::spawn_local(worker.cancel_and_join());
+            let stop = xai_spawn::spawn_local(worker.cancel_and_join());
 
             cancelled_rx.await.unwrap();
             assert!(
@@ -85,7 +85,7 @@ async fn dropping_capture_worker_cancels_and_aborts_it() {
         .run_until(async {
             let cancel = tokio_util::sync::CancellationToken::new();
             let observed = cancel.clone();
-            let task = tokio::task::spawn_local(std::future::pending());
+            let task = xai_spawn::spawn_local(std::future::pending());
             let abort = task.abort_handle();
             let worker = CaptureWorker::new(cancel, task);
 
@@ -106,7 +106,7 @@ async fn dream_workers_are_cancelled_and_joined_on_teardown() {
             let cancel = workers.cancellation_token();
             let joined = std::rc::Rc::new(std::cell::Cell::new(false));
             let joined_from_task = std::rc::Rc::clone(&joined);
-            let task = tokio::task::spawn_local(async move {
+            let task = xai_spawn::spawn_local(async move {
                 cancel.cancelled().await;
                 tokio::task::yield_now().await;
                 joined_from_task.set(true);
@@ -138,7 +138,7 @@ async fn dropping_dream_workers_cancels_and_aborts_tasks() {
             let cancel = workers.cancellation_token();
             let (dropped_tx, dropped_rx) = tokio::sync::oneshot::channel();
             let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-            let task = tokio::task::spawn_local(async move {
+            let task = xai_spawn::spawn_local(async move {
                 let _notice = DropNotice(Some(dropped_tx));
                 let _ = started_tx.send(());
                 std::future::pending::<()>().await;

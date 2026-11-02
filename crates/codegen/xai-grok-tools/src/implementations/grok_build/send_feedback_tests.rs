@@ -118,7 +118,7 @@ async fn storage_and_join_failures_are_execution_errors() {
     );
     assert!(!storage_error.detail.contains(SUCCESS_MESSAGE));
 
-    let join_error = tokio::task::spawn_blocking(|| panic!("test panic"))
+    let join_error = xai_spawn::spawn_blocking(|| panic!("test panic"))
         .await
         .unwrap_err();
     let join_error = map_append_result(Err(join_error)).unwrap_err();

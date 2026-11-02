@@ -688,7 +688,7 @@ mod tests {
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
-        let handle = tokio::spawn(reloader.run(event_rx, cancel.clone()));
+        let handle = xai_spawn::spawn(reloader.run(event_rx, cancel.clone()));
 
         event_tx
             .send(ConfigChangeEvent::ModelsCacheChanged)
@@ -708,7 +708,7 @@ mod tests {
     #[tokio::test]
     async fn reloader_dedupes_unchanged_project_mcp_config() {
         let tmp = tempfile::TempDir::new().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         let cwd = tmp.path().to_path_buf();
         let mcp_json = cwd.join(".mcp.json");
         std::fs::write(&mcp_json, r#"{"mcpServers":{}}"#).unwrap();
@@ -727,7 +727,7 @@ mod tests {
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
-        let handle = tokio::spawn(reloader.run(event_rx, cancel.clone()));
+        let handle = xai_spawn::spawn(reloader.run(event_rx, cancel.clone()));
 
         let evt = || ConfigChangeEvent::McpConfigChanged {
             path: mcp_json.clone(),
@@ -776,7 +776,7 @@ mod tests {
     #[test]
     fn hash_project_mcp_config_detects_create_and_change() {
         let tmp = tempfile::TempDir::new().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         let cwd = tmp.path();
 
         let empty = hash_project_mcp_config(cwd).expect("readable");
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn hash_project_mcp_config_covers_ancestors() {
         let tmp = tempfile::TempDir::new().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         let child = tmp.path().join("a").join("b");
         std::fs::create_dir_all(&child).unwrap();
 

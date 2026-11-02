@@ -124,6 +124,6 @@ pub(super) async fn start_mock_idp() -> (String, tokio::task::JoinHandle<()>) {
             }),
         );
 
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (issuer, handle)
 }

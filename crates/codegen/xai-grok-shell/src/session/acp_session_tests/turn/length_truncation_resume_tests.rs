@@ -7,7 +7,7 @@ use std::time::Duration;
 use xai_grok_test_support::{MockInferenceServer, ScriptedResponse, SseEvent};
 
 fn drain_gateway(mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg {
                 let _ = args.response_tx.send(Ok(()));
@@ -17,7 +17,7 @@ fn drain_gateway(mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpCl
 }
 
 fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Ok(()));
@@ -124,7 +124,7 @@ async fn length_truncation_actor(
     let actor = Arc::new(actor);
     let drainer = actor.clone();
     let mut sampler_event_rx = sampler_event_rx;
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(event) = sampler_event_rx.recv().await {
             drainer.handle_sampling_event(event).await;
         }

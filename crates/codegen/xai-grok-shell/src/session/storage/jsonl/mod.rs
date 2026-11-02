@@ -315,7 +315,7 @@ impl JsonlStorageAdapter {
     /// Final order among candidates uses `last_active_at` else `updated_at`.
     pub async fn list_sessions_recent(&self, limit: usize) -> io::Result<Vec<Summary>> {
         let adapter = self.clone();
-        tokio::task::spawn_blocking(move || adapter.list_sessions_recent_sync(limit))
+        xai_spawn::spawn_blocking(move || adapter.list_sessions_recent_sync(limit))
             .await
             .map_err(io::Error::other)?
     }
@@ -389,12 +389,12 @@ impl JsonlStorageAdapter {
         line: Vec<u8>,
         durability: AppendDurability,
     ) -> io::Result<()> {
-        tokio::task::spawn_blocking(move || Self::append_jsonl_line_sync(&path, line, durability))
+        xai_spawn::spawn_blocking(move || Self::append_jsonl_line_sync(&path, line, durability))
             .await
             .map_err(io::Error::other)?
     }
     async fn sync_file_path_durable(path: PathBuf) -> io::Result<()> {
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let file = OpenOptions::new().write(true).open(&path)?;
             Self::sync_file_durable(&file)
         })
@@ -485,7 +485,7 @@ impl JsonlStorageAdapter {
                     "working-directory switch item must carry a nonzero generation",
                 ))
             })?;
-        let disposition = tokio::task::spawn_blocking(move || {
+        let disposition = xai_spawn::spawn_blocking(move || {
             Self::append_cwd_switch_line_sync_with(
                 &path,
                 line,
@@ -650,7 +650,7 @@ impl JsonlStorageAdapter {
         line.push(b'\n');
         #[cfg(test)]
         let file_sync_probe = self.file_sync_probe.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             Self::append_jsonl_line_sync_with(
                 &path,
                 line,
@@ -1125,7 +1125,7 @@ impl JsonlStorageAdapter {
     ) -> io::Result<crate::session::persistence::SessionIdentity> {
         let summary_path = self.summary_file(info);
         let lock_path = self.summary_lock_file(info);
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             super::summary_write::stamp_session_identity_if_absent(
                 &summary_path,
                 &lock_path,
@@ -1145,7 +1145,7 @@ impl JsonlStorageAdapter {
     ) -> io::Result<bool> {
         let summary_path = self.summary_file(info);
         let lock_path = self.summary_lock_file(info);
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             super::summary_write::apply_patch_locked(&summary_path, &lock_path, &patch)
         })
         .await
@@ -1198,7 +1198,7 @@ impl StorageAdapter for JsonlStorageAdapter {
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             if summary.session_kind.is_none() || summary.worktree_label.is_none() {
                 let lock_path = self.summary_lock_file(info);
-                summary = tokio::task::spawn_blocking(move || {
+                summary = xai_spawn::spawn_blocking(move || {
                     super::summary_write::repair_untagged_worktree_summary(
                         &mut summary,
                         &summary_path,
@@ -1433,7 +1433,7 @@ impl StorageAdapter for JsonlStorageAdapter {
     ) -> io::Result<()> {
         let summary_path = self.summary_file(info);
         let lock_path = self.summary_lock_file(info);
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             super::summary_write::update_wake_start_locked(&summary_path, &lock_path, start, &abort)
         })
         .await
@@ -1446,7 +1446,7 @@ impl StorageAdapter for JsonlStorageAdapter {
     ) -> io::Result<()> {
         let summary_path = self.summary_file(info);
         let lock_path = self.summary_lock_file(info);
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             super::summary_write::restore_wake_summary_locked(&summary_path, &lock_path, prior)
         })
         .await
@@ -1698,7 +1698,7 @@ impl StorageAdapter for JsonlStorageAdapter {
         let summary_handle = {
             let info = info_clone.clone();
             let adapter_clone = self.clone();
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 let adapter = adapter_clone;
                 adapter.read_summary_sync(&info)
             })
@@ -1709,7 +1709,7 @@ impl StorageAdapter for JsonlStorageAdapter {
     async fn list_sessions(&self, cwd: Option<&str>) -> io::Result<Vec<Summary>> {
         let adapter = self.clone();
         let cwd = cwd.map(str::to_owned);
-        tokio::task::spawn_blocking(move || adapter.list_sessions_sync(cwd.as_deref()))
+        xai_spawn::spawn_blocking(move || adapter.list_sessions_sync(cwd.as_deref()))
             .await
             .map_err(io::Error::other)?
     }
@@ -1728,7 +1728,7 @@ impl StorageAdapter for JsonlStorageAdapter {
     async fn load_rewind_points(&self, info: &Info) -> io::Result<Vec<RewindPoint>> {
         let info_clone = info.clone();
         let adapter_clone = self.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let adapter = adapter_clone;
             let path = adapter.rewind_points_file(&info_clone);
             adapter.read_jsonl::<RewindPoint>(path)
@@ -1759,7 +1759,7 @@ impl StorageAdapter for JsonlStorageAdapter {
     ) -> io::Result<()> {
         let info_clone = info.clone();
         let adapter_clone = self.clone();
-        tokio::task::spawn_blocking(move || -> io::Result<()> {
+        xai_spawn::spawn_blocking(move || -> io::Result<()> {
             use std::fs::OpenOptions;
             let adapter = adapter_clone;
             #[cfg(test)]
@@ -1835,18 +1835,16 @@ impl StorageAdapter for JsonlStorageAdapter {
         let storage = self.clone();
         let source = source_info.clone();
         let target = target_info.clone();
-        tokio::task::spawn_blocking(move || {
-            storage.copy_session_data_sync(&source, &target, options)
-        })
-        .await
-        .map_err(|e| io::Error::other(format!("spawn_blocking panicked: {e}")))?
+        xai_spawn::spawn_blocking(move || storage.copy_session_data_sync(&source, &target, options))
+            .await
+            .map_err(|e| io::Error::other(format!("spawn_blocking panicked: {e}")))?
     }
     async fn load_prompts_only(&self, info: &Info) -> io::Result<Vec<String>> {
         let updates_path = self.updates_file(info);
         if !updates_path.exists() {
             return Ok(Vec::new());
         }
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let Some(iter) = super::PromptExtractIterator::open(&updates_path)? else {
                 return Ok(Vec::new());
             };
@@ -1861,7 +1859,7 @@ impl StorageAdapter for JsonlStorageAdapter {
         if !updates_path.exists() {
             return Ok(Vec::new());
         }
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let Some(iter) = super::UpdatesIterator::open(&updates_path)? else {
                 return Ok(Vec::new());
             };
@@ -1876,7 +1874,7 @@ impl StorageAdapter for JsonlStorageAdapter {
         if !updates_path.exists() {
             return Ok(Vec::new());
         }
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let Some(iter) = super::UpdatesIterator::open(&updates_path)? else {
                 return Ok(Vec::new());
             };

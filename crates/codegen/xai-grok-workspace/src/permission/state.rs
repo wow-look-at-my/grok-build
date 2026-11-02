@@ -115,7 +115,7 @@ impl PermissionState {
 /// Synchronous filesystem work: call from the blocking pool via [`resolve_store_dirs`] on async paths.
 fn permission_scope_root(cwd: &AbsPathBuf) -> std::path::PathBuf {
     match xai_grok_agent::repo::RepoDirChain::resolve(cwd.as_path()).git_root {
-        // git2 workdirs can carry a trailing separator
+        // A discovered workdir can carry a trailing separator
         // Re-collecting the components drops it so the encoded store key matches the plain spelling of the same directory
         Some(root) => root.components().collect(),
         None => cwd.as_path().to_path_buf(),
@@ -146,7 +146,7 @@ struct StoreDirs {
 async fn resolve_store_dirs(cwd: &AbsPathBuf, ensure: bool) -> StoreDirs {
     let cwd = cwd.clone();
     let fallback_dir = xai_grok_config::sessions_cwd_dir(cwd.as_str());
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         // Resolve the scope root ONCE: discovery walks the filesystem
         // The store dir, its ensure fallback, and the legacy compare all derive from this single resolution
         let root = permission_scope_root(&cwd).to_string_lossy().into_owned();
@@ -342,7 +342,7 @@ where
     let contents = toml::to_string_pretty(state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || writer(&path, &contents))
+    xai_spawn::spawn_blocking(move || writer(&path, &contents))
         .await
         .map_err(std::io::Error::other)?
 }
@@ -1144,7 +1144,7 @@ allowed_mcp_servers = ["a"]
     fn scope_root_unifies_repo_subdirectories() {
         let tmp = tempfile::tempdir().unwrap();
         let root = dunce::canonicalize(tmp.path()).unwrap();
-        git2::Repository::init(&root).unwrap();
+        crate::test_git::init(&root);
         let sub = root.join("crates/nested");
         std::fs::create_dir_all(&sub).unwrap();
 
@@ -1164,19 +1164,12 @@ allowed_mcp_servers = ["a"]
     fn scope_root_is_per_worktree() {
         let main = tempfile::tempdir().unwrap();
         let main_root = dunce::canonicalize(main.path()).unwrap();
-        let repo = git2::Repository::init(&main_root).unwrap();
         // Worktree creation requires a commit for HEAD to point at.
-        {
-            let tree_id = repo.index().unwrap().write_tree().unwrap();
-            let tree = repo.find_tree(tree_id).unwrap();
-            let sig = git2::Signature::now("t", "t@example.com").unwrap();
-            repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-                .unwrap();
-        }
+        crate::test_git::init_with_commit(&main_root);
         let wt_parent = tempfile::tempdir().unwrap();
-        // Canonicalize BEFORE creation so git2 records the canonical spelling (macOS tempdirs live behind a symlink from /var to /private/var)
+        // Canonicalize BEFORE creation so git records the canonical spelling (macOS tempdirs live behind a symlink from /var to /private/var)
         let wt_path = dunce::canonicalize(wt_parent.path()).unwrap().join("wt");
-        repo.worktree("wt", &wt_path, None).unwrap();
+        crate::test_git::worktree_add(&main_root, &wt_path);
         let wt_root = wt_path;
 
         let main_cwd = AbsPathBuf::new(main_root.clone()).unwrap();

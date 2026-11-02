@@ -1608,7 +1608,7 @@ async fn test_session_ownership_cleanup_on_disconnect() {
 
     let cancel_clone = cancel.clone();
     let sock_clone = sock_path.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let client_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let agent_busy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (_ready_tx, ready_rx) = tokio::sync::watch::channel(true);
@@ -1948,7 +1948,7 @@ async fn test_raw_registration_handshake_not_ready_then_ready() {
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let control_state = LeaderServerControlState::new(LeaderServerMetadata {
             pid: std::process::id(),
             socket_path: sock_clone.clone(),
@@ -2093,7 +2093,7 @@ async fn test_connect_waits_for_leader_ready() {
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let control_state = LeaderServerControlState::new(LeaderServerMetadata {
             pid: std::process::id(),
             socket_path: sock_clone.clone(),
@@ -2123,7 +2123,7 @@ async fn test_connect_waits_for_leader_ready() {
 
     // Spawn a task to signal readiness after a short delay (simulating slow auth/prefetch).
     let ready_delay_ms = 150u64;
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_millis(ready_delay_ms)).await;
         ready_tx.send(true).unwrap();
     });
@@ -2203,7 +2203,7 @@ async fn test_version_mismatch_notification_sent_to_client() {
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let control_state = LeaderServerControlState::new(LeaderServerMetadata {
             pid: std::process::id(),
             socket_path: sock_clone.clone(),
@@ -2276,7 +2276,7 @@ async fn test_no_version_mismatch_notification_when_versions_match() {
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let control_state = LeaderServerControlState::new(LeaderServerMetadata {
             pid: std::process::id(),
             socket_path: sock_clone.clone(),
@@ -2546,7 +2546,7 @@ async fn test_lock_released_before_connect_prevents_deadlock() {
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let control_state = LeaderServerControlState::new(LeaderServerMetadata {
             pid: std::process::id(),
             socket_path: sock_clone.clone(),
@@ -2575,7 +2575,7 @@ async fn test_lock_released_before_connect_prevents_deadlock() {
 
     // Simulate the leader: acquire the lock, then signal readiness
     // It blocks until the spawner releases the lock above
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let f = std::fs::File::open(&lock_path).unwrap();
         f.lock_exclusive().unwrap();
         ready_tx.send(true).unwrap();
@@ -2626,7 +2626,7 @@ async fn setup_persistent_test_server(
 
     let cancel_clone = cancel.clone();
     let sock_clone = sock_path.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let control_state = LeaderServerControlState::new(LeaderServerMetadata {
             pid: std::process::id(),
             socket_path: sock_clone.clone(),

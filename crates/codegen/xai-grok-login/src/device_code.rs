@@ -355,7 +355,7 @@ async fn prompt_and_poll(
 /// The CLI eprintlns; the TUI does nothing since the URL is already rendered in the widget.
 async fn open_browser_detached(url: &str) -> bool {
     let url = url.to_owned();
-    match tokio::task::spawn_blocking(move || webbrowser::open(&url)).await {
+    match xai_spawn::spawn_blocking(move || webbrowser::open(&url)).await {
         Ok(Ok(())) => true,
         Ok(Err(e)) => {
             tracing::info!(error = %e, "device auth: could not open browser automatically");
@@ -744,7 +744,7 @@ pub mod tests {
                 }
             }),
         );
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (issuer, handle)
     }
 

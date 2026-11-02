@@ -695,7 +695,7 @@ fn worktree_create_from_grove_clone_dest_forks_fuse() {
                 &["config", "--get", "remote.origin.partialclonefilter"]
             ),
             "blob:none",
-            "clone dest must be the blob:none store grok -w has to skip libgit2 for"
+            "clone dest must be the blob:none store grok -w has to skip the in-process git library for"
         );
         std::fs::write(clone_dest.join("from-clone.txt"), b"p").expect("dirty clone dest");
 
@@ -714,7 +714,7 @@ fn worktree_create_from_grove_clone_dest_forks_fuse() {
         assert_eq!(
             strategy["resolvedStrategy"],
             json!("grove-fuse"),
-            "fork from a Grove clone dest must stay grove-fuse, not fail libgit2 discover: {strategy}"
+            "fork from a Grove clone dest must stay grove-fuse, not fail in-process git discovery: {strategy}"
         );
         assert_eq!(
             strategy["transport"],

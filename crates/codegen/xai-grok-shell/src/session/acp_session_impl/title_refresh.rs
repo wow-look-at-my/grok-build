@@ -37,7 +37,7 @@ impl SessionActor {
         }
         let generation = self.title_refresh_generation.get();
         let actor = self.clone();
-        let task = tokio::task::spawn_local(async move {
+        let task = xai_spawn::spawn_local(async move {
             actor.refresh_title(generation).await;
             if actor.title_refresh_generation.get() == generation {
                 *actor.title_refresh_task.borrow_mut() = None;

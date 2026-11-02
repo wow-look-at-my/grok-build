@@ -36,7 +36,7 @@ impl MockServer {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = axum::serve(listener, app)
                 .with_graceful_shutdown(async move {
                     let _ = shutdown_rx.await;
@@ -815,7 +815,7 @@ async fn fatal_decision_does_not_strip_or_emit_images_stripped() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         // RST every connection: peek then drop (see xai-grok-http).
         loop {
             tokio::select! {
@@ -867,7 +867,7 @@ async fn connection_reset_emits_payload_heuristic_and_strips_request() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         // Peek then drop so the peer sees RST (see xai-grok-http).
         if let Ok((sock, _)) = listener.accept().await {
             let mut buf = [0u8; 64];
@@ -1722,7 +1722,7 @@ mod output_rate {
     ) -> Arc<std::sync::Mutex<Vec<(std::time::Instant, SamplingEvent)>>> {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = Arc::clone(&seen);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(event) = event_rx.recv().await {
                 sink.lock()
                     .unwrap()

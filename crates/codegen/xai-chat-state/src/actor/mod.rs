@@ -106,7 +106,7 @@ impl ChatStateActor {
             cancellation_token,
         };
 
-        tokio::spawn(actor.run());
+        xai_spawn::spawn(actor.run());
 
         ChatStateHandle::new(cmd_tx)
     }
@@ -310,7 +310,7 @@ impl ChatStateActor {
                     Some((stripped, ack_rx)) => {
                         // Await the disk ack off-actor: the persistence channel already
                         // orders the write, and blocking here would stall reads behind an fsync.
-                        tokio::spawn(async move {
+                        xai_spawn::spawn(async move {
                             let outcome = match ack_rx.await {
                                 Ok(Ok(())) => crate::StripOutcome::Applied { stripped },
                                 Ok(Err(_)) | Err(_) => {

@@ -345,7 +345,7 @@ async fn test_concurrent_gates_single_flight() {
     let start_b = Arc::clone(&start);
     let epoch_before = recovery::current_epoch();
     let (a, b) = tokio::join!(
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             start_a.wait().await;
             let result = bootstrap_with_lease_inner(
                 &root_a,
@@ -359,7 +359,7 @@ async fn test_concurrent_gates_single_flight() {
             done_a.store(true, Ordering::Release);
             result
         }),
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             start_b.wait().await;
             let result = bootstrap_with_lease_inner(
                 &root_b,

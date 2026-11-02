@@ -33,11 +33,12 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 zstd = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 # Mock HTTP server for actor / request_task integration tests.
 axum = { workspace = true }
-axum-server = { workspace = true, features = ["tls-rustls"] }
+axum-server = { workspace = true, features = ["tls-rustls-no-provider"] }
 # gzip fixtures for the response-compression wire tests.
 flate2 = { workspace = true }
 rcgen = { workspace = true }

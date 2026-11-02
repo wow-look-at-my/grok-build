@@ -83,15 +83,25 @@ fn only_origin_names_the_repo() {
     use super::remote_url;
 
     let dir = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(dir.path()).unwrap();
-    repo.remote("upstream", "https://example.com/parent/widget.git")
-        .unwrap();
-    assert_eq!(remote_url(&repo), None);
+    let git = |args: &[&str]| crate::test_support::git(dir.path(), args);
+    let open = || gix::open(dir.path()).unwrap();
+    git(&["init", "--quiet"]);
+    git(&[
+        "remote",
+        "add",
+        "upstream",
+        "https://example.com/parent/widget.git",
+    ]);
+    assert_eq!(remote_url(&open()), None);
 
-    repo.remote("origin", "https://example.com/fork/widget.git")
-        .unwrap();
+    git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://example.com/fork/widget.git",
+    ]);
     assert_eq!(
-        remote_url(&repo).as_deref(),
+        remote_url(&open()).as_deref(),
         Some("https://example.com/fork/widget.git")
     );
 }
@@ -166,7 +176,7 @@ async fn client_that_cannot_draw_the_row_never_builds_one() {
 
             let (session, mut painted) = emitter_fixture(Client::WithoutTheRow).await;
             let emitter =
-                tokio::task::spawn_local(super::run_status_emitter(Arc::downgrade(&session)));
+                xai_spawn::spawn_local(super::run_status_emitter(Arc::downgrade(&session)));
             session.emit_status_snapshot_detached();
             // Lets the emitter consume the wake while the row is still off.
             tokio::task::yield_now().await;
@@ -212,7 +222,7 @@ async fn a_dropped_session_ends_its_parked_emitter() {
         .run_until(async {
             let (session, _painted) = emitter_fixture(Client::WithoutTheRow).await;
             let emitter =
-                tokio::task::spawn_local(super::run_status_emitter(Arc::downgrade(&session)));
+                xai_spawn::spawn_local(super::run_status_emitter(Arc::downgrade(&session)));
             // Parks the emitter on the wake: without the yield it has not reached one, and the test would pass on the loop's first pass
             tokio::task::yield_now().await;
             assert!(

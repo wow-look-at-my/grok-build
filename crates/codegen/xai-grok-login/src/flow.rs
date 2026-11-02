@@ -197,7 +197,7 @@ pub async fn run_external_auth_provider(
         .map_err(|e| anyhow::anyhow!("failed to start auth provider `{command}`: {e}"))?;
     let stderr_task = if let Some(cb) = on_stderr {
         let stderr = child.stderr.take().expect("stderr was set to piped");
-        Some(tokio::task::spawn_local(async move {
+        Some(xai_spawn::spawn_local(async move {
             let mut reader = tokio::io::BufReader::new(stderr);
             let mut line = String::new();
             loop {
@@ -954,7 +954,7 @@ struct LoginConfigResponse {
 /// Best-effort: any error or unset flag returns `None` so the caller keeps the loopback default.
 /// Caps at 1.5s with no retries since it's on the login path.
 async fn fetch_login_device_flow(cli_chat_proxy_base_url: &str) -> Option<bool> {
-    let agent_id = tokio::task::spawn_blocking(xai_grok_telemetry::id::agent_id)
+    let agent_id = xai_spawn::spawn_blocking(xai_grok_telemetry::id::agent_id)
         .await
         .ok()?;
     let client = xai_grok_http::shared_client();
@@ -1234,7 +1234,7 @@ mod tests {
                 }))
             }),
         );
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let dir = tempfile::tempdir().unwrap();
         let mgr = Arc::new(
             AuthManager::new(dir.path(), GrokComConfig::default())
@@ -1879,7 +1879,7 @@ mod tests {
                     axum::Json(serde_json::json!({}))
                 }),
             );
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (base, handle)
     }
     fn expired_oidc_manager(dir: &Path, issuer: &str) -> Arc<AuthManager> {
@@ -2048,7 +2048,7 @@ mod tests {
                     }),
                 )
                 .with_state(state);
-            let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
             (format!("{base}/v1"), seen, handle)
         }
         #[tokio::test]

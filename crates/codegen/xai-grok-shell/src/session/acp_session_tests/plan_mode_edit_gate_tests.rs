@@ -16,7 +16,7 @@ async fn build_gate_actor() -> SessionActor {
         ToolConfig::for_tool::<ExitPlanModeTool>(),
     ])
     .await;
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg {
                 let _ = args.response_tx.send(Ok(()));

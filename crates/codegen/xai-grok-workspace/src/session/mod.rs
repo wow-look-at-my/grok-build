@@ -343,7 +343,7 @@ impl WorkspaceSession {
         let old = self.cwd().to_path_buf();
         if old != cwd {
             let dest = cwd.clone();
-            let _ = tokio::task::spawn_blocking(move || relocate_pre_virt_files(&old, &dest)).await;
+            let _ = xai_spawn::spawn_blocking(move || relocate_pre_virt_files(&old, &dest)).await;
         }
         if !self.checkpoint_store.remount(&cwd, &self.session_id).await {
             return Err("checkpoint remount failed".into());

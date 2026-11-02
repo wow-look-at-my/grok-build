@@ -129,7 +129,7 @@ fn run_blocking_pool_child() -> ! {
     }
 
     rt.block_on(async {
-        tokio::task::spawn_blocking(|| {})
+        xai_spawn::spawn_blocking(|| {})
             .await
             .expect("spawn_blocking");
     });

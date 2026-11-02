@@ -178,18 +178,17 @@ impl IndexBuilder {
     /// Collect files from the git index (tracked files only).
     /// Untracked files are omitted: they are a minority, fsnotify picks them up, and `statuses()` is ~10x slower.
     fn collect_files_git(&self, root_path: &Path) -> Option<Vec<PathBuf>> {
-        use git2::Repository;
-
         // Open the repository
-        let repo = Repository::open(root_path).ok()?;
+        let repo = gix::open(root_path).ok()?;
 
         // Get all files from the index (tracked files)
-        let index = repo.index().ok()?;
+        let index = repo.index_or_empty().ok()?;
         let files: Vec<PathBuf> = index
+            .entries()
             .iter()
             .filter_map(|entry| {
-                // git2 stores paths as bytes, convert to str
-                let path_str = std::str::from_utf8(&entry.path).ok()?;
+                // The index stores paths as bytes, convert to str
+                let path_str = std::str::from_utf8(entry.path(&index)).ok()?;
                 if self.registry.is_supported(path_str) {
                     Some(root_path.join(path_str))
                 } else {

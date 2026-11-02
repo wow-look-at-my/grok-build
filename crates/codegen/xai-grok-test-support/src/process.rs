@@ -872,7 +872,7 @@ fn spawn_capture<R>(mut reader: R, tail: OutputTail) -> JoinHandle<()>
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut buffer = [0_u8; 8192];
         loop {
             match reader.read(&mut buffer).await {

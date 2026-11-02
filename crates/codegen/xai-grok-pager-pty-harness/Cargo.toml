@@ -55,6 +55,7 @@ tempfile = { workspace = true }
 xai-tty-utils = { workspace = true }
 
 clap = { workspace = true, features = ["derive"] }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 xai-interjection-core = { workspace = true }
@@ -63,7 +64,7 @@ tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 # Fixture helpers for the spawn tests. All of these are already in the pager
 # binary's graph the tests exec, so they add no crate compiles.
-git2 = { workspace = true }
+xai-test-utils = { path = "../../common/xai-test-utils" }
 serial_test = { workspace = true }
 toml = { workspace = true }
 unicode-width = { workspace = true }
@@ -79,7 +80,7 @@ path = "tests/it/main.rs"
 name = "pty-scenario"
 path = "src/bin/pty_scenario.rs"
 
-# Fixture for tests/it/orphan_reap.rs: holds a PtyController child and blocks so
+# Fixture for tests/it/orphan_reap.rs. Holds a PtyController child and blocks so
 # the test can kill it ungracefully and assert the child does not survive.
 [[bin]]
 name = "pty_orphan_holder"

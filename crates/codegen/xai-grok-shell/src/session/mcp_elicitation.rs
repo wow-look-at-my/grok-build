@@ -38,7 +38,7 @@ pub(crate) fn spawn_elicitation_coordinator(
     non_interactive: Rc<Cell<bool>>,
 ) -> ElicitationCoordinatorGuard {
     let inbox = job_rx.clone();
-    let task = tokio::task::spawn_local(async move {
+    let task = xai_spawn::spawn_local(async move {
         while let Some(job) = job_rx.recv().await {
             handle_one_job(
                 job,

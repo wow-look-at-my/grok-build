@@ -124,7 +124,7 @@ fn spawn_planner_coordinator_capturing(
     let surface_log = StdArc::clone(&capture.surface_completion);
     let prompt_log = StdArc::clone(&capture.prompt);
     let model_log = StdArc::clone(&capture.model);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(ev) = rx.recv().await {
             if let SubagentEvent::OpenSpawnAdmission { .. } = ev {
                 if let SpawnBehaviour::AdmissionGatedThenWrite { opened, .. } = &behaviour {
@@ -164,7 +164,7 @@ fn spawn_planner_coordinator_capturing(
                         _ => unreachable!(),
                     };
                     let _ = started.send(spawn);
-                    tokio::task::spawn_local(async move {
+                    xai_spawn::spawn_local(async move {
                         notify.notified().await;
                         if let Some(p) = plan_path.as_deref() {
                             let _ =
@@ -953,7 +953,7 @@ async fn send_now_queues_planner_context_without_restart() {
 
             let planner = {
                 let actor = StdArc::clone(&actor);
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     actor.setup_goal("do X", None, GoalMode::Full).await
                 })
             };
@@ -1335,7 +1335,7 @@ async fn planner_clears_planning_latch_before_publishing_the_plan() {
                 let actor = StdArc::clone(&actor);
                 let plan_path = plan_path.clone();
                 let observed = StdArc::clone(&observed_at_publish);
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     loop {
                         if plan_path.exists() {
                             *observed.lock().unwrap() = actor
@@ -1839,7 +1839,7 @@ async fn lifecycle_fail_pause_resume_retry_success() {
             let count_task = StdArc::clone(&spawn_count);
             let plan_targets: StdArc<Mutex<Vec<String>>> = StdArc::new(Mutex::new(Vec::new()));
             let targets_task = StdArc::clone(&plan_targets);
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(ev) = rx.recv().await {
                     if let SubagentEvent::Spawn(req) = ev {
                         let n = count_task.fetch_add(1, SeqOrd::SeqCst);
@@ -2010,7 +2010,7 @@ fn spawn_latching_planner_coordinator() -> (
     let log: StdArc<std::sync::Mutex<Vec<FakeEvent>>> =
         StdArc::new(std::sync::Mutex::new(Vec::new()));
     let log_task = StdArc::clone(&log);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let mut latched = false;
         while let Some(ev) = rx.recv().await {
             match ev {
@@ -2314,7 +2314,7 @@ async fn setup_goal_message_is_total_when_pause_message_missing() {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
             let tracker = Arc::clone(&actor.goal_tracker);
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(ev) = rx.recv().await {
                     if let SubagentEvent::Spawn(req) = ev {
                         tracker
@@ -2463,7 +2463,7 @@ async fn a_cancelled_planner_pauses_instead_of_respawning() {
 
             let planner = {
                 let actor = StdArc::clone(&actor);
-                tokio::task::spawn_local(async move { actor.maybe_run_goal_planner("do X").await })
+                xai_spawn::spawn_local(async move { actor.maybe_run_goal_planner("do X").await })
             };
 
             assert_eq!(

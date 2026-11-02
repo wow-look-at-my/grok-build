@@ -53,7 +53,7 @@ pub fn update_from_notification(
 
 /// Eagerly warm [`CWD_GIT_CACHE`] for `cwd` off-thread, e.g. at pager startup and after a dashboard location change.
 /// The header / top bar then show the branch and worktree on the next frame instead of waiting for the first lazy refresh.
-/// No subprocess (libgit2 is filesystem-based) and a no-op when there is no tokio runtime, so callers stay infallible.
+/// No subprocess (the git read is in-process) and a no-op when there is no tokio runtime, so callers stay infallible.
 pub fn populate_from_cwd_async(cwd: PathBuf) {
     spawn_cwd_git_refresh(cwd);
 }
@@ -104,7 +104,7 @@ fn is_cwd_worktree(main_repo: Option<&str>, worktree_label: Option<&str>) -> boo
 }
 
 /// Per-cwd git info for render paths that display many directories (the dashboard agent list, each agent's status
-/// bar). Never blocks and never spawns `git` subprocesses (uses `git2`). Keyed per directory, so each agent shows
+/// bar). Never blocks and never spawns `git` subprocesses (reads with `gix`). Keyed per directory, so each agent shows
 /// the branch/worktree of its own location rather than the process cwd's.
 pub fn cwd_git_info_lazy(cwd: &Path) -> Option<CwdGitInfo> {
     let mut cache = CWD_GIT_CACHE.lock().ok()?;
@@ -133,9 +133,9 @@ fn spawn_cwd_git_refresh(cwd: PathBuf) {
         return;
     };
     let refresh_span = region!(debug, "git_info.refresh", Parent::Root);
-    handle.spawn_blocking(move || {
+    xai_spawn::spawn_blocking_on(&handle, move || {
         let _region = refresh_span;
-        // Guard against panics from the vendored libgit2 C bindings.
+        // A panic in the git read must not take down the pager.
         let info =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compute_cwd_git_info(&cwd)))
                 .unwrap_or(None);
@@ -145,7 +145,7 @@ fn spawn_cwd_git_refresh(cwd: PathBuf) {
     });
 }
 
-/// A `None` means either "not a git repo" or a transient libgit2 discovery failure, and the two are
+/// A `None` means either "not a git repo" or a transient discovery failure, and the are
 /// indistinguishable here. The timestamp always advances so the throttle resets either way.
 fn apply_cwd_git_refresh(
     cache: &mut HashMap<PathBuf, CwdCacheEntry>,
@@ -180,7 +180,8 @@ fn cwd_cache_insert(
 }
 
 fn compute_snapshot(cwd: &Path) -> GitSnapshot {
-    let Ok(repo) = git2::Repository::discover(cwd) else {
+    use xai_grok_workspace::git_repo;
+    let Ok(repo) = git_repo::discover(cwd) else {
         return GitSnapshot {
             repo_root_display: None,
             branch: None,
@@ -189,19 +190,14 @@ fn compute_snapshot(cwd: &Path) -> GitSnapshot {
         };
     };
 
-    let repo_root_display = repo.workdir().map(collapse_home);
+    let repo_root_display = git_repo::workdir(&repo).as_deref().map(collapse_home);
 
     // The empty-string sentinel means "detached HEAD"; the pager's notification path uses the same convention
-    let branch = repo.head().ok().map(|head| {
-        head.shorthand()
-            .ok()
-            .filter(|s| *s != "HEAD")
-            .map(str::to_string)
-            .unwrap_or_default()
-    });
+    let branch = git_repo::head_shorthand(&repo)
+        .map(|name| if name == "HEAD" { String::new() } else { name });
 
-    let linked_main_repo = (repo.path() != repo.commondir())
-        .then(|| repo.commondir().parent().map(collapse_home))
+    let linked_main_repo = git_repo::is_linked_worktree(&repo)
+        .then(|| git_repo::common_dir(&repo).parent().map(collapse_home))
         .flatten();
 
     // Standalone grok worktrees are CoW clones (`.git` is a directory), so `path != commondir` is false; the source marker is the back-pointer
@@ -396,7 +392,7 @@ mod tests {
         assert_eq!(cache.len(), CWD_GIT_CACHE_CAP);
     }
 
-    /// A `None` refresh result must preserve a previously-resolved value (a transient libgit2 discovery failure must not blank the branch).
+    /// A `None` refresh result must preserve a previously-resolved value (a transient discovery failure must not blank the branch).
     /// A fresh cwd with no prior entry still records the `None` (genuine non-repo).
     /// Either way the timestamp advances.
     #[test]

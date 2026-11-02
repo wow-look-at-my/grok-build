@@ -29,7 +29,7 @@ impl WebFetchArtifactWriter {
 
         let data = bytes.to_vec();
         let extension = extension.to_owned();
-        tokio::task::spawn_blocking(move || save_locked(&dir, &data, &extension))
+        xai_spawn::spawn_blocking(move || save_locked(&dir, &data, &extension))
             .await
             .context("spawn_blocking panicked")?
     }

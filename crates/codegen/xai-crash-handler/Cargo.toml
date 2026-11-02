@@ -31,3 +31,6 @@ tempfile = { workspace = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+xai-spawn = { workspace = true }

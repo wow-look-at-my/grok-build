@@ -54,7 +54,7 @@ impl ResourcesPersistence {
         let (tx, mut commands) =
             tokio::sync::mpsc::unbounded_channel::<ResourcesPersistenceCommand>();
         let (observed_tx, observed_rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(command) = commands.recv().await {
                 match command {
                     ResourcesPersistenceCommand::Save(_) => {}
@@ -88,7 +88,7 @@ impl ResourcesPersistence {
         // The handle is dropped, but the task reports its own failure: the body
         // runs through `guarded` and logs the panic under the writer's name.
         #[allow(clippy::disallowed_methods)]
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             // Guarded so the writer's own death is attributed.
             let wrote = crate::util::detached::guarded(
                 "resources persistence writer",
@@ -498,7 +498,7 @@ mod tests {
         let done = std::sync::Arc::new(AtomicBool::new(false));
         let reader_done = done.clone();
         let reader_path = state_path.clone();
-        let reader = tokio::spawn(async move {
+        let reader = xai_spawn::spawn(async move {
             while !reader_done.load(Ordering::Relaxed) {
                 if let Ok(s) = tokio::fs::read_to_string(&reader_path).await {
                     assert!(

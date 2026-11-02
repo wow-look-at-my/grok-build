@@ -42,7 +42,7 @@ impl LineBufferedRead {
     /// [`tokio::task::spawn_local`].
     pub fn spawn_local(source: impl AsyncRead + Unpin + 'static) -> Self {
         Self::new(source, |fut| {
-            tokio::task::spawn_local(fut);
+            xai_spawn::spawn_local(fut);
         })
     }
 

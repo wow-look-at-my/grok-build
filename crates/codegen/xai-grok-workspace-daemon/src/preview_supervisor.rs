@@ -995,7 +995,7 @@ mod tests {
         let donated = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let (tx, rx) = watch::channel(false);
         let sink = Arc::clone(&donated);
-        let handle = tokio::spawn(scrape_metrics_loop(
+        let handle = xai_spawn::spawn(scrape_metrics_loop(
             port,
             // 1h interval: only the immediate first scrape can donate.
             Duration::from_secs(3600),
@@ -1028,7 +1028,7 @@ mod tests {
         let donated = Arc::new(AtomicUsize::new(0));
         let (tx, rx) = watch::channel(false);
         let counter = Arc::clone(&donated);
-        let handle = tokio::spawn(scrape_metrics_loop(
+        let handle = xai_spawn::spawn(scrape_metrics_loop(
             port,
             Duration::from_millis(5),
             rx,
@@ -1048,7 +1048,7 @@ mod tests {
         let (tx, rx) = watch::channel(false);
         let counter = Arc::clone(&donated);
         let closed = ReservedRefusedPort::open();
-        let handle = tokio::spawn(scrape_metrics_loop(
+        let handle = xai_spawn::spawn(scrape_metrics_loop(
             closed.port,
             Duration::from_millis(5),
             rx,
@@ -1126,7 +1126,7 @@ mod tests {
         // Nothing is listening on this port, so every scrape classifies Absent.
         let closed = ReservedRefusedPort::open();
         let (tx, rx) = watch::channel(false);
-        let loop_handle = tokio::spawn(scrape_activity_loop(
+        let loop_handle = xai_spawn::spawn(scrape_activity_loop(
             closed.port,
             sink_of(&tracker),
             Duration::from_millis(10),
@@ -1155,7 +1155,7 @@ mod tests {
         // The server answers every time, always with a 500, so every scrape classifies as BadResponse, never Absent
         let port = serve_canned("HTTP/1.1 500 Internal Server Error", "boom", true).await;
         let (tx, rx) = watch::channel(false);
-        let loop_handle = tokio::spawn(scrape_activity_loop(
+        let loop_handle = xai_spawn::spawn(scrape_activity_loop(
             port,
             sink_of(&tracker),
             Duration::from_millis(10),
@@ -1183,7 +1183,7 @@ mod tests {
 
         let closed = ReservedRefusedPort::open();
         let (tx, rx) = watch::channel(false);
-        let loop_handle = tokio::spawn(scrape_activity_loop(
+        let loop_handle = xai_spawn::spawn(scrape_activity_loop(
             closed.port,
             sink_of(&tracker),
             Duration::from_millis(10),
@@ -1280,7 +1280,7 @@ mod tests {
             .await
             .expect("bind ephemeral loopback");
         let port = listener.local_addr().expect("addr").port();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 let Ok((mut sock, _)) = listener.accept().await else {
                     return;
@@ -1308,7 +1308,7 @@ mod tests {
             .await
             .expect("bind ephemeral loopback");
         let port = listener.local_addr().expect("addr").port();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let counter = AtomicU64::new(1);
             while let Ok((mut sock, _)) = listener.accept().await {
                 let mut buf = [0u8; 1024];
@@ -1331,7 +1331,7 @@ mod tests {
             .await
             .expect("bind ephemeral loopback");
         let port = listener.local_addr().expect("addr").port();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             if let Ok((_sock, _)) = listener.accept().await {
                 tokio::time::sleep(Duration::from_secs(3600)).await;
             }
@@ -1385,7 +1385,7 @@ mod tests {
         assert_eq!(tracker.activity_notes(), 0);
 
         let (tx, rx) = watch::channel(false);
-        let handle = tokio::spawn(scrape_activity_loop(
+        let handle = xai_spawn::spawn(scrape_activity_loop(
             port,
             sink_of(&tracker),
             Duration::from_millis(5),
@@ -1413,7 +1413,7 @@ mod tests {
         let port = serve_canned("HTTP/1.1 500 Internal Server Error", "boom", true).await;
         let tracker = TestSink::new();
         let (tx, rx) = watch::channel(false);
-        let handle = tokio::spawn(scrape_activity_loop(
+        let handle = xai_spawn::spawn(scrape_activity_loop(
             port,
             sink_of(&tracker),
             Duration::from_millis(5),
@@ -1439,7 +1439,7 @@ mod tests {
         let port = serve_canned("HTTP/1.1 200 OK", r#"{"last_activity_ms":777}"#, true).await;
         let tracker = TestSink::new();
         let (tx, rx) = watch::channel(false);
-        let handle = tokio::spawn(scrape_activity_loop(
+        let handle = xai_spawn::spawn(scrape_activity_loop(
             port,
             sink_of(&tracker),
             Duration::from_millis(5),
@@ -1548,7 +1548,7 @@ mod tests {
             }
         };
         // healthy_run is far above the child's lifetime, so every exit is unhealthy
-        let handle = tokio::spawn(supervise_loop(
+        let handle = xai_spawn::spawn(supervise_loop(
             factory,
             fast_policy(),
             Duration::from_secs(3600),
@@ -1587,7 +1587,7 @@ mod tests {
                 Ok(fake_pid_recording_command(&pid_path))
             }
         };
-        let handle = tokio::spawn(supervise_loop(
+        let handle = xai_spawn::spawn(supervise_loop(
             factory,
             fast_policy(),
             Duration::from_secs(1),
@@ -1632,7 +1632,7 @@ mod tests {
                 Err(io::Error::new(io::ErrorKind::NotFound, "no such binary"))
             }
         };
-        let handle = tokio::spawn(supervise_loop(
+        let handle = xai_spawn::spawn(supervise_loop(
             factory,
             fast_policy(),
             Duration::from_secs(3600),

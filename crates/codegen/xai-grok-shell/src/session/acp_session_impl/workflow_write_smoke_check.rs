@@ -124,7 +124,7 @@ pub(super) async fn snapshot_authored_workflow(
     let resolution_path = path.clone();
     let cwd = cwd.to_path_buf();
     let session_dir = session_dir.to_path_buf();
-    let resolution = tokio::task::spawn_blocking(move || {
+    let resolution = xai_spawn::spawn_blocking(move || {
         crate::session::workflow::registry::resolve_by_path(
             &resolution_path,
             &cwd,
@@ -174,7 +174,7 @@ pub(super) async fn check_snapshot(
     let cancel = tokio_util::sync::CancellationToken::new();
     let _cancel_on_drop = CancelOnDrop(cancel.clone());
     let validation_cancel = cancel.clone();
-    let validation = tokio::task::spawn_blocking(move || {
+    let validation = xai_spawn::spawn_blocking(move || {
         let _permit = permit;
         xai_workflow::validate_script_with_cancel(&snapshot.script, None, validation_cancel)
             .map_err(|error| error.to_string())

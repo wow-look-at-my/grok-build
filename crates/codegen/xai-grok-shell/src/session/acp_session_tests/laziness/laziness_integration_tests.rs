@@ -108,7 +108,7 @@ async fn user_input_bump_during_idle_wait_aborts_with_user_input() {
             })
             .await;
             let bump_actor = actor.clone();
-            let bump_task = tokio::task::spawn_local(async move {
+            let bump_task = xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                 bump_actor
                     .user_input_generation
@@ -141,7 +141,7 @@ async fn model_switch_during_idle_wait_aborts_with_model_switch() {
             })
             .await;
             let switch_actor = actor.clone();
-            let switch_task = tokio::task::spawn_local(async move {
+            let switch_task = xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
                 // A real id change bumps the model_switch generation
                 switch_actor
@@ -275,7 +275,7 @@ async fn idle_recheck_after_sleep_short_circuits_silently() {
             })
             .await;
             let poison_actor = actor.clone();
-            let poison_task = tokio::task::spawn_local(async move {
+            let poison_task = xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(220)).await;
                 let (respond_to, _) = tokio::sync::oneshot::channel();
                 poison_actor

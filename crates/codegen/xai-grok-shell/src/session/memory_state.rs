@@ -15,7 +15,7 @@ where
     F: FnOnce() -> std::io::Result<T> + Send + 'static,
     T: Send + 'static,
 {
-    tokio::task::spawn_blocking(initialize)
+    xai_spawn::spawn_blocking(initialize)
         .await
         .map_err(MemoryInitializationError::TaskJoin)?
         .map_err(MemoryInitializationError::Storage)

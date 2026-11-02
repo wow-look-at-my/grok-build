@@ -892,7 +892,7 @@ mod tests {
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
         (format!("http://{addr}"), handle)

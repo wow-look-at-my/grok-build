@@ -1379,7 +1379,7 @@ async fn reasoning_only_doomloop_turn_captures_every_generation_as_segments() {
             let codebase_indexes = Arc::new(parking_lot::Mutex::new(
                 xai_grok_workspace::file_system::CodebaseIndexManager::new(),
             ));
-            tokio::task::spawn_local(super::run_session(
+            xai_spawn::spawn_local(super::run_session(
                 actor.clone(),
                 cmd_rx,
                 chat_rx,

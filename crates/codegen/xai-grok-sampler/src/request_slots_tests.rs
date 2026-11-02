@@ -86,7 +86,7 @@ async fn a_raised_limit_lets_the_queue_through() {
     let held = slots.acquire().await;
     let waiter = {
         let slots = Arc::clone(&slots);
-        tokio::spawn(async move { slots.acquire().await })
+        xai_spawn::spawn(async move { slots.acquire().await })
     };
     while slots.waiting() == 0 {
         tokio::task::yield_now().await;
@@ -124,7 +124,7 @@ async fn a_dropped_waiter_leaves_the_queue() {
     let held = slots.acquire().await;
     let waiter = {
         let slots = Arc::clone(&slots);
-        tokio::spawn(async move { slots.acquire().await })
+        xai_spawn::spawn(async move { slots.acquire().await })
     };
     while slots.waiting() == 0 {
         tokio::task::yield_now().await;
@@ -143,7 +143,7 @@ async fn a_dropped_waiter_leaves_the_queue() {
 async fn queue_time_does_not_count_against_the_timeout() {
     let slots = Arc::new(RequestSlots::new(1));
     let held = slots.acquire().await;
-    let release = tokio::spawn(async move {
+    let release = xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_secs(30)).await;
         drop(held);
     });
@@ -173,7 +173,7 @@ async fn a_plain_timeout_counts_the_queue() {
 async fn run_time_still_counts_against_the_timeout() {
     let slots = Arc::new(RequestSlots::new(1));
     let held = slots.acquire().await;
-    let release = tokio::spawn(async move {
+    let release = xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_secs(30)).await;
         drop(held);
     });
@@ -194,7 +194,7 @@ async fn run_time_still_counts_against_the_timeout() {
 async fn nested_timeouts_all_exclude_the_queue() {
     let slots = Arc::new(RequestSlots::new(1));
     let held = slots.acquire().await;
-    let release = tokio::spawn(async move {
+    let release = xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_secs(30)).await;
         drop(held);
     });
@@ -215,14 +215,14 @@ async fn nested_timeouts_all_exclude_the_queue() {
 async fn a_spawned_request_records_into_the_callers_clock() {
     let slots = Arc::new(RequestSlots::new(1));
     let held = slots.acquire().await;
-    let release = tokio::spawn(async move {
+    let release = xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_secs(30)).await;
         drop(held);
     });
     let result = timeout_excluding_queue(Duration::from_secs(10), async {
         let clock = current_queue_clock();
         let slots = Arc::clone(&slots);
-        tokio::spawn(in_queue_clock(clock, async move {
+        xai_spawn::spawn(in_queue_clock(clock, async move {
             let _slot = slots.acquire().await;
             tokio::time::sleep(Duration::from_secs(5)).await;
         }))

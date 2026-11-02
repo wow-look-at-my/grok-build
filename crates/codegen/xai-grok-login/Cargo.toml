@@ -72,6 +72,7 @@ tonic-prost = { workspace = true, optional = true }
 prost = { workspace = true, optional = true }
 # Loom model-checking harness; test-only, gated by the `loom` feature.
 loom = { workspace = true, optional = true }
+xai-spawn = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

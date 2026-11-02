@@ -3,9 +3,10 @@ license = "Apache-2.0"
 name = "xai-gix-status"
 version = "0.1.0"
 edition.workspace = true
-description = "Shared gix status helpers: thread budget under RLIMIT_NPROC so produce-worker spawn cannot abort under panic=abort"
+description = "Shared gix helpers: repository discovery, and a status thread budget under RLIMIT_NPROC so produce-worker spawn cannot abort under panic=abort"
 
 [dependencies]
+dunce = { workspace = true }
 gix = { workspace = true, features = ["status", "parallel"] }
 
 [target.'cfg(unix)'.dependencies]

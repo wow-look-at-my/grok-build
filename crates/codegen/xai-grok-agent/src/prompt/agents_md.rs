@@ -457,9 +457,9 @@ mod tests {
         }
     }
 
-    /// Helper: initialize a git repo at `path` so git2::Repository::discover works.
+    /// Helper: initialize a git repo at `path` so repository discovery finds it.
     fn init_git_repo(path: &Path) {
-        git2::Repository::init(path).unwrap();
+        gix::init(path).unwrap();
     }
 
     // ── find_agent_files unit tests ─────────────────────────────────

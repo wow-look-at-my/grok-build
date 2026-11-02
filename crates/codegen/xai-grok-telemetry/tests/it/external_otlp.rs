@@ -132,7 +132,7 @@ async fn external_stream_end_to_end() {
         response_text: Some(CANARY_RESPONSE.into()),
     });
 
-    tokio::task::spawn_blocking(xai_grok_telemetry::external::flush)
+    xai_spawn::spawn_blocking(xai_grok_telemetry::external::flush)
         .await
         .unwrap();
     // Give any (erroneously constructed) exporter ample time to phone home.
@@ -147,7 +147,7 @@ async fn external_stream_end_to_end() {
     );
 
     let start = std::time::Instant::now();
-    tokio::task::spawn_blocking(xai_grok_telemetry::external::shutdown)
+    xai_spawn::spawn_blocking(xai_grok_telemetry::external::shutdown)
         .await
         .unwrap();
     assert!(
@@ -174,7 +174,7 @@ async fn external_stream_end_to_end() {
     );
     silence.expect("no exports after shutdown");
 
-    tokio::task::spawn_blocking(xai_grok_telemetry::external::shutdown)
+    xai_spawn::spawn_blocking(xai_grok_telemetry::external::shutdown)
         .await
         .unwrap();
 }

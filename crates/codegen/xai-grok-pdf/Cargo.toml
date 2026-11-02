@@ -1,0 +1,16 @@
+[package]
+license = "Apache-2.0"
+edition.workspace = true
+name = "xai-grok-pdf"
+version = "0.1.0"
+description = "The pdf_oxide engine behind the read tools' PDF seam"
+
+[dependencies]
+pdf_oxide = { workspace = true }
+xai-tool-types = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

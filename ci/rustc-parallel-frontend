@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# A RUSTC_WORKSPACE_WRAPPER: runs the type and borrow checks of a workspace crate on 4 threads.
+# RUSTC_BOOTSTRAP reaches only this rustc, so no registry build script sees a nightly compiler.
+RUSTC_BOOTSTRAP=1 exec "$@" -Zthreads=4

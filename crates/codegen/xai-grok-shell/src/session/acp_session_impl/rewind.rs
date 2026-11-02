@@ -310,7 +310,7 @@ impl SessionActor {
                 let replay_updates = updates_path.clone();
                 let replay_session_dir = session_dir.clone();
                 let replay_target = target_index;
-                let replay_result = tokio::task::spawn_blocking(move || {
+                let replay_result = xai_spawn::spawn_blocking(move || {
                     crate::session::helpers::replay::replay_to_prompt(
                         &replay_updates,
                         &replay_session_dir,

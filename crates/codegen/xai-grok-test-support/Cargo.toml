@@ -11,7 +11,7 @@ agent-client-protocol = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true }
-axum-server = { workspace = true, features = ["tls-rustls"] }
+axum-server = { workspace = true, features = ["tls-rustls-no-provider"] }
 base64 = { workspace = true }
 futures-util = { workspace = true }
 opentelemetry-proto = { workspace = true, features = ["logs", "metrics", "trace"] }
@@ -19,7 +19,7 @@ portable-pty = { workspace = true }
 prost = { workspace = true }
 rcgen = { workspace = true }
 regex = { workspace = true }
-# `ring` feature: the TLS mock picks the same provider per target as xai-grok-extra-ca.
+# `ring` feature: the TLS mock builds its server config on ring.
 rustls = { workspace = true, features = ["ring"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -31,6 +31,7 @@ tracing = { workspace = true }
 url = { workspace = true }
 xai-acp-lib = { workspace = true }
 xai-tty-utils = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }

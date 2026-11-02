@@ -9,6 +9,7 @@ mod alias;
 mod ext;
 mod glob;
 mod grep;
+pub mod pdf;
 mod read;
 pub mod resource_lock;
 mod schema_utils;

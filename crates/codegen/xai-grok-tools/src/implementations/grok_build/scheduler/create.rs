@@ -302,7 +302,7 @@ mod tests {
             pending_removal: None,
             blocked_expiries: Default::default(),
         };
-        tokio::spawn(actor.run());
+        xai_spawn::spawn(actor.run());
         (shared, cancel_token)
     }
 

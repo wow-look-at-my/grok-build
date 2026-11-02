@@ -261,8 +261,8 @@ async fn run_git(cwd: &Path, args: &[&str], timeout: Duration) -> Result<String,
         group,
         exited: false,
     };
-    let stdout = tokio::spawn(read_to_end(child.stdout.take()));
-    let stderr = tokio::spawn(read_to_end(child.stderr.take()));
+    let stdout = xai_spawn::spawn(read_to_end(child.stdout.take()));
+    let stderr = xai_spawn::spawn(read_to_end(child.stderr.take()));
     let status = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(Ok(status)) => status,
         Ok(Err(err)) => return Err(format!("{label}: {err}")),
@@ -313,7 +313,7 @@ impl Drop for GracefulStop {
         let group = self.group.clone();
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
-                handle.spawn(async move {
+                xai_spawn::spawn_on(&handle, async move {
                     tokio::time::sleep(TERM_GRACE).await;
                     let _ = group.kill();
                 });
@@ -647,7 +647,7 @@ mod tests {
             "alias.hang=!touch {} && exec sleep 30",
             marker.to_str().unwrap()
         );
-        let task = tokio::spawn(async move {
+        let task = xai_spawn::spawn(async move {
             let _ = run_git(&clone, &["-c", &alias, "hang"], Duration::from_secs(60)).await;
         });
         for _ in 0..100 {

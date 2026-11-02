@@ -133,7 +133,7 @@ impl ChatModesManager {
     /// Best-effort stale refresh; skips if a fetch is already in flight.
     fn spawn_refresh(&self, user_id: String, locale: &'static str) {
         let me = self.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let Ok(_flight) = me.inner.fetch_lock.try_lock() else {
                 return;
             };

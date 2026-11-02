@@ -78,7 +78,7 @@ pub(crate) async fn materialize_descriptors_for_gateway_tools(
     let connectors: BTreeSet<String> = gateway_connectors.into_iter().collect();
 
     let mcps_root = mcps_root.to_path_buf();
-    if let Err(e) = tokio::task::spawn_blocking(move || {
+    if let Err(e) = xai_spawn::spawn_blocking(move || {
         for connector_id in connectors {
             let server_dir = server_descriptor_dir(&mcps_root, &connector_id);
             let tools_dir = server_dir.join("tools");

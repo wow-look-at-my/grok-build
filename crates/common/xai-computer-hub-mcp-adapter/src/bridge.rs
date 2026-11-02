@@ -183,7 +183,7 @@ impl Drop for McpBridge {
         if tokio::runtime::Handle::try_current().is_ok() {
             // `Drop` cannot await, so the close has to run detached.
             #[allow(clippy::disallowed_methods)]
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 if let Err(err) = transport.close().await {
                     warn!(?err, "best-effort transport close on drop failed");
                 }

@@ -1221,7 +1221,7 @@ async fn auth_concurrent_refresh_deduplicates() {
     let mut handles = Vec::new();
     for _ in 0..4 {
         let m = mgr.clone();
-        handles.push(tokio::spawn(async move { m.auth().await }));
+        handles.push(xai_spawn::spawn(async move { m.auth().await }));
     }
     let mut results = Vec::new();
     for h in handles {
@@ -2708,7 +2708,7 @@ async fn update_writes_disk_before_user_enrichment() {
             }
         }),
     );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     let cfg = GrokComConfig::default();
     let mgr = Arc::new(
@@ -2793,7 +2793,7 @@ async fn enrichment_task_preserves_interleaved_token_rotation() {
             }
         }),
     );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     let cfg = GrokComConfig::default();
     let mgr = Arc::new(
@@ -2879,7 +2879,7 @@ async fn enrichment_aborts_when_disk_user_changes_mid_flight() {
             }))
         }),
     );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     let cfg = GrokComConfig::default();
     let scope = cfg.auth_scope();
@@ -2963,7 +2963,7 @@ async fn enrichment_overlays_team_login_placeholder_user_id() {
             }))
         }),
     );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let dir = tempfile::tempdir().unwrap();
     let cfg = GrokComConfig::default();
     let mgr = Arc::new(
@@ -3398,7 +3398,7 @@ async fn spawn_user_stub(token: &'static str, body: &'static str) -> String {
             Ok(([("content-type", "application/json")], body))
         }),
     );
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     format!("http://127.0.0.1:{port}")
 }
 #[tokio::test]
@@ -4430,7 +4430,7 @@ async fn sleep_gate_lets_in_flight_refresh_complete() {
         call_count: call_count.clone(),
     }));
     let m = mgr.clone();
-    let handle = tokio::spawn(async move { m.auth().await });
+    let handle = xai_spawn::spawn(async move { m.auth().await });
     started.notified().await;
     assert_eq!(
         mgr.refresh_in_flight.load(Ordering::SeqCst),

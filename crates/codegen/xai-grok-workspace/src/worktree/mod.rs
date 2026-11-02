@@ -10,7 +10,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result};
-use git2::{DiffOptions, Oid, Repository};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
@@ -20,8 +19,7 @@ use xai_grok_telemetry::region;
 use xai_grok_telemetry::region::Parent;
 
 use crate::session::git::{
-    GitFileChange, change_type_from_git2_delta, find_git_root_from_path,
-    find_main_repo_root_from_path, git_cli,
+    ChangeType, GitFileChange, find_git_root_from_path, find_main_repo_root_from_path, git_cli,
 };
 
 mod create_root;
@@ -53,7 +51,7 @@ where
 {
     let region = region!("worktree.copy_on_write", Parent::Inherit);
     let span = region.span().clone();
-    tokio::task::spawn_blocking(move || span.in_scope(work)).await
+    xai_spawn::spawn_blocking(move || span.in_scope(work)).await
 }
 
 /// True when `path` is on a grove FUSE mount.
@@ -384,10 +382,9 @@ pub fn btrfs_delegate_from_env() -> Option<Arc<dyn BtrfsDelegate>> {
     BTRFS_DELEGATE_FACTORY.get().and_then(|f| f())
 }
 
-fn get_head_commit(repo: &Repository) -> Result<String> {
-    let head = repo.head()?;
-    let commit = head.peel_to_commit()?;
-    Ok(commit.id().to_string())
+fn get_head_commit(repo: &gix::Repository) -> Result<String> {
+    let commit = repo.head()?.peel_to_commit()?;
+    Ok(commit.id.to_string())
 }
 
 // Best-effort dedup of duplicate async spawns within one process
@@ -517,7 +514,7 @@ pub async fn run_background_ignored_copy<N: WorktreeNotificationSender>(
     let patterns = skip_patterns.clone();
 
     // Run the copy in a blocking task (copy_ignored_only does blocking I/O)
-    let copy_handle = tokio::task::spawn_blocking(move || {
+    let copy_handle = xai_spawn::spawn_blocking(move || {
         // The token's is_cancelled() is polled by the sync copy engine.
         let builder = WorktreeBuilder::new(&source, &dest)
             .ignored_files_mode(IgnoredFilesMode::CopyOnly {
@@ -896,7 +893,7 @@ pub fn worktree_base_dir_for_source_in(
 }
 
 /// The managed root a source inside a managed checkout already sits in. It
-/// runs no git discovery, so a Grove parent is never opened with libgit2.
+/// runs no git discovery, so a Grove parent is never opened by git discovery.
 /// A source under a repository's own `.grok/worktrees` is not answered here:
 /// new checkouts are created under the grok home, never inside a repository.
 fn managed_base_dir_for_source_in(
@@ -1070,7 +1067,7 @@ pub async fn prepare_worktree_creation(req: &CreateWorktreeRequest) -> PrepareWo
         };
     }
 
-    if !layout.skipped_libgit2
+    if !layout.skipped_git_discovery
         && git_cli(source_path, &["rev-parse", "--git-dir"])
             .await
             .is_err()
@@ -1130,7 +1127,7 @@ pub async fn create_worktree_async<N: WorktreeNotificationSender + Clone + 'stat
     // spawn_local because the notifier uses non-Send futures internally.
     if should_copy_ignored_in_background && let Some(worktree_path) = worktree_path {
         let notifier = notifier.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             run_background_ignored_copy(
                 copy_context,
                 session_id,
@@ -1542,7 +1539,7 @@ pub async fn remove_worktree(
     // The btrfs delegate is used only as a fallback when a direct btrfs op fails (rootless hosts lack CAP_SYS_ADMIN for direct subvolume ops)
     let delegate = btrfs_delegate_from_env();
     let span = tracing::Span::current();
-    match tokio::task::spawn_blocking(move || {
+    match xai_spawn::spawn_blocking(move || {
         span.in_scope(|| xai_fast_worktree::remove_worktree_with_delegate(&wt_path, delegate))
     })
     .await
@@ -1630,7 +1627,7 @@ pub async fn rehydrate_subagent_worktree(
     let session_id = session_id.map(str::to_owned);
     let recreate = region!("worktree.cwd_recreate", Parent::Inherit);
     let span = recreate.span().clone();
-    let report = tokio::task::spawn_blocking(move || {
+    let report = xai_spawn::spawn_blocking(move || {
         span.in_scope(|| {
             xai_fast_worktree::rehydrate_worktree_from_ref(
                 &dest,
@@ -1656,7 +1653,7 @@ pub async fn snapshot_subagent_worktree(
     let source_repo = source_repo.to_path_buf();
     let ref_name = ref_name.to_string();
     let span = tracing::Span::current();
-    tokio::task::spawn_blocking(move || -> Result<String> {
+    xai_spawn::spawn_blocking(move || -> Result<String> {
         span.in_scope(|| {
             let message = format!("subagent worktree snapshot {ref_name}");
             // Capture into the worktree's git, then make it durable in the source repo (and verify) so it survives the worktree's deletion
@@ -1677,7 +1674,7 @@ pub async fn remove_subagent_worktree(worktree_path: &Path) -> Result<()> {
     // On rootless hosts the snapshot delete needs the privileged helper; without the delegate the btrfs delete hits EPERM and the snapshot leaks
     let delegate = btrfs_delegate_from_env();
     let span = tracing::Span::current();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         span.in_scope(|| xai_fast_worktree::remove_worktree_with_delegate(&worktree_path, delegate))
     })
     .await
@@ -1816,7 +1813,7 @@ pub async fn prepare_worktree_from_worktree(
         }
     };
 
-    if !layout.skipped_libgit2
+    if !layout.skipped_git_discovery
         && git_cli(source_path, &["rev-parse", "--git-dir"])
             .await
             .is_err()
@@ -1903,7 +1900,7 @@ async fn cleanup_cancelled_worktree(worktree_path: &str) {
     let path = std::path::PathBuf::from(worktree_path);
     let delegate = btrfs_delegate_from_env();
     let span = tracing::Span::current();
-    match tokio::task::spawn_blocking(move || {
+    match xai_spawn::spawn_blocking(move || {
         span.in_scope(|| xai_fast_worktree::remove_worktree_with_delegate(&path, delegate))
     })
     .await
@@ -2500,49 +2497,51 @@ struct ApplyContext {
 async fn get_apply_context(worktree_path: &str) -> Result<ApplyContext> {
     let wt_path = worktree_path.to_string();
 
-    tokio::task::spawn_blocking(move || {
-        let wt_repo = Repository::open(&wt_path)?;
+    let (wt_root, wt_head, main_head) = xai_spawn::spawn_blocking(move || {
+        let wt_repo = crate::git_repo::open(Path::new(&wt_path))?;
         let wt_head = get_head_commit(&wt_repo)?;
 
-        let main_git_dir = wt_repo.commondir().to_path_buf();
+        let main_git_dir = crate::git_repo::common_dir(&wt_repo);
         let main_repo_path = main_git_dir
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Invalid git repository structure"))?;
-        let main_repo = Repository::open(main_repo_path)?;
+        let main_repo = crate::git_repo::open(main_repo_path)?;
         let main_head = get_head_commit(&main_repo)?;
+        let wt_root = crate::git_repo::workdir(&wt_repo)
+            .unwrap_or_else(|| std::path::PathBuf::from(&wt_path));
+        Ok::<_, anyhow::Error>((wt_root, wt_head, main_head))
+    })
+    .await??;
 
-        let mut changed_files = Vec::new();
-        let mut seen_paths = HashSet::new();
+    let mut changed_files = Vec::new();
+    let mut seen_paths = HashSet::new();
+    // Gitlink changes count, the same as any other path.
+    const NAME_STATUS: &[&str] = &["--name-status", "-z", "--ignore-submodules=none"];
+    const NUMSTAT: &[&str] = &["--numstat", "-z", "--ignore-submodules=none"];
 
-        // 1. Get committed changes: diff from main repo HEAD to worktree HEAD
-        let main_oid = Oid::from_str(&main_head)?;
-        let wt_oid = Oid::from_str(&wt_head)?;
-        let main_tree = wt_repo.find_commit(main_oid)?.tree()?;
-        let wt_tree = wt_repo.find_commit(wt_oid)?.tree()?;
-
-        let mut opts = DiffOptions::new();
-        let diff = wt_repo.diff_tree_to_tree(Some(&main_tree), Some(&wt_tree), Some(&mut opts))?;
-
-        for (idx, delta) in diff.deltas().enumerate() {
-            let path = delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_default();
-
+    // 1. Get committed changes: diff from main repo HEAD to worktree HEAD
+    let committed_revs = [main_head.clone(), wt_head.clone()];
+    let (name_status, numstat) = tokio::join!(
+        crate::session::git::diff_cli(&wt_root, &committed_revs, NAME_STATUS, &[]),
+        crate::session::git::diff_cli(&wt_root, &committed_revs, NUMSTAT, &[]),
+    );
+    let name_status = name_status.ok_or_else(|| {
+        anyhow::anyhow!(
+            "failed to diff {main_head}..{wt_head} in {}",
+            wt_root.display()
+        )
+    })?;
+    let numstat = numstat
+        .as_deref()
+        .map(crate::session::git::parse_numstat_z)
+        .unwrap_or_default();
+    {
+        for (path, change_type) in crate::session::git::parse_name_status_z(&name_status) {
             if path.is_empty() {
                 continue;
             }
 
-            let change_type = change_type_from_git2_delta(delta.status());
-
-            let (additions, deletions) = git2::Patch::from_diff(&diff, idx)
-                .ok()
-                .flatten()
-                .and_then(|p| p.line_stats().ok())
-                .map(|(_, a, d)| (a as u64, d as u64))
-                .unwrap_or((0, 0));
+            let (additions, deletions) = numstat.get(&path).copied().unwrap_or((0, 0));
 
             seen_paths.insert(path.clone());
             changed_files.push(GitFileChange {
@@ -2560,26 +2559,18 @@ async fn get_apply_context(worktree_path: &str) -> Result<ApplyContext> {
             });
         }
 
-        // 2. Get dirty (uncommitted) changes in worktree
-        let mut dirty_opts = DiffOptions::new();
-        dirty_opts.include_untracked(true);
-
-        if let Ok(dirty_diff) =
-            wt_repo.diff_tree_to_workdir_with_index(Some(&wt_tree), Some(&mut dirty_opts))
-        {
-            for delta in dirty_diff.deltas() {
-                let path = delta
-                    .new_file()
-                    .path()
-                    .or_else(|| delta.old_file().path())
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default();
-
+        // 2. Get dirty (uncommitted) changes in worktree; a wholly untracked directory is one `dir/` entry
+        let dirty_revs = [wt_head.clone()];
+        let dirty = crate::session::git::diff_cli(&wt_root, &dirty_revs, NAME_STATUS, &[]).await;
+        if let Some(dirty) = dirty {
+            let untracked = crate::session::git::untracked_paths(&wt_root, &[], false).await;
+            let changes = crate::session::git::parse_name_status_z(&dirty)
+                .into_iter()
+                .chain(untracked.into_iter().map(|p| (p, ChangeType::Untracked)));
+            for (path, change_type) in changes {
                 if path.is_empty() || seen_paths.contains(&path) {
                     continue;
                 }
-
-                let change_type = change_type_from_git2_delta(delta.status());
 
                 seen_paths.insert(path.clone());
                 changed_files.push(GitFileChange {
@@ -2597,13 +2588,11 @@ async fn get_apply_context(worktree_path: &str) -> Result<ApplyContext> {
                 });
             }
         }
-
-        Ok(ApplyContext {
-            base_commit: main_head,
-            changed_files,
-        })
+    }
+    Ok(ApplyContext {
+        base_commit: main_head,
+        changed_files,
     })
-    .await?
 }
 
 async fn get_file_at_commit(worktree_path: &str, commit: &str, path: &str) -> Option<String> {

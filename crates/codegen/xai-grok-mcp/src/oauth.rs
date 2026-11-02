@@ -164,7 +164,7 @@ async fn authenticate_with_fs_lock(
         }
     };
 
-    let lock_file = tokio::task::spawn_blocking(move || {
+    let lock_file = xai_spawn::spawn_blocking(move || {
         use std::os::unix::io::AsRawFd;
         let fd = lock_file.as_raw_fd();
         let deadline = std::time::Instant::now() + AUTH_LOCK_WAIT;
@@ -266,7 +266,7 @@ async fn run_browser_auth_flow(
 async fn stored_access_token(server_name: &str, server_url: &str) -> Option<String> {
     let url = url::Url::parse(server_url).ok()?;
     let name = server_name.to_string();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         use oauth2::TokenResponse as _;
         let store = crate::credentials::McpCredentialStore::load_default().ok()?;
         store
@@ -631,7 +631,7 @@ fn start_oauth_callback_server(
     // The handle is returned to the caller alongside the receiver, which is where
     // it is aborted when the flow completes or is cancelled.
     #[allow(clippy::disallowed_methods)]
-    let server = tokio::spawn(async move {
+    let server = xai_spawn::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
 
@@ -741,7 +741,7 @@ mod tests {
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
         format!("http://{addr}/token")
@@ -810,7 +810,7 @@ mod tests {
                 axum::http::StatusCode::NOT_FOUND.into_response()
             }
         });
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
 

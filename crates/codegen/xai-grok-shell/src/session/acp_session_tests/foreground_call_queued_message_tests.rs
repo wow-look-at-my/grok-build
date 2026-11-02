@@ -134,7 +134,7 @@ async fn run_with_queued_message(
     let started = Instant::now();
     let call_actor = actor.clone();
     let call =
-        tokio::task::spawn_local(
+        xai_spawn::spawn_local(
             async move { call_actor.execute_tool_calls(vec![call], None).await },
         );
     // The call is in flight once it raises the blocking wait.

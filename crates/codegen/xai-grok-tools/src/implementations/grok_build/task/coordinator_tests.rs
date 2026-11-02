@@ -547,7 +547,7 @@ pub(in crate::implementations::grok_build::task::coordinator) fn harness_with_op
         .graduated_progress
         .then(|| std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)));
     let (temporary_worktree_release_tx, temporary_worktree_releases) = mpsc::unbounded_channel();
-    let actor = tokio::spawn(
+    let actor = xai_spawn::spawn(
         SubagentCoordinator::from_channel(
             command_rx,
             TestRunner {
@@ -630,7 +630,7 @@ fn harness_with_admission_gate(
         entered: entered_tx,
         release: admission_release.clone(),
     };
-    let actor = tokio::spawn(
+    let actor = xai_spawn::spawn(
         SubagentCoordinator::from_channel(
             command_rx,
             TestRunner {
@@ -695,7 +695,7 @@ fn spawn_noting_registration(
     tokio::task::JoinHandle<Result<SubagentResult, xai_tool_runtime::ToolError>>,
 ) {
     let (registered_tx, registered_rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         SubagentBackend::spawn(&backend, request, Some(registered_tx)).await
     });
     (registered_rx, handle)
@@ -720,7 +720,7 @@ async fn active_message_on_owned_pending_admits_after_promotion() {
         .await
         .expect("runner received child");
 
-    let send = tokio::spawn({
+    let send = xai_spawn::spawn({
         let backend = backend.clone();
         async move {
             backend
@@ -773,7 +773,7 @@ async fn outstanding(backend: &ChannelBackend, prompt_id: &str) -> SubagentOutst
 #[tokio::test]
 async fn interject_reaches_the_active_child_named_by_id() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("planner", false), None).await }
     });
@@ -826,7 +826,7 @@ async fn interject_reaches_the_active_child_named_by_id() {
 #[tokio::test]
 async fn interject_before_start_is_delivered_on_start() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("planner", false), None).await }
     });
@@ -888,7 +888,7 @@ async fn message_child(
 #[tokio::test]
 async fn send_message_reaches_the_caller_s_own_running_child() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("planner", false), None).await }
     });
@@ -919,7 +919,7 @@ async fn send_message_reaches_the_caller_s_own_running_child() {
 #[tokio::test]
 async fn send_message_refuses_a_child_of_another_session() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("planner", false), None).await }
     });
@@ -959,7 +959,7 @@ async fn send_message_to_an_unknown_id_reports_not_found() {
 #[tokio::test]
 async fn send_message_before_start_is_queued_then_delivered() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("planner", false), None).await }
     });
@@ -1037,7 +1037,7 @@ async fn background_spawn_acks_when_pending_before_session_start() {
 #[tokio::test]
 async fn foreground_completion_is_delivered_inline() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("inline", false), None).await }
     });
@@ -1055,7 +1055,7 @@ async fn foreground_completion_is_delivered_inline() {
 #[tokio::test(start_paused = true)]
 async fn foreground_deadline_hands_off_without_stopping_child() {
     let mut harness = harness(false, std::time::Duration::from_secs(1));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("slow", false), None).await }
     });
@@ -1096,7 +1096,7 @@ async fn foreground_deadline_hands_off_without_stopping_child() {
 async fn hand_off_takes_awaited_foreground_reply_before_caller_drops() {
     let mut harness = harness(false, std::time::Duration::from_secs(600));
     let backend = parent_backend(&harness);
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = backend.clone();
         async move { backend.spawn(request("blocking", false), None).await }
     });
@@ -1127,12 +1127,12 @@ async fn hand_off_takes_awaited_foreground_reply_before_caller_drops() {
 #[tokio::test]
 async fn live_blocking_waiter_suppresses_async_surface() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("waited", true), None).await }
     });
     tokio::task::yield_now().await;
-    let wait = tokio::spawn({
+    let wait = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.query("waited", true, Some(60_000)).await }
     });
@@ -1151,7 +1151,7 @@ async fn live_blocking_waiter_suppresses_async_surface() {
 #[tokio::test(start_paused = true)]
 async fn timed_out_waiter_does_not_suppress_later_completion() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("timeout", true), None).await }
     });
@@ -1175,12 +1175,12 @@ async fn timed_out_waiter_does_not_suppress_later_completion() {
 #[tokio::test(start_paused = true)]
 async fn surviving_waiter_suppresses_after_peer_times_out() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("two-waiters", true), None).await }
     });
     tokio::task::yield_now().await;
-    let short = tokio::spawn({
+    let short = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move {
             backend
@@ -1189,7 +1189,7 @@ async fn surviving_waiter_suppresses_after_peer_times_out() {
                 .unwrap()
         }
     });
-    let long = tokio::spawn({
+    let long = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move {
             backend
@@ -1215,12 +1215,12 @@ async fn surviving_waiter_suppresses_after_peer_times_out() {
 #[tokio::test]
 async fn dropped_waiter_does_not_suppress_completion() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("dropped-wait", true), None).await }
     });
     tokio::task::yield_now().await;
-    let wait = tokio::spawn({
+    let wait = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.query("dropped-wait", true, Some(60_000)).await }
     });
@@ -1240,12 +1240,12 @@ async fn dropped_waiter_does_not_suppress_completion() {
 #[tokio::test]
 async fn pending_cancel_delivers_waiter_once() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("pending-cancel", true), None).await }
     });
     tokio::task::yield_now().await;
-    let wait = tokio::spawn({
+    let wait = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.query("pending-cancel", true, Some(60_000)).await }
     });
@@ -1271,7 +1271,7 @@ async fn pending_cancel_delivers_waiter_once() {
 #[tokio::test]
 async fn caller_drop_during_initialization_does_not_drop_owned_run() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("owned", false), None).await }
     });
@@ -1300,7 +1300,7 @@ async fn caller_drop_during_initialization_does_not_drop_owned_run() {
 #[tokio::test]
 async fn a_delivered_foreground_result_empties_the_live_set() {
     let harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("settled", false), None).await }
     });
@@ -1340,7 +1340,7 @@ async fn a_delivered_foreground_result_empties_the_live_set() {
 #[tokio::test(start_paused = true)]
 async fn drain_resolves_when_child_backgrounds_at_deadline() {
     let harness = harness(false, std::time::Duration::from_secs(1));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("slow", false), None).await }
     });
@@ -1379,7 +1379,7 @@ async fn drain_resolves_when_caller_goes_away() {
     // abandonment itself rather than by the clock advancing to that deadline. No command is sent after the caller drops,
     // so only the abandonment wake can trigger the reap that resolves the drain.
     let harness = harness(false, std::time::Duration::from_secs(600));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("abandoned", false), None).await }
     });
@@ -1424,7 +1424,7 @@ async fn drain_resolves_when_queued_spawn_is_cancelled() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Queue));
     let mut filler = request("filler", true);
     filler.parent_prompt_id = Some("other".to_owned());
-    let _filler = tokio::spawn({
+    let _filler = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(filler, None).await }
     });
@@ -1434,7 +1434,7 @@ async fn drain_resolves_when_queued_spawn_is_cancelled() {
         .await
         .expect("filler occupies the slot");
 
-    let queued = tokio::spawn({
+    let queued = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("queued", false), None).await }
     });
@@ -1469,7 +1469,7 @@ async fn drain_resolves_when_pending_child_starts_background() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
     let mut blocking = request("bg-def", false);
     blocking.subagent_type = "background-default".to_owned();
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(blocking, None).await }
     });
@@ -1523,7 +1523,7 @@ async fn drain_waits_for_deferred_terminalization_to_finalize() {
         },
     );
     let backend = parent_backend(&harness);
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = backend.clone();
         async move { backend.spawn(request("settling", false), None).await }
     });
@@ -1539,7 +1539,7 @@ async fn drain_waits_for_deferred_terminalization_to_finalize() {
         "a running turn-blocking child keeps the drain parked"
     );
 
-    let send = tokio::spawn({
+    let send = xai_spawn::spawn({
         let backend = backend.clone();
         async move {
             backend
@@ -1581,7 +1581,7 @@ async fn drain_waits_for_deferred_terminalization_to_finalize() {
 #[tokio::test]
 async fn two_parked_drains_on_one_scope_both_fire() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("fanout", false), None).await }
     });
@@ -1618,7 +1618,7 @@ async fn abandoned_foreground_caller_clears_outstanding() {
     // ParentGone parity: dropping the spawn await must leave Outstanding
     // (turn-freeze) without waiting for the foreground budget.
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("abandoned", false), None).await }
     });
@@ -1657,7 +1657,7 @@ async fn abandoned_foreground_caller_clears_outstanding() {
 #[tokio::test]
 async fn duplicate_subagent_id_is_rejected_without_replacing_live_child() {
     let harness = harness(false, std::time::Duration::from_secs(60));
-    let first = tokio::spawn({
+    let first = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("duplicate", true), None).await }
     });
@@ -1692,7 +1692,7 @@ async fn external_cancel_token_cancels_live_child() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let request = request("external-cancel", false);
     let cancel_token = request.cancel_token.clone();
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request, None).await }
     });
@@ -1719,7 +1719,7 @@ async fn dropping_coordinator_cancels_live_child() {
     let cancellation = CancellationToken::new();
     let mut request = request("owner-drop", true);
     request.cancel_token = cancellation.clone();
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request, None).await }
     });
@@ -1737,7 +1737,7 @@ async fn await_to_completion_has_no_foreground_deadline() {
     let mut harness = harness(false, std::time::Duration::from_secs(1));
     let mut request = request("await-completion", false);
     request.await_to_completion = true;
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request, None).await }
     });
@@ -1775,7 +1775,7 @@ async fn workflow_cancel_waits_for_drain_and_hides_owned_children() {
     let mut active_request = request(WORKFLOW_CHILD_ID, false);
     active_request.await_to_completion = true;
     active_request.owner = SubagentOwner::workflow("workflow-run");
-    let active_spawn = tokio::spawn({
+    let active_spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(active_request, None).await }
     });
@@ -1806,7 +1806,7 @@ async fn workflow_cancel_waits_for_drain_and_hides_owned_children() {
     let mut pending_request = request("workflow-pending", false);
     pending_request.await_to_completion = true;
     pending_request.owner = SubagentOwner::workflow("workflow-run");
-    let pending_spawn = tokio::spawn({
+    let pending_spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(pending_request, None).await }
     });
@@ -1905,7 +1905,7 @@ async fn spawn_session_child(
     req.await_to_completion = true;
     req.parent_session_id = session.to_owned();
     let backend = harness.backend.clone();
-    let handle = tokio::spawn(async move { backend.spawn(req, None).await });
+    let handle = xai_spawn::spawn(async move { backend.spawn(req, None).await });
     assert_eq!(
         harness
             .requests
@@ -2022,7 +2022,7 @@ async fn teardown_holds_admission_until_children_drain_then_reopens() {
         .expect("drain channel");
 
     // A later spawn on the same session is admitted and runs to completion.
-    let admitted = tokio::spawn({
+    let admitted = xai_spawn::spawn({
         let backend = harness.backend.clone();
         let mut req = request("after-drain", false);
         req.parent_session_id = "parent".to_owned();
@@ -2096,7 +2096,7 @@ async fn teardown_drain_deadline_reopens_spawns() {
         .expect("drain channel");
 
     // Admission reopened: a later spawn on the same session starts.
-    let _admitted = tokio::spawn({
+    let _admitted = xai_spawn::spawn({
         let backend = harness.backend.clone();
         let mut req = request("after-deadline", false);
         req.parent_session_id = "parent".to_owned();
@@ -2134,7 +2134,7 @@ async fn panic_keeps_request_uuid_as_resume_identity() {
 
     let mut resume = request("identity-resume", false);
     resume.resume_from = Some("identity-panic".to_owned());
-    let resume_spawn = tokio::spawn({
+    let resume_spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(resume, None).await }
     });
@@ -2166,7 +2166,7 @@ async fn panic_keeps_request_uuid_as_resume_identity() {
 async fn divergent_child_session_id_disables_sender_authority() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let id = uuid::Uuid::now_v7().to_string();
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         let mut request = request(&id, false);
         request.subagent_type = "divergent-session".to_owned();
@@ -2196,7 +2196,7 @@ async fn divergent_child_session_id_disables_sender_authority() {
 #[tokio::test]
 async fn completed_resume_source_uses_request_uuid_as_agent_id() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("identity-source", false), None).await }
     });
@@ -2218,7 +2218,7 @@ async fn completed_resume_source_uses_request_uuid_as_agent_id() {
 
     let mut resume = request("identity-resume", false);
     resume.resume_from = Some("identity-source".to_owned());
-    let resume_spawn = tokio::spawn({
+    let resume_spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(resume, None).await }
     });
@@ -2259,7 +2259,7 @@ async fn a_resumed_child_reports_its_own_live_state_not_the_source() {
         CoordinatorConfig::default(),
     );
     // The source finishes first; the resume then continues its transcript.
-    let source = tokio::spawn({
+    let source = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("resume-src", true), None).await }
     });
@@ -2269,7 +2269,7 @@ async fn a_resumed_child_reports_its_own_live_state_not_the_source() {
 
     let mut resume = request("resume-child", true);
     resume.resume_from = Some("resume-src".to_owned());
-    let resume_spawn = tokio::spawn({
+    let resume_spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(resume, None).await }
     });
@@ -2339,7 +2339,7 @@ async fn a_resumed_child_reports_its_own_live_state_not_the_source() {
 #[tokio::test]
 async fn resolved_subagent_type_is_what_resume_source_returns() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         let mut req = request("resolved-type-source", false);
         req.subagent_type = "general-purpose".to_owned();
@@ -2355,7 +2355,7 @@ async fn resolved_subagent_type_is_what_resume_source_returns() {
     let mut resume = request("identity-resume", false);
     resume.resume_from = Some("resolved-type-source".to_owned());
     resume.subagent_type = "general-purpose".to_owned();
-    let resume_spawn = tokio::spawn({
+    let resume_spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(resume, None).await }
     });
@@ -2376,7 +2376,7 @@ async fn queued_resume_inherits_the_source_type_before_admission() {
 
     let mut source = request("source", true);
     source.subagent_type = "plan".to_owned();
-    let source_spawn = tokio::spawn({
+    let source_spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(source, None).await }
     });
@@ -2384,7 +2384,7 @@ async fn queued_resume_inherits_the_source_type_before_admission() {
     let _ = harness.finish.send(());
     source_spawn.await.unwrap().unwrap();
 
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
@@ -2393,7 +2393,7 @@ async fn queued_resume_inherits_the_source_type_before_admission() {
     let mut resume = request("queued-resume", true);
     resume.subagent_type = "general-purpose".to_owned();
     resume.resume_from = Some("source".to_owned());
-    let queued = tokio::spawn({
+    let queued = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(resume, None).await }
     });
@@ -2457,7 +2457,7 @@ async fn queued_resume_inherits_a_durable_source_type_before_admission() {
         limited(1, LimitBehavior::Queue),
     );
 
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
@@ -2466,7 +2466,7 @@ async fn queued_resume_inherits_a_durable_source_type_before_admission() {
     let mut resume = request("queued-resume", true);
     resume.subagent_type = "general-purpose".to_owned();
     resume.resume_from = Some("disk-only".to_owned());
-    let queued = tokio::spawn({
+    let queued = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(resume, None).await }
     });
@@ -2515,7 +2515,7 @@ async fn queued_resume_inherits_a_durable_source_type_before_admission() {
 #[tokio::test]
 async fn resolved_subagent_type_updates_a_queued_record() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Queue));
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move {
             backend
@@ -2530,7 +2530,7 @@ async fn resolved_subagent_type_updates_a_queued_record() {
 
     let mut queued_request = request("queued-resume", true);
     queued_request.subagent_type = "general-purpose".to_owned();
-    let queued = tokio::spawn({
+    let queued = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(queued_request, None).await }
     });
@@ -2620,7 +2620,7 @@ async fn teardown_cancels_background_child_without_rebuffering() {
     // rebuffers a completion for a later resume of the same session id.
     let mut req = request("bg", true);
     req.parent_session_id = "parent".to_owned();
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(req, None).await }
     });
@@ -2714,7 +2714,7 @@ async fn usage_events_feed_sorted_outstanding_reply() {
         ("a-foreground", false),
         ("background", true),
     ] {
-        spawns.push(tokio::spawn({
+        spawns.push(xai_spawn::spawn({
             let backend = harness.backend.clone();
             async move { backend.spawn(request(id, is_background), None).await }
         }));
@@ -2826,7 +2826,7 @@ async fn cancel_parent_session_kills_prior_turn_background() {
     let mut spawns = Vec::new();
     for req in [prior, current] {
         let id = req.id.clone();
-        spawns.push(tokio::spawn({
+        spawns.push(xai_spawn::spawn({
             let backend = harness.backend.clone();
             async move { backend.spawn(req, None).await }
         }));
@@ -2874,7 +2874,7 @@ async fn cancel_parent_session_does_not_touch_foreign_session() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
     let mut foreign = request("foreign-child", true);
     foreign.parent_session_id = "other-session".into();
-    let foreign_spawn = tokio::spawn({
+    let foreign_spawn = xai_spawn::spawn({
         let backend = ChannelBackend::for_coordinator_session(
             harness
                 .backend
@@ -2928,7 +2928,7 @@ async fn cancel_parent_session_unbound_backend_is_not_found() {
 async fn cancel_parent_session_rejects_late_spawn_until_admission_reopens() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
     let bound = parent_backend(&harness);
-    let prior = tokio::spawn({
+    let prior = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("prior", true), None).await }
     });
@@ -2972,7 +2972,7 @@ async fn cancel_parent_session_rejects_late_spawn_until_admission_reopens() {
     );
 
     assert!(bound.open_spawn_admission());
-    let allowed = tokio::spawn({
+    let allowed = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("after-reopen", true), None).await }
     });
@@ -3006,7 +3006,7 @@ async fn cancel_parent_session_spares_nested_workflow_children() {
     // Workflow-owned parent child (child_session_id = "wf-child").
     let mut wf_parent = request("wf-child", true);
     wf_parent.owner = SubagentOwner::workflow("run-1");
-    let wf_spawn = tokio::spawn({
+    let wf_spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(wf_parent, None).await }
     });
@@ -3034,7 +3034,7 @@ async fn cancel_parent_session_spares_nested_workflow_children() {
 
     // Nested Task-owned spawn from the workflow child (reparented to root parent).
     let nested_active = request("nested-active", true);
-    let nested_active_spawn = tokio::spawn({
+    let nested_active_spawn = xai_spawn::spawn({
         let backend = child_backend.clone();
         async move { backend.spawn(nested_active, None).await }
     });
@@ -3059,7 +3059,7 @@ async fn cancel_parent_session_spares_nested_workflow_children() {
 
     // Nested pending (not started yet) under the same workflow child.
     let nested_pending = request("nested-pending", true);
-    let nested_pending_spawn = tokio::spawn({
+    let nested_pending_spawn = xai_spawn::spawn({
         let backend = child_backend.clone();
         async move { backend.spawn(nested_pending, None).await }
     });
@@ -3103,7 +3103,7 @@ async fn loop_tracking_covers_pending_active_and_nested_reparenting() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
     let mut outer_request = request("outer", true);
     outer_request.runtime_overrides.loop_task_id = Some("loop-task".to_owned());
-    let outer_spawn = tokio::spawn({
+    let outer_spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(outer_request, None).await }
     });
@@ -3158,7 +3158,7 @@ async fn loop_tracking_covers_pending_active_and_nested_reparenting() {
 #[tokio::test]
 async fn runner_receives_direct_spawner_as_advertise_target() {
     let mut harness = harness(true, std::time::Duration::from_secs(60));
-    let _child_spawn = tokio::spawn({
+    let _child_spawn = xai_spawn::spawn({
         let backend = parent_backend(&harness);
         async move { backend.spawn(request("child", true), None).await }
     });
@@ -3176,7 +3176,7 @@ async fn runner_receives_direct_spawner_as_advertise_target() {
             .expect("coordinator sender"),
         "child",
     );
-    let _grandchild_spawn = tokio::spawn({
+    let _grandchild_spawn = xai_spawn::spawn({
         let backend = child_backend.clone();
         async move { backend.spawn(request("grandchild", true), None).await }
     });
@@ -3209,7 +3209,7 @@ async fn spawn_child_with(
 ) -> ChannelBackend {
     let backend = parent_backend(harness);
     // Background: resolves at completion, which no caller of this helper awaits.
-    let _child = tokio::spawn(async move { backend.spawn(child, None).await });
+    let _child = xai_spawn::spawn(async move { backend.spawn(child, None).await });
     harness.requests.recv().await.expect("child observed");
     if wait_before_start {
         let _ = harness.start.send(());
@@ -3223,7 +3223,7 @@ async fn spawn_nested(
     backend: &ChannelBackend,
     nested: SubagentRequest,
 ) -> tokio::task::JoinHandle<Result<SubagentResult, xai_tool_runtime::ToolError>> {
-    let join = tokio::spawn({
+    let join = xai_spawn::spawn({
         let backend = backend.clone();
         async move { backend.spawn(nested, None).await }
     });
@@ -3302,7 +3302,7 @@ async fn nested_spawner_can_query_and_cancel_queued_grandchild() {
     let (config, mut notices) = limited_with_sink(1, LimitBehavior::Queue);
     let mut harness = harness_with_config(false, config);
     let child_backend = spawn_child(&mut harness, false).await;
-    let grandchild = tokio::spawn({
+    let grandchild = xai_spawn::spawn({
         let backend = child_backend.clone();
         async move { backend.spawn(request("grandchild", true), None).await }
     });
@@ -3588,7 +3588,7 @@ async fn workflow_nested_grandchild_completion_still_buffers_for_spawner() {
     let mut child = request("child", true);
     child.owner = SubagentOwner::workflow("wf-1");
     let child_backend = spawn_child_with(&mut harness, false, child).await;
-    let grandchild = tokio::spawn({
+    let grandchild = xai_spawn::spawn({
         let backend = child_backend.clone();
         async move { backend.spawn(request("grandchild", true), None).await }
     });
@@ -3638,7 +3638,7 @@ async fn completion_buffer_caps_summary_without_mutating_result() {
     let mut request = request("buffered", true);
     request.prompt = "aéb".to_owned();
     request.runtime_overrides.completion_output_cap = Some(2);
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request, None).await }
     });
@@ -3692,7 +3692,7 @@ async fn definition_background_counts_as_background_for_outstanding() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
     let mut blocking_request = request("bg-def", false);
     blocking_request.subagent_type = "background-default".to_owned();
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(blocking_request, None).await }
     });
@@ -3729,7 +3729,7 @@ async fn buffered_completion_output_cap_bounds_buffered_summary() {
     );
     let mut request = request("capped", true);
     request.prompt = "x".repeat(64);
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request, None).await }
     });
@@ -3789,7 +3789,7 @@ async fn teardown_session_drops_only_that_sessions_buffer() {
     for (id, parent) in [("child-a", "parent-a"), ("child-b", "parent-b")] {
         let mut request = request(id, true);
         request.parent_session_id = parent.to_owned();
-        let spawn = tokio::spawn({
+        let spawn = xai_spawn::spawn({
             let backend = harness.backend.clone();
             async move { backend.spawn(request, None).await }
         });
@@ -3838,7 +3838,7 @@ async fn teardown_session_drops_only_that_sessions_buffer() {
 #[tokio::test]
 async fn suppressed_completion_stays_buffered_for_a_later_drain() {
     let mut harness = harness_with_config(false, buffering());
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("child", true), None).await }
     });
@@ -3877,7 +3877,7 @@ async fn suppressed_completion_stays_buffered_for_a_later_drain() {
 async fn peek_completions_returns_owned_without_draining() {
     let mut harness = harness_with_config(false, buffering());
     for id in ["child-a", "child-b"] {
-        let spawn = tokio::spawn({
+        let spawn = xai_spawn::spawn({
             let backend = harness.backend.clone();
             async move { backend.spawn(request(id, true), None).await }
         });
@@ -3913,7 +3913,7 @@ async fn peek_is_scoped_to_parent_session() {
     for (id, parent) in [("child-a", "parent-a"), ("child-b", "parent-b")] {
         let mut request = request(id, true);
         request.parent_session_id = parent.to_owned();
-        let spawn = tokio::spawn({
+        let spawn = xai_spawn::spawn({
             let backend = harness.backend.clone();
             async move { backend.spawn(request, None).await }
         });
@@ -3950,7 +3950,7 @@ async fn completion_drain_is_scoped_to_parent_session() {
     for (id, parent) in [("child-a", "parent-a"), ("child-b", "parent-b")] {
         let mut request = request(id, true);
         request.parent_session_id = parent.to_owned();
-        let spawn = tokio::spawn({
+        let spawn = xai_spawn::spawn({
             let backend = harness.backend.clone();
             async move { backend.spawn(request, None).await }
         });
@@ -3984,7 +3984,7 @@ async fn completion_drain_is_scoped_to_parent_session() {
 #[tokio::test]
 async fn blocking_query_of_completed_child_returns_immediately() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("already-done", true), None).await }
     });
@@ -4012,7 +4012,7 @@ async fn blocking_query_of_completed_child_returns_immediately() {
 #[tokio::test]
 async fn blocking_query_of_cancelled_child_returns_immediately() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("already-killed", true), None).await }
     });
@@ -4065,7 +4065,7 @@ async fn blocking_query_of_unknown_id_returns_immediately() {
 #[tokio::test]
 async fn session_backend_cannot_query_or_cancel_foreign_child() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("scoped", true), None).await }
     });
@@ -4114,7 +4114,7 @@ async fn completed_cache_evicts_oldest_entry_at_cap() {
     );
     for index in 0..=MAX_COMPLETED_ENTRIES {
         let id = format!("cache-{index:04}");
-        let spawn = tokio::spawn({
+        let spawn = xai_spawn::spawn({
             let backend = harness.backend.clone();
             let request = request(&id, true);
             async move { backend.spawn(request, None).await }
@@ -4198,7 +4198,7 @@ async fn spawns_past_the_concurrent_limit_queue_until_a_slot_frees() {
     let mut harness = harness_with_config(false, limited(2, LimitBehavior::Queue));
     let spawns: Vec<_> = (0..4)
         .map(|i| {
-            tokio::spawn({
+            xai_spawn::spawn({
                 let backend = harness.backend.clone();
                 async move {
                     backend
@@ -4254,7 +4254,7 @@ async fn spawns_past_the_concurrent_limit_queue_until_a_slot_frees() {
 #[tokio::test]
 async fn fail_mode_rejects_at_the_limit_and_recovers_when_a_slot_frees() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Fail));
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
@@ -4295,7 +4295,7 @@ async fn fail_mode_rejects_at_the_limit_and_recovers_when_a_slot_frees() {
     let held = held.await.expect("join").expect("spawn round-trips");
     assert!(held.success, "{held:?}");
 
-    let next = tokio::spawn({
+    let next = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("next", true), None).await }
     });
@@ -4315,7 +4315,7 @@ async fn fail_mode_rejects_at_the_limit_and_recovers_when_a_slot_frees() {
 async fn limit_notices_report_running_count_queue_depth_and_origin() {
     let (config, mut notices) = limited_with_sink(1, LimitBehavior::Queue);
     let mut harness = harness_with_config(false, config);
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
@@ -4325,7 +4325,7 @@ async fn limit_notices_report_running_count_queue_depth_and_origin() {
         "an admitted spawn must not notify the sink"
     );
 
-    let parked = tokio::spawn({
+    let parked = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("parked", true), None).await }
     });
@@ -4345,7 +4345,7 @@ async fn limit_notices_report_running_count_queue_depth_and_origin() {
 
     let mut loop_request = request("loop-fire", true);
     loop_request.runtime_overrides.loop_task_id = Some("loop-1".to_owned());
-    let looped = tokio::spawn({
+    let looped = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(loop_request, None).await }
     });
@@ -4369,7 +4369,7 @@ async fn limit_notices_report_running_count_queue_depth_and_origin() {
 async fn a_rejected_spawn_notice_excludes_itself_from_queue_depth() {
     let (config, mut notices) = limited_with_sink(1, LimitBehavior::Fail);
     let mut harness = harness_with_config(false, config);
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
@@ -4408,12 +4408,12 @@ async fn teardown_purges_a_queued_spawn_without_rebuffering() {
             ..limited(1, LimitBehavior::Queue)
         },
     );
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
     assert_eq!(harness.started.recv().await.as_deref(), Some("held"));
-    let parked = tokio::spawn({
+    let parked = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("parked", true), None).await }
     });
@@ -4468,12 +4468,12 @@ async fn teardown_purges_a_queued_spawn_without_rebuffering() {
 async fn dropping_the_actor_resolves_queued_callers_without_host_callbacks() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Queue));
     // Foreground so spawn_reply is still held when the actor drops.
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", false), None).await }
     });
     assert_eq!(harness.started.recv().await.as_deref(), Some("held"));
-    let parked = tokio::spawn({
+    let parked = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("parked", false), None).await }
     });
@@ -4495,7 +4495,7 @@ async fn dropping_the_actor_resolves_queued_callers_without_host_callbacks() {
 #[tokio::test]
 async fn a_spawn_cancelled_while_queued_never_starts() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Queue));
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
@@ -4504,7 +4504,7 @@ async fn a_spawn_cancelled_while_queued_never_starts() {
     let mut queued = request("queued", true);
     let cancel = CancellationToken::new();
     queued.cancel_token = cancel.clone();
-    let queued = tokio::spawn({
+    let queued = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(queued, None).await }
     });
@@ -4550,13 +4550,13 @@ async fn a_queued_spawn_auto_backgrounds_its_caller_at_the_await_budget() {
             ..CoordinatorConfig::default()
         },
     );
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
     assert_eq!(harness.started.recv().await.as_deref(), Some("held"));
 
-    let parked = tokio::spawn({
+    let parked = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("parked", false), None).await }
     });
@@ -4599,7 +4599,7 @@ async fn a_queued_spawn_auto_backgrounds_its_caller_at_the_await_budget() {
 #[tokio::test]
 async fn an_abandoned_queued_caller_stops_turn_blocking() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Queue));
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
@@ -4608,7 +4608,7 @@ async fn an_abandoned_queued_caller_stops_turn_blocking() {
     // No await budget: only the caller-gone reap can unblock the turn.
     let mut abandoned = request("abandoned", false);
     abandoned.await_to_completion = true;
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(abandoned, None).await }
     });
@@ -4648,13 +4648,13 @@ async fn a_dequeued_spawn_keeps_spending_its_enqueue_await_budget() {
             ..CoordinatorConfig::default()
         },
     );
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
     assert_eq!(harness.started.recv().await.as_deref(), Some("held"));
 
-    let parked = tokio::spawn({
+    let parked = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("parked", false), None).await }
     });
@@ -4706,7 +4706,7 @@ async fn a_dequeued_spawn_keeps_spending_its_enqueue_await_budget() {
 #[tokio::test(start_paused = true)]
 async fn an_out_of_band_token_cancel_resolves_without_other_actor_traffic() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Queue));
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
@@ -4715,7 +4715,7 @@ async fn an_out_of_band_token_cancel_resolves_without_other_actor_traffic() {
     let mut queued = request("queued", true);
     let cancel = CancellationToken::new();
     queued.cancel_token = cancel.clone();
-    let queued = tokio::spawn({
+    let queued = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(queued, None).await }
     });
@@ -4748,13 +4748,13 @@ async fn an_out_of_band_token_cancel_resolves_without_other_actor_traffic() {
 #[tokio::test]
 async fn a_cancel_command_by_id_resolves_a_queued_spawn() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Queue));
-    let held = tokio::spawn({
+    let held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("held", true), None).await }
     });
     assert_eq!(harness.started.recv().await.as_deref(), Some("held"));
 
-    let queued = tokio::spawn({
+    let queued = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("queued", true), None).await }
     });
@@ -4802,13 +4802,13 @@ async fn a_cancel_command_by_id_resolves_a_queued_spawn() {
 #[tokio::test]
 async fn a_saturated_session_does_not_block_another_sessions_spawns() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Queue));
-    let a_held = tokio::spawn({
+    let a_held = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("a-held", true), None).await }
     });
     assert_eq!(harness.started.recv().await.as_deref(), Some("a-held"));
 
-    let a_queued = tokio::spawn({
+    let a_queued = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("a-queued", true), None).await }
     });
@@ -4817,7 +4817,7 @@ async fn a_saturated_session_does_not_block_another_sessions_spawns() {
     // Session B must start despite sitting behind session A's parked entry.
     let mut for_b = request("b-first", true);
     for_b.parent_session_id = "other".to_owned();
-    let b_first = tokio::spawn({
+    let b_first = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(for_b, None).await }
     });
@@ -4841,7 +4841,7 @@ async fn a_saturated_session_does_not_block_another_sessions_spawns() {
 #[tokio::test]
 async fn workflow_spawns_bypass_the_session_concurrent_limit() {
     let mut harness = harness_with_config(false, limited(1, LimitBehavior::Fail));
-    let task_child = tokio::spawn({
+    let task_child = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(request("task-child", true), None).await }
     });
@@ -4849,7 +4849,7 @@ async fn workflow_spawns_bypass_the_session_concurrent_limit() {
 
     let mut workflow = request("wf-child", true);
     workflow.owner = SubagentOwner::workflow("run-1");
-    let workflow = tokio::spawn({
+    let workflow = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move { backend.spawn(workflow, None).await }
     });
@@ -4888,7 +4888,7 @@ const PANICKING_PROMPT: &str = "panic mid-run";
 #[tokio::test]
 async fn a_panicking_child_reports_what_it_died_of() {
     let mut harness = harness(false, std::time::Duration::from_secs(60));
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = harness.backend.clone();
         async move {
             let mut request = request("dead-child", true);
@@ -4961,7 +4961,7 @@ async fn conflicting_spawns_resolve_to_separate_worktrees() {
 
     let first = {
         let backend = backend.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             backend
                 .spawn(locked_request("lock-a", "/repo", false), None)
                 .await
@@ -4976,7 +4976,7 @@ async fn conflicting_spawns_resolve_to_separate_worktrees() {
 
     let second = {
         let backend = backend.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             backend
                 .spawn(locked_request("lock-b", "/repo", false), None)
                 .await
@@ -5021,7 +5021,7 @@ async fn temporary_worktree_is_released_when_the_agent_finishes() {
 
     let first = {
         let backend = backend.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             backend
                 .spawn(locked_request("lock-a", "/repo", false), None)
                 .await
@@ -5031,7 +5031,7 @@ async fn temporary_worktree_is_released_when_the_agent_finishes() {
 
     let second = {
         let backend = backend.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             backend
                 .spawn(locked_request("lock-b", "/repo", false), None)
                 .await
@@ -5075,7 +5075,7 @@ async fn conflicting_spawn_waits_when_a_worktree_is_unavailable() {
 
     let first = {
         let backend = backend.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             backend
                 .spawn(locked_request("lock-a", "/repo", false), None)
                 .await
@@ -5127,7 +5127,7 @@ fn spawn_on(
     request: SubagentRequest,
 ) -> tokio::task::JoinHandle<Result<SubagentResult, xai_tool_runtime::ToolError>> {
     let backend = backend.clone();
-    tokio::spawn(async move { backend.spawn(request, None).await })
+    xai_spawn::spawn(async move { backend.spawn(request, None).await })
 }
 
 /// Children one caller blocks on hold the caller's lock together. A panel of
@@ -5275,7 +5275,7 @@ async fn conflicting_spawn_fails_when_the_holder_never_releases() {
 
     let first = {
         let backend = backend.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             backend
                 .spawn(locked_request("lock-a", "/repo", false), None)
                 .await

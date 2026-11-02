@@ -1,0 +1,12 @@
+[package]
+license = "Apache-2.0"
+name = "xai-spawn"
+version = "0.1.0"
+edition.workspace = true
+description = "Type-erased tokio spawn wrappers that compile tokio's task code once per output type"
+
+[dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

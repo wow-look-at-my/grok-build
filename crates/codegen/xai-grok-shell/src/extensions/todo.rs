@@ -77,7 +77,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                     })
                     .is_ok();
                 if enqueued {
-                    tokio::spawn(async move {
+                    xai_spawn::spawn(async move {
                         let _ = wake_rx.await;
                     });
                 }

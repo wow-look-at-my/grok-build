@@ -911,7 +911,7 @@ mod live_orphan_hook_tests {
 
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         actor.tool_context.subagent_event_tx = Some(event_tx);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(event) = event_rx.recv().await {
                 if let SubagentEvent::Inspect(request) = event {
                     let value = inspect

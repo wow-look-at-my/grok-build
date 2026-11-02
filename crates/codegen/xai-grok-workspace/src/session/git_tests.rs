@@ -193,55 +193,47 @@ async fn git_cli_scrubs_token_from_transport_failure() {
 #[test]
 fn detect_default_branch_prefers_remote_head_then_config() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
+    let dir = tmp.path();
+    crate::test_git::init(dir);
     // Repo-local value shields the assertions from the host's global config.
-    repo.config()
-        .unwrap()
-        .set_str("init.defaultBranch", "trunk")
-        .unwrap();
-
-    let sig = git2::Signature::now("test", "test@test.com").unwrap();
-    let tree_id = repo.index().unwrap().write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    let oid = repo
-        .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
-        .unwrap();
+    crate::test_git::git(dir, &["config", "init.defaultBranch", "trunk"]);
+    let oid = crate::test_git::commit(dir, "initial");
+    let repo = || crate::git_repo::discover(dir).unwrap();
 
     // With no remote HEAD, detection falls back to config
-    assert_eq!(detect_default_branch(&repo).as_deref(), Some("trunk"));
+    assert_eq!(detect_default_branch(&repo()).as_deref(), Some("trunk"));
 
     // A lone remote-tracking branch without `origin/HEAD` still falls back to config
     // Detection reads the `origin/HEAD` symbolic ref and never guesses from the remote-tracking branches
-    repo.reference("refs/remotes/origin/main", oid, false, "test")
-        .unwrap();
-    assert_eq!(detect_default_branch(&repo).as_deref(), Some("trunk"));
+    crate::test_git::git(dir, &["update-ref", "refs/remotes/origin/main", &oid]);
+    assert_eq!(detect_default_branch(&repo()).as_deref(), Some("trunk"));
 
     // `origin/HEAD` symbolic ref wins over config.
-    repo.reference_symbolic(
-        "refs/remotes/origin/HEAD",
-        "refs/remotes/origin/main",
-        false,
-        "test",
-    )
-    .unwrap();
-    assert_eq!(detect_default_branch(&repo).as_deref(), Some("main"));
+    crate::test_git::git(
+        dir,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+    );
+    assert_eq!(detect_default_branch(&repo()).as_deref(), Some("main"));
 }
 
 #[test]
 fn test_resolve_persisted_session_git_metadata_collects_sorted_unique_remotes() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
-    repo.remote(
+    crate::test_git::init(tmp.path());
+    let add_remote =
+        |name: &str, url: &str| crate::test_git::git(tmp.path(), &["remote", "add", name, url]);
+    add_remote(
         "origin",
         "https://x-access-token:secret-token@github.com/xai-org/example.git",
-    )
-    .unwrap();
+    );
     // Use a different host to avoid CI insteadOf rules collapsing URLs.
-    repo.remote("backup", "https://gitlab.com/xai-org/example.git")
-        .unwrap();
+    add_remote("backup", "https://gitlab.com/xai-org/example.git");
     // Same effective URL as origin after credential stripping, so it tests dedup
-    repo.remote("duplicate", "https://github.com/xai-org/example.git")
-        .unwrap();
+    add_remote("duplicate", "https://github.com/xai-org/example.git");
 
     let metadata = resolve_persisted_session_git_metadata_sync(tmp.path());
 
@@ -262,9 +254,16 @@ fn test_resolve_persisted_session_git_metadata_collects_sorted_unique_remotes() 
 #[test]
 fn test_resolve_persisted_session_git_metadata_captures_head() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
-    repo.remote("origin", "https://github.com/xai-org/example.git")
-        .unwrap();
+    crate::test_git::init(tmp.path());
+    crate::test_git::git(
+        tmp.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/xai-org/example.git",
+        ],
+    );
 
     // Before any commit, HEAD is unborn, so both fields are None
     let metadata = resolve_persisted_session_git_metadata_sync(tmp.path());
@@ -272,55 +271,28 @@ fn test_resolve_persisted_session_git_metadata_captures_head() {
     assert!(metadata.head_branch.is_none());
 
     // Create initial commit on default branch.
-    let sig = git2::Signature::now("test", "test@test.com").unwrap();
-    let mut index = repo.index().unwrap();
-    let tree_id = index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    let commit_oid = repo
-        .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
-        .unwrap();
+    let commit_oid = crate::test_git::commit(tmp.path(), "initial");
 
     let metadata = resolve_persisted_session_git_metadata_sync(tmp.path());
-    assert_eq!(
-        metadata.head_commit.as_deref(),
-        Some(commit_oid.to_string().as_str())
-    );
+    assert_eq!(metadata.head_commit.as_deref(), Some(commit_oid.as_str()));
     assert!(metadata.head_branch.is_some());
 
     // Create a second commit and verify HEAD updates.
-    let parent = repo.find_commit(commit_oid).unwrap();
-    let tree2 = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    let commit2 = repo
-        .commit(Some("HEAD"), &sig, &sig, "second", &tree2, &[&parent])
-        .unwrap();
+    let commit2 = crate::test_git::commit(tmp.path(), "second");
 
     let metadata = resolve_persisted_session_git_metadata_sync(tmp.path());
-    assert_eq!(
-        metadata.head_commit.as_deref(),
-        Some(commit2.to_string().as_str())
-    );
+    assert_eq!(metadata.head_commit.as_deref(), Some(commit2.as_str()));
 }
 
 #[test]
 fn test_resolve_persisted_session_git_metadata_detached_head() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
+    let commit_oid = crate::test_git::init_with_commit(tmp.path());
 
-    let sig = git2::Signature::now("test", "test@test.com").unwrap();
-    let mut index = repo.index().unwrap();
-    let tree_id = index.write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    let commit_oid = repo
-        .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
-        .unwrap();
-
-    repo.set_head_detached(commit_oid).unwrap();
+    crate::test_git::git(tmp.path(), &["checkout", "--detach", &commit_oid]);
 
     let metadata = resolve_persisted_session_git_metadata_sync(tmp.path());
-    assert_eq!(
-        metadata.head_commit.as_deref(),
-        Some(commit_oid.to_string().as_str()),
-    );
+    assert_eq!(metadata.head_commit.as_deref(), Some(commit_oid.as_str()),);
     // Detached HEAD yields None for branch, matching `git branch --show-current` in the git watcher path
     assert!(metadata.head_branch.is_none());
 }
@@ -333,39 +305,25 @@ fn test_resolve_persisted_session_git_metadata_worktree_resolves_remotes() {
     let main_path = tmp.path().join("main-repo");
     std::fs::create_dir_all(&main_path).unwrap();
 
-    let repo = git2::Repository::init(&main_path).unwrap();
-    repo.remote("origin", "https://github.com/xai-org/example.git")
-        .unwrap();
+    crate::test_git::init(&main_path);
+    crate::test_git::git(
+        &main_path,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/xai-org/example.git",
+        ],
+    );
 
     // Create an initial commit so we can create a worktree.
-    {
-        let mut index = repo.index().unwrap();
-        let tree_id = index.write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let sig = git2::Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
-    }
+    crate::test_git::commit(&main_path, "init");
 
     // Create a new branch for the worktree (can't check out the same branch).
-    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
-    repo.branch("wt-branch", &head_commit, false).unwrap();
+    crate::test_git::git(&main_path, &["branch", "wt-branch"]);
 
-    // Create a worktree via git2.
     let wt_path = tmp.path().join("my-worktree");
-    repo.worktree(
-        "my-worktree",
-        &wt_path,
-        Some(
-            git2::WorktreeAddOptions::new().reference(Some(
-                &repo
-                    .find_branch("wt-branch", git2::BranchType::Local)
-                    .unwrap()
-                    .into_reference(),
-            )),
-        ),
-    )
-    .unwrap();
+    crate::test_git::worktree_add_branch(&main_path, &wt_path, "wt-branch");
 
     // Verify from the worktree cwd: the remotes resolve through the commondir
     let metadata = resolve_persisted_session_git_metadata_sync(&wt_path);
@@ -381,30 +339,13 @@ fn test_resolve_persisted_session_git_metadata_worktree_resolves_remotes() {
 }
 
 fn init_repo_on_branch(path: &Path, branch: &str) {
-    std::fs::create_dir_all(path).unwrap();
-    let repo = git2::Repository::init(path).unwrap();
+    crate::test_git::init(path);
     std::fs::write(path.join("README"), "test\n").unwrap();
-    let sig = git2::Signature::now("test", "test@test.com").unwrap();
-    let tree_id = {
-        let mut index = repo.index().unwrap();
-        index.add_path(Path::new("README")).unwrap();
-        index.write().unwrap();
-        index.write_tree().unwrap()
-    };
-    let tree = repo.find_tree(tree_id).unwrap();
-    let oid = repo
-        .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-        .unwrap();
-    let commit = repo.find_commit(oid).unwrap();
-    let current = repo
-        .head()
-        .ok()
-        .and_then(|h| h.shorthand().ok().map(str::to_string));
-    if current.as_deref() != Some(branch) {
-        repo.branch(branch, &commit, true).unwrap();
-        repo.set_head(&format!("refs/heads/{branch}")).unwrap();
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-            .unwrap();
+    crate::test_git::git(path, &["add", "README"]);
+    crate::test_git::commit(path, "init");
+    let current = crate::test_git::git(path, &["branch", "--show-current"]);
+    if current != branch {
+        crate::test_git::git(path, &["checkout", "-f", "-B", branch]);
     }
 }
 
@@ -422,14 +363,10 @@ fn copy_dir_all(src: &Path, dst: &Path) {
 }
 
 fn checkout_named_branch(repo_path: &Path, branch: &str) {
-    let repo = git2::Repository::open(repo_path).unwrap();
-    let commit = repo.head().unwrap().peel_to_commit().unwrap();
-    if repo.find_branch(branch, git2::BranchType::Local).is_err() {
-        repo.branch(branch, &commit, false).unwrap();
+    if crate::test_git::git(repo_path, &["branch", "--list", branch]).is_empty() {
+        crate::test_git::git(repo_path, &["branch", branch]);
     }
-    repo.set_head(&format!("refs/heads/{branch}")).unwrap();
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+    crate::test_git::git(repo_path, &["checkout", "-f", branch]);
 }
 
 fn collapse_home_for_test(path: &Path) -> String {
@@ -610,23 +547,9 @@ async fn get_worktree_info_linked_git_worktree() {
     let tmp = tempfile::tempdir().unwrap();
     let main = tmp.path().join("main");
     init_repo_on_branch(&main, "main-only");
-    let repo = git2::Repository::open(&main).unwrap();
-    let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
-    repo.branch("wt-branch", &head_commit, false).unwrap();
+    crate::test_git::git(&main, &["branch", "wt-branch"]);
     let wt_path = tmp.path().join("my-worktree");
-    repo.worktree(
-        "my-worktree",
-        &wt_path,
-        Some(
-            git2::WorktreeAddOptions::new().reference(Some(
-                &repo
-                    .find_branch("wt-branch", git2::BranchType::Local)
-                    .unwrap()
-                    .into_reference(),
-            )),
-        ),
-    )
-    .unwrap();
+    crate::test_git::worktree_add_branch(&main, &wt_path, "wt-branch");
     assert!(wt_path.join(".git").is_file());
 
     let (is_wt, main_repo) = get_worktree_info(&wt_path)
@@ -754,7 +677,7 @@ fn test_effective_worktree_cwd_no_trailing_slash() {
 fn test_compute_subdir_offset_at_git_root() {
     let tmp = tempfile::tempdir().unwrap();
     let repo_root = tmp.path();
-    git2::Repository::init(repo_root).unwrap();
+    crate::test_git::init(repo_root);
 
     let (offset, git_root) = compute_subdir_offset(&repo_root.to_string_lossy());
     assert!(
@@ -772,7 +695,7 @@ fn test_compute_subdir_offset_at_git_root() {
 fn test_compute_subdir_offset_in_subdirectory() {
     let tmp = tempfile::tempdir().unwrap();
     let repo_root = tmp.path();
-    git2::Repository::init(repo_root).unwrap();
+    crate::test_git::init(repo_root);
 
     let sub = repo_root.join("packages").join("frontend");
     std::fs::create_dir_all(&sub).unwrap();
@@ -793,7 +716,7 @@ fn test_compute_subdir_offset_in_subdirectory() {
 fn test_compute_subdir_offset_deeply_nested() {
     let tmp = tempfile::tempdir().unwrap();
     let repo_root = tmp.path();
-    git2::Repository::init(repo_root).unwrap();
+    crate::test_git::init(repo_root);
 
     let deep = repo_root.join("a").join("b").join("c").join("d");
     std::fs::create_dir_all(&deep).unwrap();
@@ -818,7 +741,7 @@ fn test_compute_subdir_offset_not_a_git_repo() {
 fn test_effective_cwd_roundtrip_with_compute_offset() {
     let tmp = tempfile::tempdir().unwrap();
     let repo_root = tmp.path();
-    git2::Repository::init(repo_root).unwrap();
+    crate::test_git::init(repo_root);
 
     let sub = repo_root.join("src").join("lib");
     std::fs::create_dir_all(&sub).unwrap();
@@ -835,7 +758,7 @@ fn test_effective_cwd_roundtrip_with_compute_offset() {
 #[test]
 fn test_find_git_root_from_repo_root() {
     let tmp = tempfile::tempdir().unwrap();
-    git2::Repository::init(tmp.path()).unwrap();
+    crate::test_git::init(tmp.path());
 
     let root = find_git_root_from_path(tmp.path()).unwrap();
     // Canonicalize both sides so macOS /private/... symlinks don't trip up the comparison.
@@ -848,7 +771,7 @@ fn test_find_git_root_from_repo_root() {
 #[test]
 fn test_find_git_root_from_subdir_returns_repo_root() {
     let tmp = tempfile::tempdir().unwrap();
-    git2::Repository::init(tmp.path()).unwrap();
+    crate::test_git::init(tmp.path());
 
     let sub = tmp.path().join("a").join("b");
     std::fs::create_dir_all(&sub).unwrap();
@@ -872,7 +795,7 @@ fn test_find_git_root_outside_repo_returns_err() {
 #[test]
 fn test_discover_git_root_found_at_repo_root() {
     let tmp = tempfile::tempdir().unwrap();
-    git2::Repository::init(tmp.path()).unwrap();
+    crate::test_git::init(tmp.path());
 
     match discover_git_root(tmp.path()) {
         GitDiscoveryResult::Found(root) => {
@@ -888,7 +811,7 @@ fn test_discover_git_root_found_at_repo_root() {
 #[test]
 fn test_discover_git_root_found_from_subdir() {
     let tmp = tempfile::tempdir().unwrap();
-    git2::Repository::init(tmp.path()).unwrap();
+    crate::test_git::init(tmp.path());
 
     let sub = tmp.path().join("a").join("b");
     std::fs::create_dir_all(&sub).unwrap();
@@ -917,7 +840,7 @@ fn test_discover_git_root_not_a_repo() {
 #[test]
 fn test_discover_git_root_bare_repo_returns_discovery_failed() {
     let tmp = tempfile::tempdir().unwrap();
-    git2::Repository::init_bare(tmp.path()).unwrap();
+    crate::test_git::init_bare(tmp.path());
 
     // Bare repos have no workdir: the repo exists but a working directory can't be extracted
     assert!(
@@ -953,15 +876,10 @@ fn test_parse_numstat_empty() {
 #[tokio::test]
 async fn diffs_head_to_working_reports_untracked_file_additions() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
-    let sig = git2::Signature::now("test", "test@test.com").unwrap();
+    crate::test_git::init(tmp.path());
     std::fs::write(tmp.path().join("README.md"), "hello\n").unwrap();
-    let mut index = repo.index().unwrap();
-    index.add_path(Path::new("README.md")).unwrap();
-    index.write().unwrap();
-    let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-        .unwrap();
+    crate::test_git::git(tmp.path(), &["add", "README.md"]);
+    crate::test_git::commit(tmp.path(), "init");
 
     std::fs::write(tmp.path().join("new.txt"), "line1\nline2\nline3\n").unwrap();
 
@@ -1174,27 +1092,19 @@ fn test_parse_porcelain_v2_rename() {
     ));
 }
 
-/// Split index makes libgit2's status fail, so `status()` must fall back to the CLI.
+/// `status()` reads a split index, whether through gix or through the CLI fallback.
 /// Skipped under Bazel sandbox tests where the `git` CLI is unavailable (set `BAZEL_TEST=1` to skip; cargo runs the test normally).
 #[tokio::test]
 #[cfg_attr(
     not(unix),
     ignore = "test invokes git CLI which is not always available"
 )]
-async fn test_status_with_split_index_falls_back_to_cli() {
+async fn test_status_with_split_index() {
     if std::env::var("BAZEL_TEST").is_ok() {
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
-
-    {
-        let sig = git2::Signature::now("test", "test@test.com").unwrap();
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
-    }
+    crate::test_git::init_with_commit(tmp.path());
 
     // Enable split index via CLI; this writes the `link` extension
     git_cli(tmp.path(), &["update-index", "--split-index"])
@@ -1203,7 +1113,7 @@ async fn test_status_with_split_index_falls_back_to_cli() {
 
     std::fs::write(tmp.path().join("test.txt"), "hello").unwrap();
 
-    // status() succeeds via the CLI fallback even though libgit2 can't read the split index
+    // status() succeeds with a split index
     let result = status(tmp.path(), true, true, false, false).await;
     assert!(result.is_ok(), "status() failed: {:?}", result.err());
 
@@ -1223,14 +1133,8 @@ async fn test_status_via_cli_on_real_repo() {
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
-
     // Create an initial commit so HEAD exists.
-    let sig = git2::Signature::now("test", "test@test.com").unwrap();
-    let tree_id = repo.index().unwrap().write_tree().unwrap();
-    let tree = repo.find_tree(tree_id).unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-        .unwrap();
+    crate::test_git::init_with_commit(tmp.path());
 
     // Create an unstaged file.
     std::fs::write(tmp.path().join("hello.txt"), "hello").unwrap();
@@ -1301,15 +1205,7 @@ async fn test_status_double_failure_preserves_original_error() {
         return;
     }
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
-
-    {
-        let sig = git2::Signature::now("test", "test@test.com").unwrap();
-        let tree_id = repo.index().unwrap().write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
-    }
+    crate::test_git::init_with_commit(tmp.path());
 
     git_cli(tmp.path(), &["update-index", "--split-index"])
         .await
@@ -1328,12 +1224,12 @@ async fn test_status_double_failure_preserves_original_error() {
     }
 
     let result = status(tmp.path(), true, true, false, false).await;
-    assert!(result.is_err(), "expected both libgit2 and CLI to fail");
+    assert!(result.is_err(), "expected both gix and CLI to fail");
 
     let err_msg = result.unwrap_err().to_string();
     assert!(
-        err_msg.contains("link") || err_msg.contains("libgit2") || err_msg.contains("extension"),
-        "double-failure error should mention original libgit2 cause, got: {err_msg}"
+        err_msg.contains("link") || err_msg.contains("gix") || err_msg.contains("extension"),
+        "double-failure error should mention original gix cause, got: {err_msg}"
     );
 }
 
@@ -1518,11 +1414,25 @@ fn normalize_scp_leading_slash_in_path() {
 #[test]
 fn resolve_normalized_remote_urls_deduplicates_across_transports() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(tmp.path()).unwrap();
-    repo.remote("origin", "git@github.com:xai-org/example.git")
-        .unwrap();
-    repo.remote("https-mirror", "https://github.com/xai-org/example.git")
-        .unwrap();
+    crate::test_git::init(tmp.path());
+    crate::test_git::git(
+        tmp.path(),
+        &[
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:xai-org/example.git",
+        ],
+    );
+    crate::test_git::git(
+        tmp.path(),
+        &[
+            "remote",
+            "add",
+            "https-mirror",
+            "https://github.com/xai-org/example.git",
+        ],
+    );
 
     let urls = resolve_normalized_remote_urls(tmp.path());
     assert_eq!(urls, vec!["github.com/xai-org/example"]);
@@ -1531,30 +1441,15 @@ fn resolve_normalized_remote_urls_deduplicates_across_transports() {
 // A well-formed OID that no fresh repo has an object for.
 const MISSING_OID: &str = "0123456789abcdef0123456789abcdef01234567";
 
-/// Repo with one empty-tree commit; returns the repo and commit OID.
-fn init_git2_repo_with_commit(dir: &Path) -> (git2::Repository, git2::Oid) {
-    let repo = git2::Repository::init(dir).expect("init repo");
-    let oid = {
-        let sig = git2::Signature::now("test", "test@test.com").expect("signature");
-        let mut index = repo.index().expect("index");
-        let tree_id = index.write_tree().expect("write tree");
-        let tree = repo.find_tree(tree_id).expect("find tree");
-        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
-            .expect("commit")
-    };
-    (repo, oid)
-}
-
-/// Point HEAD's branch at an `oid` with no backing object (git2's ref API refuses, so write the ref file directly).
+/// Point HEAD's branch at an `oid` with no backing object (git refuses that through its ref commands, so write the ref file directly).
 /// Then assert that peeling fails, the precondition that makes the refs-only tests real.
-fn point_head_at_missing_object(repo: &git2::Repository, oid: &str) {
-    let head_ref = repo.head().expect("head").name().expect("name").to_string();
-    std::fs::write(repo.commondir().join(&head_ref), format!("{oid}\n")).expect("write ref");
+fn point_head_at_missing_object(dir: &Path, oid: &str) {
+    let head_ref = crate::test_git::git(dir, &["symbolic-ref", "HEAD"]);
+    std::fs::write(dir.join(".git").join(&head_ref), format!("{oid}\n")).expect("write ref");
 
-    // Fresh handle: git2 caches refs.
-    let fresh = git2::Repository::open(repo.path()).expect("reopen repo");
+    let fresh = crate::git_repo::discover(dir).expect("reopen repo");
     assert!(
-        fresh.head().expect("head").peel_to_commit().is_err(),
+        fresh.head_commit().is_err(),
         "peel must fail, else the test misses the refs-only path",
     );
 }
@@ -1562,15 +1457,10 @@ fn point_head_at_missing_object(repo: &git2::Repository, oid: &str) {
 #[test]
 fn metadata_resolves_head_when_object_missing() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let (repo, _) = init_git2_repo_with_commit(tmp.path());
-    let branch = repo
-        .head()
-        .expect("head")
-        .shorthand()
-        .expect("branch")
-        .to_string();
+    crate::test_git::init_with_commit(tmp.path());
+    let branch = crate::test_git::git(tmp.path(), &["branch", "--show-current"]);
 
-    point_head_at_missing_object(&repo, MISSING_OID);
+    point_head_at_missing_object(tmp.path(), MISSING_OID);
 
     let metadata = resolve_persisted_session_git_metadata_sync(tmp.path());
     assert_eq!(metadata.head_commit.as_deref(), Some(MISSING_OID));
@@ -1583,17 +1473,17 @@ fn metadata_resolves_head_when_object_missing() {
 async fn get_current_commit_reads_head_from_refs() {
     let tmp = tempfile::tempdir().expect("tempdir");
 
-    git2::Repository::init(tmp.path()).expect("init repo");
+    crate::test_git::init(tmp.path());
     assert!(get_current_commit(tmp.path()).await.is_none());
 
     // Same dir; init is idempotent, now with a commit.
-    let (repo, commit_oid) = init_git2_repo_with_commit(tmp.path());
+    let commit_oid = crate::test_git::init_with_commit(tmp.path());
     assert_eq!(
         get_current_commit(tmp.path()).await.as_deref(),
-        Some(commit_oid.to_string().as_str()),
+        Some(commit_oid.as_str()),
     );
 
-    point_head_at_missing_object(&repo, MISSING_OID);
+    point_head_at_missing_object(tmp.path(), MISSING_OID);
     assert_eq!(
         get_current_commit(tmp.path()).await.as_deref(),
         Some(MISSING_OID),
@@ -1601,13 +1491,13 @@ async fn get_current_commit_reads_head_from_refs() {
 }
 
 /// End-to-end: `status()` reports the HEAD hash even when the commit object is gone.
-/// libgit2's status tolerates a missing HEAD tree (it diffs against an empty tree), so the refs-only OID read supplies the hash.
+/// Status tolerates a missing HEAD tree (it diffs against an empty tree), so the refs-only OID read supplies the hash.
 #[tokio::test]
 async fn status_reports_head_oid_when_object_missing() {
     xai_test_utils::require_git!();
     let tmp = tempfile::tempdir().expect("tempdir");
-    let (repo, _) = init_git2_repo_with_commit(tmp.path());
-    point_head_at_missing_object(&repo, MISSING_OID);
+    crate::test_git::init_with_commit(tmp.path());
+    point_head_at_missing_object(tmp.path(), MISSING_OID);
 
     let data = status(
         tmp.path(),
@@ -1627,8 +1517,8 @@ async fn status_reports_head_oid_when_object_missing() {
 async fn checkout_commit_with_fetch_repairs_missing_head_object() {
     xai_test_utils::require_git!();
     let tmp = tempfile::tempdir().expect("tempdir");
-    let (repo, _) = init_git2_repo_with_commit(tmp.path());
-    point_head_at_missing_object(&repo, MISSING_OID);
+    crate::test_git::init_with_commit(tmp.path());
+    point_head_at_missing_object(tmp.path(), MISSING_OID);
 
     let resp = checkout_commit_with_fetch(tmp.path(), MISSING_OID, /*stash_if_dirty*/ false).await;
     assert!(!resp.checked_out);

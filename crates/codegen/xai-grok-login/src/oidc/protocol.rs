@@ -1245,7 +1245,7 @@ mod tests {
                 }
             }),
         );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let _ = discover(&issuer).await.unwrap();
         let _ = discover(&issuer).await.unwrap();
         let _ = discover(&issuer).await.unwrap();
@@ -1285,7 +1285,7 @@ mod tests {
                 }
             }),
         );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let token_endpoint = format!("http://127.0.0.1:{port}/token");
         let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None)
             .await
@@ -1322,7 +1322,7 @@ mod tests {
                 }
             }),
         );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let token_endpoint = format!("http://127.0.0.1:{port}/token");
         let err = refresh_tokens(&token_endpoint, "rt", "client", None, None)
             .await
@@ -1367,7 +1367,7 @@ mod tests {
                 }
             }),
         );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let token_endpoint = format!("http://127.0.0.1:{port}/token");
         let resp = refresh_tokens(&token_endpoint, "rt", "client", None, None)
             .await

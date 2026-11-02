@@ -35,7 +35,7 @@ impl NotificationEventSink for SessionNotificationSink {
         let Some(session) = self.session.upgrade() else {
             return;
         };
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             session
                 .dispatch_notification_hook(
                     event.notification_type,

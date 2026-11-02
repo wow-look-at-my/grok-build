@@ -328,7 +328,7 @@ async fn initial_connect_times_out_and_bounds_retries_against_black_hole() {
         .await
         .expect("bind loopback listener");
     let addr = listener.local_addr().expect("listener addr");
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut held = Vec::new();
         while let Ok((sock, _)) = listener.accept().await {
             held.push(sock);
@@ -389,11 +389,11 @@ async fn initial_connect_hedge_wins_when_first_transport_stalls() {
     let hellos = Arc::new(AtomicUsize::new(0));
     let accepted_server = accepted.clone();
     let hellos_server = hellos.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Ok((tcp, _)) = listener.accept().await {
             let connection = accepted_server.fetch_add(1, Ordering::SeqCst);
             let hellos = hellos_server.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 if connection == 0 {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
@@ -483,7 +483,7 @@ async fn initial_connect_hedge_returns_non_retryable_error_immediately() {
     let addr = listener.local_addr().expect("mock addr");
     let accepted = Arc::new(AtomicUsize::new(0));
     let accepted_server = accepted.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut held = Vec::new();
         while let Ok((mut tcp, _)) = listener.accept().await {
             let connection = accepted_server.fetch_add(1, Ordering::SeqCst);
@@ -491,7 +491,7 @@ async fn initial_connect_hedge_returns_non_retryable_error_immediately() {
                 held.push(tcp);
                 continue;
             }
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let _ = tcp
                     .write_all(b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\n\r\n")
                     .await;
@@ -548,7 +548,7 @@ async fn black_hole_initial_connect(
     let addr = listener.local_addr().expect("listener addr");
     let accepted = Arc::new(AtomicUsize::new(0));
     let accepted_server = accepted.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut held = Vec::new();
         while let Ok((sock, _)) = listener.accept().await {
             accepted_server.fetch_add(1, Ordering::SeqCst);
@@ -921,7 +921,7 @@ async fn writer_sends_close_before_pause() {
     let (ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(4);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1059,7 +1059,7 @@ async fn writer_preempts_blocked_data_send_for_close() {
     let (ctl_tx, ctl_rx) = mpsc::channel::<WriterControl<BlockingSink>>(4);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink.clone(),
         out_rx,
         prio_rx,
@@ -1110,7 +1110,7 @@ async fn writer_close_then_queued_pause_still_writes_close_1001() {
     let (ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(4);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1161,7 +1161,7 @@ async fn writer_ctl_preempts_in_flight_blocking_ping_then_resumes() {
     let (ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(4);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1206,7 +1206,7 @@ async fn writer_drains_outbound_while_live() {
     let (_ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(2);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1240,7 +1240,7 @@ async fn writer_first_ping_is_immediate() {
     let (_ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(2);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1274,7 +1274,7 @@ async fn writer_first_ping_after_resume_is_immediate() {
     let (ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(4);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         dead,
         out_rx,
         prio_rx,
@@ -1323,7 +1323,7 @@ async fn writer_priority_pong_bypasses_full_outbound() {
     prio_tx
         .try_send(r#"{"method":"pong","ts_ms":1}"#.to_owned())
         .expect("priority send before spawn");
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1365,7 +1365,7 @@ async fn writer_pause_drops_stale_priority_pongs() {
     let (prio_tx, prio_rx) = mpsc::channel::<String>(4);
     let (ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(4);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         dead,
         out_rx,
         prio_rx,
@@ -1408,7 +1408,7 @@ async fn writer_honors_custom_ping_interval() {
     let (_ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(2);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1449,7 +1449,7 @@ async fn writer_re_arms_custom_ping_interval_after_resume() {
     let (ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(2);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         dead,
         out_rx,
         prio_rx,
@@ -1482,7 +1482,7 @@ async fn writer_buffers_during_pause_and_flushes_on_resume() {
     let (ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(2);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         dead,
         out_rx,
         prio_rx,
@@ -1539,7 +1539,7 @@ async fn writer_send_error_pauses_until_resume_without_multi_frame_loss() {
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let write_error = idle_write_error_slot();
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         failing,
         out_rx,
         prio_rx,
@@ -1605,7 +1605,7 @@ async fn writer_resume_discards_stale_write_error() {
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let write_error = idle_write_error_slot();
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1636,7 +1636,7 @@ async fn writer_exits_on_stop_signal() {
     let (_ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(2);
     let (stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1659,7 +1659,7 @@ async fn writer_exits_when_outbound_channel_closes() {
     let (_ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(2);
     let (_stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1682,7 +1682,7 @@ async fn writer_exits_when_control_channel_closes() {
     let (ctl_tx, ctl_rx) = mpsc::channel::<TestCtl>(2);
     let (_stop_tx, stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         sink,
         out_rx,
         prio_rx,
@@ -1872,7 +1872,7 @@ mod auth_refresh_driver {
     async fn sends_once_per_changed_bearer_and_never_two_at_once() {
         let provider = RotatingBearer::new("t1");
         let (conn, demux, mut outbound_rx, driver) = connection_with_driver(&provider, POLL);
-        let task = tokio::spawn(run_auth_refresh(conn.inner.clone(), driver, POLL));
+        let task = xai_spawn::spawn(run_auth_refresh(conn.inner.clone(), driver, POLL));
         assert!(
             no_frame_for(&mut outbound_rx, QUIET).await,
             "an unchanged bearer is never re-presented"
@@ -1904,7 +1904,7 @@ mod auth_refresh_driver {
     async fn a_not_later_refusal_acknowledges_the_bearer_and_others_do_not() {
         let provider = RotatingBearer::new("t1");
         let (conn, demux, mut outbound_rx, driver) = connection_with_driver(&provider, POLL);
-        let task = tokio::spawn(run_auth_refresh(conn.inner.clone(), driver, POLL));
+        let task = xai_spawn::spawn(run_auth_refresh(conn.inner.clone(), driver, POLL));
         provider.rotate("t2");
         let (id, _) = next_refresh(&mut outbound_rx).await;
         refuse(&demux, id, AUTH_REFRESH_NOT_LATER);
@@ -1987,7 +1987,7 @@ mod auth_refresh_driver {
         let (conn, _demux, mut outbound_rx, driver) =
             connection_with_driver(&provider, Duration::from_secs(60));
         provider.rotate("t2");
-        let task = tokio::spawn(run_auth_refresh(
+        let task = xai_spawn::spawn(run_auth_refresh(
             conn.inner.clone(),
             driver,
             Duration::from_secs(60),
@@ -2164,7 +2164,7 @@ async fn call_request_with_timeout_round_trips_via_demux() {
         method: Method::Hook.as_wire_str().to_owned(),
         params: serde_json::json!({ "k": "v" }),
     };
-    let call = tokio::spawn(async move {
+    let call = xai_spawn::spawn(async move {
         conn.call_request_with_timeout(request_id, &req, Duration::from_secs(5))
             .await
     });
@@ -2266,7 +2266,7 @@ async fn call_request_reclaims_waiter_on_caller_cancellation() {
     let request_id = conn.try_alloc_request_id().expect("request id");
     let probe_id = request_id.clone();
     let conn_for_call = conn.clone();
-    let call = tokio::spawn(async move {
+    let call = xai_spawn::spawn(async move {
         let req = JsonRpcRequest {
             jsonrpc: JsonRpcVersion,
             id: JsonRpcId::from_request_id(&request_id),
@@ -2418,13 +2418,13 @@ async fn forced_reconnect_retries_past_failed_attempt_without_repolling_old_stre
     let addr = listener.local_addr().expect("mock addr");
     let upgrades = Arc::new(AtomicUsize::new(0));
     let upgrades_srv = upgrades.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;
             };
             let n = upgrades_srv.fetch_add(1, Ordering::SeqCst);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let Ok(mut ws) = tokio_tungstenite::accept_async(tcp).await else {
                     return;
                 };
@@ -2507,13 +2507,13 @@ async fn successful_reconnect_resets_attempt_after_stable_dwell() {
     let addr = listener.local_addr().expect("mock addr");
     let upgrades = Arc::new(AtomicUsize::new(0));
     let upgrades_srv = upgrades.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;
             };
             let n = upgrades_srv.fetch_add(1, Ordering::SeqCst);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let Ok(mut ws) = tokio_tungstenite::accept_async(tcp).await else {
                     return;
                 };
@@ -2606,13 +2606,13 @@ async fn flapping_reconnect_does_not_reset_attempt() {
     let addr = listener.local_addr().expect("mock addr");
     let upgrades = Arc::new(AtomicUsize::new(0));
     let upgrades_srv = upgrades.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;
             };
             let n = upgrades_srv.fetch_add(1, Ordering::SeqCst);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let Ok(mut ws) = tokio_tungstenite::accept_async(tcp).await else {
                     return;
                 };
@@ -2706,12 +2706,12 @@ async fn spawn_ack_only_hub() -> std::net::SocketAddr {
         .await
         .expect("bind mock hub");
     let addr = listener.local_addr().expect("mock addr");
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;
             };
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let Ok(mut ws) = tokio_tungstenite::accept_async(tcp).await else {
                     return;
                 };
@@ -2857,13 +2857,13 @@ async fn drain_4409_then_quick_redrop_climbs_attempt() {
     let addr = listener.local_addr().expect("mock addr");
     let upgrades = Arc::new(AtomicUsize::new(0));
     let upgrades_srv = upgrades.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;
             };
             let n = upgrades_srv.fetch_add(1, Ordering::SeqCst);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let Ok(mut ws) = tokio_tungstenite::accept_async(tcp).await else {
                     return;
                 };
@@ -2954,12 +2954,12 @@ async fn distinct_connections_use_distinct_jitter_seeds() {
         .await
         .expect("bind mock hub");
     let addr = listener.local_addr().expect("mock addr");
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;
             };
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let Ok(mut ws) = tokio_tungstenite::accept_async(tcp).await else {
                     return;
                 };
@@ -3351,7 +3351,7 @@ async fn default_ping_pong_composition_keeps_idle_connection_alive() {
     let (ctl_tx, ctl_rx) = mpsc::channel::<WriterControl<PongEchoSink>>(2);
     let (writer_stop_tx, writer_stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         PongEchoSink {
             inbound: inbound_tx.clone(),
         },
@@ -3441,7 +3441,7 @@ async fn app_ping_only_keeps_idle_connection_alive_without_ws_pongs() {
     let (_ctl_tx, ctl_rx) = mpsc::channel::<WriterControl<AppPingOnlyEchoSink>>(2);
     let (writer_stop_tx, writer_stop_rx) = mpsc::channel::<()>(1);
     let (_prio_tx, prio_rx) = mpsc::channel::<String>(4);
-    let writer = tokio::spawn(run_writer(
+    let writer = xai_spawn::spawn(run_writer(
         AppPingOnlyEchoSink {
             inbound: inbound_tx,
         },
@@ -3504,7 +3504,7 @@ async fn spawn_hub_close_after_ack(close: Option<u16>) -> std::net::SocketAddr {
         .await
         .expect("bind mock hub");
     let addr = listener.local_addr().expect("mock addr");
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let Ok((tcp, _)) = listener.accept().await else {
             return;
         };
@@ -3631,7 +3631,7 @@ async fn spawn_hub_close_then_accept(close: u16) -> std::net::SocketAddr {
         .await
         .expect("bind mock hub");
     let addr = listener.local_addr().expect("mock addr");
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         for stay_up in [false, true] {
             let Ok((tcp, _)) = listener.accept().await else {
                 return;

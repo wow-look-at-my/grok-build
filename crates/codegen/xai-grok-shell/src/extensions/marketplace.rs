@@ -55,7 +55,7 @@ async fn handle_list() -> ExtResult {
         .iter()
         .map(|source| {
             let source = source.clone();
-            tokio::task::spawn_blocking(move || scan_source(&source))
+            xai_spawn::spawn_blocking(move || scan_source(&source))
         })
         .collect();
     let mut results = Vec::with_capacity(scan_handles.len());
@@ -116,7 +116,7 @@ async fn handle_action(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             // list) on the blocking pool (LocalSet invariant: plugin/acquire.rs).
             let sources = load_filtered_marketplace_sources();
             let filter = source_url_or_path;
-            match tokio::task::spawn_blocking(move || refresh_sources(&sources, filter.as_deref()))
+            match xai_spawn::spawn_blocking(move || refresh_sources(&sources, filter.as_deref()))
                 .await
             {
                 Ok(outcome) => outcome,
@@ -196,7 +196,7 @@ fn refresh_sources(
 async fn run_post_install(repo_key: &str) {
     let repo_key = repo_key.to_string();
     let post_warnings =
-        tokio::task::spawn_blocking(move || crate::config::post_install_plugin(&repo_key).1)
+        xai_spawn::spawn_blocking(move || crate::config::post_install_plugin(&repo_key).1)
             .await
             .unwrap_or_else(|e| vec![format!("post-install task failed: {e}")]);
     for w in &post_warnings {
@@ -421,8 +421,7 @@ async fn handle_uninstall(
     // (never block the LocalSet on fs or the flock poll).
     let source = source_url_or_path.to_string();
     let path = plugin_relative_path.to_string();
-    let outcome = match tokio::task::spawn_blocking(move || uninstall_locked(&source, &path)).await
-    {
+    let outcome = match xai_spawn::spawn_blocking(move || uninstall_locked(&source, &path)).await {
         Ok(outcome) => outcome,
         Err(e) => {
             return action_outcome(
@@ -735,7 +734,7 @@ async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome 
     // The probe blocks on a git subprocess, so run it off the LocalSet
     if let MarketplaceAddInput::GitUrl(git_url) = &input {
         let probe_url = git_url.clone();
-        let probe = tokio::task::spawn_blocking(move || {
+        let probe = xai_spawn::spawn_blocking(move || {
             xai_grok_plugin_marketplace::git::probe_git_remote(&probe_url)
         })
         .await;

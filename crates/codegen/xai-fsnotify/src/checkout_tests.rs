@@ -6,7 +6,7 @@ use tempfile::TempDir;
 fn workspace() -> TempDir {
     let temp = TempDir::new().unwrap();
     let root = temp.path();
-    git2::Repository::init(root).unwrap();
+    xai_test_utils::git::init_git_repo(root);
     fs::write(
         root.join(".gitmodules"),
         "[submodule \"deps/lib\"]\n\tpath = deps/lib\n\turl = ../lib.git\n",

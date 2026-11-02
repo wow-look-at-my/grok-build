@@ -299,7 +299,7 @@ impl MvpAgent {
         session_txs: Vec<tokio::sync::mpsc::UnboundedSender<SessionCommand>>,
     ) {
         let cache = self.managed_mcp_cache.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             cache.lock().await.disable_gateway_tools();
             for tx in session_txs {
                 let _ = tx.send(SessionCommand::RefreshMcpSearchIndex);
@@ -317,7 +317,7 @@ impl MvpAgent {
         let cache = self.managed_mcp_cache.clone();
         let proxy_url = self.cfg.borrow().endpoints.proxy_url();
         let auth_manager = self.auth_manager.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let auth_key = auth_manager
                 .get_valid_token()
                 .await
@@ -396,8 +396,8 @@ impl MvpAgent {
         let remote_settings = self.cfg.borrow().remote_settings.clone();
         let gateway = self.gateway.clone();
         let agent_mcp_state = self.agent_mcp_state.clone();
-        tokio::task::spawn_local(async move {
-            let local_mcp_servers = match tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_local(async move {
+            let local_mcp_servers = match xai_spawn::spawn_blocking(move || {
                     let local = crate::util::config::load_mcp_servers(&cwd, &compat);
                     folder_trust::resolve_and_record(
                         &cwd,
@@ -491,7 +491,7 @@ impl MvpAgent {
         let launch_cwd = self.launch_cwd.clone();
         let remote_settings = self.cfg.borrow().remote_settings.clone();
         let handle = self.plugin_registry_handle.clone();
-        let built = tokio::task::spawn_blocking(move || {
+        let built = xai_spawn::spawn_blocking(move || {
                 let (trusted, disk_config) = Self::registry_build_inputs(
                     &launch_cwd,
                     remote_settings.as_ref(),
@@ -530,7 +530,7 @@ impl MvpAgent {
         let cwd = cwd.to_path_buf();
         let remote_settings = self.cfg.borrow().remote_settings.clone();
         let handle = self.plugin_registry_handle.clone();
-        match tokio::task::spawn_blocking(move || {
+        match xai_spawn::spawn_blocking(move || {
                 let (trusted, disk_cfg) = Self::registry_build_inputs(
                     &cwd,
                     remote_settings.as_ref(),
@@ -996,7 +996,7 @@ impl MvpAgent {
                 let binary = binary.clone();
                 let cwd = cwd.clone();
                 let agent_ref = agent_ref.clone();
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     if generations.borrow().get(&sid) != Some(&generation) {
                         return;
                     }
@@ -1588,7 +1588,7 @@ impl MvpAgent {
     fn reapply_official_marketplace(&self) {
         if self.cfg.borrow().resolve_official_marketplace_auto_register().value {
             let task = tokio_util::task::AbortOnDropHandle::new(
-                tokio::task::spawn_blocking(|| {
+                xai_spawn::spawn_blocking(|| {
                     crate::extensions::marketplace::ensure_official_marketplace_source(
                         &crate::util::grok_home::grok_home(),
                     );
@@ -1684,7 +1684,7 @@ impl MvpAgent {
         let outcome = self.fetch_settings(auth).await;
         if matches!(outcome, crate::remote::SettingsFetch::Rejected) {
             let manager = self.auth_manager.clone();
-            let attempt = tokio::spawn(async move { manager.auth().await });
+            let attempt = xai_spawn::spawn(async move { manager.auth().await });
             if let Ok(Ok(Ok(fresh))) = tokio::time::timeout(
                     crate::http::STARTUP_AUTH_REFRESH_TIMEOUT,
                     attempt,
@@ -1826,7 +1826,7 @@ impl MvpAgent {
             return false;
         }
         let in_flight = in_flight.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             struct ClearOnDrop(std::rc::Rc<std::cell::Cell<bool>>);
             impl Drop for ClearOnDrop {
                 fn drop(&mut self) {
@@ -1898,7 +1898,7 @@ impl MvpAgent {
             return;
         }
         let agent_ref = LocalRef::new(self);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let mut interval = tokio::time::interval(announcements_refresh_interval());
             interval.tick().await;
             loop {
@@ -2025,7 +2025,7 @@ impl MvpAgent {
             let cfg = self.cfg.borrow();
             (cfg.endpoints.proxy_url(), cfg.endpoints.alpha_test_key.clone())
         };
-        match tokio::task::spawn_blocking(move || crate::remote::fetch_settings_blocking(
+        match xai_spawn::spawn_blocking(move || crate::remote::fetch_settings_blocking(
                 &base_url,
                 &auth,
                 alpha_test_key.as_deref(),
@@ -3048,7 +3048,7 @@ impl MvpAgent {
     ) {
         use crate::extensions::notification::RelaySyncStatus;
         let session_id = acp::SessionId::new(session_id);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while state_rx.changed().await.is_ok() {
                 let state = *state_rx.borrow_and_update();
                 let status = match state {
@@ -4266,7 +4266,7 @@ impl MvpAgent {
                     user_id: self.auth_manager.current().map(|a| a.user_id.clone()),
                     aggregate_tx: Some(loc_agg_tx),
                 };
-                tokio::spawn(
+                xai_spawn::spawn(
                     xai_hunk_tracker::run_loc_sink(
                         hunk_event_rx,
                         loc_writer,
@@ -4958,7 +4958,7 @@ impl MvpAgent {
             });
         if let Some(mut loc_rx) = loc_aggregate_rx {
             let signals = handle.signals_handle.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 while let Some(agg) = loc_rx.recv().await {
                     match agg {
                         xai_hunk_tracker::LocAggregate::LinesChanged {
@@ -5097,7 +5097,7 @@ impl MvpAgent {
         }
         self.spawn_managed_gateway_tool_catalog_fetch();
         let cwd_for_maintenance = session_info.cwd.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             crate::session::prompt_history::truncate_if_needed_async(cwd_for_maintenance)
                 .await;
         });
@@ -5195,7 +5195,7 @@ impl Drop for LocalWorkspaceReapGuard {
         }
         self.generations.borrow_mut().remove(&self.session_id);
         if let Some(handle) = self.supervisors.borrow_mut().remove(&self.session_id) {
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 handle.shutdown().await;
             });
         }
@@ -5228,7 +5228,7 @@ mod tests {
         });
         let app = axum::Router::new()
             .route("/v1/models", get(move || { let b = body.clone(); async move { axum::Json(b) } }));
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
         // Sentinel context window (the DEFAULT_CONTEXT_WINDOW), own api_key, non-xAI base.
         let mut model = ModelEntry::fallback("deepseek/deepseek-v4-pro-0813", &Default::default());
@@ -5245,7 +5245,7 @@ mod tests {
 
         // The fetch runs blocking on a dedicated thread inside the resolver; run
         // it off the async runtime the same way the shipped call sites do.
-        let updated = tokio::task::spawn_blocking(move || {
+        let updated = xai_spawn::spawn_blocking(move || {
             resolve_byok_context_window_on_request_path(&model, &credentials)
                 .into_owned()
         })

@@ -875,10 +875,10 @@ mod tests {
             .await
             .expect("bind stub");
         let addr = listener.local_addr().expect("stub addr");
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Ok((mut sock, _)) = listener.accept().await {
                 let body = body.clone();
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     use tokio::io::{AsyncReadExt, AsyncWriteExt};
                     let mut buf = [0u8; 8192];
                     let _ = sock.read(&mut buf).await;

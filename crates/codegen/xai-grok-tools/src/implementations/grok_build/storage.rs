@@ -103,7 +103,7 @@ impl SessionFileWriter {
         let dest = path.clone();
         let target_dir = dir;
         let data = bytes.to_vec();
-        let result: anyhow::Result<()> = tokio::task::spawn_blocking(move || {
+        let result: anyhow::Result<()> = xai_spawn::spawn_blocking(move || {
             let tmp = tempfile::NamedTempFile::new_in(&target_dir).context("create temp file")?;
             std::fs::write(tmp.path(), &data).context("write temp file")?;
             tmp.as_file().sync_all().context("fsync temp file")?;

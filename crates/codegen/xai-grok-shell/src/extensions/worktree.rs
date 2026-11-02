@@ -301,7 +301,7 @@ pub async fn handle(
             req.grove_gate_source =
                 Some(apply_grove_worktree_flag(agent, &mut req.grove_worktree).into());
 
-            // Nested clones keep libgit2; Grove dest is the fallback on partialclone.
+            // Nested clones keep the in-process git library; Grove dest is the fallback on partialclone.
             let source_path = std::path::Path::new(&req.source_worktree_path);
             if xai_grok_workspace::worktree::git_or_grove_is_jj_async(
                 source_path,

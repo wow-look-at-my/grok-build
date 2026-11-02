@@ -2027,7 +2027,7 @@ pub(crate) fn spawn_progress_publisher(
     cancel_token: tokio_util::sync::CancellationToken,
     parent_cmd_tx: Option<mpsc::UnboundedSender<SessionCommand>>,
 ) -> tokio_util::task::AbortOnDropHandle<()> {
-    tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+    tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn(async move {
         let mut interval = tokio::time::interval(PROGRESS_PUBLISH_INTERVAL);
         interval.tick().await;
         let mut last_signature: ProgressSignature = (0, 0, 0, 0, 0);
@@ -2407,7 +2407,7 @@ fn persist_subagent_completion(dir: &Path, result: &SubagentResult, gcs_ctx: &Gc
             let bucket = bucket.clone();
             let method = method.clone();
             let auth_for_spawn = gcs_ctx.auth_manager.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 upload_subagent_metadata(&gcs_meta, &bucket, method, auth_for_spawn).await;
             });
         }

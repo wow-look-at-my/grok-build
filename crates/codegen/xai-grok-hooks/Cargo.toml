@@ -24,6 +24,7 @@ xai-grok-config = { workspace = true }
 # from the binary crate, matching the other consumers.
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 xai-grok-tools = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

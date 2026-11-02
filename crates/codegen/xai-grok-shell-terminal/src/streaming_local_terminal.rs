@@ -207,7 +207,7 @@ pub async fn kill_and_release_all_for_session(session_id: &str) {
     // Worse, `Shutdown` / `IsBusy` queue behind the in-flight cancel, so the leader cannot evict a session stuck on a slow-dying child
     // The children are already SIGKILL'd with `KillOnDrop` set, so they are torn down even if this reaper is cancelled The bounded waits (`KILL_REAP_TIMEOUT`) run concurrently, so one wedged child can't delay the others
     if !to_reap.is_empty() {
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             future::join_all(to_reap.into_iter().map(|entry| async move {
                 let mut child = entry.child.lock().await;
                 let _ = tokio::time::timeout(KILL_REAP_TIMEOUT, child.wait()).await;
@@ -264,7 +264,7 @@ pub async fn create_terminal(
     });
     register_entry(session_id, &terminal_id, entry).await;
 
-    tokio::task::spawn_local(run_output_collector(
+    xai_spawn::spawn_local(run_output_collector(
         child_handle,
         output_state,
         exit_notify,
@@ -468,7 +468,7 @@ impl AsyncTerminalRunner for StreamingLocalTerminalRunner {
             let command = request.command.clone();
             let cwd = request.cwd.to_string();
 
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 wait_background_completion(
                     child_handle,
                     output_state,
@@ -1208,7 +1208,7 @@ mod tests {
                     session_id: acp::SessionId::new(session_id_clone),
                 };
 
-                let handle = tokio::task::spawn_local(async move {
+                let handle = xai_spawn::spawn_local(async move {
                     runner.run(make_request(&tool_id_clone, "sleep 30")).await
                 });
 

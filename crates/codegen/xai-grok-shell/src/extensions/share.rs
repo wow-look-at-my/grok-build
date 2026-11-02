@@ -107,7 +107,7 @@ async fn handle_share_session(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtRe
     // Upload share metadata to cloud storage (best-effort, fire-and-forget).
     if let Some(mut ctx) = trace_context {
         ctx.gcs_config.gcs_prefix = None;
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             upload_session_metadata(&ctx, SessionMetadataType::Share).await;
         });
     }

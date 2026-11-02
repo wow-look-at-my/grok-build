@@ -641,7 +641,7 @@ async fn refresh_body() {
     register_stub(&bridge, "gone__probe").await;
     a.mcp_state.lock().await.configs = vec![stdio("gone", "true")];
     let managed_guard = a.managed_mcp_handle.lock().await;
-    let stale_refresh = tokio::task::spawn_local(refresh_mcp_snapshot_for_test(
+    let stale_refresh = xai_spawn::spawn_local(refresh_mcp_snapshot_for_test(
         bridge.clone(),
         Arc::clone(&a.mcp_state),
         a.managed_mcp_handle.clone(),

@@ -1,6 +1,6 @@
 //! Generates a compact git status for the system prompt.
 //!
-//! Uses the git CLI for performance: libgit2's status is 5-10x slower than the native git binary on large repos due to inefficient index refresh.
+//! Uses the git CLI.
 //! Output is prioritized by change type and limited to ~1k characters.
 
 use crate::file_system::FsError;
@@ -15,7 +15,7 @@ pub async fn git_status(working_directory: impl Into<PathBuf>) -> Result<String,
     let working_directory = working_directory.into();
     let permit = crate::git_odb::try_acquire_odb();
 
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let _permit = permit;
         git_status_impl(&working_directory)
     })
@@ -59,9 +59,9 @@ pub async fn git_status_short_pinned(
     // Held for the whole run to bound ODB contention.
     let _permit = crate::git_odb::try_acquire_odb();
 
-    // libgit2 config walk is blocking; keep it off the async scheduler.
+    // The git config read is blocking; keep it off the async scheduler.
     let pin_cwd = working_directory.clone();
-    let filter_pins = tokio::task::spawn_blocking(move || {
+    let filter_pins = xai_spawn::spawn_blocking(move || {
         crate::git_content_filters::content_filter_config_pins(&pin_cwd)
     })
     .await
@@ -262,22 +262,13 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn init_attributed_repo(tmp: &Path) -> git2::Repository {
-        let repo = git2::Repository::init(tmp).unwrap();
+    fn init_attributed_repo(tmp: &Path) {
+        crate::test_git::init(tmp);
         std::fs::write(tmp.join(".gitattributes"), "data.txt filter=Pwn\n").unwrap();
         std::fs::write(tmp.join("data.txt"), "hello\n").unwrap();
         // Commit before installing the filter so commit itself does not run it.
-        let mut index = repo.index().unwrap();
-        index.add_path(Path::new(".gitattributes")).unwrap();
-        index.add_path(Path::new("data.txt")).unwrap();
-        index.write().unwrap();
-        let tree_id = index.write_tree().unwrap();
-        let tree = repo.find_tree(tree_id).unwrap();
-        let sig = git2::Signature::now("t", "t@t").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
-        drop(tree);
-        repo
+        crate::test_git::git(tmp, &["add", ".gitattributes", "data.txt"]);
+        crate::test_git::commit(tmp, "init");
     }
 
     #[cfg(unix)]
@@ -309,7 +300,7 @@ mod tests {
     #[tokio::test]
     async fn git_status_short_does_not_run_content_filters() {
         let tmp = tempfile::tempdir().unwrap();
-        let _repo = init_attributed_repo(tmp.path());
+        init_attributed_repo(tmp.path());
         let marker = tmp.path().join("pwned");
         let script = write_filter_script(tmp.path(), &marker);
         let cfg_path = tmp.path().join(".git/config");

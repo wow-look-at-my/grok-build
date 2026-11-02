@@ -861,7 +861,7 @@ impl SessionActor {
             goal = snapshot.goal.is_some(),
             "persisting resume status snapshot"
         );
-        let _ = tokio::task::spawn_blocking({
+        let _ = xai_spawn::spawn_blocking({
             let session_dir = session_dir.clone();
             let snapshot = snapshot.clone();
             move || crate::session::resume_status::persist(&session_dir, &snapshot)
@@ -908,7 +908,7 @@ impl SessionActor {
         let subagents = {
             let session_dir = session_dir.clone();
             let sid = self.session_info.id.0.clone();
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 crate::session::resume_status::running_subagent_metas(&session_dir, &sid)
             })
             .await

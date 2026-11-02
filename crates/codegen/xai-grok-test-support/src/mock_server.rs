@@ -290,7 +290,7 @@ impl MockInferenceServer {
                     .await
                     .context("bind mock inference server")?;
                 let addr = listener.local_addr().context("local_addr")?;
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     axum::serve(listener, app)
                         .with_graceful_shutdown(async {
                             let _ = shutdown_rx.await;

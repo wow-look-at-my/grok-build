@@ -49,7 +49,7 @@ static MEMORY_ARCHIVE_BUILDS: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::HashMap<String, MemoryArchiveBuild>>,
 > = std::sync::LazyLock::new(Default::default);
 
-/// Join the in-flight build for `cwd` or start one. The builder task owns publishing and map cleanup, so it completes even if every waiter is dropped (e.g. all turns hit their flush deadline). `MemoryStorage::new` runs git2 workspace discovery and the build tars+gzips the whole memory dir — seconds on large workspaces — so both stay on the blocking pool.
+/// Join the in-flight build for `cwd` or start one. The builder task owns publishing and map cleanup, so it completes even if every waiter is dropped (e.g. all turns hit their flush deadline). `MemoryStorage::new` runs repository discovery and the build tars+gzips the whole memory dir — seconds on large workspaces — so both stay on the blocking pool.
 /// `memory_root` overrides the default `~/.grok/memory` root for tests.
 fn join_or_start_memory_archive_build(
     cwd: String,
@@ -61,9 +61,9 @@ fn join_or_start_memory_archive_build(
     }
     let (tx, rx) = tokio::sync::watch::channel(None);
     builds.insert(cwd.clone(), rx.clone());
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let build_cwd = cwd.clone();
-        let result = match tokio::task::spawn_blocking(move || {
+        let result = match xai_spawn::spawn_blocking(move || {
             #[cfg(test)]
             apply_test_archive_fault()?;
             let storage = crate::session::memory::MemoryStorage::new(

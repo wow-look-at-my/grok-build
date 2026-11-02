@@ -335,7 +335,7 @@ impl rmcp::transport::auth::CredentialStore for McpCredentialStoreAdapter {
     > {
         let name = self.server_name.clone();
         let url = self.server_url.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = xai_spawn::spawn_blocking(move || {
             let store = McpCredentialStore::load_default()
                 .map_err(|e| rmcp::transport::auth::AuthError::InternalError(e.to_string()))?;
             Ok(store.get(&name, &url).cloned())
@@ -354,7 +354,7 @@ impl rmcp::transport::auth::CredentialStore for McpCredentialStoreAdapter {
     ) -> std::result::Result<(), rmcp::transport::auth::AuthError> {
         let name = self.server_name.clone();
         let url = self.server_url.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let mut store = McpCredentialStore::load_default().unwrap_or_default();
             store
                 .insert_and_save(&name, &url, credentials)
@@ -367,7 +367,7 @@ impl rmcp::transport::auth::CredentialStore for McpCredentialStoreAdapter {
     async fn clear(&self) -> std::result::Result<(), rmcp::transport::auth::AuthError> {
         let name = self.server_name.clone();
         let url = self.server_url.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             // Under the same flock as `insert_and_save`: this is a whole-file read-modify-write
             // An unlocked snapshot here could silently drop *other servers'* entries another process wrote concurrently
             // Their just-rotated refresh tokens would go with them

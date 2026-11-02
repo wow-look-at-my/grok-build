@@ -177,7 +177,7 @@ impl TurnEndQueue {
     pub(super) fn spawn(session: Arc<SessionActor>) -> Self {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<QueueItem>();
         *session.turn_end_tx.borrow_mut() = Some(tx.clone());
-        let worker = tokio::task::spawn_local({
+        let worker = xai_spawn::spawn_local({
             let session = session.clone();
             async move {
                 while let Some(item) = rx.recv().await {

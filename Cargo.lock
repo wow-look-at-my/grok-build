@@ -667,29 +667,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
-name = "aws-lc-rs"
-version = "1.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
-dependencies = [
- "aws-lc-sys",
- "zeroize",
-]
-
-[[package]]
-name = "aws-lc-sys"
-version = "0.45.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
-dependencies = [
- "cc",
- "cmake",
- "dunce",
- "fs_extra",
- "pkg-config",
-]
-
-[[package]]
 name = "axum"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1335,15 +1312,6 @@ name = "clru"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cbd0f76e066e64fdc5631e3bb46381254deab9ef1158292f27c8c57e3bf3fe59"
-
-[[package]]
-name = "cmake"
-version = "0.1.54"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7caa3f9de89ddbe2c607f4101924c5abec803763ae9534e4f4d7d8f84aa81f0"
-dependencies = [
- "cc",
-]
 
 [[package]]
 name = "cmov"
@@ -2815,12 +2783,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fs_extra"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
-
-[[package]]
 name = "fsevent-sys"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3057,18 +3019,6 @@ name = "gimli"
 version = "0.32.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
-
-[[package]]
-name = "git2"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddddbf932745a6be37109b6112d3ee09696106f848449069d3a57bba937ab82e"
-dependencies = [
- "bitflags 2.13.0",
- "libc",
- "libgit2-sys",
- "log",
-]
 
 [[package]]
 name = "gix"
@@ -3713,6 +3663,7 @@ dependencies = [
  "gix-date",
  "gix-error",
  "gix-hash",
+ "gix-hashtable",
  "gix-object",
  "gix-revwalk",
  "gix-trace",
@@ -5015,18 +4966,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
-name = "libgit2-sys"
-version = "0.18.8+1.9.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f7c568b25d7489bc3fb2988ed69ab111d2944d2f5fec3d5c987fe545ea97b50"
-dependencies = [
- "cc",
- "libc",
- "libz-sys",
- "pkg-config",
-]
-
-[[package]]
 name = "libloading"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5081,18 +5020,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "840db8cf39d9ec4dd794376f38acc40d0fc65eec2a8f484f7fd375b84602becd"
 dependencies = [
  "zlib-rs 0.5.5",
-]
-
-[[package]]
-name = "libz-sys"
-version = "1.1.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b70e7a7df205e92a1a4cd9aaae7898dac0aa555503cc0a649494d0d60e7651d"
-dependencies = [
- "cc",
- "libc",
- "pkg-config",
- "vcpkg",
 ]
 
 [[package]]
@@ -7095,6 +7022,7 @@ dependencies = [
  "terminput",
  "tokio",
  "tower-http",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -7893,7 +7821,6 @@ version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
- "aws-lc-rs",
  "log",
  "once_cell",
  "ring",
@@ -7931,7 +7858,6 @@ version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
- "aws-lc-rs",
  "ring",
  "rustls-pki-types",
  "untrusted",
@@ -11249,6 +11175,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11279,6 +11206,7 @@ dependencies = [
  "xai-compaction-transcript",
  "xai-grok-compaction",
  "xai-grok-sampling-types",
+ "xai-spawn",
  "xai-token-estimation",
 ]
 
@@ -11299,7 +11227,7 @@ dependencies = [
  "crossbeam",
  "dashmap",
  "dunce",
- "git2",
+ "gix",
  "hashbrown 0.15.5",
  "ignore",
  "libc",
@@ -11367,6 +11295,7 @@ dependencies = [
  "tokio",
  "tracing",
  "xai-computer-hub-sdk",
+ "xai-spawn",
  "xai-tool-protocol",
  "xai-tool-runtime",
  "xai-tool-types",
@@ -11407,6 +11336,7 @@ dependencies = [
  "uuid",
  "xai-computer-hub-core",
  "xai-grok-net",
+ "xai-spawn",
  "xai-tool-protocol",
  "xai-tool-runtime",
  "xai-tool-types",
@@ -11422,6 +11352,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "windows-sys 0.59.0",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11505,6 +11436,7 @@ dependencies = [
  "xai-grok-net",
  "xai-grok-otel",
  "xai-grok-version",
+ "xai-spawn",
  "zstd",
 ]
 
@@ -11513,7 +11445,7 @@ name = "xai-fsnotify"
 version = "0.1.0"
 dependencies = [
  "dunce",
- "git2",
+ "gix",
  "globset",
  "ignore",
  "notify",
@@ -11526,6 +11458,8 @@ dependencies = [
  "tokio-util",
  "tracing",
  "xai-bench",
+ "xai-spawn",
+ "xai-test-utils",
  "xai-tracing-macros",
 ]
 
@@ -11546,6 +11480,7 @@ dependencies = [
 name = "xai-gix-status"
 version = "0.1.0"
 dependencies = [
+ "dunce",
  "gix",
  "libc",
  "tempfile",
@@ -11574,7 +11509,7 @@ dependencies = [
  "chrono",
  "dunce",
  "fs2",
- "git2",
+ "gix",
  "ignore",
  "minijinja",
  "regex",
@@ -11589,6 +11524,7 @@ dependencies = [
  "tokio",
  "tracing",
  "xai-dirs",
+ "xai-gix-status",
  "xai-grok-config",
  "xai-grok-hooks",
  "xai-grok-sampling-types",
@@ -11723,6 +11659,7 @@ dependencies = [
  "tokio",
  "tracing",
  "xai-grok-version",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11779,13 +11716,13 @@ version = "0.1.0"
 dependencies = [
  "dunce",
  "filetime",
- "git2",
  "libc",
  "md5",
  "serde_json",
  "tempfile",
  "uuid",
  "xai-dirs",
+ "xai-gix-status",
 ]
 
 [[package]]
@@ -11817,6 +11754,7 @@ dependencies = [
  "xai-grok-net",
  "xai-grok-sandbox",
  "xai-grok-tools",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11907,6 +11845,7 @@ dependencies = [
  "xai-grok-test-support",
  "xai-grok-tools",
  "xai-grok-version",
+ "xai-spawn",
  "xai-system-power",
  "xai-tool-types",
 ]
@@ -11978,6 +11917,7 @@ dependencies = [
  "xai-grok-tools",
  "xai-grok-version",
  "xai-grok-workspace-types",
+ "xai-spawn",
  "xai-tool-protocol",
  "xai-tool-runtime",
  "xai-tool-types",
@@ -11995,7 +11935,6 @@ dependencies = [
  "dunce",
  "filetime",
  "flate2",
- "git2",
  "libc",
  "nix 0.30.1",
  "notify",
@@ -12009,6 +11948,7 @@ dependencies = [
  "tokio",
  "tracing",
  "windows 0.61.3",
+ "xai-gix-status",
  "xai-grok-auth",
  "xai-grok-config-types",
  "xai-grok-http",
@@ -12108,7 +12048,7 @@ dependencies = [
  "dunce",
  "flate2",
  "gethostname",
- "git2",
+ "gix",
  "image",
  "indexmap",
  "insta",
@@ -12156,6 +12096,7 @@ dependencies = [
  "xai-dirs",
  "xai-fast-worktree",
  "xai-file-utils",
+ "xai-gix-status",
  "xai-grok-active-sessions",
  "xai-grok-agent",
  "xai-grok-announcements",
@@ -12189,6 +12130,8 @@ dependencies = [
  "xai-prompt-queue",
  "xai-ratatui-inline",
  "xai-ratatui-textarea",
+ "xai-spawn",
+ "xai-test-utils",
  "xai-token-estimation",
  "xai-tool-types",
  "xai-tty-utils",
@@ -12214,11 +12157,13 @@ dependencies = [
  "xai-grok-extra-ca",
  "xai-grok-login",
  "xai-grok-pager",
+ "xai-grok-pdf",
  "xai-grok-sandbox",
  "xai-grok-shell",
  "xai-grok-telemetry",
  "xai-grok-version",
  "xai-grok-workspace",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -12242,7 +12187,6 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "dunce",
- "git2",
  "image",
  "libc",
  "portable-pty",
@@ -12261,6 +12205,8 @@ dependencies = [
  "unicode-width 0.2.0",
  "xai-grok-test-support",
  "xai-interjection-core",
+ "xai-spawn",
+ "xai-test-utils",
  "xai-tty-utils",
 ]
 
@@ -12319,6 +12265,7 @@ dependencies = [
  "xai-grok-workspace",
  "xai-ratatui-inline",
  "xai-ratatui-textarea",
+ "xai-spawn",
  "xai-tty-utils",
  "zbus",
 ]
@@ -12331,6 +12278,15 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "xai-grok-pdf"
+version = "0.1.0"
+dependencies = [
+ "pdf_oxide",
+ "serde_json",
+ "xai-tool-types",
 ]
 
 [[package]]
@@ -12384,6 +12340,7 @@ dependencies = [
  "xai-grok-sampling-types",
  "xai-grok-test-support",
  "xai-grok-version",
+ "xai-spawn",
  "xai-token-estimation",
  "zstd",
 ]
@@ -12476,6 +12433,7 @@ dependencies = [
  "uuid",
  "xai-grok-config",
  "xai-grok-telemetry",
+ "xai-spawn",
  "xai-sqlite-journal",
 ]
 
@@ -12536,7 +12494,7 @@ dependencies = [
  "futures",
  "futures-util",
  "gethostname",
- "git2",
+ "gix",
  "glob",
  "globset",
  "hmac 0.12.1",
@@ -12595,6 +12553,7 @@ dependencies = [
  "xai-fast-worktree",
  "xai-file-utils",
  "xai-fsnotify",
+ "xai-gix-status",
  "xai-grok-agent",
  "xai-grok-announcements",
  "xai-grok-auth",
@@ -12639,6 +12598,7 @@ dependencies = [
  "xai-interjection-core",
  "xai-message-delivery-core",
  "xai-prompt-queue",
+ "xai-spawn",
  "xai-test-utils",
  "xai-token-estimation",
  "xai-tool-protocol",
@@ -12682,6 +12642,7 @@ dependencies = [
  "xai-grok-net",
  "xai-grok-shared",
  "xai-grok-version",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -12699,6 +12660,7 @@ dependencies = [
  "xai-grok-http",
  "xai-grok-net",
  "xai-grok-version",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -12728,6 +12690,7 @@ dependencies = [
  "xai-grok-sandbox",
  "xai-grok-tools",
  "xai-grok-workspace",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -12778,7 +12741,6 @@ dependencies = [
  "chrono",
  "ctor",
  "filetime",
- "git2",
  "http",
  "mid",
  "obfstr",
@@ -12807,6 +12769,7 @@ dependencies = [
  "whoami",
  "xai-dirs",
  "xai-file-utils",
+ "xai-gix-status",
  "xai-grok-auth",
  "xai-grok-config",
  "xai-grok-env",
@@ -12819,6 +12782,7 @@ dependencies = [
  "xai-grok-test-support",
  "xai-grok-version",
  "xai-mixpanel",
+ "xai-spawn",
  "xai-token-estimation",
  "xai-tool-types",
  "xai-tty-utils",
@@ -12852,6 +12816,7 @@ dependencies = [
  "tracing",
  "url",
  "xai-acp-lib",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -12868,6 +12833,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "command-fds",
+ "ctor",
  "derive_more",
  "dhat",
  "dunce",
@@ -12889,7 +12855,6 @@ dependencies = [
  "minijinja",
  "nix 0.30.1",
  "parking_lot",
- "pdf_oxide",
  "pretty_assertions",
  "pulldown-cmark",
  "quick-xml 0.41.0",
@@ -12930,12 +12895,14 @@ dependencies = [
  "xai-grok-image",
  "xai-grok-net",
  "xai-grok-otel",
+ "xai-grok-pdf",
  "xai-grok-sandbox",
  "xai-grok-test-support",
  "xai-grok-tools-api",
  "xai-grok-version",
  "xai-interjection-core",
  "xai-message-delivery-core",
+ "xai-spawn",
  "xai-test-utils",
  "xai-token-estimation",
  "xai-tool-protocol",
@@ -12985,6 +12952,7 @@ dependencies = [
  "xai-dirs",
  "xai-grok-extra-ca",
  "xai-grok-net",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -13007,7 +12975,7 @@ dependencies = [
  "fastrace",
  "fs2",
  "futures",
- "git2",
+ "gix",
  "glob",
  "hashbrown 0.16.1",
  "ignore",
@@ -13050,6 +13018,7 @@ dependencies = [
  "xai-file-utils",
  "xai-fsnotify",
  "xai-fuzzy-file-search",
+ "xai-gix-status",
  "xai-grok-agent",
  "xai-grok-auth",
  "xai-grok-config",
@@ -13067,9 +13036,9 @@ dependencies = [
  "xai-grok-tools-api",
  "xai-grok-version",
  "xai-grok-workspace-client",
- "xai-grok-workspace-daemon",
  "xai-grok-workspace-types",
  "xai-hunk-tracker",
+ "xai-spawn",
  "xai-test-utils",
  "xai-tool-protocol",
  "xai-tool-runtime",
@@ -13115,6 +13084,34 @@ dependencies = [
  "windows 0.61.3",
  "xai-computer-hub-sdk",
  "xai-grok-net",
+ "xai-spawn",
+ "xai-tty-utils",
+]
+
+[[package]]
+name = "xai-grok-workspace-server"
+version = "0.1.220-alpha.4"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dunce",
+ "fastrace",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "xai-computer-hub-sdk",
+ "xai-grok-diag-server",
+ "xai-grok-extra-ca",
+ "xai-grok-pdf",
+ "xai-grok-sandbox",
+ "xai-grok-workspace",
+ "xai-grok-workspace-daemon",
+ "xai-spawn",
+ "xai-tool-protocol",
  "xai-tty-utils",
 ]
 
@@ -13157,6 +13154,7 @@ dependencies = [
  "tracing",
  "uuid",
  "xai-gix-status",
+ "xai-spawn",
  "xai-test-utils",
 ]
 
@@ -13239,6 +13237,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "xai-spawn"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "xai-sqlite-journal"
 version = "0.1.0"
 dependencies = [
@@ -13296,6 +13301,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "xai-grok-tools-api",
+ "xai-spawn",
  "xai-tool-protocol",
  "xai-tool-types",
 ]
@@ -13337,6 +13343,7 @@ dependencies = [
  "uuid",
  "wiremock",
  "xai-grok-net",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -13351,6 +13358,7 @@ dependencies = [
  "nix 0.30.1",
  "tokio",
  "windows 0.61.3",
+ "xai-spawn",
 ]
 
 [[package]]

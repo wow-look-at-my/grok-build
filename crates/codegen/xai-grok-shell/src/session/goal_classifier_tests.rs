@@ -60,7 +60,7 @@ async fn channel_spawner_request_is_harness_internal() {
         skeptic_overrides: Vec::new(),
         fallback: Default::default(),
     };
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let _ = spawner
             .spawn_classifier(
                 "clf-id",
@@ -116,7 +116,7 @@ async fn channel_spawner_applies_per_index_model_to_request() {
         ],
         fallback: Default::default(),
     };
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         // Skeptic 0 with a resume id: even on the cold path it carries skeptic_overrides[0]
         let _ = spawner
             .spawn_classifier(
@@ -175,7 +175,7 @@ async fn channel_spawner_inherit_index_leaves_model_none() {
         skeptic_overrides: vec![RoleSpawnOverride::default()],
         fallback: Default::default(),
     };
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let _ = spawner
             .spawn_classifier(
                 "clf-x",
@@ -218,7 +218,7 @@ async fn channel_spawner_skeptic_blocks_its_caller_in_the_session_cwd() {
         skeptic_overrides: vec![RoleSpawnOverride::default()],
         fallback: Default::default(),
     };
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let _ = spawner
             .spawn_classifier(
                 "clf-lock",
@@ -3112,7 +3112,7 @@ async fn cold_fallback_after_resume_failure_carries_pool0_model_on_request() {
     let captured: SpawnCapture = Arc::new(StdMutex::new(Vec::new()));
     let cap = captured.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
-    let coord = tokio::spawn(async move {
+    let coord = xai_spawn::spawn(async move {
         while let Some(ev) = rx.recv().await {
             let SubagentEvent::Spawn(req) = ev else {
                 continue;
@@ -3494,7 +3494,7 @@ async fn channel_spawner_blocks_until_subagent_result() {
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
     let release = Arc::new(Notify::new());
     let release_task = Arc::clone(&release);
-    let coordinator = tokio::spawn(async move {
+    let coordinator = xai_spawn::spawn(async move {
         let SubagentEvent::Spawn(req) = event_rx.recv().await.expect("spawn event") else {
             panic!("expected SubagentEvent::Spawn");
         };
@@ -3520,7 +3520,7 @@ async fn channel_spawner_blocks_until_subagent_result() {
         skeptic_overrides: Vec::new(),
         fallback: Default::default(),
     };
-    let spawn_task = tokio::spawn(async move {
+    let spawn_task = xai_spawn::spawn(async move {
         spawner
             .spawn_classifier(
                 "classifier-id",

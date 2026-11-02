@@ -468,7 +468,7 @@ mod tests {
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         // Give the server 50ms to bind and accept — more headroom for Bazel CI sandboxing.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 

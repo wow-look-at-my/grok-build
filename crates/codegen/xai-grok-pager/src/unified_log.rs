@@ -20,7 +20,7 @@ static BUFFER: Mutex<Vec<ClientLogEntry>> = Mutex::new(Vec::new());
 /// promptly without manual flush calls.
 pub fn init(tx: AcpAgentTx) {
     let _ = ACP_TX.set(tx);
-    tokio::spawn(async {
+    xai_spawn::spawn(async {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -104,7 +104,7 @@ fn send_entries(entries: Vec<ClientLogEntry>) {
         return;
     };
     let tx = tx.clone();
-    handle.spawn(async move {
+    xai_spawn::spawn_on(&handle, async move {
         let _ = xai_acp_lib::acp_send(notification, &tx).await;
     });
 }

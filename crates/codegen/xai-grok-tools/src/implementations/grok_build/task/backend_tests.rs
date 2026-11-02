@@ -146,7 +146,7 @@ async fn channel_backend_spawn_success() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let req = recv_event!(rx, Spawn);
         assert_eq!(req.request.id, "test-id");
         assert_eq!(req.request.prompt, "do something");
@@ -228,7 +228,7 @@ async fn channel_backend_query_found() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let req = recv_event!(rx, Query);
         assert_eq!(req.subagent_id, "sub-1");
         assert!(req.block);
@@ -282,7 +282,7 @@ async fn channel_backend_query_non_blocking_passes_through() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let req = recv_event!(rx, Query);
         assert_eq!(req.subagent_id, "sub-nb");
         assert!(!req.block, "block should be false");
@@ -300,7 +300,7 @@ async fn channel_backend_query_non_blocking_passes_through() {
 async fn coordinator_exits_after_external_senders_drop() {
     let (sender, receiver) =
         super::super::coordinator::SubagentCoordinator::<BackendTestRunner>::channel();
-    let actor = tokio::spawn(
+    let actor = xai_spawn::spawn(
         super::super::coordinator::SubagentCoordinator::from_channel(
             receiver,
             BackendTestRunner,
@@ -317,7 +317,7 @@ async fn channel_backend_query_not_found() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let req = recv_event!(rx, Query);
         req.respond_to.send(None).unwrap();
     });
@@ -333,7 +333,7 @@ async fn channel_backend_active_message_binds_parent_and_round_trips() {
     let (sender, mut receiver) =
         super::super::coordinator::SubagentCoordinator::<BackendTestRunner>::channel();
     let backend = ChannelBackend::for_coordinator_session(sender, "bound-parent");
-    let send = tokio::spawn(async move {
+    let send = xai_spawn::spawn(async move {
         backend
             .send_active_message(ActiveAgentMessageRequest::try_new("sub-1", "follow up").unwrap())
             .await
@@ -405,7 +405,7 @@ async fn root_capable_backend_maps_agent_target_to_root_sender() {
     let (sender, mut receiver) =
         super::super::coordinator::SubagentCoordinator::<BackendTestRunner>::channel();
     let backend = ChannelBackend::for_coordinator_session(sender, "root").with_root_targets();
-    let send = tokio::spawn(async move {
+    let send = xai_spawn::spawn(async move {
         backend
             .send_active_message(
                 ActiveAgentMessageRequest::try_from_parts(
@@ -442,7 +442,7 @@ async fn stalled_actor_flood_is_rejected_at_ingress_capacity() {
     let (sender, mut receiver) =
         super::super::coordinator::SubagentCoordinatorReceiver::with_capacity(CAPACITY);
     let backend = ChannelBackend::for_coordinator_session(sender, "parent");
-    let first = tokio::spawn({
+    let first = xai_spawn::spawn({
         let backend = backend.clone();
         async move {
             backend
@@ -455,7 +455,7 @@ async fn stalled_actor_flood_is_rejected_at_ingress_capacity() {
     let first_queued = await_with_timeout(receiver.active_messages.recv())
         .await
         .expect("first active message queued");
-    let second = tokio::spawn({
+    let second = xai_spawn::spawn({
         let backend = backend.clone();
         async move {
             backend
@@ -525,7 +525,7 @@ async fn channel_backend_cancel_success() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let req = recv_event!(rx, Cancel);
         match &req.target {
             SubagentCancelTarget::SubagentId(id) => assert_eq!(id, "sub-cancel"),
@@ -585,7 +585,7 @@ async fn workflow_spawn_future_drop_cancels_but_task_drop_does_not() {
         let backend = Arc::new(ChannelBackend::new(tx));
         let request = request_for(owner);
         let cancel_token = request.cancel_token.clone();
-        let task = tokio::spawn({
+        let task = xai_spawn::spawn({
             let backend = backend.clone();
             async move { backend.spawn(request, None).await }
         });
@@ -606,7 +606,7 @@ async fn channel_backend_spawn_result_dropped() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let req = recv_event!(rx, Spawn);
         drop(req.result_tx);
     });
@@ -658,7 +658,7 @@ async fn channel_backend_validate_type_round_trips_outcome() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let event = rx.recv().await.unwrap();
         match event {
             SubagentEvent::ValidateType(req) => {
@@ -682,7 +682,7 @@ async fn channel_backend_validate_type_propagates_unknown_outcome() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         if let Some(SubagentEvent::ValidateType(req)) = rx.recv().await {
             req.respond_to
                 .send(SubagentValidateTypeOutcome::Unknown {
@@ -718,7 +718,7 @@ async fn channel_backend_validate_type_returns_coordinator_gone_when_channel_clo
 async fn channel_backend_validate_type_returns_validation_unavailable_when_responder_dropped() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         if let Some(SubagentEvent::ValidateType(req)) = rx.recv().await {
             drop(req.respond_to);
         }
@@ -741,7 +741,7 @@ async fn channel_backend_validate_type_logs_warn_on_timeout() {
 
     // Coordinator receives but never replies; keeps the responder
     // alive so the timeout arm fires (not responder-dropped).
-    let holder = tokio::spawn(async move {
+    let holder = xai_spawn::spawn(async move {
         if let Some(SubagentEvent::ValidateType(req)) = rx.recv().await {
             std::mem::forget(req.respond_to);
             std::future::pending::<()>().await;
@@ -749,7 +749,7 @@ async fn channel_backend_validate_type_logs_warn_on_timeout() {
     });
 
     let timeout = validate_type_timeout();
-    let validate = tokio::spawn(async move { backend.validate_type("explore", "p").await });
+    let validate = xai_spawn::spawn(async move { backend.validate_type("explore", "p").await });
     tokio::time::advance(timeout + std::time::Duration::from_millis(1)).await;
     let outcome = validate.await.unwrap();
     assert!(matches!(
@@ -787,7 +787,7 @@ async fn validate_reply_timeout_warn_reports_the_raced_duration() {
     let override_timeout = std::time::Duration::from_millis(250);
     let (_respond_to, response_rx) = tokio::sync::oneshot::channel();
 
-    let raced = tokio::spawn(await_validate_reply(
+    let raced = xai_spawn::spawn(await_validate_reply(
         "explore",
         override_timeout,
         response_rx,
@@ -820,7 +820,7 @@ async fn channel_backend_validate_type_waits_out_a_busy_coordinator() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let responder = tokio::spawn(async move {
+    let responder = xai_spawn::spawn(async move {
         if let Some(SubagentEvent::ValidateType(req)) = rx.recv().await {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             let _ = req.respond_to.send(SubagentValidateTypeOutcome::Ok);
@@ -842,7 +842,7 @@ async fn channel_backend_describe_round_trips_summary() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         match rx.recv().await.unwrap() {
             SubagentEvent::DescribeType(req) => {
                 assert_eq!(req.subagent_type, "explore");
@@ -887,7 +887,7 @@ async fn channel_backend_describe_propagates_not_allowed_outcome() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         if let Some(SubagentEvent::DescribeType(req)) = rx.recv().await {
             req.respond_to
                 .send(SubagentDescribeOutcome::NotAllowed {
@@ -923,7 +923,7 @@ async fn channel_backend_describe_returns_unavailable_when_responder_dropped() {
     use super::super::types::SubagentDescribeOutcome;
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         if let Some(SubagentEvent::DescribeType(req)) = rx.recv().await {
             drop(req.respond_to);
         }
@@ -941,7 +941,7 @@ async fn channel_backend_describe_returns_unavailable_on_timeout() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let holder = tokio::spawn(async move {
+    let holder = xai_spawn::spawn(async move {
         if let Some(SubagentEvent::DescribeType(req)) = rx.recv().await {
             std::mem::forget(req.respond_to);
             std::future::pending::<()>().await;
@@ -949,7 +949,7 @@ async fn channel_backend_describe_returns_unavailable_on_timeout() {
     });
 
     let describe =
-        tokio::spawn(async move { backend.describe_subagent_type("explore", None, "p").await });
+        xai_spawn::spawn(async move { backend.describe_subagent_type("explore", None, "p").await });
     tokio::time::advance(DESCRIBE_TYPE_TIMEOUT + std::time::Duration::from_millis(1)).await;
     assert!(matches!(
         describe.await.unwrap(),
@@ -967,7 +967,7 @@ async fn channel_backend_describe_times_out_before_validate_default() {
     let (tx, mut rx) = mpsc::unbounded_channel::<SubagentEvent>();
     let backend = ChannelBackend::new(tx);
 
-    let responder = tokio::spawn(async move {
+    let responder = xai_spawn::spawn(async move {
         if let Some(SubagentEvent::DescribeType(req)) = rx.recv().await {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             let _ = req

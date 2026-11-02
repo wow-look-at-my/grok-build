@@ -783,7 +783,7 @@ impl SessionActor {
                 .collect()
         };
         let lock_cwd = dispatch_cwd.clone();
-        let lock_paths = tokio::task::spawn_blocking(move || {
+        let lock_paths = xai_spawn::spawn_blocking(move || {
             lock_args
                 .iter()
                 .map(|args| lock_path_for_args(args, &lock_cwd))
@@ -1214,7 +1214,7 @@ impl SessionActor {
                             let am = am.clone();
                             let shared_recovery = Arc::clone(&shared_recovery);
                             let tool_name = prepared.tool_name.clone();
-                            tokio::spawn(async move {
+                            xai_spawn::spawn(async move {
                                 call_with_auth_retry(
                                     am.as_ref(),
                                     Some(&shared_recovery),
@@ -1245,7 +1245,7 @@ impl SessionActor {
                                     %task_id,
                                     "moved tool call to background: queued message pending"
                                 );
-                                tokio::spawn(report_detached_call(
+                                xai_spawn::spawn(report_detached_call(
                                     call,
                                     tool_notifications,
                                     task_id.clone(),
@@ -1350,7 +1350,7 @@ impl SessionActor {
             u64,
             crate::session::telemetry::ToolCallProjection,
         )>();
-        let drainer = tokio::spawn(
+        let drainer = xai_spawn::spawn(
             async move {
                 while let Some(item) = dispatch_stream.next().await {
                     if dispatch_tx.send(item).is_err() {
@@ -4129,7 +4129,7 @@ mod wait_interrupt_tests {
         use std::sync::Arc;
         let depth = Arc::new(crate::tools::tool_context::BlockingWaitState::new());
         let inner = depth.clone();
-        let task = tokio::spawn(async move {
+        let task = xai_spawn::spawn(async move {
             let _g = BlockingWaitGuard::enter(inner);
             tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
         });

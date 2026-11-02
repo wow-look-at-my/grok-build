@@ -91,7 +91,7 @@ async fn chat_completions_compaction_extracts_summary_after_reasoning_delta() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -202,7 +202,7 @@ async fn chat_completions_compaction_does_not_panic_on_reasoning_sibling() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -279,7 +279,7 @@ async fn chat_completions_below_trigger_preserves_images_and_tools() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -440,7 +440,7 @@ async fn responses_below_trigger_preserves_images_and_tools() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -549,7 +549,7 @@ async fn stalled_compaction_stream_times_out_as_transient() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -635,7 +635,7 @@ async fn completed_then_stalled_stream_errors_no_salvage() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -723,7 +723,7 @@ async fn substantial_partial_errors_no_salvage() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -808,7 +808,7 @@ async fn thin_partial_retries_on_stall() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
