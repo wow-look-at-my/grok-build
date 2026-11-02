@@ -3,10 +3,7 @@
 
 use std::cell::RefCell;
 
-/// Bumped when a turn is promoted.
-/// A report carrying an older epoch is refused.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct TurnEpoch(u64);
+pub(crate) use crate::session::actor_types::TurnEpoch;
 
 /// Only a gate claim is held across an await, so only a gate claim can be released by an abort.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,0 +1,33 @@
+//! Agent config, remote config, model providers and the clients the agent uses. `xai_grok_shell::agent` adds the agent itself.
+pub mod activity;
+pub mod auth_method;
+pub mod chat_modes;
+pub mod config;
+pub mod config_model_override_parse;
+pub mod cursor_worker_config;
+pub mod ext_parsers;
+pub mod external_otel_pin;
+pub mod feedback_client;
+pub mod folder_trust;
+pub mod media_tool_config;
+pub mod model_pricing;
+pub mod model_provider_discovery;
+pub mod model_providers;
+pub mod models_effort;
+pub mod otel_gate;
+pub mod proxy;
+pub mod proxy_headers;
+pub mod reasoning_policy;
+pub mod relay;
+pub mod remote_config;
+pub mod restore_code;
+pub mod roster;
+pub mod session_config;
+pub mod session_metrics;
+pub mod session_registry_client;
+pub mod subagent;
+pub mod subscription_check;
+pub mod telemetry_config;
+pub mod update_chunk_merge;
+
+pub use relay::{RelayConfig, RelayHandle, spawn_relay_connection};

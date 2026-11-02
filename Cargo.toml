@@ -70,6 +70,7 @@ members = [
     "crates/codegen/xai-grok-shell",
     "crates/codegen/xai-grok-shell-assets",
     "crates/codegen/xai-grok-shell-base",
+    "crates/codegen/xai-grok-shell-core",
     "crates/codegen/xai-grok-shell-session-support",
     "crates/codegen/xai-grok-shell-terminal",
     "crates/codegen/xai-grok-stamp",
@@ -359,6 +360,7 @@ xai-grok-session-search = { path = "crates/codegen/xai-grok-session-search" }
 xai-grok-shared = { path = "crates/codegen/xai-grok-shared" }
 xai-grok-shell = { path = "crates/codegen/xai-grok-shell" }
 xai-grok-shell-base = { path = "crates/codegen/xai-grok-shell-base" }
+xai-grok-shell-core = { path = "crates/codegen/xai-grok-shell-core" }
 xai-grok-shell-session-support = { path = "crates/codegen/xai-grok-shell-session-support" }
 xai-grok-shell-terminal = { path = "crates/codegen/xai-grok-shell-terminal" }
 xai-grok-status-line = { path = "crates/codegen/xai-grok-status-line" }
@@ -403,6 +405,10 @@ panic = "abort"
 overflow-checks = true
 
 [profile.release.package.xai-grok-shell]
+opt-level = 2
+codegen-units = 256
+
+[profile.release.package.xai-grok-shell-core]
 opt-level = 2
 codegen-units = 256
 

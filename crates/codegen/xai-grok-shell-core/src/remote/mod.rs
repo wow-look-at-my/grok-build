@@ -1,0 +1,47 @@
+//! Remote storage client for the backend.
+pub mod agent;
+pub mod chat_models_client;
+pub mod client;
+pub mod conversations_client;
+pub mod local_runtime;
+mod model_source;
+pub mod pull;
+#[cfg(test)]
+mod pull_smoke_test;
+pub mod skills_client;
+pub mod sync;
+pub mod workspaces_client;
+pub use agent::{
+    SandboxClient, SandboxCreateEnvironmentRequest, SandboxEnvironment, SandboxEnvironmentResponse,
+    SandboxEnvironmentVariable, SandboxEnvironmentWithMetadata, SandboxForkRequest,
+    SandboxForkResponse, SandboxForkedSession, SandboxHibernateResponse,
+    SandboxListEnvironmentsRequest, SandboxListEnvironmentsResponse,
+    SandboxListPreinstalledPackagesResponse, SandboxLogsExitCodes, SandboxLogsResponse,
+    SandboxMode, SandboxPreinstalledPackage, SandboxRestoreRequest, SandboxRestoreResponse,
+    SandboxSecretInput, SandboxStartRequest, SandboxStartResponse, SandboxStatusResponse,
+    SandboxTerminateRequest, SandboxUpdateEnvironmentRequest,
+};
+pub use chat_models_client::{
+    ChatModelsClient, ChatModelsError, ListModesResponse, Mode, ModeAvailability,
+};
+pub use client::{
+    BackendClient, BackendError, FetchModelsResult, FetchedBundle, SettingsFetch, fetch_bundle,
+    fetch_settings_blocking, fetch_subagent_bundle, share_url,
+};
+pub use client::{
+    DEFAULT_CONTEXT_WINDOW, fetch_models_for_api_base_blocking, fetch_models_for_list_url_blocking,
+    models_list_url_for_base,
+};
+pub use conversations_client::{
+    ConvError, ConvQuery, Conversation, ConversationsClient, ListConversationsPage,
+    UpdateConversationBody,
+};
+pub use local_runtime::{fetch_local_listing_blocking, fetch_residency_blocking};
+pub use model_source::{ModelSource, active_model_source};
+pub use pull::{PullResult, pull_session_to_local};
+pub use skills_client::{
+    BundledSkill, CHAT_PRODUCT_META_KEY, CHAT_PRODUCT_META_VALUE, ListBundledSkillsResponse,
+    ListUserSkillsResponse, ProductSkillsCatalog, SkillsClient, SkillsError, UserSkill,
+};
+pub use sync::RemoteSync;
+pub use workspaces_client::{ListWorkspacesPage, Workspace, WorkspacesClient, WsError, WsQuery};

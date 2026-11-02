@@ -14,13 +14,14 @@ dhat-heap = ["dep:dhat"]
 # `test-support` so downstream test builds see those crates' test seams
 # (`isolated_spawn_e2e` uses `WorkspaceOps::for_test`).
 test-support = [
+    "xai-grok-shell-core/test-support",
     "xai-grok-login/test-support",
     "xai-grok-sampler/test-support",
     "xai-grok-workspace/test-support",
 ]
 test-util = []
 # Local Computer Hub workspace_server (own/attach + crash-restart). Requires
-local-workspace = []
+local-workspace = ["xai-grok-shell-core/local-workspace"]
 # CI default set (preferred over cargo `default` for hermetic CI builds):
 # `config-docs` is on this set (not cargo `default`) so hermetic lib tests
 # parse the committed config-reference page.
@@ -53,7 +54,7 @@ glob = { workspace = true }
 globset = { workspace = true }
 kanal = "0.1"
 regex = { workspace = true }
-# The MCP code in this crate (extensions/mcp.rs, mcp_doctor.rs) reaches rmcp
+# The MCP code in this crate (extensions/mcp.rs) reaches rmcp
 # model types via `xai_grok_mcp::rmcp::model::*`. Every HTTP and WebSocket
 # call site in this crate goes through xai-grok-net.
 xai-grok-mcp = { workspace = true }
@@ -120,6 +121,7 @@ xai-fast-worktree = { path = "../xai-fast-worktree", features = ["metadata"] }
 
 xai-grok-paths = { path = "../xai-grok-paths" }
 xai-grok-shell-base = { workspace = true }
+xai-grok-shell-core = { workspace = true }
 xai-grok-shell-assets = { path = "../xai-grok-shell-assets" }
 xai-grok-shell-session-support = { workspace = true }
 xai-grok-shell-terminal = { workspace = true }
@@ -180,7 +182,7 @@ tdigests = "1.0"
 semver = { workspace = true }
 parking_lot.workspace = true
 
-# Used by acp_session.rs and mcp_servers.rs for the unified
+# Used by acp_session.rs for the unified
 # xai_tool_runtime::Tool dispatch model and the computer-hub MCP adapter.
 xai-computer-hub-sdk = { workspace = true }
 xai-tool-runtime = { workspace = true }
@@ -223,6 +225,8 @@ serial_test = { workspace = true }
 # Test-only builds expose `env::EnvVarGuard` and the cpu_profile test seams to
 # this crate's test targets.
 xai-grok-shell-base = { workspace = true, features = ["test-support"] }
+# The core crate's `#[cfg(test)]` seams and `test_support` helpers, for this crate's tests.
+xai-grok-shell-core = { workspace = true, features = ["test-util"] }
 # Exposes the login crate's `#[cfg(test)]`-only auth-provider helpers
 # (`test_counting_provider`, `test_backdate_provider_mint`) to shell tests.
 xai-grok-login = { workspace = true, features = ["test-support"] }
