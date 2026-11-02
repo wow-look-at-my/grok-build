@@ -988,6 +988,59 @@ pub(super) fn handle_todo_captured(
     vec![]
 }
 
+/// `@sonnet [level] <task>` and its siblings: echo the request and send the spawn to the shell.
+/// The subagent row appears through the usual `SubagentSpawned` update.
+pub(super) fn dispatch_spawn_model_agent(
+    app: &mut AppView,
+    family: String,
+    effort: Option<String>,
+    prompt: String,
+) -> Vec<Effect> {
+    let ActiveView::Agent(id) = app.active_view else {
+        return vec![];
+    };
+    let Some(agent) = app.agents.get_mut(&id) else {
+        return vec![];
+    };
+    let Some(session_id) = agent.session.session_id.clone() else {
+        agent.show_toast(NO_SESSION_NOTICE);
+        return vec![];
+    };
+    agent.prompt.set_text("");
+    let level = effort
+        .as_deref()
+        .map(|level| format!(" ({level})"))
+        .unwrap_or_default();
+    agent
+        .scrollback
+        .push_block(RenderBlock::system(format!("@{family}{level}: {prompt}")));
+    vec![Effect::SpawnModelAgent {
+        agent_id: id,
+        session_id,
+        family,
+        effort,
+        prompt,
+    }]
+}
+
+/// Say which model the `@family` subagent runs on, or why it did not start.
+pub(super) fn handle_model_agent_spawned(
+    app: &mut AppView,
+    agent_id: AgentId,
+    family: &str,
+    result: Result<String, String>,
+) -> Vec<Effect> {
+    let Some(agent) = app.agents.get_mut(&agent_id) else {
+        return vec![];
+    };
+    let text = match result {
+        Ok(model_id) => format!("Started a background @{family} subagent on {model_id}."),
+        Err(error) => format!("Couldn't start the @{family} subagent: {error}"),
+    };
+    agent.scrollback.push_block(RenderBlock::system(text));
+    vec![]
+}
+
 /// Owns `/btw` attachments until they are handed to the send effect.
 /// Drop unlinks staged temps and session copies.
 struct BtwImages(Vec<crate::prompt_images::PastedImage>);

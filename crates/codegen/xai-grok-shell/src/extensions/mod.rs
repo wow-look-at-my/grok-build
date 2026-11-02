@@ -22,6 +22,7 @@ pub mod jj;
 pub mod marketplace;
 pub mod mcp;
 pub mod memory;
+pub mod model_agent;
 pub mod notification;
 pub mod plugins;
 pub mod pr;

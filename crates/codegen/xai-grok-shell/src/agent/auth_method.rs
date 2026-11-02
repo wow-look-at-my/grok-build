@@ -296,9 +296,9 @@ pub(crate) enum ModelByok {
     /// Config couldn't be loaded/parsed; BYOK status indeterminate.
     Unknown,
 }
-/// Whether this session and model combination uses a refreshable session token. Gates on stable inputs, not `Credentials.auth_type`. `model_byok` still excludes genuine per-model BYOK, whose keys are not refreshable.
-/// token. Gates on stable inputs, not `Credentials.auth_type`. `model_byok`
-/// still excludes genuine per-model BYOK, whose keys are not refreshable.
+/// Whether this session and model combination uses a refreshable session
+/// token. Gates on stable inputs, not `Credentials.auth_type`. It must
+/// **not** demote a live session to non-refreshable api-key mode.
 pub(crate) fn session_token_auth_gate(
     is_session_based_method: bool,
     model_byok: ModelByok,

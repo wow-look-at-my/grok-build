@@ -1101,6 +1101,11 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SaveRememberNoteFromModal => dispatch_save_remember_note_from_modal(app),
         Action::SendBtw { question, images } => dispatch_send_btw(app, question, images),
         Action::SendTodo { request, urgent } => dispatch_send_todo(app, request, urgent),
+        Action::SpawnModelAgent {
+            family,
+            effort,
+            prompt,
+        } => super::notes::dispatch_spawn_model_agent(app, family, effort, prompt),
         Action::SendRecap { auto } => dispatch_send_recap(app, auto),
         Action::SetCodingDataSharing { opted_in } => set_coding_data_sharing(
             app,
