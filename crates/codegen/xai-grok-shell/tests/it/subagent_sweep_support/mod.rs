@@ -1,5 +1,4 @@
 //! Shared harness for the subagent latency sweep and the bootstrap-cost regression tier.
-//! The regression tier needs its own process because the waterfall sink and env latch once per process.
 #![allow(dead_code)]
 
 use std::time::{Duration, Instant};
@@ -115,7 +114,8 @@ pub fn has_user_prompt(body: &Value, prompt: &str) -> bool {
         .any(|message| message["role"] == "user" && message_text(message).contains(prompt))
 }
 
-/// The one foreground chat-completions body satisfying `matches`; anything else is a test-scripting mistake.
+/// The foreground chat-completions body satisfying `matches`; anything else
+/// is a test-scripting mistake.
 pub fn single_request(mock: &MockInferenceServer, matches: impl Fn(&Value) -> bool) -> Value {
     let bodies: Vec<Value> = mock
         .requests()
@@ -470,7 +470,6 @@ pub fn run_burst(
 }
 
 /// Process-wide scaffold shared by the sweep and regression binaries.
-/// The mock gets its own runtime because agent startup prefetch would starve a shared one.
 pub struct SweepEnv {
     pub mock_rt: tokio::runtime::Runtime,
     pub deadline: Duration,
@@ -507,8 +506,8 @@ pub fn sweep_env_init() -> SweepEnv {
     }
 }
 
-/// One burst on a fresh mock server: repoint the env (SAFETY: the previous
-/// burst's agent thread has been joined), run, let child teardown settle.
+/// One burst on a fresh mock server: repoint the env (SAFETY: the burst's
+/// agent thread has been joined), run, let child teardown settle.
 pub fn burst_on_fresh_mock(env: &SweepEnv, n: usize, isolation: &str) -> BurstOutcome {
     let server = env
         .mock_rt

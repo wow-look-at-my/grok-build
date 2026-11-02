@@ -1,3 +1,5 @@
+// test_mcp_permission_persistence.rs holds the test mcp permission persistence code.
+
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 

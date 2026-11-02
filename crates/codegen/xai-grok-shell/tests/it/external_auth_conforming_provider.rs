@@ -1,9 +1,4 @@
 //! The published external-auth contract, end to end.
-//!
-//! Operator binaries live outside this repo and read `GROK_AUTH_EXPIRED=1` as "headless, don't prompt".
-//! They decline a run they cannot complete silently.
-//! So a binary that declines the boot probe must still be able to sign the user in.
-//! The two runs have to reach it in the order boot produces them.
 
 #![cfg(unix)]
 

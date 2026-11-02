@@ -180,7 +180,8 @@ where
     connect_client(client, client_type, pipes).await
 }
 
-/// Initialize plus API-key auth over `pipes`; the one handshake every harness topology shares.
+/// Initialize plus API-key auth over `pipes`; the handshake every harness
+/// topology shares.
 pub async fn connect_client<C>(
     client: C,
     client_type: &str,
@@ -344,8 +345,7 @@ fn set_test_env(grok_home: &std::path::Path, server_url: &str) {
         std::env::set_var("GROK_TELEMETRY_ENABLED", "false");
         std::env::set_var("GROK_FEEDBACK_ENABLED", "false");
         std::env::set_var("GROK_TRACE_UPLOAD", "false");
-        // Turn summaries fire one more request to the same mock endpoint after the turn, on a spawned task
-        // The race makes request-count assertions flaky
+        // Turn summaries fire one more request to the same mock endpoint after the turn.
         std::env::set_var("GROK_TURN_SUMMARY", "false");
     }
 }

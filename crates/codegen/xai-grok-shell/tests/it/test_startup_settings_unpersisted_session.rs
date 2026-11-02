@@ -6,8 +6,8 @@ use xai_grok_shell::agent::remote_config::settings_get::{SettingsQuery, get_sett
 use xai_grok_shell::util::config::RemoteSettings;
 
 /// A live fetch made with an in-memory session that is not on disk yet (a fresh
-/// login or token refresh) must be served this boot, not discarded because the
-/// commit gate re-reads a different disk identity.
+/// login or token refresh) must be served this boot, not discarded. This is
+/// because the commit gate re-reads a different disk identity.
 #[test]
 fn live_fetch_with_unpersisted_session_is_served() {
     let home = common::isolated_home();

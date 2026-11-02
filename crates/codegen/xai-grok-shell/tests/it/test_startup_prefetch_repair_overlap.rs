@@ -10,9 +10,9 @@ use xai_grok_shell::agent::remote_config::settings_get::{
 use xai_grok_shell::util::config::RemoteSettings;
 
 /// A boot that needs a policy repair must not pay repair and settings fetch
-/// back to back: the gate-exit warm starts the one startup load and
-/// bootstrap's bounded wait joins it. A warm while the repair is still
-/// pending sends nothing and must not decide the one-shot startup cell.
+/// back to back. The gate-exit warm starts the startup load and bootstrap's
+/// bounded wait joins it. A warm while the repair is still pending sends
+/// nothing and must not decide the one-shot startup cell.
 #[test]
 fn gate_exit_warm_starts_the_one_startup_load_after_the_repair_settles() {
     let home = common::isolated_home();

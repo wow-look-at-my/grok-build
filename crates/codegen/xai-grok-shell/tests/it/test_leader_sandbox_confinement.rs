@@ -1,6 +1,4 @@
 //! Defense-in-depth: `connect_or_spawn` must refuse when a non-`off` sandbox profile was requested, before any socket discovery or leader spawn.
-//!
-//! This test needs its own process: `set_configured_profile` writes a process-global `OnceLock` that other unit tests in this crate also set.
 
 use xai_grok_shell::leader::{
     ClientCapabilities, ClientMode, ConnectionError, LeaderEnvUrls, connect_or_spawn,

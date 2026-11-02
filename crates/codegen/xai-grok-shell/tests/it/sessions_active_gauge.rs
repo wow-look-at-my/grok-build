@@ -1,5 +1,4 @@
-//! `sessions_active` is counted at the one spawn point shared by every way the agent hosts a session.
-//! This test needs its own process, so the process-global gauge sees no other session traffic and the counts can be exact.
+//! `sessions_active` is counted at the spawn point shared by every way the agent hosts a session.
 
 #[allow(dead_code)]
 use crate::acp_harness;

@@ -1,3 +1,5 @@
+// test_bootstrap_subphase_timings.rs holds the test bootstrap subphase timings code.
+
 #[test]
 fn startup_completed_carries_bootstrap_subphase_fields() {
     let home = tempfile::TempDir::new().expect("grok home");

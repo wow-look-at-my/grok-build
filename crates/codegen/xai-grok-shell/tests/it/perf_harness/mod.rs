@@ -1,5 +1,5 @@
-//! The agent runs on its OWN thread so client-side timestamping never competes with the parent session's `LocalSet`.
-//! Items the current tests do not use are dead code.
+//! The agent runs on its OWN thread so client-side timestamping never
+//! competes with the parent session's `LocalSet`.
 #![allow(dead_code)]
 
 use std::cell::RefCell;

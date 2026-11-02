@@ -9,7 +9,7 @@ use xai_grok_shell::util::config::RemoteSettings;
 use xai_grok_test_support::MockModelEntry;
 
 /// The production current-thread boot path (`resolve_boot_startup_settings` then
-/// `bootstrap_with_cancel`) the pager worker uses; every other suite drives the
+/// `bootstrap_with_cancel`) the pager worker uses. Every other suite drives the
 /// multi-thread `bootstrap()`, so only this test covers the current-thread arm.
 #[test]
 fn current_thread_boot_installs_settings_and_fetched_catalog() {
@@ -34,9 +34,8 @@ fn current_thread_boot_installs_settings_and_fetched_catalog() {
             .await
             .expect("boot settings resolve");
 
-        // The prefetch also wrote the disk cache, which would let bootstrap's disk fallback mask an
-        // ignored handoff. Remove it and change what a re-fetch returns, so the assertions fail
-        // unless the boot consumes the owned in-memory prefetch.
+        // The prefetch also wrote the disk cache, which would let bootstrap's
+        // disk fallback mask an ignored handoff.
         std::fs::remove_file(home.path().join("models_cache.json"))
             .expect("prefetch must have written models_cache.json to remove");
         server.set_models(vec![MockModelEntry::new("resync-should-not-appear")]);

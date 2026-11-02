@@ -1,5 +1,7 @@
 #![cfg(unix)]
 
+// session_create_hook_deferral.rs holds the session create hook deferral code.
+
 #[allow(dead_code)]
 use crate::acp_harness;
 

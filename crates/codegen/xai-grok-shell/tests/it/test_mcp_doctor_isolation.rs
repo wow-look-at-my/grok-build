@@ -1,6 +1,5 @@
-//! Needs its own process so `grok_home()`'s process-wide OnceLock initializes from
-//! our `GROK_HOME`. A lib-test EnvGuard is a no-op if another test already
-//! resolved it, and then doctor reads the real ~/.grok.
+//! Needs its own process so `grok_home()`'s process-wide OnceLock initializes
+//! from our `GROK_HOME`.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
