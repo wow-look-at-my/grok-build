@@ -21,7 +21,6 @@ xai-grok-config = { path = "../xai-grok-config" }
 xai-grok-extra-ca = { workspace = true }
 xai-grok-feedback = { workspace = true }
 xai-grok-tools-api = { path = "../xai-grok-tools-api" }
-xai-grok-workspace-types = { path = "../xai-grok-workspace-types" }
 xai-grok-version = { workspace = true }
 xai-interjection-core = { workspace = true }
 xai-message-delivery-core = { workspace = true }
@@ -35,7 +34,6 @@ ignore = { workspace = true }
 infer = { workspace = true }
 globset = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico"] }
-kamadak-exif = { workspace = true, optional = true }
 pdf_oxide = { workspace = true }
 # PPTX text extraction (implementations/read_file/pptx.rs). Deliberately NOT
 # `workspace = true`: the workspace `zip` pin has default features on, which
@@ -76,13 +74,11 @@ tokio = { workspace = true, features = [
     "sync",
 ] }
 tokio-util = { workspace = true, features = ["compat"] }
-tonic = { workspace = true }
 tracing = { workspace = true }
 unicode-normalization = { workspace = true, optional = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 wildmatch = { workspace = true }
-xai-grok-env = { workspace = true }
 serde_yaml = { workspace = true }
 shellexpand = "3.1"
 tempfile = { workspace = true }

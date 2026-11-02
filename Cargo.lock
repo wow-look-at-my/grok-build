@@ -5188,22 +5188,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
-name = "humantime"
-version = "2.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
-
-[[package]]
-name = "humantime-serde"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
-dependencies = [
- "humantime",
- "serde",
-]
-
-[[package]]
 name = "hybrid-array"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5855,15 +5839,6 @@ dependencies = [
  "sha2 0.10.9",
  "signature",
  "simple_asn1",
-]
-
-[[package]]
-name = "kamadak-exif"
-version = "0.5.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef4fc70d0ab7e5b6bafa30216a6b48705ea964cdfc29c050f2412295eba58077"
-dependencies = [
- "mutate_once",
 ]
 
 [[package]]
@@ -6537,12 +6512,6 @@ name = "multimap"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
-
-[[package]]
-name = "mutate_once"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13d2233c9842d08cfe13f9eac96e207ca6a2ea10b80259ebe8ad0268be27d2af"
 
 [[package]]
 name = "ndk"
@@ -13497,17 +13466,13 @@ dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http-client",
  "axum",
- "axum-server",
  "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
- "dunce",
  "filetime",
  "futures",
  "gcloud-storage",
- "indexmap",
  "prod-mc-cli-chat-proxy-types",
- "rcgen",
  "reflink-copy",
  "reqwest 0.12.24",
  "reqwest-middleware 0.4.2",
@@ -13527,7 +13492,6 @@ dependencies = [
  "xai-grok-extra-ca",
  "xai-grok-otel",
  "xai-grok-version",
- "xai-test-utils",
  "zstd",
 ]
 
@@ -13753,10 +13717,6 @@ dependencies = [
 [[package]]
 name = "xai-grok-env"
 version = "0.1.0"
-dependencies = [
- "tracing",
- "url",
-]
 
 [[package]]
 name = "xai-grok-extra-ca"
@@ -13806,7 +13766,6 @@ dependencies = [
 name = "xai-grok-foreign-sessions"
 version = "0.1.0"
 dependencies = [
- "dirs 6.0.0",
  "dunce",
  "filetime",
  "git2",
@@ -14165,7 +14124,6 @@ dependencies = [
  "urlencoding",
  "uuid",
  "walkdir",
- "wiremock",
  "xai-acp-lib",
  "xai-chat-state",
  "xai-crash-handler",
@@ -14218,7 +14176,6 @@ dependencies = [
  "clap",
  "dunce",
  "libc",
- "obfstr",
  "serde_json",
  "serial_test",
  "tikv-jemalloc-ctl",
@@ -14547,7 +14504,6 @@ dependencies = [
  "clap",
  "criterion",
  "ctor",
- "dashmap",
  "dhat",
  "dunce",
  "filetime",
@@ -14555,7 +14511,6 @@ dependencies = [
  "fs2",
  "futures",
  "futures-util",
- "gcloud-storage",
  "gethostname",
  "git2",
  "glob",
@@ -14573,7 +14528,6 @@ dependencies = [
  "notify",
  "notify-debouncer-mini",
  "nucleo",
- "obfstr",
  "parking_lot",
  "pretty_assertions",
  "prod-mc-cli-chat-proxy-types",
@@ -14605,7 +14559,6 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
- "walkdir",
  "webbrowser",
  "windows 0.61.3",
  "xai-acp-lib",
@@ -14669,23 +14622,15 @@ dependencies = [
  "xai-tracing-macros",
  "xai-tty-utils",
  "xai-workflow",
- "zstd",
 ]
 
 [[package]]
 name = "xai-grok-shell-assets"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "flate2",
- "prod-mc-cli-chat-proxy-types",
- "serde",
- "serde_json",
  "sha2 0.10.9",
- "tar",
  "tempfile",
  "tracing",
- "xai-grok-config",
  "xai-grok-version",
 ]
 
@@ -14865,7 +14810,6 @@ dependencies = [
  "axum",
  "axum-server",
  "base64 0.22.1",
- "clap",
  "futures-util",
  "libc",
  "opentelemetry-proto",
@@ -14874,17 +14818,14 @@ dependencies = [
  "rcgen",
  "regex",
  "reqwest 0.12.24",
- "ring",
  "rustls",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
- "tokio-tungstenite",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
  "url",
  "xai-acp-lib",
  "xai-tty-utils",
@@ -14918,7 +14859,6 @@ dependencies = [
  "image",
  "indexmap",
  "infer 0.19.0",
- "kamadak-exif",
  "libc",
  "minijinja",
  "nix 0.30.1",
@@ -14945,7 +14885,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
- "tonic",
  "tracing",
  "tracing-subscriber",
  "unicode-normalization",
@@ -14961,7 +14900,6 @@ dependencies = [
  "xai-file-utils",
  "xai-grok-auth",
  "xai-grok-config",
- "xai-grok-env",
  "xai-grok-extra-ca",
  "xai-grok-feedback",
  "xai-grok-image",
@@ -14970,7 +14908,6 @@ dependencies = [
  "xai-grok-test-support",
  "xai-grok-tools-api",
  "xai-grok-version",
- "xai-grok-workspace-types",
  "xai-interjection-core",
  "xai-message-delivery-core",
  "xai-test-utils",
@@ -14987,11 +14924,9 @@ dependencies = [
 name = "xai-grok-tools-api"
 version = "0.1.220-alpha.4"
 dependencies = [
- "prost",
  "serde",
  "serde_json",
  "tonic",
- "tonic-prost",
  "xai-proto-build",
  "xai-tool-protocol",
 ]
@@ -15011,7 +14946,6 @@ dependencies = [
  "cpal",
  "futures-util",
  "parking_lot",
- "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -15043,13 +14977,11 @@ dependencies = [
  "dashmap",
  "dunce",
  "fastrace",
- "flate2",
  "fs2",
  "futures",
  "git2",
  "glob",
  "hashbrown 0.16.1",
- "humantime-serde",
  "ignore",
  "indexmap",
  "infer 0.19.0",
@@ -15068,14 +15000,12 @@ dependencies = [
  "sha2 0.10.9",
  "smallvec",
  "strum 0.27.2",
- "tar",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
  "toml",
- "tonic",
  "tracing",
  "tracing-subscriber",
  "tree-sitter",
@@ -15098,7 +15028,6 @@ dependencies = [
  "xai-grok-config",
  "xai-grok-config-types",
  "xai-grok-diag-server",
- "xai-grok-env",
  "xai-grok-extra-ca",
  "xai-grok-hooks",
  "xai-grok-mcp",
@@ -15222,8 +15151,6 @@ dependencies = [
  "reqwest 0.12.24",
  "serde_json",
  "thiserror 2.0.18",
- "tokio",
- "wiremock",
  "xai-grok-secrets",
 ]
 

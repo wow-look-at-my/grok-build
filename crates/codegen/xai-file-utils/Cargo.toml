@@ -9,7 +9,6 @@ authors = ["xAI"]
 [dependencies]
 anyhow = { workspace = true }
 base64.workspace = true
-dunce = { workspace = true }
 xai-circuit-breaker = { workspace = true }
 xai-grok-version = { workspace = true }
 aws-sdk-s3 = { version = "1", default-features = false, features = [
@@ -27,7 +26,6 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
-indexmap = { workspace = true }
 xai-dirs = { workspace = true }
 reqwest = { workspace = true }
 xai-grok-extra-ca = { workspace = true }
@@ -53,10 +51,7 @@ default-bazel = []
 [dev-dependencies]
 tempfile = { workspace = true }
 axum = { workspace = true, features = ["multipart"] }
-axum-server = { workspace = true, features = ["tls-rustls"] }
-rcgen = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "net", "time"] }
-xai-test-utils = { workspace = true }
 filetime = { workspace = true }
 tracing-subscriber = { workspace = true }
 

@@ -9,8 +9,6 @@ description = "Bounded, metadata-only discovery of foreign coding-agent sessions
 default = []
 
 [dependencies]
-# Home/config discovery for the per-tool session stores.
-dirs = "6"
 # Non-UNC canonicalization so Windows path comparisons stay comparable.
 dunce = { workspace = true }
 # Branch lookup for session summaries.

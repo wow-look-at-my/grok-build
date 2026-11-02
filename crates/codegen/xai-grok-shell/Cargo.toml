@@ -83,7 +83,6 @@ tracing-subscriber = { workspace = true, features = [
     "json",
     "time",
 ] }
-obfstr = { workspace = true }
 tokio-util = { workspace = true, features = ["compat", "rt"] }
 tokio-retry = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v5", "v7"] }
@@ -106,7 +105,6 @@ rustls = { version = "0.23", default-features = false, features = [
 futures-util = { workspace = true }
 urlencoding = { workspace = true }
 gethostname = { workspace = true }
-gcloud-storage = { workspace = true }
 git2 = { version = "0.21", default-features = false, features = [
     "vendored-libgit2",
 ] }
@@ -180,14 +178,11 @@ xai-grok-models = { workspace = true }
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
 flate2 = { workspace = true }
 fs2 = { workspace = true }
-zstd = { workspace = true }
 tar = { workspace = true }
 url = { workspace = true }
-walkdir = { workspace = true }
 tdigests = "1.0"
 semver = { workspace = true }
 parking_lot.workspace = true
-dashmap.workspace = true
 
 # Used by acp_session.rs and mcp_servers.rs for the unified
 # xai_tool_runtime::Tool dispatch model and the computer-hub MCP adapter.

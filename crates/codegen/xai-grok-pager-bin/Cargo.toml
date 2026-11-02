@@ -46,11 +46,6 @@ xai-grok-config = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 xai-grok-extra-ca = { workspace = true }
 
-# Binary hardening: compile-time string + control-flow obfuscation.
-obfstr = { workspace = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 # Default allocator on Unix; gated by the `jemalloc` feature (see main.rs
