@@ -26,7 +26,6 @@ mod subagent_bootstrap_regression;
 mod test_auth_provider_command_e2e;
 mod test_bootstrap_subphase_timings;
 mod test_config_update_isolation;
-mod test_heap_profile_monitor;
 mod test_image_strip_recovery;
 mod test_leader_cursor_worker;
 mod test_leader_sandbox_confinement;

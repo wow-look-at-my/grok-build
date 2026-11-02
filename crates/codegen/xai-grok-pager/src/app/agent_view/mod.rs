@@ -2564,61 +2564,27 @@ pub(crate) mod test_fixtures {
         assert_eq!(user.session.current_prompt_id.as_deref(), Some("p-user"));
         assert!(user.session.state.is_turn_running());
     }
-    /// Resolving a reload window purges iff a heavy transient dropped: the stash (success + full replay), or the staged partial replay (failure / abort / supersede). The common cursor-resolve outcome reuses the stash
-    /// (nothing multi-MB drops) and must NOT purge. The counter is thread-local, so parallel tests cannot interfere with the deltas.
+    /// `finish_session_reload` finalizes only the window opened for its generation.
     #[test]
-    fn reload_finalize_and_abort_release_retained_memory() {
-        use crate::memory_release::test_support;
-        test_support::install_counting_hook();
+    fn reload_finalize_matches_the_open_generation() {
         let mut agent = make_agent();
         agent.begin_session_reload(1);
         agent.mark_reload_replay_seen();
-        let before = test_support::calls();
-        assert!(agent.finish_session_reload(1, true));
-        assert_eq!(
-            test_support::calls(),
-            before + 1,
-            "full-replay finalize must purge after the reload stash drops"
-        );
+        assert!(agent.finish_session_reload(1, true), "full-replay finalize");
         let mut cursor = make_agent();
         cursor.begin_session_reload(1);
-        let before = test_support::calls();
-        assert!(cursor.finish_session_reload(1, true));
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "cursor-resolve finalize drops nothing heavy and must not purge"
+        assert!(
+            cursor.finish_session_reload(1, true),
+            "cursor-resolve finalize"
         );
         let mut stale = make_agent();
         stale.begin_session_reload(2);
-        let before = test_support::calls();
-        assert!(!stale.finish_session_reload(1, true));
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "a superseded finalize drops nothing and must not purge"
+        assert!(
+            !stale.finish_session_reload(1, true),
+            "a superseded generation does not finalize"
         );
-        let before = test_support::calls();
-        stale.begin_session_reload(3);
-        assert_eq!(
-            test_support::calls(),
-            before + 1,
-            "supersede must purge the discarded prior staging"
-        );
-        let before = test_support::calls();
         stale.abort_session_reload();
-        assert_eq!(
-            test_support::calls(),
-            before + 1,
-            "abort must purge after the discarded staging drops"
-        );
-        let before = test_support::calls();
-        stale.abort_session_reload();
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "abort without an open window must not purge"
-        );
+        assert!(stale.session_reload.is_none(), "abort closes the window");
     }
     #[test]
     fn apply_follow_ups_empty_clears_hit_areas() {

@@ -2219,14 +2219,9 @@ pub(super) mod paste_key_tests {
         );
     }
     /// The scrolled-off/overlay branch of `AgentView::draw` (render.rs) must stop live inline playback through `stop_inline_playback`.
-    /// That drops the frame set and REQUESTS a post-draw purge, never purging synchronously mid-frame.
     /// Pins the render.rs wiring itself; the helper alone is covered in media.rs.
     #[test]
-    #[serial_test::serial(MEMORY_RELEASE_DEFER)]
-    fn scrolled_off_video_stop_requests_post_draw_release() {
-        use crate::memory_release::test_support;
-        test_support::install_counting_hook();
-        crate::memory_release::run_deferred_release();
+    fn scrolled_off_video_stops_playback() {
         let mut agent = make_agent();
         agent.inline_media_active = true;
         agent.inline_video = Some(crate::app::agent_view::InlineVideoState {
@@ -2237,22 +2232,10 @@ pub(super) mod paste_key_tests {
             fps: 1.0,
             finished: false,
         });
-        let before = test_support::calls();
         draw_media_frame(&mut agent);
         assert!(
             agent.inline_video.is_none(),
             "scroll-off branch must stop playback"
-        );
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "no synchronous purge inside AgentView::draw"
-        );
-        crate::memory_release::run_deferred_release();
-        assert_eq!(
-            test_support::calls(),
-            before + 1,
-            "the post-draw drain must purge the dropped frame set"
         );
     }
     /// Entering the fullscreen subagent view must delete the parent's Kitty placements.

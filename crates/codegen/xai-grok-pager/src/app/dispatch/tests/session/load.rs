@@ -460,37 +460,6 @@ fn load_session_falls_back_to_process_cwd_when_no_session_cwd() {
 }
 /// A stale fresh-view load resolving inside an open reconnect reload window must not close the window.
 /// Flipping `loading_replay` makes the replay gate drop the rest of the reconnect replay (a truncated transcript reported as a successful restore).
-/// The original purge site: completing a session load (no reload window open) drops the replay transient and must purge exactly once.
-#[test]
-fn session_loaded_purges_replay_transient() {
-    use crate::memory_release::test_support;
-    test_support::install_counting_hook();
-    let mut app = test_app();
-    dispatch(
-        Action::LoadSession("sess-purge".into(), None, false),
-        &mut app,
-    );
-    let id = AgentId(0);
-    let before = test_support::calls();
-    dispatch(
-        Action::TaskComplete(TaskResult::SessionLoaded {
-            agent_id: id,
-            session_id: acp::SessionId::new("sess-purge"),
-            models: None,
-            modes: None,
-            code_restored: false,
-            restore_summary: None,
-            restore_degree: None,
-            running_prompt_id: None,
-        }),
-        &mut app,
-    );
-    assert_eq!(
-        test_support::calls(),
-        before + 1,
-        "load completion must purge the dropped replay transient exactly once"
-    );
-}
 #[test]
 fn session_loaded_during_open_reload_window_defers_to_window() {
     let mut app = test_app();

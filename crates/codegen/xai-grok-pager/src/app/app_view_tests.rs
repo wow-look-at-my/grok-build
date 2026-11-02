@@ -46,33 +46,6 @@ fn parse_esc_ttl_bounds() {
         Duration::from_millis(ESC_DOUBLE_PRESS_TEST_MS)
     );
 }
-/// `AppView::draw` is the ONLY drain point for the process-wide deferred release flag.
-/// If the wrapper loses its `run_deferred_release()` call, every draw/tick-path cliff silently stops purging.
-/// The cliffs are video scroll-off, takeover drain, and frame-set replacement.
-#[test]
-#[serial_test::serial(MEMORY_RELEASE_DEFER)]
-fn app_draw_drains_deferred_release_after_flush() {
-    use crate::memory_release::test_support;
-    test_support::install_counting_hook();
-    crate::memory_release::run_deferred_release();
-    let (mut terminal, _frame_rx) = test_terminal();
-    let mut app = test_app();
-    crate::memory_release::request_release_after_draw("unit-test-defer");
-    let before = test_support::calls();
-    app.draw(&mut terminal);
-    assert_eq!(
-        test_support::calls(),
-        before + 1,
-        "AppView::draw must drain the deferred release post-flush"
-    );
-    let before = test_support::calls();
-    app.draw(&mut terminal);
-    assert_eq!(
-        test_support::calls(),
-        before,
-        "a draw without a pending request must not purge"
-    );
-}
 pub(crate) fn test_app() -> AppView {
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     AppView {
@@ -1398,7 +1371,6 @@ fn painted_tick_demand(app: &mut AppView, terminal: &mut PagerTerminal) -> TickD
     app.tick_demand()
 }
 #[test]
-#[serial_test::serial(MEMORY_RELEASE_DEFER)]
 fn tick_demand_dashboard_fast_while_background_work_runs() {
     use crate::app::agent_test_fixtures::{running_bg_task, scheduled_loop};
     let (mut terminal, _frame_rx) = test_terminal();
@@ -1492,7 +1464,6 @@ fn tick_a_full_cycle(app: &mut AppView, terminal: &mut PagerTerminal) -> u64 {
     frames
 }
 #[test]
-#[serial_test::serial(MEMORY_RELEASE_DEFER)]
 fn dashboard_tick_requests_a_redraw_exactly_when_the_frame_changes() {
     use crate::app::agent_test_fixtures::running_bg_task;
     use crate::views::dashboard::animation::{NEEDS_INPUT_BLINK_DIVISOR, SPINNER_DIVISOR};
@@ -1512,7 +1483,6 @@ fn dashboard_tick_requests_a_redraw_exactly_when_the_frame_changes() {
     assert_eq!(cycle / SPINNER_DIVISOR, frames, "spinner frames per cycle");
 }
 #[test]
-#[serial_test::serial(MEMORY_RELEASE_DEFER)]
 fn collapsed_needs_input_row_paints_no_blink() {
     use crate::views::dashboard::animation::{NEEDS_INPUT_BLINK_DIVISOR, SPINNER_DIVISOR};
     use crate::views::dashboard::{RowState, SectionKey};
@@ -1560,7 +1530,6 @@ fn collapsed_needs_input_row_paints_no_blink() {
     );
 }
 #[test]
-#[serial_test::serial(MEMORY_RELEASE_DEFER)]
 fn dashboard_tick_requests_no_redraw_when_nothing_animated_is_painted() {
     use crate::app::agent_test_fixtures::running_bg_task;
     use crate::views::dashboard::Filter;
@@ -1583,7 +1552,6 @@ fn dashboard_tick_requests_no_redraw_when_nothing_animated_is_painted() {
     );
 }
 #[test]
-#[serial_test::serial(MEMORY_RELEASE_DEFER)]
 fn first_spinner_frame_arms_the_tick_only_after_the_paint() {
     use crate::app::agent_test_fixtures::running_bg_task;
     use crate::app::event_loop::schedule_tick;
@@ -1614,7 +1582,6 @@ fn first_spinner_frame_arms_the_tick_only_after_the_paint() {
     );
 }
 #[test]
-#[serial_test::serial(MEMORY_RELEASE_DEFER)]
 fn tick_demand_dashboard_parks_when_filter_hides_the_working_row() {
     use crate::app::agent_test_fixtures::running_bg_task;
     use crate::views::dashboard::Filter;
@@ -1647,7 +1614,6 @@ fn tick_demand_dashboard_parks_when_filter_hides_the_working_row() {
     );
 }
 #[test]
-#[serial_test::serial(MEMORY_RELEASE_DEFER)]
 fn tick_demand_dashboard_fast_for_animated_roster_row() {
     use crate::app::agent_test_fixtures::roster_entry;
     use crate::app::roster::RosterActivity;

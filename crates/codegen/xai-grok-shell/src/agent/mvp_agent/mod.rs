@@ -851,10 +851,8 @@ pub struct MvpAgent {
     /// Idempotency guard: the periodic announcements refresh task is spawned at most once (on the first `initialize`).
     /// See `spawn_announcements_refresh`.
     announcements_refresh_started: std::cell::Cell<bool>,
-    /// Threshold jemalloc heap-profile monitor (agent process only).
-    heap_profile_monitor: RefCell<crate::heap_profile::HeapProfileMonitor>,
-    /// Idempotency guard for the heap-profile poll / kill-switch loop.
-    heap_profile_started: std::cell::Cell<bool>,
+    /// Idempotency guard for the periodic resource-usage report loop.
+    resource_reporter_started: std::cell::Cell<bool>,
     /// Test-only spy recording every session id whose cloud replica was finalized via `finalize_session_replica`.
     /// Lets the no-evict tests assert that `finalize()` does NOT fire on a mere client disconnect (only on a terminal/explicit close).
     #[cfg(test)]
@@ -1215,7 +1213,6 @@ mod agent_directory;
 mod agent_runtime;
 mod code_nav;
 mod folder_trust_prompt;
-mod heap_profile;
 mod resource_telemetry;
 mod session_registry;
 mod session_lifecycle;

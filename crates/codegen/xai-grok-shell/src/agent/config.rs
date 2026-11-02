@@ -2681,38 +2681,6 @@ impl Config {
             .default(mode.value.is_enabled())
             .resolve()
     }
-    /// Resolve jemalloc heap-profile config from stored remote settings and the current gates.
-    pub fn resolve_jemalloc_heap_profile(
-        &self,
-        data_collection_disabled: bool,
-    ) -> crate::heap_profile::JemallocHeapProfileConfig {
-        let rs = self.remote_settings.as_ref();
-        crate::heap_profile::resolve_jemalloc_heap_profile(
-            rs.and_then(|s| s.jemalloc_heap_profile_enabled),
-            rs.and_then(|s| s.jemalloc_heap_profile_thresholds_bytes.as_deref()),
-            rs.and_then(|s| s.jemalloc_heap_profile_poll_interval_secs),
-            data_collection_disabled,
-            self.resolve_trace_upload().value,
-            crate::heap_profile::prof_available(),
-        )
-    }
-    /// Scoped resolve: fresh jemalloc fields and current gates, with no remote-settings rewrite.
-    pub(crate) fn resolve_jemalloc_heap_profile_from_partial(
-        &self,
-        jemalloc_enabled: Option<bool>,
-        jemalloc_thresholds: Option<&[u64]>,
-        jemalloc_poll_interval_secs: Option<u64>,
-        data_collection_disabled: bool,
-    ) -> crate::heap_profile::JemallocHeapProfileConfig {
-        crate::heap_profile::resolve_jemalloc_heap_profile(
-            jemalloc_enabled,
-            jemalloc_thresholds,
-            jemalloc_poll_interval_secs,
-            data_collection_disabled,
-            self.resolve_trace_upload().value,
-            crate::heap_profile::prof_available(),
-        )
-    }
     pub(crate) fn trace_upload_decision_debug(&self) -> serde_json::Value {
         let telemetry = self.resolve_telemetry_mode();
         let trace_upload = self.resolve_trace_upload();

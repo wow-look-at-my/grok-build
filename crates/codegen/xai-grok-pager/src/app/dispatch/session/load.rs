@@ -1358,7 +1358,6 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
             cwd: agent.session.cwd.display().to_string(),
         });
         notify_session_ready(&app.notification_service, agent);
-        crate::memory_release::release_retained_memory("session-load-replay");
         note_peek_page_flip(app, agent_id, page_flip_entry);
         identity_rebind.apply(app);
         return effects;

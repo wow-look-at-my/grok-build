@@ -23,10 +23,7 @@ pub(in crate::app::dispatch) fn remove_agent_and_cleanup(app: &mut AppView, agen
             agent.session.forked_from = None;
         }
     }
-    if removed.is_some() {
-        drop(removed);
-        crate::memory_release::release_retained_memory("agent-close");
-    }
+    drop(removed);
     identity_rebind.apply(app);
 }
 /// A closed tab's session is left as it is.
