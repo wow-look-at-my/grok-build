@@ -392,21 +392,35 @@ fn linked_worktree_scope_includes_main_and_siblings() {
     let root = TempDir::new().unwrap();
     let main = root.path().join("main");
     fs::create_dir_all(&main).unwrap();
-    let repository = git2::Repository::init(&main).unwrap();
-    let signature = git2::Signature::now("test", "test@example.com").unwrap();
-    let tree = {
-        let mut index = repository.index().unwrap();
-        let oid = index.write_tree().unwrap();
-        repository.find_tree(oid).unwrap()
-    };
-    repository
-        .commit(Some("HEAD"), &signature, &signature, "init", &tree, &[])
-        .unwrap();
-    drop(tree);
     let linked = root.path().join("linked");
     let sibling = root.path().join("sibling");
-    repository.worktree("linked", &linked, None).unwrap();
-    repository.worktree("sibling", &sibling, None).unwrap();
+    for args in [
+        &["init", "--quiet"][..],
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--no-gpg-sign",
+            "-m",
+            "init",
+        ],
+        &["worktree", "add", "--quiet", "-b", "linked", "../linked"],
+        &["worktree", "add", "--quiet", "-b", "sibling", "../sibling"],
+    ] {
+        let output = std::process::Command::new("git")
+            .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
+            .args(args)
+            .current_dir(&main)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     let main_project = scoped_project(root.path(), &dunce::canonicalize(&main).unwrap());
     let linked_project = scoped_project(root.path(), &dunce::canonicalize(&linked).unwrap());
     let sibling_project = scoped_project(root.path(), &dunce::canonicalize(&sibling).unwrap());

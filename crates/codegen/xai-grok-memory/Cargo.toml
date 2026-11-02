@@ -17,9 +17,7 @@ blake3 = { workspace = true }
 chrono = { workspace = true }
 dunce = { workspace = true }
 flate2 = { workspace = true }
-git2 = { version = "0.21", default-features = false, features = [
-    "vendored-libgit2",
-] }
+xai-gix-status = { workspace = true }
 libc = { workspace = true }
 notify = { workspace = true }
 parking_lot = { workspace = true }

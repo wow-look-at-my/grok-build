@@ -990,7 +990,7 @@ mod tests {
         let _reset = MarkerCacheReset;
         crate::claude_import::refresh_marker_cache(false);
         let repo = tempfile::tempdir().unwrap();
-        git2::Repository::init(repo.path()).unwrap();
+        gix::init(repo.path()).unwrap();
         std::fs::create_dir_all(repo.path().join(".grok")).unwrap();
         std::fs::write(
             repo.path().join(".grok/config.toml"),

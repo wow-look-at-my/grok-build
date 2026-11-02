@@ -287,31 +287,52 @@ struct SameRepoTopology {
     sources: Vec<CandidateSource>,
 }
 
+/// Run `git` in `dir` with the host config shut out and a fixed identity and date. Returns trimmed stdout.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(["-c", "user.name=session-list-benchmark"])
+        .args(["-c", "user.email=benchmark@localhost"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_AUTHOR_DATE", "1700000000 +0000")
+        .env("GIT_COMMITTER_DATE", "1700000000 +0000")
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
 fn create_same_repo_cwds(home: &Path) -> SameRepoTopology {
     let repo_dir = home.join("fixture").join("main");
     fs::create_dir_all(&repo_dir).expect("create main checkout directory");
-    let repo = git2::Repository::init(&repo_dir).expect("initialize main git repository");
-    repo.remote(
-        "origin",
-        "https://github.com/xai-org/session-list-benchmark.git",
-    )
-    .expect("create benchmark git remote");
-
-    let signature = git2::Signature::new(
-        "session-list-benchmark",
-        "benchmark@localhost",
-        &git2::Time::new(1_700_000_000, 0),
-    )
-    .expect("create git signature");
-    let tree_id = repo
-        .index()
-        .expect("open git index")
-        .write_tree()
-        .expect("write empty git tree");
-    let tree = repo.find_tree(tree_id).expect("find empty git tree");
-    let commit_id = repo
-        .commit(Some("HEAD"), &signature, &signature, "fixture", &tree, &[])
-        .expect("create initial git commit");
+    git(&repo_dir, &["init", "--quiet"]);
+    git(
+        &repo_dir,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/xai-org/session-list-benchmark.git",
+        ],
+    );
+    git(
+        &repo_dir,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "--no-gpg-sign",
+            "-m",
+            "fixture",
+        ],
+    );
+    let commit_id = git(&repo_dir, &["rev-parse", "HEAD"]);
 
     let main = dunce::canonicalize(&repo_dir).expect("canonicalize main checkout");
     let worktree_base = xai_grok_shell::session::worktree::worktree_base_dir(&main);
@@ -322,8 +343,17 @@ fn create_same_repo_cwds(home: &Path) -> SameRepoTopology {
     for index in 1..=LINKED_WORKTREE_COUNT {
         let name = format!("session-list-{index:02}");
         let path = worktree_base.join(&name);
-        repo.worktree(&name, &path, None)
-            .expect("create linked worktree");
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                "-b",
+                &name,
+                &path.to_string_lossy(),
+            ],
+        );
         linked.push((
             dunce::canonicalize(path)
                 .expect("canonicalize linked worktree")

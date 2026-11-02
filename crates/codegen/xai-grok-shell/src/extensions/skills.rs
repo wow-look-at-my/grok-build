@@ -229,9 +229,7 @@ fn resolve_skill_path(raw: &str, cwd: &str) -> String {
 fn discover_auto_sources(cwd: &str, skills: &[SkillInfo]) -> Vec<(String, usize)> {
     let cwd_path = std::path::PathBuf::from(cwd);
     let grok_home = xai_grok_tools::util::grok_home::grok_home();
-    let git_root = git2::Repository::discover(&cwd_path)
-        .ok()
-        .and_then(|repo| repo.workdir().map(|p| p.to_path_buf()));
+    let git_root = xai_gix_status::discover::discover_workdir(&cwd_path);
 
     // After /import-claude, do not list hardcoded .claude/skills/ paths.
     // Import writes those dirs to [paths] extra_skill_dirs for the source UI.

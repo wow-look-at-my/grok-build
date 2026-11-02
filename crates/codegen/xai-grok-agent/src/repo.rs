@@ -1,13 +1,13 @@
 //! Shared git-repo dir-chain primitive.
 //!
-//! One `git2` discovery and one walk from cwd up to the root.
+//! One repository discovery and one walk from cwd up to the root.
 //! The folder-trust gate reuses it across the many repo-local config marker checks it runs back-to-back.
 //! Lives in its own module (rather than `discovery`) because it is a generic repo-walk primitive, not agent-definition discovery.
 //! `xai-grok-workspace` consumes it cross-crate.
 
 use std::path::{Path, PathBuf};
 
-/// Git worktree root for `cwd` plus the cwd-to-root chain, from one `git2` discovery and one walk.
+/// Git worktree root for `cwd` plus the cwd-to-root chain, from one repository discovery and one walk.
 /// Shared so the folder-trust gate and loaders cannot drift, and so startup does not repeat the walk.
 /// Outside a git repo `git_root` is `None` and `dirs` is just `[cwd]`.
 #[derive(Debug, Clone)]
@@ -19,11 +19,9 @@ pub struct RepoDirChain {
 }
 
 impl RepoDirChain {
-    /// Resolve the chain for `cwd`: ONE `git2` discovery and ONE upward walk.
+    /// Resolve the chain for `cwd`: ONE repository discovery and ONE upward walk.
     pub fn resolve(cwd: &Path) -> Self {
-        let git_root = git2::Repository::discover(cwd)
-            .ok()
-            .and_then(|repo| repo.workdir().map(|p| p.to_path_buf()))
+        let git_root = xai_gix_status::discover::discover_workdir(cwd)
             // Home-is-a-git-repo: a walk up to $HOME must not treat the whole home subtree as one repo.
             // Otherwise home-level `.grok`/plugins would look repo-local. Drop it so cwd is probed as no-repo.
             // Home is compared canonically to match the symlink handling below.
@@ -164,7 +162,7 @@ mod tests {
     fn resolve_in_repo_yields_cwd_to_root_chain() {
         // A git-init'd tmp with a 2-deep subdir: the chain is cwd to root inclusive, cwd-first, in the dirs' original spelling
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         let nested = tmp.path().join("a").join("b");
         std::fs::create_dir_all(&nested).unwrap();
 
@@ -177,7 +175,7 @@ mod tests {
                 tmp.path().to_path_buf(),
             ]
         );
-        // `git_root` is the canonical worktree root (git2's `workdir`)
+        // `git_root` is the canonical worktree root (`xai_gix_status::discover::workdir`)
         // Compare by canonical form so a `/tmp` to `/private/tmp` symlink doesn't fail the test
         let root = chain.git_root.expect("inside a repo");
         assert_eq!(
@@ -194,7 +192,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let plain = tmp.path().join("plain");
         std::fs::create_dir_all(&plain).unwrap();
-        if git2::Repository::discover(&plain).is_err() {
+        if xai_gix_status::discover::discover(&plain).is_none() {
             let chain = RepoDirChain::resolve(&plain);
             assert_eq!(chain.dirs, vec![plain]);
             assert_eq!(chain.git_root, None);
@@ -209,7 +207,7 @@ mod tests {
         // Pin HOME and USERPROFILE: xai_dirs::home_dir reads USERPROFILE on Windows
         let tmp = tempfile::tempdir().unwrap();
         let home = dunce::canonicalize(tmp.path()).unwrap();
-        git2::Repository::init(&home).unwrap();
+        gix::init(&home).unwrap();
         let _home_guard = EnvVarGuard::set("HOME", &home);
         let _userprofile_guard = EnvVarGuard::set("USERPROFILE", &home);
         let sub = home.join("proj");
@@ -229,7 +227,7 @@ mod tests {
         let _home_guard = EnvVarGuard::set("HOME", home.path());
         let _userprofile_guard = EnvVarGuard::set("USERPROFILE", home.path());
         let repo = tempfile::tempdir().unwrap();
-        git2::Repository::init(repo.path()).unwrap();
+        gix::init(repo.path()).unwrap();
         let sub = repo.path().join("pkg");
         std::fs::create_dir_all(&sub).unwrap();
 

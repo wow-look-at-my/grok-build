@@ -697,7 +697,7 @@ mod tests {
     #[test]
     fn deterministic_scan_uses_git_root_and_skips_invalid_filename() {
         let dir = tempfile::tempdir().unwrap();
-        git2::Repository::init(dir.path()).unwrap();
+        gix::init(dir.path()).unwrap();
         let cwd = dir.path().join("nested");
         let wf_dir = dir.path().join(".grok").join("workflows");
         std::fs::create_dir_all(&cwd).unwrap();
@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn session_run_projection_resolves_despite_generic_filename() {
         let cwd_dir = tempfile::tempdir().unwrap();
-        git2::Repository::init(cwd_dir.path()).unwrap();
+        gix::init(cwd_dir.path()).unwrap();
         let session_dir = tempfile::tempdir().unwrap();
         let run_dir = session_dir.path().join("workflows/wf_1");
         std::fs::create_dir_all(&run_dir).unwrap();
@@ -743,7 +743,7 @@ mod tests {
     #[test]
     fn project_workflows_follow_folder_trust() {
         let dir = tempfile::tempdir().unwrap();
-        git2::Repository::init(dir.path()).unwrap();
+        gix::init(dir.path()).unwrap();
         let workflows = dir.path().join(".grok/workflows");
         std::fs::create_dir_all(&workflows).unwrap();
         std::fs::write(workflows.join("project-only.rhai"), script("project-only")).unwrap();

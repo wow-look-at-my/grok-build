@@ -1377,7 +1377,7 @@ mod tests {
     fn project_discovery_watcher_skips_project_grok_equal_to_grok_home() {
         let tmp = TempDir::new().unwrap();
         let project = tmp.path();
-        git2::Repository::init(project).unwrap();
+        gix::init(project).unwrap();
         let project_grok = project.join(".grok");
         fs::create_dir_all(project_grok.join("workflows")).unwrap();
         // Nested cwd: the guard must compare the discovered git root's .grok, not cwd's
@@ -1393,7 +1393,7 @@ mod tests {
     fn project_discovery_watcher_ignores_unclassified_files_under_project_grok() {
         let tmp = TempDir::new().unwrap();
         let project = tmp.path();
-        git2::Repository::init(project).unwrap();
+        gix::init(project).unwrap();
         let project_grok = project.join(".grok");
         fs::create_dir_all(project_grok.join("workflows")).unwrap();
 

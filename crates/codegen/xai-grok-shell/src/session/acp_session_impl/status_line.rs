@@ -34,9 +34,8 @@ fn strip_trailing_separator(path: &Path) -> PathBuf {
     }
 }
 
-fn remote_url(repo: &git2::Repository) -> Option<String> {
-    let origin = repo.find_remote("origin").ok()?;
-    origin.url().ok().map(str::to_string)
+fn remote_url(repo: &gix::Repository) -> Option<String> {
+    xai_gix_status::discover::origin_url(repo)
 }
 
 fn split_normalized_remote(remote: &str) -> Option<StatusLineRepo> {
@@ -223,21 +222,23 @@ impl SessionActor {
 
     async fn repo_state(cwd: PathBuf) -> RepoState {
         tokio::task::spawn_blocking(move || {
-            let Ok(repo) = git2::Repository::discover(&cwd) else {
+            use xai_gix_status::discover;
+            let Some(repo) = discover::discover(&cwd) else {
                 return RepoState::default();
             };
-            let common_dir = repo.commondir().to_path_buf();
-            let is_worktree = repo.path() != common_dir;
-            let branch = match repo.head_detached() {
-                Ok(false) => repo
-                    .head()
-                    .ok()
-                    .and_then(|h| h.shorthand().ok().map(str::to_string)),
-                Ok(true) | Err(_) => None,
-            };
+            let common_dir = discover::common_dir(&repo);
+            let is_worktree = discover::is_linked_worktree(&repo);
+            // A detached or unborn HEAD names no branch
+            let branch = repo
+                .head()
+                .ok()
+                .filter(|head| !head.is_unborn())
+                .and_then(|head| head.referent_name().map(|name| name.shorten().to_string()));
             RepoState {
                 branch,
-                repo_root: repo.workdir().map(strip_trailing_separator),
+                repo_root: discover::workdir(&repo)
+                    .as_deref()
+                    .map(strip_trailing_separator),
                 repo: remote_url(&repo)
                     .as_deref()
                     .and_then(normalize_repo_url)

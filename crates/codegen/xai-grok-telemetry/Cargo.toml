@@ -27,9 +27,7 @@ tracing-subscriber = { workspace = true, features = [
     "time",
 ] }
 chrono = { workspace = true }
-git2 = { version = "0.21", default-features = false, features = [
-    "vendored-libgit2",
-] }
+xai-gix-status = { workspace = true }
 xai-grok-net = { workspace = true }
 xai-grok-secrets = { workspace = true }
 xai-mixpanel = { workspace = true }
