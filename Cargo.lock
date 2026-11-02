@@ -12112,12 +12112,7 @@ dependencies = [
  "prometheus",
  "prometheus-parse",
  "prost",
-<<<<<<< HEAD
- "reqwest 0.12.24",
  "schemars",
-=======
- "schemars 1.0.4",
->>>>>>> origin/master
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -12216,13 +12211,9 @@ dependencies = [
  "filetime",
  "futures",
  "gcloud-storage",
-<<<<<<< HEAD
-=======
  "http 1.4.0",
  "http-body-util",
- "indexmap",
  "jsonwebtoken",
->>>>>>> origin/master
  "prod-mc-cli-chat-proxy-types",
  "reflink-copy",
  "serde",
@@ -13134,12 +13125,7 @@ dependencies = [
  "chrono",
  "http 1.4.0",
  "indexmap",
-<<<<<<< HEAD
- "reqwest 0.12.24",
  "schemars",
-=======
- "schemars 1.0.4",
->>>>>>> origin/master
  "serde",
  "serde_json",
  "strum 0.27.2",
@@ -13920,12 +13906,7 @@ dependencies = [
  "base64 0.22.1",
  "serde_json",
  "thiserror 2.0.18",
-<<<<<<< HEAD
-=======
- "tokio",
- "wiremock",
  "xai-grok-net",
->>>>>>> origin/master
  "xai-grok-secrets",
 ]
 
