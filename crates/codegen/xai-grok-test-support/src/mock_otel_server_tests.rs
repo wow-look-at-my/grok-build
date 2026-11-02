@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use reqwest::Method;
+use request::Method;
 use tokio::io::AsyncWriteExt as _;
 use tokio::net::TcpStream;
 

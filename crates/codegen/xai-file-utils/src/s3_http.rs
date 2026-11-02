@@ -64,7 +64,7 @@ impl Addressing {
     }
 }
 
-/// The `Host` header value reqwest sends for `url`.
+/// The `Host` header value request sends for `url`.
 pub(crate) fn host_header(url: &Url) -> anyhow::Result<String> {
     let host = url
         .host_str()

@@ -2,7 +2,7 @@
 
 //! HTTP clients for the application.
 //!
-//! Building a `reqwest::Client` is expensive (~95ms: it loads OS TLS roots), so
+//! Building a `request::Client` is expensive (~95ms: it loads OS TLS roots), so
 //! the shared clients are `OnceLock`-cached. Sampling traffic uses the
 //! process-wide clients owned by `xai_grok_sampler::shared_http`. TLS policy
 //! (backend pin, roots, provider) lives in `xai_grok_extra_ca`.

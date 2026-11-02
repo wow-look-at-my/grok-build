@@ -33,7 +33,7 @@ xai-acp-lib = { workspace = true }
 xai-tty-utils = { workspace = true }
 
 [dev-dependencies]
-reqwest = { workspace = true }
+request = { workspace = true }
 # `test-util` enables the paused clock the recorder's deadline tests run on.
 tokio = { workspace = true, features = ["test-util"] }
 [features]

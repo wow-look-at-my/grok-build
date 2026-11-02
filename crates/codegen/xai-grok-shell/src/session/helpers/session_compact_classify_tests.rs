@@ -244,14 +244,14 @@ fn sampling_api_500_with_context_length_message_is_overflow() {
 
 #[test]
 fn sampling_http_is_transient() {
-    // reqwest::Error has no public constructor; trigger one via a known-bad request
-    // reqwest's TCP connect needs a Tokio reactor; futures::executor is not enough (CI runs in a Bazel sandbox where the failure surfaces)
+    // request::Error has no public constructor; trigger one via a known-bad request
+    // request's TCP connect needs a Tokio reactor; futures::executor is not enough (CI runs in a Bazel sandbox where the failure surfaces)
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     let http_err = rt
-        .block_on(reqwest::get("http://127.0.0.1:0"))
+        .block_on(request::get("http://127.0.0.1:0"))
         .expect_err("connecting to port 0 must fail");
     assert!(!is_det(&classify_sampling_error(SamplingError::Http(
         xai_grok_net::Error::from(http_err)

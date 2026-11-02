@@ -473,7 +473,7 @@ mod tests {
     use super::*;
 
     async fn get_json(port: u16, path: &str) -> (u16, Value) {
-        let response = reqwest::get(format!("http://127.0.0.1:{port}{path}"))
+        let response = request::get(format!("http://127.0.0.1:{port}{path}"))
             .await
             .expect("request");
         let status = response.status().as_u16();
@@ -949,13 +949,13 @@ mod tests {
     }
 
     async fn get_text(port: u16, path: &str) -> (u16, Option<String>, String) {
-        let response = reqwest::get(format!("http://127.0.0.1:{port}{path}"))
+        let response = request::get(format!("http://127.0.0.1:{port}{path}"))
             .await
             .expect("request");
         let status = response.status().as_u16();
         let content_type = response
             .headers()
-            .get(reqwest::header::CONTENT_TYPE)
+            .get(request::header::CONTENT_TYPE)
             .map(|v| v.to_str().expect("content-type").to_owned());
         (status, content_type, response.text().await.expect("body"))
     }

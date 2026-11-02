@@ -111,7 +111,7 @@ mod tests {
             proxy_endpoint: Some("https://proxy.corp.example.com".into()),
             ..Default::default()
         };
-        // Should succeed — reqwest accepts the proxy URL.
+        // Should succeed — request accepts the proxy URL.
         let client = HttpClient::new(&params);
         assert!(client.is_ok());
     }

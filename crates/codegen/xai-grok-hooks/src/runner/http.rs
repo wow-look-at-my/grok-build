@@ -1071,7 +1071,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_http_hook_scrubs_url_from_reqwest_error() {
+    async fn run_http_hook_scrubs_url_from_request_error() {
         let secret = "ghp_VERY_REAL_SECRET_TOKEN_42";
         let mut extra_env = std::collections::HashMap::new();
         extra_env.insert("RUNTIME_HOST".to_string(), "192.0.2.1".to_string());

@@ -406,7 +406,7 @@ mod static_grok_auth_tests {
     }
 }
 
-/// Default reqwest client used by `StorageClient::new`. Plain defaults --
+/// Default request client used by `StorageClient::new`. Plain defaults --
 /// production callers should instead pass a tuned client (e.g. shell's
 /// `crate::http::shared_upload_client()`) to `with_provider`.
 pub(crate) fn default_upload_client() -> HttpClient {
@@ -877,7 +877,7 @@ impl StorageClient {
                 .add_common_headers(self.http_client.post(&url))
                 .header("Content-Type", "application/json")
                 .header("Content-Encoding", "zstd")
-                // Clone needed: reqwest consumes the body on send, but we
+                // Clone needed: request consumes the body on send, but we
                 // need it intact for retries.
                 .body(compressed.clone());
 

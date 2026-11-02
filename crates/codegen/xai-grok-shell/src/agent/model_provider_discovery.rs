@@ -552,7 +552,7 @@ fn strip_vendor_prefix(name: &str) -> String {
     }
 }
 
-/// Fetch and parse a listing off the async path. `reqwest::blocking` builds
+/// Fetch and parse a listing off the async path. `request::blocking` builds
 /// its own runtime, which panics when it is constructed inside an async
 /// context, so the request runs on a dedicated OS thread. That is the same
 /// reason `resolve_context_window_from_provider` spawns one.

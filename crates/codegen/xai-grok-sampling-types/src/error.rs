@@ -298,7 +298,7 @@ impl SamplingError {
 
     /// Display plus the hidden source() chain.
     ///
-    /// reqwest Error Display hides DNS/connect causes on source().
+    /// request Error Display hides DNS/connect causes on source().
     pub fn detail_with_causes(&self) -> String {
         match self {
             Self::Http(err) => {
@@ -590,7 +590,7 @@ impl SamplingError {
     }
 
     /// The response stream died part-way through: the SSE connection dropped,
-    /// or reqwest could not decode the body it was reading ("error decoding
+    /// or request could not decode the body it was reading ("error decoding
     /// response body").
     pub fn is_stream_interrupted(&self) -> bool {
         match self {
@@ -606,7 +606,7 @@ impl SamplingError {
             SamplingError::InvalidConfiguration(_) => false,
             SamplingError::EndpointNotAllowed(_) => false,
             SamplingError::MtlsConfiguration(_) => false,
-            SamplingError::Http(err) => is_retryable_reqwest(err),
+            SamplingError::Http(err) => is_retryable_request(err),
             SamplingError::Serialization(_) => false,
             SamplingError::Api { status, .. } => is_retryable_api_status(*status),
             SamplingError::EventStreamError(_) => true,
@@ -1054,7 +1054,7 @@ pub fn is_retryable_api_status(status: StatusCode) -> bool {
     RetryPolicy::edge_client().should_retry(status.as_u16())
 }
 
-/// Render an error with every cause in its `source()` chain. reqwest prints
+/// Render an error with every cause in its `source()` chain. request prints
 /// only a category, such as "error decoding response body". The real cause (a
 /// reset stream, an early EOF, a timeout) is in the chain.
 pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
@@ -1072,7 +1072,7 @@ pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
 }
 
 /// Decide whether a transport error is worth retrying. A credential refusal is not.
-pub fn is_retryable_reqwest(err: &xai_grok_net::Error) -> bool {
+pub fn is_retryable_request(err: &xai_grok_net::Error) -> bool {
     if err.is_timeout() || err.is_connect() {
         return true;
     }
@@ -1086,7 +1086,7 @@ pub fn is_retryable_reqwest(err: &xai_grok_net::Error) -> bool {
     }
 
     // A decode failure is a body that stopped arriving mid-read, not a
-    // deterministic fault: reqwest renders it "error decoding response body".
+    // deterministic fault: request renders it "error decoding response body".
     if err.is_decode() {
         return true;
     }
@@ -1456,7 +1456,7 @@ mod tests {
         assert!(err.is_stream_interrupted());
     }
 
-    /// The real thing reqwest produces when a body it is reading does not
+    /// The real thing request produces when a body it is reading does not
     /// decode. Its Display is "error decoding response body".
     async fn decode_error() -> xai_grok_net::Error {
         let response = xai_grok_net::Response::from(http::Response::new("this is not json"));
@@ -1470,9 +1470,9 @@ mod tests {
     #[tokio::test]
     async fn a_body_decode_failure_is_a_retryable_stream_interruption() {
         let err = decode_error().await;
-        assert!(err.is_decode(), "reqwest classified this as {err:?}");
+        assert!(err.is_decode(), "request classified this as {err:?}");
         assert!(
-            is_retryable_reqwest(&err),
+            is_retryable_request(&err),
             "a body that stopped arriving is transient, not fatal"
         );
         let err = SamplingError::Http(err);

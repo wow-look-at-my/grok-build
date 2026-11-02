@@ -3,7 +3,7 @@ license = "Apache-2.0"
 name = "xai-mixpanel"
 version = "0.1.0"
 edition.workspace = true
-description = "Lightweight Mixpanel HTTP tracking client (replaces mixpanel-rs to avoid pulling reqwest 0.11)"
+description = "Lightweight Mixpanel HTTP tracking client (replaces mixpanel-rs to avoid pulling a second HTTP client)"
 
 [dependencies]
 serde_json = { workspace = true }

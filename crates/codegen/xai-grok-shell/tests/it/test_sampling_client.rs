@@ -1,7 +1,7 @@
 //! Integration tests for the sampling client with mock HTTP servers.
 
 use futures_util::stream::StreamExt;
-use reqwest::StatusCode;
+use request::StatusCode;
 use serde_json::{Value, json};
 
 use xai_grok_shell::sampling::{

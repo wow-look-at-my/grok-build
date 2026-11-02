@@ -357,7 +357,7 @@ enum FetchResult {
 
 /// Fetch a URL with manual same-host redirect handling. Re-runs SSRF checks on every hop so DNS
 /// rebinding between redirects cannot sneak a previously-blocked address past the initial check
-/// (partial TOCTOU mitigation; peer IP on the live TCP connection is not available from reqwest).
+/// (partial TOCTOU mitigation; peer IP on the live TCP connection is not available from request).
 async fn fetch_url(
     client: &xai_grok_net::HttpClient,
     url: &Url,

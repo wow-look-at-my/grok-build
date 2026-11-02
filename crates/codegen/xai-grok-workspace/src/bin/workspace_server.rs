@@ -796,7 +796,7 @@ mod tests {
                 .any(|m| m == WORKSPACE_HUB_AUTH_FAILED_MARKER),
             "auth path must emit marker, got {messages:?}"
         );
-        let response = reqwest::get(format!("http://127.0.0.1:{port}/ready"))
+        let response = request::get(format!("http://127.0.0.1:{port}/ready"))
             .await
             .expect("request");
         assert_eq!(response.status().as_u16(), 503);
@@ -837,7 +837,7 @@ mod tests {
                 .all(|m| m != WORKSPACE_HUB_AUTH_FAILED_MARKER),
             "non-auth path must not emit auth marker, got {messages:?}"
         );
-        let response = reqwest::get(format!("http://127.0.0.1:{port}/ready"))
+        let response = request::get(format!("http://127.0.0.1:{port}/ready"))
             .await
             .expect("request");
         assert_eq!(response.status().as_u16(), 503);

@@ -130,7 +130,7 @@ async fn fetch_managed_config_once(
         }
     };
 
-    // reqwest's `json()` tags a mid-body drop and malformed JSON both as `Kind::Decode`;
+    // request's `json()` tags a mid-body drop and malformed JSON both as `Kind::Decode`;
     // reading `bytes()` first keeps interruption (retryable) apart from bad JSON (terminal).
     let bytes = match resp.bytes().await {
         Ok(b) => b,

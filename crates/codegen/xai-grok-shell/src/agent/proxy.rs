@@ -18,7 +18,7 @@ use xai_grok_net::ws::MaybeTlsStream;
 // ---------------------------------------------------------------------------
 
 /// Read proxy configuration from the environment and decide whether `target_host` should be connected through a proxy.
-/// Resolution order (matches `curl` / `reqwest` behaviour): If `NO_PROXY` contains `target_host` (or a matching domain suffix / CIDR), return `None`. If `HTTPS_PROXY` (or `https_proxy`) is set, return its value.
+/// Resolution order (matches `curl` / `request` behaviour): If `NO_PROXY` contains `target_host` (or a matching domain suffix / CIDR), return `None`. If `HTTPS_PROXY` (or `https_proxy`) is set, return its value.
 /// If `HTTP_PROXY` (or `http_proxy`) is set, return its value. Otherwise return `None`.
 pub(crate) fn resolve_proxy_for_host(target_host: &str) -> Option<String> {
     resolve_proxy_for_host_with(target_host, |key| std::env::var(key))
