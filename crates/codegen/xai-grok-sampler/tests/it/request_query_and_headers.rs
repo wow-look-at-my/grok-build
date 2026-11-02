@@ -1,7 +1,5 @@
 //! Checks that provider `query_params` and `env_http_headers` reach the outgoing request.
 
-mod support;
-
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
@@ -12,6 +10,7 @@ use xai_grok_sampler::SamplingClient;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn request_carries_query_params_and_env_http_headers() {
+    own_process!(request_carries_query_params_and_env_http_headers);
     // A unique name avoids clashing with other tests that read the process environment; the surrounding whitespace exercises value trimming
     let env_var = "XAI_SAMPLER_TEST_TENANT_TOKEN";
     unsafe { std::env::set_var(env_var, "  tenant-secret\n") };
@@ -37,7 +36,7 @@ async fn request_carries_query_params_and_env_http_headers() {
 
     // The base URL already carries `api-version`; a configured value must replace it (not duplicate), keep unrelated keys, and percent-encode
     let base_url = format!("http://{addr}/v1?api-version=old&keep=1");
-    let mut cfg = support::test_config(&base_url, "test-key");
+    let mut cfg = crate::support::test_config(&base_url, "test-key");
     cfg.query_params
         .insert("api-version".into(), "2026-07-22".into());
     cfg.query_params.insert("tenant".into(), "a b".into());
@@ -45,7 +44,7 @@ async fn request_carries_query_params_and_env_http_headers() {
         .insert("x-tenant-token".into(), env_var.into());
 
     let client = SamplingClient::new(cfg).expect("client builds");
-    support::send_one(&client).await;
+    crate::support::send_one(&client).await;
     unsafe { std::env::remove_var(env_var) };
 
     let (query, headers) = captured.lock().unwrap().take().expect("request captured");

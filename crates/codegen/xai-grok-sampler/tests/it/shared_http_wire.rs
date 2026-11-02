@@ -1,10 +1,9 @@
-mod support;
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Once};
 
+use crate::support::{send_one, test_config};
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::http::Version;
@@ -13,7 +12,6 @@ use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
 use rustls::RootCertStore;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use rustls::server::WebPkiClientVerifier;
-use support::{send_one, test_config};
 use xai_grok_sampler::{SamplerConfig, SamplingClient};
 use xai_grok_sampling_types::SamplingError;
 use xai_grok_test_support::{TestSandbox, spawn_counting_server};
@@ -64,7 +62,7 @@ static TLS_FIXTURE: LazyLock<TestTlsFixture> = LazyLock::new(|| {
 fn pin_env() {
     static PIN: Once = Once::new();
     PIN.call_once(|| {
-        support::pin_env();
+        crate::support::pin_env();
         let fixture = &*TLS_FIXTURE;
         // SAFETY: Every test in this process calls `pin_env` before building a client.
         // `PIN` serializes the one mutation while concurrent tests wait.
@@ -74,6 +72,7 @@ fn pin_env() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shared_client_keeps_per_config_headers_isolated() {
+    own_process!(shared_client_keeps_per_config_headers_isolated);
     pin_env();
     let (base_url, _accepts, heads) = spawn_counting_server().await;
     let mut cfg_a = test_config(&base_url, "token-a");
@@ -99,6 +98,7 @@ async fn shared_client_keeps_per_config_headers_isolated() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn with_http1_moves_a_pooled_client_onto_the_pool_less_transport() {
+    own_process!(with_http1_moves_a_pooled_client_onto_the_pool_less_transport);
     pin_env();
     let (base_url, accepts, heads) = spawn_counting_server().await;
     let pooled = SamplingClient::new(test_config(&base_url, "token-a")).unwrap();
@@ -118,6 +118,7 @@ async fn with_http1_moves_a_pooled_client_onto_the_pool_less_transport() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shared_http1_fallback_never_pools() {
+    own_process!(shared_http1_fallback_never_pools);
     pin_env();
     let (base_url, accepts, _heads) = spawn_counting_server().await;
     let mut cfg = test_config(&base_url, "token-a");
@@ -147,6 +148,7 @@ fn invalid_configuration_message(config: SamplerConfig) -> String {
 
 #[test]
 fn mtls_path_selection_prefers_client_names_when_either_exists() {
+    own_process!(mtls_path_selection_prefers_client_names_when_either_exists);
     pin_env();
     let sandbox = TestSandbox::new();
     let fallback_dir = sandbox.root().join("fallback");
@@ -173,6 +175,7 @@ fn mtls_path_selection_prefers_client_names_when_either_exists() {
 
 #[test]
 fn mtls_oversized_file_is_rejected_before_identity_parsing() {
+    own_process!(mtls_oversized_file_is_rejected_before_identity_parsing);
     pin_env();
     let sandbox = TestSandbox::new();
     let cert_dir = sandbox.root().join("identity");
@@ -187,6 +190,7 @@ fn mtls_oversized_file_is_rejected_before_identity_parsing() {
 
 #[test]
 fn mtls_invalid_pem_reports_both_identity_paths() {
+    own_process!(mtls_invalid_pem_reports_both_identity_paths);
     pin_env();
     let sandbox = TestSandbox::new();
     let cert_dir = sandbox.root().join("identity");
@@ -204,6 +208,7 @@ fn mtls_invalid_pem_reports_both_identity_paths() {
 
 #[test]
 fn mtls_configuration_errors_remain_directory_scoped() {
+    own_process!(mtls_configuration_errors_remain_directory_scoped);
     pin_env();
     let sandbox = TestSandbox::new();
     let first_dir = sandbox.root().join("first");
@@ -307,6 +312,7 @@ async fn start_mtls_server(tls: &TestTlsMaterial, state: Arc<TestTlsServerState>
 
 #[tokio::test(flavor = "current_thread")]
 async fn configured_identity_completes_a_required_mtls_handshake() {
+    own_process!(configured_identity_completes_a_required_mtls_handshake);
     pin_env();
     let fixture = &*TLS_FIXTURE;
     // Initialize the sampler's approved rustls provider before the test server

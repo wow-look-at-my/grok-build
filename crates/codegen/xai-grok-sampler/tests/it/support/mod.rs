@@ -1,4 +1,4 @@
-//! Shared fixtures for the sampler wire-test binaries.
+//! Shared fixtures for the sampler wire tests.
 #![allow(dead_code)]
 
 use std::sync::Arc;
@@ -7,12 +7,12 @@ use std::sync::Once;
 use xai_grok_sampler::{SamplerConfig, SamplingClient};
 use xai_grok_sampling_types::{ContentPart, ConversationItem, ConversationRequest, UserItem};
 
-/// These wire tests own a dedicated binary: the pinned env latches
-/// process-wide at first use and must not leak into or be poisoned by other
-/// test binaries.
+/// These wire tests each run in their own process (`own_process!`). The
+/// pinned env latches process-wide at first use and must not leak into or be
+/// poisoned by other tests.
 pub fn pin_env() {
     static PIN: Once = Once::new();
-    // SAFETY: runs before any test builds a client; the kill switch, pool knobs, and OnceLock'd pool_idle_timeout latch once at first use, and racing tests block on the Once.
+    // SAFETY: runs before any test builds a client. The kill switch, pool knobs, and OnceLock'd pool_idle_timeout latch once at first use, and racing tests block on the Once.
     PIN.call_once(|| unsafe {
         std::env::remove_var("GROK_SAMPLER_SHARED_CLIENT");
         std::env::set_var("GROK_POOL_MAX_IDLE", "2");

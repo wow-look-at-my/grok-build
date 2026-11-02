@@ -1609,7 +1609,7 @@ async fn responses_doom_loop_does_not_resample_after_output_when_retry_only_befo
 // ---------------------------------------------------------------------------
 
 /// The output-rate floor's coverage. That coverage is in one module so `cargo
-/// test --test test_actor output_rate` runs the whole of it. The new cases
+/// test --test it test_actor::output_rate` runs the whole of it. The new cases
 /// and the existing ones together, since what a widened hold must not do is
 /// break the detection the floor exists for.
 mod output_rate {

@@ -1,15 +1,14 @@
-mod support;
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use support::{pin_env, send_one, settle_pool, test_config};
+use crate::support::{pin_env, send_one, settle_pool, test_config};
 use xai_grok_sampler::{PrewarmOutcome, SamplingClient, prewarm_transport};
 use xai_grok_test_support::counting_server::spawn_http_server;
 use xai_grok_test_support::spawn_counting_server;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prewarm_wire_lifecycle() {
+    own_process!(prewarm_wire_lifecycle);
     pin_env();
 
     const ATTEMPTS: usize = 8;

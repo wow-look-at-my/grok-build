@@ -139,6 +139,7 @@ impl Counting {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_server_never_sees_more_requests_than_the_cap() {
+    own_process!(the_server_never_sees_more_requests_than_the_cap);
     let _cap = CAP.lock().await;
     set_max_parallel_requests(3);
     let counting = Counting::new();
@@ -171,6 +172,7 @@ async fn the_server_never_sees_more_requests_than_the_cap() {
 /// A request queued behind a slow one must not be reissued by its first-token limit.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn queue_time_does_not_count_toward_the_first_token_limit() {
+    own_process!(queue_time_does_not_count_toward_the_first_token_limit);
     let _cap = CAP.lock().await;
     set_max_parallel_requests(1);
     let counting = Counting::new();
@@ -238,6 +240,7 @@ async fn queue_time_does_not_count_toward_the_first_token_limit() {
 /// A deadline around `submit_and_collect` excludes the queue, though the request runs on the actor's task.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_outer_deadline_excludes_the_queue_across_the_actor() {
+    own_process!(an_outer_deadline_excludes_the_queue_across_the_actor);
     let _cap = CAP.lock().await;
     set_max_parallel_requests(1);
     let counting = Counting::new();
@@ -276,6 +279,7 @@ async fn an_outer_deadline_excludes_the_queue_across_the_actor() {
 /// The same deadline over a direct client call, which takes its slot inside the client rather than in the actor.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_direct_client_call_queues_and_excludes_the_queue() {
+    own_process!(a_direct_client_call_queues_and_excludes_the_queue);
     let _cap = CAP.lock().await;
     set_max_parallel_requests(1);
     let counting = Counting::new();
