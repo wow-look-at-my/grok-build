@@ -46,7 +46,7 @@ scroll-matrix = { max-threads = 1 }
 disabled-hooks-file = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary(scroll_matrix_curated)'
+filter = 'binary_id(xai-grok-pager-pty-harness::it) and test(/^scroll_matrix_curated::/)'
 test-group = 'scroll-matrix'
 
 # These tests write the real user `$GROK_HOME/disabled-hooks`. `grok_home()`

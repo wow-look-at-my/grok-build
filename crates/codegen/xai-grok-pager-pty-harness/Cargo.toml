@@ -6,6 +6,7 @@ license = "Apache-2.0"
 authors = ["xAI"]
 description = "Shared PTY harness + scenario library for xai-grok-pager e2e tests and benchmarks."
 publish = false
+autotests = false
 
 # Not imported into the production pager binary. Spawn-only pager tests live
 # here so `cargo test -p xai-grok-pager` / `cargo test -p xai-grok-pager-bin`
@@ -67,63 +68,25 @@ serial_test = { workspace = true }
 toml = { workspace = true }
 unicode-width = { workspace = true }
 
+# Every integration test links into this one binary. Each former test target
+# is a module of it. The spawn-only PTY cases stay #[ignore]d for ordinary
+# cargo. Select a family with a name filter.
 [[test]]
-name = "env_op_compile"
-path = "tests/env_op_compile.rs"
+name = "it"
+path = "tests/it/main.rs"
 
-# Spawn-only pager families. Each root is its own Cargo/Bazel process so CI
-# can schedule them independently. Cases stay #[ignore]d for ordinary cargo.
-[[test]]
-name = "pty_e2e_smoke"
-path = "tests/pty_e2e_smoke.rs"
-
-[[test]]
-name = "pty_e2e_queue"
-path = "tests/pty_e2e_queue.rs"
-
-[[test]]
-name = "pty_e2e_scroll_selection"
-path = "tests/pty_e2e_scroll_selection.rs"
-
-[[test]]
-name = "pty_e2e_config_ui"
-path = "tests/pty_e2e_config_ui.rs"
-
-[[test]]
-name = "pty_e2e_shell_tools"
-path = "tests/pty_e2e_shell_tools.rs"
-
-[[test]]
-name = "pty_e2e_persistence"
-path = "tests/pty_e2e_persistence.rs"
-
-[[test]]
-name = "pty_e2e_clipboard"
-path = "tests/pty_e2e_clipboard.rs"
-
-[[test]]
-name = "leader_pty_e2e"
-path = "tests/leader_pty_e2e/mod.rs"
-
-[[test]]
-name = "scripted_scenarios"
-path = "tests/scripted_scenarios.rs"
-
-[[test]]
-name = "pty_auto_mode"
-path = "tests/pty_auto_mode.rs"
 [[bin]]
 name = "pty-scenario"
 path = "src/bin/pty_scenario.rs"
 
-# Fixture for tests/orphan_reap.rs: holds a PtyController child and blocks so
+# Fixture for tests/it/orphan_reap.rs: holds a PtyController child and blocks so
 # the test can kill it ungracefully and assert the child does not survive.
 [[bin]]
 name = "pty_orphan_holder"
 path = "src/bin/pty_orphan_holder.rs"
 
 # scroll-matrix — scroll validation matrix sweep. The curated tier also runs
-# in CI (tests/scroll_matrix_curated.rs); this binary is the local full-sweep
+# in CI (tests/it/scroll_matrix_curated.rs); this binary is the local full-sweep
 # and single-cell-rerun entry point.
 [[bin]]
 name = "scroll-matrix"

@@ -145,7 +145,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           cargo nextest run --locked --workspace --profile ci \
-            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_queue)' \
+            -E 'binary_id(xai-grok-pager-pty-harness::it) and (test(/^pty_e2e_smoke::/) or test(/^pty_e2e_config_ui::/) or test(/^pty_e2e_queue::/) or test(/^common::/))' \
             --run-ignored all --test-threads 4
 
       - uses: ./.github/actions/upload-cargo-timings
