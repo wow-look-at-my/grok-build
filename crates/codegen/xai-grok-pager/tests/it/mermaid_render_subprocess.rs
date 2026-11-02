@@ -10,7 +10,7 @@
 //! The in-process worker unit tests cannot (under `cargo test` the harness binary is not the pager).
 //!
 //! Every test is `#[ignore]`: it needs the built binary, so `cargo test` skips it by default. Opt in with
-//! `PAGER_BINARY=target/debug/xai-grok-pager cargo test -p xai-grok-pager --test mermaid_render_subprocess -- --ignored`
+//! `PAGER_BINARY=target/debug/xai-grok-pager cargo test -p xai-grok-pager --test it mermaid_render_subprocess:: -- --ignored`
 //! (Bazel wires `PAGER_BINARY` from `//crates/codegen/xai-grok-pager-bin:xai-grok-pager`).
 //! Unlike the spawn-only suites in `xai-grok-pager-pty-harness`, this test stays here because it exercises pager library code.
 

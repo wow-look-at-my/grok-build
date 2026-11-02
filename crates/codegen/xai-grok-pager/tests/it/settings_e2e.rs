@@ -103,7 +103,7 @@ fn every_registered_setting_is_exercised() {
     }
     assert!(
         missing.is_empty(),
-        "settings registered but not exercised in tests/settings_e2e.rs: {missing:?}\n\
+        "settings registered but not exercised in tests/it/settings_e2e.rs: {missing:?}\n\
          Add a row to ALL_SETTINGS_EXERCISED + a keyboard test + a mouse test."
     );
 }

@@ -3,7 +3,7 @@
 
 use xai_grok_shell::agent::config::FEATURES;
 
-const CONFIG_REFERENCE: &str = include_str!("../docs/user-guide/26-config-reference.md");
+const CONFIG_REFERENCE: &str = include_str!("../../docs/user-guide/26-config-reference.md");
 
 #[test]
 fn every_registered_feature_reaches_the_operator() {

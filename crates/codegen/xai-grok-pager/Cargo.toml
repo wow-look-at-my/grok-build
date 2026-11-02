@@ -4,6 +4,7 @@ version = "1.0.41"
 edition.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
+autotests = false
 
 [dependencies]
 # TTY safety — detach subprocesses from the controlling terminal
@@ -216,12 +217,11 @@ harness = false
 name = "resize"
 harness = false
 
-# Settings modal regression tests — keyboard/mouse dispatch + registry
-# contracts. Not gated by `--ignored`; runs on every `cargo test`.
-# Spawn-only pager tests live in `xai-grok-pager-pty-harness`.
+# Every integration test links into this one binary. Each former test file is a
+# module of it. Spawn-only pager tests live in `xai-grok-pager-pty-harness`.
 [[test]]
-name = "settings_e2e"
-path = "tests/settings_e2e.rs"
+name = "it"
+path = "tests/it/main.rs"
 
 # Opt into [workspace.lints.clippy] (too_many_arguments etc.). Without this,
 # `cargo clippy --workspace -- -D warnings` on this package is stricter than
