@@ -408,27 +408,6 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
-  # A timing probe: the same release build, compiled natively on a Mac instead of cross-compiled on Linux. Nothing consumes its output.
-  build-darwin-native-probe:
-    name: Probe native darwin build (macOS)
-    if: github.event.repository.visibility == 'public'
-    runs-on: macos-15
-    timeout-minutes: 45
-    env:
-      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-no-lto
-    steps:
-      - uses: wow-look-at-my/actions@parallel-checkout#latest
-
-      # setup-protoc installs the Linux build only.
-      - name: Install protoc
-        run: brew install protobuf
-
-      - name: Report the machine
-        run: sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
-
-      - name: Build release binary
-        run: cargo build --locked --release -p xai-grok-pager-bin
-
   # One cc, and the only step in the workflow that needs a Mac.
   link-darwin:
     name: Link darwin/arm64 (macOS)
