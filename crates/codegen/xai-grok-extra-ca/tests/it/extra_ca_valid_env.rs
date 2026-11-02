@@ -2,6 +2,7 @@
 
 #[test]
 fn valid_bundle_loads_one_root() {
+    own_process!(valid_bundle_loads_one_root);
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("ca.pem");
     const CERT: &str = "-----BEGIN CERTIFICATE-----\n\
@@ -25,7 +26,7 @@ hJAE3EOL2ZddrMPF64QeU9UhvCm0Ch+Ceqa1ZWE0MygccggX5s2yQwtXO2ovJdjH\n\
 -----END CERTIFICATE-----\n";
     std::fs::write(&path, CERT).expect("write cert");
 
-    // Safety: sole test in this binary; set before any OnceLock resolve.
+    // Safety: sole test in this process; set before any OnceLock resolve.
     unsafe {
         std::env::set_var(
             xai_grok_extra_ca::ENV_GROK_EXTRA_CA_BUNDLE,

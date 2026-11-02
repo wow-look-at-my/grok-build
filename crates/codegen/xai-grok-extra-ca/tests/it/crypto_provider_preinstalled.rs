@@ -1,5 +1,6 @@
 #[test]
 fn earlier_ring_install_is_preserved() {
+    own_process!(earlier_ring_install_is_preserved);
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("first install wins");

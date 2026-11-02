@@ -2,11 +2,12 @@
 
 #[test]
 fn configured_garbage_file_yields_zero_roots_and_builds() {
+    own_process!(configured_garbage_file_yields_zero_roots_and_builds);
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("garbage.pem");
     std::fs::write(&path, b"not a pem at all").expect("write");
 
-    // Safety: sole test in this binary; set before any OnceLock resolve.
+    // Safety: sole test in this process; set before any OnceLock resolve.
     unsafe {
         std::env::set_var(
             xai_grok_extra_ca::ENV_GROK_EXTRA_CA_BUNDLE,

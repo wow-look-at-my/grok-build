@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 
 #[test]
 fn http1_only_client_stays_on_http11_against_an_h2_server() {
+    own_process!(http1_only_client_stays_on_http11_against_an_h2_server);
     let ca_key = KeyPair::generate().expect("ca key");
     let mut ca_params = CertificateParams::new(vec![]).expect("ca params");
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -18,7 +19,7 @@ fn http1_only_client_stays_on_http11_against_an_h2_server() {
     let ca_path = dir.path().join("ca.pem");
     std::fs::write(&ca_path, ca_cert.pem()).expect("write ca pem");
 
-    // SAFETY: sole test in this binary; set before any client build resolves
+    // SAFETY: sole test in this process; set before any client build resolves
     // the crate's env-backed root snapshot.
     unsafe {
         std::env::remove_var(xai_grok_extra_ca::ENV_SSL_CERT_FILE);

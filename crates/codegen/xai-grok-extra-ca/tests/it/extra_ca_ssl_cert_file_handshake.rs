@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 
 #[test]
 fn handshake_succeeds_against_ca_loaded_from_ssl_cert_file() {
+    own_process!(handshake_succeeds_against_ca_loaded_from_ssl_cert_file);
     let ca_key = KeyPair::generate().expect("ca key");
     let mut ca_params = CertificateParams::new(vec![]).expect("ca params");
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
@@ -18,7 +19,7 @@ fn handshake_succeeds_against_ca_loaded_from_ssl_cert_file() {
     let ca_path = dir.path().join("ca.pem");
     std::fs::write(&ca_path, ca_cert.pem()).expect("write ca pem");
 
-    // Safety: sole test in this binary; set before any OnceLock resolve.
+    // Safety: sole test in this process; set before any OnceLock resolve.
     unsafe {
         std::env::remove_var(xai_grok_extra_ca::ENV_GROK_EXTRA_CA_BUNDLE);
         std::env::set_var(xai_grok_extra_ca::ENV_SSL_CERT_FILE, ca_path.as_os_str());
