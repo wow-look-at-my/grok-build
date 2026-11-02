@@ -243,6 +243,7 @@ jobs:
     env:
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
+      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-threads
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
