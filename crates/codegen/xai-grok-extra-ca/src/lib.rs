@@ -54,7 +54,7 @@ pub fn ensure_default_crypto_provider() {
 /// The roots are read once per process instead of on each build.
 /// For HTTP/1.1 only, add `http1_only()` in `configure`.
 #[allow(clippy::disallowed_methods)] // the approved async build path
-pub fn build_http_client(
+pub fn build_raw_http_client(
     configure: impl Fn(request::ClientBuilder) -> request::ClientBuilder,
 ) -> request::Result<request::Client> {
     ensure_default_crypto_provider();
@@ -68,9 +68,9 @@ pub fn build_http_client(
     builder.build()
 }
 
-/// [`build_http_client`] for the blocking client type.
+/// [`build_raw_http_client`] for the blocking client type.
 #[allow(clippy::disallowed_methods)] // the approved blocking build path
-pub fn build_blocking_http_client(
+pub fn build_raw_blocking_http_client(
     configure: impl Fn(request::blocking::ClientBuilder) -> request::blocking::ClientBuilder,
 ) -> request::Result<request::blocking::Client> {
     ensure_default_crypto_provider();

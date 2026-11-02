@@ -179,7 +179,7 @@ impl HttpClient {
     /// Build a client with the grok TLS policy.
     pub fn build(options: ClientOptions) -> Result<Self, Error> {
         options.check()?;
-        let inner = xai_grok_extra_ca::build_http_client(|b| options.apply(b))?;
+        let inner = xai_grok_extra_ca::build_raw_http_client(|b| options.apply(b))?;
         Ok(Self { inner })
     }
 

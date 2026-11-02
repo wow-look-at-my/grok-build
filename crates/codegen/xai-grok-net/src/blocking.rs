@@ -36,7 +36,7 @@ impl BlockingHttpClient {
 
     /// Build a client with the grok TLS policy and every option in `options`.
     pub fn build_with(options: BlockingOptions) -> Result<Self, Error> {
-        let inner = xai_grok_extra_ca::build_blocking_http_client(|mut b| {
+        let inner = xai_grok_extra_ca::build_raw_blocking_http_client(|mut b| {
             if let Some(t) = options.timeout {
                 b = b.timeout(t);
             }

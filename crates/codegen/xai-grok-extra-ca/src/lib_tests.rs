@@ -159,8 +159,8 @@ fn first_der_item_parses_der_length_forms_and_rejects_malformed() {
 #[test]
 fn native_trust_store_loads_once_across_many_builds() {
     for _ in 0..4 {
-        build_http_client(|builder| builder).expect("h2 client");
-        build_http_client(|builder| builder.http1_only()).expect("http1 client");
+        build_raw_http_client(|builder| builder).expect("h2 client");
+        build_raw_http_client(|builder| builder.http1_only()).expect("http1 client");
     }
     assert_eq!(
         NATIVE_ROOT_LOADS.load(std::sync::atomic::Ordering::Relaxed),

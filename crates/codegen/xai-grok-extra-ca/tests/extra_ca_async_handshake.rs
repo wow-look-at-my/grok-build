@@ -58,7 +58,7 @@ fn http1_only_client_stays_on_http11_against_an_h2_server() {
         }
     });
 
-    let client = xai_grok_extra_ca::build_blocking_http_client(|builder| {
+    let client = xai_grok_extra_ca::build_raw_blocking_http_client(|builder| {
         builder
             .http1_only()
             .timeout(std::time::Duration::from_secs(10))
