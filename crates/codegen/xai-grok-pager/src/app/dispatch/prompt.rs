@@ -729,11 +729,14 @@ pub(super) fn dispatch_send_prompt_submission(
         agent.show_toast(crate::slash::mid_text_hoist::MID_TEXT_GOAL_NOTICE);
         return prelude;
     }
+    // A leading `@sonnet`, `@haiku` or `@opus` runs as its slash command, so it spawns at once.
     let hoisted = if is_plain_submission {
-        crate::slash::mid_text_hoist::hoist_mid_text_command(
-            &slash_input,
-            agent.prompt.slash_controller.registry(),
-        )
+        crate::slash::commands::model_agent::rewrite_model_mention(&slash_input).or_else(|| {
+            crate::slash::mid_text_hoist::hoist_mid_text_command(
+                &slash_input,
+                agent.prompt.slash_controller.registry(),
+            )
+        })
     } else {
         None
     };

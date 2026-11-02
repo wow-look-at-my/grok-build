@@ -6,6 +6,7 @@ mod dashboard;
 mod jump;
 mod mid_text_btw;
 mod mid_text_goal;
+mod model_mention;
 mod modes;
 mod notes;
 mod permissions;

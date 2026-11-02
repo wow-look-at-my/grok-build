@@ -4560,6 +4560,49 @@ pub(crate) fn execute(
                     }
                 });
         }
+        Effect::SpawnModelAgent { agent_id, session_id, family, effort, prompt } => {
+            let tx = acp_tx.clone();
+            let is_api_key_auth = session_flags.is_api_key_auth;
+            tasks
+                .spawn(async move {
+                    let ext = acp::ExtRequest::new(
+                        "x.ai/model_agent",
+                        serde_json::value::to_raw_value(
+                                &serde_json::json!({
+                        "sessionId": session_id.0.to_string(),
+                        "family": &family,
+                        "effort": &effort,
+                        "prompt": &prompt,
+                    }),
+                            )
+                            .expect("serialize model agent params")
+                            .into(),
+                    );
+                    let result = match acp_send(ext, &tx).await {
+                        Ok(resp) => {
+                            let parsed: serde_json::Value = serde_json::from_str(
+                                    resp.0.get(),
+                                )
+                                .unwrap_or_default();
+                            parsed
+                                .get("result")
+                                .unwrap_or(&parsed)
+                                .get("modelId")
+                                .and_then(|m| m.as_str())
+                                .map(str::to_owned)
+                                .ok_or_else(|| {
+                                    format!("the shell sent no model id: {parsed}")
+                                })
+                        }
+                        Err(e) => Err(format_acp_error(&e, is_api_key_auth)),
+                    };
+                    TaskResult::ModelAgentSpawned {
+                        agent_id,
+                        family,
+                        result,
+                    }
+                });
+        }
         Effect::SendTodo { agent_id, session_id, request, urgent, capture_id } => {
             let tx = acp_tx.clone();
             let is_api_key_auth = session_flags.is_api_key_auth;

@@ -882,6 +882,13 @@ pub enum SessionCommand {
         images: Vec<acp::ImageContent>,
         respond_to: oneshot::Sender<Result<String, SideQuestionError>>,
     },
+    /// Spawn a background subagent on the newest model of a family (`@sonnet`, `@haiku`, `@opus`).
+    SpawnModelAgent {
+        family: String,
+        effort: Option<String>,
+        prompt: String,
+        respond_to: oneshot::Sender<Result<super::acp_session::ModelMentionSpawn, String>>,
+    },
     /// Capture a `/todo` request as items on the session's todo list.
     TodoCapture {
         request: String,

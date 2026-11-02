@@ -2099,6 +2099,9 @@ impl acp::Agent for MvpAgent {
             | "x.ai/btw" => crate::extensions::feedback::handle(self, &args).await,
             "x.ai/recap" => crate::extensions::recap::handle(self, &args).await,
             "x.ai/todo" => crate::extensions::todo::handle(self, &args).await,
+            crate::extensions::model_agent::MODEL_AGENT_METHOD => {
+                crate::extensions::model_agent::handle(self, &args).await
+            }
             "x.ai/cloud/terminate" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
