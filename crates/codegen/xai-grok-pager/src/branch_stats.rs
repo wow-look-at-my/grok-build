@@ -1,5 +1,7 @@
 //! Branch divergence and uncommitted line counts, shown beside the branch.
 use std::collections::HashMap;
+
+use gix::bstr::ByteSlice;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -156,7 +158,7 @@ fn worktree_line_stats(
     let (mut insertions, mut deletions) = (0usize, 0usize);
     for path in paths {
         let old = tree
-            .lookup_entry_by_path(gix::path::from_bstr(path.as_ref()))?
+            .lookup_entry_by_path(gix::path::from_bstr(path.as_bstr()))?
             .map(|entry| (entry.object_id(), entry.mode().kind()));
         let (old_id, old_kind) = match old {
             Some((id, kind @ (EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link))) => {
@@ -166,7 +168,7 @@ fn worktree_line_stats(
             None => (null, EntryKind::Blob),
         };
         let new_kind =
-            match std::fs::symlink_metadata(workdir.join(gix::path::from_bstr(path.as_ref()))) {
+            match std::fs::symlink_metadata(workdir.join(gix::path::from_bstr(path.as_bstr()))) {
                 Ok(meta) if meta.is_dir() => continue,
                 Ok(meta) if meta.file_type().is_symlink() => EntryKind::Link,
                 Ok(meta) if is_executable(&meta) => EntryKind::BlobExecutable,
