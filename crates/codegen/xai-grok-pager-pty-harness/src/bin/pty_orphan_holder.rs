@@ -1,4 +1,4 @@
-//! Test fixture for the orphan-reap regression test (`tests/orphan_reap.rs`).
+//! Test fixture for the orphan-reap regression test (`tests/it/orphan_reap.rs`).
 //!
 //! Spawns one long-lived child under a [`PtyController`] — exactly the way
 //! every PTY e2e test spawns the pager — prints the child PID, then blocks

@@ -284,10 +284,8 @@ fn an_empty_read_of_a_running_resumed_child_stays_needs_replay_and_retries() {
     set_replay_grok_home_for_tests(None);
 }
 #[test]
-fn a_child_replay_releases_retained_memory_only_once() {
-    use crate::memory_release::test_support;
-    test_support::install_counting_hook();
-    let child_sid = "child-purge-real";
+fn an_emitting_child_replay_records_the_disk_copy() {
+    let child_sid = "child-replay-real";
     let home = tempfile::tempdir().unwrap();
     let session_dir = home
         .path()
@@ -306,66 +304,17 @@ fn a_child_replay_releases_retained_memory_only_once() {
     let mut info = make_info();
     info.child_session_id = child_sid.into();
     parent.subagent_sessions.insert(child_sid.to_string(), info);
-    let before = test_support::calls();
     assert_eq!(
         ensure_subagent_child_replayed(&mut parent, child_sid),
         ChildReplayOutcome::Replayed,
         "an emitting replay returns Replayed"
-    );
-    assert_eq!(
-        test_support::calls(),
-        before + 1,
-        "a real replay must purge after the parsed transient drops"
     );
     assert!(
         parent
             .subagent_sessions
             .get(child_sid)
             .is_some_and(|s| !s.transcript.needs_replay()),
-        "fixture sanity: the emitting replay must record the disk copy"
-    );
-    let before = test_support::calls();
-    let _ = ensure_subagent_child_replayed(&mut parent, child_sid);
-    assert_eq!(
-        test_support::calls(),
-        before,
-        "the skip path allocates nothing and must not purge"
-    );
-    let ghost_sid = "child-purge-ghost";
-    parent.insert_test_child(ghost_sid.to_string(), Box::new(make_min_child_view()));
-    let mut ghost = make_info();
-    ghost.child_session_id = ghost_sid.into();
-    parent
-        .subagent_sessions
-        .insert(ghost_sid.to_string(), ghost);
-    let before = test_support::calls();
-    let _ = ensure_subagent_child_replayed(&mut parent, ghost_sid);
-    assert_eq!(
-        test_support::calls(),
-        before,
-        "a no-op replay (missing transcript) must not purge"
-    );
-    let empty_sid = "child-purge-empty";
-    let empty_dir = home
-        .path()
-        .join("sessions")
-        .join(urlencoding::encode("/tmp").as_ref())
-        .join(empty_sid);
-    std::fs::create_dir_all(&empty_dir).unwrap();
-    std::fs::write(empty_dir.join("summary.json"), "{}").unwrap();
-    std::fs::write(empty_dir.join("updates.jsonl"), "").unwrap();
-    parent.insert_test_child(empty_sid.to_string(), Box::new(make_min_child_view()));
-    let mut empty = make_info();
-    empty.child_session_id = empty_sid.into();
-    parent
-        .subagent_sessions
-        .insert(empty_sid.to_string(), empty);
-    let before = test_support::calls();
-    let _ = ensure_subagent_child_replayed(&mut parent, empty_sid);
-    assert_eq!(
-        test_support::calls(),
-        before,
-        "an empty replay (zero updates parsed) must not purge"
+        "the emitting replay must record the disk copy"
     );
     set_replay_grok_home_for_tests(None);
 }

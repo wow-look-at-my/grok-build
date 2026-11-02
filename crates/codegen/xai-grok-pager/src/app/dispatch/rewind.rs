@@ -376,11 +376,7 @@ pub(super) fn dispatch_rewind_success(
     agent.set_last_turn_summary(None);
     let target_idx = find_user_prompt_entry_for_shell_index(&agent.scrollback, target);
     if let Some(anchor_idx) = target_idx {
-        let removed = agent.scrollback.remove_from(anchor_idx);
-        // Explicit drop BEFORE the purge: the rewound tail must be freed for the release below to return its pages
-        // (Entries and their render caches are potentially most of a long transcript.)
-        drop(removed);
-        crate::memory_release::release_retained_memory("rewind-truncate");
+        drop(agent.scrollback.remove_from(anchor_idx));
     }
 
     agent.show_toast("Reverted conversation");

@@ -233,13 +233,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `output_config.effort` is 4.6-and-later too. So the older dialect sends the effort as `budget_tokens` instead and nothing beside it. `output_config.format` is untouched — structured outputs are not what 4.6 changed.
 - A budget must clear the API's 1024 floor and stay under `max_tokens`. One that cannot do both leaves thinking off with a warning, rather than sending a request the API answers with a 400.
 
-## CI compile-cache notes
+## CI builds from clean
 
-[docs/ci-compile-cache-notes.md](docs/ci-compile-cache-notes.md) holds this section.
-
-## The dependency tar: one cache entry per dependency set, and why it cannot grow
-
-[docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md](docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md) holds this section.
+- A crate's integration tests build as one `it` binary (`tests/it/main.rs`, one module per former file). Select tests by module path (`cargo nextest run -E 'binary(it) and test(/^module::/)'`). Run them with nextest: several set process-global state (`grok_home()`, env vars, the tracer) and pass only one test per process.
+- CI has no compile cache. Every job compiles the whole dependency graph, so the number of registry crates is what sets its build time. Check what a new dependency pulls in (`cargo tree -e normal,build,dev -i <crate>`) before adding it.
 
 ## Why build-test is not on the self-hosted runner
 

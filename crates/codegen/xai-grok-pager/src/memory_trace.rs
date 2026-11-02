@@ -1,31 +1,20 @@
 //! Process memory tracing: durable JSONL evidence for memory investigations.
 //!
-//! The pager's footprint problems (see `memory_release`) historically had to be diagnosed live with `vmmap` on whatever process was still running.
-//! vmmap mislabels the jemalloc heap as "CoreMedia Capture Data" because jemalloc tags its mmaps with `VM_MAKE_TAG(101)`, `VM_MEMORY_CM_REGWARP`.
-//! Post-hoc analysis was therefore blind, so this module records what actually happened, when, attributed to which code path:
+//! This module records the process memory over time, so a footprint problem can be read after the process is gone:
 //!
-//! - **Samples**: footprint/RSS and allocator gauges every `GROK_MEMTRACE_INTERVAL_SECS` (default 30s) from a detached thread.
-//! - **Purges**: every `memory_release` call, tagged with the memory cliff that triggered it (`reason`), with before/after footprint and duration.
-//!   Over- or under-purging is thus visible per call site.
+//! - **Samples**: footprint/RSS and the thread count every `GROK_MEMTRACE_INTERVAL_SECS` (default 30s) from a detached thread. - **Thresholds**.
 //! - **Thresholds**: the physical footprint crossing a bucket (`GROK_MEMTRACE_THRESHOLD_MB`, default 1 GiB, doubling) fires the *threshold hook*.
-//!   A full allocator stats dump (jemalloc `malloc_stats_print`) is written next to the trace.
-//!   The GCS trace-upload pipeline attaches to the hook (see below).
 //!   Buckets re-arm once the footprint halves, so a long-lived process can evidence repeated growth cycles.
 //!
 //! ## Files
 //!
-//! `$GROK_HOME/memtrace/<start-ts>-<pid>.jsonl` (and a `.1` after 4 MiB rotation) plus `<stem>-jemalloc-<seq>.txt` threshold dumps.
+//! `$GROK_HOME/memtrace/<start-ts>-<pid>.jsonl`, and a `.1` after 4 MiB rotation.
 //! Files are created lazily on the first event so short-lived CLI invocations leave no debris.
 //! Traces contain **process memory numbers only** (no user content), so they are safe to ship for analysis.
 //!
-//! ## Hooks (installed by the composition-root binary, mirrors `memory_release`)
+//! ## Threshold hook
 //!
-//! The lib cannot depend on jemalloc; `xai-grok-pager-bin` installs:
-//! - [`install_allocator_stats_provider`]: cheap mallctl gauge reads
-//! - [`install_allocator_dump_provider`]: full `malloc_stats_print` text
-//! - [`install_threshold_hook`]: `(trace_path, crossed_bytes)`.
-//!   The GCS upload pipeline (WIP) attaches here to ship the trace and dump when a process gets big enough to care about.
-//!   Absent a hook, crossing is still recorded locally and logged via `tracing::warn!`.
+//! Absent a hook, crossing is still recorded locally and logged via `tracing::warn!`.
 //!
 //! Everything is inert until [`start`] runs (tests use scoped sinks).
 
@@ -41,29 +30,12 @@ use memory_trace_wait::wait_full_interval;
 
 pub use xai_tty_utils::{ProcessResources, sample_process_memory};
 
-/// Allocator gauges sampled from jemalloc (`stats.*` mallctls). All bytes.
-#[derive(Clone, Copy, Debug, serde::Serialize)]
-pub struct AllocatorStats {
-    /// Bytes in live application allocations.
-    pub allocated: u64,
-    /// Bytes in active pages (allocated + internal fragmentation).
-    pub active: u64,
-    /// Bytes in physically resident data pages mapped by the allocator.
-    pub resident: u64,
-    /// Bytes in active extents mapped by the allocator.
-    pub mapped: u64,
-    /// Bytes in virtual memory mappings retained rather than returned.
-    pub retained: u64,
-    /// Allocator metadata bytes.
-    pub metadata: u64,
-}
-
 /// One JSONL trace line. `kind` discriminates which optional fields apply.
 #[derive(serde::Serialize)]
 struct TraceEvent<'a> {
     /// Unix millis.
     ts_ms: u64,
-    /// "start" | "sample" | "purge" | "threshold" | "crash".
+    /// "start" | "sample" | "threshold" | "crash".
     kind: &'a str,
     /// macOS `phys_footprint` (resident dirty + compressed + swapped).
     /// This is the number Activity Monitor "Memory" and `vmmap`'s "Physical footprint" show.
@@ -77,27 +49,9 @@ struct TraceEvent<'a> {
     /// A count that scales with work done (background tasks, subagents) instead of holding a flat baseline is a leak.
     #[serde(skip_serializing_if = "Option::is_none")]
     threads: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    alloc: Option<AllocatorStats>,
-    /// Purge: which memory cliff triggered it (call-site tag).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<&'a str>,
-    /// Purge: whether an allocator release hook was installed (a purge without a hook is a no-op, evidence the binary is misconfigured).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hook_installed: Option<bool>,
-    /// Purge: the memory gauge before the purge, physical footprint where available (macOS), else RSS (Linux).
-    /// Pair with the event's `footprint_bytes`/`rss_bytes` (same precedence, sampled after) for the released delta.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    gauge_before_bytes: Option<u64>,
-    /// Purge duration in microseconds.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    purge_us: Option<u64>,
     /// Threshold: the bucket that fired.
     #[serde(skip_serializing_if = "Option::is_none")]
     threshold_bytes: Option<u64>,
-    /// Threshold: relative path of the allocator dump written next to the trace, if a dump provider is installed.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    dump_file: Option<&'a str>,
     /// Start: pid and binary version, for joining traces to sessions/hosts.
     #[serde(skip_serializing_if = "Option::is_none")]
     pid: Option<u32>,
@@ -105,25 +59,10 @@ struct TraceEvent<'a> {
     version: Option<&'a str>,
 }
 
-static STATS_PROVIDER: OnceLock<fn() -> Option<AllocatorStats>> = OnceLock::new();
-static DUMP_PROVIDER: OnceLock<fn() -> String> = OnceLock::new();
 static THRESHOLD_HOOK: OnceLock<fn(&Path, u64)> = OnceLock::new();
 
-/// Install the allocator gauge provider (jemalloc `stats.*` reads).
-/// Idempotent; first caller wins.
-pub fn install_allocator_stats_provider(provider: fn() -> Option<AllocatorStats>) {
-    let _ = STATS_PROVIDER.set(provider);
-}
-
-/// Install the full allocator dump provider (`malloc_stats_print` text), invoked only on threshold crossings.
-/// Idempotent; first caller wins.
-pub fn install_allocator_dump_provider(provider: fn() -> String) {
-    let _ = DUMP_PROVIDER.set(provider);
-}
-
-/// Install the threshold hook: `(jsonl_trace_path, crossed_threshold_bytes)`. This is the attachment point for the
-/// GCS trace-upload pipeline. It fires at most once per bucket per growth cycle (buckets re-arm after the footprint
-/// halves). Idempotent; first caller wins.
+/// It fires at most once per bucket per growth cycle (buckets re-arm after
+/// the footprint halves). Idempotent; first caller wins.
 pub fn install_threshold_hook(hook: fn(&Path, u64)) {
     let _ = THRESHOLD_HOOK.set(hook);
 }
@@ -164,7 +103,6 @@ impl Thresholds {
 }
 
 const ROTATE_BYTES_DEFAULT: u64 = 4 << 20; // 4 MiB, then one .1 rotation.
-static DUMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 struct Sink {
     /// Lazily-created JSONL file; `None` until the first event.
@@ -244,32 +182,16 @@ impl Sink {
         }
     }
 
-    /// Record gauges and run the threshold logic. Shared by samples and purges.
-    fn record(&self, kind: &str, purge: Option<PurgeInfo<'_>>) {
+    /// Record a sample and run the threshold logic.
+    fn record_sample(&self) {
         let mem = sample_process_memory();
-        let alloc = STATS_PROVIDER.get().and_then(|p| p());
-        let (reason, hook_installed, before, purge_us) = match purge {
-            Some(p) => (
-                Some(p.reason),
-                Some(p.hook_installed),
-                p.gauge_before,
-                Some(p.duration.as_micros() as u64),
-            ),
-            None => (None, None, None, None),
-        };
         self.emit(&TraceEvent {
             ts_ms: now_ms(),
-            kind,
+            kind: "sample",
             footprint_bytes: mem.footprint_bytes,
             rss_bytes: mem.rss_bytes,
             threads: mem.threads,
-            alloc,
-            reason,
-            hook_installed,
-            gauge_before_bytes: before,
-            purge_us,
             threshold_bytes: None,
-            dump_file: None,
             pid: None,
             version: None,
         });
@@ -287,32 +209,13 @@ impl Sink {
     }
 
     fn fire_threshold(&self, bucket: u64, footprint: u64) {
-        // Write the full allocator dump next to the trace (rare: once per bucket per growth cycle), so the upload has arena-level detail to analyze
-        let dump_rel = DUMP_PROVIDER.get().map(|dump| {
-            let seq = DUMP_SEQ.fetch_add(1, Ordering::Relaxed);
-            let stem = self
-                .path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "memtrace".to_owned());
-            let name = format!("{stem}-jemalloc-{seq}.txt");
-            let dump_path = self.path.with_file_name(&name);
-            let _ = std::fs::write(&dump_path, dump());
-            name
-        });
         self.emit(&TraceEvent {
             ts_ms: now_ms(),
             kind: "threshold",
             footprint_bytes: Some(footprint),
             rss_bytes: None,
             threads: None,
-            alloc: None,
-            reason: None,
-            hook_installed: None,
-            gauge_before_bytes: None,
-            purge_us: None,
             threshold_bytes: Some(bucket),
-            dump_file: dump_rel.as_deref(),
             pid: None,
             version: None,
         });
@@ -329,13 +232,6 @@ impl Sink {
     }
 }
 
-struct PurgeInfo<'a> {
-    reason: &'a str,
-    hook_installed: bool,
-    gauge_before: Option<u64>,
-    duration: Duration,
-}
-
 fn with_sink(f: impl FnOnce(&Sink)) {
     let guard = match SINK.read() {
         Ok(g) => g,
@@ -344,36 +240,6 @@ fn with_sink(f: impl FnOnce(&Sink)) {
     if let Some(sink) = guard.as_ref() {
         f(sink);
     }
-}
-
-/// Whether a trace sink is installed ([`start`] ran and `GROK_MEMTRACE` is not disabled, or a test sink is scoped in).
-/// Lets callers skip gauge sampling entirely when tracing is off.
-pub(crate) fn is_active() -> bool {
-    match SINK.read() {
-        Ok(g) => g.is_some(),
-        Err(p) => p.into_inner().is_some(),
-    }
-}
-
-/// Record a completed purge, attributed to its memory cliff.
-/// Called by `memory_release`; no-op until [`start`].
-pub(crate) fn record_purge(
-    reason: &'static str,
-    hook_installed: bool,
-    gauge_before: Option<u64>,
-    duration: Duration,
-) {
-    with_sink(|s| {
-        s.record(
-            "purge",
-            Some(PurgeInfo {
-                reason,
-                hook_installed,
-                gauge_before,
-                duration,
-            }),
-        );
-    });
 }
 
 /// Env: disable with `GROK_MEMTRACE=0|false|off`.
@@ -444,18 +310,12 @@ pub fn start(dir: PathBuf) {
                             footprint_bytes: None,
                             rss_bytes: None,
                             threads: None,
-                            alloc: None,
-                            reason: None,
-                            hook_installed: None,
-                            gauge_before_bytes: None,
-                            purge_us: None,
                             threshold_bytes: None,
-                            dump_file: None,
                             pid: Some(std::process::id()),
                             version: Some(env!("CARGO_PKG_VERSION")),
                         });
                     }
-                    s.record("sample", None);
+                    s.record_sample();
                 });
             }
         });
@@ -479,13 +339,7 @@ pub fn record_crash_sample() {
         footprint_bytes: mem.footprint_bytes,
         rss_bytes: mem.rss_bytes,
         threads: mem.threads,
-        alloc: STATS_PROVIDER.get().and_then(|p| p()),
-        reason: None,
-        hook_installed: None,
-        gauge_before_bytes: None,
-        purge_us: None,
         threshold_bytes: None,
-        dump_file: None,
         pid: None,
         version: None,
     }) else {
@@ -534,24 +388,16 @@ struct Candidate {
     path: PathBuf,
     len: u64,
     modified: SystemTime,
-    is_dump: bool,
-    dump_seq: u64,
 }
 
-fn parse_trace_name(name: &str) -> Option<(String, bool, u64)> {
-    let (stem, is_dump, dump_seq) = match name.rsplit_once("-jemalloc-") {
-        Some((stem, seq)) => (stem, true, seq.strip_suffix(".txt")?.parse().ok()?),
-        None => {
-            let stem = name
-                .strip_suffix(".jsonl")
-                .or_else(|| name.strip_suffix(".jsonl.1"))?;
-            (stem, false, 0)
-        }
-    };
+fn parse_trace_name(name: &str) -> Option<String> {
+    let stem = name
+        .strip_suffix(".jsonl")
+        .or_else(|| name.strip_suffix(".jsonl.1"))?;
     let (start_ts, pid) = stem.split_once('-')?;
     start_ts.parse::<u64>().ok()?;
     pid.parse::<u32>().ok()?;
-    Some((stem.to_owned(), is_dump, dump_seq))
+    Some(stem.to_owned())
 }
 
 pub fn collect_for_export(dir: &Path, limits: ExportLimits) -> Vec<ExportedTrace> {
@@ -566,7 +412,7 @@ pub fn collect_for_export(dir: &Path, limits: ExportLimits) -> Vec<ExportedTrace
                 return None;
             }
             let name = entry.file_name().to_string_lossy().into_owned();
-            let (stem, is_dump, dump_seq) = parse_trace_name(&name)?;
+            let stem = parse_trace_name(&name)?;
             let meta = entry.metadata().ok()?;
             Some(Candidate {
                 stem,
@@ -574,8 +420,6 @@ pub fn collect_for_export(dir: &Path, limits: ExportLimits) -> Vec<ExportedTrace
                 path: entry.path(),
                 len: meta.len(),
                 modified: meta.modified().unwrap_or(UNIX_EPOCH),
-                is_dump,
-                dump_seq,
             })
         })
         .collect();
@@ -593,8 +437,6 @@ pub fn collect_for_export(dir: &Path, limits: ExportLimits) -> Vec<ExportedTrace
         (
             std::cmp::Reverse(last_activity.get(&c.stem).copied().unwrap_or(c.modified)),
             c.stem.clone(),
-            c.is_dump,
-            std::cmp::Reverse(c.dump_seq),
             c.name.clone(),
         )
     });
@@ -654,7 +496,7 @@ pub(crate) mod test_support {
     }
 
     pub(crate) fn record_sample_for_tests() {
-        with_sink(|s| s.record("sample", None));
+        with_sink(|s| s.record_sample());
     }
 }
 
@@ -725,47 +567,6 @@ mod tests {
         }
     }
 
-    #[test]
-    #[serial_test::serial(MEMTRACE_SINK)]
-    fn purge_events_carry_cliff_attribution() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("p.jsonl");
-        let _guard = test_support::install_test_sink(path.clone(), 1 << 20);
-
-        crate::memory_release::release_retained_memory("unit-test-cliff");
-
-        let body = std::fs::read_to_string(&path).unwrap();
-        let purge_line = body
-            .lines()
-            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
-            .find(|v| {
-                v.get("kind").and_then(|k| k.as_str()) == Some("purge")
-                    && v.get("reason").and_then(|r| r.as_str()) == Some("unit-test-cliff")
-            })
-            .expect("a purge event tagged with the calling cliff");
-        assert!(
-            purge_line
-                .get("purge_us")
-                .and_then(|u| u.as_u64())
-                .is_some()
-        );
-        assert!(
-            purge_line
-                .get("hook_installed")
-                .and_then(|h| h.as_bool())
-                .is_some()
-        );
-        // The before-gauge must exist on every supported platform (footprint on macOS, RSS fallback on Linux) or purge deltas are uncomputable
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        assert!(
-            purge_line
-                .get("gauge_before_bytes")
-                .and_then(|g| g.as_u64())
-                .is_some_and(|n| n > 0),
-            "purge events must carry a before-gauge for delta analysis"
-        );
-    }
-
     fn write_aged(dir: &Path, name: &str, len: usize, age_secs: u64) {
         let path = dir.join(name);
         std::fs::write(&path, vec![b'x'; len]).unwrap();
@@ -799,10 +600,9 @@ mod tests {
     fn export_groups_each_process_and_leads_with_its_timeline() {
         let dir = tempfile::tempdir().unwrap();
         write_aged(dir.path(), "100-1.jsonl", 8, 60);
-        write_aged(dir.path(), "100-1-jemalloc-2.txt", 8, 300);
-        write_aged(dir.path(), "100-1-jemalloc-10.txt", 8, 120);
+        write_aged(dir.path(), "100-1.jsonl.1", 8, 300);
         write_aged(dir.path(), "100-2.jsonl", 8, 5);
-        write_aged(dir.path(), "100-2-jemalloc-0.txt", 8, 30);
+        write_aged(dir.path(), "100-2.jsonl.1", 8, 30);
 
         let exported = collect_for_export(dir.path(), ExportLimits::default());
 
@@ -810,10 +610,9 @@ mod tests {
             names(&exported),
             [
                 "100-2.jsonl",
-                "100-2-jemalloc-0.txt",
+                "100-2.jsonl.1",
                 "100-1.jsonl",
-                "100-1-jemalloc-10.txt",
-                "100-1-jemalloc-2.txt"
+                "100-1.jsonl.1"
             ]
         );
     }

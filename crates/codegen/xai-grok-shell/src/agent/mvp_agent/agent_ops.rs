@@ -1581,7 +1581,6 @@ impl MvpAgent {
         self.sync_collection_config_gate();
         self.emit_settings_update_notification();
         self.emit_announcements(AnnouncementsPushMode::IfChanged);
-        self.reconfigure_heap_profile_monitor();
     }
     /// Re-evaluates the official-marketplace auto-register gate now that remote settings exist.
     /// `init_process` ran the same gate at boot without them, so a settings-targeted (not env-set) team would otherwise never register.
@@ -1814,7 +1813,6 @@ impl MvpAgent {
         self.sync_collection_config_gate();
         self.emit_settings_update_notification();
         self.emit_announcements(AnnouncementsPushMode::Force);
-        self.reconfigure_heap_profile_monitor();
     }
     /// Spawns a background task coalesced on `in_flight`: a request while one is in flight is dropped.
     /// The task is bounded by `SETTINGS_REAPPLY_TIMEOUT`.
@@ -2532,10 +2530,7 @@ impl MvpAgent {
             announcements_gen: std::cell::Cell::new(0),
             last_emitted_announcements: RefCell::new(Vec::new()),
             announcements_refresh_started: std::cell::Cell::new(false),
-            heap_profile_monitor: RefCell::new(
-                crate::heap_profile::HeapProfileMonitor::new(),
-            ),
-            heap_profile_started: std::cell::Cell::new(false),
+            resource_reporter_started: std::cell::Cell::new(false),
             #[cfg(test)]
             finalize_spy: RefCell::new(Vec::new()),
             #[cfg(test)]
@@ -5001,7 +4996,6 @@ impl MvpAgent {
         super::test_hooks::pause_at(super::test_hooks::AttachPause::AfterSpawn).await;
         self.set_session_live_state(&session_info.id, SessionLiveState::IdleResident);
         self.ensure_session_supervisor();
-        self.heap_profile_set_session_id(&session_info.id.0);
         self.push_roster_delta_upserted(&session_info.id);
         if chat_history.is_empty() {
             let _timer = crate::instrumentation_timer!("session.system_prompt_inject");

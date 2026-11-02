@@ -90,9 +90,6 @@ impl AgentView {
                 });
                 self.image_viewer = None;
                 self.image_load_rx = None;
-                // The viewer's decoded/re-encoded overlay image (tens of MB for screenshots/renders) just dropped
-                // This is the input path, so a synchronous purge lands between interactions
-                crate::memory_release::release_retained_memory("image-viewer-close");
             }
             _ => {}
         }
@@ -378,24 +375,16 @@ impl AgentView {
         }
     }
 
-    /// Stop inline video playback, dropping the pre-extracted frame set (~50-300 MB), and request a post-draw purge for it.
+    /// Stop inline video playback, dropping the pre-extracted frame set.
     /// Returns whether a video was actually playing.
-    /// Draw-path callers rely on the deferred request (never a synchronous mid-frame purge); image-only paths must not purge at all.
     pub(super) fn stop_inline_playback(&mut self) -> bool {
-        let had_video = self.inline_video.take().is_some();
-        if had_video {
-            crate::memory_release::request_release_after_draw("inline-video-stop");
-        }
-        had_video
+        self.inline_video.take().is_some()
     }
 
-    /// Install freshly-extracted inline video frames, dropping (and requesting a post-draw purge for) any previous playback's frame set.
+    /// Install freshly-extracted inline video frames, dropping any previous
     /// The tick path calls this when the background extraction completes.
     pub(crate) fn replace_inline_video(&mut self, video: crate::app::agent_view::InlineVideoState) {
-        if self.inline_video.replace(video).is_some() {
-            // Switching videos: the previous frame set just dropped.
-            crate::memory_release::request_release_after_draw("inline-video-replace");
-        }
+        self.inline_video = Some(video);
     }
 
     /// Subagent fullscreen views render inline media with their own ids; drain those (recursively), leaving this view's placements alone.
@@ -608,8 +597,6 @@ impl AgentView {
                     let _ = clear.write_to(stderr);
                 });
                 self.video_viewer = None;
-                // The viewer's pre-extracted frame set (~50-300 MB for a typical clip) just dropped; return the pages to the OS
-                crate::memory_release::release_retained_memory("video-viewer-close");
             }
             KeyCode::Char(' ') => {
                 viewer.toggle_play_pause();
@@ -664,8 +651,6 @@ impl AgentView {
 
 #[cfg(test)]
 mod tests {
-    use crate::memory_release::test_support;
-
     fn make_agent() -> crate::app::agent_view::AgentView {
         crate::test_util::make_agent_view(None, "/tmp")
     }
@@ -681,130 +666,37 @@ mod tests {
         }
     }
 
-    /// Closing the video viewer modal drops the pre-extracted frame set; the purge must fire on close and never on other viewer keys.
     #[test]
-    fn video_viewer_close_releases_retained_memory() {
+    fn video_viewer_closes_on_esc_and_not_on_play_pause() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        test_support::install_counting_hook();
 
         let mut agent = make_agent();
         agent.video_viewer = Some(crate::prompt_images::VideoViewerState::test_stub());
 
-        // A non-close key keeps the viewer (and its frames), so no purge
-        let before = test_support::calls();
         agent.handle_video_viewer_key(&KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
-        assert!(agent.video_viewer.is_some());
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "play/pause drops nothing and must not purge"
-        );
+        assert!(agent.video_viewer.is_some(), "play/pause keeps the viewer");
 
-        // Esc closes: the frames drop and one purge fires
-        let before = test_support::calls();
         agent.handle_video_viewer_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(agent.video_viewer.is_none());
-        assert_eq!(
-            test_support::calls(),
-            before + 1,
-            "closing the viewer must purge after the frame set drops"
-        );
     }
 
-    /// Draining inline-media placements requests a POST-DRAW purge only when live playback (a frame set) was actually dropped.
-    /// Image-only clears must not, and the purge must never run synchronously (these paths sit inside `draw`).
-    /// Serialized: the deferred-request flag is process-wide.
     #[test]
-    #[serial_test::serial(MEMORY_RELEASE_DEFER)]
-    fn inline_media_clear_defers_release_only_for_video() {
-        test_support::install_counting_hook();
-        // Drain any stale request left by an earlier test in this group.
-        crate::memory_release::run_deferred_release();
-
+    fn inline_media_clear_stops_playback() {
         let mut agent = make_agent();
 
-        // Image-only placements active: clear drops no frames, so no request
-        agent.inline_media_active = true;
-        let before = test_support::calls();
-        let _ = agent.take_inline_media_clear_escapes();
-        crate::memory_release::run_deferred_release();
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "an image-only media clear must not purge"
-        );
-
-        // Active inline playback: no purge synchronously; the deferred drain runs it (one purge)
         agent.inline_media_active = true;
         agent.inline_video = Some(stub_inline_video());
-        let before = test_support::calls();
         let _ = agent.take_inline_media_clear_escapes();
         assert!(agent.inline_video.is_none());
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "draw-path video stop must never purge synchronously"
-        );
-        crate::memory_release::run_deferred_release();
-        assert_eq!(
-            test_support::calls(),
-            before + 1,
-            "the post-draw drain must purge the dropped frame set"
-        );
 
         // Orphaned playback: frames finished loading after the media scrolled off (no active flag, no placements)
-        // The drain must still stop the video and request its purge
         agent.inline_media_active = false;
         agent.inline_video = Some(stub_inline_video());
-        let before = test_support::calls();
         assert!(agent.take_inline_media_clear_escapes().is_none());
         assert!(
             agent.inline_video.is_none(),
             "orphaned playback must be stopped by the drain"
         );
-        crate::memory_release::run_deferred_release();
-        assert_eq!(test_support::calls(), before + 1);
-
-        // Nothing at all: the early no-placement return, so no request
-        let before = test_support::calls();
-        let _ = agent.take_inline_media_clear_escapes();
-        crate::memory_release::run_deferred_release();
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "a no-op clear must not purge"
-        );
-    }
-
-    /// Installing freshly-extracted frames purges the PREVIOUS playback's frame set (deferred), and never purges on first install.
-    #[test]
-    #[serial_test::serial(MEMORY_RELEASE_DEFER)]
-    fn replace_inline_video_defers_release_only_when_replacing() {
-        test_support::install_counting_hook();
-        crate::memory_release::run_deferred_release();
-
-        let mut agent = make_agent();
-
-        // First install: nothing drops, so no request
-        let before = test_support::calls();
-        agent.replace_inline_video(stub_inline_video());
-        crate::memory_release::run_deferred_release();
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "first frame-set install drops nothing and must not purge"
-        );
-
-        // Replacement: the old frame set drops, so a deferred purge
-        let before = test_support::calls();
-        agent.replace_inline_video(stub_inline_video());
-        assert_eq!(
-            test_support::calls(),
-            before,
-            "tick-path replacement must never purge synchronously"
-        );
-        crate::memory_release::run_deferred_release();
-        assert_eq!(test_support::calls(), before + 1);
     }
 
     /// Oversized payloads (at or above the cap) are handed back for transient use and never inserted.
@@ -842,11 +734,9 @@ mod tests {
         assert!(cache.values().map(Vec::len).sum::<usize>() <= 16);
     }
 
-    /// Closing the image viewer drops the decoded overlay image; purge synchronously (input path), exactly once.
     #[test]
-    fn image_viewer_close_releases_retained_memory() {
+    fn image_viewer_closes_on_esc() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        test_support::install_counting_hook();
 
         let mut agent = make_agent();
         agent.image_viewer = Some(
@@ -854,13 +744,7 @@ mod tests {
                 "x.png",
             )),
         );
-        let before = test_support::calls();
         agent.handle_image_viewer_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(agent.image_viewer.is_none());
-        assert_eq!(
-            test_support::calls(),
-            before + 1,
-            "closing the image viewer must purge after the image drops"
-        );
     }
 }

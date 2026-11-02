@@ -2,7 +2,7 @@
 //!
 //! A gesture is a `&'static [WheelStep]`.
 //! The runner emits each step's report after sleeping `pre_delay_ms`, never before the first step and never after the last.
-//! That is the `send_wheel_sequence` contract in the pager's `tests/pty_e2e/scroll.rs`.
+//! That is the `send_wheel_sequence` contract in the pager's `tests/it/pty_e2e/scroll.rs`.
 //! Delays are HOST-side lower bounds: scheduler jitter can only stretch gaps.
 //! So the invariant suite ([`super::invariants`]) judges timing from the recorder's own clock.
 //!

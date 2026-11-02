@@ -41,7 +41,6 @@ pub mod inline_media_ffmpeg;
 pub mod input_log;
 pub mod mcp_cmd;
 pub mod memory_cmd;
-pub mod memory_release;
 pub mod memory_trace;
 pub mod models;
 pub mod notifications;

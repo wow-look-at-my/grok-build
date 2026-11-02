@@ -15,7 +15,7 @@ use super::overflow::{OverflowHandler, RecoveryTools, inline_budget};
 use super::ssrf;
 use crate::implementations::grok_build::storage::SessionFileWriter;
 use crate::types::output::{WebFetchContent, WebFetchOutput, WebFetchSourceArtifact};
-use scraper::{Html, Selector};
+use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
 
 const DEFAULT_DOWNLOAD_DIR: &str = "downloads";
 
@@ -712,56 +712,52 @@ fn html_to_markdown(converter: &htmd::HtmlToMarkdown, html: &str) -> String {
         .unwrap_or_else(|_| html.to_string())
 }
 
+/// Tags removed whole before markdown conversion.
+const NOISY_TAGS: &[&str] = &["nav", "header", "footer"];
+/// An element whose `class` or `id` holds one of these substrings is removed.
+const NOISY_ATTR_SUBSTRINGS: &[&str] = &["cookie", "sidebar", "ad-", "advert"];
+
 /// Remove common noisy elements from HTML before markdown conversion.
 fn clean_html(html: &str) -> String {
-    let mut document = Html::parse_document(html);
+    use html5ever::tendril::TendrilSink as _;
 
-    // Never detach the root element itself - the broad selectors below can match
-    // attributes on <html> (e.g. class="...advert..."), which would leave the
-    // tree with no root element. Looked up fallibly so we never assume one exists.
-    let root_id = document
-        .tree
-        .root()
-        .children()
-        .find(|child| child.value().is_element())
-        .map(|node| node.id());
+    let dom = html5ever::parse_document(RcDom::default(), Default::default()).one(html);
 
-    let selectors: Vec<Selector> = [
-        "nav",
-        "header",
-        "footer",
-        "[class*='cookie']",
-        "[class*='sidebar']",
-        "[class*='ad-']",
-        "[class*='advert']",
-        "[id*='cookie']",
-        "[id*='sidebar']",
-        "[id*='ad-']",
-        "[id*='advert']",
-    ]
-    .iter()
-    .filter_map(|s| Selector::parse(s).ok())
-    .collect();
+    // The <html> element is never removed, even when its class matches.
+    // Without it the tree has no root element.
+    for top in dom.document.children.borrow().iter() {
+        remove_noisy_descendants(top);
+    }
 
-    selectors.iter().for_each(|selector| {
-        document
-            .select(selector)
-            .map(|e| e.id())
-            .collect::<Vec<_>>()
-            .into_iter()
-            .for_each(|id| {
-                if Some(id) == root_id {
-                    return;
-                }
-                if let Some(mut node) = document.tree.get_mut(id) {
-                    node.detach();
-                }
-            });
-    });
+    let mut out = Vec::new();
+    let document: SerializableHandle = dom.document.clone().into();
+    if html5ever::serialize(&mut out, &document, Default::default()).is_err() {
+        return html.to_string();
+    }
+    // html5ever writes UTF-8, so the lossy pass never replaces a byte.
+    String::from_utf8_lossy(&out).into_owned()
+}
 
-    // Serialize the whole document rather than `root_element()`, which panics if
-    // the tree somehow has no root element.
-    document.html()
+fn remove_noisy_descendants(node: &Handle) {
+    node.children.borrow_mut().retain(|child| !is_noisy(child));
+    for child in node.children.borrow().iter() {
+        remove_noisy_descendants(child);
+    }
+}
+
+fn is_noisy(node: &Handle) -> bool {
+    let NodeData::Element { name, attrs, .. } = &node.data else {
+        return false;
+    };
+    if name.ns == html5ever::ns!(html) && NOISY_TAGS.contains(&&*name.local) {
+        return true;
+    }
+    attrs.borrow().iter().any(|attr| {
+        matches!(&*attr.name.local, "class" | "id")
+            && NOISY_ATTR_SUBSTRINGS
+                .iter()
+                .any(|needle| attr.value.contains(needle))
+    })
 }
 
 /// Strip base64 data URIs from content to prevent token bloat. Uses manual scanning (`find` + byte
@@ -1380,7 +1376,7 @@ mod tests {
         assert!(params.proxy_endpoint.is_none());
     }
 
-    // ── HTML cleaning (scraper-based) ─────────────────────────────────
+    // ── HTML cleaning ─────────────────────────────────────────────────
 
     #[test]
     fn clean_html_removes_boilerplate_tags() {
