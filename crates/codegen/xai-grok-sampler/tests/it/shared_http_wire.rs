@@ -1,3 +1,5 @@
+// shared_http_wire.rs holds the shared http wire code.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -65,7 +67,6 @@ fn pin_env() {
         crate::support::pin_env();
         let fixture = &*TLS_FIXTURE;
         // SAFETY: Every test in this process calls `pin_env` before building a client.
-        // `PIN` serializes the one mutation while concurrent tests wait.
         unsafe { std::env::set_var("GROK_EXTRA_CA_BUNDLE", &fixture.ca_path) };
     });
 }

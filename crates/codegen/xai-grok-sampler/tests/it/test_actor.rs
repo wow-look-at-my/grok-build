@@ -1,7 +1,4 @@
 //! Integration tests for the actor and request_task layer.
-//!
-//! They live in `tests/` because they need a real `tokio::runtime` and a mock axum HTTP server for the `SamplingClient` to talk to.
-//! Happy-path SSE payloads come from `xai_grok_test_support::sse`.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -27,9 +24,7 @@ use xai_grok_sampling_types::{
 };
 use xai_grok_test_support::{SseEvent, sse};
 
-// ---------------------------------------------------------------------------
 // Mock server harness
-// ---------------------------------------------------------------------------
 
 struct MockServer {
     addr: SocketAddr,
@@ -461,7 +456,6 @@ async fn retries_on_500_then_succeeds() {
     );
 }
 
-/// A coded `invalid_image` 400 strips the image, emits ServerRejected, retries, and completes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn invalid_image_code_strips_and_retries() {
     const IMAGE_URI: &str = "data:image/png;base64,cG9pc29uZWQ=";
@@ -478,7 +472,8 @@ async fn invalid_image_code_strips_and_retries() {
                     b.len()
                 };
                 if n == 1 {
-                    // The FLAT envelope the xAI API's non-stream rejections actually use; the message alone must not matter
+                    // The FLAT envelope the xAI API's non-stream rejections
+                    // use; the message alone must not matter
                     Err::<Sse<_>, (StatusCode, String)>((
                         StatusCode::BAD_REQUEST,
                         json!({
@@ -616,7 +611,6 @@ async fn responses_invalid_image_strips_as_server_rejected() {
     );
 }
 
-/// A legacy-phrase 400 with no code still strips and recovers, but the reason is `PayloadHeuristic`.
 /// Without the deterministic code the server blamed nothing specific, so the strip must stay request-local.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn legacy_phrase_400_strips_as_heuristic() {
@@ -863,7 +857,7 @@ async fn fatal_decision_does_not_strip_or_emit_images_stripped() {
     );
 }
 
-/// An RST mid-upload (nginx-style 413) emits PayloadHeuristic and strips the request only.
+/// An RST mid-upload (a later nginx-style) emits PayloadHeuristic and strips the request only.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn connection_reset_emits_payload_heuristic_and_strips_request() {
     const IMAGE_URI: &str = "data:image/png;base64,cG9pc29uZWQ=";
@@ -1131,9 +1125,7 @@ async fn auth_401_emits_failed_immediately_no_retry() {
     assert_eq!(counter.load(Ordering::SeqCst), 1, "no retries on 401");
 }
 
-// ---------------------------------------------------------------------------
 // Anthropic Messages API: refusal stop_reason + mid-stream parse failure
-// ---------------------------------------------------------------------------
 
 fn messages_config(base_url: String) -> SamplerConfig {
     let mut cfg = test_config(base_url, "messages-compatible-model");

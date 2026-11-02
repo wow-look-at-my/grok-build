@@ -1,9 +1,4 @@
-//! Serde round-trip coverage for every public type and the wire-rename
-//! assertions for each variant.
-//!
-//! Companion files: `identifier_validation.rs` covers id-newtype
-//! constructor and validator behaviour; `tool_id_derivation.rs` covers
-//! `ToolDescriptionWithSchema::derive_tool_id`.
+//! Serde round-trip coverage for every public type and the wire-rename assertions for each variant.
 
 use std::collections::HashMap;
 
@@ -99,8 +94,7 @@ fn tool_capabilities_default_round_trips_and_omits_optionals() {
     let caps = ToolCapabilities::default();
     let json = roundtrip(&caps);
     let obj = json.as_object().unwrap();
-    // Bool fields default to `false` and are present so wire consumers can
-    // rely on their presence; optional fields are skipped.
+    // Bool fields default to `false` and are present so wire consumers can rely on their presence.
     assert_eq!(obj["supports_cancel"], json!(false));
     assert_eq!(obj["is_read_only"], json!(false));
     assert!(!obj.contains_key("streaming"));
@@ -519,10 +513,7 @@ fn method_round_trips_for_every_variant() {
         let v = serde_json::to_value(m).expect("serialize");
         let parsed: Method = serde_json::from_value(v.clone()).expect("deserialize");
         assert_eq!(parsed, m);
-        // `as_wire_str` and the serde-emitted wire string MUST agree;
-        // a future variant added without a matching `as_wire_str` arm
-        // would silently drift through the round-trip but be wrong on
-        // any code path that relies on the const wire-string lookup.
+        // `as_wire_str` and the serde-emitted wire string MUST agree.
         let serde_str = v.as_str().expect("variant serialises to a string");
         assert_eq!(
             m.as_wire_str(),
@@ -1084,9 +1075,7 @@ fn session_bind_result_image_capabilities_round_trip() {
 fn attach_route_round_trips_snake_case_and_tolerates_unknown() {
     assert_eq!(roundtrip(&AttachRoute::Local), json!("local"));
     assert_eq!(roundtrip(&AttachRoute::Remote), json!("remote"));
-    // "restored" was removed with restore-on-activity; old hubs may still send
-    // it, and it must fall into the tolerant `Unknown` bucket like any other
-    // retired/newer value.
+    // "restored".
     let parsed: AttachRoute =
         serde_json::from_value(json!("restored")).expect("tolerant parse of retired value");
     assert_eq!(parsed, AttachRoute::Unknown);
@@ -1599,20 +1588,16 @@ fn one_of_each_tool_error_wire_variant() -> Vec<ToolErrorWire> {
         },
     ]
 }
-/// Wire-string discriminators that deliberately do NOT have a row in the
-/// numeric ↔ string table. Each rides on a generic JSON-RPC reserved
-/// numeric (`invalid_request` or `internal_error`) while emitting a
-/// more-specific subcode for receivers that want richer dispatch.
+/// Wire-string discriminators that deliberately do NOT have a row in the numeric ↔ string table.
 const NON_TABLE_WIRE_STRINGS: &[&str] = &["session_mismatch", "cancelled", "execution", "custom"];
 
-/// For every variant whose wire `data.code` is a table row: assert the
-/// strict round-trip (`numeric_for(code) == Some(from_tool_error_wire(&v))`
-/// AND `string_for(numeric) == Some(code)`). For variants whose wire
-/// `data.code` is in [`NON_TABLE_WIRE_STRINGS`]: `numeric_for` must
-/// return `None`, and `from_tool_error_wire` must still return some valid
-/// table numeric. Adding a new variant without the matching
-/// `#[serde(rename = "...")]` (or without listing the wire string in
-/// [`NON_TABLE_WIRE_STRINGS`]) fails this test.
+/// For every variant whose wire `data.code` is a table row: assert the strict
+/// round-trip (`numeric_for(code) == Some(from_tool_error_wire(&v))`. AND
+/// `string_for(numeric) == Some(code)`). For variants whose wire `data.code`
+/// is in [`NON_TABLE_WIRE_STRINGS`]: `numeric_for` must return `None`, and
+/// `from_tool_error_wire` must still return some valid table numeric. Adding
+/// a new variant without the matching `#[serde(rename = "...")]` (or without
+/// listing the wire string in [`NON_TABLE_WIRE_STRINGS`]) fails this test.
 #[test]
 fn every_tool_error_wire_variant_aligns_with_codes_table() {
     for err in one_of_each_tool_error_wire_variant() {

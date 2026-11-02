@@ -1,7 +1,4 @@
-//! `ToolRegistry` trait coverage via a per-test mock backed by `DashMap`
-//! — lock-free per-key concurrent access mirrors the production
-//! direction even at the test layer. The mock implements the
-//! connection-scoped `ToolRegistry` trait surface.
+//! `ToolRegistry` trait coverage via a per-test mock backed by `DashMap`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

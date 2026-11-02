@@ -1,3 +1,5 @@
+// extra_ca_ssl_cert_file_handshake.rs holds the extra ca ssl cert file handshake code.
+
 use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
 use std::io::{Read, Write};
 
@@ -59,8 +61,8 @@ fn handshake_succeeds_against_ca_loaded_from_ssl_cert_file() {
         let _ = tls.write_all(b"HTTP/1.1 204 No Content\r\ncontent-length: 0\r\n\r\n");
     });
 
-    // Native roots off: the CA is trusted only if the crate's SSL_CERT_FILE loader added it
-    // rustls-native-certs also reads SSL_CERT_FILE, so leaving native roots on would let the handshake pass without the loader
+    // Native roots off: the CA is trusted only if the crate's SSL_CERT_FILE loader added it rustls-native-certs also reads
+    // SSL_CERT_FILE. Leaving native roots on would let the handshake pass without the loader
     #[expect(clippy::expect_used)]
     let client = xai_grok_extra_ca::build_blocking_reqwest_client(|builder| {
         builder

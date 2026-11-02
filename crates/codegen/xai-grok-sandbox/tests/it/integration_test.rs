@@ -142,7 +142,7 @@ fn test_sandbox_manager_lifecycle() {
 
     let workspace = std::env::current_dir().expect("cwd");
 
-    // Off profile: apply should succeed without actually sandboxing
+    // Off profile: apply should succeed without sandboxing
     let mut manager = SandboxManager::new(ProfileName::Off, &workspace);
     assert!(!manager.is_applied());
     assert!(!manager.restrict_child_network());
@@ -182,7 +182,6 @@ fn test_sandbox_logger() {
 
 #[test]
 fn test_should_restrict_child_network_default() {
-    // The "set" path needs an applied sandbox, which is irreversible, so only the default (false) is verifiable here
-    // The global is set once at process startup and never unset; a test that applies a sandbox would interfere with this one
+    // The "set" path needs an applied sandbox, which is irreversible, so only the default (false) is verifiable here.
     assert!(!xai_grok_sandbox::should_restrict_child_network());
 }

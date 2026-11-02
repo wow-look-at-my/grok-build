@@ -1,3 +1,5 @@
+// extra_ca_async_handshake.rs holds the extra ca async handshake code.
+
 use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
 use std::io::{Read, Write};
 

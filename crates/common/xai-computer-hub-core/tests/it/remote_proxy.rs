@@ -1,6 +1,4 @@
-//! `RemoteToolProxy` and `RemoteTransport` coverage. A channel-backed
-//! mock `ConnectionClient` lets the test inspect outgoing frames and
-//! drive synthetic responses + progress without any tokio I/O.
+//! `RemoteToolProxy` and `RemoteTransport` coverage.
 
 use std::sync::{Arc, Mutex};
 
@@ -28,13 +26,9 @@ use xai_tool_types::ToolDescription;
 /// response; progress frames are pushed through per-call senders.
 #[derive(Debug, Default)]
 struct MockConnection {
-    /// Senders keyed by `tool_call_id`. Pulled out of the inner state so
-    /// per-call subscription touches a lock-free DashMap rather than the
-    /// shared Mutex that guards the rest of the queue + capture state.
+    /// Senders keyed by `tool_call_id`.
     progress_senders: DashMap<ToolCallId, mpsc::UnboundedSender<ToolCallProgressFrame>>,
-    /// Shared state guarded by one Mutex. The lock provides atomic
-    /// pop-from-`responses` + push-to-`captured_requests` semantics that
-    /// some tests rely on.
+    /// Shared state guarded by one Mutex.
     inner: Mutex<MockState>,
 }
 
@@ -266,7 +260,7 @@ async fn progress_then_terminal_orders_correctly() {
     );
     let mut stream = proxy.execute(ctx, serde_json::json!(null)).await;
 
-    // Push two progress frames before the terminal is unblocked.
+    // Push progress frames before the terminal is unblocked.
     conn.push_progress(
         &call_id,
         ToolCallProgressFrame {
@@ -602,11 +596,7 @@ async fn remote_transport_authorize_returns_bound_principal() {
 
 #[tokio::test]
 async fn proxy_subscribe_happens_before_request_send() {
-    // Locks in BOTH halves of the subscribe-before-send contract:
-    //   1. the subscription IS active by the time `execute` returns;
-    //   2. the request HAS NOT been sent yet at that point.
-    // A future refactor that eagerly sent the request inside
-    // `execute` would still satisfy (1) but would break (2).
+    // the subscription IS active by the time `execute` returns.
     let conn = Arc::new(MockConnection::default());
     let proxy = RemoteToolProxy::new(
         tid("foo"),
@@ -620,10 +610,8 @@ async fn proxy_subscribe_happens_before_request_send() {
     conn.enqueue_ok(ok_call_result(&call_id, ToolOutputWire::Text("ok".into())));
     let mut stream = proxy.execute(ctx, serde_json::json!(null)).await;
     {
-        // The DashMap subscription read and the captured-requests check
-        // are individually atomic. Single-threaded `#[tokio::test]`
-        // execution means no other task can mutate either between the
-        // two checks, so the pair is observationally simultaneous.
+        // The DashMap subscription read and the captured-requests check are
+        // individually atomic.
         assert!(
             conn.progress_senders.contains_key(&call_id),
             "subscription must be active before request send"
@@ -634,8 +622,7 @@ async fn proxy_subscribe_happens_before_request_send() {
             "request must not be sent before stream is polled"
         );
     }
-    // Polling the stream is what actually drives the request future,
-    // so the captured-requests vec only fills in once we start consuming.
+    // Polling the stream is what drives the request future.
     while stream.next().await.is_some() {}
     {
         let guard = conn.inner.lock().expect("mutex");
