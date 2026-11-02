@@ -2786,7 +2786,7 @@ async fn shared_plugin_registry_snapshot_reads_plugins_config_from_disk() {
     )
     .unwrap();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let project_config_dir = repo.path().join(".grok");
     std::fs::create_dir_all(&project_config_dir).unwrap();
     let auth_home = tempfile::tempdir().unwrap();
@@ -2890,7 +2890,7 @@ fn write_plugin_manifest(dir: &std::path::Path, name: &str) {
 #[serial_test::serial]
 async fn plugins_reload_resolves_real_remote_trust_before_reading_disk_config() {
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let proj_plugin = repo.path().join("proj-plugin");
     write_plugin_manifest(&proj_plugin, "regr-killswitch-proj");
     std::fs::create_dir_all(repo.path().join(".grok")).unwrap();
@@ -2930,7 +2930,7 @@ async fn plugins_reload_resolves_real_remote_trust_before_reading_disk_config() 
 #[serial_test::serial]
 async fn plugins_reload_rechecks_launch_dir_trust() {
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let h = ReloadHarness::launched_in(repo.path(), &crate::agent::config::Config::default());
     h.agent.ensure_plugin_registry();
     assert!(
@@ -2985,7 +2985,7 @@ async fn plugins_reload_rechecks_launch_dir_trust() {
 #[serial_test::serial]
 async fn lazy_registry_build_resolves_real_remote_trust_before_reading_disk_config() {
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let h = ReloadHarness::launched_in(repo.path(), &crate::agent::config::Config::default());
     assert!(h.agent.prime_launch_dir_trust().1);
     h.agent.cfg.borrow_mut().remote_settings = Some(crate::util::config::RemoteSettings {
@@ -7633,7 +7633,7 @@ fn build_agent_with_gateway_rx() -> (
 /// The project server should reappear after a trust grant.
 fn repo_with_project_mcp_server() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
-    git2::Repository::init(tmp.path()).unwrap();
+    gix::init(tmp.path()).unwrap();
     std::fs::write(
         tmp.path().join(".mcp.json"),
         r#"{"mcpServers":{"projsrv":{"command":"echo","args":["hi"]}}}"#,
@@ -7663,7 +7663,7 @@ fn folder_trust_on() -> crate::util::config::RemoteSettings {
 #[serial_test::serial]
 fn subagent_spawn_context_reloads_project_definitions_after_trust_changes() {
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     write_project_subagent_definitions(repo.path());
     run_local_for_bridge_test(|| async {
         let (agent, _rx) = build_agent_with_gateway_rx();
@@ -7732,7 +7732,7 @@ fn project_roles_personas_gated_via_resolve_and_record_chain() {
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     write_project_subagent_definitions(repo.path());
     run_local_for_bridge_test(|| async {
         let (agent, _rx) = build_agent_with_gateway_rx();

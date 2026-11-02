@@ -237,16 +237,14 @@ pub(crate) fn strip_url_credentials(url_str: &str) -> String {
     url_str.to_string()
 }
 /// Best-effort git repo root and remote URL for the session's cwd.
-/// Runs git2 discovery off-thread since it walks parent directories.
+/// Runs repository discovery off-thread since it walks parent directories.
 pub(crate) async fn resolve_git_repo_info(cwd: &str) -> (Option<String>, Option<String>) {
     let cwd = cwd.to_owned();
     tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::discover(&cwd).ok()?;
-        let repo_root = repo.workdir().map(|p| p.to_string_lossy().to_string());
-        let remote_url = repo
-            .find_remote("origin")
-            .ok()
-            .and_then(|r| r.url().ok().map(strip_url_credentials));
+        use xai_gix_status::discover;
+        let repo = discover::discover(std::path::Path::new(&cwd))?;
+        let repo_root = discover::workdir(&repo).map(|p| p.to_string_lossy().to_string());
+        let remote_url = discover::origin_url(&repo).map(|url| strip_url_credentials(&url));
         Some((repo_root, remote_url))
     })
     .await
@@ -1673,14 +1671,19 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn fill_git_fields_preserves_existing_fields() {
         let tmp = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(tmp.path()).unwrap();
-        repo.remote("origin", "https://github.com/test/repo.git")
-            .unwrap();
-        let expected_remote = repo
-            .find_remote("origin")
-            .unwrap()
-            .url()
-            .map(strip_url_credentials)
+        crate::test_support::git(tmp.path(), &["init", "--quiet"]);
+        crate::test_support::git(
+            tmp.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/test/repo.git",
+            ],
+        );
+        let expected_remote = xai_gix_status::discover::discover(tmp.path())
+            .and_then(|repo| xai_gix_status::discover::origin_url(&repo))
+            .map(|url| strip_url_credentials(&url))
             .expect("origin remote must have a url");
         let mut meta = bare_prompt_metadata();
         meta.repo_root = Some("/custom/root".into());
@@ -1708,14 +1711,19 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn resolve_git_repo_info_populates_from_git_repo() {
         let tmp = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(tmp.path()).unwrap();
-        repo.remote("origin", "https://github.com/test/repo.git")
-            .unwrap();
-        let expected_remote = repo
-            .find_remote("origin")
-            .unwrap()
-            .url()
-            .map(strip_url_credentials)
+        crate::test_support::git(tmp.path(), &["init", "--quiet"]);
+        crate::test_support::git(
+            tmp.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/test/repo.git",
+            ],
+        );
+        let expected_remote = xai_gix_status::discover::discover(tmp.path())
+            .and_then(|repo| xai_gix_status::discover::origin_url(&repo))
+            .map(|url| strip_url_credentials(&url))
             .expect("origin remote must have a url");
         let (repo_root, remote_url) = resolve_git_repo_info(tmp.path().to_str().unwrap()).await;
         assert!(repo_root.is_some(), "repo_root should be populated");

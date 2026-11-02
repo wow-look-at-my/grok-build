@@ -1910,7 +1910,7 @@ mod tests {
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
 
         let repo = tempfile::tempdir().unwrap();
-        git2::Repository::init(repo.path()).unwrap();
+        gix::init(repo.path()).unwrap();
 
         // Project-declared [plugins].paths plugin providing one agent.
         let plugin_dir = repo.path().join("proj-plugin");
@@ -2588,7 +2588,7 @@ enabled = false
 "#,
         )
         .unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
 
         let names = all_toml_mcp_server_names(tmp.path());
         assert!(names.contains("enabled_one"));
@@ -2600,7 +2600,7 @@ enabled = false
         let tmp = tempfile::tempdir().unwrap();
         let nested = tmp.path().join("a").join("b");
         std::fs::create_dir_all(&nested).unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
 
         let paths = mcp_json_candidate_paths(&nested);
         assert_eq!(
@@ -2756,7 +2756,7 @@ enabled = false
     #[tokio::test]
     async fn enable_unstick_only_touches_nearest_project_definition() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         let nested = tmp.path().join("pkg");
         std::fs::create_dir_all(nested.join(".grok")).unwrap();
         std::fs::create_dir_all(tmp.path().join(".grok")).unwrap();
@@ -2851,7 +2851,7 @@ enabled = false
     #[tokio::test]
     async fn project_enable_replaces_config_symlink_not_referent() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         let outside = tmp.path().join("outside.toml");

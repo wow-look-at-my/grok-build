@@ -6,11 +6,12 @@ pub(super) const MAX_SANITIZED_LENGTH: usize = 200;
 
 pub(super) fn scoped_project_dirs(config_dir: &Path, cwd: &Path) -> Vec<PathBuf> {
     let mut paths = vec![cwd.to_path_buf()];
-    if let Ok(repository) = git2::Repository::discover(cwd) {
+    if let Some(repository) = xai_gix_status::discover::discover(cwd) {
         if let Some(workdir) = repository.workdir() {
             paths.push(dunce::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf()));
-            if repository.path() != repository.commondir()
-                && let Some(main_workdir) = repository.commondir().parent()
+            let common_dir = xai_gix_status::discover::common_dir(&repository);
+            if xai_gix_status::discover::is_linked_worktree(&repository)
+                && let Some(main_workdir) = common_dir.parent()
             {
                 paths.push(
                     dunce::canonicalize(main_workdir)
@@ -19,10 +20,9 @@ pub(super) fn scoped_project_dirs(config_dir: &Path, cwd: &Path) -> Vec<PathBuf>
             }
         }
         if let Ok(worktrees) = repository.worktrees() {
-            for name in worktrees.iter().flatten().flatten().take(MAX_PROJECT_DIRS) {
-                if let Ok(worktree) = repository.find_worktree(name) {
-                    let path = worktree.path();
-                    paths.push(dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
+            for worktree in worktrees.iter().take(MAX_PROJECT_DIRS) {
+                if let Ok(path) = worktree.base() {
+                    paths.push(dunce::canonicalize(&path).unwrap_or(path));
                 }
             }
         }

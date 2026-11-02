@@ -864,7 +864,7 @@ args = ["ok"]
 "#,
         )
         .unwrap();
-        git2::Repository::init(cwd.path()).unwrap();
+        gix::init(cwd.path()).unwrap();
 
         let mut compat = xai_grok_tools::types::compat::CompatConfig::default();
         compat.cursor.mcps = false;
@@ -1120,7 +1120,7 @@ url = "https://denied.corp.com/mcp"
             return;
         }
         let cwd = tempfile::tempdir().unwrap();
-        git2::Repository::init(cwd.path()).unwrap();
+        gix::init(cwd.path()).unwrap();
         std::fs::create_dir_all(cwd.path().join(".grok")).unwrap();
         std::fs::write(
             cwd.path().join(".grok").join("config.toml"),
@@ -1284,7 +1284,7 @@ command = "echo"
     #[test]
     fn filter_policy_blocked_agent_mcp_drops_enabled_false_name() {
         let cwd = tempfile::tempdir().unwrap();
-        git2::Repository::init(cwd.path()).unwrap();
+        gix::init(cwd.path()).unwrap();
         std::fs::create_dir_all(cwd.path().join(".grok")).unwrap();
         std::fs::write(
             cwd.path().join(".grok").join("config.toml"),
@@ -1310,7 +1310,7 @@ enabled = false
     #[test]
     fn toml_loaders_agree_on_env_and_header_bearing_definitions() {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         std::fs::create_dir_all(tmp.path().join(".grok")).unwrap();
         std::fs::write(
             tmp.path().join(".grok").join("config.toml"),
@@ -2075,7 +2075,7 @@ enabled = false
 "#,
         )
         .unwrap();
-        git2::Repository::init(cwd.path()).unwrap();
+        gix::init(cwd.path()).unwrap();
         std::fs::write(
             cwd.path().join(".mcp.json"),
             r#"{
@@ -2121,7 +2121,7 @@ Authorization = "Bearer org2-token"
 "#,
         )
         .unwrap();
-        git2::Repository::init(cwd.path()).unwrap();
+        gix::init(cwd.path()).unwrap();
         crate::agent::folder_trust::record_for_test(cwd.path(), true);
         cwd
     }
@@ -2178,7 +2178,7 @@ Authorization = "Bearer org2-token"
     fn untrusted_workspace_drops_project_mcp_servers() {
         fn repo_with_project_server() -> tempfile::TempDir {
             let cwd = tempfile::tempdir().unwrap();
-            git2::Repository::init(cwd.path()).unwrap();
+            gix::init(cwd.path()).unwrap();
             std::fs::write(
                 cwd.path().join(".mcp.json"),
                 r#"{"mcpServers": {"projsrv": {"url": "https://proj.example.com/mcp"}}}"#,
@@ -2307,7 +2307,7 @@ Authorization = "Bearer org2-token"
             "plugin server must merge before the disable"
         );
 
-        git2::Repository::init(cwd.path()).unwrap();
+        gix::init(cwd.path()).unwrap();
         std::fs::create_dir_all(cwd.path().join(".grok")).unwrap();
         std::fs::write(
             cwd.path().join(".grok").join("config.toml"),

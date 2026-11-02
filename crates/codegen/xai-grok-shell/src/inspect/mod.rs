@@ -394,9 +394,7 @@ async fn build_report(cwd: &Path) -> InspectReport {
     let config_parse_error = parsed_config.as_ref().err().cloned();
     let parsed_config = parsed_config.ok();
 
-    let git_root = git2::Repository::discover(cwd)
-        .ok()
-        .and_then(|r| r.workdir().map(|p| p.to_path_buf()));
+    let git_root = xai_gix_status::discover::discover_workdir(cwd);
 
     // Route through the live folder-trust gate rather than a raw store read; no session resolve has run for a one-shot `inspect`
     // `remote = None`: env/user/managed opt-out is honored, but a remote kill-switch is not consulted on this report-only path
@@ -576,10 +574,8 @@ async fn list_instructions(
             ]
         })
         .unwrap_or_default();
-    let workspace_root = git2::Repository::discover(cwd)
-        .ok()
-        .and_then(|repo| repo.workdir().map(Path::to_path_buf))
-        .unwrap_or_else(|| cwd.to_path_buf());
+    let workspace_root =
+        xai_gix_status::discover::discover_workdir(cwd).unwrap_or_else(|| cwd.to_path_buf());
 
     // Phase 2 cutoff: when imported, stop classifying `.claude/rules/` paths as rules
     // Equivalent dirs come in via `[paths] extra_rule_dirs`

@@ -1252,9 +1252,7 @@ impl AgentBuilder {
                 .collect();
             let (gitignore_timer, gitignore_span) = build_await_step!("gitignore_compile");
             let gitignore_span = gitignore_span.entered();
-            let git_root = git2::Repository::discover(&self.working_directory)
-                .ok()
-                .and_then(|repo| repo.workdir().map(|p| p.to_path_buf()));
+            let git_root = xai_gix_status::discover::discover_workdir(&self.working_directory);
             let gitignore = crate::prompt::ignore::build_gitignore(git_root.as_deref());
             drop(gitignore_span);
             drop(gitignore_timer);

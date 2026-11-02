@@ -24,6 +24,23 @@ fn redirect_unified_log_for_tests() {
     xai_grok_telemetry::unified_log::redirect_to_temp_for_tests();
 }
 
+/// Run `git <args>` in `dir` with the host config shut out. Panics when git fails.
+pub(crate) fn git(dir: &std::path::Path, args: &[&str]) {
+    ensure_hermetic_git_on_path();
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// Prepend the hermetic git binary (via `GIT_BIN_PATH`) to `PATH`.
 /// `Command::new("git")` in test helpers then resolves to the Bazel-provided static binary instead of system-installed git.
 /// Safe to call multiple times; only the first call mutates `PATH`.

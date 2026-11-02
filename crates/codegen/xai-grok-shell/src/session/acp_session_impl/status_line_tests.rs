@@ -83,15 +83,25 @@ fn only_origin_names_the_repo() {
     use super::remote_url;
 
     let dir = tempfile::tempdir().unwrap();
-    let repo = git2::Repository::init(dir.path()).unwrap();
-    repo.remote("upstream", "https://example.com/parent/widget.git")
-        .unwrap();
-    assert_eq!(remote_url(&repo), None);
+    let git = |args: &[&str]| crate::test_support::git(dir.path(), args);
+    let open = || gix::open(dir.path()).unwrap();
+    git(&["init", "--quiet"]);
+    git(&[
+        "remote",
+        "add",
+        "upstream",
+        "https://example.com/parent/widget.git",
+    ]);
+    assert_eq!(remote_url(&open()), None);
 
-    repo.remote("origin", "https://example.com/fork/widget.git")
-        .unwrap();
+    git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://example.com/fork/widget.git",
+    ]);
     assert_eq!(
-        remote_url(&repo).as_deref(),
+        remote_url(&open()).as_deref(),
         Some("https://example.com/fork/widget.git")
     );
 }

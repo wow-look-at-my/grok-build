@@ -51,7 +51,7 @@ async fn plugin_refresh_reads_reconciled_trust_and_does_not_start_before_it() {
     super::CAPTURE_TRUST_ONLY.store(true, Ordering::SeqCst);
 
     let cwd = tempfile::tempdir().unwrap();
-    git2::Repository::init(cwd.path()).unwrap();
+    gix::init(cwd.path()).unwrap();
     let home = tempfile::tempdir().unwrap();
     let _home = EnvGuard::set("GROK_HOME", home.path());
 
