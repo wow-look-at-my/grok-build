@@ -38,6 +38,8 @@ zstd = { workspace = true }
 # Mock HTTP server for actor / request_task integration tests.
 axum = { workspace = true }
 axum-server = { workspace = true, features = ["tls-rustls"] }
+# gzip fixtures for the response-compression wire tests.
+flate2 = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["registry"] }

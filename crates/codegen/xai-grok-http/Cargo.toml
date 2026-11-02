@@ -19,8 +19,11 @@ xai-grok-version = { workspace = true }
 xai-grok-workspace = { workspace = true }
 
 [dev-dependencies]
+# gzip fixtures plus the local HTTP server the wire tests drive the client against.
+flate2 = { workspace = true }
 rcgen = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+xai-grok-test-support = { workspace = true }
 
 [lints]
 workspace = true
