@@ -1,3 +1,5 @@
+// plan_revise_empty_enter_does_not_approve.rs holds the plan revise empty enter does not approve code.
+
 #[allow(unused_imports)]
 use super::common::*;
 
@@ -47,7 +49,7 @@ async fn plan_revise_empty_enter_does_not_approve() {
         });
     // Preview `s` is a no-op until the line-viewer key path is live. A fixed
     // sleep after first paint raced suite load: Enter on Preview opens comment
-    // mode instead of toasting, so wait until the preview chrome is stable.
+    // mode instead of toasting. Wait until the preview chrome is stable.
     harness
         .wait_until_stable(
             "plan approval preview interactive",

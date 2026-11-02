@@ -72,7 +72,7 @@ fn wait_for_stable_gap_layout(harness: &mut PtyHarness) -> (u16, u16, u16) {
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn drag_enters_content_from_gap_pty() {
     let content = ContentController::start().await.expect("start content");
-    // Copy-on-release (OSC 52) only in flash. Pin it so sibling tests that seed hold/word_select cannot change the behavior if config leaks.
+    // Copy-on-release (the copy-on-release) only in flash.
     seed_ui_config(&content, "keep_text_selection = \"flash\"");
     content.set_response(GAPDEEP_LINE.to_string());
 

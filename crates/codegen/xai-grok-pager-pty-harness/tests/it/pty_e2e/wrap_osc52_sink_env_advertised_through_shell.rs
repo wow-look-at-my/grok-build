@@ -2,9 +2,9 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// The wrapped child must see `GROK_OSC52_SINK=1` even through the `$SHELL -i -c` hop.
-/// An inner `grok` reads that variable to trust OSC 52 over SSH (see `run_wrapped_command`).
-/// The parent env pins the var to `0`, so a pass proves the wrap layer overrode the inherited value.
+/// The wrapped child must see `GROK_OSC52_SINK=1` even through the `$SHELL -i -c` hop. An inner
+/// `grok` reads that variable to trust a later OSC over SSH (see `run_wrapped_command`). The parent
+/// env pins the var to `0`, so a pass proves the wrap layer overrode the inherited value.
 #[test]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]

@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// Editing a queued `!` row from the queue pane keeps it a bash command: the edited command runs when the queue drains and never reaches the model.
+/// Editing a queued `!` row from the queue pane keeps it a bash command. The edited command runs when the queue drains and never reaches the model.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 #[cfg(unix)]
@@ -74,7 +74,7 @@ async fn verify_bashq_claim3_edit_keeps_bash() {
         .wait_for_text("Run shell command", Duration::from_secs(10))
         .expect("bash edit mode entered");
 
-    // The cursor sits at 0, so the edit prepends and comments out the original.
+    // The cursor sits at a set value, so the edit prepends and comments out the original.
     harness
         .inject_keys(b"printf 'CLAIMTHREE_%s_OK\\n' EDITED # ")
         .expect("type the edit");

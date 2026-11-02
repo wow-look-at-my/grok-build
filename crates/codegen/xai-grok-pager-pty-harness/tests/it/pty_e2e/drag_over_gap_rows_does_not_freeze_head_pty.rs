@@ -7,7 +7,7 @@ const GAP_TOP: &str = "GAPROW_ALPHA";
 
 const GAP_BOTTOM: &str = "GAPROW_OMEGA";
 
-/// PTY: a drag whose LAST motion lands on the dead blank row between two paragraphs of one message
+/// PTY: a drag whose LAST motion lands on the dead blank row between paragraphs of one message
 /// must not freeze the head.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]

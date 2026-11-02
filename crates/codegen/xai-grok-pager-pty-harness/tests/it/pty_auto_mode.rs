@@ -1,15 +1,4 @@
 //! PTY e2e: permission Auto mode is distinct on the real pager screen.
-//!
-//! Uses `xai-grok-pager-pty-harness` (`PtyHarness`) and Shift+Tab (CSI Z, compatible with `ptyctl` key injection) to cycle Normal to Plan to Auto.
-//! The mode banner or status line must show Auto as its own mode, distinct from Always-Approve.
-//!
-//! Auth: seeds `HOME/.grok/auth.json` from `GROK_AUTH_JSON` (path) or the
-//! developer's `~/.grok/auth.json` so the pager skips device-login when
-//! credentials exist. Without auth the test records an environmental
-//! failure (login screen) and still asserts the harness API surface.
-//!
-//! Run with:
-//! `cargo test -p xai-grok-pager-pty-harness --test it pty_auto_mode:: -- --ignored --nocapture`
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -79,9 +68,8 @@ fn prepare_sandbox(sandbox: &mut TestSandbox, gate_on: bool) -> Vec<(String, Str
         ("TERM_PROGRAM".into(), "".into()),
         ("TMUX".into(), "".into()),
     ];
-    // `GROK_AUTO_PERMISSION_MODE` is the highest gate layer below requirements; "1" and "0" parse to on and off
-    // (`xai_grok_config::env_bool`) portable-pty merges this over the inherited environment, so a value exported in
-    // the shell can't flip the result.
+    // `GROK_AUTO_PERMISSION_MODE` is the highest gate layer below
+    // requirements.
     env.push((
         "GROK_AUTO_PERMISSION_MODE".into(),
         if gate_on { "1" } else { "0" }.into(),
@@ -96,7 +84,6 @@ fn is_login_screen(screen: &str) -> bool {
 }
 
 /// Whether the caller expects seeded auth (CI, or a deliberate e2e run).
-/// When set, hitting the login screen means auth seeding broke, so the test fails instead of passing vacuously.
 fn require_auth() -> bool {
     std::env::var("GROK_PTY_REQUIRE_AUTH").is_ok_and(|v| v == "1" || v == "true")
 }
@@ -183,9 +170,11 @@ fn pty_shift_tab_cycles_to_auto_mode_banner() {
     let _ = harness.inject_keys(b"q");
 }
 
-/// Gate off (the shipped default): the Shift+Tab ring must skip Auto entirely, so the feature is inert and the classifier never launches.
-/// The ring cycles Normal, Plan, Always-Approve, back to Normal.
-/// The negative companion to the gate-on cycle test; it proves the gate governs the UI ring, not just the engine.
+/// Gate off (the shipped default): the Shift+Tab ring must skip Auto
+/// entirely, so the feature is inert and the classifier never launches. The
+/// ring cycles Normal, Plan, Always-Approve, back to Normal. The negative
+/// companion to the gate-on cycle test; it proves the gate governs the UI
+/// ring, not the engine.
 #[test]
 #[ignore = "spawns real pager PTY; run with cargo test -- --ignored"]
 fn pty_shift_tab_skips_auto_when_gate_off() {
@@ -223,17 +212,13 @@ fn pty_shift_tab_skips_auto_when_gate_off() {
         return;
     }
 
-    // Cycle the full ring (4 presses returns to Normal)
-    // With the gate off the ring is Normal, Plan, Always-Approve, Normal: Auto must never appear
-    // Plan and Always-Approve still must appear, proving the ring otherwise works
+    // Cycle the full ring (presses returns to Normal).
     let mut saw_plan = false;
     let mut saw_always = false;
     let mut saw_auto = false;
     for _ in 0..4 {
         harness.inject_keys(SHIFT_TAB).expect("inject Shift+Tab");
-        // Drain output so the new mode banner renders before we read
-        // `wait_for_text("Switched to mode:")` would hit its fast path and return instantly on the prior press's banner still on screen
-        // Pump for a fixed window instead; the screen tracker keeps only the latest frame, so each read reflects the current mode
+        // Drain output so the new mode.
         harness.update(Duration::from_secs(2));
         let s = harness.screen_contents();
         if is_login_screen(&s) {

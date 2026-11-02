@@ -1,9 +1,4 @@
 //! A requested quit exits within the exit timeout even when teardown hangs.
-//! `GROK_TEST_HOLD_TEARDOWN_SECS` supplies the hang; a real `SessionEnd` hook cannot hold teardown past `SESSION_FLUSH_GRACE`.
-//!
-//! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test it exit_timeout:: -- --ignored
-//! ```
 
 use std::time::Duration;
 
@@ -50,7 +45,7 @@ fn assert_forced_exit(pager: &mut PtyHarness, exit_code: u32) -> Result<()> {
     Ok(())
 }
 
-/// Spawn with a short exit timeout and a long teardown hold, then submit a prompt and let the turn settle so the quit exercises a started session.
+/// Spawn with a short exit timeout and a long teardown hold, then submit a prompt. Let the turn settle so the quit exercises a started session.
 async fn spawn_pager_with_teardown_hold() -> Result<(PtyHarness, tempfile::TempDir)> {
     let content = ContentController::start()
         .await

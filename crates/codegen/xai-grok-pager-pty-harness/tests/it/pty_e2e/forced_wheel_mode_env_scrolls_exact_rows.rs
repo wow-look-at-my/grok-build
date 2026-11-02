@@ -4,20 +4,15 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-// Env-forced scroll settings reach the live scroll config. Those overrides must price a 3-event
-// burst at exactly 3 rows, one row per event. Without GROK_SCROLL_LINES=1, Zed's wheel profile
-// prices the burst at 3 lines per event, 9 rows total.
+// Env-forced scroll settings reach the live scroll config.
 
-/// 120 one-row markers overflow the 50-row PTY, so the early markers sit above the visible top.
 const MARKER_COUNT: usize = 120;
 
-/// One wheel notch worth of reports on an ept=1 brand: 3 distinct events.
 const BURST_EVENTS: usize = 3;
 
-/// Exactly 1 row per event under the forced env (see header math).
 const EXPECTED_ROWS: usize = 3;
 
-/// The `GROK_SCROLL_MODE` and `GROK_SCROLL_LINES` overrides must reach the live config: a 3-event burst scrolls the viewport up by exactly 3 rows.
+/// The `GROK_SCROLL_MODE` and `GROK_SCROLL_LINES` overrides must reach the live config: a 3-event burst scrolls the viewport up by a few rows.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn forced_wheel_mode_env_scrolls_exact_rows() {

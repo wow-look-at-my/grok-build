@@ -52,7 +52,7 @@ async fn campaign_nudges_default_until_dismissed_by_model_pick() {
         .expect("spawn pager")
     };
 
-    // ── Phase 1: a fresh boot shows the campaign model, not the config one. ──
+    // ── one phase: a fresh boot shows the campaign model, not the config one. ──
     {
         let mut h = spawn(&campaign_env);
         h.wait_for_text(CAMPAIGN_MODEL, WELCOME_TIMEOUT)
@@ -70,7 +70,7 @@ async fn campaign_nudges_default_until_dismissed_by_model_pick() {
         h.quit().expect("clean quit");
     }
 
-    // ── Phase 2: a session and an explicit `/model` pick dismiss the campaign. ──
+    // ── a later phase: a session and an explicit `/model` pick dismiss the campaign. ──
     {
         let mut h = spawn(&campaign_env);
         h.wait_for_text(CAMPAIGN_MODEL, WELCOME_TIMEOUT)
@@ -103,7 +103,7 @@ async fn campaign_nudges_default_until_dismissed_by_model_pick() {
         h.quit().expect("clean quit");
     }
 
-    // ── Phase 3: reboot with the SAME campaign env; the config model wins. ──
+    // ── a later phase: reboot with the SAME campaign env; the config model wins. ──
     {
         let mut h = spawn(&campaign_env);
         h.wait_for_text(CONFIG_MODEL, WELCOME_TIMEOUT)

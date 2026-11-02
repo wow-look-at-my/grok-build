@@ -2,7 +2,7 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// A single argv containing whitespace routes through `$SHELL -i -c`, the same hop OSC 52 takes.
+/// A single argv containing whitespace routes through `$SHELL -i -c`, the same hop a later OSC takes.
 const PRINT_APPEARANCE: &str =
     "printf 'grok=%s lc=%s\\n' \"$GROK_APPEARANCE\" \"$LC_GROK_APPEARANCE\"";
 
@@ -14,7 +14,7 @@ fn parse_printed_appearance(raw: &str) -> Option<(String, String)> {
 }
 
 /// End-to-end check that the appearance stamp survives the interactive shell hop. Do not call
-/// `detect_desktop()` here: two live portal probes can disagree.
+/// `detect_desktop()` here: live portal probes can disagree.
 #[test]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]

@@ -2,8 +2,7 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// The fail-closed gate refuses during bootstrap, after the TUI redirects fd 2 to `/dev/null`; its refusal must still reach the real terminal.
-/// A regression that does not restore fd 2 leaves a managed user a blank `exit 1`.
+/// A regression that does not restore a later fd leaves a managed user a blank `exit 1`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn managed_policy_gate_refusal_reaches_real_terminal() {

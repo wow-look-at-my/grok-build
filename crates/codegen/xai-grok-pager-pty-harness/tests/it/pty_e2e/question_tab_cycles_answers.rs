@@ -50,9 +50,9 @@ fn ask_user_question_args() -> String {
     .to_string()
 }
 
-/// Text of the answer row that currently carries the cursor band (the row's unique background).
-///
-/// Reading the styled screen is the only way to observe cursor position from outside the process.
+/// Text of the answer row that carries the cursor band (the row's unique
+/// background). Reading the styled screen is the only way to observe cursor
+/// position from outside the process.
 fn cursor_row(harness: &PtyHarness) -> Option<String> {
     let labels: Vec<&str> = FIRST_ROWS
         .iter()

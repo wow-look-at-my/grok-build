@@ -10,7 +10,7 @@ use super::common::*;
 async fn folder_trust_home_git_repo_subdir_keys_on_subdir() {
     let content = ContentController::start().await.expect("start content");
 
-    // $HOME is a dotfiles-style git repo; the launch dir is a subdir with its own repo-local `.mcp.json`, so the subdir has something to gate
+    // $HOME is a dotfiles-style git repo. The launch dir is a subdir with its own repo-local `.mcp.json`. The subdir has something to gate
     git2::Repository::init(content.home()).expect("git init $HOME");
     let proj = content.home().join("proj");
     std::fs::create_dir_all(&proj).expect("create proj subdir");
@@ -30,8 +30,7 @@ async fn folder_trust_home_git_repo_subdir_keys_on_subdir() {
     )
     .expect("spawn pager");
 
-    // Check the trust store directly, not via `folder_is_trusted`: the assertions below query both the
-    // subdir and `$HOME` against the same store file.
+    // Check the trust store directly, not via `folder_is_trusted`.
     let store_path = content.home().join(".grok").join(TRUST_FILE_NAME);
 
     // The question renders (keyed on the subdir), and the store is empty first.

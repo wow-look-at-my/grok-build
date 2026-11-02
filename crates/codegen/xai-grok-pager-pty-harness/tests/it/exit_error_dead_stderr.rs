@@ -1,12 +1,4 @@
-//! Error reports on the exit path must exit 1 when fd 2 is dead, not panic
-//! (SIGABRT under `panic = "abort"`, plus a crash report on the next launch).
-//!
-//! Two deterministic, offline errors pin the tests to the writes in question:
-//! `--memory-flush` without a prompt or session is a pre-TUI `anyhow::bail!` that lands in
-//! `main()`'s generic `Error:` arm; `-p` with no credentials fails auth inside headless mode,
-//! whose plain-format emitter reports it to stderr before `main()` gets the same error. The
-//! headless run also carries `--include-partial-messages`, whose ignored-flag warning is
-//! headless mode's other pre-auth stderr write, through the same `eprint_line` helper.
+//! Error reports on the exit path must exit 1 when a later fd is dead, not panic.
 
 use std::process::{Command, Stdio};
 
@@ -33,9 +25,9 @@ fn dead_stderr() -> std::io::PipeWriter {
     writer
 }
 
-/// Run once with a live stderr to confirm the invocation exits 1 and writes a line starting with
-/// each of `expected_lines`, then again with a dead stderr and assert it still exits 1 instead of
-/// dying by signal.
+/// Run once with a live stderr to confirm the invocation exits 1. The invocation writes a line
+/// starting with each of `expected_lines`, then again with a dead stderr. The invocation assert
+/// it still exits 1 instead of dying by signal.
 fn assert_exit_error_survives_dead_stderr(args: &[&str], expected_lines: &[&str]) {
     let home = tempfile::tempdir().unwrap();
 

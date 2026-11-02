@@ -3,12 +3,9 @@
 use super::common::*;
 
 /// The suggestion the mock streams for every request.
-/// The mock's fixed mode answers the prompt turn and the turn-end `x.ai/suggestPrompt` call alike, so the ghost text mirrors this string.
-/// It is multi-word so the shell-side sanitizer (`sanitize_suggestion`) accepts it.
 const SUGGESTION: &str = "review the staged changes";
 
-/// Bottom-bar hint that only renders while the prompt-suggestion ghost is visible (the `ActivePane::Prompt` arm of `build_hints`).
-/// The ghost text is the same string as the agent's reply, so a plain-text screen dump cannot tell them apart; the hint proves the ghost is visible.
+/// Bottom-bar hint that only renders while the prompt-suggestion ghost is visible.
 const ACCEPT_HINT: &str = "accept suggestion";
 
 /// After a turn completes, the predicted next prompt renders as ghost text in the empty prompt with a bottom-bar "accept suggestion" hint.
@@ -67,8 +64,7 @@ async fn prompt_suggestion_ghost_tab_accepts() {
         .wait_for_text(ACCEPT_HINT, Duration::from_secs(5))
         .expect("ghost returns once the input is empty again");
 
-    // Tab accepts: the hint goes away and the suggestion is now real, editable prompt text
-    // Typing appends after it; the echo proves the cursor sits at the end of the accepted text
+    // Tab accepts: the hint goes away and the suggestion is now real, editable prompt text Typing appends after it.
     harness.inject_keys(b"\t").expect("tab accepts suggestion");
     wait_for_text_gone(&mut harness, ACCEPT_HINT, Duration::from_secs(5))
         .expect("hint gone after accept");

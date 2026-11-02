@@ -18,7 +18,6 @@ fn tall_first_response() -> String {
     s
 }
 
-/// Welcome, then a tall turn 1, then submit turn 2 while holding turn 2 open.
 async fn drive_to_second_send(content: &ContentController) -> (PtyHarness, AgentTurnExpectation) {
     let mut first_turn =
         content.expect_agent_turn("page-flip tall first turn", tall_first_response());
@@ -38,7 +37,7 @@ async fn drive_to_second_send(content: &ContentController) -> (PtyHarness, Agent
         .inject_keys(format!("{PROMPT}\r").as_bytes())
         .expect("submit first prompt");
     // Default page_flip_on_send parks at the prompt (head visible, tail off
-    // screen). Follow can pin the tail instead. Either proves turn 1 rendered.
+    // screen). Follow can pin the tail instead.
     harness
         .wait_until(
             "turn 1 head or tail on screen",

@@ -12,8 +12,6 @@ async fn cancel_then_resend_prompt_appears_once() {
     const NEW_PROMPT: &str = "brand new question instead";
 
     let content = ContentController::start().await.expect("start content");
-    // Turn 1 is OLD (the 30s chunk delay keeps it from streaming any output); turn 2 is NEW's reply
-    // mut: wait_received before Ctrl+C so the resend cannot steal the GONE script.
     let mut rewound_turn =
         content.expect_agent_turn("rewound turn before first token", "GONE never streams.");
     let _resent_turn =

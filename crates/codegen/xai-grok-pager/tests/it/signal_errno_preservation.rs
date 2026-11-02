@@ -1,5 +1,7 @@
 #![cfg(any(target_os = "linux", target_os = "macos"))]
 
+// signal_errno_preservation.rs holds the signal errno preservation code.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static SIGNAL_HANDLED: AtomicBool = AtomicBool::new(false);

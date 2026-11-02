@@ -2,8 +2,7 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// A terminal that pushed kitty flags but never answers DA1 must not hold the quit. The marker deadline is what makes this
-/// load-bearing: an unbounded fence would still reach exit 0 through the 20 s watchdog.
+/// A terminal that pushed kitty flags but never answers DA1 must not hold the quit.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 #[cfg(unix)]
@@ -15,7 +14,6 @@ async fn quit_fence_bounded_when_terminal_silent() {
     let query_at = wait_for_raw_bytes_after(&mut harness, pre, DA1_QUERY, Duration::from_secs(10))
         .expect("pager did not send the DA1 fence query on quit");
 
-    // Nothing is injected: 1 s fence timeout, then 2 s of quiet for `cat`
     let ended = wait_for_raw_bytes_after(
         &mut harness,
         query_at,

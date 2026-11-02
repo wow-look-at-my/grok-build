@@ -3,7 +3,6 @@
 use super::common::*;
 
 /// Content of the nested file: `cat`ing it through the completed, quoted command must print this into the scrollback.
-/// That proves the inserted quoting parses as a valid command in the real shell.
 const INNER_SENTINEL: &str = "INNER-NOTE-SENTINEL-4173";
 
 /// There is NO env flag for this: Tab completion in bash mode is always on, and this test is the
@@ -38,7 +37,7 @@ fn seed_cwd(cwd: &Path) {
         .expect("seed inner note");
 }
 
-/// The fetch a Tab starts and the refreshes after an accept or a fill are async; give a landed response slack before the next Tab consumes it.
+/// The fetch a Tab starts and the refreshes after an accept or a fill are async. Give a landed response slack before the next Tab consumes it.
 async fn settle() {
     tokio::time::sleep(Duration::from_millis(1500)).await;
 }
@@ -84,7 +83,7 @@ async fn bash_mode_file_completion_shell_like() {
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("session ready");
 
-    // ── Leg 1: Tab fills the common prefix, second Tab opens the list ───
+    // ── one leg: Tab fills the common prefix, second Tab opens the list ───
     harness
         .inject_keys(b"!cat al")
         .expect("type bash prefix with shared-prefix candidates");
@@ -111,12 +110,13 @@ async fn bash_mode_file_completion_shell_like() {
     harness.inject_keys(b"\x1b").expect("Esc closes dropdown");
     harness.inject_keys(b"\x15").expect("Ctrl+U clears draft");
 
-    // ── Leg 2: quoted dropdown, directory accept, drill-down accept ─────
+    // ── a later leg: quoted dropdown, directory accept, drill-down accept ─────
     harness
         .inject_keys(b"cat \"no")
         .expect("type quoted prefix");
     harness.inject_keys(b"\t").expect("Tab opens dropdown");
-    // The candidates differ in case, so there is no shared prefix to fill: the dropdown just opens
+    // The candidates differ in case, so there is no shared prefix to fill:
+    // the dropdown opens
     harness
         .wait_for_text("Notes Archive/", Duration::from_secs(10))
         .expect("dropdown lists the case-insensitive directory match");

@@ -1,23 +1,5 @@
-//! E2E: the settings modal's locked coding-data row, driven off the seeded auth entry through the full pipeline.
-//! The pipeline runs auth.json, shell `GrokAuth`, auth meta, `AppView::coding_data_sharing_lock()`, `PagerLocalSnapshot`, then the render:
-//!
-//! - ZDR team (`team_blocked_reasons` = `BLOCKED_REASON_NO_LOGS`): the value column shows exactly `ZDR` (no Opt in / Opt out) and no `›` chevron.
-//!   Expanding the row shows only "Your team has Zero Data Retention."
-//! - Team member the server says cannot administer the team (`can_administer_team` = `false`): the value shows `Opt out · Admin Managed` and no chevron.
-//!   Expanding shows only "Managed by your team admin."
-//! - Team member with an unknown capability (`canAdministerTeam: null`): the row stays editable (`Opt out` with the chevron).
-//!   An absent key reads the same `None` (unit-tested), so only `null` runs here.
-//!
-//! All three accounts suppress the welcome privacy banner even with `GROK_PRIVACY_NOTICE_ROLLOUT=1`.
-//! That is asserted on the authenticated welcome screen before opening settings.
-//! Team name and role are seeded on every account so the lock cannot be keying on them.
-//! Row/input details are unit-tested in `xai-grok-pager` (`views/settings_modal/tests.rs`, `locked_coding_*`).
-//! This suite covers the auth-to-render pipeline.
-//!
-//! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test it settings_locked_row_e2e:: \
-//!   -- --ignored --nocapture
-//! ```
+//! E2E: the settings modal's locked coding-data row, driven off the seeded
+//! auth entry through the full pipeline.
 
 use std::path::Path;
 use std::time::Duration;
@@ -38,8 +20,6 @@ const CHEVRON: &str = "\u{203A}"; // ›
 const ZDR_REASON: &str = "Your team has Zero Data Retention.";
 const TEAM_REASON: &str = "Managed by your team admin.";
 /// Head of the row's description in `settings/defs.rs`.
-/// It is kept short so it can't span one of the modal's word wraps.
-/// `contains_text` joins rows with `\n`, so a match on wrapped copy would silently never fire.
 const DESCRIPTION_PREFIX: &str = "Opt-in to provide SpaceXAI";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -62,9 +42,9 @@ async fn team_member_with_unknown_capability_sees_no_banner_and_editable_row() {
         .expect("unknown-capability e2e");
 }
 
-/// Rollout on so a plain opted-out user would see the banner. Fake API key removed so team OAuth is active.
-/// ZDR access must be enabled or the blocked welcome never reaches settings. Lock and suppression key off `is_zdr`.
-/// The seeded team principal would otherwise start a managed-config fetch the mock does not serve.
+/// Rollout on so a plain opted-out user would see the banner. Fake API key
+/// removed so team OAuth is active. ZDR access must be enabled or the blocked
+/// welcome never reaches settings. Lock and suppression key off `is_zdr`.
 fn locked_row_env_ops() -> [EnvOp<'static>; 4] {
     [
         EnvOp::set("GROK_PRIVACY_NOTICE_ROLLOUT", "1"),

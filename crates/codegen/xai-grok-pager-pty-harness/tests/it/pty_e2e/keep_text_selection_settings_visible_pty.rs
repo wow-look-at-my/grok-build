@@ -1,3 +1,5 @@
+// keep_text_selection_settings_visible_pty.rs holds the keep text selection settings visible pty code.
+
 #[allow(unused_imports)]
 use super::common::*;
 

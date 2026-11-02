@@ -34,8 +34,7 @@ async fn esc_esc_clears_idle_prompt_into_the_stash() {
         .wait_for_text(draft, Duration::from_secs(10))
         .expect("draft renders in the composer");
 
-    // Wait for the confirm hint between the presses: it proves the pending clear is set
-    // A single `ESC ESC` byte pair collapses to one `Esc` in crossterm
+    // Wait for the confirm hint between the presses.
     harness.inject_keys(keys::ESC).expect("first esc");
     harness
         .wait_for_text("press again to clear", Duration::from_secs(15))
@@ -60,7 +59,7 @@ async fn esc_esc_clears_idle_prompt_into_the_stash() {
         .wait_for_text("Stashed", Duration::from_secs(10))
         .expect("the clear must stash the draft");
 
-    // The stash is not a history source: Up on the now-empty prompt opens the history panel, and the unsent draft must not be in it
+    // The stash is not a history source: Up on the now-empty prompt opens the history panel. The unsent draft must not be in it
     harness.inject_keys(keys::UP).expect("open history panel");
     assert!(
         harness

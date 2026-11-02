@@ -6,10 +6,8 @@ use super::scroll::*;
 
 use std::time::Duration;
 
-// Scroll-debug HUD e2e (`GROK_SCROLL_DEBUG`). The HUD is a release-compiled overlay gated at
-// runtime, so the stock harness binary must show it with the env var set and nothing without it.
+// Scroll-debug HUD e2e (`GROK_SCROLL_DEBUG`).
 
-/// 120 one-row markers overflow the 50-row PTY, so the early markers sit above the visible screen.
 const MARKER_COUNT: usize = 120;
 
 /// **Env-on e2e.** `GROK_SCROLL_DEBUG=1` must paint the HUD (panel title and config echo) and track a finalized trackpad flood.

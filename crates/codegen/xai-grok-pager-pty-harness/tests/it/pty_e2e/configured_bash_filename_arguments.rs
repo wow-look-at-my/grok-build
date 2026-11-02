@@ -1,3 +1,5 @@
+// configured_bash_filename_arguments.rs holds the configured bash filename arguments code.
+
 use super::common::*;
 use std::collections::BTreeMap;
 

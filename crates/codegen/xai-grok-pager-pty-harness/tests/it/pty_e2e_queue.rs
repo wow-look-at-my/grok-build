@@ -1,7 +1,4 @@
 //! Queue, cancellation, send-now, interjection, and rewind PTY coverage.
-//!
-//! This is the narrow retry unit for the suite's historically timing-sensitive cases.
-//! All cases are ignored for ordinary Cargo runs; Bazel opts in and caps the family at four concurrent libtest workers.
 
 use crate::common;
 

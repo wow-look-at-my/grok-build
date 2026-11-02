@@ -4,21 +4,18 @@ use super::common::*;
 #[allow(unused_imports)]
 use super::scroll::*;
 
-// Infra check: timed wheel bursts, viewport markers, frame capture. "The view scrolled up" is then
-// a strict index decrease rather than a fragile absolute-row check. Only the byte-deterministic
-// frame count is asserted; no wall-clock.
+// Infra check: timed wheel bursts, viewport markers, frame capture.
 
-/// Marker count: 120 one-row lines far exceed the 50-row PTY, so early markers sit off-screen-top once the finished stream pins the view to the bottom.
 const MARKER_COUNT: usize = 120;
 
-/// 30 spaced single reports at a nominal 6ms: a trackpad-classified flood under the harness terminal.
 const BURST_EVENTS: usize = 30;
 
 const BURST_INTERVAL: Duration = Duration::from_millis(6);
 
-/// **Wheel-burst scroll infra check.**
-/// A closely spaced wheel-up burst over a marker transcript must scroll previously off-screen-top markers into view without a panic.
-/// It must produce at least one repaint frame and at most one frame per wheel event (no frame amplification).
+/// A closely spaced wheel-up burst over a marker transcript must scroll
+/// off-screen-top markers into view without a panic. It must produce at least
+/// one repaint frame and at most one frame per wheel event (no frame
+/// amplification).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn wheel_burst_scrolls_viewport_without_frame_amplification() {
@@ -62,8 +59,7 @@ async fn wheel_burst_scrolls_viewport_without_frame_amplification() {
         harness.screen_contents()
     );
 
-    // Amplification bound on the live frame capture: the burst repainted at least once, and never more than once per wheel event
-    // (Durations are not asserted: the no-drain driver means chunks were parsed at drain time, and wall-clock is load-sensitive anyway.)
+    // Amplification bound on the live frame capture: the burst repainted at least once, and never more than once per wheel event.
     let frames = harness.frame_count();
     assert!(
         frames >= 1,

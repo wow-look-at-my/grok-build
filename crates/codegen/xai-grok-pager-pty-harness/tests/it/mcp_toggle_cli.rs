@@ -1,5 +1,4 @@
-//! CLI-seam tests for `grok mcp enable`/`disable`/`add`/`list` against the real pager binary: no-op
-//! toggles leave config.toml alone, policy refusals fire before any write, list reports verdicts.
+//! CLI-seam tests for `grok mcp enable`/`disable`/`add`/`list` against the real pager binary: no-op toggles leave config.toml alone.
 
 use std::process::{Command, Stdio};
 
@@ -73,7 +72,7 @@ fn run_mcp(env: &ToggleEnv, args: &[&str]) -> std::process::Output {
     command.output().expect("run isolated pager binary")
 }
 
-/// Exit 1, the org-policy refusal on stderr naming the policy file by name only, no success
+/// Exit 1, the org-policy refusal on stderr naming the policy file by name only. No success
 /// or write report on stdout, and a byte-identical `path`.
 fn assert_refused_without_write(
     env: &ToggleEnv,
@@ -176,7 +175,7 @@ fn noop_disable_reports_already_disabled_without_config_write() {
 }
 
 /// The refusal must win over both a real enable (disabled server) and the no-op path (already
-/// enabled), so it fires before the no-op check and before any write.
+/// enabled). It fires before the no-op check and before any write.
 #[test]
 #[ignore = "spawns the real pager binary; CI/Bazel provides PAGER_BINARY"]
 fn blocked_enable_refuses_without_config_write() {
@@ -223,8 +222,8 @@ options = [{{ label = "US", value = "us1" }}]
     );
 }
 
-/// A denied server shipped by a trusted project's `[plugins].paths` plugin is known to the CLI,
-/// so the verdict map must be built over the same registry or the gate passes and prints success.
+/// A denied server shipped by a trusted project's `[plugins].paths` plugin is known to the CLI.
+/// The verdict map must be built over the same registry or the gate passes and prints success.
 #[test]
 #[ignore = "spawns the real pager binary; CI/Bazel provides PAGER_BINARY"]
 fn enable_refuses_denied_server_from_project_path_plugin() {
@@ -254,7 +253,7 @@ fn enable_refuses_denied_server_from_project_path_plugin() {
     assert_refused_without_write(&env, &output, &env.config, &before);
 }
 
-/// Release-stamped build, untrusted clone: folder trust hides the repo's project definitions, but
+/// Release-stamped build, untrusted clone. Folder trust hides the repo's project definitions, but
 /// the enable gate still judges them for both disable encodings, sticky `enabled = false` included.
 #[test]
 #[ignore = "spawns the real pager binary; CI/Bazel provides PAGER_BINARY"]
@@ -381,7 +380,7 @@ fn list_reports_policy_block_in_text_and_json() {
     );
 }
 
-/// `grok mcp add` gates on policy before persisting: a URL deny refuses a user-scope add and the
+/// `grok mcp add` gates on policy before persisting: a URL deny refuses a user-scope add. The
 /// project-MCP pin refuses a fresh `--scope project` add, with no config file written either way.
 #[test]
 #[ignore = "spawns the real pager binary; CI/Bazel provides PAGER_BINARY"]
