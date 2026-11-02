@@ -159,21 +159,6 @@ pub struct EndpointsConfig {
     /// Env: `GROK_TRACE_UPLOAD_URL`. Where trace uploads go.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_url: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_BUCKET`. Direct bucket (`gs://` or `s3://`), bypasses proxy.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_bucket: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_REGION`. AWS region (S3 only).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_region: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_CREDENTIALS_FILE`. Path to GCS SA key or AWS credentials file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_credentials_file: Option<String>,
-    /// Inline credentials (JSON/INI). Takes precedence over `credentials_file`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_credentials: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_ENDPOINT_URL`. Custom S3-compatible endpoint.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_endpoint_url: Option<String>,
     /// Env: `GROK_MANAGED_CONFIG_URL`. Override the managed config endpoint.
     /// Defaults to `{proxy_url()}/deployment/config`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -220,9 +205,51 @@ pub struct EndpointsConfig {
     /// Read by `load_management_api_key_sync()`. Declared for `serde_ignored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub management_api_key: Option<String>,
-    /// Read by `load_gcs_service_account_key_sync()`. Declared for `serde_ignored`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gcs_service_account_key: Option<String>,
+}
+
+/// `[endpoints]` keys of the removed direct S3 and direct GCS upload modes.
+/// A config that names one fails to load. Trace uploads go through the proxy only.
+pub const REMOVED_DIRECT_UPLOAD_KEYS: &[&str] = &[
+    "trace_upload_bucket",
+    "trace_upload_region",
+    "trace_upload_credentials_file",
+    "trace_upload_credentials",
+    "trace_upload_endpoint_url",
+    "gcs_service_account_key",
+];
+
+/// Env vars of the removed direct S3 and direct GCS upload modes.
+pub const REMOVED_DIRECT_UPLOAD_ENV_VARS: &[&str] = &[
+    "GROK_TRACE_UPLOAD_BUCKET",
+    "GROK_TRACE_UPLOAD_REGION",
+    "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
+    "GROK_TRACE_UPLOAD_ENDPOINT_URL",
+    "GROK_TELEMETRY_GCS_BUCKET",
+];
+
+/// The message for a setting of a removed upload mode.
+pub fn removed_direct_upload_message(setting: &str) -> String {
+    format!(
+        "`{setting}` selects a direct S3 or direct GCS trace upload, and those upload modes \
+         were removed. Trace uploads go through the proxy only. Remove `{setting}`."
+    )
+}
+
+/// The first removed direct-upload env var that is set, as an error message.
+pub fn removed_direct_upload_env_error() -> Option<String> {
+    REMOVED_DIRECT_UPLOAD_ENV_VARS
+        .iter()
+        .find(|name| std::env::var_os(name).is_some())
+        .map(|name| removed_direct_upload_message(name))
+}
+
+/// Why an `[endpoints]` table did not load.
+#[derive(Debug, thiserror::Error)]
+pub enum EndpointsConfigError {
+    #[error(transparent)]
+    Alias(#[from] xai_tool_types::AliasConflict),
+    #[error("{}", removed_direct_upload_message(&format!("endpoints.{}", .0)))]
+    RemovedUploadMode(&'static str),
 }
 impl EndpointsConfig {
     /// The keys [`models_list_url`](Self::models_list_url) is read under.
@@ -249,11 +276,13 @@ struct EndpointsConfigWire {
     models_endpoint: Option<String>,
     feedback_base_url: Option<String>,
     trace_upload_url: Option<String>,
-    trace_upload_bucket: Option<String>,
-    trace_upload_region: Option<String>,
-    trace_upload_credentials_file: Option<String>,
-    trace_upload_credentials: Option<String>,
-    trace_upload_endpoint_url: Option<String>,
+    // Removed direct-upload keys: read only to refuse them.
+    trace_upload_bucket: Option<serde::de::IgnoredAny>,
+    trace_upload_region: Option<serde::de::IgnoredAny>,
+    trace_upload_credentials_file: Option<serde::de::IgnoredAny>,
+    trace_upload_credentials: Option<serde::de::IgnoredAny>,
+    trace_upload_endpoint_url: Option<serde::de::IgnoredAny>,
+    gcs_service_account_key: Option<serde::de::IgnoredAny>,
     managed_config_url: Option<String>,
     otel_exporter_otlp_endpoint: Option<String>,
     otel_exporter_otlp_traces_endpoint: Option<String>,
@@ -264,13 +293,27 @@ struct EndpointsConfigWire {
     otel_traces_export_interval: Option<u64>,
     otel_exporter_otlp_timeout: Option<u64>,
     management_api_key: Option<String>,
-    gcs_service_account_key: Option<String>,
 }
 
 impl TryFrom<EndpointsConfigWire> for EndpointsConfig {
-    type Error = xai_tool_types::AliasConflict;
+    type Error = EndpointsConfigError;
 
     fn try_from(wire: EndpointsConfigWire) -> Result<Self, Self::Error> {
+        let removed = [
+            wire.trace_upload_bucket.is_some(),
+            wire.trace_upload_region.is_some(),
+            wire.trace_upload_credentials_file.is_some(),
+            wire.trace_upload_credentials.is_some(),
+            wire.trace_upload_endpoint_url.is_some(),
+            wire.gcs_service_account_key.is_some(),
+        ];
+        if let Some((key, _)) = REMOVED_DIRECT_UPLOAD_KEYS
+            .iter()
+            .zip(removed)
+            .find(|(_, set)| *set)
+        {
+            return Err(EndpointsConfigError::RemovedUploadMode(key));
+        }
         Ok(Self {
             cli_chat_proxy_base_url: wire.cli_chat_proxy_base_url,
             xai_api_base_url: wire.xai_api_base_url,
@@ -281,11 +324,6 @@ impl TryFrom<EndpointsConfigWire> for EndpointsConfig {
                 .fold(vec![wire.models_list_url, wire.models_endpoint])?,
             feedback_base_url: wire.feedback_base_url,
             trace_upload_url: wire.trace_upload_url,
-            trace_upload_bucket: wire.trace_upload_bucket,
-            trace_upload_region: wire.trace_upload_region,
-            trace_upload_credentials_file: wire.trace_upload_credentials_file,
-            trace_upload_credentials: wire.trace_upload_credentials,
-            trace_upload_endpoint_url: wire.trace_upload_endpoint_url,
             managed_config_url: wire.managed_config_url,
             otel_exporter_otlp_endpoint: wire.otel_exporter_otlp_endpoint,
             otel_exporter_otlp_traces_endpoint: wire.otel_exporter_otlp_traces_endpoint,
@@ -297,7 +335,6 @@ impl TryFrom<EndpointsConfigWire> for EndpointsConfig {
             otel_traces_export_interval: wire.otel_traces_export_interval,
             otel_exporter_otlp_timeout: wire.otel_exporter_otlp_timeout,
             management_api_key: wire.management_api_key,
-            gcs_service_account_key: wire.gcs_service_account_key,
         })
     }
 }
@@ -391,11 +428,6 @@ mod endpoints_wire_alias_tests {
         cfg.models_list_url = Some("https://list.test".to_owned());
         cfg.feedback_base_url = Some("https://feedback.test".to_owned());
         cfg.trace_upload_url = Some("https://upload.test".to_owned());
-        cfg.trace_upload_bucket = Some("bucket".to_owned());
-        cfg.trace_upload_region = Some("region".to_owned());
-        cfg.trace_upload_credentials_file = Some("/dev/null".to_owned());
-        cfg.trace_upload_credentials = Some("{\"type\":\"service_account\"}".to_owned());
-        cfg.trace_upload_endpoint_url = Some("https://s3.test".to_owned());
         cfg.managed_config_url = Some("https://managed.test".to_owned());
         cfg.otel_exporter_otlp_endpoint = Some("https://otlp.test".to_owned());
         cfg.otel_exporter_otlp_traces_endpoint = Some("https://traces.test".to_owned());
@@ -406,12 +438,11 @@ mod endpoints_wire_alias_tests {
         cfg.otel_traces_export_interval = Some(1_234);
         cfg.otel_exporter_otlp_timeout = Some(5_678);
         cfg.management_api_key = Some("mgmt".to_owned());
-        cfg.gcs_service_account_key = Some("gcs".to_owned());
 
         let written = serde_json::to_value(&cfg).unwrap();
         let keys = written.as_object().expect("a table").len();
         assert!(
-            keys >= 24,
+            keys >= 18,
             "the fixture must exercise every field the shadow reads, got {keys}: {written}"
         );
         let read_back: EndpointsConfig =
@@ -421,6 +452,19 @@ mod endpoints_wire_alias_tests {
             written,
             "a key the shadow does not read comes back as its default"
         );
+    }
+
+    #[test]
+    fn a_removed_direct_upload_key_fails_the_load_and_says_it_was_removed() {
+        for key in super::REMOVED_DIRECT_UPLOAD_KEYS {
+            let err = parse(&format!("\"{key}\": \"gs://bucket\""))
+                .expect_err("a removed upload key must not load");
+            let message = err.to_string();
+            assert!(
+                message.contains(&format!("endpoints.{key}")) && message.contains("removed"),
+                "{key}: {message}"
+            );
+        }
     }
 }
 
@@ -581,103 +625,18 @@ impl EndpointsConfig {
         self.otel_exporter_otlp_timeout
             .map(std::time::Duration::from_millis)
     }
-    /// Resolve trace upload credentials: inline > file > `None` (ambient).
-    pub(crate) fn resolve_trace_credentials(&self) -> Option<String> {
-        if let Some(ref inline) = self.trace_upload_credentials {
-            let trimmed = inline.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_owned());
-            }
-        }
-        self.trace_upload_credentials_file
-            .as_deref()
-            .and_then(|path| {
-                std::fs::read_to_string(path)
-                    .inspect_err(|e| {
-                        tracing::warn!(
-                            path = %path,
-                            error = %e,
-                            "Failed to read trace upload credentials file"
-                        );
-                    })
-                    .ok()
-            })
-    }
-    /// Resolve direct-to-bucket upload method from `trace_upload_bucket`.
-    /// Returns `None` if no bucket is configured or scheme is unrecognized.
-    pub fn resolve_direct_upload_method(
-        &self,
-    ) -> Option<crate::session::repo_changes::UploadMethod> {
-        let bucket_url = self.trace_upload_bucket.as_deref()?.trim();
-        if bucket_url.is_empty() {
-            return None;
-        }
-        if let Some(bucket_name) = bucket_url
-            .strip_prefix("s3://")
-            .map(|s| s.trim_end_matches('/'))
-        {
-            let region = self
-                .trace_upload_region
-                .clone()
-                .unwrap_or_else(|| "us-east-1".to_owned());
-            return Some(crate::session::repo_changes::UploadMethod::S3 {
-                bucket: bucket_name.to_owned(),
-                region,
-                credentials_file: None,
-                credentials_content: self.resolve_trace_credentials(),
-                endpoint_url: self.trace_upload_endpoint_url.clone(),
-            });
-        }
-        if bucket_url.starts_with("gs://") {
-            return Some(crate::session::repo_changes::UploadMethod::Direct {
-                service_account_key: self.resolve_trace_credentials(),
-            });
-        }
-        tracing::warn!(
-            bucket = %bucket_url,
-            "trace_upload_bucket has unrecognized scheme (expected gs:// or s3://), ignoring"
-        );
-        None
-    }
-    pub fn has_noninteractive_upload_auth(&self) -> bool {
-        self.resolve_direct_upload_method().is_some()
-    }
-    /// Tries the direct bucket, then the proxy (if `auth_token`), then ambient GCS, else `None`.
+    /// The proxy upload method for `auth_token`. Without a token there is no upload method.
     pub fn resolve_upload_method(
         &self,
         auth_token: Option<String>,
     ) -> Option<crate::session::repo_changes::UploadMethod> {
-        if let Some(method) = self.resolve_direct_upload_method() {
-            return Some(method);
-        }
-        if let Some(user_token) = auth_token {
-            return Some(crate::session::repo_changes::UploadMethod::Proxy {
+        auth_token.map(
+            |user_token| crate::session::repo_changes::UploadMethod::Proxy {
                 proxy_base_url: self.resolve_trace_upload_url(),
                 user_token,
                 alpha_test_key: self.alpha_test_key.clone(),
-            });
-        }
-        let service_account_key = crate::util::config::load_gcs_service_account_key_sync();
-        if service_account_key.is_some() {
-            return Some(crate::session::repo_changes::UploadMethod::Direct {
-                service_account_key,
-            });
-        }
-        None
-    }
-    /// Resolve trace bucket URL: env > config > compiled-in default.
-    /// `None` disables direct GCS trace uploads.
-    pub fn resolve_trace_bucket_url(&self) -> Option<Resolved<String>> {
-        resolve_string_flag(
-            None,
-            "GROK_TELEMETRY_GCS_BUCKET",
-            self.trace_upload_bucket.as_deref(),
-            None,
+            },
         )
-        .or_else(|| {
-            crate::upload::gcs::SESSION_TRACES_BUCKET
-                .map(|b| Resolved::new(format!("gs://{b}"), ConfigSource::Default))
-        })
     }
     /// `models_list_url` > `{models_base_url}/models` > `{proxy_base_url}/models`.
     pub(crate) fn resolve_models_list_url(&self) -> String {
@@ -705,11 +664,6 @@ impl Default for EndpointsConfig {
             models_list_url: env_string("GROK_MODELS_LIST_URL"),
             feedback_base_url: env_string("GROK_FEEDBACK_BASE_URL"),
             trace_upload_url: env_string("GROK_TRACE_UPLOAD_URL"),
-            trace_upload_bucket: env_string("GROK_TRACE_UPLOAD_BUCKET"),
-            trace_upload_region: env_string("GROK_TRACE_UPLOAD_REGION"),
-            trace_upload_credentials_file: env_string("GROK_TRACE_UPLOAD_CREDENTIALS_FILE"),
-            trace_upload_credentials: None,
-            trace_upload_endpoint_url: env_string("GROK_TRACE_UPLOAD_ENDPOINT_URL"),
             managed_config_url: env_string("GROK_MANAGED_CONFIG_URL"),
             otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
             otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
@@ -724,7 +678,6 @@ impl Default for EndpointsConfig {
             otel_exporter_otlp_timeout: env_string("OTEL_EXPORTER_OTLP_TIMEOUT")
                 .and_then(|s| s.parse().ok()),
             management_api_key: None,
-            gcs_service_account_key: None,
         }
     }
 }
@@ -2145,6 +2098,9 @@ impl Config {
         Ok((config, unrecognized_keys))
     }
     pub fn new_from_toml_cfg(raw_config: &toml::Value) -> Result<Self, String> {
+        if let Some(removed) = removed_direct_upload_env_error() {
+            return Err(removed);
+        }
         let raw_config = &Self::expand_auth_alias(raw_config);
         let super::config_model_override_parse::ParsedModelOverrides {
             models: config_models,
@@ -5647,7 +5603,7 @@ pub(crate) struct ConfiguredPricing {
     pub(crate) catalog_url: String,
 }
 
-/// Read both halves off ONE config load. A model call resolves this.
+/// Read both halves off ONE config load. A model call resolves this per
 /// response, and `ConfigLayers::load` reads the config files each time. So a
 /// second load here doubles that cost for every message the session sends.
 pub(crate) fn resolve_configured_pricing(model_id: &str) -> ConfiguredPricing {

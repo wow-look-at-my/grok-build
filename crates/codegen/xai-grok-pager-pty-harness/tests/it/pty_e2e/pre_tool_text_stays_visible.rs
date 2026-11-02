@@ -32,7 +32,7 @@ async fn pre_tool_text_survives_turn_and_resume() {
         "run_terminal_command",
         args,
     );
-    let mut second = content.expect_agent_turn_blocked("text after the tool", POST_MARK);
+    let second = content.expect_agent_turn_blocked("text after the tool", POST_MARK);
 
     let project = tempfile::tempdir().expect("create project dir");
     std::fs::create_dir_all(project.path().join(".git")).expect("create .git");

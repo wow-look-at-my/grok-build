@@ -3235,34 +3235,21 @@ impl MvpAgent {
         {
             self.refresh_remote_settings(&auth).await;
         }
-        let (direct_method, endpoints) = {
+        let endpoints = {
             let cfg = self.cfg.borrow();
             if !cfg.is_trace_upload_enabled() {
                 return (None, TraceUploadReason::FeatureOff);
             }
-            (cfg.endpoints.resolve_direct_upload_method(), cfg.endpoints.clone())
+            cfg.endpoints.clone()
         };
-        let service_account_key = crate::util::config::load_gcs_service_account_key_sync();
-        let method = if let Some(method) = direct_method {
-            Some(method)
-        } else {
-            let auth_token = self
-                .auth_manager
-                .auth()
-                .await
-                .ok()
-                .filter(|auth| auth.is_xai_auth())
-                .map(|auth| auth.key);
-            if auth_token.is_some() {
-                endpoints.resolve_upload_method(auth_token)
-            } else if service_account_key.is_some() {
-                Some(crate::session::repo_changes::UploadMethod::Direct {
-                    service_account_key,
-                })
-            } else {
-                None
-            }
-        };
+        let auth_token = self
+            .auth_manager
+            .auth()
+            .await
+            .ok()
+            .filter(|auth| auth.is_xai_auth())
+            .map(|auth| auth.key);
+        let method = endpoints.resolve_upload_method(auth_token);
         let reason = crate::upload::turn::TraceUploadReason::from_upload_method(&method);
         (method, reason)
     }
@@ -3514,29 +3501,9 @@ impl MvpAgent {
         gcs_prefix: String,
     ) -> Option<crate::session::repo_changes::TraceExportConfig> {
         let upload_method = self.trace_upload_config().await?;
-        let bucket_url = {
-            let cfg = self.cfg.borrow();
-            match &upload_method {
-                crate::session::repo_changes::UploadMethod::Direct { .. } => {
-                    match cfg.endpoints.resolve_trace_bucket_url() {
-                        Some(resolved) => Some(resolved.value),
-                        None => {
-                            tracing::debug!(
-                                "no trace bucket configured; skipping direct GCS upload"
-                            );
-                            return None;
-                        }
-                    }
-                }
-                crate::session::repo_changes::UploadMethod::S3 { bucket, .. } => {
-                    Some(format!("s3://{bucket}"))
-                }
-                crate::session::repo_changes::UploadMethod::Proxy { .. } => None,
-            }
-        };
+        // The proxy picks the bucket.
         Some(crate::session::repo_changes::TraceExportConfig {
-            bucket_url,
-            service_account_key: None,
+            bucket_url: None,
             prefix_dir: None,
             gcs_prefix: Some(gcs_prefix),
             absolute_paths: false,
@@ -3612,8 +3579,6 @@ impl MvpAgent {
     }
     fn has_custom_trace_destination(cfg: &crate::agent::config::Config) -> bool {
         cfg.endpoints.trace_upload_url.is_some()
-            || cfg.endpoints.trace_upload_bucket.is_some()
-            || cfg.endpoints.trace_upload_endpoint_url.is_some()
     }
     /// Upload method for a user-consented feedback trace archive. Blocks ZDR and custom destinations. Deliberately ignores the live `trace_upload` flag and the cached coding-data opt-out.
     /// The consent just granted may not have reached either cache yet. Fails closed on unknown privacy state.
@@ -3647,15 +3612,8 @@ impl MvpAgent {
             .map(|auth| auth.key);
         let cfg = self.cfg.borrow();
         let upload_method = cfg.endpoints.resolve_upload_method(auth_token)?;
-        if !matches!(
-            upload_method,
-            crate::session::repo_changes::UploadMethod::Proxy { .. }
-        ) {
-            return None;
-        }
         Some(crate::session::repo_changes::TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: Some(gcs_prefix),
             absolute_paths: false,
@@ -3828,31 +3786,9 @@ impl MvpAgent {
                 return None;
             }
         };
-        let bucket_url = {
-            let cfg = self.cfg.borrow();
-            match &upload_method {
-                crate::session::repo_changes::UploadMethod::Direct { .. } => {
-                    match cfg.endpoints.resolve_trace_bucket_url() {
-                        Some(resolved) => Some(resolved.value),
-                        None => {
-                            xai_grok_telemetry::session_ctx::log_session_event(crate::agent::session_metrics::TraceUploadSkipped {
-                                session_id: session_info.id.0.to_string(),
-                                turn_number,
-                                reason: "no_trace_bucket_configured".to_owned(),
-                            });
-                            return None;
-                        }
-                    }
-                }
-                crate::session::repo_changes::UploadMethod::S3 { bucket, .. } => {
-                    Some(format!("s3://{bucket}"))
-                }
-                crate::session::repo_changes::UploadMethod::Proxy { .. } => None,
-            }
-        };
+        // The proxy picks the bucket.
         let gcs_config = crate::session::repo_changes::TraceExportConfig {
-            bucket_url,
-            service_account_key: None,
+            bucket_url: None,
             prefix_dir: None,
             gcs_prefix: Some(format!("{}/turn_{}", session_info.id.0, turn_number)),
             absolute_paths: false,

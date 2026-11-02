@@ -20,8 +20,6 @@ pub struct TraceTurnsRequest<'a> {
 pub enum TraceTurnsSkipReason {
     /// Not available in this build.
     BuildUnavailable,
-    /// Direct GCS and S3 destinations have no existence probe, so never-overwrite cannot be guaranteed.
-    UnsupportedUploadMethod,
     /// No prompt boundaries in the chat history.
     NoTurns,
     /// Rebuilding turns from the session directory did not complete.
@@ -38,9 +36,6 @@ impl TraceTurnsSkipReason {
     pub fn user_message(self) -> &'static str {
         match self {
             TraceTurnsSkipReason::BuildUnavailable => "not available in this build",
-            TraceTurnsSkipReason::UnsupportedUploadMethod => {
-                "only proxy uploads can check for existing turn artifacts"
-            }
             TraceTurnsSkipReason::NoTurns => "no turns found in the session history",
             TraceTurnsSkipReason::ReconstructionFailed => {
                 "could not rebuild turns from the session directory"

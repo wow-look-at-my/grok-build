@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 /// Libraries that open an HTTP or WebSocket connection.
 const CLIENT_LIBRARIES: &[&str] = &[
     "reqwest",
+    "request",
     "reqwest-middleware",
     "tokio-tungstenite",
     "tungstenite",
@@ -21,8 +22,8 @@ const ALLOWED_CRATES: &[&str] = &["xai-grok-net", "xai-grok-extra-ca"];
 /// Calls that hand out a raw client or a raw TLS config. Only `xai-grok-net` and the
 /// listed files may make them.
 const RAW_ACCESS: &[&str] = &[
-    "build_reqwest_client(",
-    "build_blocking_reqwest_client(",
+    "build_raw_http_client(",
+    "build_raw_blocking_http_client(",
     "library_client(",
 ];
 

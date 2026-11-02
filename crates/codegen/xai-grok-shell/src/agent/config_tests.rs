@@ -6455,7 +6455,6 @@ fn config_accepts_all_known_sections() {
             feedback = true
             [endpoints]
             management_api_key = "mgmt-key"
-            gcs_service_account_key = "gcs-key"
             [models]
             default = "grok-3"
             [ui]

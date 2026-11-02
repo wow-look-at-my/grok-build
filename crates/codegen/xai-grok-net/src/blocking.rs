@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::{IntoUrl, Method, Url};
+use request::header::{HeaderMap, HeaderName, HeaderValue};
+use request::{IntoUrl, Method, Url};
 
 use crate::auth::{self, Auth, is_credential_header};
 use crate::error::{AuthRefusal, Error};
@@ -21,7 +21,7 @@ pub struct BlockingOptions {
 /// The blocking HTTP client. Same credential rules as [`crate::HttpClient`].
 #[derive(Clone, Debug)]
 pub struct BlockingHttpClient {
-    inner: reqwest::blocking::Client,
+    inner: request::blocking::Client,
 }
 
 impl BlockingHttpClient {
@@ -36,7 +36,7 @@ impl BlockingHttpClient {
 
     /// Build a client with the grok TLS policy and every option in `options`.
     pub fn build_with(options: BlockingOptions) -> Result<Self, Error> {
-        let inner = xai_grok_extra_ca::build_blocking_reqwest_client(|mut b| {
+        let inner = xai_grok_extra_ca::build_raw_blocking_http_client(|mut b| {
             if let Some(t) = options.timeout {
                 b = b.timeout(t);
             }
@@ -80,7 +80,7 @@ impl BlockingHttpClient {
 }
 
 struct Pending {
-    builder: reqwest::blocking::RequestBuilder,
+    builder: request::blocking::RequestBuilder,
     url: Url,
     auth_headers: HeaderMap,
     extra_headers: HeaderMap,
@@ -94,7 +94,7 @@ pub struct BlockingRequest {
 impl BlockingRequest {
     fn map(
         mut self,
-        f: impl FnOnce(reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder,
+        f: impl FnOnce(request::blocking::RequestBuilder) -> request::blocking::RequestBuilder,
     ) -> Self {
         self.state = self.state.map(|mut p| {
             p.builder = f(p.builder);
@@ -132,14 +132,14 @@ impl BlockingRequest {
     pub fn form<T: serde::Serialize + ?Sized>(self, form: &T) -> Self {
         self.map(|b| b.form(form))
     }
-    pub fn body(self, body: impl Into<reqwest::blocking::Body>) -> Self {
+    pub fn body(self, body: impl Into<request::blocking::Body>) -> Self {
         self.map(|b| b.body(body))
     }
     pub fn timeout(self, timeout: Duration) -> Self {
         self.map(|b| b.timeout(timeout))
     }
 
-    pub fn send(self) -> Result<reqwest::blocking::Response, Error> {
+    pub fn send(self) -> Result<request::blocking::Response, Error> {
         let p = self.state?;
         let (client, built) = p.builder.build_split();
         let mut built = built?;

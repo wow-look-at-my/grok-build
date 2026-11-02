@@ -1,7 +1,7 @@
 //! WebSocket connects. The upgrade request carries its credential by the same rules as
 //! an HTTP request.
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use request::header::{HeaderMap, HeaderName, HeaderValue};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
@@ -52,7 +52,7 @@ impl std::error::Error for WsConnectError {
 impl WsRequest {
     /// An upgrade request to `url` carrying `auth` and the non-credential `headers`.
     pub fn new(url: &str, auth: Auth, headers: HeaderMap) -> Result<Self, Error> {
-        let parsed = reqwest::Url::parse(url).map_err(|_| AuthRefusal::InvalidValue)?;
+        let parsed = request::Url::parse(url).map_err(|_| AuthRefusal::InvalidValue)?;
         // The host rules are the HTTP ones: wss is https, ws is http.
         let mut as_http = parsed.clone();
         let scheme = match parsed.scheme() {

@@ -1785,19 +1785,6 @@ pub fn mcp_server_defined_at(path: &std::path::Path, server_name: &str) -> bool 
         .is_some_and(|servers| servers.contains_key(server_name))
 }
 
-pub(crate) fn load_gcs_service_account_key_sync() -> Option<String> {
-    let root: TomlValue = crate::config::load_effective_config().ok()?;
-    if let TomlValue::Table(table) = root
-        && let Some(TomlValue::Table(endpoints)) = table.get("endpoints")
-    {
-        endpoints
-            .get("gcs_service_account_key")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-    } else {
-        None
-    }
-}
 /// Returns `None` when `[cli] use_leader` is not set in the config, or `Some(true/false)` when explicitly configured.
 /// The `None` lets callers fall through to a remote flag when the user hasn't expressed a local preference.
 pub fn use_leader_from_toml_opt(root: &TomlValue) -> Option<bool> {

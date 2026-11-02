@@ -125,17 +125,13 @@ pub(super) struct UploadFailure<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UploadFailureLogLevel {
     Error,
-    Warn,
     Debug,
 }
-/// ERROR is what logging / alerting treat as a first-party incident, so it is reserved for first-party backends (proxy, cloud storage).
-/// A failing customer-managed S3 bucket is the customer's outage and logs at WARN.
+/// The first failure of an episode logs at ERROR: the proxy is a first-party backend.
 /// Repeats within one failure episode drop to DEBUG.
-fn upload_failure_log_level(method: &UploadMethod, prior_failures: u64) -> UploadFailureLogLevel {
+fn upload_failure_log_level(prior_failures: u64) -> UploadFailureLogLevel {
     if prior_failures > 0 {
         UploadFailureLogLevel::Debug
-    } else if matches!(method, UploadMethod::S3 { .. }) {
-        UploadFailureLogLevel::Warn
     } else {
         UploadFailureLogLevel::Error
     }
@@ -144,9 +140,7 @@ fn upload_failure_log_level(method: &UploadMethod, prior_failures: u64) -> Uploa
 fn upload_method_label(method: &UploadMethod) -> &'static str {
     use super::turn::TraceUploadReason;
     match method {
-        UploadMethod::Direct { .. } => TraceUploadReason::DirectGcs,
         UploadMethod::Proxy { .. } => TraceUploadReason::Proxy,
-        UploadMethod::S3 { .. } => TraceUploadReason::DirectS3,
     }
     .into()
 }
@@ -166,7 +160,7 @@ pub(super) fn record_upload_failure(ctx: &PromptTraceContext, f: UploadFailure<'
         .session_handle
         .upload_failures_since_success
         .fetch_add(1, Relaxed);
-    let level = upload_failure_log_level(&ctx.gcs_config.upload_method, prior_failures);
+    let level = upload_failure_log_level(prior_failures);
     let method = upload_method_label(&ctx.gcs_config.upload_method);
     macro_rules! log_failure {
         ($level:ident) => {
@@ -188,7 +182,6 @@ pub(super) fn record_upload_failure(ctx: &PromptTraceContext, f: UploadFailure<'
     }
     match level {
         UploadFailureLogLevel::Error => log_failure!(error),
-        UploadFailureLogLevel::Warn => log_failure!(warn),
         UploadFailureLogLevel::Debug => log_failure!(debug),
     }
     if prior_failures > 0 {
@@ -206,11 +199,7 @@ pub(super) fn record_upload_failure(ctx: &PromptTraceContext, f: UploadFailure<'
         "bytes": f.bytes,
         "phase": f.phase,
     }));
-    if level == UploadFailureLogLevel::Warn {
-        xai_grok_telemetry::unified_log::warn(&msg, sid, log_ctx);
-    } else {
-        xai_grok_telemetry::unified_log::error(&msg, sid, log_ctx);
-    }
+    xai_grok_telemetry::unified_log::error(&msg, sid, log_ctx);
 }
 /// Increment when making breaking changes to PromptMetadata structure.
 pub(crate) use prod_mc_cli_chat_proxy_types::{
@@ -384,7 +373,6 @@ pub(crate) async fn upload_subagent_metadata(
     let gcs_path = format!("{}/subagent.json", metadata.child_session_id);
     let base_config = crate::session::repo_changes::TraceExportConfig {
         bucket_url: Some(bucket_url.to_owned()),
-        service_account_key: None,
         prefix_dir: None,
         gcs_prefix: None,
         absolute_paths: false,
@@ -1034,17 +1022,15 @@ impl DynamicResolver {
 impl TraceExportSource for DynamicResolver {
     fn resolve(&self) -> TraceExportConfig {
         let mut config = self.base_config.clone();
-        if let crate::session::repo_changes::UploadMethod::Proxy {
+        let crate::session::repo_changes::UploadMethod::Proxy {
             ref mut user_token, ..
-        } = config.upload_method
-        {
-            let auth = self.auth_manager.current().or_else(|| {
-                self.auth_manager.force_reload_from_disk();
-                self.auth_manager.current()
-            });
-            if let Some(auth) = auth {
-                *user_token = auth.key;
-            }
+        } = config.upload_method;
+        let auth = self.auth_manager.current().or_else(|| {
+            self.auth_manager.force_reload_from_disk();
+            self.auth_manager.current()
+        });
+        if let Some(auth) = auth {
+            *user_token = auth.key;
         }
         config
     }
@@ -1088,18 +1074,16 @@ impl TraceExportSource for DynamicResolver {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TraceExportConfig> + Send + '_>> {
         Box::pin(async move {
             let mut config = self.base_config.clone();
-            if let crate::session::repo_changes::UploadMethod::Proxy {
+            let crate::session::repo_changes::UploadMethod::Proxy {
                 ref mut user_token, ..
-            } = config.upload_method
-            {
-                match self.auth_manager.get_valid_token().await {
-                    Ok(key) => *user_token = key,
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            "auth: upload credential resolve failed"
-                        )
-                    }
+            } = config.upload_method;
+            match self.auth_manager.get_valid_token().await {
+                Ok(key) => *user_token = key,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "auth: upload credential resolve failed"
+                    )
                 }
             }
             config
@@ -1785,7 +1769,6 @@ pub(crate) mod tests {
         ));
         let base_config = TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: Some("session/turn_0".into()),
             absolute_paths: false,
@@ -1827,7 +1810,6 @@ pub(crate) mod tests {
             UploadMethod::Proxy { proxy_base_url, .. } => {
                 assert_eq!(proxy_base_url, "https://proxy.example.com");
             }
-            _ => unreachable!(),
         }
     }
     #[test]
@@ -1857,7 +1839,6 @@ pub(crate) mod tests {
             auth_manager: auth_manager.clone(),
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -1916,7 +1897,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -1933,7 +1913,6 @@ pub(crate) mod tests {
             UploadMethod::Proxy { user_token, .. } => {
                 assert_eq!(user_token, "stale-base-token");
             }
-            other => panic!("expected Proxy, got {:?}", other),
         }
     }
     /// `resolve_async()` picks up a fresh disk token (written by another flow) when the in-memory token is expired.
@@ -1963,7 +1942,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -1983,7 +1961,6 @@ pub(crate) mod tests {
                     "resolve_async should use get_valid_token() to pick up disk token"
                 );
             }
-            other => panic!("expected Proxy, got {:?}", other),
         }
     }
     /// `resolve_async()` drives `refresh_chain` when the in-memory OIDC token is expired and no fresh disk token exists.
@@ -2033,7 +2010,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -2053,7 +2029,6 @@ pub(crate) mod tests {
                     "resolve_async must use token from refresh_chain, not stale base_config"
                 );
             }
-            other => panic!("expected Proxy, got {:?}", other),
         }
     }
     /// Proactive refresh keeps the cache hot so `resolve_async` on the trace upload path is a cache hit.
@@ -2106,7 +2081,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -2126,7 +2100,6 @@ pub(crate) mod tests {
                     "resolve_async must pick up the proactively-refreshed token"
                 );
             }
-            other => panic!("expected Proxy, got {:?}", other),
         }
         assert_eq!(
             call_count.load(std::sync::atomic::Ordering::SeqCst),
@@ -2146,7 +2119,6 @@ pub(crate) mod tests {
         ));
         let base_config = TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: None,
             absolute_paths: false,
@@ -2166,52 +2138,6 @@ pub(crate) mod tests {
             UploadMethod::Proxy { user_token, .. } => {
                 assert_eq!(user_token, "original-token");
             }
-            other => panic!("expected Proxy, got {:?}", other),
-        }
-    }
-    #[test]
-    fn dynamic_resolver_noop_for_direct_mode() {
-        use crate::session::repo_changes::UploadMethod;
-        use std::collections::BTreeMap;
-        use xai_grok_login::GrokAuth;
-        let dir = tempfile::tempdir().unwrap();
-        let grok_com_config = xai_grok_login::GrokComConfig::default();
-        let scope = grok_com_config.auth_scope();
-        let auth = GrokAuth {
-            key: "some-token".into(),
-            ..GrokAuth::test_default()
-        };
-        let mut store = BTreeMap::new();
-        store.insert(scope, auth);
-        let auth_json = serde_json::to_string_pretty(&store).unwrap();
-        std::fs::write(dir.path().join("auth.json"), &auth_json).unwrap();
-        let auth_manager = Arc::new(xai_grok_login::AuthManager::new(
-            dir.path(),
-            grok_com_config,
-        ));
-        let base_config = TraceExportConfig {
-            bucket_url: Some("gs://bucket".into()),
-            service_account_key: Some("sa-key".into()),
-            prefix_dir: None,
-            gcs_prefix: None,
-            absolute_paths: false,
-            archive_name_override: None,
-            upload_method: UploadMethod::Direct {
-                service_account_key: Some("sa-key".into()),
-            },
-        };
-        let resolver = DynamicResolver {
-            auth_manager,
-            base_config,
-        };
-        let config = resolver.resolve();
-        match &config.upload_method {
-            UploadMethod::Direct {
-                service_account_key,
-            } => {
-                assert_eq!(service_account_key.as_deref(), Some("sa-key"));
-            }
-            other => panic!("expected Direct, got {:?}", other),
         }
     }
     /// `DynamicResolver` must supply `proxy_credentials` and `proxy_attribution`.
@@ -2228,7 +2154,6 @@ pub(crate) mod tests {
         ));
         let base_config = TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: None,
             absolute_paths: false,
@@ -2275,7 +2200,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -2307,7 +2231,6 @@ pub(crate) mod tests {
         ));
         let gcs_config = TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: None,
             absolute_paths: false,
@@ -2613,47 +2536,18 @@ pub(crate) mod tests {
         }
         tempfile::tempdir_in(home).ok()
     }
-    /// Customer-managed S3 failures stay below the ERROR alerting threshold.
     /// Repeats within an episode drop to debug, and the `method` log field keeps the structured upload-method vocabulary.
     #[test]
-    fn upload_failure_log_level_splits_on_backend_and_repeats() {
+    fn upload_failure_log_level_drops_on_repeats() {
         use crate::session::repo_changes::UploadMethod;
-        let s3 = UploadMethod::S3 {
-            bucket: "bucket".into(),
-            region: "region".into(),
-            credentials_file: None,
-            credentials_content: None,
-            endpoint_url: None,
-        };
         let proxy = UploadMethod::Proxy {
             proxy_base_url: "https://proxy.example/v1".into(),
             user_token: "token".into(),
             alpha_test_key: None,
         };
-        let gcs = UploadMethod::Direct {
-            service_account_key: None,
-        };
-        assert_eq!(
-            upload_failure_log_level(&s3, 0),
-            UploadFailureLogLevel::Warn
-        );
-        assert_eq!(
-            upload_failure_log_level(&proxy, 0),
-            UploadFailureLogLevel::Error
-        );
-        assert_eq!(
-            upload_failure_log_level(&gcs, 0),
-            UploadFailureLogLevel::Error
-        );
-        for method in [&s3, &proxy, &gcs] {
-            assert_eq!(
-                upload_failure_log_level(method, 1),
-                UploadFailureLogLevel::Debug
-            );
-        }
-        assert_eq!(upload_method_label(&s3), "direct_s3");
+        assert_eq!(upload_failure_log_level(0), UploadFailureLogLevel::Error);
+        assert_eq!(upload_failure_log_level(1), UploadFailureLogLevel::Debug);
         assert_eq!(upload_method_label(&proxy), "proxy");
-        assert_eq!(upload_method_label(&gcs), "direct_gcs");
     }
     /// The manifest may claim `enqueued` (queue-owned: flushable and sidecar-recoverable) only for these accept shapes.
     /// An inline fallback or a failed enqueue must take the awaited direct attempt so the recorded status is a real outcome.

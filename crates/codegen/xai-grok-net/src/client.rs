@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::{IntoUrl, Method, Url};
+use request::header::{HeaderMap, HeaderName, HeaderValue};
+use request::{IntoUrl, Method, Url};
 
 use crate::auth::{self, Auth, is_credential_header};
 use crate::error::{AuthRefusal, Error};
@@ -27,11 +27,11 @@ pub struct ClientOptions {
     no_proxy: bool,
     no_redirects: bool,
     decompress: bool,
-    proxy: Option<reqwest::Proxy>,
+    proxy: Option<request::Proxy>,
     user_agent: Option<String>,
     default_headers: HeaderMap,
-    identity: Option<reqwest::Identity>,
-    root_certificates: Vec<reqwest::Certificate>,
+    identity: Option<request::Identity>,
+    root_certificates: Vec<request::Certificate>,
 }
 
 macro_rules! option_setters {
@@ -62,8 +62,8 @@ impl ClientOptions {
         tcp_keepalive: Duration,
         http2_keep_alive_interval: Duration,
         http2_keep_alive_timeout: Duration,
-        identity: reqwest::Identity,
-        proxy: reqwest::Proxy,
+        identity: request::Identity,
+        proxy: request::Proxy,
     );
     flag_setters!(
         http2_keep_alive_while_idle,
@@ -86,12 +86,12 @@ impl ClientOptions {
         self
     }
 
-    pub fn add_root_certificate(mut self, cert: reqwest::Certificate) -> Self {
+    pub fn add_root_certificate(mut self, cert: request::Certificate) -> Self {
         self.root_certificates.push(cert);
         self
     }
 
-    fn apply(&self, mut b: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    fn apply(&self, mut b: request::ClientBuilder) -> request::ClientBuilder {
         if let Some(v) = self.timeout {
             b = b.timeout(v);
         }
@@ -132,7 +132,7 @@ impl ClientOptions {
             b = b.no_proxy();
         }
         if self.no_redirects {
-            b = b.redirect(reqwest::redirect::Policy::none());
+            b = b.redirect(request::redirect::Policy::none());
         }
         if self.decompress {
             b = b.gzip(true).brotli(true).deflate(true);
@@ -172,14 +172,14 @@ impl ClientOptions {
 /// The async HTTP client. Every request names its credential; see [`Auth`].
 #[derive(Clone, Debug)]
 pub struct HttpClient {
-    inner: reqwest::Client,
+    inner: request::Client,
 }
 
 impl HttpClient {
     /// Build a client with the grok TLS policy.
     pub fn build(options: ClientOptions) -> Result<Self, Error> {
         options.check()?;
-        let inner = xai_grok_extra_ca::build_reqwest_client(|b| options.apply(b))?;
+        let inner = xai_grok_extra_ca::build_raw_http_client(|b| options.apply(b))?;
         Ok(Self { inner })
     }
 
@@ -214,13 +214,13 @@ impl HttpClient {
 
     /// The underlying client, for a library that takes one and sends its own
     /// requests (an MCP transport, an OTLP exporter).
-    pub fn library_client(&self) -> reqwest::Client {
+    pub fn library_client(&self) -> request::Client {
         self.inner.clone()
     }
 }
 
 struct Pending {
-    builder: reqwest::RequestBuilder,
+    builder: request::RequestBuilder,
     url: Url,
     auth: Auth,
     extra_headers: HeaderMap,
@@ -232,7 +232,7 @@ pub struct Request {
 }
 
 impl Request {
-    fn map(mut self, f: impl FnOnce(reqwest::RequestBuilder) -> reqwest::RequestBuilder) -> Self {
+    fn map(mut self, f: impl FnOnce(request::RequestBuilder) -> request::RequestBuilder) -> Self {
         self.state = self.state.map(|mut p| {
             p.builder = f(p.builder);
             p
@@ -283,16 +283,16 @@ impl Request {
     pub fn form<T: serde_like::Serialize + ?Sized>(self, form: &T) -> Self {
         self.map(|b| b.form(form))
     }
-    pub fn body(self, body: impl Into<reqwest::Body>) -> Self {
+    pub fn body(self, body: impl Into<request::Body>) -> Self {
         self.map(|b| b.body(body))
     }
-    pub fn multipart(self, form: reqwest::multipart::Form) -> Self {
+    pub fn multipart(self, form: request::multipart::Form) -> Self {
         self.map(|b| b.multipart(form))
     }
     pub fn timeout(self, timeout: Duration) -> Self {
         self.map(|b| b.timeout(timeout))
     }
-    pub fn version(self, version: reqwest::Version) -> Self {
+    pub fn version(self, version: request::Version) -> Self {
         self.map(|b| b.version(version))
     }
 
@@ -318,7 +318,7 @@ impl Request {
 
     /// Send the request. The response's extensions hold the
     /// [`crate::SentBearerSuffix`] of the credential that produced it.
-    pub async fn send(self) -> Result<reqwest::Response, Error> {
+    pub async fn send(self) -> Result<request::Response, Error> {
         let p = self.state?;
         let (source, retries) = match &p.auth {
             Auth::Source {
@@ -337,7 +337,7 @@ impl Request {
             return Ok(response);
         };
         for _ in 0..retries {
-            if response.status() != reqwest::StatusCode::UNAUTHORIZED
+            if response.status() != request::StatusCode::UNAUTHORIZED
                 || !source.refresh_after_unauthorized().await
             {
                 break;
@@ -353,11 +353,11 @@ impl Request {
 }
 
 async fn send_once(
-    builder: reqwest::RequestBuilder,
+    builder: request::RequestBuilder,
     url: &Url,
     auth: &Auth,
     extra_headers: &HeaderMap,
-) -> Result<reqwest::Response, Error> {
+) -> Result<request::Response, Error> {
     let fixed = auth.resolve();
     let (client, built) = builder.build_split();
     let mut built = built?;

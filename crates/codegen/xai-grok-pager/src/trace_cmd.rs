@@ -173,13 +173,6 @@ struct TraceConfigSnapshot {
     trace_upload_enabled: bool,
     telemetry_trace_upload: Option<bool>,
     custom_upload_url: bool,
-    bucket_url_source: String,
-    direct_upload_configured: bool,
-    has_bucket_configured: bool,
-    has_region_configured: bool,
-    has_custom_endpoint: bool,
-    has_credentials_file: bool,
-    has_inline_credentials: bool,
 }
 
 fn build_trace_config_snapshot(agent_config: &AgentConfig) -> TraceConfigSnapshot {
@@ -187,22 +180,6 @@ fn build_trace_config_snapshot(agent_config: &AgentConfig) -> TraceConfigSnapsho
         trace_upload_enabled: agent_config.is_trace_upload_enabled(),
         telemetry_trace_upload: agent_config.telemetry.trace_upload,
         custom_upload_url: agent_config.endpoints.trace_upload_url.is_some(),
-        bucket_url_source: match agent_config.endpoints.resolve_trace_bucket_url() {
-            Some(resolved) => format!("{}", resolved.source),
-            None => "unconfigured".to_owned(),
-        },
-        direct_upload_configured: agent_config
-            .endpoints
-            .resolve_direct_upload_method()
-            .is_some(),
-        has_bucket_configured: agent_config.endpoints.trace_upload_bucket.is_some(),
-        has_region_configured: agent_config.endpoints.trace_upload_region.is_some(),
-        has_custom_endpoint: agent_config.endpoints.trace_upload_endpoint_url.is_some(),
-        has_credentials_file: agent_config
-            .endpoints
-            .trace_upload_credentials_file
-            .is_some(),
-        has_inline_credentials: agent_config.endpoints.trace_upload_credentials.is_some(),
     }
 }
 
@@ -267,49 +244,14 @@ fn add_directory_to_tar<W: std::io::Write>(
 
 pub struct UploadMethodDisplay<'a> {
     pub method: &'a UploadMethod,
-    pub bucket_url: &'a str,
 }
 
 impl std::fmt::Display for UploadMethodDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.method {
-            UploadMethod::Direct {
-                service_account_key,
-            } => {
-                let auth = if service_account_key.is_some() {
-                    "service account key"
-                } else {
-                    "ambient credentials"
-                };
-                writeln!(f, "  Method:   Direct GCS")?;
-                writeln!(f, "  Bucket:   {}", self.bucket_url)?;
-                write!(f, "  Auth:     {auth}")
-            }
             UploadMethod::Proxy { proxy_base_url, .. } => {
                 writeln!(f, "  Method:   Proxy")?;
                 write!(f, "  Proxy:    {proxy_base_url}")
-            }
-            UploadMethod::S3 {
-                bucket,
-                region,
-                endpoint_url,
-                credentials_content,
-                credentials_file,
-                ..
-            } => {
-                let endpoint = endpoint_url.as_deref().unwrap_or("(default AWS)");
-                let creds = if credentials_content.is_some() {
-                    "inline credentials"
-                } else if credentials_file.is_some() {
-                    "credentials file"
-                } else {
-                    "ambient credentials"
-                };
-                writeln!(f, "  Method:   S3")?;
-                writeln!(f, "  Bucket:   {bucket}")?;
-                writeln!(f, "  Region:   {region}")?;
-                writeln!(f, "  Endpoint: {endpoint}")?;
-                write!(f, "  Auth:     {creds}")
             }
         }
     }
@@ -435,34 +377,17 @@ async fn run_upload(
     let archive = build_session_tar(session_dir, session_id, agent_config)?;
     let archive_size = archive.len();
 
-    // Proxy-mode uploads don't need a bucket (the proxy owns the destination); direct GCS uploads do
-    let bucket_url = agent_config
-        .endpoints
-        .resolve_trace_bucket_url()
-        .map(|r| r.value);
-    if bucket_url.is_none()
-        && matches!(
-            upload_method,
-            xai_grok_shell::session::repo_changes::UploadMethod::Direct { .. }
-        )
-    {
-        anyhow::bail!(
-            "No trace upload bucket configured. Set `GROK_TELEMETRY_GCS_BUCKET`, \
-             `GROK_TRACE_UPLOAD_BUCKET`, or `endpoints.trace_upload_bucket` in \
-             config for direct GCS uploads."
-        );
-    }
-    let bucket_display = bucket_url.as_deref().unwrap_or("proxy-managed");
+    // The proxy owns the destination bucket.
+    let bucket_url: Option<String> = None;
+    let bucket_display = "proxy-managed";
     let object_path = format!("{session_id}/{TRACE_BUNDLE_FILENAME}");
     let method_desc = UploadMethodDisplay {
         method: &upload_method,
-        bucket_url: bucket_display,
     }
     .to_string();
 
     let upload_config = xai_grok_shell::session::repo_changes::TraceExportConfig {
         bucket_url: bucket_url.clone(),
-        service_account_key: None,
         prefix_dir: None,
         gcs_prefix: Some(session_id.to_string()),
         absolute_paths: false,
@@ -689,7 +614,8 @@ pub(crate) async fn resolve_upload_gate(agent_config: &AgentConfig) -> UploadGat
         &agent_config.grok_com_config,
         agent_config.login_device_flow,
         agent_config.endpoints.proxy_url(),
-        agent_config.endpoints.has_noninteractive_upload_auth(),
+        // Only the proxy uploads, and it needs a login.
+        false,
         Some("Authentication required for trace upload."),
     )
     .await
