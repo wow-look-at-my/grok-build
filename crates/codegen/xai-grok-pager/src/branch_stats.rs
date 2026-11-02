@@ -111,7 +111,7 @@ pub fn compute_branch_stats(cwd: &Path) -> Result<Option<BranchStats>, git2::Err
     Ok(Some(stats))
 }
 
-/// The base the status bar compares HEAD against: the checked-out branch's
+/// The base the status bar compares HEAD against. The checked-out branch's
 /// configured upstream, else the branch it was created from, else the
 /// repository's default branch. The current branch is never its own base, and
 /// a detached HEAD has none.
@@ -298,8 +298,7 @@ mod tests {
         );
         git(dir, &["switch", "-q", "-c", "feature"]);
         commit_file(dir, "f.txt", "f\n");
-        // A linked worktree detached at the branch tip is what a new Grok
-        // worktree looks like.
+        // A linked worktree detached at the branch tip is what a new Grok worktree looks like.
         let outside = tempfile::tempdir().unwrap();
         let wt = outside.path().join("wt");
         git(
