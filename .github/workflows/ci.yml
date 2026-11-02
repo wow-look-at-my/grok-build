@@ -92,6 +92,8 @@ jobs:
     env:
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
+      # Job-wide, so the nextest steps reuse the compile instead of rebuilding under a different wrapper.
+      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-parallel-frontend
       # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build steps alone.
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
