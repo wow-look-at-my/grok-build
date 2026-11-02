@@ -398,6 +398,22 @@ panic = "abort"
 # `release-dist-jemalloc` and `x-prod` inherit this.
 overflow-checks = true
 
+[profile.release.package.xai-grok-shell]
+opt-level = 2
+codegen-units = 256
+
+[profile.release.package.xai-grok-pager]
+opt-level = 2
+codegen-units = 256
+
+[profile.release.package.xai-grok-tools]
+opt-level = 2
+codegen-units = 256
+
+[profile.release.package.xai-grok-workspace]
+opt-level = 2
+codegen-units = 256
+
 # Hardened release profile for shipping to end users (alpha + stable).
 # Use `cargo build --profile release-dist` for distribution builds.
 # Not used by default `--release` to avoid slowing down local dev builds (~2.2x).
