@@ -22,7 +22,7 @@ fn double_click_text(harness: &mut PtyHarness, needle: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 async fn agent_execute_full_output_double_click_fold_pty() {
     let content = ContentController::start().await.expect("start content");

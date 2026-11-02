@@ -18,7 +18,7 @@ const FINAL: &str = "REPARK_FINAL_ANSWER";
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn reparked_wait_stays_markerless() {
     let content = ContentController::start().await.expect("start content");
     // Gates the background command both waits block on (released at the end).

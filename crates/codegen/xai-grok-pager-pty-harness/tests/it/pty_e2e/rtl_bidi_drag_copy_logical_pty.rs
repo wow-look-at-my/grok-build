@@ -13,7 +13,7 @@ const FA_VISUAL: &str = "بوخ";
 /// PTY: with `[scrollback.display] rtl_bidi = true`, a mixed LTR and Persian row paints the Persian
 /// in visual (reversed) order.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn rtl_bidi_drag_copy_logical_pty() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!(

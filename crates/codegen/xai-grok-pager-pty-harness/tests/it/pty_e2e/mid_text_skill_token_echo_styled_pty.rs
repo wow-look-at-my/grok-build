@@ -49,7 +49,7 @@ fn seed_test_skill(dir: &Path) {
 /// Type `great /test-skill do it`, wait for the composer to highlight the advertised skill token, then submit.
 /// The scrollback echo must render the SAME token in the same accent fg while the body word stays a different fg.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn mid_text_skill_token_echo_styled_pty() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{DONE_SENTINEL} echo styling verified."));

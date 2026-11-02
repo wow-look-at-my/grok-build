@@ -39,7 +39,7 @@ fn dump_top_rows(label: &str, screen: &str) {
 /// PTY: stream an answer taller than the terminal and check the ▲ indicator appears under the sticky prompt header.
 /// Click it and check the viewport lands on the answer's first line.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn response_top_indicator_jumps_to_answer_start() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(long_answer());

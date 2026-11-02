@@ -6,7 +6,7 @@ use super::common::*;
 /// closing terminal sends) must not skip cleanup. Drop handlers never run on signal death, so wrap
 /// needs an explicit signal path.
 #[test]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 fn wrap_sigterm_restores_terminal_and_exit_code() {
     let (code, raw) = run_wrap_driving(

@@ -8,7 +8,7 @@ const STEER_MARKER: &str = "STEER_FOLD_MARKER_XYZ";
 /// The request after the tool must carry it as an interjection, and it must not run as a turn of its own.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn steer_folds_follow_up_into_running_turn() {
     let content = ContentController::start().await.expect("start content");
     seed_ui_config(&content, "follow_up_behavior = \"steer\"");
@@ -135,7 +135,7 @@ fn assert_folded_once(content: &ContentController, harness: &PtyHarness, marker:
 /// Steer mode: a follow-up typed while the final answer streams is folded before the turn ends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn steer_folds_follow_up_typed_during_final_answer() {
     const MARKER: &str = "STEER_FINAL_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
@@ -180,7 +180,7 @@ async fn steer_folds_follow_up_typed_during_final_answer() {
 /// The wait is interruptible, so the follow-up must not sit until the task ends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn steer_delivers_follow_up_typed_during_task_wait() {
     const MARKER: &str = "STEER_WAIT_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
@@ -268,7 +268,7 @@ async fn steer_delivers_follow_up_typed_during_task_wait() {
 /// Steer mode: a follow-up typed during an auto-wake turn reaches that turn at its next request.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn steer_folds_follow_up_into_auto_wake_turn() {
     const MARKER: &str = "STEER_WAKE_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");

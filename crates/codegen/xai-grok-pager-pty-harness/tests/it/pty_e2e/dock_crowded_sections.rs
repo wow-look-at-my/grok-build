@@ -33,7 +33,7 @@ fn dock_lines(screen: &str) -> Vec<&str> {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_smoke Cargo test with --ignored"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it pty_e2e_smoke:: -- --ignored"]
 async fn a_crowded_dock_keeps_every_header_inside_its_row_cap() {
     const TASKS: usize = 12;
 

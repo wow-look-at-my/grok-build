@@ -41,7 +41,7 @@ fn expect_cut_reply(content: &ContentController, text: &str) {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn length_continue_prompt_is_shown() {
     let content = ContentController::start().await.expect("start content");
     expect_cut_reply(&content, CUT);
@@ -86,7 +86,7 @@ async fn length_continue_prompt_is_shown() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn plan_mode_reminder_is_shown() {
     let content = ContentController::start().await.expect("start content");
     let _reply = content.expect_agent_turn("plan reply", PLAN_REPLY);
@@ -136,7 +136,7 @@ async fn plan_mode_reminder_is_shown() {
 /// A background command finishes while the session is idle. The wake prompt that reports it gets a row above the wake reply.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn wake_prompt_is_shown() {
     let content = ContentController::start().await.expect("start content");
     let flag = content.home().join("wake_row_flag");
@@ -196,7 +196,7 @@ async fn wake_prompt_is_shown() {
 /// A monitor prints an event while the session is idle. The drain prompt that delivers it gets a row above the reply.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn notification_drain_prompt_is_shown() {
     let content = ContentController::start().await.expect("start content");
     let flag = content.home().join("drain_row_flag");
@@ -274,7 +274,7 @@ fn write_recovery_profile(dir: &Path) -> PathBuf {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn auto_recovery_prompt_is_shown() {
     let content = ContentController::start().await.expect("start content");
     let _first = content.expect_agent_turn("reply without the tool", "BEFORE_RECOVERY_MARK");

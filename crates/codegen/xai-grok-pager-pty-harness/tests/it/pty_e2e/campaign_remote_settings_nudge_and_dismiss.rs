@@ -5,7 +5,7 @@ use super::common::*;
 /// Campaign nudge via the real remote path. A new session, possibly not the first (see
 /// [`wait_for_model_via_new_sessions`]), opens on the campaign model.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn campaign_remote_settings_nudge_and_dismiss() {
     const CONFIG_MODEL: &str = "config-model";
     const CAMPAIGN_MODEL: &str = "campaign-model";

@@ -3,7 +3,7 @@
 //! Legacy terminals send Alt+S as `ESC s`, next to the double-Esc clear: a split decode would turn on "press again to clear" and type a literal `s`.
 //!
 //! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test prompt_stash -- --ignored --nocapture
+//! cargo test -p xai-grok-pager-pty-harness --test it prompt_stash:: -- --ignored --nocapture
 //! ```
 
 use std::time::Duration;

@@ -44,14 +44,14 @@ pub(crate) enum WakeCancelGesture {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn auto_wake_cancel_preserves_queued_user_prompt() {
     run_wake_cancel_scenario(WakeCancelGesture::CtrlC, "auto_wake_repro").await;
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn auto_wake_queued_prompt_can_send_now() {
     run_wake_cancel_scenario(WakeCancelGesture::SendNow, "auto_wake_send_now").await;
 }
@@ -307,7 +307,7 @@ fn unified_log_diagnostics(content: &ContentController) -> String {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn cancel_before_task_completion_defers_auto_wake_until_user_prompt() {
     let content = ContentController::start().await.expect("start content");
 

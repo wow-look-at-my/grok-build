@@ -50,7 +50,7 @@ fn edit_header_rows(screen: &str) -> usize {
 /// PTY: with `collapsed_edit_blocks` enabled, three sequential same-file edits coalesce into ONE
 /// Edit row whose header sums the diffstat (`+3/-3`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test pty_e2e -- --ignored"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn edit_merge_sequential_pty() {
     let content = ContentController::start().await.expect("start content");
     seed_ui_config(&content, "collapsed_edit_blocks = true");

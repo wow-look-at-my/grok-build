@@ -16,7 +16,7 @@ fn parse_printed_appearance(raw: &str) -> Option<(String, String)> {
 /// End-to-end check that the appearance stamp survives the interactive shell hop. Do not call
 /// `detect_desktop()` here: two live portal probes can disagree.
 #[test]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 fn wrap_appearance_env_advertised_through_shell() {
     let (code, raw) = run_wrap(
@@ -48,7 +48,7 @@ fn wrap_appearance_env_advertised_through_shell() {
 /// A desktop probe that answers overrides both names to the same polarity; one that answers `None` inherits GROK and must not invent LC.
 /// The test itself never probes the desktop; a second live probe could disagree.
 #[test]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 fn wrap_appearance_env_desktop_none_does_not_restamp_parent_grok() {
     let (code, raw) = run_wrap(

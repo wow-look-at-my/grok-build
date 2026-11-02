@@ -11,7 +11,7 @@ const CHROMEHOLD_BOTTOM: &str = "CHROMEHOLD_BOTTOM";
 /// stays a whole-block drag. Text-drag anchoring waits until the pointer enters selectable text;
 /// this pins the case where the pointer never does.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn drag_from_chrome_stays_block_pty() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!(

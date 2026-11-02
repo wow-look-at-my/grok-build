@@ -69,7 +69,7 @@ fn wait_for_stable_gap_layout(harness: &mut PtyHarness) -> (u16, u16, u16) {
 /// The payload is the entry-to-release slice of that single line, not a snap to the text nearest
 /// the press, not a block copy.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn drag_enters_content_from_gap_pty() {
     let content = ContentController::start().await.expect("start content");
     // Copy-on-release (OSC 52) only in flash. Pin it so sibling tests that seed hold/word_select cannot change the behavior if config leaks.

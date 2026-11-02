@@ -15,7 +15,7 @@
 //! This suite covers the auth-to-render pipeline.
 //!
 //! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test settings_locked_row_e2e \
+//! cargo test -p xai-grok-pager-pty-harness --test it settings_locked_row_e2e:: \
 //!   -- --ignored --nocapture
 //! ```
 

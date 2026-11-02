@@ -10,7 +10,7 @@ const GAP_BOTTOM: &str = "GAPROW_OMEGA";
 /// PTY: a drag whose LAST motion lands on the dead blank row between two paragraphs of one message
 /// must not freeze the head.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn drag_over_gap_rows_does_not_freeze_head_pty() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!(

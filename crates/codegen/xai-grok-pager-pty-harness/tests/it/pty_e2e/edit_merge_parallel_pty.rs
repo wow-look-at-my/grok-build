@@ -9,7 +9,7 @@ const FIXTURE: &str = "parallel_fix.py";
 /// PTY: with `collapsed_edit_blocks` enabled, two parallel search_replace calls to the same file in one model turn merge into a single Edit row.
 /// The merged row sums both diffstats, whatever order the completions land in.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test pty_e2e -- --ignored"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn edit_merge_parallel_pty() {
     let content = ContentController::start().await.expect("start content");
     seed_ui_config(&content, "collapsed_edit_blocks = true");

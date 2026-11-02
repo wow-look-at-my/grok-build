@@ -8,7 +8,7 @@ const DONE_SENTINEL: &str = "VERB_GROUP_STREAM_DONE";
 /// label must be on screen while the third turn is still streaming, before the 3-file label or the
 /// final completion exists.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn verb_group_streaming_fold_pty() {
     let content = ContentController::start().await.expect("start content");
     // Pin group_tool_verbs on via the config tier so the test does not depend on the client default

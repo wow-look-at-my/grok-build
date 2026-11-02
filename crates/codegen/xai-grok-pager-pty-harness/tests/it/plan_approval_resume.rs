@@ -5,7 +5,7 @@
 //! The test also runs under plain cargo, which builds the pager on demand:
 //!
 //! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test plan_approval_resume -- --nocapture
+//! cargo test -p xai-grok-pager-pty-harness --test it plan_approval_resume:: -- --nocapture
 //! ```
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

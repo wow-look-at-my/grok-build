@@ -6,7 +6,7 @@ use super::common::*;
 /// It must be handed to `$SHELL -i -c` to word-split; the broken path spawned a program literally named `echo wrap-e2e one two`.
 /// `SHELL` is pinned to `/bin/sh` for determinism.
 #[test]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 fn wrap_single_string_routes_via_shell() {
     let (code, raw) = run_wrap(&["echo wrap-e2e one two"], &[("SHELL", "/bin/sh")]);

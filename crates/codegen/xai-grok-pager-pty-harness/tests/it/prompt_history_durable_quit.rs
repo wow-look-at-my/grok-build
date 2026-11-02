@@ -11,7 +11,7 @@
 //! The deterministic regression catch here is the SIGINT path exiting 0 (pre-fix it was `process::exit(130)`).
 //!
 //! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test prompt_history_durable_quit \
+//! cargo test -p xai-grok-pager-pty-harness --test it prompt_history_durable_quit:: \
 //!   -- --ignored --nocapture
 //! ```
 

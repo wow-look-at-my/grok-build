@@ -104,7 +104,7 @@ fn assert_reaches_model_before_release(
 /// Queue mode: a message typed while a foreground subagent runs reaches the model before the subagent ends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_sends_follow_up_typed_during_a_foreground_subagent() {
     const MARKER: &str = "QUEUE_FG_TASK_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
@@ -129,7 +129,7 @@ async fn queue_mode_sends_follow_up_typed_during_a_foreground_subagent() {
 /// A goal round that waits on a foreground subagent is a gap too: the typed message reaches the model before the subagent ends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn goal_round_sends_follow_up_typed_during_a_foreground_subagent() {
     use xai_grok_pager_pty_harness::{InferenceEndpoint, InferenceRequestMatcher};
     const MARKER: &str = "GOAL_FG_TASK_MARKER_XYZ";
@@ -213,7 +213,7 @@ async fn goal_round_sends_follow_up_typed_during_a_foreground_subagent() {
 /// Queue mode: a message typed while a background subagent runs after the turn ended starts a turn at once.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_sends_follow_up_typed_while_a_background_subagent_runs() {
     const MARKER: &str = "QUEUE_BG_TASK_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
@@ -269,7 +269,7 @@ fn assert_reaches_model(
 /// Queue mode: a follow-up typed while a foreground tool runs goes into the request after that tool.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_folds_follow_up_typed_during_a_tool() {
     const MARKER: &str = "QUEUE_TOOL_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
@@ -331,7 +331,7 @@ async fn queue_mode_folds_follow_up_typed_during_a_tool() {
 /// Queue mode: a follow-up typed while the final answer streams runs as the next turn when that one ends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_sends_follow_up_typed_during_final_answer() {
     const MARKER: &str = "QUEUE_FINAL_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
@@ -362,7 +362,7 @@ async fn queue_mode_sends_follow_up_typed_during_final_answer() {
 /// Queue mode: follow-ups typed during one tool both reach the model with one Enter each.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_delivers_two_follow_ups_typed_during_a_tool() {
     const FIRST: &str = "QUEUE_TWO_FIRST_XYZ";
     const SECOND: &str = "QUEUE_TWO_SECOND_XYZ";
@@ -463,7 +463,7 @@ fn spawn_idle(content: &ContentController) -> PtyHarness {
 /// Queue mode: a message typed while the turn blocks on `wait_commands_or_subagents` does not wait for the task.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_sends_follow_up_typed_during_a_task_wait() {
     const MARKER: &str = "QUEUE_WAIT_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
@@ -482,7 +482,7 @@ async fn queue_mode_sends_follow_up_typed_during_a_task_wait() {
 /// Queue mode: a message typed while the turn blocks on a task-output read with a timeout does not wait for the task.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_sends_follow_up_typed_during_a_task_output_wait() {
     const MARKER: &str = "QUEUE_OUTPUT_WAIT_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");
@@ -501,7 +501,7 @@ async fn queue_mode_sends_follow_up_typed_during_a_task_output_wait() {
 /// Queue mode: a skill invocation typed while a tool runs goes into the request after that tool, expanded.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_folds_skill_typed_during_a_tool() {
     const SKILL_BODY: &str = "QUEUE_SKILL_BODY_XYZ";
     let content = ContentController::start().await.expect("start content");
@@ -579,7 +579,7 @@ async fn queue_mode_folds_skill_typed_during_a_tool() {
 /// Every request is stalled, so some messages land while the model is still answering.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_delivers_every_message_typed_across_a_long_turn() {
     use xai_grok_test_support::{Conversation, MockToolCall, Tool};
     const DONE: &str = "SOAK_TURN_DONE";
@@ -635,7 +635,7 @@ async fn queue_mode_delivers_every_message_typed_across_a_long_turn() {
 /// Queue mode: a slash command typed mid-turn does not hold back the plain message typed after it.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn queue_mode_slash_command_does_not_hold_back_later_text() {
     const MARKER: &str = "QUEUE_AFTER_SLASH_MARKER_XYZ";
     let content = ContentController::start().await.expect("start content");

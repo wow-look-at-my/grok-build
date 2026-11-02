@@ -6,7 +6,7 @@ use super::common::*;
 /// turns must stream live into BOTH panes regardless of which client drives. The leader and viewer must survive the
 /// spawning client's exit.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test leader_pty_e2e -- --ignored --test-threads=1"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it leader_pty_e2e:: -- --ignored --test-threads=1"]
 async fn leader_two_clients_shared_session() {
     // The shared HOME/GROK_HOME hold the sessions AND the explicit leader socket
     // B therefore attaches to the leader A spawned instead of the machine's default one

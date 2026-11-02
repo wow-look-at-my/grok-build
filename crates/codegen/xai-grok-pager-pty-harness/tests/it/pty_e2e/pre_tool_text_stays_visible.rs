@@ -21,7 +21,7 @@ fn quit(harness: &mut PtyHarness) {
 /// Text, a tool call, its result, then more text: the first text shows while the turn runs, after it ends, and after a resume.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn pre_tool_text_survives_turn_and_resume() {
     let content = ContentController::start().await.expect("start content");
     let args = json!({ "command": "true", "description": "no-op" }).to_string();
@@ -104,7 +104,7 @@ async fn pre_tool_text_survives_turn_and_resume() {
 /// The same shape on a turn the harness starts itself: a background command's completion wake.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn pre_tool_text_survives_completion_wake() {
     let content = ContentController::start().await.expect("start content");
     let flag = content.home().join("pre_tool_wake_flag");
@@ -168,7 +168,7 @@ async fn pre_tool_text_survives_completion_wake() {
 /// A turn that calls a tool and writes no text says so on its end marker.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn tool_only_turn_marks_no_message() {
     let content = ContentController::start().await.expect("start content");
     let noop = json!({ "command": "true", "description": "no-op" }).to_string();

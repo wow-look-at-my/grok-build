@@ -35,7 +35,7 @@ fn expect_verdict(content: &ContentController, name: &str, verdict: &serde_json:
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn goal_round_shows_check_and_directive() {
     let content = ContentController::start().await.expect("start content");
     let _first = content.expect_agent_turn("first round", ROUND_ONE);
@@ -122,7 +122,7 @@ async fn goal_round_shows_check_and_directive() {
 /// Every skeptic answers "not refuted", so verification passes and the summarizer runs. Its run has a row after the verifier's.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn passed_verification_shows_summarizer_row() {
     let content = ContentController::start().await.expect("start content");
     let _first = content.expect_agent_turn("first round", ROUND_ONE);
@@ -183,7 +183,7 @@ async fn passed_verification_shows_summarizer_row() {
 /// With the strategist set to fire on the first failed verification, its run has a row after the verifier's.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn failed_verification_shows_strategist_row() {
     let content = ContentController::start().await.expect("start content");
     let _first = content.expect_agent_turn("first round", ROUND_ONE);
@@ -245,7 +245,7 @@ async fn failed_verification_shows_strategist_row() {
 /// A full goal whose round the evaluator calls complete runs the verifier subagents. That run has a row, above the directive its verdict sends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn full_goal_shows_verifier_row() {
     let content = ContentController::start().await.expect("start content");
     let _first = content.expect_agent_turn("first round", ROUND_ONE);
@@ -311,7 +311,7 @@ async fn full_goal_shows_verifier_row() {
 /// A full goal starts with a planner subagent. Its run has a row, so the wait before the first round is accounted for.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn full_goal_shows_planner_row() {
     let content = ContentController::start().await.expect("start content");
     content.set_response("PLANNER_FALLBACK");

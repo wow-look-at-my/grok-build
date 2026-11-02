@@ -6,7 +6,7 @@ use super::common::*;
 /// An inner `grok` reads that variable to trust OSC 52 over SSH (see `run_wrapped_command`).
 /// The parent env pins the var to `0`, so a pass proves the wrap layer overrode the inherited value.
 #[test]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 fn wrap_osc52_sink_env_advertised_through_shell() {
     let (code, raw) = run_wrap(

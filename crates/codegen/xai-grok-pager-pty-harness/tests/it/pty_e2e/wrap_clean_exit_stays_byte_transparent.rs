@@ -6,7 +6,7 @@ use super::common::*;
 /// Blindly blasting resets on exit would be visible here (duplicate disables, and a kitty pop corrupting an enclosing context's keyboard stack).
 /// The mode tracker keeps clean exits byte-for-byte transparent.
 #[test]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 fn wrap_clean_exit_stays_byte_transparent() {
     let (code, raw) = run_wrap(

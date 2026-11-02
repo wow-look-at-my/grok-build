@@ -5,7 +5,7 @@ use super::common::*;
 /// A bare program name that PATH cannot resolve (the alias case, and the old hard-ENOENT failure)
 /// must be handed to `$SHELL`.
 #[test]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 fn wrap_not_found_alias_routes_via_shell_contract() {
     let (_dir, shell) = fake_argv_echo_shell();

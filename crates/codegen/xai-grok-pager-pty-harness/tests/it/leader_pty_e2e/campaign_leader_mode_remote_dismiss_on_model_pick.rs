@@ -5,7 +5,7 @@ use super::common::*;
 /// Only `app::run`'s own seed makes a remote campaign visible to `resolve_dismissable_campaigns`. Without that seed
 /// this test times out in the dismiss phase: the pick persists but no dismissal is recorded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test leader_pty_e2e -- --ignored --test-threads=1"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it leader_pty_e2e:: -- --ignored --test-threads=1"]
 async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
     const CONFIG_MODEL: &str = "config-model";
     const CAMPAIGN_MODEL: &str = "campaign-model";

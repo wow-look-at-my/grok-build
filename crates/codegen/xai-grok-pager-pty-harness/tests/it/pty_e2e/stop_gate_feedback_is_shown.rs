@@ -28,7 +28,7 @@ fn seed_block_once_stop_hook(content: &ContentController) {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn stop_gate_feedback_is_shown_above_the_reply() {
     let content = ContentController::start().await.expect("start content");
     seed_block_once_stop_hook(&content);

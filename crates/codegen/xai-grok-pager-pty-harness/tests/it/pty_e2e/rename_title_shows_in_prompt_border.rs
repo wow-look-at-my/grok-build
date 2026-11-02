@@ -151,7 +151,7 @@ fn submit_rename(harness: &mut PtyHarness, title: &str) {
 /// A manual `/rename` renders the session title inline on the prompt box's top border (info-line dim text treatment).
 /// It is right-aligned before the `╮` corner.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn rename_title_shows_in_prompt_border() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} rename title turn."));
@@ -181,7 +181,7 @@ async fn rename_title_shows_in_prompt_border() {
 /// The manual flag is persisted in `summary.json` (`title_is_manual`) and re-hydrated into `display_name` on resume.
 /// The inverse holds too: a session that was never renamed resumes with a plain top border (auto titles never show on the border).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn rename_title_survives_resume_and_stays_absent_without_rename() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} resume title turn."));
@@ -258,7 +258,7 @@ async fn rename_title_survives_resume_and_stays_absent_without_rename() {
 /// `/rename --auto` clears the prompt-border title.
 /// Followers and the picker converge later when a regenerated auto title is adopted; this test pins the initiating pager's optimistic clear.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn rename_auto_clears_prompt_border_title() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} unpin title turn."));

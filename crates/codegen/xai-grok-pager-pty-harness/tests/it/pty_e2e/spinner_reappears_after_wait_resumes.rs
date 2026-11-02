@@ -10,7 +10,7 @@ const CANCEL_HINT: &str = "Ctrl+c:cancel";
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn spinner_reappears_after_wait_resumes() {
     let content = ContentController::start().await.expect("start content");
     let park_flag = content.home().join("spinner_park_flag");

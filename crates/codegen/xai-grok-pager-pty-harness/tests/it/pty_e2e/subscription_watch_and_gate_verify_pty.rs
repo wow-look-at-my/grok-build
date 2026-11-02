@@ -204,7 +204,7 @@ fn spawn_subscription_session(
 /// unblock the shell must refresh the model catalog with a paid JWT (mock IdP on `:22255`). The
 /// paid-only model id must appear in the `/model` picker, not merely `/v1/models` being called.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn subscription_watch_polls_free_tier_then_goes_dormant_after_upgrade() {
     // Start free-targeted (no paid-only model); swap after upgrade.
     // OIDC mock is started only after free-phase polling so early refresh still connection-refuses (keeps the free watch path hermetic)
@@ -294,7 +294,7 @@ async fn subscription_watch_polls_free_tier_then_goes_dormant_after_upgrade() {
 /// A genuinely-free user gated at startup still gets the paywall, but only after a live subscription check confirmed the block.
 /// The gate is never painted straight from the stale source.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn startup_gate_shows_paywall_for_free_user_after_live_check() {
     let content = ContentController::start().await.expect("start content");
     // Explicit deny and gate copy. An absent allow_access fails open.
@@ -333,7 +333,7 @@ async fn startup_gate_shows_paywall_for_free_user_after_live_check() {
 /// gated settings snapshot reaches the client. The stale snapshot is delivered via the `/new`
 /// settings refresh, the only active `/v1/settings` consumer at that point.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn stale_gate_push_never_flashes_paywall_for_subscribed_user() {
     let content = ContentController::start().await.expect("start content");
     // Live tier: already paid; steady settings allow access.

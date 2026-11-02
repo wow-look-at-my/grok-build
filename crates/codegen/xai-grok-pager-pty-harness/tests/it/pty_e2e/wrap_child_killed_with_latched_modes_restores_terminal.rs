@@ -6,7 +6,7 @@ use super::common::*;
 /// must emit the matching resets. Otherwise the outer terminal is left broken. The PTY hits EOF
 /// with the enables' reset bytes never having arrived.
 #[test]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 fn wrap_child_killed_with_latched_modes_restores_terminal() {
     let (code, raw) = run_wrap(

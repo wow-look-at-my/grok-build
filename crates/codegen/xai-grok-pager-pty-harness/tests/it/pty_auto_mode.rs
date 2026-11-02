@@ -9,7 +9,7 @@
 //! failure (login screen) and still asserts the harness API surface.
 //!
 //! Run with:
-//! `cargo test -p xai-grok-pager-pty-harness --test pty_auto_mode -- --ignored --nocapture`
+//! `cargo test -p xai-grok-pager-pty-harness --test it pty_auto_mode:: -- --ignored --nocapture`
 
 use std::path::PathBuf;
 use std::time::Duration;

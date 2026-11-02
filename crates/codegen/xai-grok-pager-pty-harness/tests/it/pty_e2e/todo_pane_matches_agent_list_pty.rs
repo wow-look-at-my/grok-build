@@ -8,7 +8,7 @@ const DONE_SENTINEL: &str = "TODO_PANE_SYNC_DONE";
 /// the agent reads back in its next request. This happens after the model writes its todo
 /// list twice.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn todo_pane_matches_agent_list_pty() {
     let content = ContentController::start().await.expect("start content");
     let create = json!({

@@ -1,7 +1,7 @@
 //! Relay-mangled X10 mouse reports must not type into the composer, and refocus must re-assert mouse capture.
 //!
 //! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test x10_mouse_leak -- --ignored --nocapture
+//! cargo test -p xai-grok-pager-pty-harness --test it x10_mouse_leak:: -- --ignored --nocapture
 //! ```
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

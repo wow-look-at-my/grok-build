@@ -8,7 +8,7 @@ const PLAN_LINES: usize = 120;
 /// scroll the plan. Terminal.app leaves line-gap pixels unpainted under a foreground-only `█`,
 /// striping the thumb with dark bars.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn plan_scrollbar_grab_zone_pty() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} first turn done."));

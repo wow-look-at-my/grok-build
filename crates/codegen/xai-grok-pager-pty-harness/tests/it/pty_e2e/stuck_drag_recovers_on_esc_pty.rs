@@ -30,7 +30,7 @@ fn differing_cells(base: &[(Option<String>, bool)], other: &[(Option<String>, bo
 /// later motion can't keep extending it. Without the recovery guard the post-Esc motion re-extends
 /// the latched selection and the final assert fails.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn stuck_drag_recovers_on_esc_pty() {
     let content = ContentController::start().await.expect("start content");
 

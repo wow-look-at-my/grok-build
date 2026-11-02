@@ -87,7 +87,7 @@ fn write_asciicast(path: &Path, cols: u16, rows: u16, events: &[(f64, String)]) 
 /// PTY: search_replace on a mid-file `"""` fixture; assert the Edit block's target line restyles in place when hunk-only HL upgrades to file-scoped.
 /// Also dumps asciicast and HTML demo artifacts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn edit_hl_inplace_refresh_pty() {
     fs::create_dir_all(ARTIFACT_DIR).expect("artifact dir");
     let content = ContentController::start().await.expect("start content");

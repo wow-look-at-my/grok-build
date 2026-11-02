@@ -8,7 +8,7 @@ const MARKER: &str = "ENTER_DELIVER_MARKER_XYZ";
 /// The queued row must still reach the model at once, not when the command ends.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn empty_enter_delivers_queue_while_a_tool_runs() {
     let content = ContentController::start().await.expect("start content");
     let hold_args = json!({

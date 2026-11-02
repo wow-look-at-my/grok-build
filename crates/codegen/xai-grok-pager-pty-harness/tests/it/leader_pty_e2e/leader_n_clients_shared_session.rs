@@ -6,7 +6,7 @@ use super::common::*;
 /// `leader_two_clients_shared_session`, so that test must not be deleted as redundant. Only it drives a turn from a
 /// viewer back to the driver, and only it checks that every turn of a multi-turn scrollback appears exactly once.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test leader_pty_e2e -- --ignored --test-threads=1"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it leader_pty_e2e:: -- --ignored --test-threads=1"]
 async fn leader_n_clients_shared_session() {
     // One driver plus VIEWERS viewers; bump to scale the live fan-out
     // Keep it small: worker_threads above and the per-viewer survival pump below are sized for it, so raise them together if you scale VIEWERS up

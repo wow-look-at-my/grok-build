@@ -10,7 +10,7 @@
 //! A seeded opted-out OAuth entry is the active auth (`XAI_API_KEY` removed) and the rollout is forced on via `GROK_PRIVACY_NOTICE_ROLLOUT=1`.
 //!
 //! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test privacy_banner_e2e \
+//! cargo test -p xai-grok-pager-pty-harness --test it privacy_banner_e2e:: \
 //!   -- --ignored --nocapture
 //! ```
 

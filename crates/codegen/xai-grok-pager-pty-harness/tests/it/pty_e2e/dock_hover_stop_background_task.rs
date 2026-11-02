@@ -3,7 +3,7 @@ use super::common::*;
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_smoke Cargo test with --ignored"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it pty_e2e_smoke:: -- --ignored"]
 async fn dock_hover_reveals_and_dispatches_stop() {
     let content = ContentController::start().await.expect("start content");
     content

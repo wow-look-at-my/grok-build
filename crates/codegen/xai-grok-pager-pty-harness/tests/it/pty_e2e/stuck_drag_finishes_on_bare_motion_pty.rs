@@ -30,7 +30,7 @@ fn differing_cells(base: &[(Option<String>, bool)], other: &[(Option<String>, bo
 /// PTY: a drag whose release was lost (xtermjs/xterm.js#4781) must be finished by the first bare-motion report (`<35`).
 /// The copy lands and the highlight freezes at the drag's end instead of following the pointer forever.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn stuck_drag_finishes_on_bare_motion_pty() {
     let content = ContentController::start().await.expect("start content");
 

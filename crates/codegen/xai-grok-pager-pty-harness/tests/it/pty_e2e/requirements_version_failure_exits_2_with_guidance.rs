@@ -5,7 +5,7 @@ use super::common::*;
 /// `validate_requirements` runs at the very top of `main`, before the runtime/TUI, so fd 2 is still the real terminal.
 /// An invalid `fail_closed` version_override must abort startup with the update/admin guidance and exit 2, distinct from the gate's exit 1.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn requirements_version_failure_exits_2_with_guidance() {
     let sandbox = xai_grok_test_support::TestSandbox::new();
     let home_path = sandbox.grok_home();

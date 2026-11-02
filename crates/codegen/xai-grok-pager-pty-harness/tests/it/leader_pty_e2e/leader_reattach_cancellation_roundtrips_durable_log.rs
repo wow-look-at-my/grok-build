@@ -6,7 +6,7 @@ use super::common::*;
 /// the cancelled transcript through the same leader and land clean. It must still hold that transcript after A, the
 /// original driver, exits. C attaches *before* A is dropped, because `PtyHarness` Drop SIGKILLs the child.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test leader_pty_e2e -- --ignored --test-threads=1"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it leader_pty_e2e:: -- --ignored --test-threads=1"]
 async fn leader_reattach_cancellation_roundtrips_durable_log() {
     let cluster = LeaderCluster::start(DEFAULT_ROWS, DEFAULT_COLS)
         .await

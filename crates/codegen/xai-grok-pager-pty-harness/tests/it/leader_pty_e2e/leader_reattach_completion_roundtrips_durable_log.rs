@@ -6,7 +6,7 @@ use super::common::*;
 /// fails right there, before any replay. It must land clean: running, no panic, and not stranded on the active-turn
 /// "Waiting" spinner.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test leader_pty_e2e -- --ignored --test-threads=1"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it leader_pty_e2e:: -- --ignored --test-threads=1"]
 async fn leader_reattach_completion_roundtrips_durable_log() {
     let cluster = LeaderCluster::start(DEFAULT_ROWS, DEFAULT_COLS)
         .await

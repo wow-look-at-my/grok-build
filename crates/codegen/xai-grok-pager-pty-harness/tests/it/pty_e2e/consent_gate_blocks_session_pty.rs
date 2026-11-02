@@ -49,7 +49,7 @@ fn spawn_serving(
 /// Only the `session_startup_allowed()` chokepoint stops it.
 /// The sibling folder-trust test guards the same leak for its own gate.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn consent_gate_renders_and_blocks_new_session() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} past the notice."));
@@ -80,7 +80,7 @@ async fn consent_gate_renders_and_blocks_new_session() {
 
 /// No served notice means no gate, which is the fail-open path every launch without settings takes: the client must stay fully usable.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn absent_consent_gate_shows_no_notice() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} no notice."));
@@ -112,7 +112,7 @@ async fn absent_consent_gate_shows_no_notice() {
 
 /// Answer once and the same notice never asks again; a bumped version asks again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn an_answered_notice_does_not_ask_again() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} past the notice."));

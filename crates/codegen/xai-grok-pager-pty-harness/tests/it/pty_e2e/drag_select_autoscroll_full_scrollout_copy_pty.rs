@@ -15,7 +15,7 @@ const FILLER_ROWS: usize = 120;
 /// The copy must still contain the anchor line and the block's late lines. Exercises the drag-start
 /// `content_width` snapshot: at mouse-up time `visible_blocks` no longer has the anchor block.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn drag_select_autoscroll_full_scrollout_copy_pty() {
     let content = ContentController::start().await.expect("start content");
     // Turn 1: a three-row anchor message (markdown hard breaks keep one row per source line)

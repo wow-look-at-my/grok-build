@@ -31,7 +31,7 @@ fn spawn_with_hints(content: &ContentController) -> PtyHarness {
 /// Double-clicking scrollback while Text selection is fold/nav (`flash`) shows an ephemeral tip naming the settings path and the Ctrl+Y accept chord.
 /// Pressing Ctrl+Y while the tip is up flips the setting to `word_select` and persists it to config.toml.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 async fn word_select_tip_shows_and_ctrl_y_accepts() {
     let content = ContentController::start().await.expect("start content");
@@ -143,7 +143,7 @@ async fn word_select_tip_shows_and_ctrl_y_accepts() {
 
 /// Already on `word_select`: a double-click selects a word and the tip must not fire.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 async fn word_select_tip_skipped_when_mode_is_word_select() {
     let content = ContentController::start().await.expect("start content");
@@ -196,7 +196,7 @@ async fn word_select_tip_skipped_when_mode_is_word_select() {
 
 /// With the per-tip gate off (`[ui.contextual_hints].word_select = false`), the tip must not show.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
 async fn word_select_tip_skipped_when_contextual_hint_disabled() {
     let content = ContentController::start().await.expect("start content");

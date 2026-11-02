@@ -1,5 +1,5 @@
 //! PTY e2e tests for the runtime XTVERSION probe, run with:
-//! `cargo test -p xai-grok-pager-pty-harness --test pty_xtversion -- --ignored --nocapture`
+//! `cargo test -p xai-grok-pager-pty-harness --test it pty_xtversion:: -- --ignored --nocapture`
 
 use std::time::Duration;
 

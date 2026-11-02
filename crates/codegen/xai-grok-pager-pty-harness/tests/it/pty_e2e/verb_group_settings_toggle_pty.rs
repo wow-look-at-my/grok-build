@@ -73,7 +73,7 @@ fn toggle_group_tool_calls(harness: &mut PtyHarness, want_on: bool) {
 /// OFF unfolds an existing "Read 3 files" group into individual Read rows immediately, no `/new`
 /// needed. The toggle path must invalidate cached entry heights. Turning it back ON refolds them.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "PTY e2e; run the owning pty_e2e_* Cargo test with --ignored (see Cargo.toml)"]
+#[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 async fn verb_group_settings_toggle_pty() {
     let content = ContentController::start().await.expect("start content");
     // Pin ON via the CONFIG tier, not the env var. An env pin could not be overridden by the modal's
