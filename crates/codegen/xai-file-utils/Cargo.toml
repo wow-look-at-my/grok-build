@@ -9,19 +9,22 @@ authors = ["xAI"]
 [dependencies]
 anyhow = { workspace = true }
 base64.workspace = true
-dunce = { workspace = true }
 xai-circuit-breaker = { workspace = true }
 xai-grok-version = { workspace = true }
+<<<<<<< HEAD
 aws-sdk-s3 = { version = "1", default-features = false, features = [
     "rt-tokio",
 ] }
+=======
+bytes = { workspace = true }
+>>>>>>> origin/master
 futures = { workspace = true }
+hmac = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
-indexmap = { workspace = true }
 xai-dirs = { workspace = true }
 xai-grok-net = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time", "io-util", "fs"] }
@@ -29,6 +32,11 @@ sha2 = { workspace = true, features = ["force-soft"] }
 xai-grok-auth = { path = "../xai-grok-auth" }
 prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" }
 async-compression = { workspace = true, features = ["tokio"] }
+<<<<<<< HEAD
+=======
+gcloud-storage = { workspace = true }
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
+>>>>>>> origin/master
 reflink-copy = { workspace = true }
 xai-grok-otel = { workspace = true }
 tokio-stream = { workspace = true }
@@ -43,10 +51,7 @@ default-bazel = []
 [dev-dependencies]
 tempfile = { workspace = true }
 axum = { workspace = true, features = ["multipart"] }
-axum-server = { workspace = true, features = ["tls-rustls"] }
-rcgen = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "net", "time"] }
-xai-test-utils = { workspace = true }
 filetime = { workspace = true }
 tracing-subscriber = { workspace = true }
 xai-grok-net = { workspace = true, features = ["test-loopback-session"] }
