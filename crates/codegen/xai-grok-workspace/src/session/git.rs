@@ -571,110 +571,167 @@ fn status_entries(
     include_untracked: bool,
     ignore_submodules: bool,
 ) -> Result<std::collections::BTreeMap<String, PathStatus>> {
-    use gix::status::index_worktree::Item as WorktreeItem;
-    use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
     // An unborn HEAD, or a HEAD whose objects are missing, compares against the empty tree.
     let head_tree = repo
         .head_tree_id_or_empty()
         .map(gix::Id::detach)
         .unwrap_or_else(|_| gix::ObjectId::empty_tree(repo.object_hash()));
-    let submodules = if ignore_submodules {
-        gix::status::Submodule::Given {
-            ignore: gix::submodule::config::Ignore::All,
-            check_dirty: false,
-        }
-    } else {
-        gix::status::Submodule::AsConfigured { check_dirty: false }
-    };
-    let platform = repo
-        .status(gix::progress::Discard)?
-        .head_tree(head_tree)
-        .tree_index_track_renames(gix::status::tree_index::TrackRenames::Disabled)
-        .index_worktree_rewrites(None)
-        .index_worktree_submodules(submodules)
-        .untracked_files(if include_untracked {
-            gix::status::UntrackedFiles::Files
-        } else {
-            gix::status::UntrackedFiles::None
-        });
-    let platform = xai_gix_status::with_budgeted_thread_limit(platform);
+    let index = crate::git_repo::index(repo)?;
     let mut entries: std::collections::BTreeMap<String, PathStatus> = Default::default();
-    for item in platform.into_iter(Vec::<gix::bstr::BString>::new())? {
-        match item? {
-            gix::status::Item::TreeIndex(change) => {
-                let (location, change_type, modes) = match &change {
-                    gix::diff::index::Change::Addition {
-                        location,
-                        entry_mode,
-                        ..
-                    } => (location, ChangeType::Create, [*entry_mode, *entry_mode]),
-                    gix::diff::index::Change::Deletion {
-                        location,
-                        entry_mode,
-                        ..
-                    } => (location, ChangeType::Delete, [*entry_mode, *entry_mode]),
-                    gix::diff::index::Change::Modification {
-                        location,
-                        previous_entry_mode,
-                        entry_mode,
-                        ..
-                    } => {
-                        let change_type =
-                            if mode_kind(*previous_entry_mode) == mode_kind(*entry_mode) {
-                                ChangeType::Edit
-                            } else {
-                                ChangeType::Typechange
-                            };
-                        (location, change_type, [*previous_entry_mode, *entry_mode])
-                    }
-                    gix::diff::index::Change::Rewrite { location, .. } => (
-                        location,
-                        ChangeType::Rename,
-                        [gix::index::entry::Mode::FILE; 2],
-                    ),
-                };
-                if ignore_submodules
-                    && modes
-                        .iter()
-                        .any(|m| m.contains(gix::index::entry::Mode::COMMIT))
-                {
-                    continue;
+
+    repo.tree_index_status(
+        &head_tree,
+        &index,
+        None,
+        gix::status::tree_index::TrackRenames::Disabled,
+        |change, _, _| {
+            use gix::diff::index::ChangeRef;
+            let (location, change_type, modes) = match &change {
+                ChangeRef::Addition {
+                    location,
+                    entry_mode,
+                    ..
+                } => (location, ChangeType::Create, [*entry_mode, *entry_mode]),
+                ChangeRef::Deletion {
+                    location,
+                    entry_mode,
+                    ..
+                } => (location, ChangeType::Delete, [*entry_mode, *entry_mode]),
+                ChangeRef::Modification {
+                    location,
+                    previous_entry_mode,
+                    entry_mode,
+                    ..
+                } => {
+                    let change_type = if mode_kind(*previous_entry_mode) == mode_kind(*entry_mode) {
+                        ChangeType::Edit
+                    } else {
+                        ChangeType::Typechange
+                    };
+                    (location, change_type, [*previous_entry_mode, *entry_mode])
                 }
+                ChangeRef::Rewrite { location, .. } => (
+                    location,
+                    ChangeType::Rename,
+                    [gix::index::entry::Mode::FILE; 2],
+                ),
+            };
+            let gitlink = modes
+                .iter()
+                .any(|m| m.contains(gix::index::entry::Mode::COMMIT));
+            if !(ignore_submodules && gitlink) {
                 entries.entry(location.to_string()).or_default().staged = Some(change_type);
             }
-            gix::status::Item::IndexWorktree(item) => {
-                let (path, change_type) = match &item {
-                    WorktreeItem::Modification {
-                        rela_path, status, ..
-                    } => {
-                        let change_type = match status {
-                            EntryStatus::Change(Change::Removed) => ChangeType::Delete,
-                            EntryStatus::Change(Change::Type { .. }) => ChangeType::Typechange,
-                            EntryStatus::Change(_) => ChangeType::Edit,
-                            EntryStatus::IntentToAdd => ChangeType::Untracked,
-                            EntryStatus::Conflict { .. } => {
-                                entries.entry(rela_path.to_string()).or_default();
-                                continue;
-                            }
-                            EntryStatus::NeedsUpdate(_) => continue,
-                        };
-                        (rela_path.to_string(), change_type)
-                    }
-                    WorktreeItem::DirectoryContents { entry, .. } => {
-                        if entry.status != gix::dir::entry::Status::Untracked {
-                            continue;
-                        }
-                        (entry.rela_path.to_string(), ChangeType::Untracked)
-                    }
-                    WorktreeItem::Rewrite { dirwalk_entry, .. } => {
-                        (dirwalk_entry.rela_path.to_string(), ChangeType::Rename)
-                    }
-                };
-                entries.entry(path).or_default().unstaged = Some(change_type);
-            }
+            Ok::<_, std::convert::Infallible>(gix::diff::index::Action::Continue(()))
+        },
+    )?;
+
+    let dirwalk_options = if include_untracked {
+        Some(
+            repo.dirwalk_options()?
+                .emit_untracked(gix::dir::walk::EmissionMode::Matching),
+        )
+    } else {
+        None
+    };
+    let options = gix::status::index_worktree::Options {
+        sorting: None,
+        dirwalk_options,
+        rewrites: None,
+        thread_limit: Some(xai_gix_status::compute_gix_status_thread_limit()),
+    };
+    // The built-in submodule status reads `.gitmodules`, which can mean peeling HEAD.
+    // When that fails, gitlinks report no change, the same as with submodules ignored.
+    let builtin = (!ignore_submodules)
+        .then(|| {
+            gix::status::index_worktree::BuiltinSubmoduleStatus::new(
+                repo.clone().into_sync(),
+                gix::status::Submodule::AsConfigured { check_dirty: false },
+            )
+            .ok()
+        })
+        .flatten();
+    match builtin {
+        Some(submodules) => {
+            worktree_status_entries(repo, &index, submodules, options, &mut entries)?
         }
+        None => worktree_status_entries(repo, &index, NoSubmoduleStatus, options, &mut entries)?,
     }
     Ok(entries)
+}
+/// A submodule status that never reports a change.
+#[derive(Clone)]
+struct NoSubmoduleStatus;
+impl gix::status::plumbing::index_as_worktree::traits::SubmoduleStatus for NoSubmoduleStatus {
+    type Output = ();
+    type Error = std::convert::Infallible;
+    fn status(
+        &mut self,
+        _entry: &gix::index::Entry,
+        _rela_path: &gix::bstr::BStr,
+    ) -> Result<Option<()>, Self::Error> {
+        Ok(None)
+    }
+}
+/// Record the index-to-worktree side of every changed path into `entries`.
+fn worktree_status_entries<S>(
+    repo: &gix::Repository,
+    index: &gix::index::State,
+    submodules: S,
+    options: gix::status::index_worktree::Options,
+    entries: &mut std::collections::BTreeMap<String, PathStatus>,
+) -> Result<()>
+where
+    S: gix::status::plumbing::index_as_worktree::traits::SubmoduleStatus + Send + Clone,
+    S::Output: Send + Clone,
+{
+    use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
+    use gix::status::plumbing::index_as_worktree_with_renames::{Entry, Recorder};
+    let mut recorder = Recorder {
+        records: Vec::new(),
+    };
+    let interrupt = std::sync::atomic::AtomicBool::new(false);
+    repo.index_worktree_status(
+        index,
+        Vec::<gix::bstr::BString>::new(),
+        &mut recorder,
+        gix::status::plumbing::index_as_worktree::traits::FastEq,
+        submodules,
+        &mut gix::progress::Discard,
+        &interrupt,
+        options,
+    )?;
+    for record in recorder.records {
+        let (path, change_type) = match &record {
+            Entry::Modification {
+                rela_path, status, ..
+            } => {
+                let change_type = match status {
+                    EntryStatus::Change(Change::Removed) => ChangeType::Delete,
+                    EntryStatus::Change(Change::Type { .. }) => ChangeType::Typechange,
+                    EntryStatus::Change(_) => ChangeType::Edit,
+                    EntryStatus::IntentToAdd => ChangeType::Untracked,
+                    EntryStatus::Conflict { .. } => {
+                        entries.entry(rela_path.to_string()).or_default();
+                        continue;
+                    }
+                    EntryStatus::NeedsUpdate(_) => continue,
+                };
+                (rela_path.to_string(), change_type)
+            }
+            Entry::DirectoryContents { entry, .. } => {
+                if entry.status != gix::dir::entry::Status::Untracked {
+                    continue;
+                }
+                (entry.rela_path.to_string(), ChangeType::Untracked)
+            }
+            Entry::Rewrite { dirwalk_entry, .. } => {
+                (dirwalk_entry.rela_path.to_string(), ChangeType::Rename)
+            }
+        };
+        entries.entry(path).or_default().unstaged = Some(change_type);
+    }
+    Ok(())
 }
 /// A git reference for diffing: either a working state (Index/Workdir) or a commit-ish.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3701,7 +3758,7 @@ pub async fn stage_content(git_root: &Path, path: &str, content: &str) -> Result
         };
         use gix::index::entry::{Flags, Mode, Stage, Stat};
         let blob_oid = repo.write_blob(content.as_bytes())?.detach();
-        let snapshot = repo.index_or_empty()?;
+        let snapshot = crate::git_repo::index(&repo)?;
         let mut index: gix::index::File = (**snapshot).clone();
         let rela_path: &gix::bstr::BStr = relative_path.as_str().into();
         // A zero stat makes git re-read the worktree file instead of trusting the cache.

@@ -128,6 +128,9 @@ fn worktree_line_stats(
         .to_path_buf();
     let platform = repo
         .status(gix::progress::Discard)?
+        .index(gix::worktree::IndexPersistedOrInMemory::Persisted(
+            xai_grok_workspace::git_repo::index(repo)?,
+        ))
         .head_tree(head_tree)
         .tree_index_track_renames(gix::status::tree_index::TrackRenames::Disabled)
         .index_worktree_rewrites(None)

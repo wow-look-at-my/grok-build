@@ -1092,14 +1092,14 @@ fn test_parse_porcelain_v2_rename() {
     ));
 }
 
-/// Split index makes libgit2's status fail, so `status()` must fall back to the CLI.
+/// `status()` reads a split index, whether through gix or through the CLI fallback.
 /// Skipped under Bazel sandbox tests where the `git` CLI is unavailable (set `BAZEL_TEST=1` to skip; cargo runs the test normally).
 #[tokio::test]
 #[cfg_attr(
     not(unix),
     ignore = "test invokes git CLI which is not always available"
 )]
-async fn test_status_with_split_index_falls_back_to_cli() {
+async fn test_status_with_split_index() {
     if std::env::var("BAZEL_TEST").is_ok() {
         return;
     }
@@ -1224,12 +1224,12 @@ async fn test_status_double_failure_preserves_original_error() {
     }
 
     let result = status(tmp.path(), true, true, false, false).await;
-    assert!(result.is_err(), "expected both libgit2 and CLI to fail");
+    assert!(result.is_err(), "expected both gix and CLI to fail");
 
     let err_msg = result.unwrap_err().to_string();
     assert!(
-        err_msg.contains("link") || err_msg.contains("libgit2") || err_msg.contains("extension"),
-        "double-failure error should mention original libgit2 cause, got: {err_msg}"
+        err_msg.contains("link") || err_msg.contains("gix") || err_msg.contains("extension"),
+        "double-failure error should mention original gix cause, got: {err_msg}"
     );
 }
 

@@ -136,6 +136,34 @@ pub fn common_dir(repo: &gix::Repository) -> PathBuf {
     canonical(repo.common_dir())
 }
 
+/// The index, or an empty one when the index file does not exist.
+/// gix reads a missing `sharedindex.*` of a split index as a missing index, and gives an empty one.
+/// This function fails in that case, because an empty index there is a false status.
+pub fn index(repo: &gix::Repository) -> anyhow::Result<gix::worktree::Index> {
+    if repo.index_path().exists() {
+        let file = repo.open_index().map_err(|err| {
+            let path = repo.index_path();
+            let missing = matches!(
+                &err,
+                gix::worktree::open_index::Error::IndexFile(gix::index::file::init::Error::Io(io))
+                    if io.kind() == std::io::ErrorKind::NotFound
+            );
+            // The index file exists, so a missing file is the shared index its link extension names.
+            if missing {
+                anyhow::Error::new(err).context(format!(
+                    "the index at {} links a shared index file that does not exist",
+                    path.display()
+                ))
+            } else {
+                anyhow::Error::new(err).context(format!("read the index at {}", path.display()))
+            }
+        })?;
+        Ok(gix::worktree::Index::new(gix::fs::FileSnapshot::new(file)))
+    } else {
+        Ok(repo.index_or_empty()?)
+    }
+}
+
 /// Whether `repo` is a linked worktree.
 pub fn is_linked_worktree(repo: &gix::Repository) -> bool {
     git_dir(repo) != common_dir(repo)
