@@ -20,6 +20,18 @@ const AMZ_SECURITY_TOKEN: &str = "x-amz-security-token";
 
 type TimeoutKey = (Option<Duration>, Option<Duration>);
 
+/// The boxed error the SDK's connector error carries.
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+fn boxed_message(message: impl Into<String>) -> BoxError {
+    let message: String = message.into();
+    message.into()
+}
+
+fn boxed_error(error: impl std::error::Error + Send + Sync + 'static) -> BoxError {
+    Box::new(error)
+}
+
 /// An SDK `HttpClient` that sends through `xai_grok_net`.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct NetSmithyClient {
@@ -70,10 +82,8 @@ struct BuildFailed(Arc<String>);
 
 impl HttpConnector for BuildFailed {
     fn call(&self, _request: HttpRequest) -> HttpConnectorFuture {
-        let msg = self.0.clone();
-        HttpConnectorFuture::ready(Err(ConnectorError::user(
-            format!("build the S3 HTTP client: {msg}").into(),
-        )))
+        let err = boxed_message(format!("build the S3 HTTP client: {}", self.0));
+        HttpConnectorFuture::ready(Err(ConnectorError::user(err)))
     }
 }
 
@@ -110,14 +120,16 @@ async fn send(
     client: &xai_grok_net::HttpClient,
     mut request: HttpRequest,
 ) -> Result<HttpResponse, ConnectorError> {
-    let user = |e: String| ConnectorError::user(e.into());
-    let method =
-        Method::from_bytes(request.method().as_bytes()).map_err(|e| user(e.to_string()))?;
-    let url = Url::parse(request.uri()).map_err(|e| user(format!("S3 request URL: {e}")))?;
+    let method = Method::from_bytes(request.method().as_bytes())
+        .map_err(|e| ConnectorError::user(boxed_message(e.to_string())))?;
+    let url = Url::parse(&request.uri().to_string())
+        .map_err(|e| ConnectorError::user(boxed_message(format!("S3 request URL: {e}"))))?;
     let mut pairs = Vec::new();
     for (name, value) in request.headers() {
-        let name = HeaderName::from_bytes(name.as_bytes()).map_err(|e| user(e.to_string()))?;
-        let value = HeaderValue::from_str(value).map_err(|e| user(e.to_string()))?;
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|e| ConnectorError::user(boxed_message(e.to_string())))?;
+        let value = HeaderValue::from_bytes(value.as_bytes())
+            .map_err(|e| ConnectorError::user(boxed_message(e.to_string())))?;
         pairs.push((name, value));
     }
     let (credential, plain) = split_headers(pairs);
@@ -125,7 +137,7 @@ async fn send(
     let body = request.take_body();
     let body = match body.bytes() {
         Some(bytes) => xai_grok_net::Body::from(bytes.to_vec()),
-        None => xai_grok_net::Body::wrap(body),
+        None => xai_grok_net::Body::wrap_stream(http_body_util::BodyExt::into_data_stream(body)),
     };
 
     let response = client
@@ -136,21 +148,21 @@ async fn send(
         .await
         .map_err(connector_error)?;
 
-    let response: http::Response<xai_grok_net::Body> = response.into();
+    let response = http::Response::<xai_grok_net::Body>::from(response);
     let response = response.map(SdkBody::from_body_1_x);
-    HttpResponse::try_from(response).map_err(|e| ConnectorError::other(e.into(), None))
+    HttpResponse::try_from(response).map_err(|e| ConnectorError::other(e, None))
 }
 
 fn connector_error(e: xai_grok_net::Error) -> ConnectorError {
     if e.auth_refusal().is_some() {
         // A refusal is the caller's error: nothing was sent and a retry cannot help.
-        ConnectorError::user(Box::new(e))
+        ConnectorError::user(boxed_error(e))
     } else if e.is_timeout() {
-        ConnectorError::timeout(Box::new(e))
+        ConnectorError::timeout(boxed_error(e))
     } else if e.is_connect() {
-        ConnectorError::io(Box::new(e))
+        ConnectorError::io(boxed_error(e))
     } else {
-        ConnectorError::other(Box::new(e), None)
+        ConnectorError::other(boxed_error(e), None)
     }
 }
 

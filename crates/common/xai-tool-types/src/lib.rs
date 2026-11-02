@@ -1,6 +1,5 @@
 #![allow(clippy::expect_used)]
 // lib.rs holds the lib code.
-
 #![allow(clippy::unwrap_used)]
 
 //! Canonical, extensible tool types.

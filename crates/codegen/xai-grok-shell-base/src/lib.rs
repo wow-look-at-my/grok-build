@@ -1,6 +1,5 @@
 #![allow(clippy::cast_possible_truncation)]
 // lib.rs holds the lib code.
-
 #![allow(clippy::cast_possible_wrap)] // Hits predate the gate
 #![allow(clippy::cast_precision_loss)] // Hits predate the gate
 //! Foundation modules shared by the grok shell crate family.

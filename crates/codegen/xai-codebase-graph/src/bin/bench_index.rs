@@ -1,6 +1,5 @@
 #![allow(clippy::cast_precision_loss)]
 // bench_index.rs holds the bench index code.
-
 #![allow(clippy::expect_used)]
 
 //! Benchmark binary for index building.
