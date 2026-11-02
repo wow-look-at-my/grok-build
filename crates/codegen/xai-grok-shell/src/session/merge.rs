@@ -238,7 +238,7 @@ pub(crate) async fn fetch_lanes(
         && !local.iter().any(|s| s.info.id.0.as_ref() == id)
     {
         let id = id.to_string();
-        if let Ok(Some(summary)) = tokio::task::spawn_blocking(move || {
+        if let Ok(Some(summary)) = xai_spawn::spawn_blocking(move || {
             crate::session::persistence::find_summary_by_session_id(&id)
         })
         .await

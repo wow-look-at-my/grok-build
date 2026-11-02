@@ -28,7 +28,7 @@ impl MvpAgent {
 // Detached by design: the warm state is process-global, not session state,
 // and the dial is PREWARM_TIMEOUT-bounded.
 pub(super) fn spawn_sampler_transport_prewarm(base_url: &str) {
-    tokio::spawn(prewarm_and_record(base_url.to_owned()));
+    xai_spawn::spawn(prewarm_and_record(base_url.to_owned()));
 }
 
 fn prewarm_base_url_if_changed(already_warmed: &str, resolved: &str) -> Option<String> {

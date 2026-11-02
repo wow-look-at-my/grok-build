@@ -25,7 +25,7 @@ impl LoopbackServer {
             .await
             .with_context(|| format!("bind {name}"))?;
         let addr = listener.local_addr().context("local_addr")?;
-        let task = AbortOnDropHandle::new(tokio::spawn(async move {
+        let task = AbortOnDropHandle::new(xai_spawn::spawn(async move {
             if let Err(error) = axum::serve(listener, app).await {
                 tracing::error!(%error, name, "loopback server stopped serving");
             }

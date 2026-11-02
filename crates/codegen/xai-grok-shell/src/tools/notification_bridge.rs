@@ -195,7 +195,7 @@ pub(crate) fn spawn_notification_bridge(
     config: NotificationBridgeConfig,
 ) -> ToolNotificationHandle {
     let (handle, mut rx) = ToolNotificationHandle::acknowledged_channel();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let mut offsets: HashMap<String, usize> = HashMap::new();
         while let Some(delivery) = rx.recv().await {
             let acknowledgement = delivery.acknowledgement;

@@ -179,7 +179,7 @@ pub(super) async fn clipboard_probe_stage(
         image: None,
         message: None,
     };
-    match tokio::time::timeout(deadline, tokio::task::spawn_blocking(work)).await {
+    match tokio::time::timeout(deadline, xai_spawn::spawn_blocking(work)).await {
         Ok(Ok(stage)) => stage,
         Ok(Err(join_error)) => {
             tracing::warn!(error = %join_error, "clipboard attachment probe task failed");
@@ -1333,7 +1333,7 @@ pub(crate) async fn persist_setting(
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("respect_manual_folds", "Bool", &value));
             };
-            tokio::task::spawn_blocking(move || crate::appearance::persist_respect_manual_folds(
+            xai_spawn::spawn_blocking(move || crate::appearance::persist_respect_manual_folds(
                     b,
                 ))
                 .await
@@ -1650,7 +1650,7 @@ pub(super) fn persist_hint(
 ) {
     tasks
         .spawn(async move {
-            match tokio::task::spawn_blocking(move || crate::config_toml_edit::set_hint(
+            match xai_spawn::spawn_blocking(move || crate::config_toml_edit::set_hint(
                     key,
                     value,
                 ))

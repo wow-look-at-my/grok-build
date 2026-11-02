@@ -66,7 +66,7 @@ where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    let join = tokio::task::spawn_blocking(work);
+    let join = xai_spawn::spawn_blocking(work);
     let mut guard = BootstrapCancelGuard::arm(cancel.clone());
     tokio::pin!(join);
     let result = tokio::select! {
@@ -386,7 +386,7 @@ async fn spawn_agent_thread_direct(
             keepalive = Some(agent_rc.clone());
 
             let gw_rx = AcpGatewayReceiver::new(channel.rx, agent_rc.clone()).with_tracing(true);
-            tokio::task::spawn_local(gw_rx.run());
+            xai_spawn::spawn_local(gw_rx.run());
             let _skills_watcher = AbortOnDropHandle::new(spawn_skills_file_watcher(
                 agent_rc.clone(),
                 skills_paths,
@@ -472,7 +472,7 @@ fn spawn_skills_file_watcher(
     // Resolve the workspace at call time; the blocking pool may run this after cwd changes.
     let cwd = std::env::current_dir().unwrap_or_default();
     let workspace_user_dir = xai_grok_agent::prompt::workspace_user::optional_workspace_user_dir();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         // Blocking pool with a shutdown cancel, so a slow filesystem cannot wedge teardown.
         let start_result = run_cancellable_blocking(cancel.clone(), move || {
             // Plain span, not instrumentation::timer, which would misattribute this off-path walk to startup latency.

@@ -48,7 +48,7 @@ async fn request_plan_approval_issues_reverse_request_and_clears_flag() {
             let (actor, mut gateway_rx) = build_actor().await;
 
             // Stand in for the pager: answer the exit_plan_mode reverse-request with "approved"; ack the fire-and-forget pending broadcasts
-            let responder = tokio::task::spawn_local(async move {
+            let responder = xai_spawn::spawn_local(async move {
                 let mut seen_method = None;
                 let mut seen_session = None;
                 while let Some(msg) = gateway_rx.recv().await {
@@ -105,7 +105,7 @@ async fn request_plan_approval_clears_flag_on_request_changes() {
         .run_until(async {
             let (actor, mut gateway_rx) = build_actor().await;
 
-            let responder = tokio::task::spawn_local(async move {
+            let responder = xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -144,7 +144,7 @@ async fn request_plan_approval_parse_fallback_fails_closed() {
         .run_until(async {
             let (actor, mut gateway_rx) = build_actor().await;
 
-            let responder = tokio::task::spawn_local(async move {
+            let responder = xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -199,7 +199,7 @@ async fn real_exit_plan_mode_disconnect_keeps_awaiting_persisted() {
             }
 
             // Pager receives the gate then disconnects (drops the request).
-            let responder = tokio::task::spawn_local(async move {
+            let responder = xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -298,7 +298,7 @@ async fn request_plan_approval_keeps_flag_when_client_disconnects() {
         .run_until(async {
             let (actor, mut gateway_rx, mut persistence_rx) = actor_with_channels().await;
 
-            let responder = tokio::task::spawn_local(async move {
+            let responder = xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -342,7 +342,7 @@ async fn request_plan_approval_future_drop_clears_flag() {
             let (actor, mut gateway_rx) = build_actor().await;
 
             // Pager receives the request but never answers (keeps the parked await pending) so we can drop the future while it is in flight
-            let responder = tokio::task::spawn_local(async move {
+            let responder = xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {

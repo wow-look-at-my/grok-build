@@ -615,7 +615,7 @@ mod tests {
                     }))
                 }),
             );
-        let _server = tokio::spawn(async move {
+        let _server = xai_spawn::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
         tokio::task::yield_now().await;
@@ -628,7 +628,7 @@ mod tests {
             .build();
 
         // try_refresh uses block_in_place; needs multi-thread runtime.
-        let cred = tokio::task::spawn_blocking(move || provider.current())
+        let cred = xai_spawn::spawn_blocking(move || provider.current())
             .await
             .expect("join");
         match cred {

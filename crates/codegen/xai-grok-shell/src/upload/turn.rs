@@ -158,7 +158,7 @@ where
             root
         }
     };
-    tokio::spawn(wrap_upload_task(task_name, pending, fut).instrument(span))
+    xai_spawn::spawn(wrap_upload_task(task_name, pending, fut).instrument(span))
 }
 async fn wrap_upload_task<F>(task_name: &'static str, _pending: PendingUploadGuard, fut: F)
 where

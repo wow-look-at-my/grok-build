@@ -4025,7 +4025,7 @@ async fn promoter_clears_committed_flag_and_handle_prompt_sets_it() {
             // The persist ack resolves after the history commit, so the flag is set once it fires.
             let actor_for_prompt = actor.clone();
             let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
-            let prompt_task = tokio::task::spawn_local(async move {
+            let prompt_task = xai_spawn::spawn_local(async move {
                 actor_for_prompt
                     .handle_prompt(
                         "m2",
@@ -4089,7 +4089,7 @@ async fn bash_turn_sets_committed_flag_before_running_the_command() {
             actor.state.lock().await.front_message_committed = false;
 
             let bash_actor = actor.clone();
-            let bash_turn = tokio::task::spawn_local(async move {
+            let bash_turn = xai_spawn::spawn_local(async move {
                 bash_actor
                     .handle_direct_bash_command(
                         "bash-1",

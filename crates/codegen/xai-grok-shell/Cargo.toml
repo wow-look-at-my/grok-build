@@ -186,6 +186,7 @@ xai-computer-hub-sdk = { workspace = true }
 xai-tool-runtime = { workspace = true }
 xai-tool-protocol = { workspace = true }
 xai-tool-types = { workspace = true }
+xai-spawn = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

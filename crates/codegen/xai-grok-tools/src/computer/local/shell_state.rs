@@ -615,7 +615,7 @@ fn parse_after_marker<'a>(output: &'a str, marker: &str) -> &'a str {
 /// Uses blocking I/O on a dedicated thread (pipes are not regular files).
 pub async fn write_snapshot_to_pipe(snapshot: &str, fd: OwnedFd) -> std::io::Result<()> {
     let data = snapshot.to_string();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         use std::io::Write;
         // Safety: we own the fd.
         let mut file = unsafe { std::fs::File::from_raw_fd(fd.as_raw_fd()) };
@@ -638,7 +638,7 @@ pub async fn read_dump_from_pipe(fd: OwnedFd) -> std::io::Result<String> {
     // doesn't close the read-end's EOF until every write-end holder closes theirs.
     match tokio::time::timeout(
         DUMP_READ_TIMEOUT,
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             use std::io::Read;
             let mut file = unsafe { std::fs::File::from_raw_fd(fd.as_raw_fd()) };
             std::mem::forget(fd);
@@ -888,14 +888,13 @@ mod tests {
 
         // Write snapshot to fd 3
         let snapshot = state.snapshot.clone();
-        let write_handle =
-            tokio::spawn(
-                async move { write_snapshot_to_pipe(&snapshot, prep.state_in_write).await },
-            );
+        let write_handle = xai_spawn::spawn(async move {
+            write_snapshot_to_pipe(&snapshot, prep.state_in_write).await
+        });
 
         // Read new dump from fd 4
         let read_handle =
-            tokio::spawn(async move { read_dump_from_pipe(prep.state_out_read).await });
+            xai_spawn::spawn(async move { read_dump_from_pipe(prep.state_out_read).await });
 
         let output = child.wait_with_output().await.unwrap();
         assert!(output.status.success(), "command failed: {:?}", output);
@@ -942,12 +941,11 @@ mod tests {
         drop(cmd);
 
         let snapshot = state.snapshot.clone();
-        let write_handle =
-            tokio::spawn(
-                async move { write_snapshot_to_pipe(&snapshot, prep.state_in_write).await },
-            );
+        let write_handle = xai_spawn::spawn(async move {
+            write_snapshot_to_pipe(&snapshot, prep.state_in_write).await
+        });
         let read_handle =
-            tokio::spawn(async move { read_dump_from_pipe(prep.state_out_read).await });
+            xai_spawn::spawn(async move { read_dump_from_pipe(prep.state_out_read).await });
 
         let output = child.wait_with_output().await.unwrap();
         write_handle.await.unwrap().unwrap();

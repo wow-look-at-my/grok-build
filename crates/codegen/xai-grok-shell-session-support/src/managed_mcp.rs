@@ -526,7 +526,7 @@ mod tests {
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
         let err = call_gateway_tool(
             &format!("http://{addr}"),
@@ -611,7 +611,7 @@ mod tests {
             state.start_gateway_tool_fetch().unwrap();
         }
         let waiter_handle = handle.clone();
-        let waiter = tokio::spawn(async move {
+        let waiter = xai_spawn::spawn(async move {
             get_or_fetch_gateway_tool_catalog(&waiter_handle, "http://127.0.0.1:0", Some("token"))
                 .await
         });
@@ -682,7 +682,7 @@ mod tests {
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
         let handle = ManagedMcpStateHandle::default();
         handle.lock().await.enable_gateway_tools();
@@ -747,7 +747,7 @@ mod tests {
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base_url = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
         let handle = ManagedMcpStateHandle::default();
         handle.lock().await.enable_gateway_tools();

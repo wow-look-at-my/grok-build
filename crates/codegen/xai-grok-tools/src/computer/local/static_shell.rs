@@ -188,7 +188,7 @@ pub struct PreparedStaticCommand {
 /// Write the snapshot to the pipe, then close the fd so the child sees EOF.
 pub async fn write_snapshot_to_pipe(snapshot: &str, fd: OwnedFd) -> std::io::Result<()> {
     let data = snapshot.to_string();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         use std::io::Write;
         // Safety: we own the fd.
         let mut file = unsafe { std::fs::File::from_raw_fd(fd.as_raw_fd()) };
@@ -266,7 +266,9 @@ mod tests {
 
         let snap = state.snapshot.clone();
         let write_handle =
-            tokio::spawn(async move { write_snapshot_to_pipe(&snap, prep.state_in_write).await });
+            xai_spawn::spawn(
+                async move { write_snapshot_to_pipe(&snap, prep.state_in_write).await },
+            );
         let output = child.wait_with_output().await.unwrap();
         write_handle.await.unwrap().unwrap();
         output

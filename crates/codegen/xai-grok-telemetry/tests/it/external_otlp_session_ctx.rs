@@ -56,7 +56,7 @@ async fn ambient_ctx_injects_session_turn_and_prompt_id() {
     })
     .await;
 
-    tokio::task::spawn_blocking(external::flush).await.unwrap();
+    xai_spawn::spawn_blocking(external::flush).await.unwrap();
     // Give any (erroneous) exporter ample time to phone home.
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert!(
@@ -68,8 +68,6 @@ async fn ambient_ctx_injects_session_turn_and_prompt_id() {
         "disabled external stream must export no metrics from a session ctx"
     );
 
-    tokio::task::spawn_blocking(external::shutdown)
-        .await
-        .unwrap();
+    xai_spawn::spawn_blocking(external::shutdown).await.unwrap();
     assert!(!external::is_active());
 }

@@ -269,7 +269,7 @@ async fn clean_settlement_waits_past_legacy_timeout_without_shutdown() {
         .await
         .expect("receipt handoff");
 
-    let settlement = tokio::spawn(drain.settle(AdmissionSettlement::Settled));
+    let settlement = xai_spawn::spawn(drain.settle(AdmissionSettlement::Settled));
     await_with_timeout(handoff_tx.closed()).await;
     drop(handoff_tx);
     assert!(!settlement.is_finished());
@@ -312,7 +312,7 @@ async fn cancellation_after_clean_settlement_arms_grace_deadline() {
         .await
         .expect("receipt handoff");
 
-    let settlement = tokio::spawn(drain.settle(AdmissionSettlement::Settled));
+    let settlement = xai_spawn::spawn(drain.settle(AdmissionSettlement::Settled));
     await_with_timeout(handoff_tx.closed()).await;
     drop(handoff_tx);
     assert!(!settlement.is_finished());
@@ -405,7 +405,7 @@ async fn uncertain_settlement_deadline_forces_turn_shutdown() {
         .expect("receipt handoff");
     drop(handoff_tx);
 
-    let settlement = tokio::spawn(drain.settle(AdmissionSettlement::Uncertain));
+    let settlement = xai_spawn::spawn(drain.settle(AdmissionSettlement::Uncertain));
     assert!(matches!(
         await_with_timeout(cmd_rx.recv()).await,
         Some(SessionCommand::Cancel(_))

@@ -2119,15 +2119,15 @@ async fn session_end_evicts_inflight_enqueues() {
     let shared = handle.shared();
     shared.inflight_enqueues.insert(
         ("sess-gone".to_owned(), 1),
-        tokio::spawn(async { EnqueueOutcome::Enqueued }),
+        xai_spawn::spawn(async { EnqueueOutcome::Enqueued }),
     );
     shared.inflight_enqueues.insert(
         ("sess-gone".to_owned(), 2),
-        tokio::spawn(async { EnqueueOutcome::Enqueued }),
+        xai_spawn::spawn(async { EnqueueOutcome::Enqueued }),
     );
     shared.inflight_enqueues.insert(
         ("sess-stay".to_owned(), 1),
-        tokio::spawn(async { EnqueueOutcome::Enqueued }),
+        xai_spawn::spawn(async { EnqueueOutcome::Enqueued }),
     );
     handle.on_session_ended("sess-gone");
     assert!(
@@ -4186,7 +4186,7 @@ async fn spawn_bind_mcp_server(state: BindMcpTestState) -> (String, tokio::task:
         .with_state(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     (format!("http://{address}/mcp"), task)
@@ -4441,7 +4441,7 @@ async fn a_stop_during_a_bind_start_ends_the_client_the_start_opened() {
         let session = Arc::clone(&session);
         let hub = Arc::clone(&hub);
         let mcp_config = mcp_config.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _update_guard = session.update_lock.lock().await;
             crate::mcp::converge_session(
                 &session,
@@ -4466,7 +4466,7 @@ async fn a_stop_during_a_bind_start_ends_the_client_the_start_opened() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let probe = {
         let session = Arc::clone(&session);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _binding = session.mcp_binding.lock().await;
             session
                 .mcp_state
@@ -4877,7 +4877,7 @@ async fn the_stop_ends_the_client_while_the_push_waits_on_the_hub() {
         .get("helper")
         .map(Arc::downgrade)
         .expect("the helper's client is owned by the session");
-    let stop = tokio::spawn({
+    let stop = xai_spawn::spawn({
         let handle = handle.clone();
         let hub = hub.clone();
         async move {
@@ -4887,7 +4887,7 @@ async fn the_stop_ends_the_client_while_the_push_waits_on_the_hub() {
         }
     });
     let without_app = BindMcpConfig::new([configured_test_mcp("helper", url)]);
-    let push = tokio::spawn({
+    let push = xai_spawn::spawn({
         let session = session.clone();
         let hub = hub.clone();
         async move {
@@ -5367,7 +5367,7 @@ async fn a_teardown_mid_connect_drops_the_finished_client() {
     let connect = {
         let session = Arc::clone(&session);
         let server = configured_test_mcp("gated", url);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             crate::mcp::connect_servers(
                 &session,
                 "main",
@@ -5917,7 +5917,7 @@ async fn a_stale_drive_commit_cannot_enter_a_revived_life() {
     let drive = {
         let session = Arc::clone(&session);
         let server = configured_test_mcp("gated", url);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let scope = crate::mcp::begin_mcp_drive(&session).await?;
             crate::mcp::drive_server_starts(
                 &session,
@@ -5936,12 +5936,12 @@ async fn a_stale_drive_commit_cannot_enter_a_revived_life() {
     let gate = session.mcp_binding.lock().await;
     let teardown = {
         let handle = handle.clone();
-        tokio::spawn(async move { handle.teardown_session_mcp("main").await })
+        xai_spawn::spawn(async move { handle.teardown_session_mcp("main").await })
     };
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     let revive = {
         let session = Arc::clone(&session);
-        tokio::spawn(async move { reopen_and_enrol(&session).await })
+        xai_spawn::spawn(async move { reopen_and_enrol(&session).await })
     };
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     release.notify_one();
@@ -6000,7 +6000,7 @@ async fn a_stale_install_cannot_cross_into_a_revived_life() {
         let session = Arc::clone(&session);
         let hub = FakeHubRegistry::default();
         let writer = xai_grok_session_events::EventWriter::noop();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             crate::mcp::converge_session(
                 &session,
                 "main",
@@ -6018,12 +6018,12 @@ async fn a_stale_install_cannot_cross_into_a_revived_life() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let teardown = {
         let handle = handle.clone();
-        tokio::spawn(async move { handle.teardown_session_mcp("main").await })
+        xai_spawn::spawn(async move { handle.teardown_session_mcp("main").await })
     };
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     let revive = {
         let session = Arc::clone(&session);
-        tokio::spawn(async move { reopen_and_enrol(&session).await })
+        xai_spawn::spawn(async move { reopen_and_enrol(&session).await })
     };
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     drop(gate);
@@ -6550,19 +6550,19 @@ async fn a_stale_drive_cannot_stamp_a_revived_lifes_init_progress() {
     let gate = session.mcp_binding.lock().await;
     let teardown = {
         let handle = handle.clone();
-        tokio::spawn(async move { handle.teardown_session_mcp("main").await })
+        xai_spawn::spawn(async move { handle.teardown_session_mcp("main").await })
     };
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     let revive = {
         let session = Arc::clone(&session);
-        tokio::spawn(async move { reopen_and_enrol(&session).await })
+        xai_spawn::spawn(async move { reopen_and_enrol(&session).await })
     };
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     let (tx, _rx) = tokio::sync::mpsc::channel(crate::config::BindMcpConfig::MAX_SERVERS);
     let drive = {
         let session = Arc::clone(&session);
         let server = configured_test_mcp("stale", url);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             crate::mcp::drive_server_starts(
                 &session,
                 "main",
@@ -6983,7 +6983,7 @@ async fn a_drop_racing_a_revive_bind_orphans_no_life() {
     let gate = handle.shared.hub_handle.lock().await;
     let drop_task = {
         let handle = handle.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             handle
                 .drop_session_with_teardown("dropped", "dropped")
                 .await
@@ -7036,7 +7036,7 @@ async fn a_drives_token_belongs_to_the_life_it_checked() {
     let drive = {
         let session = Arc::clone(&session);
         let server = configured_test_mcp("gated", url);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let scope = crate::mcp::begin_mcp_drive(&session).await?;
             crate::mcp::drive_server_starts(
                 &session,
@@ -7814,8 +7814,8 @@ async fn resolve_ack_skipped_when_no_handles() {
 /// Two real enqueue tasks that both report `Enqueued` resolve to a clean `Enqueued` ack with `artifact_count == 2`.
 #[tokio::test]
 async fn resolve_ack_awaits_real_handles() {
-    let before = tokio::spawn(async { EnqueueOutcome::Enqueued });
-    let after = tokio::spawn(async { EnqueueOutcome::Enqueued });
+    let before = xai_spawn::spawn(async { EnqueueOutcome::Enqueued });
+    let after = xai_spawn::spawn(async { EnqueueOutcome::Enqueued });
     let (status, count, msg) = resolve_after_turn_ack(
         Some(before),
         Some(after),
@@ -7830,11 +7830,11 @@ async fn resolve_ack_awaits_real_handles() {
 /// A before-turn enqueue that outlives the watchdog is reported as `Failed { "watchdog_timeout" }` WITHOUT blocking the ack on the slow task.
 #[tokio::test]
 async fn resolve_ack_watchdog_trips_on_slow_before() {
-    let before = tokio::spawn(async {
+    let before = xai_spawn::spawn(async {
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         EnqueueOutcome::Enqueued
     });
-    let after = tokio::spawn(async { EnqueueOutcome::Enqueued });
+    let after = xai_spawn::spawn(async { EnqueueOutcome::Enqueued });
     let start = std::time::Instant::now();
     let (status, count, msg) = resolve_after_turn_ack(
         Some(before),
@@ -7923,7 +7923,7 @@ async fn compute_turn_injections_after_returns_skipped_ack_without_queue() {
     let handle = make_handle();
     handle.shared().inflight_enqueues.insert(
         ("main".to_owned(), 3),
-        tokio::spawn(async { EnqueueOutcome::Enqueued }),
+        xai_spawn::spawn(async { EnqueueOutcome::Enqueued }),
     );
     let reply = handle
         .compute_turn_injections(

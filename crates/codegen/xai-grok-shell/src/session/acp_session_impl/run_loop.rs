@@ -84,7 +84,7 @@ async fn deliver_interjection(
 }
 fn spawn_dream_check(session: &Arc<SessionActor>) -> tokio::task::JoinHandle<()> {
     let session = session.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         session.memory.await_init_reindex().await;
         session.maybe_run_dream().await;
     })
@@ -386,7 +386,7 @@ impl StartupTasks {
         let mcp_startup = StartupTaskSet::install(session);
         let session_for_mcp = session.clone();
         let mcp_init_prompt_promote =
-            crate::util::AbortOnDrop(tokio::task::spawn_local(async move {
+            crate::util::AbortOnDrop(xai_spawn::spawn_local(async move {
                 session_for_mcp.ensure_mcp_tools_initialized().await;
                 SessionActor::maybe_start_running_task(session_for_mcp.clone(), completion_tx)
                     .await;
@@ -396,7 +396,7 @@ impl StartupTasks {
             None
         } else {
             let s = session.clone();
-            Some(crate::util::AbortOnDrop(tokio::task::spawn_local(
+            Some(crate::util::AbortOnDrop(xai_spawn::spawn_local(
                 instrument_task!("session.context_snapshot", Parent::Inherit, async move {
                     s.wait_for_mcp_initialized().await;
                     s.emit_session_context_snapshot().await;
@@ -428,7 +428,7 @@ pub(super) async fn run_session(
     let event_tx_for_flush_timer = session.event_tx.clone();
     let buffering_flush_interval = replay_buffer.max_wait_duration_ms();
     if let Some(buffering_flush_interval) = buffering_flush_interval {
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let mut interval = tokio::time::interval(Duration::from_millis(std::cmp::max(
                 20,
                 buffering_flush_interval * 2,
@@ -446,7 +446,7 @@ pub(super) async fn run_session(
     )
     .map(|(mut watcher, mut changes)| {
         let session = session.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(change) = changes.recv().await {
                 watcher.refresh_new_dirs();
                 match change {
@@ -480,12 +480,12 @@ pub(super) async fn run_session(
     };
     {
         let s = session.clone();
-        tokio::task::spawn_local(async move { s.maybe_notify_git_branch().await });
+        xai_spawn::spawn_local(async move { s.maybe_notify_git_branch().await });
     }
-    tokio::task::spawn_local(super::status_line::run_status_emitter(Arc::downgrade(
+    xai_spawn::spawn_local(super::status_line::run_status_emitter(Arc::downgrade(
         &session,
     )));
-    tokio::task::spawn_local(SessionActor::run_mcp_reconnect_loop(Arc::downgrade(
+    xai_spawn::spawn_local(SessionActor::run_mcp_reconnect_loop(Arc::downgrade(
         &session,
     )));
     let liveness_watchers_enabled = {
@@ -549,7 +549,7 @@ pub(super) async fn run_session(
             } else {
                 None
             };
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             crate::session::mcp_dispatcher::run_dispatcher(
                 dispatcher_session_id,
                 event_rx,
@@ -597,7 +597,7 @@ pub(super) async fn run_session(
                             "MEMORY_IDLE_FLUSH: timer fired (conversation {last_len} → {current_len})");
                         session.last_idle_flush_conversation_len
                             .store(current_len, std::sync::atomic::Ordering::Relaxed);
-                        tokio::task::spawn_local({
+                        xai_spawn::spawn_local({
                             let session = session.clone();
                             async move {
                                 if !session.run_memory_flush("interval", None).await {
@@ -752,7 +752,7 @@ pub(super) async fn run_session(
                             session.initialize(system_prompt).await;
                             let s = session.clone();
                             let full_wait = session.requires_full_mcp_wait();
-                            let handle = tokio::task::spawn_local(instrument_task!(
+                            let handle = xai_spawn::spawn_local(instrument_task!(
                                 "session.prefix_task",
                                 Parent::Inherit,
                                 async move { s.build_prefix_after_mcp_wait(full_wait).await }
@@ -771,7 +771,7 @@ pub(super) async fn run_session(
                             // Dropping it cancels the `request_plan_approval` future and clears `awaiting` via the guard `resume_plan_approval` also self-guards against a concurrent or duplicate restore via `pending_interactions`.
                             let s = session.clone();
                             let completion_tx = completion_tx.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 s.resume_plan_approval(completion_tx).await;
                             });
                         }
@@ -1280,7 +1280,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::CompactSession { user_context, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 s.compact_on_request(user_context, respond_to).await;
                             });
                         }
@@ -1301,7 +1301,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::RefreshSkillBaseline => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let cwd = s.tool_context.cwd.as_path().to_string_lossy();
                                 let skills_config = crate::util::config::load_config().await.skills;
                                 let pr = s.plugin_registry.borrow().clone();
@@ -1325,13 +1325,13 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::FlushMemory { respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let _ = respond_to.send(s.memory_flush_command().await);
                             });
                         }
                         SessionCommand::MemoryDream { respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let _ = respond_to.send(s.memory_dream_command().await);
                             });
                         }
@@ -1349,7 +1349,7 @@ pub(super) async fn run_session(
                             respond_to,
                         } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let response =
                                     s.memory_forget(&path, &expected_content_hash).await;
                                 let _ = respond_to.send(response);
@@ -1389,14 +1389,14 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::Rewind { request, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = s.handle_rewind(request).await;
                                 let _ = respond_to.send(result);
                             });
                         }
                         SessionCommand::RepairHistory { dry_run, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = s.handle_repair_history(dry_run).await;
                                 let _ = respond_to.send(result);
                             });
@@ -1658,7 +1658,7 @@ pub(super) async fn run_session(
                             let sname = server_name.clone();
                             let session_cwd = session.session_info.cwd.clone();
                             // The preference outlives the session, so its write does not ride on startup.
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 if let Err(e) = crate::util::config::save_mcp_server_enabled_in(
                                     &sname,
                                     enabled,
@@ -1734,7 +1734,7 @@ pub(super) async fn run_session(
                                 } else {
                                     server_name.clone()
                                 };
-                                tokio::task::spawn_local(async move {
+                                xai_spawn::spawn_local(async move {
                                     if let Err(e) = crate::util::config::save_mcp_disabled_tools(
                                         &server_for_persist,
                                         &disabled_vec,
@@ -1835,7 +1835,7 @@ pub(super) async fn run_session(
                             let notifications = session.notifications.gateway.clone();
                             let session_id = session.session_info.id.0.clone();
                             let server_for_persist = server_name.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 if let Err(e) = crate::util::config::save_mcp_disabled_tools(
                                     &server_for_persist,
                                     &disabled_vec,
@@ -1891,7 +1891,7 @@ pub(super) async fn run_session(
                             let mcp_state = session.mcp_state.clone();
                             let tool_bridge = session.agent.borrow().tool_bridge().clone();
                             let writer = session.events.writer();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let snapshot = crate::extensions::mcp::build_mcp_status(
                                     &mcp_state,
                                     &tool_bridge,
@@ -1902,7 +1902,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::CallMcpTool { server_name, server_url, tool_name, arguments, respond_to } => {
                             let mcp_state = session.mcp_state.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = crate::extensions::mcp::call_mcp_tool(
                                     &mcp_state,
                                     &server_name,
@@ -1915,7 +1915,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::ReadMcpResource { server_name, uri, respond_to } => {
                             let mcp_state = session.mcp_state.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = crate::extensions::mcp::read_mcp_resource(
                                     &mcp_state,
                                     &server_name,
@@ -1926,7 +1926,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::McpAuthStatus { respond_to } => {
                             let mcp_state = session.mcp_state.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let state = mcp_state.lock().await;
                                 let entries: Vec<_> = state.auth_required.iter().map(|name| {
                                     crate::extensions::mcp::McpAuthStatusEntry {
@@ -1939,7 +1939,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::McpAuthTrigger { server_name, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = s.handle_mcp_auth_trigger(&server_name).await;
                                 let _ = respond_to.send(result);
                             });
@@ -1952,7 +1952,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::RetryAuthRequiredServers { respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 s.retry_auth_required_servers().await;
                                 s.retry_unreachable_servers().await;
                                 let _ = respond_to.send(());
@@ -1963,7 +1963,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::TriggerTestFeedback { tier, mode, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let request = s.feedback_manager.force_feedback_request(tier, mode).await;
                                 let notification = crate::extensions::notification::FeedbackRequestNotification::from(request.clone());
                                 s.send_feedback_notification(request).await;
@@ -2006,7 +2006,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::ReloadSkills => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 s.reload_skills_from_disk().await;
                             });
                         }
@@ -2015,7 +2015,7 @@ pub(super) async fn run_session(
                             if !deferred_start.cancel.is_cancelled() {
                                 let s = session.clone();
                                 let cancel = deferred_start.cancel.clone();
-                                let handle = tokio::task::spawn_local(async move {
+                                let handle = xai_spawn::spawn_local(async move {
                                     xai_grok_hooks::runner::command::join_hook_group_reaps(async {
                                         let run = async {
                                             if cancel.is_cancelled() {
@@ -2065,7 +2065,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::GetFeedbackContext { turn_number, responds_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 use prod_mc_cli_chat_proxy_types::feedback_types::FeedbackToolOutcome;
 
                                 let conv = s.chat_state_handle.get_conversation().await;
@@ -2117,14 +2117,14 @@ pub(super) async fn run_session(
                             respond_to,
                         } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = s.handle_side_question(&question, images).await;
                                 let _ = respond_to.send(result);
                             });
                         }
                         SessionCommand::SpawnModelAgent { family, effort, prompt, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = s
                                     .handle_spawn_model_agent(&family, effort.as_deref(), &prompt)
                                     .await;
@@ -2133,7 +2133,7 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::TodoCapture { request, urgent, capture_id, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result =
                                     s.handle_todo_capture(&request, urgent, &capture_id).await;
                                 let _ = respond_to.send(result);
@@ -2141,27 +2141,27 @@ pub(super) async fn run_session(
                         }
                         SessionCommand::Recap { auto } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 s.handle_recap(auto).await;
                             });
                         }
                         SessionCommand::AISuggest { prefix, cwd, model_override, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = s.handle_ai_suggest(&prefix, &cwd, model_override.as_deref()).await;
                                 let _ = respond_to.send(result);
                             });
                         }
                         SessionCommand::SuggestPrompt { model_override, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = s.handle_suggest_prompt(model_override.as_deref()).await;
                                 let _ = respond_to.send(result);
                             });
                         }
                         SessionCommand::RewriteMemoryNote { raw_text, context_summary, respond_to } => {
                             let s = session.clone();
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 let result = s.handle_rewrite_memory_note(&raw_text, &context_summary).await;
                                 let _ = respond_to.send(result);
                             });
@@ -2475,7 +2475,7 @@ pub(super) async fn run_session(
                     // Backstop for a `/compact` armed mid-turn.
                     if session.has_pending_manual_compact() {
                         let s = session.clone();
-                        tokio::task::spawn_local(async move {
+                        xai_spawn::spawn_local(async move {
                             s.run_pending_manual_compact().await;
                         });
                     }
@@ -2514,7 +2514,7 @@ pub(super) async fn run_session(
                     // No classification cost is incurred without explicit opt-in.
                     {
                         let s = session.clone();
-                        tokio::task::spawn_local(async move {
+                        xai_spawn::spawn_local(async move {
                             s.maybe_fire_laziness_check().await;
                         });
                     }

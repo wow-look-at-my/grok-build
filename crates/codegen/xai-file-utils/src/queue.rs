@@ -548,7 +548,7 @@ impl UploadQueue {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let worker_resolver = resolver.clone();
         let worker_stats = stats.clone();
-        let worker_handle = tokio::spawn(upload_worker(
+        let worker_handle = xai_spawn::spawn(upload_worker(
             rx,
             shutdown_rx,
             worker_resolver,
@@ -1351,7 +1351,7 @@ impl UploadQueue {
         let semaphore = self.inline_fallback_semaphore.clone();
         let permits = inline_fallback_permits(original_size);
         let parent_span = tracing::Span::current();
-        tokio::spawn(
+        xai_spawn::spawn(
             async move {
                 let _permit = semaphore
                     .acquire_many_owned(permits)
@@ -1404,7 +1404,7 @@ impl UploadQueue {
         let stats = self.stats.clone();
         let permits = inline_fallback_permits(original_size);
         let parent_span = tracing::Span::current();
-        tokio::spawn(
+        xai_spawn::spawn(
             async move {
                 let _permit = semaphore
                     .acquire_many_owned(permits)
@@ -1458,7 +1458,7 @@ impl UploadQueue {
         let semaphore = self.inline_fallback_semaphore.clone();
         let permits = inline_fallback_permits(size);
         let parent_span = tracing::Span::current();
-        tokio::spawn(
+        xai_spawn::spawn(
             async move {
                 let _permit = semaphore
                     .acquire_many_owned(permits)
@@ -1494,7 +1494,7 @@ impl UploadQueue {
         let gcs_path = gcs_path.to_string();
         let content_type = content_type.to_string();
         let parent_span = tracing::Span::current();
-        tokio::spawn(
+        xai_spawn::spawn(
             async move {
                 let _permit = semaphore
                     .acquire_many_owned(permits)
@@ -1578,7 +1578,8 @@ async fn dispatch_item(
         gcs_path = %item.gcs_path,
         client_version = %item.client_version.as_deref().unwrap_or("unknown"),
     );
-    tasks.spawn(
+    xai_spawn::spawn_in(
+        tasks,
         async move {
             process_item(
                 item,

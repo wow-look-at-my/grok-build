@@ -301,7 +301,7 @@ impl Drop for RefresherGuard {
 fn spawn_claim_refresher(db_path: PathBuf, token: ClaimToken, every: Duration) -> RefresherGuard {
     let claim_lost = Arc::new(AtomicBool::new(false));
     let lost = Arc::clone(&claim_lost);
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         let mut interval = tokio::time::interval(every);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // The first tick fires immediately; the claim was stamped just now.
@@ -491,7 +491,7 @@ async fn reindex_all(
         let per_session_timeout = BOOTSTRAP_PER_SESSION_TIMEOUT;
         let max_file_size = BOOTSTRAP_MAX_FILE_SIZE;
 
-        join_set.spawn(async move {
+        xai_spawn::spawn_in(&mut join_set, async move {
             let _permit = semaphore
                 .acquire()
                 .await
@@ -520,7 +520,7 @@ async fn reindex_all(
                 let doc = build_session_doc(&session, String::new());
                 let db_path = search_db_path(&root);
                 let shared = shared.clone();
-                let title_only = tokio::task::spawn_blocking(move || {
+                let title_only = xai_spawn::spawn_blocking(move || {
                     shared.with(&db_path, |index| index.insert_doc_if_absent(&doc))
                 })
                 .await;
@@ -537,7 +537,7 @@ async fn reindex_all(
 
             match tokio::time::timeout(per_session_timeout, async move {
                 let (content, bytes_read) = if let Some(path) = updates_path {
-                    match tokio::task::spawn_blocking(move || extract(&path)).await {
+                    match xai_spawn::spawn_blocking(move || extract(&path)).await {
                         Ok(Ok(result)) => result,
                         Ok(Err(e)) => return Err(e),
                         Err(e) => return Err(io::Error::other(e)),
@@ -549,7 +549,7 @@ async fn reindex_all(
                 let doc = build_session_doc(&session, content);
                 let db_path = search_db_path(&root);
 
-                match tokio::task::spawn_blocking(move || {
+                match xai_spawn::spawn_blocking(move || {
                     shared.with(&db_path, |index| {
                         upsert_unless_unchanged(index, &doc, bytes_read)
                     })
@@ -615,7 +615,7 @@ async fn reindex_all(
     let db_path = search_db_path(root_dir);
     let token = claim_token.as_str().to_string();
     let shared = shared.clone();
-    tokio::task::spawn_blocking(move || -> io::Result<()> {
+    xai_spawn::spawn_blocking(move || -> io::Result<()> {
         shared.with(&db_path, |index| {
             if !index.prune_missing_if_claim_owner(
                 chrono::Utc::now().timestamp(),

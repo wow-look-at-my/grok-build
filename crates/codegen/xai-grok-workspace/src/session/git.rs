@@ -181,7 +181,7 @@ async fn git_cli_content_filter_pins(cwd: &Path, args: &[&str]) -> Result<Option
         GitCliFilterPinPlan::Refuse => Err(anyhow::anyhow!("unresolved git argv")),
         GitCliFilterPinPlan::NeedPins => {
             let cwd = git_cli_pin_scan_cwd(cwd, args)?;
-            let pins = tokio::task::spawn_blocking(move || {
+            let pins = xai_spawn::spawn_blocking(move || {
                 crate::git_content_filters::content_filter_config_pins(&cwd)
             })
             .await
@@ -778,7 +778,7 @@ fn collapse_home_path(path: &Path, home: Option<&Path>) -> String {
 /// The display name is the main repo path, preferably relative to $HOME as ~...
 pub async fn get_worktree_info(cwd: &Path) -> Option<(bool, Option<String>)> {
     let cwd = cwd.to_path_buf();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let repo = crate::git_repo::discover(&cwd).ok()?;
         let home = xai_dirs::home_dir();
         let display = |path: &Path| -> String { collapse_home_path(path, home.as_deref()) };
@@ -826,7 +826,7 @@ pub async fn get_worktree_info(cwd: &Path) -> Option<(bool, Option<String>)> {
 /// Switch the working tree to a different branch, optionally creating it. Refuses to switch if the working tree is dirty (staged or unstaged changes) to avoid losing work.
 pub async fn checkout_branch(git_root: &Path, branch: &str, create: bool) -> Result<()> {
     let root = git_root.to_path_buf();
-    let has_changes = tokio::task::spawn_blocking(move || -> Result<bool> {
+    let has_changes = xai_spawn::spawn_blocking(move || -> Result<bool> {
         let repo = crate::git_repo::discover(&root).map_err(DiscoverError::into_error)?;
         Ok(!status_entries(&repo, false, true)?.is_empty())
     })
@@ -1301,7 +1301,7 @@ pub struct GitHeadChanged {
 /// Reads refs and config in-process (no subprocess).
 pub async fn git_info(cwd: &Path) -> Result<GitInfoData> {
     let cwd = cwd.to_path_buf();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let repo = crate::git_repo::discover(&cwd).map_err(DiscoverError::into_error)?;
         let root =
             crate::git_repo::workdir(&repo).unwrap_or_else(|| crate::git_repo::git_dir(&repo));
@@ -1354,7 +1354,7 @@ fn detect_remote_default_branch(repo: &gix::Repository) -> Option<String> {
 /// Reads refs in-process (no subprocess, no `git status`).
 pub async fn list_branches(git_root: &Path) -> Result<GitBranchListData> {
     let root = git_root.to_path_buf();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let repo = crate::git_repo::discover(&root).map_err(DiscoverError::into_error)?;
         let repo_root =
             crate::git_repo::workdir(&repo).unwrap_or_else(|| crate::git_repo::git_dir(&repo));
@@ -1390,7 +1390,7 @@ pub async fn list_branches(git_root: &Path) -> Result<GitBranchListData> {
 /// `None` outside a git repo or before the first commit.
 pub async fn get_current_commit(git_root: &Path) -> Option<String> {
     let cwd = git_root.to_path_buf();
-    tokio::task::spawn_blocking(move || -> Option<String> {
+    xai_spawn::spawn_blocking(move || -> Option<String> {
         let repo = crate::git_repo::discover(&cwd).ok()?;
         head_sha(&repo)
     })
@@ -1762,7 +1762,7 @@ async fn status_ungated(
     let (branch, upstream, remote_url) =
         tokio::join!(get_branch(&cwd), get_upstream(&cwd), get_remote_url(&cwd));
     let blocking_cwd = cwd.clone();
-    let scan = tokio::task::spawn_blocking(move || {
+    let scan = xai_spawn::spawn_blocking(move || {
         let cwd = blocking_cwd;
         let repo = match crate::git_repo::discover(&cwd) {
             Ok(r) => r,
@@ -1924,7 +1924,7 @@ pub async fn read_files(
     let cwd = git_root.to_path_buf();
     let paths = paths.to_vec();
     let version = version.to_string();
-    let result = tokio::task::spawn_blocking(move || {
+    let result = xai_spawn::spawn_blocking(move || {
         let repo = crate::git_repo::discover(&cwd).map_err(DiscoverError::into_error)?;
         let git_root = crate::git_repo::workdir(&repo)
             .ok_or_else(|| anyhow::anyhow!("cannot read files from bare repository"))?;
@@ -2053,7 +2053,7 @@ async fn diffs_ungated(
     let from = from.to_string();
     let to = to.to_string();
     let result = async move {
-        let prepared = tokio::task::spawn_blocking(move || {
+        let prepared = xai_spawn::spawn_blocking(move || {
             let repo = crate::git_repo::discover(&cwd).map_err(DiscoverError::into_error)?;
             let work_dir = crate::git_repo::workdir(&repo)
                 .ok_or_else(|| anyhow::anyhow!("cannot get diffs from bare repository"))?;
@@ -2115,7 +2115,7 @@ async fn diffs_ungated(
             Some(p) if !p.is_empty() => p,
             _ => changed_paths,
         };
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let mut files = Vec::new();
             for path in &final_paths {
                 let file_stats = stats.remove(path).unwrap_or_default();
@@ -2566,7 +2566,7 @@ async fn spawn_targeted_fetch(git_root: &Path, spec: &str, kind: FetchKind) -> A
     let fetch_spec = spec.to_owned();
     match tokio::time::timeout(
         crate::restore_fetch::RESTORE_FETCH_BUDGET + crate::restore_fetch::RESTORE_FETCH_JOIN_SLACK,
-        tokio::task::spawn_blocking(move || match kind {
+        xai_spawn::spawn_blocking(move || match kind {
             FetchKind::CheckoutRef => {
                 crate::restore_fetch::fetch_checkout_target_if_missing(&fetch_root, &fetch_spec)
             }
@@ -3735,7 +3735,7 @@ pub async fn stage_content(git_root: &Path, path: &str, content: &str) -> Result
     let git_root_buf = git_root.to_path_buf();
     let path = path.to_string();
     let content = content.to_string();
-    tokio::task::spawn_blocking(move || -> Result<()> {
+    xai_spawn::spawn_blocking(move || -> Result<()> {
         let git_root = git_root_buf;
         let repo = crate::git_repo::open(&git_root)?;
         let work_dir = crate::git_repo::workdir(&repo)

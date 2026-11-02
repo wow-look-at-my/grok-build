@@ -68,7 +68,7 @@ pub(crate) async fn inspect_read_paths(
             let logical = logical.to_path_buf();
             let physical = physical.to_path_buf();
             let ignored =
-                tokio_util::task::AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
+                tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn_blocking(move || {
                     filter.is_logical_path_ignored(&logical) || filter.is_ignored(&physical)
                 }))
                 .await

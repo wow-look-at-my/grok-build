@@ -30,6 +30,7 @@ xai-grok-otel = { workspace = true }
 tokio-stream = { workspace = true }
 tokio-util = { workspace = true, features = ["io"] }
 zstd.workspace = true
+xai-spawn = { workspace = true }
 
 
 [features]

@@ -134,7 +134,7 @@ impl StartArtifactPublication {
             let bucket = bucket_url.clone();
             let method = upload_method.clone();
             let auth_manager = self.auth_manager.clone();
-            tokio::spawn(instrument_task!(
+            xai_spawn::spawn(instrument_task!(
                 debug,
                 "subagent.metadata_upload",
                 xai_grok_telemetry::region::Parent::Root,

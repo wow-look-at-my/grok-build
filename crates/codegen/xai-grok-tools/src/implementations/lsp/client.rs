@@ -450,7 +450,7 @@ impl LspClient {
             // result. Guarded so the loss of that log says which pump died, and
             // the child's own exit path is unaffected either way.
             #[allow(clippy::disallowed_methods)]
-            tokio::spawn(crate::util::detached::fire_and_forget(
+            xai_spawn::spawn(crate::util::detached::fire_and_forget(
                 "lsp server stderr pump",
                 async move {
                     use tokio::io::AsyncBufReadExt;
@@ -475,7 +475,7 @@ impl LspClient {
         // The handle is kept: it rides `TransportHandles` to `LspClient::main_loop`,
         // where startup failure and shutdown abort it.
         #[allow(clippy::disallowed_methods)]
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
             if let Err(e) = main_loop
                 .run_buffered(async_stdout.compat(), async_stdin.compat_write())
@@ -509,7 +509,7 @@ impl LspClient {
         // Returned to the caller and stored on `LspClient::main_loop`, which is
         // where it is aborted.
         #[allow(clippy::disallowed_methods)]
-        Ok(tokio::spawn(async move {
+        Ok(xai_spawn::spawn(async move {
             use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
             if let Err(e) = main_loop
                 .run_buffered(read_half.compat(), write_half.compat_write())

@@ -24,7 +24,7 @@ const SLEEP_PAST_OPEN_DURATION: Duration = Duration::from_millis(250);
 async fn start_server(router: Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let handle = tokio::spawn(async move {
+    let handle = xai_spawn::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
     (addr, handle)
@@ -310,7 +310,7 @@ async fn breaker_half_open_serialises_concurrent_probes() {
         let b = barrier.clone();
         let done = laggers_done.clone();
         let count = laggers_count.clone();
-        tasks.push(tokio::spawn(async move {
+        tasks.push(xai_spawn::spawn(async move {
             b.wait().await;
             let result = c.upload("p", b"d", "text/plain").await;
             let prev = count.fetch_add(1, std::sync::atomic::Ordering::AcqRel);

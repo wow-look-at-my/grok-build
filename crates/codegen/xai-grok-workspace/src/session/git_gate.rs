@@ -438,7 +438,7 @@ impl GitGate {
         // Status and diff walks are not cooperative; aborting this task would drop the ODB permit while spawn_blocking still preads packs
         // Waiters time out locally; the walk stays attached to the slot until it ends
         let this = self.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut publisher = InflightPublisher {
                 gate: this.clone(),
                 key,
@@ -633,7 +633,7 @@ async fn canonical_git_root(path: &Path) -> Result<PathBuf> {
     }
 
     let probe = cwd.clone();
-    let discovered = tokio::task::spawn_blocking(move || discover_git_root(&probe))
+    let discovered = xai_spawn::spawn_blocking(move || discover_git_root(&probe))
         .await
         .map_err(|error| anyhow!("git discover task failed: {error}"))?;
     let discovered = match discovered {

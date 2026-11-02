@@ -186,7 +186,7 @@ async fn responses_large_tool_result_images_fit_transport_limit() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;

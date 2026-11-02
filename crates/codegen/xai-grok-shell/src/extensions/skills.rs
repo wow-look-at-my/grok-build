@@ -155,7 +155,7 @@ async fn skills_at_config_path(resolved: &str, cwd: &str) -> Vec<SkillInfo> {
     let cwd = std::path::PathBuf::from(cwd);
     // Same bound as `reload_skills`: a slow or huge tree must not stall the runtime; the per-item
     // telemetry is best-effort and the count-only events still fire when this gives up.
-    let scan = tokio::task::spawn_blocking(move || {
+    let scan = xai_spawn::spawn_blocking(move || {
         let git_root = xai_grok_agent::repo::RepoDirChain::resolve(&cwd).git_root;
         collect_config_skills(&paths, git_root.as_deref())
     });

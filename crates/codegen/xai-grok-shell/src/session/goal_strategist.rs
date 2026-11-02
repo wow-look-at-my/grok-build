@@ -551,7 +551,7 @@ mod tests {
             role_override: RoleSpawnOverride::default(),
             fallback: Default::default(),
         };
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let _ = spawner
                 .spawn_strategist(
                     "strat-id",
@@ -599,7 +599,7 @@ mod tests {
             },
             fallback: Default::default(),
         };
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let _ = spawner
                 .spawn_strategist(
                     "strat-id",

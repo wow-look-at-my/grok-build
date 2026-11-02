@@ -106,7 +106,7 @@ async fn spawn_counting_gated_server() -> (String, Arc<AtomicUsize>, Arc<AtomicU
             }
         }
     });
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
     (format!("http://{addr}/mcp"), requests, token_grants)

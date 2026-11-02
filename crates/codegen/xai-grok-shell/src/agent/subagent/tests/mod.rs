@@ -187,7 +187,7 @@ async fn turn_message_take_records_the_miss_when_the_actor_is_gone() {
             "a closed command channel must not pass for an empty turn"
         );
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
-    let actor = tokio::spawn(async move {
+    let actor = xai_spawn::spawn(async move {
         match cmd_rx.recv().await {
             Some(SessionCommand::TakeTurnMessages { respond_to }) => drop(respond_to),
             _ => panic!("expected TakeTurnMessages"),

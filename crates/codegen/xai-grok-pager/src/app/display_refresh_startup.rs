@@ -109,7 +109,7 @@ pub fn start(
 }
 
 fn spawn_terminal_and_display_refresh_telemetry(tel: StartupTel) {
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let t = crate::terminal::terminal_context().telemetry_snapshot();
         let _span = tracing::info_span!(
             "terminal.detect",

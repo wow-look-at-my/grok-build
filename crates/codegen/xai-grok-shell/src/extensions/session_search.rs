@@ -91,7 +91,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             validate_search_window(limit, offset)?;
 
             let kind_index = std::sync::Arc::new(
-                tokio::task::spawn_blocking(crate::session::persistence::SessionKindIndex::load)
+                xai_spawn::spawn_blocking(crate::session::persistence::SessionKindIndex::load)
                     .await
                     .map_err(|error| acp::Error::internal_error().data(error.to_string()))?
                     .map_err(|error| acp::Error::internal_error().data(error.to_string()))?,
@@ -121,7 +121,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                     );
                     let has_more = resp.next_offset.is_some();
                     let bootstrapping = resp.bootstrapping;
-                    let hits = tokio::task::spawn_blocking(move || {
+                    let hits = xai_spawn::spawn_blocking(move || {
                         resp.results
                             .into_iter()
                             .map(|hit| {

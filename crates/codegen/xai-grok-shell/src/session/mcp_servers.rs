@@ -188,7 +188,7 @@ mod tests {
         let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
 
         let settler = std::sync::Arc::clone(&state);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             let mut state = settler.lock().await;
             state.mark_server_ready("kagi");

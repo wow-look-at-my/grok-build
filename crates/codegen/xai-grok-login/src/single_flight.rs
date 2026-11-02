@@ -315,7 +315,7 @@ mod tests {
     async fn cancel_interrupts_waiting_select() {
         let sf = AuthSingleFlight::default();
         let (cancel, _guard) = sf.begin(None, Some(42)); // headless: no channels
-        let waiter = tokio::spawn(async move {
+        let waiter = xai_spawn::spawn(async move {
             tokio::select! {
                 biased;
                 _ = cancel.cancelled() => "cancelled",

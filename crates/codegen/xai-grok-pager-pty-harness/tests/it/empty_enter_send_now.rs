@@ -1,8 +1,7 @@
 //! Empty-composer Enter force-sends the top mid-turn queued follow-up.
 //!
-//! ```bash
-//! cargo test -p xai-grok-pager-pty-harness --test it empty_enter_send_now:: -- --ignored --nocapture
-//! ```
+//! ```bash cargo test -p xai-grok-pager-pty-harness --test it
+//! empty_enter_send_now:: -- --ignored --nocapture ```
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore] // opt-in: real pager binary in a PTY (CI runs with --ignored)

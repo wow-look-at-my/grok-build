@@ -45,7 +45,7 @@ fn spawn_tracked_round(
     tracked_id: RequestId,
     task: impl Future<Output = RequestId> + Send + 'static,
 ) {
-    tasks.spawn(async move {
+    xai_spawn::spawn_in(tasks, async move {
         match AssertUnwindSafe(task).catch_unwind().await {
             Ok(request_id) => request_id,
             Err(panic) => {
@@ -138,8 +138,8 @@ impl SamplerActor {
             tasks: JoinSet::new(),
         };
         // The actor owns the command half every `SamplerHandle` sends to and every in-flight request reports through.
-        let run = tokio::spawn(actor.run());
-        tokio::spawn(async move {
+        let run = xai_spawn::spawn(actor.run());
+        xai_spawn::spawn(async move {
             if let Err(error) = run.await {
                 tracing::error!(
                     task = "sampler actor",

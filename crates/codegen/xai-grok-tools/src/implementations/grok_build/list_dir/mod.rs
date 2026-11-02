@@ -493,7 +493,7 @@ where
     T: Send + 'static,
     F: FnOnce() -> T + Send + 'static,
 {
-    tokio::task::spawn_blocking(walk)
+    xai_spawn::spawn_blocking(walk)
         .await
         .map_err(|err| map_list_dir_join_error(err, display_path))
 }
@@ -1615,7 +1615,7 @@ mod tests {
     }
     #[tokio::test(flavor = "current_thread")]
     async fn list_dir_join_error_cancel_is_cancelled() {
-        let handle = tokio::spawn(std::future::pending::<()>());
+        let handle = xai_spawn::spawn(std::future::pending::<()>());
         handle.abort();
         let join_err = handle.await.expect_err("aborted task");
         assert!(join_err.is_cancelled());

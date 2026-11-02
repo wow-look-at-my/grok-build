@@ -15,6 +15,7 @@ xai-file-utils = { path = "../xai-file-utils", optional = true }
 xai-grok-http = { workspace = true }
 xai-grok-net = { workspace = true }
 xai-grok-version = { workspace = true }
+xai-spawn = { workspace = true }
 
 [features]
 default-bazel = []

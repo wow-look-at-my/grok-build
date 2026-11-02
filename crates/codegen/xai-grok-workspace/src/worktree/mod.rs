@@ -51,7 +51,7 @@ where
 {
     let region = region!("worktree.copy_on_write", Parent::Inherit);
     let span = region.span().clone();
-    tokio::task::spawn_blocking(move || span.in_scope(work)).await
+    xai_spawn::spawn_blocking(move || span.in_scope(work)).await
 }
 
 /// True when `path` is on a grove FUSE mount.
@@ -514,7 +514,7 @@ pub async fn run_background_ignored_copy<N: WorktreeNotificationSender>(
     let patterns = skip_patterns.clone();
 
     // Run the copy in a blocking task (copy_ignored_only does blocking I/O)
-    let copy_handle = tokio::task::spawn_blocking(move || {
+    let copy_handle = xai_spawn::spawn_blocking(move || {
         // The token's is_cancelled() is polled by the sync copy engine.
         let builder = WorktreeBuilder::new(&source, &dest)
             .ignored_files_mode(IgnoredFilesMode::CopyOnly {
@@ -1127,7 +1127,7 @@ pub async fn create_worktree_async<N: WorktreeNotificationSender + Clone + 'stat
     // spawn_local because the notifier uses non-Send futures internally.
     if should_copy_ignored_in_background && let Some(worktree_path) = worktree_path {
         let notifier = notifier.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             run_background_ignored_copy(
                 copy_context,
                 session_id,
@@ -1539,7 +1539,7 @@ pub async fn remove_worktree(
     // The btrfs delegate is used only as a fallback when a direct btrfs op fails (rootless hosts lack CAP_SYS_ADMIN for direct subvolume ops)
     let delegate = btrfs_delegate_from_env();
     let span = tracing::Span::current();
-    match tokio::task::spawn_blocking(move || {
+    match xai_spawn::spawn_blocking(move || {
         span.in_scope(|| xai_fast_worktree::remove_worktree_with_delegate(&wt_path, delegate))
     })
     .await
@@ -1627,7 +1627,7 @@ pub async fn rehydrate_subagent_worktree(
     let session_id = session_id.map(str::to_owned);
     let recreate = region!("worktree.cwd_recreate", Parent::Inherit);
     let span = recreate.span().clone();
-    let report = tokio::task::spawn_blocking(move || {
+    let report = xai_spawn::spawn_blocking(move || {
         span.in_scope(|| {
             xai_fast_worktree::rehydrate_worktree_from_ref(
                 &dest,
@@ -1653,7 +1653,7 @@ pub async fn snapshot_subagent_worktree(
     let source_repo = source_repo.to_path_buf();
     let ref_name = ref_name.to_string();
     let span = tracing::Span::current();
-    tokio::task::spawn_blocking(move || -> Result<String> {
+    xai_spawn::spawn_blocking(move || -> Result<String> {
         span.in_scope(|| {
             let message = format!("subagent worktree snapshot {ref_name}");
             // Capture into the worktree's git, then make it durable in the source repo (and verify) so it survives the worktree's deletion
@@ -1674,7 +1674,7 @@ pub async fn remove_subagent_worktree(worktree_path: &Path) -> Result<()> {
     // On rootless hosts the snapshot delete needs the privileged helper; without the delegate the btrfs delete hits EPERM and the snapshot leaks
     let delegate = btrfs_delegate_from_env();
     let span = tracing::Span::current();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         span.in_scope(|| xai_fast_worktree::remove_worktree_with_delegate(&worktree_path, delegate))
     })
     .await
@@ -1900,7 +1900,7 @@ async fn cleanup_cancelled_worktree(worktree_path: &str) {
     let path = std::path::PathBuf::from(worktree_path);
     let delegate = btrfs_delegate_from_env();
     let span = tracing::Span::current();
-    match tokio::task::spawn_blocking(move || {
+    match xai_spawn::spawn_blocking(move || {
         span.in_scope(|| xai_fast_worktree::remove_worktree_with_delegate(&path, delegate))
     })
     .await
@@ -2497,7 +2497,7 @@ struct ApplyContext {
 async fn get_apply_context(worktree_path: &str) -> Result<ApplyContext> {
     let wt_path = worktree_path.to_string();
 
-    let (wt_root, wt_head, main_head) = tokio::task::spawn_blocking(move || {
+    let (wt_root, wt_head, main_head) = xai_spawn::spawn_blocking(move || {
         let wt_repo = crate::git_repo::open(Path::new(&wt_path))?;
         let wt_head = get_head_commit(&wt_repo)?;
 

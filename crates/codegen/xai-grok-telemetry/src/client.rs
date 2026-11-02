@@ -397,7 +397,7 @@ pub fn sync_profile() {
     let Some(mixpanel) = client.mixpanel.clone() else {
         return;
     };
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let agent_id = crate::id::agent_id_async().await;
         let user_id = client.user_id.as_deref().unwrap_or(&agent_id).to_owned();
         let mut props = std::collections::HashMap::new();

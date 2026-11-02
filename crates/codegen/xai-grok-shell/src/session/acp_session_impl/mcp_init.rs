@@ -14,7 +14,7 @@ impl RefreshQueue {
     fn start(refresher: SnapshotRefresher) -> Self {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
         // One coalescing task, so the drain never waits on a refresh.
-        let task = crate::util::AbortOnDrop(tokio::task::spawn_local(async move {
+        let task = crate::util::AbortOnDrop(xai_spawn::spawn_local(async move {
             while rx.recv().await.is_some() {
                 while rx.try_recv().is_ok() {}
                 refresher.refresh().await;

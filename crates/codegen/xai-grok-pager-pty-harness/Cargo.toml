@@ -55,6 +55,7 @@ tempfile = { workspace = true }
 xai-tty-utils = { workspace = true }
 
 clap = { workspace = true, features = ["derive"] }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 xai-interjection-core = { workspace = true }
@@ -79,7 +80,7 @@ path = "tests/it/main.rs"
 name = "pty-scenario"
 path = "src/bin/pty_scenario.rs"
 
-# Fixture for tests/it/orphan_reap.rs: holds a PtyController child and blocks so
+# Fixture for tests/it/orphan_reap.rs. Holds a PtyController child and blocks so
 # the test can kill it ungracefully and assert the child does not survive.
 [[bin]]
 name = "pty_orphan_holder"

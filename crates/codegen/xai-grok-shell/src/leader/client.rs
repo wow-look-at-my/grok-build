@@ -235,7 +235,7 @@ impl LeaderClient {
         let outbound = self.outbound_tx;
         let acp_rx = self.acp_rx;
         let (acp_tx, mut local_rx) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(payload) = local_rx.recv().await {
                 if outbound.send(ClientMessage::Acp { payload }).is_err() {
                     break;
@@ -259,7 +259,7 @@ impl LeaderClient {
         let acp_rx = self.acp_rx;
         let disconnect_rx = self.disconnect_rx;
         let (acp_tx, mut local_rx) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(payload) = local_rx.recv().await {
                 if outbound.send(ClientMessage::Acp { payload }).is_err() {
                     break;
@@ -395,7 +395,7 @@ async fn register(
     let cancel_read = cancel.clone();
     let disconnect_tx_read = disconnect_tx.clone();
     let pending_control_read = pending_control.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let reason = loop {
             tokio::select! {
                 biased;
@@ -455,7 +455,7 @@ async fn register(
     });
 
     // Write task with keepalive pings
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut keepalive = tokio::time::interval(KEEPALIVE_INTERVAL);
         // Don't send immediately
         keepalive.tick().await;
@@ -924,7 +924,7 @@ mod tests {
         .unwrap();
 
         let stop_task =
-            tokio::spawn(
+            xai_spawn::spawn(
                 async move { client_a.send_control(ControlCommand::StopCpuProfile).await },
             );
 
@@ -1197,7 +1197,7 @@ mod tests {
         let cancel_clone = cancel.clone();
         let sock_clone = sock_path.clone();
         let cc = client_count.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = crate::leader::server::run_leader_server(
                 sock_clone,
                 acp_tx,

@@ -29,7 +29,7 @@ async fn manual_auth_does_not_post_when_product_telemetry_disabled() {
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/events", listener.local_addr().unwrap());
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     // Fully configured, explicitly Enabled — the disable happens downstream in
     // `client::track`, not in configuration.

@@ -45,7 +45,7 @@ fn spawn_refresh(cwd: PathBuf) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         return;
     };
-    handle.spawn_blocking(move || {
+    xai_spawn::spawn_blocking_on(&handle, move || {
         // A panic in the git read must not take down the pager.
         let stats =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compute_branch_stats(&cwd)));

@@ -826,7 +826,7 @@ impl SchedulerActor {
         // clears it. The handle itself has no waiter: the round it watches is
         // reported to the session by other means.
         #[allow(clippy::disallowed_methods)]
-        tokio::spawn(crate::util::detached::fire_and_forget(
+        xai_spawn::spawn(crate::util::detached::fire_and_forget(
             "loop chain anchor guard",
             async move {
                 let Ok(result) = result_rx.await else {
@@ -1046,7 +1046,7 @@ mod tests {
         let (notification_handle, notifications) = ToolNotificationHandle::acknowledged_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let cancel_token = CancellationToken::new();
-        tokio::spawn(
+        xai_spawn::spawn(
             SchedulerActor {
                 resources: shared.clone(),
                 resources_persistence: persistence,
@@ -1122,7 +1122,7 @@ mod tests {
     ) {
         let (plain, notifications) = ToolNotificationHandle::channel();
         let (acknowledged, mut deliveries) = ToolNotificationHandle::acknowledged_channel();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(delivery) = deliveries.recv().await {
                 if let Some(acknowledgement) = delivery.acknowledgement {
                     let _ = acknowledgement.send(Ok(()));
@@ -1173,7 +1173,7 @@ mod tests {
         // Spawns are dropped after admission, but both the registration signal and the in-flight
         // guards must be answered or the fire reads the silence as a reject and the second fire of
         // a chain waits for a reply that never comes.
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(mut event) = rx.recv().await {
                 ack_spawn_registration(&mut event);
                 match event {
@@ -1223,7 +1223,7 @@ mod tests {
             blocked_expiries: HashSet::new(),
         };
 
-        tokio::spawn(actor.run());
+        xai_spawn::spawn(actor.run());
 
         (SchedulerHandle(cmd_tx), cancel_token, notif_rx)
     }
@@ -1527,7 +1527,7 @@ mod tests {
         let (notif_handle, mut notif_rx) = auto_acknowledged_notifications();
         let (_cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let cancel_token = CancellationToken::new();
-        tokio::spawn(
+        xai_spawn::spawn(
             SchedulerActor {
                 resources: shared,
                 resources_persistence: Arc::new(crate::persistence::ResourcesPersistence::noop()),
@@ -1664,7 +1664,7 @@ mod tests {
             blocked_expiries: HashSet::new(),
         };
 
-        tokio::spawn(actor.run());
+        xai_spawn::spawn(actor.run());
 
         // The first two events on the channel must be ScheduledTaskCreated
         // for the two restored tasks, in insertion order.
@@ -1751,7 +1751,7 @@ mod tests {
             pending_removal: None,
             blocked_expiries: HashSet::new(),
         };
-        tokio::spawn(actor.run());
+        xai_spawn::spawn(actor.run());
 
         let mut kinds = Vec::new();
         for _ in 0..2 {
@@ -1987,7 +1987,7 @@ mod tests {
             blocked_expiries: HashSet::new(),
         };
 
-        let handle = tokio::spawn(actor.run());
+        let handle = xai_spawn::spawn(actor.run());
 
         // Drain the ScheduledTaskCreated announcements.
         let _ = tokio::time::timeout(Duration::from_secs(2), notif_rx.recv()).await;
@@ -2052,7 +2052,7 @@ mod tests {
             pending_removal: None,
             blocked_expiries: HashSet::new(),
         };
-        tokio::spawn(actor.run());
+        xai_spawn::spawn(actor.run());
 
         (
             SchedulerHandle(cmd_tx),
@@ -2569,7 +2569,7 @@ mod tests {
         };
 
         // Take the spawn and drop it without acking: a pre-start reject.
-        let refuse = tokio::spawn(async move {
+        let refuse = xai_spawn::spawn(async move {
             let SubagentEvent::Spawn(spawn) = next_event(&mut subagent_rx).await else {
                 panic!("expected a spawn");
             };
@@ -2609,7 +2609,7 @@ mod tests {
         let (notif_handle, mut notif_rx) = auto_acknowledged_notifications();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let cancel_token = CancellationToken::new();
-        tokio::spawn(
+        xai_spawn::spawn(
             SchedulerActor {
                 resources: shared,
                 resources_persistence: Arc::new(crate::persistence::ResourcesPersistence::noop()),
@@ -2715,7 +2715,7 @@ mod tests {
             .get_or_default::<State<WebCitationCounter>>()
             .counter = 7;
         std::fs::create_dir(&parent).unwrap();
-        let pending = tokio::spawn({
+        let pending = xai_spawn::spawn({
             let handle = handle.clone();
             async move { delete(&handle, "retry").await }
         });
@@ -2748,7 +2748,7 @@ mod tests {
             Arc::new(crate::persistence::ResourcesPersistence::noop()),
         );
         let _ = next_acknowledged(&mut notifications).await;
-        let first = tokio::spawn({
+        let first = xai_spawn::spawn({
             let handle = handle.clone();
             async move { delete(&handle, "retry-ack").await }
         });
@@ -2767,7 +2767,7 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("scheduler_notification")
         );
-        let retry = tokio::spawn({
+        let retry = xai_spawn::spawn({
             let handle = handle.clone();
             async move { delete(&handle, "retry-ack").await }
         });
@@ -2910,7 +2910,7 @@ mod tests {
             Arc::new(crate::persistence::ResourcesPersistence::noop()),
         );
         let _ = next_acknowledged(&mut notifications).await;
-        let deletion = tokio::spawn({
+        let deletion = xai_spawn::spawn({
             let handle = handle.clone();
             async move { delete(&handle, "cancel").await }
         });
@@ -3153,7 +3153,7 @@ mod tests {
             pending_removal: None,
             blocked_expiries: HashSet::new(),
         };
-        let actor_task = tokio::spawn(actor.run());
+        let actor_task = xai_spawn::spawn(actor.run());
         let (_, _withheld) = next_event(&mut saves).await;
         let announced = next_acknowledged(&mut notifications).await;
         assert!(announced.acknowledgement.is_none());
@@ -3201,7 +3201,7 @@ mod tests {
             blocked_expiries: HashSet::new(),
         };
 
-        let handle = tokio::spawn(actor.run());
+        let handle = xai_spawn::spawn(actor.run());
         cancel_token.cancel();
         handle.await.expect("actor should complete");
 

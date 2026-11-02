@@ -133,7 +133,7 @@ mod tests {
             .await
             .expect("bind ephemeral");
         let addr = listener.local_addr().expect("local addr");
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = axum::serve(listener, app.into_make_service()).await;
         });
         tokio::task::yield_now().await;
@@ -211,7 +211,7 @@ mod tests {
         for _ in 0..n_callers {
             let borrow = borrow.clone();
             let barrier = barrier.clone();
-            handles.push(tokio::spawn(async move {
+            handles.push(xai_spawn::spawn(async move {
                 barrier.wait().await;
                 borrow.begin_teardown()
             }));

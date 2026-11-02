@@ -33,11 +33,11 @@ async fn external_stream_carries_no_first_party_credential() {
         is_git_repo: true,
         permission_mode: PermissionMode::Ask,
     });
-    tokio::task::spawn_blocking(xai_grok_telemetry::external::flush)
+    xai_spawn::spawn_blocking(xai_grok_telemetry::external::flush)
         .await
         .unwrap();
     tokio::time::sleep(Duration::from_millis(600)).await;
-    tokio::task::spawn_blocking(xai_grok_telemetry::external::shutdown)
+    xai_spawn::spawn_blocking(xai_grok_telemetry::external::shutdown)
         .await
         .unwrap();
 

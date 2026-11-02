@@ -147,7 +147,7 @@ async fn external_stream_gates_on_end_to_end() {
         response_text: Some(RESPONSE_MARK.into()),
     });
 
-    tokio::task::spawn_blocking(external::flush).await.unwrap();
+    xai_spawn::spawn_blocking(external::flush).await.unwrap();
     // Give any (erroneously constructed) exporter ample time to phone home.
     tokio::time::sleep(Duration::from_millis(600)).await;
     assert!(
@@ -159,8 +159,8 @@ async fn external_stream_gates_on_end_to_end() {
         "disabled external stream must export no metrics"
     );
 
-    tokio::task::spawn_blocking(external::flush).await.unwrap();
-    tokio::task::spawn_blocking(|| {
+    xai_spawn::spawn_blocking(external::flush).await.unwrap();
+    xai_spawn::spawn_blocking(|| {
         external::apply_remote_policy(ExternalOtelRemotePolicy {
             force_disable: true,
             lock_content_gates: false,
@@ -193,7 +193,5 @@ async fn external_stream_gates_on_end_to_end() {
     );
     silence.expect("no log exports after the remote kill switch");
 
-    tokio::task::spawn_blocking(external::shutdown)
-        .await
-        .unwrap();
+    xai_spawn::spawn_blocking(external::shutdown).await.unwrap();
 }

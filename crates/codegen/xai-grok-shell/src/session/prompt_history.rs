@@ -102,7 +102,7 @@ pub(crate) fn truncate_if_needed(cwd: &str) -> io::Result<()> {
 
 /// Async wrapper for append_prompt (fire-and-forget via spawn_blocking)
 pub(crate) async fn append_prompt_async(cwd: String, entry: PromptEntry) {
-    let _ = tokio::task::spawn_blocking(move || {
+    let _ = xai_spawn::spawn_blocking(move || {
         if let Err(e) = append_prompt(&cwd, &entry) {
             tracing::warn!(?e, "failed to append prompt to history");
         }
@@ -147,7 +147,7 @@ fn load_prompts_filtered(
 }
 
 pub(crate) async fn load_prompts_async(cwd: String) -> io::Result<Vec<String>> {
-    tokio::task::spawn_blocking(move || load_prompts(&cwd))
+    xai_spawn::spawn_blocking(move || load_prompts(&cwd))
         .await
         .map_err(io::Error::other)?
 }
@@ -156,20 +156,20 @@ pub(crate) async fn load_prompts_for_session_async(
     cwd: String,
     session_id: String,
 ) -> io::Result<Vec<String>> {
-    tokio::task::spawn_blocking(move || load_prompts_for_session(&cwd, &session_id))
+    xai_spawn::spawn_blocking(move || load_prompts_for_session(&cwd, &session_id))
         .await
         .map_err(io::Error::other)?
 }
 
 pub(crate) async fn load_bash_prompts_async(cwd: String) -> io::Result<Vec<String>> {
-    tokio::task::spawn_blocking(move || load_bash_prompts(&cwd))
+    xai_spawn::spawn_blocking(move || load_bash_prompts(&cwd))
         .await
         .map_err(io::Error::other)?
 }
 
 /// Async wrapper for truncate_if_needed (background maintenance)
 pub(crate) async fn truncate_if_needed_async(cwd: String) {
-    let _ = tokio::task::spawn_blocking(move || {
+    let _ = xai_spawn::spawn_blocking(move || {
         if let Err(e) = truncate_if_needed(&cwd) {
             tracing::warn!(?e, "failed to truncate prompt history");
         }

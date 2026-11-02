@@ -60,7 +60,7 @@ async fn local_outbound_budget_accepts_32_and_rejects_33() {
     );
     drop(held);
     for index in 0..32 {
-        let send = tokio::spawn({
+        let send = xai_spawn::spawn({
             let sender = sender.clone();
             async move {
                 sender
@@ -106,7 +106,7 @@ async fn typed_targets_enter_granted_ingress() {
             ActiveAgentMessageOperation::Queue,
         )
         .unwrap();
-        let send = tokio::spawn({
+        let send = xai_spawn::spawn({
             let sender = sender.clone();
             async move { sender.send(request).await }
         });

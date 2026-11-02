@@ -396,7 +396,7 @@ pub async fn list_contents(
     let max_dirs = limits.max_dirs_visited;
     let contents = {
         let _timer = (); // instrumentation_timer noop (dev infra)
-        tokio::task::spawn_blocking(move || collect_all_contents(&path_clone, max_depth, max_dirs))
+        xai_spawn::spawn_blocking(move || collect_all_contents(&path_clone, max_depth, max_dirs))
             .await
             .map_err(|e| FsError::Other(format!("walk join error: {e}")))?
     }?;

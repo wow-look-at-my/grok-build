@@ -973,7 +973,7 @@ pub(crate) async fn spawn_session_actor(
             let gc_storage = storage.clone();
             let gc_max_age = memory_config.as_ref().map_or(30, |mc| mc.gc.max_age_days);
             let gc_span = region!(debug, "memory.gc", SpanParent::Root);
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 let _gc_span = gc_span;
                 match gc_storage.gc(gc_max_age) {
                     Ok(removed) if removed > 0 => {
@@ -1509,7 +1509,7 @@ pub(crate) async fn spawn_session_actor(
     if feedback_flags.enabled
         && let Some(user_cfg) = user_cfg
     {
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = crate::util::user_identity::cached_identity(Some(&user_cfg)).await;
         });
     }
@@ -2111,7 +2111,7 @@ pub(crate) async fn spawn_session_actor(
         {
             let drainer_session = session.clone();
             let mut sampler_event_rx = sampler_event_rx;
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(event) = sampler_event_rx.recv().await {
                     drainer_session.handle_sampling_event(event).await;
                 }
@@ -2123,7 +2123,7 @@ pub(crate) async fn spawn_session_actor(
             let Some(mut goal_update_rx) = session.goal_update_rx.borrow_mut().take() else {
                 unreachable!("goal_update_rx must be Some at session spawn");
             };
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(envelope) = goal_update_rx.recv().await {
                     let current_tokens =
                         drainer_session.chat_state_handle.get_total_tokens().await as i64;
@@ -2223,7 +2223,7 @@ pub(crate) async fn spawn_session_actor(
         let sampling_api_key = embed_api_key.clone();
         let session_id_for_reindex = session_info.id.to_string();
         let chunks_added_counter = session.memory.chunks_added.clone();
-        let reindex_handle = tokio::task::spawn_local(async move {
+        let reindex_handle = xai_spawn::spawn_local(async move {
             let db_path = storage.workspace_dir().join("index.sqlite");
             if let Ok(mut index) = crate::session::memory::MemoryIndex::open_or_create(
                 &db_path,
@@ -2286,7 +2286,7 @@ pub(crate) async fn spawn_session_actor(
             "Spawning feedback sync loop"
         );
         let fm = feedback_manager.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             fm.run_sync_loop(cancel).await;
         });
     } else {
@@ -2307,7 +2307,7 @@ pub(crate) async fn spawn_session_actor(
         let pending_interactions = session.pending_interactions.clone();
         let session_for_hooks = session.clone();
         let mut user_question_rx = user_question_rx;
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(mut request) = user_question_rx.recv().await {
                 use xai_grok_tools::implementations::grok_build::ask_user_question::AskUserQuestionMode;
                 let mode = match *current_prompt_mode.lock() {
@@ -2404,13 +2404,13 @@ pub(crate) async fn spawn_session_actor(
             })
             .unwrap_or_default();
         let telemetry_enabled = session.telemetry_enabled;
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let ev = metrics.into_event(hooks).await;
             xai_grok_telemetry::session_ctx::log_event_dual(telemetry_enabled, ev);
         });
     }
     let hosting = SESSIONS_ACTIVE.enter();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let _hosting = hosting;
         xai_grok_telemetry::session_ctx::with_session_ctx(
             telemetry_ctx,

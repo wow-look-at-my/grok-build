@@ -118,7 +118,7 @@ pub(crate) async fn list(
     let abs = resolve_in_base(&base, &req.path).await?;
     let req = req.clone();
     // The walk does synchronous traversal and metadata syscalls; run it off the async executor (matching the ext_fs ops)
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         list_blocking(&abs, &base.base, &base.canonical, &req, MAX_LIST_COLLECT)
     })
     .await
@@ -611,7 +611,7 @@ pub(crate) async fn write_file(
                 create_dirs: req.create_dirs,
                 overwrite: req.overwrite,
             };
-            let begun = tokio::task::spawn_blocking(move || begin_upload(begin))
+            let begun = xai_spawn::spawn_blocking(move || begin_upload(begin))
                 .await
                 .map_err(|e| WorkspaceError::JoinError(e.to_string()));
             match begun {
@@ -632,7 +632,7 @@ pub(crate) async fn write_file(
         session_budget: MAX_STAGED_BYTES_PER_SESSION.saturating_sub(staged_elsewhere),
     };
     // Decode, append and (on finalize) fsync + rename are blocking; the upload is dropped inside on any error.
-    let outcome = tokio::task::spawn_blocking(move || append_chunk(upload, chunk))
+    let outcome = xai_spawn::spawn_blocking(move || append_chunk(upload, chunk))
         .await
         .map_err(|e| WorkspaceError::JoinError(e.to_string()));
     match outcome {
@@ -974,7 +974,7 @@ pub(crate) fn spawn_staged_upload_maintenance(
         return None;
     }
     let sweep_ws = ws.clone();
-    let sweep = tokio::task::spawn_blocking(move || match sweep_orphaned_staging(&sweep_ws) {
+    let sweep = xai_spawn::spawn_blocking(move || match sweep_orphaned_staging(&sweep_ws) {
         Ok(removed) => {
             if removed > 0 {
                 tracing::info!(removed, "client-fs orphan sweep complete");
@@ -987,7 +987,7 @@ pub(crate) fn spawn_staged_upload_maintenance(
         }
     });
     let shared = std::sync::Arc::downgrade(&ws.shared);
-    let gc = tokio::spawn(async move {
+    let gc = xai_spawn::spawn(async move {
         let mut tick = tokio::time::interval(STAGED_UPLOAD_GC_TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -996,7 +996,7 @@ pub(crate) fn spawn_staged_upload_maintenance(
                 return;
             };
             let ws = WorkspaceHandle { shared };
-            let dropped = tokio::task::spawn_blocking(move || {
+            let dropped = xai_spawn::spawn_blocking(move || {
                 gc_staged_uploads(&ws, Instant::now(), STAGED_UPLOAD_MAX_IDLE)
             })
             .await

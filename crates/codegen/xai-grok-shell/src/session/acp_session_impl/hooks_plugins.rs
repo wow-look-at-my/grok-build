@@ -441,7 +441,7 @@ impl SessionActor {
                 // bypass the lockdown; blocking work runs off the LocalSet (invariant: plugin/acquire.rs).
                 let cwd = self.session_info.cwd.clone();
                 let cloned_source = source.clone();
-                let installed = tokio::task::spawn_blocking(move || {
+                let installed = xai_spawn::spawn_blocking(move || {
                     crate::plugin::install_plugin(&cloned_source, std::path::Path::new(&cwd))
                 })
                 .await;
@@ -500,7 +500,7 @@ impl SessionActor {
                 }
                 // Shared uninstall keeps this arm aligned with the CLI path; registry + fs work runs on the
                 // blocking pool (invariant: plugin/acquire.rs).
-                let task = tokio::task::spawn_blocking(move || {
+                let task = xai_spawn::spawn_blocking(move || {
                     // Extract plugin name from ID (last segment of "scope/hex8/name").
                     let plugin_name = plugin_id.rsplit('/').next().unwrap_or(&plugin_id);
                     crate::plugin::uninstall_plugin(plugin_name, confirmed, false)
@@ -571,7 +571,7 @@ impl SessionActor {
                 let name = plugin_id
                     .as_deref()
                     .map(|id| id.rsplit('/').next().unwrap_or(id).to_string());
-                let task = tokio::task::spawn_blocking(move || {
+                let task = xai_spawn::spawn_blocking(move || {
                     crate::plugin::update_plugins(name.as_deref())
                 })
                 .await;

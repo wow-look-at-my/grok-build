@@ -7022,6 +7022,7 @@ dependencies = [
  "terminput",
  "tokio",
  "tower-http",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11174,6 +11175,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11204,6 +11206,7 @@ dependencies = [
  "xai-compaction-transcript",
  "xai-grok-compaction",
  "xai-grok-sampling-types",
+ "xai-spawn",
  "xai-token-estimation",
 ]
 
@@ -11292,6 +11295,7 @@ dependencies = [
  "tokio",
  "tracing",
  "xai-computer-hub-sdk",
+ "xai-spawn",
  "xai-tool-protocol",
  "xai-tool-runtime",
  "xai-tool-types",
@@ -11332,6 +11336,7 @@ dependencies = [
  "uuid",
  "xai-computer-hub-core",
  "xai-grok-net",
+ "xai-spawn",
  "xai-tool-protocol",
  "xai-tool-runtime",
  "xai-tool-types",
@@ -11347,6 +11352,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "windows-sys 0.59.0",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11430,6 +11436,7 @@ dependencies = [
  "xai-grok-net",
  "xai-grok-otel",
  "xai-grok-version",
+ "xai-spawn",
  "zstd",
 ]
 
@@ -11451,6 +11458,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "xai-bench",
+ "xai-spawn",
  "xai-test-utils",
  "xai-tracing-macros",
 ]
@@ -11651,6 +11659,7 @@ dependencies = [
  "tokio",
  "tracing",
  "xai-grok-version",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11745,6 +11754,7 @@ dependencies = [
  "xai-grok-net",
  "xai-grok-sandbox",
  "xai-grok-tools",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -11835,6 +11845,7 @@ dependencies = [
  "xai-grok-test-support",
  "xai-grok-tools",
  "xai-grok-version",
+ "xai-spawn",
  "xai-system-power",
  "xai-tool-types",
 ]
@@ -11906,6 +11917,7 @@ dependencies = [
  "xai-grok-tools",
  "xai-grok-version",
  "xai-grok-workspace-types",
+ "xai-spawn",
  "xai-tool-protocol",
  "xai-tool-runtime",
  "xai-tool-types",
@@ -12118,6 +12130,7 @@ dependencies = [
  "xai-prompt-queue",
  "xai-ratatui-inline",
  "xai-ratatui-textarea",
+ "xai-spawn",
  "xai-test-utils",
  "xai-token-estimation",
  "xai-tool-types",
@@ -12150,6 +12163,7 @@ dependencies = [
  "xai-grok-telemetry",
  "xai-grok-version",
  "xai-grok-workspace",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -12191,6 +12205,7 @@ dependencies = [
  "unicode-width 0.2.0",
  "xai-grok-test-support",
  "xai-interjection-core",
+ "xai-spawn",
  "xai-test-utils",
  "xai-tty-utils",
 ]
@@ -12250,6 +12265,7 @@ dependencies = [
  "xai-grok-workspace",
  "xai-ratatui-inline",
  "xai-ratatui-textarea",
+ "xai-spawn",
  "xai-tty-utils",
  "zbus",
 ]
@@ -12324,6 +12340,7 @@ dependencies = [
  "xai-grok-sampling-types",
  "xai-grok-test-support",
  "xai-grok-version",
+ "xai-spawn",
  "xai-token-estimation",
  "zstd",
 ]
@@ -12416,6 +12433,7 @@ dependencies = [
  "uuid",
  "xai-grok-config",
  "xai-grok-telemetry",
+ "xai-spawn",
  "xai-sqlite-journal",
 ]
 
@@ -12580,6 +12598,7 @@ dependencies = [
  "xai-interjection-core",
  "xai-message-delivery-core",
  "xai-prompt-queue",
+ "xai-spawn",
  "xai-test-utils",
  "xai-token-estimation",
  "xai-tool-protocol",
@@ -12623,6 +12642,7 @@ dependencies = [
  "xai-grok-net",
  "xai-grok-shared",
  "xai-grok-version",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -12640,6 +12660,7 @@ dependencies = [
  "xai-grok-http",
  "xai-grok-net",
  "xai-grok-version",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -12669,6 +12690,7 @@ dependencies = [
  "xai-grok-sandbox",
  "xai-grok-tools",
  "xai-grok-workspace",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -12760,6 +12782,7 @@ dependencies = [
  "xai-grok-test-support",
  "xai-grok-version",
  "xai-mixpanel",
+ "xai-spawn",
  "xai-token-estimation",
  "xai-tool-types",
  "xai-tty-utils",
@@ -12793,6 +12816,7 @@ dependencies = [
  "tracing",
  "url",
  "xai-acp-lib",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -12878,6 +12902,7 @@ dependencies = [
  "xai-grok-version",
  "xai-interjection-core",
  "xai-message-delivery-core",
+ "xai-spawn",
  "xai-test-utils",
  "xai-token-estimation",
  "xai-tool-protocol",
@@ -12927,6 +12952,7 @@ dependencies = [
  "xai-dirs",
  "xai-grok-extra-ca",
  "xai-grok-net",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -13012,6 +13038,7 @@ dependencies = [
  "xai-grok-workspace-client",
  "xai-grok-workspace-types",
  "xai-hunk-tracker",
+ "xai-spawn",
  "xai-test-utils",
  "xai-tool-protocol",
  "xai-tool-runtime",
@@ -13057,6 +13084,7 @@ dependencies = [
  "windows 0.61.3",
  "xai-computer-hub-sdk",
  "xai-grok-net",
+ "xai-spawn",
  "xai-tty-utils",
 ]
 
@@ -13082,6 +13110,7 @@ dependencies = [
  "xai-grok-sandbox",
  "xai-grok-workspace",
  "xai-grok-workspace-daemon",
+ "xai-spawn",
  "xai-tool-protocol",
  "xai-tty-utils",
 ]
@@ -13125,6 +13154,7 @@ dependencies = [
  "tracing",
  "uuid",
  "xai-gix-status",
+ "xai-spawn",
  "xai-test-utils",
 ]
 
@@ -13207,6 +13237,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "xai-spawn"
+version = "0.1.0"
+dependencies = [
+ "tokio",
+]
+
+[[package]]
 name = "xai-sqlite-journal"
 version = "0.1.0"
 dependencies = [
@@ -13264,6 +13301,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "xai-grok-tools-api",
+ "xai-spawn",
  "xai-tool-protocol",
  "xai-tool-types",
 ]
@@ -13305,6 +13343,7 @@ dependencies = [
  "uuid",
  "wiremock",
  "xai-grok-net",
+ "xai-spawn",
 ]
 
 [[package]]
@@ -13319,6 +13358,7 @@ dependencies = [
  "nix 0.30.1",
  "tokio",
  "windows 0.61.3",
+ "xai-spawn",
 ]
 
 [[package]]

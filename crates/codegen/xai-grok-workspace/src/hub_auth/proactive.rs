@@ -238,7 +238,7 @@ impl ProactiveOidcAuthProvider {
                 _task_guard: None,
             };
         }
-        let task = tokio::spawn(refresh_loop(
+        let task = xai_spawn::spawn(refresh_loop(
             inner.clone(),
             params.refresh_token,
             cancel.clone(),

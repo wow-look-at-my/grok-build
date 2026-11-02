@@ -41,7 +41,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
         Vec::<acp::SessionNotification>::new(),
     ));
     let sent_for_task = sent.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg {
                 sent_for_task.lock().await.push(args.request);

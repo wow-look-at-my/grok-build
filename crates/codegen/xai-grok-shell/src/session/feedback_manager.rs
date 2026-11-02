@@ -322,7 +322,7 @@ fn spawn_turn_delta_worker(
     client: FeedbackClient,
 ) -> mpsc::Sender<TurnDeltaJob> {
     let (tx, mut rx) = mpsc::channel(TURN_DELTA_QUEUE_CAPACITY);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(job) = rx.recv().await {
             match job {
                 TurnDeltaJob::Post(delta) => {
@@ -373,7 +373,7 @@ impl FeedbackManager {
 
         // The signals actor answers every handle method on this manager, so its
         // death is reported with its name rather than as a closed channel.
-        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
             "feedback manager signals actor",
             actor.run(),
         ));
@@ -1470,7 +1470,7 @@ mod tests {
             config,
         ));
         let cancel = tokio_util::sync::CancellationToken::new();
-        let loop_handle = tokio::spawn(manager.clone().run_sync_loop(cancel.clone()));
+        let loop_handle = xai_spawn::spawn(manager.clone().run_sync_loop(cancel.clone()));
         // First tick and failed sync, then idle waiting on the long interval
         tokio::time::sleep(Duration::from_millis(400)).await;
         let started = Instant::now();
@@ -1489,12 +1489,12 @@ mod tests {
             .await
             .expect("bind blackhole listener");
         let addr = listener.local_addr().expect("local addr");
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(120)).await;
                     drop(stream);
                 });
@@ -1660,7 +1660,7 @@ mod tests {
         let app = Router::new().route("/v1/storage", post(slow_handler));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
 

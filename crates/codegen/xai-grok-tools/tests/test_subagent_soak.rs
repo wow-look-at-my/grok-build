@@ -471,7 +471,7 @@ async fn concurrent_phase(backend: &ChannelBackend, gate: &tokio::sync::Semaphor
     let handles: Vec<_> = (0..n)
         .map(|k| {
             let backend = backend.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 backend
                     .spawn(soak_request(format!("conc-{k}"), true), None)
                     .await
@@ -658,7 +658,7 @@ async fn subagent_lifecycle_soak_bounds_threads_open_files_and_heap() {
             };
             let (command_tx, command_rx) = SubagentCoordinator::<SoakRunner>::channel();
             let gate = Arc::new(tokio::sync::Semaphore::new(0));
-            tokio::task::spawn_local(
+            xai_spawn::spawn_local(
                 SubagentCoordinator::from_channel(
                     command_rx,
                     SoakRunner { gate: gate.clone() },

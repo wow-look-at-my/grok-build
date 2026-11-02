@@ -77,13 +77,10 @@ impl FsEventSource {
         let shutdown = CancellationToken::new();
 
         // Detached: cancellation via `shutdown` (biased-selected in the loop).
-        handle.spawn(event_loop(
-            raw_rx,
-            out_tx.clone(),
-            vcs,
-            cooldown,
-            shutdown.clone(),
-        ));
+        xai_spawn::spawn_on(
+            &handle,
+            event_loop(raw_rx, out_tx.clone(), vcs, cooldown, shutdown.clone()),
+        );
 
         Ok(Self {
             out_tx,

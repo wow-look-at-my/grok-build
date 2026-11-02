@@ -17,6 +17,7 @@ tracing = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 gix = { workspace = true, features = ["attributes"] }
 thiserror = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -138,7 +138,7 @@ pub(crate) fn drain_redirect_events(event: &WorktreeEnded) {
     };
     // The ring is daemon-wide, so its entries carry no session id; the
     // blocking thread has no task-local session context and none is wanted.
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let _in_flight = guard;
         drain_redirect_events_sync(&NfsWorktreeClient::from_opts(&opts));
     });
@@ -976,7 +976,7 @@ mod tests {
         let held = RedirectDrainGuard::try_acquire().unwrap();
         let ran = std::sync::Arc::new(AtomicBool::new(false));
         let ran_in_closure = std::sync::Arc::clone(&ran);
-        drop(handle.spawn_blocking(move || {
+        drop(xai_spawn::spawn_blocking_on(&handle, move || {
             let _in_flight = held;
             ran_in_closure.store(true, Ordering::Release);
         }));

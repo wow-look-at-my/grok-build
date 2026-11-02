@@ -4472,7 +4472,7 @@ fn plugin_config_writes_keep_the_caller_local_set_live() {
     rt.block_on(
         local
             .run_until(async move {
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     loop {
                         tokio::time::sleep(Duration::from_millis(5)).await;
                         ticker_ticks.set(ticker_ticks.get() + 1);

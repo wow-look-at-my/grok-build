@@ -22,6 +22,7 @@ xai-tty-utils = { workspace = true }
 
 # fork/setsid/dup2/chdir on the self-daemonize path, and PDEATHSIG on the
 # supervised preview-proxy child.
+xai-spawn = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 

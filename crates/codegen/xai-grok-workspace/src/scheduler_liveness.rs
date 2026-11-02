@@ -48,7 +48,7 @@ pub(crate) fn spawn_scheduler_liveness_poll(shared: &Arc<WorkspaceShared>) {
     }
 
     let weak = Arc::downgrade(shared);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Some(shared) = weak.upgrade() else { return };
             if let PollUpdate::Record(next_run) = poll_schedulers_once(&shared).await {
@@ -186,7 +186,7 @@ mod tests {
     async fn silent_scheduler_answers_no_reply_not_dead() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         // Hold the List reply open without answering, like a scheduler that is busy firing.
-        let holder = tokio::spawn(async move {
+        let holder = xai_spawn::spawn(async move {
             let Some(SchedulerCommand::List { reply }) = rx.recv().await else {
                 return;
             };

@@ -47,7 +47,7 @@ async fn boot_guard_drop_resets_booting_and_wakes_waiter() {
 
     let waiter = {
         let slot = Arc::clone(&slot);
-        tokio::spawn(async move { reclaim_abandoned_boot(&slot, rx, 1).await })
+        xai_spawn::spawn(async move { reclaim_abandoned_boot(&slot, rx, 1).await })
     };
 
     drop(BootSlotGuard::new(&slot, boot_tx, 1));

@@ -60,7 +60,7 @@ async fn start_idp(
             }),
         );
 
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, handle)
 }
 
@@ -184,7 +184,7 @@ async fn auth_backend_contract_concurrent_401s_hit_idp_once() {
     let mut tasks = Vec::new();
     for _ in 0..6 {
         let auth_manager = auth_manager.clone();
-        tasks.push(tokio::spawn(async move { auth_manager.auth().await }));
+        tasks.push(xai_spawn::spawn(async move { auth_manager.auth().await }));
     }
     for t in tasks {
         let outcome = t.await.unwrap();

@@ -118,11 +118,10 @@ fn pr_state(state: Option<&str>, is_draft: bool) -> &'static str {
 #[cfg(unix)]
 async fn pr_via_ci_host(fd: i32, branch: &str) -> Option<PrData> {
     let branch = branch.to_owned();
-    let body = tokio::task::spawn_blocking(move || {
-        xai_grok_sandbox::ci_host::query_ci_host_pr(fd, &branch)
-    })
-    .await
-    .ok()??;
+    let body =
+        xai_spawn::spawn_blocking(move || xai_grok_sandbox::ci_host::query_ci_host_pr(fd, &branch))
+            .await
+            .ok()??;
     let parsed = serde_json::from_slice::<HostPrResponse>(&body).ok()?;
     Some(PrData {
         url: parsed.url?,

@@ -317,7 +317,7 @@ impl HubConnectionPool {
         sweep_interval: Duration,
     ) -> JoinHandle<()> {
         let weak = Arc::downgrade(self);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut ticker = tokio::time::interval(sweep_interval);
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             // `interval`'s first tick resolves immediately; skip it.

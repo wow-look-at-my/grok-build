@@ -94,7 +94,7 @@ impl PreparedMcpFile {
         let arguments = std::sync::Arc::new(arguments);
         let measured_arguments = arguments.clone();
         let measured =
-            tokio_util::task::AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
+            tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn_blocking(move || {
                 let mut counter = SnapshotCounter { bytes: 0 };
                 serde_json::to_writer(&mut counter, measured_arguments.as_ref())
                     .map(|()| counter.bytes)
@@ -265,7 +265,7 @@ impl McpFilePreparation {
                 let arguments = std::mem::take(&mut invocation.tool_input);
                 let (arguments, preview) = tokio::time::timeout(
                     source.operation_remaining,
-                    tokio_util::task::AbortOnDropHandle::new(tokio::task::spawn_blocking(
+                    tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn_blocking(
                         move || {
                             let (preview, _) =
                                 xai_grok_hooks::event::truncate_payload(arguments.clone());
@@ -471,7 +471,7 @@ impl SessionActor {
                     format!("Cannot read complete MCP source file: {error}")
                 })?;
             source.bytes = bytes.len();
-            tokio_util::task::AbortOnDropHandle::new(tokio::task::spawn_blocking(move || {
+            tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn_blocking(move || {
                 let document = String::from_utf8(bytes)
                     .map_err(|_| "MCP source file is not valid UTF-8".to_owned())?;
                 let invocation = match input {

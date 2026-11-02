@@ -39,7 +39,7 @@ pub(crate) async fn carry_over_legacy_memory_into_v2(
     for (scope_dir, scope) in scopes {
         let source = legacy_memory_file(legacy_root, scope, &workspace_dir_name);
         let access = access.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = xai_spawn::spawn_blocking(move || {
             carry_over_legacy_memory(
                 &scope_dir,
                 &source,

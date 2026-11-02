@@ -923,7 +923,7 @@ impl HubConnection {
         let (writer_stop_tx, writer_stop_rx) = mpsc::channel::<()>(1);
         let (priority_tx, priority_rx) = mpsc::channel::<String>(PRIORITY_OUTBOUND_CAPACITY);
         let (writer_ready_tx, writer_ready_rx) = oneshot::channel();
-        let writer_handle = tokio::spawn(run_writer(
+        let writer_handle = xai_spawn::spawn(run_writer(
             sink,
             outbound_rx,
             priority_rx,
@@ -938,7 +938,7 @@ impl HubConnection {
             cb();
         }
         let reader_inner = inner.clone();
-        tokio::spawn(run_reader_actor(
+        xai_spawn::spawn(run_reader_actor(
             reader_inner,
             stream,
             presented,
@@ -1935,7 +1935,7 @@ async fn run_auth_refresh(
     loop {
         tick.tick().await;
         let provider = Arc::clone(&inner.credential);
-        let current = match tokio::task::spawn_blocking(move || provider.current()).await {
+        let current = match xai_spawn::spawn_blocking(move || provider.current()).await {
             Ok(current) => current,
             Err(err) => {
                 warn!(%err, "credential provider did not return; retrying next tick");
@@ -1967,7 +1967,7 @@ fn spawn_auth_refresh(
 ) -> Option<PhaseTask> {
     let supports = inner.supports(Method::AuthRefresh.as_wire_str());
     AuthRefreshDriver::for_phase(inner.kind, presented, supports).map(|driver| {
-        PhaseTask(tokio::spawn(run_auth_refresh(
+        PhaseTask(xai_spawn::spawn(run_auth_refresh(
             Arc::clone(inner),
             driver,
             inner.auth_refresh_poll,

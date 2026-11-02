@@ -117,7 +117,7 @@ async fn run_task_call_with_queued_message(
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
     let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(event) = event_rx.recv().await {
             if let SubagentEvent::HandOffForeground(SubagentHandOffForegroundRequest {
                 prompt_id,
@@ -158,7 +158,7 @@ async fn run_task_call_with_queued_message(
     }
 
     let call_actor = actor.clone();
-    let call = tokio::task::spawn_local(async move {
+    let call = xai_spawn::spawn_local(async move {
         call_actor
             .execute_tool_calls(vec![task_call("task-1", run_in_background)], None)
             .await

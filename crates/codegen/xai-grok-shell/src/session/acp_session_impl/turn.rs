@@ -2259,7 +2259,7 @@ impl SessionActor {
             }
             let inject_start = std::time::Instant::now();
             let storage = self.memory.storage()?;
-            let context = tokio::task::spawn_blocking(move || {
+            let context = xai_spawn::spawn_blocking(move || {
                 crate::session::helpers::memory_context::format_v2_memory_context(&storage)
             })
             .await
@@ -2933,7 +2933,7 @@ impl SessionActor {
                 && self.compaction.prefire.try_begin()
             {
                 let actor = std::sync::Arc::clone(self);
-                let handle = tokio::task::spawn_local(async move {
+                let handle = xai_spawn::spawn_local(async move {
                     actor.run_prefire_pass1().await;
                 });
                 self.compaction.prefire.set_handle(handle);

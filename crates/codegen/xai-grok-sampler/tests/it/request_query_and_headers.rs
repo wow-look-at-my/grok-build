@@ -30,7 +30,7 @@ async fn request_carries_query_params_and_env_http_headers() {
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
 

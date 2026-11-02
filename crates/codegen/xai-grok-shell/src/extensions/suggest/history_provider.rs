@@ -118,7 +118,7 @@ async fn get_or_refresh_cross_cwd_cache() -> Arc<CrossCwdCache> {
         return current;
     }
 
-    let result = match tokio::task::spawn_blocking(scan_cross_cwd_prompts).await {
+    let result = match xai_spawn::spawn_blocking(scan_cross_cwd_prompts).await {
         Ok(prompts) => {
             let new = Arc::new(CrossCwdCache {
                 prompts,
@@ -205,7 +205,7 @@ async fn get_or_refresh_shell_history_cache() -> Arc<ShellHistoryCache> {
         return current;
     }
 
-    let result = match tokio::task::spawn_blocking(load_shell_history).await {
+    let result = match xai_spawn::spawn_blocking(load_shell_history).await {
         Ok(commands) => {
             let new = Arc::new(ShellHistoryCache {
                 commands,

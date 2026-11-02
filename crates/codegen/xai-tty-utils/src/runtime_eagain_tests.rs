@@ -85,7 +85,7 @@ fn run_child(prewarmed: bool) -> ! {
     }
     // The default runtime has an empty pool, so this must create a thread and
     // take the panic arm. The pre-warmed runtime hands it to an idle worker.
-    let got = rt.block_on(async { tokio::task::spawn_blocking(|| 42u32).await });
+    let got = rt.block_on(async { xai_spawn::spawn_blocking(|| 42u32).await });
     println!("{SURVIVED} {got:?} pool={MAX_BLOCKING_THREADS}");
     std::process::exit(0);
 }

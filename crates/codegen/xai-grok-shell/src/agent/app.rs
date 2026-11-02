@@ -62,9 +62,9 @@ fn spawn_agent_local(
     *keepalive.borrow_mut() = Some(Rc::clone(&agent));
     let incoming = LineBufferedRead::spawn_local(incoming);
     let (conn, handle_io) = acp::AgentSideConnection::new(agent, outgoing, incoming, |fut| {
-        tokio::task::spawn_local(fut);
+        xai_spawn::spawn_local(fut);
     });
-    tokio::task::spawn_local(
+    xai_spawn::spawn_local(
         GatewayReceiver::new(gw_rx, conn)
             .with_on_meta(xai_grok_otel::span_from_meta_traceparent)
             .run(),
@@ -96,7 +96,7 @@ where
         skills_paths,
     )?;
     let skills_tx = acp_incoming_tx.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         while let Some(change) = skills_rx.recv().await {
             let created_discovery_dir = watcher.refresh_new_discovery_dirs();
             let (id, method) = match change {
@@ -168,7 +168,7 @@ pub async fn run_stdio_agent(
     let stdin_tx = acp_incoming_tx.clone();
     let (stdin_closed_tx, stdin_closed_rx) = tokio::sync::oneshot::channel();
     let mut stdin_lines = xai_acp_lib::spawn_stdin_line_reader();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(line) = stdin_lines.recv().await {
             let mut tx = stdin_tx.lock().await;
             if tx.write_all(&line).await.is_err() {
@@ -187,7 +187,7 @@ pub async fn run_stdio_agent(
     let result = local_set
         .run_until(async move {
             let simplex_tx = acp_incoming_tx;
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 let _ = stdin_closed_rx.await;
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 let mut tx = simplex_tx.lock().await;
@@ -301,7 +301,7 @@ pub async fn run_headless(
     let auth_for_prefetch = auth.clone();
     let endpoints_for_prefetch = agent_config.endpoints.clone();
     let fetch_auth_for_prefetch = ModelFetchAuth::resolve(&endpoints_for_prefetch, true);
-    let prefetched_models = tokio::task::spawn_blocking(move || {
+    let prefetched_models = xai_spawn::spawn_blocking(move || {
         prefetch_models_blocking(
             &endpoints_for_prefetch,
             Some(&auth_for_prefetch),
@@ -356,7 +356,7 @@ pub async fn run_headless(
     let keepalive_for_spawn = Rc::clone(&agent_keepalive);
     local_set
         .run_until(async move {
-            let _agent_handle = tokio::task::spawn_local(async move {
+            let _agent_handle = xai_spawn::spawn_local(async move {
                 let (gw_tx, gw_rx) = tokio::sync::mpsc::unbounded_channel();
                 let gateway = GatewaySender::new(gw_tx);
                 let auth_manager = shared_auth_manager;
@@ -395,10 +395,10 @@ pub async fn run_headless(
                     outgoing,
                     incoming,
                     |fut| {
-                        tokio::task::spawn_local(fut);
+                        xai_spawn::spawn_local(fut);
                     },
                 );
-                tokio::task::spawn_local(
+                xai_spawn::spawn_local(
                     GatewayReceiver::new(gw_rx, conn)
                         .with_on_meta(xai_grok_otel::span_from_meta_traceparent)
                         .run(),
@@ -409,7 +409,7 @@ pub async fn run_headless(
                 info!("Agent task completed");
             });
             let ws_tx = acp_incoming_tx.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = ws_to_agent_rx.recv().await {
                     let mut tx = ws_tx.lock().await;
                     if tx.write_all(msg.as_bytes()).await.is_err() {
@@ -426,7 +426,7 @@ pub async fn run_headless(
                 &acp_incoming_tx,
                 &agent_config.skills.paths,
             );
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 let mut reader = BufReader::new(acp_outgoing_rx);
                 let mut line = String::new();
                 loop {
@@ -511,7 +511,7 @@ fn spawn_leader_relay(
         return;
     }
     let slot_for_task = slot.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while !*relay_demand_rx.borrow() {
             tokio::select! {
                 biased;
@@ -684,7 +684,7 @@ pub async fn run_leader(
     }
     lock.cleanup_socket()?;
     info!("Leader server starting");
-    tokio::task::spawn_blocking(|| {
+    xai_spawn::spawn_blocking(|| {
         xai_file_utils::queue::cleanup_orphaned_uploads(
             &grok_home::grok_home(),
             xai_file_utils::queue::DEFAULT_MAX_AGE,
@@ -730,7 +730,7 @@ pub async fn run_leader(
     let agent_busy_for_server = agent_busy.clone();
     let agent_activity_for_server = agent_activity.clone();
     let shutdown_tx_for_server = shutdown_tx.clone();
-    let ipc_handle = tokio::spawn(async move {
+    let ipc_handle = xai_spawn::spawn(async move {
         if let Err(e) = run_leader_server(
             socket_path_for_server,
             ipc_to_agent_tx,
@@ -850,7 +850,7 @@ pub async fn run_leader(
             let mut config_watcher_path_rx = config_watcher_path_rx_opt;
             let agent_config_watcher_path_tx = config_watcher_path_tx.clone();
             let agent_activity_for_agent = agent_activity.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 let (gw_tx, gw_rx) = tokio::sync::mpsc::unbounded_channel();
                 let gateway = GatewaySender::new(gw_tx);
                 let mut agent = MvpAgent::with_models(
@@ -874,10 +874,10 @@ pub async fn run_leader(
                     outgoing,
                     incoming,
                     |fut| {
-                        tokio::task::spawn_local(fut);
+                        xai_spawn::spawn_local(fut);
                     },
                 );
-                tokio::task::spawn_local(
+                xai_spawn::spawn_local(
                     GatewayReceiver::new(gw_rx, conn)
                         .with_on_meta(xai_grok_otel::span_from_meta_traceparent)
                         .run(),
@@ -890,7 +890,7 @@ pub async fn run_leader(
             let roster_merge = Rc::new(RosterListMerge::new(external_roster.clone()));
             let acp_incoming_tx_ipc = acp_incoming_tx.clone();
             let roster_merge_ipc = roster_merge.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = ipc_to_agent_rx.recv().await {
                     roster_merge_ipc.observe_inbound(&msg);
                     let mut tx = acp_incoming_tx_ipc.lock().await;
@@ -904,7 +904,7 @@ pub async fn run_leader(
             });
             let acp_incoming_tx_ws = acp_incoming_tx.clone();
             let roster_merge_ws = roster_merge.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(msg) = ws_to_agent_rx.recv().await {
                     roster_merge_ws.observe_inbound(&msg);
                     let mut tx = acp_incoming_tx_ws.lock().await;
@@ -933,7 +933,7 @@ pub async fn run_leader(
             };
             let fan_out_agent = fan_out.clone();
             let roster_merge_out = roster_merge.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 let mut reader = BufReader::new(acp_outgoing_rx);
                 let mut line = String::new();
                 loop {
@@ -955,11 +955,11 @@ pub async fn run_leader(
                     }
                 }
             });
-            tokio::task::spawn_local(run_changed_notifier(external_roster, fan_out));
+            xai_spawn::spawn_local(run_changed_notifier(external_roster, fan_out));
             if session_pending {
                 let mint_auth_manager = auth_manager_for_mint;
                 let mint_cancel = cancel_clone.clone();
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     tokio::select! {
                         biased;
                         _ = mint_cancel.cancelled() => {}
@@ -1010,7 +1010,7 @@ pub async fn run_leader(
             {
                 let control = cursor_worker_control;
                 let cancel = cancel_clone.clone();
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     control.start_at_boot(cursor_worker_boot, &cancel, leader_pid).await;
                 });
             }
@@ -1027,7 +1027,7 @@ pub async fn run_leader(
                 if let Some(mut rx) = config_watcher_path_rx.take() {
                     let cancel_for_drain = cancel_clone.clone();
                     let watcher_for_drain = watcher.clone();
-                    tokio::task::spawn_local(async move {
+                    xai_spawn::spawn_local(async move {
                         loop {
                             tokio::select! {
                                 biased;
@@ -1048,7 +1048,7 @@ pub async fn run_leader(
             );
             let ipc_tx_for_config = agent_to_ipc_tx.clone();
             let acp_tx_for_config = acp_incoming_tx.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 use crate::config::reloader::ConfigUpdate;
                 while let Some(update) = config_update_rx.recv().await {
                     let agent = keepalive_for_config.borrow().clone();
@@ -1231,13 +1231,13 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let count = Arc::new(AtomicU32::new(0));
         let count_clone = count.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
                 let count = count_clone.clone();
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     let Ok(_ws) = tokio_tungstenite::accept_async(stream).await else {
                         return;
                     };

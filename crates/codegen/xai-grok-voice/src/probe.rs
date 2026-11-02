@@ -49,7 +49,7 @@ pub async fn run_streaming_probe(opts: VoiceProbeOptions) -> Result<VoiceProbeRe
     // The handle is awaited below (line: `forward.await`) and its join Result is
     // reported there, so a forwarder that died is visible in the probe's output.
     #[allow(clippy::disallowed_methods)]
-    let forward = tokio::spawn(async move {
+    let forward = xai_spawn::spawn(async move {
         let mut pcm_rx = pcm_rx;
         while let Some(chunk) = pcm_rx.recv().await {
             byte_count_cb.fetch_add(chunk.len(), Ordering::Relaxed);

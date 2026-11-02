@@ -2462,7 +2462,7 @@ mod tests {
         let envelope = make_envelope();
         let scope = xai_grok_tools::util::ProcessScope::new();
         let hook_scope = scope.clone();
-        let hook = tokio::spawn(async move {
+        let hook = xai_spawn::spawn(async move {
             run_command_hook(
                 &spec,
                 &envelope,
@@ -2501,7 +2501,7 @@ mod tests {
         spec.timeout_ms = 60_000;
         let envelope = make_envelope();
         let ctx = make_ctx();
-        let hook = tokio::spawn(async move {
+        let hook = xai_spawn::spawn(async move {
             run_command_hook(&spec, &envelope, &ctx, GateKind::Observe).await
         });
         tokio::time::timeout(Duration::from_secs(3), async {

@@ -243,7 +243,7 @@ mod prefire_state_tests {
                 let state = std::rc::Rc::new(PrefireState::default());
                 let worker = std::rc::Rc::clone(&state);
                 // Background pass-1 that stores its cache only after yielding, so the cache is absent at the moment pass-2 starts
-                let handle = tokio::task::spawn_local(async move {
+                let handle = xai_spawn::spawn_local(async move {
                     tokio::task::yield_now().await;
                     worker.store(dummy_cache());
                     worker.finish();

@@ -646,14 +646,13 @@ async fn walkdir_changes_since(
     let root = workspace_root.to_path_buf();
     let threshold_unix = goal_created_at;
     // Walking and I/O are sync; offload onto the blocking pool so we don't block the runtime on a large workspace
-    let result =
-        tokio::task::spawn_blocking(move || walkdir_changes_blocking(&root, threshold_unix))
-            .await
-            .map_err(|join_err| {
-                ChangesCaptureError::WalkdirFailed(io::Error::other(format!(
-                    "walkdir join error: {join_err}"
-                )))
-            })?;
+    let result = xai_spawn::spawn_blocking(move || walkdir_changes_blocking(&root, threshold_unix))
+        .await
+        .map_err(|join_err| {
+            ChangesCaptureError::WalkdirFailed(io::Error::other(format!(
+                "walkdir join error: {join_err}"
+            )))
+        })?;
     let buf = result?;
     if buf.is_empty() {
         return Err(ChangesCaptureError::WalkdirEmpty);

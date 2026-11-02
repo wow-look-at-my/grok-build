@@ -343,7 +343,7 @@ pub async fn start_seeded_mock(
 
 #[allow(dead_code)]
 pub async fn run_bootstrap() -> Result<xai_grok_shell::agent::config::Config, String> {
-    tokio::task::spawn_blocking(|| {
+    xai_spawn::spawn_blocking(|| {
         let cfg = xai_grok_shell::agent::config::Config::default();
         let auth_manager = std::sync::Arc::new(cfg.create_auth_manager());
         xai_grok_shell::agent::init::bootstrap(&cfg, &auth_manager, None)

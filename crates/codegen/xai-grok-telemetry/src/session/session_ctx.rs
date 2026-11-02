@@ -93,7 +93,7 @@ where
     F::Output: 'static,
 {
     let ctx = clone_current();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         match ctx {
             Some(ctx) => with_session_ctx(ctx, fut).await,
             None => fut.await,
@@ -339,7 +339,7 @@ pub fn emit_event_with_origin<T: Serialize + Send + 'static>(
         return;
     }
     let pending = PendingEventGuard::register();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _pending = pending;
         post_event(event_name, ctx_snapshot, activity, data).await;
     });
@@ -369,7 +369,7 @@ mod tests {
         );
         with_session_ctx(context, async {
             assert!(
-                tokio::task::spawn_blocking(clone_current)
+                xai_spawn::spawn_blocking(clone_current)
                     .await
                     .unwrap()
                     .is_none()
@@ -622,7 +622,7 @@ mod tests {
                     Arc::new(tokio::sync::Mutex::new(1usize)),
                 );
                 with_session_ctx(ctx, async {
-                    let bare = tokio::task::spawn_local(async {
+                    let bare = xai_spawn::spawn_local(async {
                         let s = build(Default::default());
                         emit_event_into(&s, &work());
                         session_id(&s)

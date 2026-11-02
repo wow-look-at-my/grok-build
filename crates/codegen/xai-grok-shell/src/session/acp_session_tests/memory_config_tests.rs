@@ -669,7 +669,7 @@ async fn v2_session_is_pinned_to_isolated_storage_and_disables_legacy_pipeline()
                 "legacy sentinel"
             );
             let late_sample_cancelled = std::rc::Rc::new(std::cell::Cell::new(None));
-            actor.memory.dream_workers.track(tokio::task::spawn_local({
+            actor.memory.dream_workers.track(xai_spawn::spawn_local({
                 let actor = std::sync::Arc::clone(&actor);
                 let late_sample_cancelled = std::rc::Rc::clone(&late_sample_cancelled);
                 async move {
@@ -1069,7 +1069,7 @@ async fn test_run_session_spawns_launch_dream() {
             let codebase_indexes = std::sync::Arc::new(parking_lot::Mutex::new(
                 xai_grok_workspace::file_system::CodebaseIndexManager::new(),
             ));
-            tokio::task::spawn_local(super::run_session(
+            xai_spawn::spawn_local(super::run_session(
                 actor.clone(),
                 cmd_rx,
                 chat_rx,

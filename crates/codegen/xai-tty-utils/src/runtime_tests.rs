@@ -41,7 +41,7 @@ fn apply_blocking_pool_builds_and_prewarms() {
     let mut builder = tokio::runtime::Builder::new_current_thread();
     let rt = build_with_blocking_pool(&mut builder).expect("runtime build");
     rt.block_on(async {
-        tokio::task::spawn_blocking(|| {})
+        xai_spawn::spawn_blocking(|| {})
             .await
             .expect("spawn_blocking");
     });

@@ -12,8 +12,8 @@ use std::time::Instant;
 use strum::IntoEnumIterator;
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::task::spawn_blocking;
 use tracing::warn;
+use xai_spawn::spawn_blocking;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 

@@ -414,10 +414,10 @@ async fn child_sender_parses_targets_at_any_depth() {
         },
         Default::default(),
     );
-    let coordinator_task = tokio::spawn(coordinator.run());
+    let coordinator_task = xai_spawn::spawn(coordinator.run());
     let backend = ChannelBackend::from_coordinator(coordinator_sender);
     let child_id = uuid::Uuid::now_v7().to_string();
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = backend.clone();
         let child_id = child_id.clone();
         async move {
@@ -483,10 +483,10 @@ async fn depth_zero_child_sender_uses_granted_path_not_backend() {
         },
         Default::default(),
     );
-    let coordinator_task = tokio::spawn(coordinator.run());
+    let coordinator_task = xai_spawn::spawn(coordinator.run());
     let backend = ChannelBackend::from_coordinator(coordinator_sender);
     let child_id = uuid::Uuid::now_v7().to_string();
-    let spawn = tokio::spawn({
+    let spawn = xai_spawn::spawn({
         let backend = backend.clone();
         let child_id = child_id.clone();
         async move {
@@ -525,14 +525,14 @@ async fn child_tool_routes_parent_and_sibling_through_coordinator() {
         },
         Default::default(),
     );
-    let coordinator_task = tokio::spawn(coordinator.run());
+    let coordinator_task = xai_spawn::spawn(coordinator.run());
     let root_backend = ChannelBackend::from_coordinator(coordinator_sender.clone());
     let parent_id = uuid::Uuid::now_v7().to_string();
     let sibling_id = uuid::Uuid::now_v7().to_string();
     let child_id = uuid::Uuid::now_v7().to_string();
     let mut spawns = Vec::new();
     for id in [&parent_id, &sibling_id] {
-        spawns.push(tokio::spawn({
+        spawns.push(xai_spawn::spawn({
             let backend = root_backend.clone();
             let id = id.clone();
             async move {
@@ -547,7 +547,7 @@ async fn child_tool_routes_parent_and_sibling_through_coordinator() {
     }
     let nested_backend =
         ChannelBackend::for_coordinator_session(coordinator_sender, parent_id.clone());
-    spawns.push(tokio::spawn({
+    spawns.push(xai_spawn::spawn({
         let child_id = child_id.clone();
         async move {
             nested_backend

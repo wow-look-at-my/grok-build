@@ -308,7 +308,7 @@ async fn cancellation_join_releases_editor_lease_before_expiry() {
             let guard = V2DreamLeaseGuard::new(Box::new(store), lease, clock.clone());
             let workers = V2DreamWorkers::default();
             let cancel = workers.cancellation_token();
-            let task = tokio::task::spawn_local(async move {
+            let task = xai_spawn::spawn_local(async move {
                 cancel.cancelled().await;
                 guard.fail_retryable("Dream task cancelled").await;
             });

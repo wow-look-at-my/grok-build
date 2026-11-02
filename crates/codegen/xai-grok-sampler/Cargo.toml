@@ -33,6 +33,7 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 zstd = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 # Mock HTTP server for actor / request_task integration tests.

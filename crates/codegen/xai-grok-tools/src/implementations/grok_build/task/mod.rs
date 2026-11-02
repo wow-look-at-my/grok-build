@@ -600,7 +600,7 @@ impl xai_tool_runtime::Tool for TaskTool {
                     // child is no longer foreground. The only thing that
                     // can come back from it is a panic.
                     #[allow(clippy::disallowed_methods)]
-                    tokio::spawn(crate::util::detached::fire_and_forget(
+                    xai_spawn::spawn(crate::util::detached::fire_and_forget(
                         "subagent cancellation forwarder",
                         async move {
                             tool_cancellation.cancelled().await;
@@ -668,7 +668,7 @@ impl xai_tool_runtime::Tool for TaskTool {
             drop(foreground_wait);
             let (registered_tx, mut registered_rx) = tokio::sync::oneshot::channel();
             let spawn_backend = backend.clone();
-            let mut spawn_task = tokio::spawn(async move {
+            let mut spawn_task = xai_spawn::spawn(async move {
                 spawn_backend
                     .backend()
                     .spawn(request, Some(registered_tx))
@@ -704,7 +704,7 @@ impl xai_tool_runtime::Tool for TaskTool {
                 let log_id = id.clone();
                 let log_type = subagent_type.clone();
                 // Detached: started text is the model reply; `spawn()` is terminal.
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     log_background_spawn_after_start(&log_id, &log_type, spawn_task.await);
                 });
             }
@@ -904,7 +904,7 @@ mod tests {
         let (raw_tx, mut raw_rx) = mpsc::unbounded_channel::<SubagentEvent>();
         let (proxy_tx, proxy_rx) = mpsc::unbounded_channel::<SubagentEvent>();
         let backend = SubagentBackendResource(Arc::new(ChannelBackend::new(raw_tx)));
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(event) = raw_rx.recv().await {
                 match event {
                     SubagentEvent::ValidateType(req) => {
@@ -997,7 +997,7 @@ mod tests {
         resources.insert(SessionIdResource("child-session".to_string()));
         resources.insert(CurrentPromptIdResource("prompt-nested".to_string()));
 
-        let drain = tokio::spawn(async move {
+        let drain = xai_spawn::spawn(async move {
             if let Some(SubagentEvent::Spawn(mut req)) = rx.recv().await {
                 req.notify_registered();
             }
@@ -1113,7 +1113,7 @@ mod tests {
         let shared = resources.into_shared();
 
         // Spawn a task that will handle the request
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert_eq!(request.subagent_type, "explore");
             assert_eq!(request.parent_session_id, "parent-session");
@@ -1179,7 +1179,7 @@ mod tests {
         let tool = TaskTool;
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             request
                 .respond_with(|_| SubagentResult {
@@ -1230,7 +1230,7 @@ mod tests {
         let shared = resources.into_shared();
 
         // Spawn a task that drops the result_tx without sending
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             drop(request.result_tx);
         });
@@ -1283,7 +1283,7 @@ mod tests {
             Box::new(WaitProbe(Arc::clone(&wait_closed_for_factory)))
         }));
 
-        let drain = tokio::spawn(async move {
+        let drain = xai_spawn::spawn(async move {
             if let Some(SubagentEvent::Spawn(boxed)) = rx.recv().await {
                 let _ = boxed.respond_with(|boxed| SubagentResult {
                     backgrounded: true,
@@ -1480,7 +1480,7 @@ mod tests {
             }
         });
         let shared = resources_for_task(backend).into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.expect("spawn"));
             assert_eq!(request.subagent_type, "explore");
             request
@@ -1514,7 +1514,7 @@ mod tests {
             ..model_policy::TaskParams::default()
         }));
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.expect("spawn"));
             assert_eq!(request.subagent_type, "explore");
             request
@@ -1608,7 +1608,7 @@ mod tests {
             ..model_policy::TaskParams::default()
         }));
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.expect("spawn"));
             assert_eq!(request.subagent_type, "general-purpose");
             request
@@ -1653,7 +1653,7 @@ mod tests {
             }
         });
         let shared = resources_for_task(backend).into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.expect("spawn"));
             assert_eq!(request.subagent_type, "explore");
             request
@@ -1681,7 +1681,7 @@ mod tests {
             ..model_policy::TaskParams::default()
         }));
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.expect("spawn"));
             assert_eq!(request.subagent_type, "general-purpose");
             assert_eq!(request.resume_from.as_deref(), Some("prev-id"));
@@ -1777,7 +1777,7 @@ mod tests {
         let (resources, _dir) =
             resources_with_parent_exec(backend, "CI still fails, fix and gt submit /pr-babysit");
 
-        let drain = tokio::spawn(async move {
+        let drain = xai_spawn::spawn(async move {
             if let Some(SubagentEvent::Spawn(mut boxed)) = rx.recv().await {
                 boxed.notify_registered();
             }
@@ -1813,7 +1813,7 @@ mod tests {
         let (resources, _dir) =
             resources_with_parent_exec(backend, "review this PR https://github.com/x/y/pull/1");
 
-        let drain = tokio::spawn(async move {
+        let drain = xai_spawn::spawn(async move {
             if let Some(SubagentEvent::Spawn(mut boxed)) = rx.recv().await {
                 boxed.notify_registered();
             }
@@ -1867,7 +1867,7 @@ mod tests {
             ],
         );
 
-        let drain = tokio::spawn(async move {
+        let drain = xai_spawn::spawn(async move {
             if let Some(SubagentEvent::Spawn(mut boxed)) = rx.recv().await {
                 boxed.notify_registered();
             }
@@ -1907,7 +1907,7 @@ mod tests {
         // done_tx signals after the spawn has been replied to so the
         // test can wait for Fix A's match arm to execute.
         let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
-        let drain = tokio::spawn(async move {
+        let drain = xai_spawn::spawn(async move {
             if let Some(SubagentEvent::Spawn(boxed)) = rx.recv().await {
                 let _ = boxed.respond_with(|boxed| SubagentResult {
                     success: false,
@@ -2039,7 +2039,7 @@ mod tests {
                 Box::new(DepthGuard(Arc::clone(&depth_for_factory)))
             }));
 
-            let drain = tokio::spawn(async move {
+            let drain = xai_spawn::spawn(async move {
                 if let Some(SubagentEvent::Spawn(mut boxed)) = rx.recv().await {
                     boxed.notify_registered();
                     // Foreground mode still awaits the terminal `spawn()` result.
@@ -2109,7 +2109,7 @@ mod tests {
         resources.insert(SessionIdResource("special-session-id".to_string()));
         resources.insert(CurrentPromptIdResource("prompt-x".to_string()));
 
-        let drain = tokio::spawn(async move {
+        let drain = xai_spawn::spawn(async move {
             if let Some(SubagentEvent::Spawn(mut req)) = rx.recv().await {
                 req.notify_registered();
             }
@@ -2538,7 +2538,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert!(
                 !request.fork_context,
@@ -2627,7 +2627,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert_eq!(request.resume_from.as_deref(), Some("prev-id"));
             request
@@ -2691,7 +2691,7 @@ mod tests {
             resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
             let shared = resources.into_shared();
-            let handle = tokio::spawn(async move {
+            let handle = xai_spawn::spawn(async move {
                 let request = unwrap_spawn(rx.recv().await.unwrap());
                 assert!(
                     request.resume_from.is_none(),
@@ -2825,7 +2825,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert!(
                 request.cwd.is_none(),
@@ -2877,7 +2877,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert!(
                 request.cwd.is_none(),
@@ -2929,7 +2929,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert!(
                 request.cwd.is_none(),
@@ -2984,7 +2984,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert!(
                 request.cwd.is_none(),
@@ -3077,7 +3077,7 @@ mod tests {
             resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
             let shared = resources.into_shared();
-            let handle = tokio::spawn(async move {
+            let handle = xai_spawn::spawn(async move {
                 let request = unwrap_spawn(rx.recv().await.unwrap());
                 assert!(
                     request.cwd.is_none(),
@@ -3136,7 +3136,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert_eq!(request.cwd.as_deref(), Some("/tmp"));
             request
@@ -3191,7 +3191,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert_eq!(
                 request.cwd.as_deref(),
@@ -3249,7 +3249,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert_eq!(request.cwd.as_deref(), Some("/tmp"));
             request
@@ -3297,7 +3297,7 @@ mod tests {
         resources.insert(CurrentPromptIdResource("prompt-1".to_string()));
 
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             // Both values are threaded through — coordinator decides precedence.
             assert_eq!(request.cwd.as_deref(), Some("/tmp/some-dir"));
@@ -3351,7 +3351,7 @@ mod tests {
         let resources = resources_for_task(backend);
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert_eq!(
                 request.runtime_overrides.model.as_deref(),
@@ -3397,7 +3397,7 @@ mod tests {
         let resources = resources_for_task(backend);
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert!(
                 request.runtime_overrides.model.is_none(),
@@ -3447,7 +3447,7 @@ mod tests {
             let (backend, mut rx) = make_backend();
             let resources = resources_for_task(backend);
             let shared = resources.into_shared();
-            let handle = tokio::spawn(async move {
+            let handle = xai_spawn::spawn(async move {
                 let request = unwrap_spawn(rx.recv().await.unwrap());
                 assert!(
                     request.runtime_overrides.model.is_none(),
@@ -3488,7 +3488,7 @@ mod tests {
         let resources = resources_for_task(backend);
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert_eq!(
                 request.runtime_overrides.model.as_deref(),
@@ -3522,7 +3522,7 @@ mod tests {
         let resources = resources_for_task(backend);
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert_eq!(request.resume_from.as_deref(), Some("prev-id"));
             assert!(
@@ -3570,7 +3570,7 @@ mod tests {
         let resources = resources_for_task(backend);
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let request = unwrap_spawn(rx.recv().await.unwrap());
             assert_eq!(request.resume_from.as_deref(), Some("prev-id"));
             assert!(request.runtime_overrides.model.is_none());
@@ -3604,7 +3604,7 @@ mod tests {
         let (backend, mut rx) = make_backend();
         let resources = resources_for_task(backend);
 
-        let drain = tokio::spawn(async move {
+        let drain = xai_spawn::spawn(async move {
             let mut spawn = unwrap_spawn(rx.recv().await.expect("spawn event"));
             spawn.notify_registered();
             spawn

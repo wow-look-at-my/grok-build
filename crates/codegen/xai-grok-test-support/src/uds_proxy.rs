@@ -107,7 +107,7 @@ impl UdsProxy {
 
         let accept_handle = handle.clone();
         let accept_cancel = cancel.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 tokio::select! {
                     _ = accept_cancel.cancelled() => break,
@@ -165,7 +165,7 @@ fn spawn_connection(
 
     let c2l_counter = handle.clone();
     let c2l_cancel = conn_cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         pump_frames(
             client_read,
             upstream_write,
@@ -178,7 +178,7 @@ fn spawn_connection(
     });
 
     let l2c_counter = handle;
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         pump_frames(
             upstream_read,
             client_write,
@@ -320,9 +320,9 @@ mod tests {
     /// Upstream that echoes every frame back to the sender.
     fn spawn_echo_upstream(path: PathBuf) {
         let listener = UnixListener::bind(&path).unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Ok((mut stream, _)) = listener.accept().await {
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     loop {
                         let mut len = [0u8; 4];
                         if stream.read_exact(&mut len).await.is_err() {

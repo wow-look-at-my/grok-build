@@ -59,7 +59,7 @@ impl ChildRunner for SenderProbeRunner {
 async fn mint_test_sender(owner: SubagentOwner) -> Option<AgentMessageSender> {
     let (coordinator_sender, receiver) = SubagentCoordinator::<SenderProbeRunner>::channel();
     let (sender_tx, mut sender_rx) = tokio::sync::mpsc::unbounded_channel();
-    let actor = tokio::spawn(
+    let actor = xai_spawn::spawn(
         SubagentCoordinator::from_channel(
             receiver,
             SenderProbeRunner(sender_tx),
@@ -69,7 +69,7 @@ async fn mint_test_sender(owner: SubagentOwner) -> Option<AgentMessageSender> {
     );
     let backend = xai_grok_tools::implementations::grok_build::task::backend::ChannelBackend::from_coordinator(coordinator_sender);
     let id = uuid::Uuid::now_v7().to_string();
-    let spawn = tokio::spawn(async move {
+    let spawn = xai_spawn::spawn(async move {
         backend
             .spawn(
                 SubagentRequest {

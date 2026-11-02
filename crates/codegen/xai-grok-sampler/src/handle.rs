@@ -53,7 +53,7 @@ impl SamplerHandle {
     #[cfg(any(test, feature = "test-support"))]
     pub fn notify_on_submit(notify: std::sync::Arc<tokio::sync::Notify>) -> Self {
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             if cmd_rx.recv().await.is_some() {
                 notify.notify_one();
             }
