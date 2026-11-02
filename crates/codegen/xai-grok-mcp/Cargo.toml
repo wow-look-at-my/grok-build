@@ -5,6 +5,7 @@ version = "0.1.0"
 edition.workspace = true
 description = "MCP integration crate. Wraps rmcp, sends its HTTP through xai-grok-net, and owns the MCP credential store and OAuth flow orchestrator."
 authors = ["xAI"]
+autotests = false
 
 [dependencies]
 # The streamable-HTTP client and the OAuth HTTP client are this crate's own, over xai-grok-net.
@@ -66,6 +67,10 @@ xai-computer-hub-sdk = { workspace = true }
 # `test-util` enables `tokio::time::pause` / `advance`, required by
 # the deterministic timing tests in `liveness.rs`.
 tokio = { workspace = true, features = ["test-util"] }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
 
 [lints]
 workspace = true

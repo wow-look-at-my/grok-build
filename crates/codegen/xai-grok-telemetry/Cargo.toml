@@ -5,6 +5,7 @@ version = "0.1.0"
 edition.workspace = true
 description = "Telemetry engine: product events + Mixpanel emission + Sentry error reporting for Grok Build sessions"
 authors = ["xAI"]
+autotests = false
 
 [features]
 default = []
@@ -97,24 +98,28 @@ async-trait = { workspace = true }
 ctor = { workspace = true }
 tonic = { workspace = true, features = ["transport"] }
 # Self-signed CA + server cert for the TLS collector fixture
-# (tests/external_otlp_grpc_tls.rs). `rustls` pins the process-default crypto
+# (tests/it/external_otlp_grpc_tls.rs). `rustls` pins the process-default crypto
 # provider there: the test binary links both ring and aws-lc-rs, so rustls
 # can't auto-select one for the server-side acceptor.
 rcgen = { workspace = true }
 rustls = { workspace = true }
 # In-memory log/metric exporters for the external-stream wire-shape tests.
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
-# The gRPC, TLS, and HTTP over mutual TLS collector transports (tests/otlp_collector/mod.rs).
+# The gRPC, TLS, and HTTP over mutual TLS collector transports (tests/it/otlp_collector/mod.rs).
 axum = { workspace = true }
 axum-server = { workspace = true, features = ["tls-rustls"] }
 opentelemetry-proto = { workspace = true }
 prost = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
-# The shared OTLP/HTTP collector double and its recorder (tests/external_otlp*.rs).
+# The shared OTLP/HTTP collector double and its recorder (tests/it/external_otlp*.rs).
 xai-grok-test-support = { workspace = true }
 # Sets a symlink's own mtime (std's `set_modified` follows links) for prune tests.
 filetime = { workspace = true }
 tempfile = { workspace = true }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
 
 [lints]
 workspace = true

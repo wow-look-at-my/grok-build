@@ -4,6 +4,7 @@ edition.workspace = true
 name = "xai-grok-tools"
 version = "0.1.220-alpha.4"
 description = "Grok tools library"
+autotests = false
 
 [dependencies]
 anyhow = { workspace = true }
@@ -113,6 +114,15 @@ tracing-subscriber = { workspace = true, features = ["fmt"] }
 wiremock = { workspace = true }
 xai-grok-test-support = { workspace = true }
 xai-test-utils = { workspace = true }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+
+# Its own binary: under `dhat-heap` it installs a `#[global_allocator]`.
+[[test]]
+name = "test_subagent_soak"
+path = "tests/test_subagent_soak.rs"
 
 [build-dependencies]
 reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }

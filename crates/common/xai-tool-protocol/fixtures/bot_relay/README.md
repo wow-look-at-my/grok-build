@@ -7,7 +7,7 @@ generated clients — not produced by serializing the Rust types.
 
 | Surface | Harness |
 |---------|---------|
-| Rust | `crates/common/xai-tool-protocol/tests/bot_relay_conformance.rs` |
+| Rust | `crates/common/xai-tool-protocol/tests/it/bot_relay_conformance.rs` |
 | TypeScript | `frontend/packages/bot-relay-protocol/` (replay not in this PR) |
 | Swift | `generated/swift/BotRelayProtocol.swift` (replay not in this PR) |
 | Kotlin | `generated/kotlin/BotRelay.kt` (replay not in this PR) |
@@ -33,7 +33,7 @@ receive path must report after ingesting `frames` in order:
   frames that share a `seq` are also two events (`sequence_same_seq_two_payloads`).
 
 The Rust `ReferenceConsumer` in
-`tests/bot_relay_conformance.rs` is the behavior a TS / Swift / Kotlin
+`tests/it/bot_relay_conformance.rs` is the behavior a TS / Swift / Kotlin
 harness must reproduce: feed it `frames`, then assert its
 `observed_resyncs` / `observed_events` equal those integers. Do not
 re-derive the integers from the input list (counting channel tags or
