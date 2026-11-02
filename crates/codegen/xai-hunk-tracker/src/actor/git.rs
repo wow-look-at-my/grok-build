@@ -93,7 +93,7 @@ impl HunkTrackerActor {
             discovered: Option<Result<(Arc<gix::ThreadSafeRepository>, PathBuf), ()>>,
         }
 
-        let task_result = tokio::task::spawn_blocking(move || {
+        let task_result = xai_spawn::spawn_blocking(move || {
             let Some((repo, prefix, discovered)) = open_or_discover(&cached_state, &working_dir)
             else {
                 return GitResult {
@@ -250,7 +250,7 @@ impl HunkTrackerActor {
             discovered: Option<Result<(Arc<gix::ThreadSafeRepository>, PathBuf), ()>>,
         }
 
-        let task_result = tokio::task::spawn_blocking(move || {
+        let task_result = xai_spawn::spawn_blocking(move || {
             let Some((repo, _prefix, discovered)) = open_or_discover(&cached_state, &working_dir)
             else {
                 return SyncResult {
@@ -318,7 +318,7 @@ impl HunkTrackerActor {
             discovered: Option<Result<(Arc<gix::ThreadSafeRepository>, PathBuf), ()>>,
         }
 
-        let task_result = tokio::task::spawn_blocking(move || {
+        let task_result = xai_spawn::spawn_blocking(move || {
             // Clone working_dir upfront for later use in path conversion
             let working_dir_for_strip = working_dir.clone();
 
@@ -413,7 +413,7 @@ impl HunkTrackerActor {
             discovered: Option<Result<(Arc<gix::ThreadSafeRepository>, PathBuf), ()>>,
         }
 
-        let task_result = tokio::task::spawn_blocking(move || {
+        let task_result = xai_spawn::spawn_blocking(move || {
             let Some((repo, prefix, discovered)) = open_or_discover(&cached_state, &working_dir)
             else {
                 return BatchResult {

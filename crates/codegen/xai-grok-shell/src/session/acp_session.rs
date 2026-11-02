@@ -1931,7 +1931,7 @@ mod tool_meta_stamp_tests {
                 let captured: Arc<tokio::sync::Mutex<Option<acp::ToolCallUpdate>>> =
                     Arc::new(tokio::sync::Mutex::new(None));
                 let captured_in_task = captured.clone();
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     while let Some(cmd) = perm_rx.recv().await {
                         if let PermissionCommand::Request {
                             request:

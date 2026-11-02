@@ -66,7 +66,7 @@ async fn spawn_fake_server() -> (String, Arc<AtomicUsize>) {
         .await
         .expect("bind");
     let addr = listener.local_addr().expect("addr");
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
     (format!("http://{addr}/mcp"), gets)

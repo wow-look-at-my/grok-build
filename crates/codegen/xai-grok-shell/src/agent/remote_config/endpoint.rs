@@ -42,7 +42,7 @@ pub(crate) async fn fetch_models_async(
     auth: Option<GrokAuth>,
     fetch_auth: ModelFetchAuth,
 ) -> Option<IndexMap<String, ModelEntry>> {
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         prefetch_models_blocking(&endpoints, auth.as_ref(), fetch_auth)
     })
     .await

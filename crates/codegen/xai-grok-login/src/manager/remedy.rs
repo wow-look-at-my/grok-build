@@ -82,7 +82,7 @@ impl AuthManager {
     /// [`Self::silent_refresh`] with the caller's budget.
     pub(crate) async fn silent_refresh_within(self: &Arc<Self>, budget: Duration) -> SilentRefresh {
         let manager = Arc::clone(self);
-        let attempt = tokio::spawn(async move { manager.auth().await });
+        let attempt = xai_spawn::spawn(async move { manager.auth().await });
         let outcome = match tokio::time::timeout(budget, attempt).await {
             Ok(Ok(Ok(auth))) => SilentRefresh::Renewed(Box::new(auth)),
             _ => SilentRefresh::Failed(self.auth_remedy()),
@@ -102,7 +102,7 @@ impl AuthManager {
     /// `cancel` (the agent's teardown token) stops the task, but an exchange already in flight is abandoned, not dropped, and may still land after teardown ([`AuthManager::silent_refresh`]'s rotated-token safety).
     pub fn prewarm_auth_refresh(self: &Arc<Self>, cancel: CancellationToken) {
         let manager = Arc::clone(self);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             tokio::select! {
                 // A cancel that lands before the first poll must win, so a
                 // failed spawn never starts an exchange at all.
@@ -140,7 +140,8 @@ impl AuthManager {
         budget: Duration,
     ) -> BoundedRefresh {
         let manager = Arc::clone(self);
-        let attempt = tokio::spawn(async move { manager.refresh_chain(token_type, reason).await });
+        let attempt =
+            xai_spawn::spawn(async move { manager.refresh_chain(token_type, reason).await });
         let (result, outcome) = match tokio::time::timeout(budget, attempt).await {
             Ok(Ok(Ok(auth))) => (BoundedRefresh::Resolved(Box::new(Ok(auth))), "ok"),
             Ok(Ok(Err(err))) => (BoundedRefresh::Resolved(Box::new(Err(err))), "err"),

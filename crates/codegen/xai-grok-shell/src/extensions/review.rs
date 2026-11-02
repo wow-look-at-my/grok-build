@@ -56,7 +56,7 @@ pub(super) async fn handle_review(agent: &MvpAgent, args: &acp::ExtRequest) -> E
                 );
 
                 let auth_manager = Some(agent.auth_manager.clone());
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     match upload_bytes(
                         &gcs_config.with_auth(auth_manager),
                         &gcs_path,
@@ -116,7 +116,7 @@ pub(super) async fn handle_review(agent: &MvpAgent, args: &acp::ExtRequest) -> E
                 );
 
                 let auth_manager = Some(agent.auth_manager.clone());
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     match upload_bytes(
                         &gcs_config.with_auth(auth_manager),
                         &gcs_path,

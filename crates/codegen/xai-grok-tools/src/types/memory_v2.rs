@@ -60,7 +60,7 @@ pub async fn validate_memory_v2_read(
         return Ok(false);
     };
     let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || access.0.validate_read(&path))
+    xai_spawn::spawn_blocking(move || access.0.validate_read(&path))
         .await
         .map_err(|error| format!("memory v2 read validation task failed: {error}"))?
 }
@@ -79,7 +79,7 @@ pub async fn record_memory_v2_read(
     if let Some(access) = access {
         let path = path.to_path_buf();
         let contents = contents.to_vec();
-        tokio::task::spawn_blocking(move || access.0.record_read(&path, &contents))
+        xai_spawn::spawn_blocking(move || access.0.record_read(&path, &contents))
             .await
             .map_err(|error| format!("memory v2 read recording task failed: {error}"))??;
     }
@@ -102,7 +102,7 @@ pub async fn preflight_memory_v2_write(
     };
     let path = path.to_path_buf();
     let contents = contents.to_vec();
-    tokio::task::spawn_blocking(move || access.0.preflight_write(&path, &contents))
+    xai_spawn::spawn_blocking(move || access.0.preflight_write(&path, &contents))
         .await
         .map_err(|error| format!("memory v2 write preflight task failed: {error}"))?
 }
@@ -123,7 +123,7 @@ pub async fn write_memory_v2_file(
     };
     let path = path.to_path_buf();
     let contents = contents.to_vec();
-    tokio::task::spawn_blocking(move || access.0.write_file(&path, &contents))
+    xai_spawn::spawn_blocking(move || access.0.write_file(&path, &contents))
         .await
         .map_err(|error| format!("memory v2 write task failed: {error}"))?
 }

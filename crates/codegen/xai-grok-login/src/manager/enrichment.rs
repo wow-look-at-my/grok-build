@@ -35,7 +35,7 @@ impl Drop for EnrichmentExitGuard {
     }
 }
 pub(super) fn spawn(manager: Arc<AuthManager>, auth: GrokAuth) {
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut exit_guard = EnrichmentExitGuard {
             started: std::time::Instant::now(),
             armed: true,
@@ -53,7 +53,7 @@ tokio::task_local! {
 async fn log_offloaded(lvl: LogLevel, msg: String, ctx: serde_json::Value) {
     #[cfg(test)]
     let hook = TEST_LOG_HOOK.try_with(Arc::clone).ok();
-    let write = tokio::task::spawn_blocking(move || {
+    let write = xai_spawn::spawn_blocking(move || {
         #[cfg(test)]
         if let Some(hook) = hook {
             hook();

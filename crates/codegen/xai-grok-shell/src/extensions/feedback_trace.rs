@@ -67,7 +67,7 @@ async fn handle_upload_trace_with_session_dir(
         .filter(|path| path.is_dir())
         .ok_or_else(|| acp::Error::invalid_params().data("session directory not found"))?;
     let session_id = req.session_id.clone();
-    let archive = tokio::task::spawn_blocking({
+    let archive = xai_spawn::spawn_blocking({
         let session_dir = session_dir.clone();
         move || xai_grok_feedback::build_session_archive(&session_dir, &session_id)
     })

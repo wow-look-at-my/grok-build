@@ -50,7 +50,7 @@ impl RemoteSync {
     pub(crate) fn test_identity_observer() -> (Self, mpsc::UnboundedReceiver<String>) {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (observed_tx, observed_rx) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(message) = rx.recv().await {
                 if let SyncMsg::SetAgentId(agent_id) = message {
                     let _ = observed_tx.send(agent_id);
@@ -64,7 +64,7 @@ impl RemoteSync {
     pub(crate) fn test_observer() -> (Self, mpsc::UnboundedReceiver<acp::SessionNotification>) {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (observed_tx, observed_rx) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(message) = rx.recv().await {
                 if let SyncMsg::Queue(notification) = message {
                     let _ = observed_tx.send(*notification);
@@ -81,7 +81,7 @@ impl RemoteSync {
         client: BackendClient,
     ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(sync_task(session_id, metadata, client, rx));
+        xai_spawn::spawn(sync_task(session_id, metadata, client, rx));
         Self { tx }
     }
 

@@ -45,14 +45,9 @@ pub fn worktree_identity_in(worktrees_dir: &Path, cwd: &str) -> Option<WorktreeI
         .or_else(|| {
             // NO_SEARCH, not `discover`: every grok-created worktree has `.git` at its root
             // An upward walk would let a stray non-repo directory here inherit a repository enclosing grok home, like a git-managed home directory
-            let repo = git2::Repository::open_ext(
-                &worktree_root,
-                git2::RepositoryOpenFlags::NO_SEARCH,
-                &[] as &[&std::ffi::OsStr],
-            )
-            .ok()?;
-            let root = repo.commondir().parent()?.to_path_buf();
-            // git2 returns symlink-resolved paths, so the containment check must compare canonicalized paths
+            let repo = crate::git_repo::open(&worktree_root).ok()?;
+            let root = crate::git_repo::common_dir(&repo).parent()?.to_path_buf();
+            // The common dir is symlink-resolved, so the containment check must compare canonicalized paths
             // Otherwise a symlinked grok home lets a standalone clone report itself as the source
             (!canonical(&root).starts_with(canonical(worktrees_dir))).then_some(root)
         })

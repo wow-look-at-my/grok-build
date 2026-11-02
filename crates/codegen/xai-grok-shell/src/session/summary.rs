@@ -65,7 +65,7 @@ impl SummaryGenerator {
                 // Spawn title generation as a background task so the
                 // persistence actor can continue processing messages
                 // (updates, flushes) without waiting for the LLM call.
-                tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+                xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
                     "session title generation",
                     async move {
                         let mut title = match sampling_client {

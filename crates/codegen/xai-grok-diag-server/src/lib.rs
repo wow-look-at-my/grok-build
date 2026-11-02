@@ -346,7 +346,7 @@ async fn logs(State(ctx): State<DiagContext>, Query(query): Query<LogsQuery>) ->
         .tail_bytes
         .unwrap_or(DEFAULT_LOG_TAIL_BYTES)
         .min(MAX_LOG_TAIL_BYTES);
-    match tokio::task::spawn_blocking(move || tail_file(&path, tail)).await {
+    match xai_spawn::spawn_blocking(move || tail_file(&path, tail)).await {
         Ok(Ok(bytes)) => (
             [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
             String::from_utf8_lossy(&bytes).into_owned(),
@@ -426,7 +426,7 @@ pub async fn serve(
                     "failed to restrict diagnostics socket permissions"
                 );
             }
-            let task = tokio::spawn(async move {
+            let task = xai_spawn::spawn(async move {
                 if let Err(e) = axum::serve(listener, router(ctx)).await {
                     tracing::warn!(error = %e, "diagnostics server exited");
                 }
@@ -442,7 +442,7 @@ pub async fn serve(
                 .await
                 .map_err(|e| anyhow!("bind 127.0.0.1:{port}: {e}"))?;
             let local = listener.local_addr()?;
-            let task = tokio::spawn(async move {
+            let task = xai_spawn::spawn(async move {
                 if let Err(e) = axum::serve(listener, router(ctx)).await {
                     tracing::warn!(error = %e, "diagnostics server exited");
                 }

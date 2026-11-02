@@ -879,7 +879,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(&tool, test_ctx_with_call_id(shared, "tc-1"), input)
@@ -922,7 +922,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(&tool, test_ctx_with_call_id(shared, "tc-4"), input)
@@ -960,7 +960,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(&tool, test_ctx_with_call_id(shared, "tc-ni"), input)
@@ -1002,7 +1002,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(
@@ -1045,7 +1045,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(
@@ -1085,7 +1085,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(&tool, test_ctx_with_call_id(shared, "tc-ok"), input)
@@ -1172,7 +1172,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(&tool, test_ctx_with_call_id(shared, "tc-short"), input)
@@ -1208,7 +1208,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(
@@ -1255,7 +1255,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(&tool, test_ctx_with_call_id(shared, "tc-5"), input)
@@ -1281,7 +1281,7 @@ mod tests {
             use_id_keyed_format: false,
         };
 
-        let handle = tokio::spawn({
+        let handle = xai_spawn::spawn({
             let shared = shared.clone();
             async move {
                 xai_tool_runtime::Tool::run(&tool, test_ctx_with_call_id(shared, "tc-6"), input)

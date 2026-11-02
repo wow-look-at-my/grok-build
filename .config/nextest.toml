@@ -34,6 +34,12 @@ fail-fast = false
 filter = 'test(compress_camera_sized_photo_succeeds)'
 slow-timeout = { period = "300s", terminate-after = 1 }
 
+# The PTY tests launch the pager binary (PAGER_BINARY), so the CI archive carries it.
+[profile.ci.archive]
+include = [
+    { path = "debug/xai-grok-pager", relative-to = "target" },
+]
+
 [test-groups]
 scroll-matrix = { max-threads = 1 }
 disabled-hooks-file = { max-threads = 1 }

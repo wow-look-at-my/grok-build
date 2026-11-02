@@ -368,7 +368,7 @@ fn discovery_with_no_settings_files() {
 fn project_claude_absent_when_home_is_git_repo() {
     // Home-is-a-git-repo (dotfiles in $HOME): for a cwd under home.
     let home = IsolatedHome::new();
-    git2::Repository::init(home.path()).unwrap();
+    crate::test_git::init(home.path());
     let claude_dir = home.path().join(".claude");
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(claude_dir.join("settings.json"), "{}").unwrap();
@@ -1197,7 +1197,7 @@ allow = ["Bash(git status)"]
 
     let tmp = tempfile::tempdir().unwrap();
     // Bound project discovery to this temp dir (canonical walker uses git root).
-    git2::Repository::init(tmp.path()).expect("git init");
+    crate::test_git::init(tmp.path());
     let grok = tmp.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(

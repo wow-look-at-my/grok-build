@@ -300,7 +300,7 @@ async fn start_mtls_server(tls: &TestTlsMaterial, state: Arc<TestTlsServerState>
     listener.set_nonblocking(true).expect("set nonblocking");
     let port = listener.local_addr().expect("server address").port();
     let config = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config));
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum_server::from_tcp_rustls(listener, config)
             .expect("create mTLS server")
             .serve(app.into_make_service())

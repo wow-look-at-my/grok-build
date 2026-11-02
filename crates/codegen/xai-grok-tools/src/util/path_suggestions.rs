@@ -67,7 +67,7 @@ pub async fn path_not_found_hint(path: &Path, cwd: &Path, display_cwd: &Path) ->
 
     let result = tokio::time::timeout(
         HINT_TIMEOUT,
-        tokio::task::spawn_blocking(move || collect_hints(&path_owned, &cwd_owned)),
+        xai_spawn::spawn_blocking(move || collect_hints(&path_owned, &cwd_owned)),
     )
     .await;
 

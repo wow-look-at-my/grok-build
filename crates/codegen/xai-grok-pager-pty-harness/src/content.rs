@@ -423,7 +423,7 @@ mod tests {
         ] {
             let content = ContentController::start().await.unwrap();
             let mut turn = content.expect_agent_turn("either endpoint", "MATCHED_TURN");
-            let request = tokio::spawn(read_foreground(content.url(), endpoint));
+            let request = xai_spawn::spawn(read_foreground(content.url(), endpoint));
 
             tokio::time::timeout(EXPECTATION_TIMEOUT, turn.wait_received())
                 .await
@@ -460,7 +460,7 @@ mod tests {
             let content = ContentController::start().await.unwrap();
             let mut turn =
                 content.expect_agent_turn_blocked("blocked turn", "BLOCKED_MATCHED_TURN");
-            let mut request = tokio::spawn(read_foreground(content.url(), endpoint));
+            let mut request = xai_spawn::spawn(read_foreground(content.url(), endpoint));
 
             tokio::time::timeout(EXPECTATION_TIMEOUT, turn.wait_received())
                 .await

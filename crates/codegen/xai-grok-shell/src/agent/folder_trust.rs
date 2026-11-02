@@ -448,7 +448,7 @@ mod tests {
     /// Those discover the enclosing repo and walk to its root, so they would otherwise reach any ancestor repo the system temp dir lives in.
     fn repo_tmp() -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         tmp
     }
 
@@ -551,7 +551,7 @@ mod tests {
         let grok_home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::set("GROK_HOME", grok_home.path());
         let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
-        git2::Repository::init(home.path()).unwrap();
+        gix::init(home.path()).unwrap();
         // Repo-local code-exec config, so the final allow is the unrecordable-key rule at work
         // A recordable key with configs and an empty store would deny
         std::fs::create_dir_all(home.path().join(".grok").join("hooks")).unwrap();

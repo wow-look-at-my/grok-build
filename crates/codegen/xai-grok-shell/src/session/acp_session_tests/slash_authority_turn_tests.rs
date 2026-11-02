@@ -116,7 +116,7 @@ fn spawn_gateway_drain(
     mut gateway_rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
 ) -> tokio::sync::mpsc::UnboundedReceiver<()> {
     let (hook_tx, hook_rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(message) = gateway_rx.recv().await {
             match message {
                 xai_acp_lib::AcpClientMessage::SessionNotification(args) => {
@@ -138,7 +138,7 @@ fn spawn_persistence_drain(
     mut persistence_rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg>,
 ) -> tokio::sync::mpsc::UnboundedReceiver<()> {
     let (user_chunk_tx, user_chunk_rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(message) = persistence_rx.recv().await {
             match message {
                 PersistenceMsg::FlushAndAck { respond_to } => {
@@ -232,7 +232,7 @@ async fn actor_with_sampler_configured(
     configure(&mut actor);
     let actor = Arc::new(actor);
     let event_actor = actor.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(event) = sampler_event_rx.recv().await {
             event_actor.handle_sampling_event(event).await;
         }
@@ -770,7 +770,7 @@ async fn goal_set_with_failed_planner_makes_no_inference_request() {
             let agent = test_agent_with_goal_tool().await;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
             // Every planner spawn fails, so the goal pauses as `Planner` before any model turn.
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(ev) = rx.recv().await {
                     if let SubagentEvent::Spawn(req) = ev {
                         let result = SubagentResult {

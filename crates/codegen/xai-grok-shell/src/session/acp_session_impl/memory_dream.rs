@@ -664,7 +664,7 @@ impl SessionActor {
             };
 
             // Run on the multi-threaded runtime so it doesn't block the session's LocalSet
-            let handle = tokio::spawn(async move {
+            let handle = xai_spawn::spawn(async move {
                 let response = sampling_client
                     .conversation_collect(request)
                     .await

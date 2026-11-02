@@ -523,7 +523,7 @@ mod tests {
 
         let info_a = info.clone();
         let barrier_a = barrier.clone();
-        let task_a = tokio::spawn(async move {
+        let task_a = xai_spawn::spawn(async move {
             barrier_a.wait().await;
             for _ in 0..N {
                 appender
@@ -542,7 +542,7 @@ mod tests {
 
         let info_b = info.clone();
         let barrier_b = barrier.clone();
-        let task_b = tokio::spawn(async move {
+        let task_b = xai_spawn::spawn(async move {
             barrier_b.wait().await;
             for turn in 0..N {
                 metadata
@@ -790,7 +790,7 @@ mod tests {
             let manual = adapter.clone();
             let info_m = info.clone();
             let barrier_m = barrier.clone();
-            let task_m = tokio::spawn(async move {
+            let task_m = xai_spawn::spawn(async move {
                 barrier_m.wait().await;
                 manual
                     .update_session_title(&info_m, "Manual Title".into())
@@ -801,7 +801,7 @@ mod tests {
             let auto = adapter.clone();
             let info_a = info.clone();
             let barrier_a = barrier.clone();
-            let task_a = tokio::spawn(async move {
+            let task_a = xai_spawn::spawn(async move {
                 barrier_a.wait().await;
                 auto.set_generated_title_if_absent(&info_a, "Auto Title".into())
                     .await
@@ -1056,7 +1056,7 @@ mod tests {
             let reset = adapter.clone();
             let info_r = info.clone();
             let barrier_r = barrier.clone();
-            let task_r = tokio::spawn(async move {
+            let task_r = xai_spawn::spawn(async move {
                 barrier_r.wait().await;
                 reset.reset_title_to_auto(&info_r).await.unwrap();
             });
@@ -1064,7 +1064,7 @@ mod tests {
             let auto = adapter.clone();
             let info_a = info.clone();
             let barrier_a = barrier.clone();
-            let task_a = tokio::spawn(async move {
+            let task_a = xai_spawn::spawn(async move {
                 barrier_a.wait().await;
                 auto.set_generated_title_if_absent(&info_a, "Auto Title".into())
                     .await

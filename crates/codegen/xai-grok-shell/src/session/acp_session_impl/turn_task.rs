@@ -544,7 +544,7 @@ mod start_gate_tests {
                 )
                 .await;
                 let transcript_path = transcript.path().to_path_buf();
-                let persistence_drain = tokio::task::spawn_local(async move {
+                let persistence_drain = xai_spawn::spawn_local(async move {
                     while let Some(message) = persistence_rx.recv().await {
                         if let PersistenceMsg::Chat(item) = message {
                             use std::io::Write as _;
@@ -617,7 +617,7 @@ mod task_slot_tests {
     /// Spawn a 60s task that bumps `fired` by `by`, armed into `slot`.
     fn arm_counter(slot: &TaskSlot<()>, fired: &Arc<AtomicUsize>, by: usize) {
         let f = Arc::clone(fired);
-        slot.arm(tokio::spawn(async move {
+        slot.arm(xai_spawn::spawn(async move {
             tokio::time::sleep(Duration::from_secs(60)).await;
             f.fetch_add(by, Ordering::SeqCst);
         }));

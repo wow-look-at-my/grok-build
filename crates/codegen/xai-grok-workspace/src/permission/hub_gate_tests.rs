@@ -457,7 +457,7 @@ async fn the_protected_target_floor_prompts_whatever_the_grants_say() {
 async fn the_ambient_git_scan_runs_on_the_hub_path() {
     let handle = make_handle();
     let session = daemon_session(&handle).await;
-    git2::Repository::init(session.cwd()).expect("checkout");
+    crate::test_git::init(session.cwd());
     let status = json!({"command": "git status", "description": "status"});
     settle_at_cwd(&session, "run_terminal_command", "c1", &status, None)
         .await
@@ -635,7 +635,7 @@ async fn an_always_answer_under_the_served_root_holds_for_sibling_conversations(
     for dir in [&conv_a, &conv_b, &repo_c] {
         std::fs::create_dir_all(dir).expect("scratch directory");
     }
-    git2::Repository::init(&repo_c).expect("git init");
+    crate::test_git::init(&repo_c);
     let session_a = daemon_session_at(&handle, "conv-a", Some(conv_a)).await;
     let session_b = daemon_session_at(&handle, "conv-b", Some(conv_b)).await;
     let session_c = daemon_session_at(&handle, "repo-c", Some(repo_c.clone())).await;

@@ -723,7 +723,7 @@ pub struct WakeSummaryState {
 pub(crate) async fn read_wake_summary_state_from_dir(
     session_dir: PathBuf,
 ) -> io::Result<WakeSummaryState> {
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         let path = session_dir.join("summary.json");
         let bytes = std::fs::read(&path)?;
         serde_json::from_slice::<Summary>(&bytes)
@@ -1825,7 +1825,7 @@ impl SessionPersistence {
                     "session directory is unknown; cannot probe disk space",
                 )
             })?;
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             std::fs::create_dir_all(&dir)?;
             let probe = dir.join(".disk_ok");
             std::fs::write(&probe, b"ok")?;
@@ -2026,7 +2026,7 @@ impl SessionPersistence {
         {
             let client = reg.client.clone();
             let sid = self.info.id.to_string();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let req = crate::agent::session_registry_client::UpdateRequest {
                     summary: Some(title),
                     first_prompt: None,
@@ -2569,7 +2569,7 @@ impl SessionPersistence {
 
     async fn copy_session_dir_to_memory(&self) -> anyhow::Result<SessionStateCopy> {
         let session_dir = session_dir(&self.info);
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let mut files = Vec::new();
 
             if !session_dir.exists() {
@@ -2838,7 +2838,7 @@ mod io_error_to_acp_tests;
 /// Lives here (not in a `StorageAdapter`) so every session create/load path shares it regardless of backend.
 fn spawn_worktree_touch(info: &Info) -> tokio::task::JoinHandle<()> {
     let cwd = info.cwd.clone();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         crate::session::worktree::touch_worktree_for_cwd(&cwd);
     })
 }
@@ -2928,7 +2928,7 @@ pub(crate) async fn new(
     let info_clone = info.clone();
     let storage: Arc<dyn StorageAdapter> = Arc::new(storage);
     let remote_sync = init_remote_sync(&summary, storage_mode, auth_manager)?;
-    tokio::task::spawn(async move {
+    xai_spawn::spawn(async move {
         let persistence = SessionPersistence {
             info: info_clone,
             storage: storage.clone(),
@@ -3037,7 +3037,7 @@ pub(crate) async fn new_with_explicit_dir(
 
     let info_clone = info.clone();
     let storage: Arc<dyn StorageAdapter> = Arc::new(storage);
-    tokio::task::spawn(async move {
+    xai_spawn::spawn(async move {
         let persistence = SessionPersistence {
             info: info_clone,
             storage: storage.clone(),
@@ -3173,7 +3173,7 @@ pub(crate) async fn load_light(
     let remote_sync = init_remote_sync(&persisted_info.summary, storage_mode, auth_manager)?;
 
     let has_title = !persisted_info.summary.display_title().is_empty();
-    tokio::task::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut summary_gen = crate::session::summary::SummaryGenerator::new(
             crate::session::summary::SummaryConfig {
                 sampling_client,

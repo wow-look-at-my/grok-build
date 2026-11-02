@@ -723,7 +723,7 @@ pub(crate) fn queue_input_request(
 pub(crate) fn running_task_stub(prompt_id: &str) -> AgentTask {
     AgentTask::new(
         prompt_id,
-        tokio::task::spawn_local(async {
+        xai_spawn::spawn_local(async {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         })
         .abort_handle(),
@@ -738,7 +738,7 @@ pub(crate) async fn build_actor() -> (
         tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
     let (persistence_tx, mut persistence_rx) =
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(message) = persistence_rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = message {
                 let _ = respond_to.send(Ok(()));
@@ -963,12 +963,12 @@ pub(crate) fn spawn_gateway_loop_counting_prompt_hooks(
     let updates: Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Arc::default();
     let captured = updates.clone();
     let mut gateway_rx = gateway_rx;
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::RequestPermission(args) => {
                     let hooks = permission_prompt_hooks.clone();
-                    tokio::task::spawn_local(async move {
+                    xai_spawn::spawn_local(async move {
                         if park_until_hook {
                             let start = std::time::Instant::now();
                             while hooks.load(Ordering::SeqCst) == 0 {
@@ -1026,7 +1026,7 @@ pub(crate) fn spawn_gateway_loop_counting_prompt_hooks(
 pub(crate) fn drain_gateway(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
 ) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg {
                 let _ = args.response_tx.send(Ok(()));
@@ -1037,7 +1037,7 @@ pub(crate) fn drain_gateway(
 /// Answer every `FlushAndAck` persistence barrier with `Ok` so a driven turn's `persist_ack` resolves.
 /// Spawned on the current `LocalSet`.
 pub(crate) fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Ok(()));
@@ -1052,7 +1052,7 @@ pub(crate) async fn disk_full_actor() -> SessionActor {
     drain_gateway(gateway_rx);
     let (persistence_tx, mut persistence_rx) =
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = persistence_rx.recv().await {
             if let PersistenceMsg::ProbeWritable { respond_to } = msg {
                 let _ = respond_to.send(Err(std::io::Error::from(std::io::ErrorKind::StorageFull)));
@@ -1118,7 +1118,7 @@ pub(crate) fn spawn_fake_coordinator(
     let suppress_seen = Arc::clone(&fake.suppress_seen);
     let returned = Arc::clone(&fake.returned);
     let peeks = Arc::clone(&fake.peeks);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let mut buffer = buffer;
         while let Some(ev) = rx.recv().await {
             match ev {
@@ -1159,7 +1159,7 @@ pub(crate) fn spawn_capturing_gateway_loop(
     let acp_captured = acp_updates.clone();
     let xai_captured = xai_updates.clone();
     let mut gateway_rx = gateway_rx;
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::SessionNotification(args) => {
@@ -1196,10 +1196,10 @@ pub(crate) async fn actor_with_persistence_drain_and_sampler(
 ) -> std::sync::Arc<SessionActor> {
     let (gateway_tx, mut gateway_rx) =
         tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
-    tokio::task::spawn_local(async move { while gateway_rx.recv().await.is_some() {} });
+    xai_spawn::spawn_local(async move { while gateway_rx.recv().await.is_some() {} });
     let (persistence_tx, mut persistence_rx) =
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = persistence_rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Ok(()));

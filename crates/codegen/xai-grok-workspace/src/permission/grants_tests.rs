@@ -18,7 +18,7 @@ fn evaluate_bash_with_ambient_flags_a_poisoned_checkout() {
     let evil = root.path().join("evil");
     for dir in [&clean, &evil] {
         std::fs::create_dir_all(dir).unwrap();
-        git2::Repository::init(dir).unwrap();
+        crate::test_git::init(dir);
     }
     std::fs::write(evil.join(".git/config"), "[core]\nfsmonitor = /tmp/pwn\n").unwrap();
     let state = PermissionState::default();

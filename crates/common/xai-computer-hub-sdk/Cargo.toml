@@ -47,6 +47,7 @@ xai-computer-hub-core = { workspace = true }
 xai-tracing = { workspace = true }
 
 # Integration tests that need heavier backend deps live in a separate sibling crate to keep this dev-dep set minimal.
+xai-spawn = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 axum = { workspace = true, features = ["ws", "macros"] }

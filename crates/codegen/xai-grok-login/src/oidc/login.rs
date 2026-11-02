@@ -189,7 +189,7 @@ fn wait_for_stdin_or_closed(
 }
 
 fn spawn_stdin_reader(tx: tokio::sync::mpsc::Sender<CallbackResult>) {
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         use std::io::BufRead;
         let stdin = std::io::stdin();
         let mut buf = String::new();
@@ -248,7 +248,7 @@ async fn race_callback_and_client_ui(
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     let app = build_callback_router(tx.clone());
-    let server = tokio::spawn(async move {
+    let server = xai_spawn::spawn(async move {
         let _ = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
@@ -305,7 +305,7 @@ async fn race_callback_and_stdin(
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     let app = build_callback_router(tx.clone());
-    let server = tokio::spawn(async move {
+    let server = xai_spawn::spawn(async move {
         let _ = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;

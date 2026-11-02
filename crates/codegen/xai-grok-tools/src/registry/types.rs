@@ -1286,7 +1286,7 @@ impl ToolRegistryBuilder {
             // The scheduler answers the create/list/delete tool calls over
             // `cmd_rx`, so its death closes that channel, what a dropped.
             #[allow(clippy::disallowed_methods)]
-            tokio::spawn(crate::util::detached::fire_and_forget(
+            xai_spawn::spawn(crate::util::detached::fire_and_forget(
                 "scheduler actor",
                 actor.run(),
             ));

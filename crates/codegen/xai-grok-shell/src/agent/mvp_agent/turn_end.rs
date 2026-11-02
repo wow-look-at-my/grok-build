@@ -193,7 +193,7 @@ impl TurnEndCapture {
         {
             tracing::warn!("Failed to send CopyFile command, skipping session state upload");
         }
-        let git_sample = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+        let git_sample = tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn(async move {
             sample_git_head(&head_cwd).await
         }));
         Self {

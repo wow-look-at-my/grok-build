@@ -1588,7 +1588,7 @@ async fn restore_effort_via_load(
         .insert_test_entry("effort-model", entry);
     let sid = acp::SessionId::new("restore-precedence-sess");
     let (handle, _cmd_tx, mut cmd_rx) = make_live_session_handle(&sid, None);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(cmd) = cmd_rx.recv().await {
             if let crate::session::SessionCommand::SetSessionModel {
                 switch,
@@ -1954,7 +1954,7 @@ async fn mcp_list_gateway_refresh_fans_only_on_committed_uncached_catalog() {
             );
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let proxy_url = format!("http://{}", listener.local_addr().unwrap());
-            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
             let (agent, _rx) = build_agent_with_auth_and_proxy(
                 xai_grok_login::GrokAuth {
                     key: "eligible".into(),
@@ -2753,7 +2753,7 @@ async fn shared_plugin_registry_snapshot_reads_plugins_config_from_disk() {
     )
     .unwrap();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let project_config_dir = repo.path().join(".grok");
     std::fs::create_dir_all(&project_config_dir).unwrap();
     let auth_home = tempfile::tempdir().unwrap();
@@ -2857,7 +2857,7 @@ fn write_plugin_manifest(dir: &std::path::Path, name: &str) {
 #[serial_test::serial]
 async fn plugins_reload_resolves_real_remote_trust_before_reading_disk_config() {
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let proj_plugin = repo.path().join("proj-plugin");
     write_plugin_manifest(&proj_plugin, "regr-killswitch-proj");
     std::fs::create_dir_all(repo.path().join(".grok")).unwrap();
@@ -2897,7 +2897,7 @@ async fn plugins_reload_resolves_real_remote_trust_before_reading_disk_config() 
 #[serial_test::serial]
 async fn plugins_reload_rechecks_launch_dir_trust() {
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let h = ReloadHarness::launched_in(repo.path(), &crate::agent::config::Config::default());
     h.agent.ensure_plugin_registry();
     assert!(
@@ -2952,7 +2952,7 @@ async fn plugins_reload_rechecks_launch_dir_trust() {
 #[serial_test::serial]
 async fn lazy_registry_build_resolves_real_remote_trust_before_reading_disk_config() {
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let h = ReloadHarness::launched_in(repo.path(), &crate::agent::config::Config::default());
     assert!(h.agent.prime_launch_dir_trust().1);
     h.agent.cfg.borrow_mut().remote_settings = Some(crate::util::config::RemoteSettings {
@@ -3010,7 +3010,7 @@ async fn wait_for_in_flight_load_blocks_until_load_completes() {
             let guard = agent.begin_session_load(&sid);
             let waiter_agent = agent.clone();
             let waiter_sid = sid.clone();
-            let waiter = tokio::task::spawn_local(async move {
+            let waiter = xai_spawn::spawn_local(async move {
                 waiter_agent
                     .wait_for_in_flight_session_load(&waiter_sid)
                     .await;
@@ -3044,7 +3044,7 @@ async fn wait_for_in_flight_load_wakes_on_failed_load() {
             let guard = agent.begin_session_load(&sid);
             let waiter_agent = agent.clone();
             let waiter_sid = sid.clone();
-            let waiter = tokio::task::spawn_local(async move {
+            let waiter = xai_spawn::spawn_local(async move {
                 waiter_agent
                     .wait_for_in_flight_session_load(&waiter_sid)
                     .await;
@@ -3948,7 +3948,7 @@ async fn spawn_counting_storage_stub() -> (String, std::sync::Arc<std::sync::ato
             )
         }
     });
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (format!("http://127.0.0.1:{port}"), count)
 }
 /// Regression: the auth-diagnostics uploader was gated only on the trace-upload config switch.
@@ -5464,7 +5464,7 @@ fn a_cancelled_installer_retires_its_thread_when_a_reinstall_takes_the_slot() {
         crate::session::persistence::STAMPS_SERVED.set(0);
         let (_installer_attach, installer_waiter) = agent.session_registry.begin_attach(&sid);
         let (handle, _cmd_tx, mut cmd_rx) = make_live_session_handle(&sid, None);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(cmd) = cmd_rx.recv().await {
                 match cmd {
                     TestSessionCommand::FlushComplete { respond_to } => {
@@ -5703,7 +5703,7 @@ fn cancel_never_overtakes_in_flight_prompt_intake() {
             std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         let (intake_parked_tx, intake_parked_rx) = tokio::sync::oneshot::channel::<()>();
         let driver_order = order.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let mut intake_parked_tx = Some(intake_parked_tx);
             while let Some(cmd) = cmd_rx.recv().await {
                 match cmd {
@@ -5748,7 +5748,7 @@ fn prompt_routes_only_non_send_now_through_human_delivery_handle() {
             let sid = acp::SessionId::new(format!("human-route-{send_now}"));
             let (handle, _tx, mut cmd_rx) = make_live_session_handle(&sid, None);
             agent.insert_resident(&sid, handle);
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(command) = cmd_rx.recv().await {
                     match command {
                         SessionCommand::GetCurrentPromptMode { responds_to } => {
@@ -5842,7 +5842,7 @@ fn bash_prompt_reaches_the_actor_when_the_session_model_is_unavailable() {
                 .set_unavailable_model(&sid, acp::ModelId::new(std::sync::Arc::from("gone-model")));
             let saw_prompt = std::rc::Rc::new(std::cell::Cell::new(false));
             let driver_saw = saw_prompt.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(command) = cmd_rx.recv().await {
                     match command {
                         SessionCommand::GetCurrentPromptMode { responds_to } => {
@@ -5913,7 +5913,7 @@ fn spawn_fake_actor(
     busy: bool,
 ) -> tokio::sync::mpsc::UnboundedReceiver<TestSessionCommand> {
     let (observed_tx, observed_rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(cmd) = cmd_rx.recv().await {
             match cmd {
                 TestSessionCommand::IsBusy { respond_to } => {
@@ -5936,7 +5936,7 @@ fn spawn_active_work_actor(
     mut cmd_rx: tokio::sync::mpsc::UnboundedReceiver<TestSessionCommand>,
     active_work: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 ) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(cmd) = cmd_rx.recv().await {
             if let TestSessionCommand::IsBusy { respond_to } = cmd {
                 let _ = respond_to.send(active_work.load(std::sync::atomic::Ordering::Acquire) > 0);
@@ -7600,7 +7600,7 @@ fn build_agent_with_gateway_rx() -> (
 /// The project server should reappear after a trust grant.
 fn repo_with_project_mcp_server() -> tempfile::TempDir {
     let tmp = tempfile::tempdir().unwrap();
-    git2::Repository::init(tmp.path()).unwrap();
+    gix::init(tmp.path()).unwrap();
     std::fs::write(
         tmp.path().join(".mcp.json"),
         r#"{"mcpServers":{"projsrv":{"command":"echo","args":["hi"]}}}"#,
@@ -7630,7 +7630,7 @@ fn folder_trust_on() -> crate::util::config::RemoteSettings {
 #[serial_test::serial]
 fn subagent_spawn_context_reloads_project_definitions_after_trust_changes() {
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     write_project_subagent_definitions(repo.path());
     run_local_for_bridge_test(|| async {
         let (agent, _rx) = build_agent_with_gateway_rx();
@@ -7699,7 +7699,7 @@ fn project_roles_personas_gated_via_resolve_and_record_chain() {
     let _sim = EnvGuard::set(xai_grok_version::TEST_VERSION_ENV, "0.0-sim");
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     write_project_subagent_definitions(repo.path());
     run_local_for_bridge_test(|| async {
         let (agent, _rx) = build_agent_with_gateway_rx();

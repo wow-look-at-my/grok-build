@@ -52,6 +52,8 @@ members = [
     "crates/codegen/xai-grok-models",
     "crates/codegen/xai-grok-otel",
     "crates/codegen/xai-grok-pager",
+    "crates/codegen/xai-grok-pdf",
+    "crates/codegen/xai-grok-workspace-server",
     "crates/codegen/xai-grok-pager-bin",
     "crates/codegen/xai-grok-pager-diff",
     "crates/codegen/xai-grok-pager-pty-harness",
@@ -103,6 +105,7 @@ members = [
     "crates/common/xai-grok-compaction",
     "crates/common/xai-interjection-core",
     "crates/common/xai-message-delivery-core",
+    "crates/common/xai-spawn",
     "crates/common/xai-test-utils",
     "crates/common/xai-tool-protocol",
     "crates/common/xai-tool-runtime",
@@ -179,7 +182,6 @@ futures = "0.3"
 futures-util = "0.3"
 fuzzy-matcher = "0.3.7"
 gethostname = "1"
-git2 = "0.21"
 gix = { version = "0.83", default-features = false, features = ["sha1"] }
 glob = "0.3"
 globset = "0.4"
@@ -250,7 +252,7 @@ ring = "0.17"
 rsa = "0.9"
 runfiles = "0.1"
 rustc-hash = "2"
-rustls = { version = "0.23", features = ["aws-lc-rs"] }
+rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 same-file = "1"
 schemars = "1"
@@ -284,7 +286,7 @@ tokio-tungstenite = "0.28"
 tokio-util = { version = "0.7", features = ["rt"] }
 toml = "0.9"
 toml_edit = "0.23"
-tonic = { version = "0.14", features = ["tls-aws-lc", "gzip", "deflate", "zstd"] }
+tonic = { version = "0.14", features = ["tls-ring", "gzip", "deflate", "zstd"] }
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
 tower = "0.5"
@@ -361,6 +363,7 @@ xai-grok-shell-terminal = { path = "crates/codegen/xai-grok-shell-terminal" }
 xai-grok-status-line = { path = "crates/codegen/xai-grok-status-line" }
 xai-grok-telemetry = { path = "crates/codegen/xai-grok-telemetry" }
 xai-grok-test-support = { path = "crates/codegen/xai-grok-test-support" }
+xai-grok-pdf = { path = "crates/codegen/xai-grok-pdf" }
 xai-grok-tools = { path = "crates/codegen/xai-grok-tools" }
 xai-grok-tools-api = { path = "crates/codegen/xai-grok-tools-api" }
 xai-grok-version = { path = "crates/codegen/xai-grok-version" }
@@ -376,6 +379,7 @@ xai-ratatui-inline = { path = "crates/codegen/xai-ratatui-inline" }
 xai-ratatui-textarea = { path = "crates/codegen/xai-ratatui-textarea" }
 xai-sqlite-journal = { path = "crates/codegen/xai-sqlite-journal" }
 xai-system-power = { path = "crates/codegen/xai-system-power" }
+xai-spawn = { path = "crates/common/xai-spawn" }
 xai-test-utils = { path = "crates/common/xai-test-utils" }
 xai-token-estimation = { path = "crates/codegen/xai-token-estimation" }
 xai-tool-protocol = { path = "crates/common/xai-tool-protocol" }
@@ -410,6 +414,10 @@ opt-level = 2
 codegen-units = 256
 
 [profile.release.package.xai-grok-workspace]
+opt-level = 2
+codegen-units = 256
+
+[profile.release.package.xai-grok-pager-bin]
 opt-level = 2
 codegen-units = 256
 

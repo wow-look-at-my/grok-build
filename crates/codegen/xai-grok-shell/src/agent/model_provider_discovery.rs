@@ -610,7 +610,7 @@ mod tests {
                 "/catalog.json",
                 get(move || async move { axum::Json(for_custom) }),
             );
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (base, handle)
     }
 
@@ -671,7 +671,7 @@ mod tests {
                     }))
                 }),
             );
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (base, handle)
     }
 
@@ -772,7 +772,7 @@ mod tests {
                     }
                 }),
             );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
         let cfg = config_from(&format!(
             r#"
@@ -1027,7 +1027,7 @@ mod tests {
                 }
             }),
         );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let cfg = config_from(&format!(
             r#"
             [model_providers.gateway]

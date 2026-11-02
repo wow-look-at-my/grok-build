@@ -911,7 +911,7 @@ mod tests {
         let handles: Vec<_> = (0..16)
             .map(|_| {
                 let (t, s, e) = (tracker.clone(), snapshot.clone(), err.clone());
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     t.record(s.as_ref(), e.as_ref(), ManualAuthSurface::Turn);
                 })
             })

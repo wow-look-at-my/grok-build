@@ -470,7 +470,7 @@ pub(crate) async fn rehydrate_session_in_worktree(
         let session_id = req.session_id.clone();
         let btrfs_delegate = btrfs_delegate_from_env();
         let _recreate = region!("worktree.cwd_recreate", Parent::Inherit);
-        let created = tokio::task::spawn_blocking(move || {
+        let created = xai_spawn::spawn_blocking(move || {
             use xai_fast_worktree::{
                 CreationMode, IgnoredFilesMode, WorkingTreeMode, WorktreeBuilder,
             };

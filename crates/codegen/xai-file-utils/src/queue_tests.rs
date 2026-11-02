@@ -81,7 +81,7 @@ async fn transition_notify_wakes_wired_listener() {
 
     let waiter = {
         let n = notify.clone();
-        tokio::spawn(async move { n.notified().await })
+        xai_spawn::spawn(async move { n.notified().await })
     };
     tokio::task::yield_now().await;
 
@@ -168,7 +168,7 @@ async fn wait_idle_reports_pending_and_wakes_on_settle() {
     );
 
     let settle_stats = stats.clone();
-    let settle = tokio::spawn(async move {
+    let settle = xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_millis(50)).await;
         settle_stats.pending.store(0, Ordering::Relaxed);
         settle_stats.notify_transition();
@@ -1993,7 +1993,7 @@ async fn upload_with_retries_aborts_on_persistent_auth_error() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let resolve_count = Arc::new(AtomicU32::new(0));
@@ -2176,7 +2176,7 @@ async fn spawn_flippable_server(initially_unauthorized: bool) -> (FlippableAuthS
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (state, format!("http://{}/v1", addr))
 }
 
@@ -2230,7 +2230,7 @@ async fn parked_item_uploads_after_auth_recovery() {
         let resolver = resolver_dyn.clone();
         let stats = stats.clone();
         let draining = draining.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             upload_with_retries(&mut item, &resolver, &policy, 100, &stats, &draining, None).await
         })
     };
@@ -2330,7 +2330,7 @@ async fn parked_item_releases_concurrency_permit() {
         let resolver = resolver_dyn.clone();
         let stats = stats.clone();
         let draining = draining.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let r = upload_with_retries(
                 &mut item,
                 &resolver,
@@ -2436,7 +2436,7 @@ async fn parked_wake_revalidates_drain_before_wire() {
         let resolver = resolver_dyn.clone();
         let stats = stats.clone();
         let draining = draining.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             upload_with_retries(&mut item, &resolver, &policy, 100, &stats, &draining, None).await
         })
     };
@@ -2487,7 +2487,7 @@ async fn parked_item_probe_retries_without_token_change() {
     {
         let state = state.clone();
         let stats = stats.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while stats.auth_parked.load(Ordering::Relaxed) == 0 {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
@@ -2532,7 +2532,7 @@ async fn parked_item_skips_probe_without_usable_credential() {
         let state = state.clone();
         let stats = stats.clone();
         let resolver = resolver.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while stats.auth_parked.load(Ordering::Relaxed) == 0 {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
@@ -2592,7 +2592,7 @@ async fn parked_item_bails_out_on_drain() {
         let resolver = resolver.clone();
         let stats = stats.clone();
         let draining = draining.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             upload_with_retries(&mut item, &resolver, &policy, 100, &stats, &draining, None).await
         })
     };
@@ -2667,7 +2667,7 @@ async fn assert_terminal_status_aborts_immediately(status: axum::http::StatusCod
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let resolve_count = Arc::new(AtomicU32::new(0));
@@ -2774,7 +2774,7 @@ async fn upload_with_retries_recovers_after_auth_refresh() {
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let resolve_count = Arc::new(AtomicU32::new(0));
@@ -2867,7 +2867,7 @@ async fn enqueue_after_drain_falls_back_to_inline() {
 async fn spawn_test_server(app: axum::Router) -> Arc<dyn TraceExportSource> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     Arc::new(CountingResolver {
         count: Arc::new(AtomicU32::new(0)),
         proxy_base_url: format!("http://{}/v1", addr),
@@ -2942,7 +2942,7 @@ async fn drain_settles_inflight_and_pending_to_zero() {
     let pings_task = {
         let pings = pings.clone();
         let notify = notify.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 notify.notified().await;
                 pings.fetch_add(1, Ordering::SeqCst);
@@ -3174,7 +3174,7 @@ async fn enqueue_file_over_budget_streams_source_at_upload_time() {
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let resolver: Arc<dyn TraceExportSource> = Arc::new(CountingResolver {
         count: Arc::new(AtomicU32::new(0)),
@@ -3365,7 +3365,7 @@ async fn enqueue_file_channel_full_streams_from_source_path() {
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     let resolver: Arc<dyn TraceExportSource> = Arc::new(CountingResolver {
         count: Arc::new(AtomicU32::new(0)),
@@ -3512,7 +3512,7 @@ async fn inline_fallback_semaphore_bounds_concurrency() {
     let app = Router::new().route("/v1/storage", post(ok_handler));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     // Budget = 4 permits; each task requests 2 permits → at most 2 concurrent.
     const BUDGET: usize = 4;
@@ -3638,7 +3638,7 @@ async fn spawn_ok_server() -> (Arc<dyn TraceExportSource>, Arc<AtomicU32>) {
         .with_state(count.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let resolver: Arc<dyn TraceExportSource> = Arc::new(CountingResolver {
         count: Arc::new(AtomicU32::new(0)),
         proxy_base_url: format!("http://{}/v1", addr),
@@ -3714,7 +3714,7 @@ async fn reference_snapshot_immutable_to_source_mutation() {
         .with_state(captured.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let resolver: Arc<dyn TraceExportSource> = Arc::new(CountingResolver {
         count: Arc::new(AtomicU32::new(0)),
         proxy_base_url: format!("http://{}/v1", addr),
@@ -4242,7 +4242,7 @@ async fn process_item_owned_snapshot_failure_deletes_snapshot() {
     let app = Router::new().route("/v1/storage", post(h401));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let resolver: Arc<dyn TraceExportSource> = Arc::new(CountingResolver {
         count: Arc::new(AtomicU32::new(0)),
         proxy_base_url: format!("http://{}/v1", addr),

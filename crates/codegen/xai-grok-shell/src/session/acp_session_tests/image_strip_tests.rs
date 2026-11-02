@@ -320,7 +320,7 @@ fn deliver_completed(
 ) -> tokio::task::JoinHandle<()> {
     let actor = Arc::clone(actor);
     let request_id = request_id.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         actor
             .handle_sampling_event(completed_event(&request_id))
             .await;
@@ -402,7 +402,7 @@ async fn rewind_cancels_detached_image_strip_before_it_runs() {
             );
 
             let rewind_actor = Arc::clone(&actor);
-            let rewind = tokio::task::spawn_local(async move {
+            let rewind = xai_spawn::spawn_local(async move {
                 rewind_actor
                     .handle_rewind(RewindRequest {
                         target_prompt_index: 1,
@@ -467,7 +467,7 @@ async fn rejected_rewind_preserves_queued_image_strip() {
 
             let strip_blocker = actor.image_strip_rewrite_barrier.lock_strip().await;
             let rewind_actor = Arc::clone(&actor);
-            let rewind = tokio::task::spawn_local(async move {
+            let rewind = xai_spawn::spawn_local(async move {
                 rewind_actor
                     .handle_rewind(RewindRequest {
                         target_prompt_index: usize::MAX,
@@ -580,7 +580,7 @@ async fn failed_compaction_replay_preserves_queued_image_strip() {
             let completed = deliver_completed(&actor, &request_id);
             tokio::task::yield_now().await;
             let rewind_actor = Arc::clone(&actor);
-            let rewind = tokio::task::spawn_local(async move {
+            let rewind = xai_spawn::spawn_local(async move {
                 rewind_actor
                     .handle_rewind(RewindRequest {
                         target_prompt_index: 1,

@@ -34,6 +34,7 @@ xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 xai-grok-tools = { workspace = true }
 xai-grok-workspace = { workspace = true }
 xai-tty-utils = { workspace = true }
+xai-spawn = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

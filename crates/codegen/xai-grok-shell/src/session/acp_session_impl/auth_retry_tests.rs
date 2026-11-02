@@ -258,7 +258,7 @@ async fn pace_early_wake_on_token_landing_returns_promptly() {
     let (_dir, am) = expired_manager_for_pace();
     let started = tokio::time::Instant::now();
     let waker = am.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         waker.hot_swap(xai_grok_login::GrokAuth {
             key: "fresh-key".into(),
@@ -327,7 +327,7 @@ async fn pace_wakes_on_token_adopted_without_notify() {
     use xai_grok_login::backend::{ActiveAuthBackend, AuthBackend};
     let (_dir, am) = expired_manager_for_pace();
     let waker = am.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         // No notify: what the disk-adoption and config-watcher paths do.
         waker.hot_swap(xai_grok_login::GrokAuth {
@@ -366,7 +366,7 @@ async fn pace_adopts_token_written_to_auth_json_mid_park() {
     let (_dir, am) = expired_manager_for_pace();
     let path = am.auth_json_path().to_path_buf();
     let scope = ActiveAuthBackend::default().scope_key(&xai_grok_login::GrokComConfig::default());
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         // Disk write only — no hot_swap, no notify — what an external login does.
         let landed = xai_grok_login::GrokAuth {
@@ -412,7 +412,7 @@ async fn pace_spurious_notify_holds_the_full_delay() {
     let (_dir, am) = expired_manager_for_pace();
     let started = tokio::time::Instant::now();
     let waker = am.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         // No token change: fire the notify alone.
         waker.refresh_notifier().notify_waiters();

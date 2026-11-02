@@ -181,7 +181,7 @@ async fn invalid_authored_workflow_returns_path_specific_warning() {
 async fn parse_failure_is_returned_during_snapshot() {
     let directory = tempfile::tempdir().unwrap();
     // Unique workspace_key even when $TMPDIR lives inside a git checkout.
-    git2::Repository::init(directory.path()).unwrap();
+    gix::init(directory.path()).unwrap();
     let path = directory.path().join(".grok/workflows/parse-failure.rhai");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, workflow("parse-failure", "let value = ;")).unwrap();

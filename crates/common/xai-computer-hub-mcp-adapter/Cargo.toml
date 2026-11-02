@@ -21,6 +21,7 @@ xai-tool-protocol = { workspace = true }
 xai-tool-runtime = { workspace = true }
 xai-tool-types = { workspace = true }
 xai-computer-hub-sdk = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }

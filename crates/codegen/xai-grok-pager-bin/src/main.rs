@@ -1396,7 +1396,7 @@ async fn run_agent_command(
                 let leader_tx_stdin = leader_tx.clone();
                 let replay_state_stdin = replay_state.clone();
                 let cancel_stdin = cancel.clone();
-                let stdin_task = tokio::spawn(async move {
+                let stdin_task = xai_spawn::spawn(async move {
                     let mut stdin_lines = xai_acp_lib::spawn_stdin_line_reader();
                     loop {
                         tokio::select! {
@@ -1416,7 +1416,7 @@ async fn run_agent_command(
                     }
                 });
                 let cancel_stdout = cancel.clone();
-                let stdout_task = tokio::spawn(async move {
+                let stdout_task = xai_spawn::spawn(async move {
                     let mut stdout = tokio::io::stdout();
                     let mut rx = rx;
                     loop {
@@ -1791,6 +1791,7 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
+    xai_grok_pdf::install();
     // A `--sandbox` session starts on the host (outside the jail), where we
     // spawn an unsandboxed `gh` CI-status worker and hand its stream fd into
     // the jail.
@@ -2617,7 +2618,7 @@ mod tests {
         );
         let (leader_tx, mut leader_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let responder = tokio::spawn(async move {
+        let responder = xai_spawn::spawn(async move {
             let _init = leader_rx.recv().await.unwrap();
             response_tx
                 .send(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_string())
@@ -2711,7 +2712,7 @@ mod tests {
         );
         let (leader_tx, mut leader_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let responder = tokio::spawn(async move {
+        let responder = xai_spawn::spawn(async move {
             let _init = leader_rx.recv().await.unwrap();
             response_tx
                 .send(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_string())
@@ -2764,7 +2765,7 @@ mod tests {
         );
         let (leader_tx, mut leader_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let (response_tx, mut response_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let responder = tokio::spawn(async move {
+        let responder = xai_spawn::spawn(async move {
             let _init = leader_rx.recv().await.unwrap();
             response_tx
                 .send(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_string())
@@ -2820,7 +2821,7 @@ mod tests {
             &state_mutex,
         );
         let state = state_mutex.lock().unwrap().clone();
-        let responder = tokio::spawn(async move {
+        let responder = xai_spawn::spawn(async move {
             let _init = leader_rx.recv().await.unwrap();
             response_tx
                 .send(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_string())
@@ -2856,7 +2857,7 @@ mod tests {
             &state_mutex,
         );
         let state = state_mutex.lock().unwrap().clone();
-        let responder = tokio::spawn(async move {
+        let responder = xai_spawn::spawn(async move {
             let _init = leader_rx.recv().await.unwrap();
             response_tx
                 .send(
@@ -2923,7 +2924,7 @@ mod tests {
             &state_mutex,
         );
         let state = state_mutex.lock().unwrap().clone();
-        let responder = tokio::spawn(async move {
+        let responder = xai_spawn::spawn(async move {
             let _init = leader_rx.recv().await.unwrap();
             response_tx
                 .send(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_string())
@@ -2962,7 +2963,7 @@ mod tests {
             &state_mutex,
         );
         let state = state_mutex.lock().unwrap().clone();
-        let responder = tokio::spawn(async move {
+        let responder = xai_spawn::spawn(async move {
             let _init = leader_rx.recv().await.unwrap();
             response_tx
                 .send(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_string())

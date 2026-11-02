@@ -129,7 +129,7 @@ impl PtySession {
             .context("failed to spawn PTY reader thread")?;
 
         // --- PTY Writer Task (async) ---
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 tokio::select! {
                     Some(bytes) = pty_write_rx.recv() => {
@@ -155,7 +155,7 @@ impl PtySession {
         let terminal_feeder = terminal.clone();
         let output_tx_feeder = output_tx.clone();
         let raw_tail_feeder = raw_tail.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(bytes) = pty_read_rx.recv().await {
                 // Broadcast raw PTY output to all WebSocket subscribers.
                 // Ignore errors (no active subscribers is fine).
@@ -175,7 +175,7 @@ impl PtySession {
         // --- Child Process Waiter ---
         let alive_waiter = alive.clone();
         let exit_code_waiter = exit_code.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 if !alive_waiter.load(Ordering::SeqCst) {
@@ -554,7 +554,7 @@ pub(crate) mod tests {
         // A child that never writes: the resize is the only grid activity.
         let session = start_session(vec!["/bin/sleep".into(), "30".into()]).await;
 
-        let wait = tokio::spawn(
+        let wait = xai_spawn::spawn(
             session
                 .wait_handle()
                 .wait_for(WaitCondition::StableMs(800), Duration::from_secs(10)),

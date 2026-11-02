@@ -51,7 +51,7 @@ async fn mid_text_skill_token_echo_styled_pty() {
     let content = ContentController::start().await.expect("start content");
     content.set_response(format!("{DONE_SENTINEL} echo styling verified."));
     let workspace = tempfile::tempdir().expect("workspace tempdir");
-    git2::Repository::init(workspace.path()).expect("git init workspace");
+    xai_test_utils::git::init_git_repo(workspace.path());
     seed_test_skill(workspace.path());
 
     let binary = pager_binary().expect("resolve pager binary");

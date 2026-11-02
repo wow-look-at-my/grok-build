@@ -499,7 +499,7 @@ impl HunkTrackerActor {
                 let mut join_set = tokio::task::JoinSet::new();
                 for path in chunk {
                     let p = path.clone();
-                    join_set.spawn(async move {
+                    xai_spawn::spawn_in(&mut join_set, async move {
                         let content = read_file_bounded(&p).await;
                         (p, content)
                     });

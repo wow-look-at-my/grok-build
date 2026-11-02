@@ -206,7 +206,7 @@ pub(crate) async fn append_laziness_debug_log_line(
     let mut json = serde_json::to_string(line).map_err(std::io::Error::other)?;
     json.push('\n');
     let path = std::sync::Arc::clone(log_handle);
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         use std::io::Write as _;
         let mut file = std::fs::OpenOptions::new()
             .create(true)

@@ -765,7 +765,7 @@ mod tests {
         }
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).expect("cert");
         let server_config = rustls::ServerConfig::builder_with_provider(
-            rustls::crypto::aws_lc_rs::default_provider().into(),
+            rustls::crypto::ring::default_provider().into(),
         )
         .with_safe_default_protocol_versions()
         .expect("protocol versions")

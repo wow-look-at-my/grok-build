@@ -225,7 +225,7 @@ pub(crate) async fn maybe_schedule_restart(
     }
 
     let task_actions = Rc::clone(&actions);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         // RAII: release the in-flight claim taken above when the task exits for any reason
         let _in_flight = RestartInFlightGuard {
             actions: Rc::clone(&task_actions),
@@ -446,7 +446,7 @@ pub(crate) async fn maybe_schedule_http_recovery(
     }
 
     let task_actions = Rc::clone(&actions);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         // RAII: release the in-flight claim on every exit path.
         let _in_flight = RestartInFlightGuard {
             actions: Rc::clone(&task_actions),
@@ -763,7 +763,7 @@ mod tests {
             mock.configure("svr");
             let cancel = tokio_util::sync::CancellationToken::new();
 
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
@@ -809,7 +809,7 @@ mod tests {
         run_in_local(async {
             let mock = Rc::new(MockActions::new());
             mock.configure("svr");
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
@@ -846,7 +846,7 @@ mod tests {
         run_in_local(async {
             let mock = Rc::new(MockActions::new());
             mock.configure("svr");
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
@@ -960,7 +960,7 @@ mod tests {
             mock.script_outcome(Ok(Respawn::Installed));
             let cancel = tokio_util::sync::CancellationToken::new();
 
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
@@ -996,7 +996,7 @@ mod tests {
             mock.configure("svr");
             mock.script_outcome(Ok(Respawn::Installed));
 
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
@@ -1031,7 +1031,7 @@ mod tests {
             mock.configure("svr");
             mock.script_outcome(Ok(Respawn::Superseded));
 
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
@@ -1067,7 +1067,7 @@ mod tests {
             mock.script_outcome(Err("handshake timeout".into()));
             let cancel = tokio_util::sync::CancellationToken::new();
 
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
@@ -1122,7 +1122,7 @@ mod tests {
             }
             mock.script_outcome(Ok(Respawn::Installed));
 
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
@@ -1164,7 +1164,7 @@ mod tests {
             let mock = Rc::new(MockActions::new());
             mock.configure("svr");
 
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),
@@ -1196,7 +1196,7 @@ mod tests {
             mock.configure("svr");
             mock.script_outcome(Ok(Respawn::Installed));
 
-            let task = tokio::task::spawn_local(auto_restart_stdio(
+            let task = xai_spawn::spawn_local(auto_restart_stdio(
                 dyn_actions(mock.clone()),
                 "sess-1".to_string(),
                 "svr".to_string(),

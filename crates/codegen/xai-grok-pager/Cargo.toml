@@ -150,11 +150,10 @@ uuid = { workspace = true, features = ["v4", "v7"] }
 # Path computation (plan file, etc.)
 shellexpand = "3.1"
 
-# libgit2 for the startup git-info populator (no fork/exec, runs once on launch
+# In-process git reads for the git-info populator and branch stats (no fork/exec,
 # in spawn_blocking; the render path never touches git directly).
-git2 = { version = "0.21", default-features = false, features = [
-    "vendored-libgit2",
-] }
+gix = { workspace = true, features = ["status", "blob-diff"] }
+xai-gix-status = { workspace = true }
 urlencoding = { workspace = true }
 
 # Parsing (web_search)
@@ -169,6 +168,7 @@ parking_lot.workspace = true
 # nix: signal handling in notifications/.
 # signal-hook: SIGWINCH handler for the `grok wrap` PTY wrapper (pty_wrap.rs).
 # libc: poll/read for non-blocking terminal reads in theme/osc11.rs.
+xai-spawn = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["signal"] }
 signal-hook = { workspace = true }
@@ -179,6 +179,7 @@ libc = { workspace = true }
 core-foundation = { workspace = true }
 
 [dev-dependencies]
+xai-test-utils = { path = "../../common/xai-test-utils" }
 tokio = { workspace = true, features = ["test-util"] }
 xai-interjection-core = { workspace = true }
 # The fixture that builds a `[ui.status_line]` section field by field.

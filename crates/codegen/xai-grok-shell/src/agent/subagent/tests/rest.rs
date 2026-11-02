@@ -1391,7 +1391,7 @@ async fn live_reconcile_with_heal_lock(
 ) {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let backend = ChannelBackend::new(event_tx);
-    let respond = tokio::spawn(async move {
+    let respond = xai_spawn::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             let SubagentEvent::Inspect(request) = event else {
                 continue;

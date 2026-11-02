@@ -110,7 +110,7 @@ pub fn spawn_transport_liveness(
     // dead watcher means that client's transport is never again detected as
     // closed.
     #[allow(clippy::disallowed_methods)]
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let watched = xai_grok_tools::util::detached::guarded(
             "mcp transport liveness watcher",
             watch_transport(

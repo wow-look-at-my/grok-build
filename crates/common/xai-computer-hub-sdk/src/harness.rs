@@ -1760,7 +1760,7 @@ impl ToolHarness {
         // an `inner` clone here would keep the strong count above 1 and
         // suppress the `Drop` teardown gate.
         let hook_request_handler = self.inner.hook_request_handler.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(frame) = inbox_rx.recv().await {
                 match frame {
                     crate::demux::InboundFrame::Notification(value) => {
@@ -1850,7 +1850,7 @@ impl ToolHarness {
         // (a strong Arc would form a cycle via demux inbox → task → Arc →
         // ConnectionBorrow → HubConnection → demux and defeat Drop teardown).
         let weak = Arc::downgrade(&self.inner);
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             while let Some(notification) = rx.recv().await {
                 let Some(inner) = weak.upgrade() else {
                     break; // harness gone — exit without extending its lifetime
@@ -2163,7 +2163,7 @@ impl ObservedToolStream {
             outcome,
         };
         let harness = state.harness;
-        handle.spawn(async move {
+        xai_spawn::spawn_on(&handle, async move {
             harness.emit_session_event(event).await;
         });
     }
@@ -3454,7 +3454,7 @@ mod tests {
             .await
             .expect("bind ephemeral");
         let addr = listener.local_addr().expect("local addr");
-        tokio::spawn({
+        xai_spawn::spawn({
             let recorded = Arc::clone(&recorded);
             async move {
                 let app = Router::new().route(
@@ -3680,7 +3680,7 @@ mod tests {
         for _ in 0..n {
             let clone = harness.clone();
             let barrier = barrier.clone();
-            handles.push(tokio::spawn(async move {
+            handles.push(xai_spawn::spawn(async move {
                 barrier.wait().await;
                 drop(clone);
             }));
@@ -4029,7 +4029,7 @@ mod tests {
                     std::hint::spin_loop();
                 }
             };
-            let dropper = tokio::spawn({
+            let dropper = xai_spawn::spawn({
                 let gate = Arc::clone(&gate);
                 let old = live;
                 async move {
@@ -4037,7 +4037,7 @@ mod tests {
                     drop(old);
                 }
             });
-            let rebuild = tokio::spawn({
+            let rebuild = xai_spawn::spawn({
                 let gate = Arc::clone(&gate);
                 let pending = builder();
                 async move {

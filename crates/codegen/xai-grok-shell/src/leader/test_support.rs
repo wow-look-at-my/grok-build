@@ -75,7 +75,7 @@ pub(crate) async fn spawn_fake_leader(
     let cancel = CancellationToken::new();
     let cancel_clone = cancel.clone();
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = fs::remove_file(&socket_path);
         let listener = match super::transport::LeaderListener::bind(&socket_path) {
             Ok(listener) => listener,

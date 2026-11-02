@@ -48,7 +48,7 @@ pub async fn spawn_agent(
 
     // Built inside the task so the agent's bootstrap state lives on the task's heap-boxed future, not on the caller's
     // stack (a debug-build `MvpAgent` boot would otherwise deepen every test that awaits this)
-    let connection = tokio::task::spawn_local(async move {
+    let connection = xai_spawn::spawn_local(async move {
         let mut config = AgentConfig::default();
         let auth_manager = Arc::new(config.create_auth_manager());
         // This runs on a current-thread `LocalSet`, where the sync bootstrap in `MvpAgent::new`
@@ -83,9 +83,9 @@ pub async fn spawn_agent(
         let incoming = LineBufferedRead::spawn_local(agent_in_read.compat());
         let (conn, handle_io) =
             acp::AgentSideConnection::new(agent, agent_out_write.compat_write(), incoming, |fut| {
-                tokio::task::spawn_local(fut);
+                xai_spawn::spawn_local(fut);
             });
-        tokio::task::spawn_local(
+        xai_spawn::spawn_local(
             GatewayReceiver::new(gateway_rx, conn)
                 .with_on_meta(xai_grok_otel::span_from_meta_traceparent)
                 .run(),
@@ -93,7 +93,7 @@ pub async fn spawn_agent(
         let _ = handle_io.await;
     });
 
-    let requests = tokio::task::spawn_local(async move {
+    let requests = xai_spawn::spawn_local(async move {
         while let Some(msg) = to_agent.recv().await {
             if agent_in_write.write_all(msg.as_bytes()).await.is_err()
                 || agent_in_write.write_all(b"\n").await.is_err()
@@ -103,7 +103,7 @@ pub async fn spawn_agent(
         }
     });
 
-    let responses = tokio::task::spawn_local(async move {
+    let responses = xai_spawn::spawn_local(async move {
         let mut reader = BufReader::new(agent_out_read);
         let mut line = String::new();
         loop {

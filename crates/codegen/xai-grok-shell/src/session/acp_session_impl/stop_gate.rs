@@ -180,7 +180,7 @@ impl SessionActor {
     ) -> Option<(String, xai_grok_sandbox::ci_state::CiStatus)> {
         let cwd = self.tool_context.cwd.as_path().to_path_buf();
         // The query shells out to `git` and `gh`, so it runs off the executor.
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             use xai_grok_tools::implementations::grok_build::ci;
             let branch = ci::current_branch(&cwd)?;
             let runs = match ci::fetch_runs(&cwd, &branch, 10, None) {

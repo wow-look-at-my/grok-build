@@ -73,7 +73,7 @@ impl AgentConnection {
         let spawn_until_stopped = {
             let stop = stop.clone();
             move |future: LocalBoxFuture<'static, ()>| {
-                tokio::task::spawn_local(stop.clone().run_until_cancelled_owned(future));
+                xai_spawn::spawn_local(stop.clone().run_until_cancelled_owned(future));
             }
         };
         let handler = ScriptedClient::new(policy);
@@ -87,7 +87,7 @@ impl AgentConnection {
         AgentConnection {
             conn,
             handler,
-            _io_task: AbortOnDropHandle::new(tokio::task::spawn_local(handle_io)),
+            _io_task: AbortOnDropHandle::new(xai_spawn::spawn_local(handle_io)),
             _stop_spawned_tasks: stop.drop_guard(),
         }
     }

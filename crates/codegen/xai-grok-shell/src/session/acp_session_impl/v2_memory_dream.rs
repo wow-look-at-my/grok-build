@@ -267,7 +267,7 @@ impl V2DreamLeaseGuard {
         };
         let error = error.into();
         let clock = self.clock.clone();
-        match tokio::task::spawn_blocking(move || {
+        match xai_spawn::spawn_blocking(move || {
             store.fail_retryable(&lease, clock.now_unix_seconds(), &error)
         })
         .await
@@ -297,7 +297,7 @@ impl Drop for V2DreamLeaseGuard {
             }
         };
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn_blocking(release);
+            xai_spawn::spawn_blocking_on(&runtime, release);
         } else {
             release();
         }
@@ -473,7 +473,7 @@ impl SessionActor {
             }
             let attempt_workspace = workspace.clone();
             let attempt_clock = clock.clone();
-            match tokio::task::spawn_blocking(move || {
+            match xai_spawn::spawn_blocking(move || {
                 xai_grok_memory::V2CaptureStore::open_with_clock(
                     &attempt_workspace,
                     xai_grok_memory::V2MemoryScope::Workspace,
@@ -534,7 +534,7 @@ impl SessionActor {
             let maintenance_global = global.clone();
             let maintenance_workspace = workspace.clone();
             let maintenance_clock = clock.clone();
-            match tokio::task::spawn_blocking(move || {
+            match xai_spawn::spawn_blocking(move || {
                 let maintenance = xai_grok_memory::V2MaintenanceStore::open_with_clock(
                     &maintenance_workspace,
                     xai_grok_memory::V2MemoryScope::Workspace,
@@ -589,7 +589,7 @@ impl SessionActor {
         let is_shadow = self.memory.v2_config.rollout == crate::config::MemoryV2Rollout::Shadow;
         let started_at = std::time::Instant::now();
         let eligibility_clock = clock.clone();
-        let eligibility = tokio::task::spawn_blocking(move || {
+        let eligibility = xai_spawn::spawn_blocking(move || {
             let store = xai_grok_memory::V2ConsolidationStore::open_with_clock(
                 &workspace,
                 xai_grok_memory::V2MemoryScope::Workspace,
@@ -786,7 +786,7 @@ impl SessionActor {
         let global = storage.global_dir().to_path_buf();
         let workspace = storage.workspace_dir().to_path_buf();
         let is_shadow = self.memory.v2_config.rollout == crate::config::MemoryV2Rollout::Shadow;
-        let claimed = tokio::task::spawn_blocking({
+        let claimed = xai_spawn::spawn_blocking({
             let global = global.clone();
             let workspace = workspace.clone();
             let store_clock = clock.clone();
@@ -978,7 +978,7 @@ impl SessionActor {
         let observation_count = lease.observations.len();
         if self.memory.v2_config.rollout == crate::config::MemoryV2Rollout::Shadow {
             let shadow_clock = clock.clone();
-            let shadow_result = tokio::task::spawn_blocking(move || {
+            let shadow_result = xai_spawn::spawn_blocking(move || {
                 let now = shadow_clock.now_unix_seconds();
                 let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     store.complete_shadow(&lease, &operations, now)
@@ -1058,7 +1058,7 @@ impl SessionActor {
             };
         }
         let commit_clock = clock;
-        let committed = tokio::task::spawn_blocking(move || {
+        let committed = xai_spawn::spawn_blocking(move || {
             let now = commit_clock.now_unix_seconds();
             let result = store.commit(&lease, &operations, now);
             if let Err(error) = &result {

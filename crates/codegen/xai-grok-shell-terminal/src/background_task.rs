@@ -418,7 +418,7 @@ mod tests {
 
         let registry_clone = registry.clone();
 
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
             registry_clone
                 .mark_completed("test-1", Some(42), None)

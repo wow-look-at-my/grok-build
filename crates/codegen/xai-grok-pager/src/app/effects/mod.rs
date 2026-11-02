@@ -65,7 +65,7 @@ pub(crate) async fn discover_mcp_servers(
     cwd: std::path::PathBuf,
 ) -> Vec<acp::McpServer> {
     let started = std::time::Instant::now();
-    let servers = tokio::task::spawn_blocking(move || xai_grok_shell::util::config::load_mcp_servers(
+    let servers = xai_spawn::spawn_blocking(move || xai_grok_shell::util::config::load_mcp_servers(
             &cwd,
             &xai_grok_tools::types::compat::CompatConfig::default(),
         ))
@@ -182,11 +182,11 @@ pub(crate) fn execute(
         }
         Effect::CancelAuth { request_seq } => {
             let tx = acp_tx.clone();
-            tasks.spawn(async move { send_auth_cancel(&tx, request_seq).await });
+            xai_spawn::spawn_in(tasks, async move { send_auth_cancel(&tx, request_seq).await });
         }
         Effect::CheckSubscription { verify } => {
             let tx = acp_tx.clone();
-            tasks.spawn(async move { send_check_subscription(&tx, verify).await });
+            xai_spawn::spawn_in(tasks, async move { send_check_subscription(&tx, verify).await });
         }
         Effect::HydrateTeamCapability { identity } => {
             let tx = acp_tx.clone();
@@ -195,7 +195,7 @@ pub(crate) fn execute(
         }
         Effect::CreditLimitRecheck { agent_id } => {
             let tx = acp_tx.clone();
-            tasks.spawn(async move { send_credit_limit_recheck(&tx, agent_id).await });
+            xai_spawn::spawn_in(tasks, async move { send_credit_limit_recheck(&tx, agent_id).await });
         }
         Effect::SchedulePaywallCheck => {
             tasks
@@ -602,7 +602,7 @@ pub(crate) fn execute(
                             seq,
                         };
                     }
-                    let summaries = tokio::task::spawn_blocking(move || {
+                    let summaries = xai_spawn::spawn_blocking(move || {
                             let _permit = permit;
                             xai_grok_foreign_sessions::scan_foreign_sessions(
                                 &cwd,
@@ -629,7 +629,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let cwd_for_task = requested_cwd.clone();
-                    let canonical_cwd = tokio::task::spawn_blocking(move || {
+                    let canonical_cwd = xai_spawn::spawn_blocking(move || {
                             dunce::canonicalize(cwd_for_task).ok()
                         })
                         .await
@@ -657,7 +657,7 @@ pub(crate) fn execute(
                             compat,
                             &grok_home,
                             |enabled| async move {
-                                tokio::task::spawn_blocking(move || xai_grok_foreign_sessions::most_recent_foreign_session(
+                                xai_spawn::spawn_blocking(move || xai_grok_foreign_sessions::most_recent_foreign_session(
                                         &cwd_for_scan,
                                         enabled,
                                         crate::app::foreign_sessions::RESUME_HINT_WINDOW,
@@ -907,7 +907,7 @@ pub(crate) fn execute(
         Effect::LoadWorkspaceSnapshot { db_path } => {
             tasks
                 .spawn(async move {
-                    match tokio::task::spawn_blocking(move || {
+                    match xai_spawn::spawn_blocking(move || {
                             let store = xai_grok_dashboard_store::WorkspaceStore::open(
                                 &db_path,
                             )?;
@@ -945,7 +945,7 @@ pub(crate) fn execute(
             let db_path = store.path().to_path_buf();
             tasks
                 .spawn(async move {
-                    match tokio::task::spawn_blocking(move || {
+                    match xai_spawn::spawn_blocking(move || {
                             let mut store = store;
                             let mut failures = Vec::new();
                             let completion = match mutation {
@@ -1025,7 +1025,7 @@ pub(crate) fn execute(
             let db_path = store.path().to_path_buf();
             tasks
                 .spawn(async move {
-                    match tokio::task::spawn_blocking(move || {
+                    match xai_spawn::spawn_blocking(move || {
                             let result = match store.data_version() {
                                 Ok(data_version) if data_version == known_data_version => {
                                     Ok(None)
@@ -1208,7 +1208,7 @@ pub(crate) fn execute(
                 .spawn(async move {
                     use crate::app::app_view::CardDetail;
                     let result_session_id = session_id.clone();
-                    let detail = tokio::task::spawn_blocking(move || {
+                    let detail = xai_spawn::spawn_blocking(move || {
                             let info = xai_grok_shell::session::info::Info {
                                 id: acp::SessionId::new(session_id),
                                 cwd,
@@ -2079,7 +2079,7 @@ pub(crate) fn execute(
         Effect::RehydrateFeedbackImage { agent_id, modal_id, image_identity, path } => {
             tasks
                 .spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || {
+                    let result = xai_spawn::spawn_blocking(move || {
                             xai_grok_feedback::read_regular_capped(
                                     &path,
                                     xai_grok_shell::session::MAX_FEEDBACK_IMAGE_BYTES,
@@ -2101,7 +2101,7 @@ pub(crate) fn execute(
             tasks
                 .spawn(async move {
                     let preview = preparation.preview();
-                    if tokio::task::spawn_blocking(move || preparation.run())
+                    if xai_spawn::spawn_blocking(move || preparation.run())
                         .await
                         .is_err()
                     {
@@ -2113,7 +2113,7 @@ pub(crate) fn execute(
         Effect::PlanDoctorFix { target, report, terminal, request } => {
             tasks
                 .spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || match request {
+                    let result = xai_spawn::spawn_blocking(move || match request {
                             crate::slash::command::DoctorRequest::ListFixes => {
                                 Ok(
                                     actions::DoctorPlanningOutcome::Listing(
@@ -2160,7 +2160,7 @@ pub(crate) fn execute(
         Effect::ApplyDoctorFix { target, plan } => {
             tasks
                 .spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || crate::diagnostics::apply_fix(
+                    let result = xai_spawn::spawn_blocking(move || crate::diagnostics::apply_fix(
                             *plan,
                         ))
                         .await
@@ -2175,7 +2175,7 @@ pub(crate) fn execute(
         Effect::FetchChangelog => {
             tasks
                 .spawn(async move {
-                    let changelog = tokio::task::spawn_blocking(|| {
+                    let changelog = xai_spawn::spawn_blocking(|| {
                             xai_grok_shell::util::changelog::ChangelogManager::new()
                                 .fetch()
                         })
@@ -2293,7 +2293,7 @@ pub(crate) fn execute(
         Effect::PersistDashboard(persisted) => {
             tasks
                 .spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || {
+                    let result = xai_spawn::spawn_blocking(move || {
                             if let Err(e) = crate::views::dashboard::state::write_persisted(
                                 &persisted,
                             ) {
@@ -3424,7 +3424,7 @@ pub(crate) fn execute(
         }
         Effect::FetchPluginCtaMcps { agent_id, session_id, plugin_name } => {
             let tx = acp_tx.clone();
-            tasks.spawn(fetch_plugin_cta_mcps(agent_id, session_id, plugin_name, tx));
+            xai_spawn::spawn_in(tasks, fetch_plugin_cta_mcps(agent_id, session_id, plugin_name, tx));
         }
         Effect::RetryPluginCtaMcps { agent_id, session_id, plugin_name } => {
             let tx = acp_tx.clone();
@@ -4445,7 +4445,7 @@ pub(crate) fn execute(
         Effect::SaveMemoryNote { agent_id, text, cwd, pinned_mode } => {
             tasks
                 .spawn(async move {
-                    let result = tokio::task::spawn_blocking(move || {
+                    let result = xai_spawn::spawn_blocking(move || {
                             let mode = match pinned_mode {
                                 Some(mode) => mode,
                                 None => xai_grok_shell::config::load_memory_mode()?,
@@ -4481,7 +4481,7 @@ pub(crate) fn execute(
                     let question_fallback = question.clone();
                     let session_fallback = session_id.clone();
                     let images = BtwSendImages(images);
-                    let prepared = tokio::task::spawn_blocking(move || {
+                    let prepared = xai_spawn::spawn_blocking(move || {
                             let mut encoded = crate::app::dispatch::notes::encode_btw_images(
                                 &question,
                                 &images.0,
@@ -5071,7 +5071,7 @@ pub(crate) fn execute(
                     let path = xai_grok_shell::session::persistence::session_dir(&info)
                         .join("summary.json");
                     type DiskTitle = (Option<(String, bool)>, Option<String>);
-                    let (title, last_turn_summary) = tokio::task::spawn_blocking(move || -> Option<
+                    let (title, last_turn_summary) = xai_spawn::spawn_blocking(move || -> Option<
                             DiskTitle,
                         > {
                             let raw = std::fs::read_to_string(path).ok()?;
@@ -5160,7 +5160,7 @@ pub(crate) fn execute(
         Effect::RefreshGate => {
             tasks
                 .spawn(async move {
-                    let settings = tokio::task::spawn_blocking(|| {
+                    let settings = xai_spawn::spawn_blocking(|| {
                             if !xai_grok_shell::util::config::resolve_remote_fetch_enabled() {
                                 return None;
                             }

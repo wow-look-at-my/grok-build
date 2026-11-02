@@ -101,7 +101,7 @@ async fn admit_steer(
 /// Starts `prompt_id` as the running turn with a fresh epoch, so two turns are distinguishable.
 pub(super) async fn start_turn(actor: &SessionActor, prompt_id: &str) -> TurnEpoch {
     let epoch = actor.turn_report.start_next_turn();
-    let handle = tokio::task::spawn_local(std::future::pending::<()>()).abort_handle();
+    let handle = xai_spawn::spawn_local(std::future::pending::<()>()).abort_handle();
     let mut state = actor.state.lock().await;
     state
         .pending_inputs
@@ -174,7 +174,7 @@ async fn receipt_backpressure_waits_before_queue_commit() {
             .expect("occupy receipt capacity");
         let (respond_to, mut response_rx) = oneshot::channel();
         let (completion_tx, _completion_rx) = mpsc::unbounded_channel();
-        let admission = tokio::task::spawn_local({
+        let admission = xai_spawn::spawn_local({
             let actor = Arc::clone(&actor);
             async move {
                 actor
@@ -238,7 +238,7 @@ async fn busy_state_lock_waits_before_commit_and_receipt_handoff() {
         let (receipt_sink, mut receipt_rx) = mpsc::channel(1);
         let (respond_to, mut response_rx) = oneshot::channel();
         let (completion_tx, _completion_rx) = mpsc::unbounded_channel();
-        let admission = tokio::task::spawn_local({
+        let admission = xai_spawn::spawn_local({
             let actor = Arc::clone(&actor);
             async move {
                 actor
@@ -325,7 +325,7 @@ async fn idle_human_steer_queues_one_verbatim_protected_row() {
     await_with_timeout(local.run_until(async {
         let (actor, _) = await_with_timeout(super::super::support::build_actor()).await;
         actor.deferred_prefix.arm(
-            tokio::task::spawn_local(async { "PARENT_PREFIX_READY".to_owned() }),
+            xai_spawn::spawn_local(async { "PARENT_PREFIX_READY".to_owned() }),
             false,
         );
         actor.state.lock().await.arm_hook_block_hold();
@@ -511,7 +511,7 @@ async fn cancelled_persistence_barrier_skips_delivery_without_fallback() {
         let actor = Arc::new(actor);
         set_running(&actor, "running").await;
         let mut receipt = admit_steer(&actor, "persist-failed").await;
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(message) = persistence_rx.recv().await {
                 if let PersistenceMsg::FlushAndAck { respond_to } = message {
                     drop(respond_to);
@@ -553,7 +553,7 @@ async fn cancel_running_turn_shutdown_drains_after_stale_rewind_cancel() {
     let local = tokio::task::LocalSet::new();
     await_with_timeout(local.run_until(async {
         let (gateway_tx, mut gateway_rx) = mpsc::unbounded_channel();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(message) = gateway_rx.recv().await {
                 if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = message {
                     let _ = args.response_tx.send(Ok(()));
@@ -561,7 +561,7 @@ async fn cancel_running_turn_shutdown_drains_after_stale_rewind_cancel() {
             }
         });
         let (persistence_tx, mut persistence_rx) = mpsc::unbounded_channel();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(message) = persistence_rx.recv().await {
                 if let PersistenceMsg::FlushAndAck { respond_to } = message {
                     let _ = respond_to.send(Ok(()));
@@ -576,7 +576,7 @@ async fn cancel_running_turn_shutdown_drains_after_stale_rewind_cancel() {
         let receipt = admit_steer(&actor, "shutdown").await;
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (_chat_tx, chat_rx) = mpsc::unbounded_channel();
-        let loop_task = tokio::task::spawn_local(super::super::run_session(
+        let loop_task = xai_spawn::spawn_local(super::super::run_session(
             Arc::clone(&actor),
             cmd_rx,
             chat_rx,
@@ -639,7 +639,7 @@ async fn unresolved_persistence_barrier_does_not_block_hard_teardown() {
         let (barrier_seen_tx, barrier_seen_rx) = oneshot::channel();
         let held_barrier = Arc::new(tokio::sync::Mutex::new(None));
         let held_by_drain = Arc::clone(&held_barrier);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let mut barrier_seen_tx = Some(barrier_seen_tx);
             while let Some(message) = persistence_rx.recv().await {
                 if let PersistenceMsg::FlushAndAck { respond_to } = message {
@@ -650,7 +650,7 @@ async fn unresolved_persistence_barrier_does_not_block_hard_teardown() {
                 }
             }
         });
-        let drain = tokio::task::spawn_local({
+        let drain = xai_spawn::spawn_local({
             let actor = Arc::clone(&actor);
             async move { actor.drain_parent_messages_at_safe_point().await }
         });
@@ -717,7 +717,7 @@ async fn teardown_settlement_during_barrier_skips_persist_and_push() {
         let steer_text_persisted = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let held_by_drain = Arc::clone(&held_barrier);
         let persisted_flag = Arc::clone(&steer_text_persisted);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let mut barrier_seen_tx = Some(barrier_seen_tx);
             while let Some(message) = persistence_rx.recv().await {
                 match message {
@@ -743,7 +743,7 @@ async fn teardown_settlement_during_barrier_skips_persist_and_push() {
                 }
             }
         });
-        let drain = tokio::task::spawn_local({
+        let drain = xai_spawn::spawn_local({
             let actor = Arc::clone(&actor);
             async move { actor.drain_parent_messages_at_safe_point().await }
         });
@@ -822,7 +822,7 @@ async fn delivered_message_is_durable_in_updates_and_chat_history_before_shutdow
         .expect("persistence actor");
         let persistence_tx = persistence.tx.clone();
         let (gateway_tx, mut gateway_rx) = mpsc::unbounded_channel();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(message) = gateway_rx.recv().await {
                 if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = message {
                     let _ = args.response_tx.send(Ok(()));
@@ -845,7 +845,7 @@ async fn delivered_message_is_durable_in_updates_and_chat_history_before_shutdow
         assert!(actor.drain_parent_messages_at_safe_point().await);
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let (_chat_tx, chat_rx) = mpsc::unbounded_channel();
-        let loop_task = tokio::task::spawn_local(super::super::run_session(
+        let loop_task = xai_spawn::spawn_local(super::super::run_session(
             Arc::clone(&actor),
             cmd_rx,
             chat_rx,
@@ -893,7 +893,7 @@ async fn committed_delivery_queues_protected_fifo_row_with_typed_receipt_identit
     await_with_timeout(local.run_until(async {
         let (actor, _) = await_with_timeout(super::super::support::build_actor()).await;
         actor.deferred_prefix.arm(
-            tokio::task::spawn_local(async { "PARENT_PREFIX_READY".to_string() }),
+            xai_spawn::spawn_local(async { "PARENT_PREFIX_READY".to_string() }),
             false,
         );
         let (completion_tx, _completion_rx) = mpsc::unbounded_channel();

@@ -156,7 +156,7 @@ impl ModelsCacheManager {
         let path = self.path.clone();
         let ttl = self.ttl;
         let scope = scope.clone();
-        let _ = tokio::task::spawn_blocking(move || {
+        let _ = xai_spawn::spawn_blocking(move || {
             let _guard = WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
             let Some(data) = read_capped(&path, MODELS_CACHE_MAX_BYTES) else {
                 return;

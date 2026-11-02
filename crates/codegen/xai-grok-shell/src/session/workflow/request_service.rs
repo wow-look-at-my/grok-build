@@ -31,7 +31,7 @@ pub(crate) fn spawn_request_service(
         session_dir,
         enabled,
     } = options;
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some((req, ack)) = rx.recv().await {
             if !enabled {
                 let _ = ack.send(WorkflowLaunchAck::Rejected {
@@ -107,8 +107,8 @@ pub(crate) fn spawn_request_service(
                 let agent_budget = input
                     .agent_budget
                     .unwrap_or(xai_workflow::DEFAULT_AGENT_BUDGET);
-                tokio::spawn(async move {
-                    let verdict = tokio::task::spawn_blocking(move || {
+                xai_spawn::spawn(async move {
+                    let verdict = xai_spawn::spawn_blocking(move || {
                         xai_workflow::validate_script_with_agent_budget(
                             &script,
                             probe_args,
@@ -178,7 +178,7 @@ pub(crate) fn spawn_request_service(
                         name: display_name,
                         script_path,
                     });
-                    tokio::spawn(async move {
+                    xai_spawn::spawn(async move {
                         if let Ok(outcome) = outcome_rx.await {
                             tracing::info!(run_id, ?outcome, "background workflow finished");
                         }

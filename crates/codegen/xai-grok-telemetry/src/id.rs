@@ -18,7 +18,7 @@ pub async fn agent_id_async() -> String {
     if let Some(id) = AGENT_ID.get() {
         return id.clone();
     }
-    match tokio::task::spawn_blocking(agent_id).await {
+    match xai_spawn::spawn_blocking(agent_id).await {
         Ok(id) => id,
         Err(err) => {
             tracing::warn!(error = %err, "agent id blocking task failed; reading inline");

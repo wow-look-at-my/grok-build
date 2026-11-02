@@ -377,7 +377,7 @@ impl ToolServer {
     pub fn metric_donation_reporter(&self, service_name: impl Into<String>) -> MetricDonationPump {
         let (tx, rx) = mpsc::channel::<PumpMsg>(PENDING_FLUSHES);
         let server = self.downgrade();
-        tokio::spawn(run_pump(rx, move |payload: String| {
+        xai_spawn::spawn(run_pump(rx, move |payload: String| {
             let server = server.clone();
             async move {
                 let Some(server) = server.upgrade() else {
@@ -394,7 +394,7 @@ impl ToolServer {
             resource: make_resource(service_name.into()),
         };
         ACTIVE_METRIC_EXPORTER.store(Some(Arc::new(exporter.clone())));
-        tokio::spawn(
+        xai_spawn::spawn(
             MetricDonationReporter {
                 exporter,
                 interval: DEFAULT_GATHER_INTERVAL,

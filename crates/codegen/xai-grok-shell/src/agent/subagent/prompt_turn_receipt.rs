@@ -165,7 +165,7 @@ impl PromptTurnReceiptDrain {
     ) -> Self {
         let (finalization, finalization_rx) = oneshot::channel();
         let (settlement_tx, settlement) = oneshot::channel();
-        let task = tokio::spawn(async move {
+        let task = xai_spawn::spawn(async move {
             let settlement = drain_prompt_turn_receipts(
                 receipt_stream,
                 &child_cmd_tx,

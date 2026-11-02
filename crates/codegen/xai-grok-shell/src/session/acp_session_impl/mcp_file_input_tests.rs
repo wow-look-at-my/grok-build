@@ -187,7 +187,7 @@ fn record_client_hooks(
     seen: Arc<parking_lot::Mutex<Vec<Value>>>,
     reply: Value,
 ) -> tokio_util::task::AbortOnDropHandle<()> {
-    tokio_util::task::AbortOnDropHandle::new(tokio::task::spawn_local(async move {
+    tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn_local(async move {
         while let Some(message) = gateway.recv().await {
             match message {
                 xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -1281,7 +1281,7 @@ async fn source_and_resolved_approval_are_distinct_and_reject_prevents_send() {
             let prompts = Arc::new(parking_lot::Mutex::new(vec![]));
             let captured = prompts.clone();
             let responder =
-                tokio_util::task::AbortOnDropHandle::new(tokio::task::spawn_local(async move {
+                tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn_local(async move {
                     while let Some(message) = requests.recv().await {
                         if let xai_acp_lib::AcpClientMessage::RequestPermission(args) = message {
                             let first = captured.lock().is_empty();

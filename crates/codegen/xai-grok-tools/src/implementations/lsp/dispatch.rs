@@ -62,7 +62,7 @@ impl LspBackendAdapter {
         startup: Arc<StartupCoordinator>,
     ) {
         #[allow(clippy::disallowed_methods)]
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             // Guarded, because the state below is what a waiter is waiting on:
             // `ensure_ready` parks on `notify` for as long as the state reads
             // `Starting`. So a bootstrap that dies mid-flight has to move the
@@ -133,7 +133,7 @@ async fn bootstrap_lsp(
         // Nothing polls this monitor: a server that dies with no monitor left
         // stops being diagnosed.
         #[allow(clippy::disallowed_methods)]
-        tokio::spawn(crate::util::detached::fire_and_forget(
+        xai_spawn::spawn(crate::util::detached::fire_and_forget(
             "lsp restart monitor",
             crate::implementations::lsp::restart_monitor(mgr_weak, name),
         ));
@@ -146,7 +146,7 @@ impl Drop for LspBackendAdapter {
         tracing::debug!("LspBackendAdapter dropping, initiating LSP shutdown");
         let mgr = self.lsp_manager.clone();
         let _ = tokio::runtime::Handle::try_current().map(|handle| {
-            handle.spawn(async move {
+            xai_spawn::spawn_on(&handle, async move {
                 mgr.lock().await.shutdown().await;
             })
         });
@@ -163,7 +163,7 @@ impl super::LspBackend for LspBackendAdapter {
             tracing::debug!("no tokio runtime: skipping the LSP startup warm-up");
             return;
         };
-        handle.spawn(async move {
+        xai_spawn::spawn_on(&handle, async move {
             // Guarded, because this is the round that leaves the state
             // `Starting` for the bootstrap to replace.
             let started = crate::util::detached::guarded(

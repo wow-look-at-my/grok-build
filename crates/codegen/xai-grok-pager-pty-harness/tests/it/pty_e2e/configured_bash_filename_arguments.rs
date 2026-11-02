@@ -40,7 +40,7 @@ impl FilenamePager {
         let content = ContentController::start().await.expect("mock inference");
         let sandbox = content.sandbox();
         let cwd = sandbox.workspace();
-        git2::Repository::init(cwd).expect("fixture repository");
+        xai_test_utils::git::init_git_repo(cwd);
         std::fs::create_dir_all(cwd.join(".claude")).expect("settings directory");
         std::fs::write(cwd.join(".claude/settings.json"), SETTINGS).expect("permission settings");
         std::fs::write(sandbox.grok_home().join("config.toml"), CONFIG).expect("Ask config");

@@ -24,6 +24,7 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 uuid = { workspace = true }
 xai-grok-net = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 bytes = { workspace = true }

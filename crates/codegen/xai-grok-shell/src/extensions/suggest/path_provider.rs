@@ -118,7 +118,7 @@ async fn get_or_refresh_path_cache() -> Arc<PathCacheInner> {
         return current;
     }
 
-    let result = match tokio::task::spawn_blocking(scan_path_dirs).await {
+    let result = match xai_spawn::spawn_blocking(scan_path_dirs).await {
         Ok(executables) => {
             let new = Arc::new(PathCacheInner {
                 executables,

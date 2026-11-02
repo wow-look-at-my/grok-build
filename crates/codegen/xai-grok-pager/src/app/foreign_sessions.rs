@@ -627,7 +627,7 @@ mod tests {
     async fn scan_coordinator_aborts_obsolete_pending_task() {
         let coordinator = ForeignScanCoordinator::default();
         coordinator.begin_request(1);
-        let first = tokio::spawn(std::future::pending::<()>());
+        let first = xai_spawn::spawn(std::future::pending::<()>());
         coordinator.install_abort_handle(1, first.abort_handle());
         coordinator.begin_request(2);
         let join_error = tokio::time::timeout(Duration::from_secs(1), first)
@@ -657,7 +657,7 @@ mod tests {
         let (cancelled_tx, cancelled_rx) = tokio::sync::oneshot::channel();
         let (probe_tx, mut probe_rx) =
             tokio::sync::mpsc::unbounded_channel::<tokio::sync::oneshot::Sender<()>>();
-        let task = tokio::spawn(async move {
+        let task = xai_spawn::spawn(async move {
             let _signal = CancellationSignal(Some(cancelled_tx));
             let _ = started_tx.send(());
             while let Some(acknowledge) = probe_rx.recv().await {

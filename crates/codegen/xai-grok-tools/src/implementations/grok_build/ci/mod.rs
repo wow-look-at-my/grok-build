@@ -637,7 +637,7 @@ fn spawn_query(
     owner_session_id: Option<String>,
 ) {
     #[allow(clippy::disallowed_methods)]
-    tokio::spawn(crate::util::detached::fire_and_forget(
+    xai_spawn::spawn(crate::util::detached::fire_and_forget(
         "ci query",
         async move {
             let outcome = crate::util::detached::guarded("ci blocking query", async {
@@ -740,7 +740,7 @@ fn run_blocking(
 async fn off_executor<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, xai_tool_runtime::ToolError> + Send + 'static,
 ) -> Result<T, xai_tool_runtime::ToolError> {
-    tokio::task::spawn_blocking(work).await.map_err(|error| {
+    xai_spawn::spawn_blocking(work).await.map_err(|error| {
         xai_tool_runtime::ToolError::custom("ci_join", format!("ci query panicked: {error}"))
     })?
 }

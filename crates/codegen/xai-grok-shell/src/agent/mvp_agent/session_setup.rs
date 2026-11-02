@@ -189,7 +189,7 @@ fn spawn_session_sweep(session_info: &SessionInfo) {
     if persistence::session_sweep_done() {
         return;
     }
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         persistence::cleanup_stale_sessions(&live_session_dir);
     });
 }
@@ -758,7 +758,7 @@ impl MvpAgent {
             } else {
                 xai_grok_telemetry::enums::PermissionMode::Ask
             };
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let git = xai_grok_telemetry::context::collect_git_context(&cwd_str);
                 let ev = xai_grok_telemetry::events::SessionNew {
                     session_id: sid,
@@ -982,7 +982,7 @@ impl MvpAgent {
         let git_root =
             xai_grok_workspace::session::git::find_git_root_from_path(cwd.as_path()).ok();
         if let Some(root) = git_root {
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 crate::session::worktree_pool::cleanup_stale_pool_worktrees(Some(&root));
             });
         }

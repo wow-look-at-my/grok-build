@@ -54,7 +54,7 @@ async fn file_write_is_broadcast_as_fs_changed() {
     // The watcher reports paths under the canonical directory; the producer strips against that
     // (macOS temp dirs live behind a `/var` → `/private/var` symlink).
     let watch_root = dunce::canonicalize(root.path()).expect("canonical root");
-    let forwarder = tokio::spawn(async move {
+    let forwarder = xai_spawn::spawn(async move {
         forward_fs_changes(fs_rx, &events_tx, &watch_root).await;
     });
 
@@ -86,7 +86,7 @@ async fn file_write_is_broadcast_as_fs_changed() {
 async fn a_batch_past_the_frame_bound_is_split_in_order() {
     let (fs_tx, fs_rx) = broadcast::channel(4);
     let (events_tx, mut events_rx) = broadcast::channel(16);
-    let forwarder = tokio::spawn(async move {
+    let forwarder = xai_spawn::spawn(async move {
         forward_fs_changes(fs_rx, &events_tx, Path::new("/r")).await;
     });
     let absolute: Vec<PathBuf> = (0..FS_CHANGED_PATHS_PER_FRAME + 1)
@@ -126,7 +126,7 @@ async fn a_batch_past_the_frame_bound_is_split_in_order() {
 async fn a_settle_window_of_paths_is_one_fs_changed_frame() {
     let (fs_tx, fs_rx) = broadcast::channel(4);
     let (events_tx, mut events_rx) = broadcast::channel(16);
-    let forwarder = tokio::spawn(async move {
+    let forwarder = xai_spawn::spawn(async move {
         forward_fs_changes(fs_rx, &events_tx, Path::new("/r")).await;
     });
     fs_tx
@@ -163,7 +163,7 @@ async fn off_root_paths_are_dropped_and_on_root_paths_are_emitted_relative() {
     use xai_grok_workspace_types::FsEventKind as WireKind;
     let (fs_tx, fs_rx) = broadcast::channel(16);
     let (events_tx, mut events_rx) = broadcast::channel(16);
-    let forwarder = tokio::spawn(async move {
+    let forwarder = xai_spawn::spawn(async move {
         forward_fs_changes(fs_rx, &events_tx, Path::new("/watch")).await;
     });
     let batches = [
@@ -239,7 +239,7 @@ async fn a_removal_under_a_symlinked_root_is_emitted_relative() {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let probe = link.clone();
-        let holders = tokio::task::spawn_blocking(move || {
+        let holders = xai_spawn::spawn_blocking(move || {
             xai_fsnotify::shared(probe, FsConfig::default()).map(|probe| Arc::strong_count(&probe))
         })
         .await
@@ -494,7 +494,7 @@ async fn dropping_the_producer_handle_ends_the_task_and_releases_the_watcher() {
     let producer = spawn_fs_change_producer(root.path().to_path_buf(), events_tx);
 
     let holders = |root: PathBuf| async move {
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             xai_fsnotify::shared(root, FsConfig::default())
                 .map(|probe| Arc::strong_count(&probe))
                 .expect("probe watcher")

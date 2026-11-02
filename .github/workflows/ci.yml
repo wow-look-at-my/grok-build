@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  id-token: write
   contents: read
 
 # A push to a branch cancels that branch's running build. Runs on master each get their own group and complete.
@@ -92,6 +93,8 @@ jobs:
     env:
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
+      # Job-wide, so the nextest steps reuse the compile instead of rebuilding under a different wrapper.
+      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-parallel-frontend
       # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build steps alone.
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
@@ -123,34 +126,97 @@ jobs:
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
           echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
 
-      - name: Build test harnesses (compile, no-run)
+      # The archive holds every test binary plus the pager binary (.config/nextest.toml `[profile.ci.archive]`), so the test shards run without a compiler.
+      - name: Build test harnesses into a nextest archive
         env:
           CARGO_BUILD_JOBS: "4"
         run: |
           start=$(date +%s)
           # This also builds the pager binary: xai-grok-pager-bin has an integration test.
-          cargo test --locked --workspace --no-run --no-fail-fast
+          mkdir -p dist
+          cargo nextest archive --locked --workspace --profile ci --archive-file dist/nextest-archive.tar.zst
           test -x "$PAGER_BINARY"
+          "$PAGER_BINARY" --version
           echo "compile wall: $(( $(date +%s) - start )) s"
           echo "target: $(du -sh target 2>/dev/null | cut -f1)"
+          echo "archive: $(du -sh dist/nextest-archive.tar.zst | cut -f1)"
 
-      - name: Run tests (workspace)
-        if: ${{ !cancelled() }}
-        run: |
-          cargo nextest run --locked --workspace --profile ci
-          "$PAGER_BINARY" --version
-
-      # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/.
-      - name: Test (PTY end-to-end)
-        if: ${{ !cancelled() }}
-        run: |
-          cargo nextest run --locked --workspace --profile ci \
-            -E 'binary_id(xai-grok-pager-pty-harness::it) and (test(/^pty_e2e_smoke::/) or test(/^pty_e2e_config_ui::/) or test(/^pty_e2e_queue::/) or test(/^common::/))' \
-            --run-ignored all --test-threads 4
+      - uses: wow-look-at-my/actions@cache-upload#latest
+        with:
+          name: nextest-archive
+          path: dist/nextest-archive.tar.zst
 
       - uses: ./.github/actions/upload-cargo-timings
         with:
           name: cargo-timings-build-test
+
+  # Each shard runs one hash partition of the archive on its own runner, so the test wall is the slowest shard, not the sum.
+  test:
+    name: Test (${{ matrix.name }})
+    needs: build-test
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
+    permissions:
+      id-token: write
+      contents: read
+      actions: write
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "workspace 1/4", partition: "hash:1/4", pty: false }
+          - { name: "workspace 2/4", partition: "hash:2/4", pty: false }
+          - { name: "workspace 3/4", partition: "hash:3/4", pty: false }
+          - { name: "workspace 4/4", partition: "hash:4/4", pty: false }
+          - { name: "PTY 1/2", partition: "hash:1/2", pty: true }
+          - { name: "PTY 2/2", partition: "hash:2/2", pty: true }
+    env:
+      PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
+    steps:
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
+
+      # xai-proto-build's tests compile .proto fixtures at run time.
+      - uses: ./.github/actions/setup-protoc
+
+      # ripgrep: rg_path() ends at a bare "rg" on PATH, so without it the grep and glob tests fail on empty output. bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it.
+      - name: Install ripgrep and bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep bubblewrap
+
+      # Consider the gh shim e2e tests. Those tests serve sandbox/gh.xml with the real api-cli, and workspace_gh_slopfix_e2e runs slopfix in the sandbox.
+      - uses: ./.github/actions/setup-org-tools
+        with:
+          tools: api-cli slopfix
+
+      - name: Install cargo-nextest
+        run: |
+          mkdir -p "${{ runner.temp }}/nextest-bin"
+          curl -fsSL -o "${{ runner.temp }}/nextest.tar.gz" \
+            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
+          echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
+
+      - uses: wow-look-at-my/actions@cache-download#latest
+        with:
+          name: nextest-archive
+          path: dist
+
+      # The archive unpacks its target/ into the checkout, at the same path the build runner used. Test binaries carry CARGO_BIN_EXE_* and CARGO_MANIFEST_DIR as compiled-in absolute paths, so any other location breaks them.
+      - name: Run tests (workspace)
+        if: ${{ !matrix.pty }}
+        run: |
+          cargo nextest run --archive-file dist/nextest-archive.tar.zst --workspace-remap . \
+            --extract-to . --extract-overwrite --profile ci --partition ${{ matrix.partition }}
+
+      # The PTY cases are #[ignore]d, so the workspace shards skip every case; this is the only thing that executes them.
+      - name: Test (PTY end-to-end)
+        if: ${{ matrix.pty }}
+        run: |
+          cargo nextest run --archive-file dist/nextest-archive.tar.zst --workspace-remap . \
+            --extract-to . --extract-overwrite --profile ci --partition ${{ matrix.partition }} \
+            -E 'binary_id(xai-grok-pager-pty-harness::it) and (test(/^pty_e2e_smoke::/) or test(/^pty_e2e_config_ui::/) or test(/^pty_e2e_queue::/) or test(/^common::/))' \
+            --run-ignored all --test-threads 4
 
   # Clippy shares no artifact with the test build, so it needs nothing from build-test.
   lint:
@@ -222,7 +288,7 @@ jobs:
           echo "${{ runner.temp }}/zig" >> "$GITHUB_PATH"
           "${{ runner.temp }}/zig/zig" version
 
-      # aws-lc-sys and its siblings include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
+      # C build scripts in the graph include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
       - name: Install the macOS SDK (pinned 14.5)
         if: matrix.darwin
         run: |
@@ -323,7 +389,7 @@ jobs:
   # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
   release:
     name: Create buildhost release
-    needs: [slopfix, fmt, lint, build-test, test-darwin-sandbox, build-release, link-darwin]
+    needs: [slopfix, fmt, lint, build-test, test, test-darwin-sandbox, build-release, link-darwin]
     runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     timeout-minutes: 10
     permissions:

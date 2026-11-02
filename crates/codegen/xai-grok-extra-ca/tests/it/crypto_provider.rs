@@ -1,4 +1,3 @@
-// The bare builder panics when ring and aws-lc-rs are both compiled in.
 #[test]
 fn ensure_is_idempotent_and_bare_client_config_builder_does_not_panic() {
     xai_grok_extra_ca::ensure_default_crypto_provider();

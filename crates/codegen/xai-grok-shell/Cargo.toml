@@ -102,9 +102,8 @@ rustls = { version = "0.23", default-features = false, features = [
 futures-util = { workspace = true }
 urlencoding = { workspace = true }
 gethostname = { workspace = true }
-git2 = { version = "0.21", default-features = false, features = [
-    "vendored-libgit2",
-] }
+gix = { workspace = true }
+xai-gix-status = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 nucleo = { workspace = true }
@@ -187,6 +186,7 @@ xai-computer-hub-sdk = { workspace = true }
 xai-tool-runtime = { workspace = true }
 xai-tool-protocol = { workspace = true }
 xai-tool-types = { workspace = true }
+xai-spawn = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

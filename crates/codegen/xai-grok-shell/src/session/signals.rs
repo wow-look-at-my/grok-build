@@ -582,7 +582,7 @@ impl SessionSignalsHandle {
         let (handle, actor) = SessionSignalsActor::new();
         // Nothing joins with the actor: its death would otherwise surface as
         // a closed command channel on whichever `SignalEvent` is sent next.
-        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
             "session signals actor",
             actor.run(),
         ));
@@ -1738,7 +1738,7 @@ pub fn spawn_signals_actor() -> SessionSignalsHandle {
 pub fn spawn_signals_actor_with_interval(sync_interval: Duration) -> SessionSignalsHandle {
     let (handle, actor) = SessionSignalsActor::with_sync_interval(sync_interval);
     // The actor owns the receiving half of every handle's channel.
-    tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+    xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
         "session signals actor",
         actor.run(),
     ));

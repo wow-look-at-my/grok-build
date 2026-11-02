@@ -6,7 +6,7 @@ use xai_grok_test_support::sse::responses_api_script_exact;
 use xai_grok_test_support::{MockInferenceServer, ScriptedResponse};
 
 fn drain_gateway(mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg {
                 let _ = args.response_tx.send(Ok(()));
@@ -16,7 +16,7 @@ fn drain_gateway(mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpCl
 }
 
 fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Ok(()));
@@ -555,7 +555,7 @@ fn panel_coordinator(
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
     let prompts = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let log = std::sync::Arc::clone(&prompts);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(event) = rx.recv().await {
             let SubagentEvent::Spawn(req) = event else {
                 continue;

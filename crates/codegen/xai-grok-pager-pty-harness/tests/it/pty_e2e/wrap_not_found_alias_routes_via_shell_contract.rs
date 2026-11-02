@@ -2,8 +2,8 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// A bare program name that PATH cannot resolve (the alias case, and the old hard-ENOENT failure)
-/// must be handed to `$SHELL`.
+/// A bare program name that PATH cannot resolve (the alias case, and the
+/// hard-ENOENT failure) must be handed to `$SHELL`.
 #[test]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]

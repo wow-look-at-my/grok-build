@@ -1754,7 +1754,7 @@ async fn config_write_blocking<F>(write: F) -> Result<(), String>
 where
     F: FnOnce() -> Result<(), Box<dyn std::error::Error>> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || write().map_err(|e| e.to_string()))
+    xai_spawn::spawn_blocking(move || write().map_err(|e| e.to_string()))
         .await
         .map_err(|e| format!("config write task failed: {e}"))?
 }

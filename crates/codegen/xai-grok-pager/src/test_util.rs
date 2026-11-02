@@ -241,26 +241,16 @@ impl TempGitRepo {
     /// Linked `git worktree` of `branch` as a sibling of this checkout.
     /// `.git` at the returned path is a file. Keep `self` alive while using it.
     pub fn add_linked_worktree(&self, name: &str, branch: &str) -> PathBuf {
-        let repo = git2::Repository::open(&self.path).unwrap();
-        let commit = repo.head().unwrap().peel_to_commit().unwrap();
-        if repo.find_branch(branch, git2::BranchType::Local).is_err() {
-            repo.branch(branch, &commit, false).unwrap();
-        }
+        ensure_branch(&self.path, branch);
         let wt_path = self
             .path
             .parent()
             .expect("repo lives in a temp parent")
             .join(name);
-        let reference = repo
-            .find_branch(branch, git2::BranchType::Local)
-            .unwrap()
-            .into_reference();
-        repo.worktree(
-            name,
-            &wt_path,
-            Some(git2::WorktreeAddOptions::new().reference(Some(&reference))),
-        )
-        .unwrap();
+        run_git(
+            &self.path,
+            &["worktree", "add", wt_path.to_str().unwrap(), branch],
+        );
         wt_path
     }
 }
@@ -279,40 +269,28 @@ pub fn collapsed_path_display(path: &Path) -> String {
 }
 pub fn init_git_repo_on_branch(path: &Path, branch: &str) {
     std::fs::create_dir_all(path).unwrap();
-    let repo = git2::Repository::init(path).unwrap();
+    run_git(path, &["init", "-b", "master"]);
     std::fs::write(path.join("README"), "test\n").unwrap();
-    let sig = git2::Signature::now("test", "test@test.com").unwrap();
-    let tree_id = {
-        let mut index = repo.index().unwrap();
-        index.add_path(Path::new("README")).unwrap();
-        index.write().unwrap();
-        index.write_tree().unwrap()
-    };
-    let tree = repo.find_tree(tree_id).unwrap();
-    let oid = repo
-        .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-        .unwrap();
-    let commit = repo.find_commit(oid).unwrap();
-    let current = repo
-        .head()
-        .ok()
-        .and_then(|h| h.shorthand().ok().map(str::to_string));
-    if current.as_deref() != Some(branch) {
-        repo.branch(branch, &commit, true).unwrap();
-        repo.set_head(&format!("refs/heads/{branch}")).unwrap();
-        repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-            .unwrap();
+    run_git(path, &["add", "README"]);
+    run_git(path, &["commit", "-m", "init"]);
+    if branch != "master" {
+        run_git(path, &["checkout", "-f", "-B", branch]);
     }
 }
 fn checkout_named_branch(repo_path: &Path, branch: &str) {
-    let repo = git2::Repository::open(repo_path).unwrap();
-    let commit = repo.head().unwrap().peel_to_commit().unwrap();
-    if repo.find_branch(branch, git2::BranchType::Local).is_err() {
-        repo.branch(branch, &commit, false).unwrap();
+    ensure_branch(repo_path, branch);
+    run_git(repo_path, &["checkout", "-f", branch]);
+}
+/// Create `branch` at HEAD unless it exists.
+fn ensure_branch(repo_path: &Path, branch: &str) {
+    let exists = run_git(repo_path, &["branch", "--list", branch]);
+    if exists.is_empty() {
+        run_git(repo_path, &["branch", branch]);
     }
-    repo.set_head(&format!("refs/heads/{branch}")).unwrap();
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-        .unwrap();
+}
+/// Git with a fixed identity and the machine's own configuration masked.
+fn run_git(dir: &Path, args: &[&str]) -> String {
+    xai_test_utils::git::run_git(dir, args)
 }
 fn copy_dir_all(src: &Path, dst: &Path) {
     std::fs::create_dir_all(dst).unwrap();

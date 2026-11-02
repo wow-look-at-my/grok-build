@@ -498,7 +498,7 @@ impl SessionActor {
 
         // 0600 via the secure-file helper; on a blocking thread so the large write doesn't stall the executor
         let offload_span = region!("turn.prompt_offload_write", Parent::Inherit);
-        let offload = tokio::task::spawn_blocking(move || {
+        let offload = xai_spawn::spawn_blocking(move || {
             write_offload_and_build(
                 &full_message,
                 bounded,

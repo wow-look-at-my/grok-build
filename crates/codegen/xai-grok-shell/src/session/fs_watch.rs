@@ -848,7 +848,7 @@ pub(crate) fn spawn(plan: FsWatchPlan) -> FsWatchHandle {
         "fs-notify: starting FsEventSource"
     );
 
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         tokio::task::yield_now().await;
         let start_time = std::time::Instant::now();
 
@@ -857,8 +857,7 @@ pub(crate) fn spawn(plan: FsWatchPlan) -> FsWatchHandle {
             timer.with_field("cwd", cwd.to_string_lossy().as_ref());
             let init_cwd = cwd.clone();
             let result =
-                tokio::task::spawn_blocking(move || xai_fsnotify::shared(init_cwd, fs_config))
-                    .await;
+                xai_spawn::spawn_blocking(move || xai_fsnotify::shared(init_cwd, fs_config)).await;
             let ws = xai_fsnotify::stats();
             timer.with_field("live_watchers", ws.live_watchers as u64);
             timer.with_field("watchers_created_total", ws.created_total);
@@ -921,7 +920,7 @@ pub(crate) fn spawn(plan: FsWatchPlan) -> FsWatchHandle {
                             refreshing.set(true);
                             let fut = plan.refresh_future(rebuild);
                             let reset = ResetOnDrop(refreshing.clone());
-                            tokio::task::spawn_local(async move {
+                            xai_spawn::spawn_local(async move {
                                 // Reset on completion OR panic so a panicking refresh can't wedge single-flight for the session's life
                                 let _reset = reset;
                                 fut.await;

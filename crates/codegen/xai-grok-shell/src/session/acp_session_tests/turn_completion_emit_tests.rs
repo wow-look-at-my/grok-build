@@ -137,7 +137,7 @@ async fn completion_and_cancel_arbitrate_during_cleanup() {
                 let identity = completion_identity(&actor);
                 let winner_identity = identity.clone();
                 let winner = actor.clone();
-                let finalizing = tokio::task::spawn_local(async move {
+                let finalizing = xai_spawn::spawn_local(async move {
                     if completion_wins {
                         winner
                             .handle_completion(
@@ -380,7 +380,7 @@ async fn same_prompt_and_epoch_wrong_allocation_does_not_settle_successor() {
             let live_epoch = TurnEpoch::default();
             let wrong_allocation = std::rc::Rc::new(());
             let (item, mut response_rx) = pending_input("same");
-            let handle = tokio::task::spawn_local(std::future::pending::<()>()).abort_handle();
+            let handle = xai_spawn::spawn_local(std::future::pending::<()>()).abort_handle();
             {
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.push_back(item);
@@ -1106,7 +1106,7 @@ async fn turn_delta_sink() -> (
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, router).await.unwrap();
     });
     (addr, rx)

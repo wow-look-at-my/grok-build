@@ -16,7 +16,7 @@ const SEED_TODO_ARGS: &str =
     r#"{"merge":true,"todos":[{"id":"t1","content":"ship the release","status":"in_progress"}]}"#;
 
 fn drain_gateway(mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg {
                 let _ = args.response_tx.send(Ok(()));
@@ -26,7 +26,7 @@ fn drain_gateway(mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpCl
 }
 
 fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Ok(()));

@@ -178,7 +178,7 @@ impl LeaderLock {
         let options = LockOptions::new()
             .with_poll(timeout, LEADER_LOCK_POLL_INTERVAL)
             .with_slot(self.slot.clone());
-        let file = match tokio::task::spawn_blocking(move || lock_file(&path, &options)).await {
+        let file = match xai_spawn::spawn_blocking(move || lock_file(&path, &options)).await {
             Ok(result) => result?,
             Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
             // Runtime shutdown mid-poll: the lock was neither opened nor taken, so report it as a lock failure.

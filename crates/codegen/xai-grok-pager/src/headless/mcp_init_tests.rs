@@ -65,7 +65,7 @@ fn spawn_mcp_list_agent(replies: Vec<McpListReply>) -> (xai_acp_lib::AcpAgentTx,
     let calls = Arc::new(AtomicUsize::new(0));
     let calls_task = Arc::clone(&calls);
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut replies = replies.into_iter();
         let mut held = Vec::new();
         while let Some(msg) = rx.recv().await {

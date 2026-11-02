@@ -18,7 +18,7 @@ async fn pre_cancelled_token_skips_fut() {
 async fn cancel_aborts_pending_open() {
     let cancel = CancellationToken::new();
     let cancel2 = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_millis(20)).await;
         cancel2.cancel();
     });

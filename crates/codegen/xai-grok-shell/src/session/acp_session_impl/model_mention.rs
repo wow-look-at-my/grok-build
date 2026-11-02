@@ -142,7 +142,7 @@ impl SessionActor {
         let backend = ChannelBackend::for_session(event_tx, self.session_id_string());
         let (registered_tx, registered_rx) = tokio::sync::oneshot::channel();
         let mut spawn_task =
-            tokio::spawn(async move { backend.spawn(request, Some(registered_tx)).await });
+            xai_spawn::spawn(async move { backend.spawn(request, Some(registered_tx)).await });
         tokio::select! {
             biased;
             registered = registered_rx => {
@@ -155,7 +155,7 @@ impl SessionActor {
             }
         }
         let log_id = id.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             if let Ok(Ok(result)) = spawn_task.await
                 && !result.success
             {

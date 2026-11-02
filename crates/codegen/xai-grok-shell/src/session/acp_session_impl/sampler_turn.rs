@@ -869,7 +869,7 @@ impl SessionActor {
         )>();
         let session = Arc::clone(self);
         // One shared worker serializes parent and subagent classifier requests.
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some((messages, respond_to)) = rx.recv().await {
                 let request_span = region!("permission.classifier_request", Parent::Root);
                 let result = async {

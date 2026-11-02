@@ -25,11 +25,11 @@ impl MvpAgent {
             crate::upload::turn::SyntheticTurnTraceRequest,
         >();
         self.subagent_presentation.borrow_mut().synthetic_trace_tx = Some(trace_tx);
-        tokio::task::spawn_local({
+        xai_spawn::spawn_local({
             let agent_ref = agent_ref.clone();
             async move {
                 while let Some(request) = trace_rx.recv().await {
-                    tokio::task::spawn_local({
+                    xai_spawn::spawn_local({
                         let agent_ref = agent_ref.clone();
                         async move {
                             handle_synthetic_turn_trace(agent_ref, request).await;

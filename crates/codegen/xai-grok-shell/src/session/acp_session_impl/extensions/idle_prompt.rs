@@ -63,7 +63,7 @@ impl LocalSessionLifecycleContributor for IdlePromptExtension {
         }
         let notification_event_sink = Rc::clone(&self.notification_event_sink);
         let delay = idle_notification_delay();
-        let handle = tokio::task::spawn_local(async move {
+        let handle = xai_spawn::spawn_local(async move {
             tokio::time::sleep(delay).await;
             notification_event_sink.emit(NotificationEvent {
                 notification_type: "idle_prompt",

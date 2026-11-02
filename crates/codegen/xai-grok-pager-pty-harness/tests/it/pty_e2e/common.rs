@@ -202,7 +202,7 @@ pub(crate) const TRUST_QUESTION_SENTINEL: &str = "Do you trust the contents of t
 /// `repo_configs_present` returns true for it, so an untrusted clone with the feature on resolves to `Prompt` and the trust question renders.
 pub(crate) fn git_repo_with_mcp_json() -> tempfile::TempDir {
     let repo = tempfile::tempdir().expect("repo tempdir");
-    git2::Repository::init(repo.path()).expect("git init");
+    xai_test_utils::git::init_git_repo(repo.path());
     std::fs::write(repo.path().join(".mcp.json"), "{}").expect("write .mcp.json");
     repo
 }

@@ -1108,7 +1108,7 @@ async fn new_prompt_aborts_in_flight_turn_summary() {
             actor.turn_summary_enabled = true;
 
             // Stand-in for an in-flight generation: a task parked forever.
-            let task = tokio::task::spawn_local(std::future::pending::<()>());
+            let task = xai_spawn::spawn_local(std::future::pending::<()>());
             *actor.turn_summary_task.borrow_mut() = Some(task);
 
             actor.invalidate_side_calls_for_new_prompt();

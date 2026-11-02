@@ -63,7 +63,7 @@ mod tests {
     #[tokio::test]
     async fn a_panicking_detached_task_reaches_its_caller_as_an_error() {
         let (done_tx, done_rx) = oneshot::channel();
-        let join = tokio::spawn(async move {
+        let join = xai_spawn::spawn(async move {
             let outcome = guarded("test detached work", async {
                 tokio::task::yield_now().await;
                 panic!("the detached work died")
@@ -129,7 +129,7 @@ mod tests {
     async fn a_panicking_fire_and_forget_task_ends_without_a_join_failure() {
         let survived = tokio::time::timeout(
             Duration::from_secs(5),
-            tokio::spawn(fire_and_forget("test fire and forget", async {
+            xai_spawn::spawn(fire_and_forget("test fire and forget", async {
                 tokio::task::yield_now().await;
                 panic!("the detached work died");
             })),
