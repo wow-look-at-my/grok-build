@@ -6,7 +6,7 @@
 # - Moved trust/base64.rs to src/base64.rs: keystore.rs decodes with it.
 # - Committed the build.rs output (src/capability_manifest_types.rs, generated
 #   by typify from schema/capability-manifest.schema.json) and removed build.rs.
-# - Dropped the tests and the system-keyring feature.
+# - Dropped the tests and the system-keyring feature. [lib] test = false.
 [package]
 name = "nono"
 version = "0.53.0"
@@ -17,6 +17,8 @@ autotests = false
 
 [lib]
 path = "src/lib.rs"
+# Upstream's unit tests stay upstream; CI does not build them.
+test = false
 doctest = false
 
 [dependencies]
