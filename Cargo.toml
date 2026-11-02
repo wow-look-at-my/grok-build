@@ -92,6 +92,7 @@ members = [
     "crates/codegen/xai-tracing-macros",
     "crates/codegen/xai-tty-utils",
     "crates/codegen/xai-workflow",
+    "crates/common/xai-bench",
     "crates/common/xai-circuit-breaker",
     "crates/common/xai-computer-hub-core",
     "crates/common/xai-computer-hub-mcp-adapter",
@@ -147,7 +148,8 @@ clap_complete = { version = "4" }
 colored_json = "5"
 core-foundation = "0.10"
 crc32fast = "1.4"
-criterion = "0.6"
+# The bench harness. The benches import it as `criterion`.
+criterion = { path = "crates/common/xai-bench", package = "xai-bench" }
 crossbeam = "0.8"
 crossterm = "0.28"
 ctor = "0.4"

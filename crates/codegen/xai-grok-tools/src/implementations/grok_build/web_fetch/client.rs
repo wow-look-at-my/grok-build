@@ -734,7 +734,8 @@ fn clean_html(html: &str) -> String {
     if html5ever::serialize(&mut out, &document, Default::default()).is_err() {
         return html.to_string();
     }
-    String::from_utf8(out).unwrap_or_else(|_| html.to_string())
+    // html5ever writes UTF-8, so the lossy pass never replaces a byte.
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn remove_noisy_descendants(node: &Handle) {
