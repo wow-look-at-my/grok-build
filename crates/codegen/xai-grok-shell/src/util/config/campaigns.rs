@@ -303,7 +303,7 @@ pub(crate) fn collect_url_origins(value: &toml::Value, out: &mut Vec<String>) {
             for (key, v) in table {
                 if let toml::Value::String(s) = v
                     && key.to_ascii_lowercase().ends_with("url")
-                    && let Ok(url) = reqwest::Url::parse(s.trim())
+                    && let Ok(url) = xai_grok_net::Url::parse(s.trim())
                     && matches!(url.scheme(), "http" | "https")
                     && url.host_str().is_some()
                 {

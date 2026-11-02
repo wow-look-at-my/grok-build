@@ -26,7 +26,7 @@ pub use prod_mc_cli_chat_proxy_types::{
 /// HTTP client for interacting with the sandbox API via cli-chat-proxy. Path parameters (`session_id`, `environment_id`) are interpolated directly into URLs without percent-encoding.
 /// This is safe because these IDs are UUIDs in practice. If ID formats ever change to include URL-unsafe characters, the `format!()` calls should be updated to use percent-encoding.
 pub struct SandboxClient {
-    client: reqwest::Client,
+    client: xai_grok_net::HttpClient,
     base_url: String,
     auth_manager: Arc<AuthManager>,
 }
@@ -44,18 +44,20 @@ impl SandboxClient {
         &self.base_url
     }
 
-    // Do not set Content-Type: callers use .json() and reqwest .header() appends
+    // Do not set Content-Type: callers use .json() and `.header()` appends
     async fn auth_headers(
         &self,
-        builder: reqwest::RequestBuilder,
-    ) -> Result<reqwest::RequestBuilder> {
+        method: xai_grok_net::Method,
+        url: &str,
+    ) -> Result<xai_grok_net::Request> {
         let auth = self
             .auth_manager
             .auth()
             .await
             .context("failed to resolve sandbox auth")?;
-        let mut builder = builder
-            .header("Authorization", format!("Bearer {}", &auth.key))
+        let mut builder = self
+            .client
+            .request(method, url, auth.wire_auth())
             .header("X-XAI-Token-Auth", GrokComConfig::default().token_header)
             .header("x-userid", &auth.user_id)
             .header("x-grok-client-version", xai_grok_version::version());
@@ -79,7 +81,7 @@ impl SandboxClient {
 
     /// Check an HTTP response for errors, then deserialize the JSON body.
     async fn parse_response<T: DeserializeOwned>(
-        response: reqwest::Response,
+        response: xai_grok_net::Response,
         operation: &str,
     ) -> Result<T> {
         if !response.status().is_success() {
@@ -94,7 +96,7 @@ impl SandboxClient {
     }
 
     /// Check an HTTP response for errors, discarding the body.
-    async fn check_response(response: reqwest::Response, operation: &str) -> Result<()> {
+    async fn check_response(response: xai_grok_net::Response, operation: &str) -> Result<()> {
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let body = response.text().await.unwrap_or_default();
@@ -106,7 +108,7 @@ impl SandboxClient {
     pub async fn fork_session(&self, request: &SandboxForkRequest) -> Result<SandboxForkResponse> {
         let url = format!("{}/sandbox/sessions/fork", self.base_url);
         let response = self
-            .auth_headers(self.client.post(&url))
+            .auth_headers(xai_grok_net::Method::POST, &url)
             .await?
             .json(request)
             .send()
@@ -126,7 +128,7 @@ impl SandboxClient {
         }
 
         let response = self
-            .auth_headers(self.client.delete(&url))
+            .auth_headers(xai_grok_net::Method::DELETE, &url)
             .await?
             .send()
             .await
@@ -151,7 +153,7 @@ impl SandboxClient {
         request: &SandboxListEnvironmentsRequest,
     ) -> Result<SandboxListEnvironmentsResponse> {
         let url = format!("{}/sandbox/environments", self.base_url);
-        let mut builder = self.auth_headers(self.client.get(&url)).await?;
+        let mut builder = self.auth_headers(xai_grok_net::Method::GET, &url).await?;
         if let Some(page) = request.page {
             builder = builder.query(&[("page", page)]);
         }
@@ -171,7 +173,7 @@ impl SandboxClient {
     ) -> Result<SandboxEnvironmentResponse> {
         let url = format!("{}/sandbox/environments", self.base_url);
         let response = self
-            .auth_headers(self.client.post(&url))
+            .auth_headers(xai_grok_net::Method::POST, &url)
             .await?
             .json(request)
             .send()
@@ -187,7 +189,7 @@ impl SandboxClient {
     ) -> Result<SandboxEnvironmentResponse> {
         let url = format!("{}/sandbox/environments/{}", self.base_url, environment_id);
         let response = self
-            .auth_headers(self.client.put(&url))
+            .auth_headers(xai_grok_net::Method::PUT, &url)
             .await?
             .json(request)
             .send()
@@ -199,7 +201,7 @@ impl SandboxClient {
     pub(crate) async fn delete_environment(&self, environment_id: &str) -> Result<()> {
         let url = format!("{}/sandbox/environments/{}", self.base_url, environment_id);
         let response = self
-            .auth_headers(self.client.delete(&url))
+            .auth_headers(xai_grok_net::Method::DELETE, &url)
             .await?
             .send()
             .await

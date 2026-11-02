@@ -1,6 +1,6 @@
 use opentelemetry::global;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use xai_grok_net::header::{HeaderMap, HeaderName, HeaderValue};
 
 pub fn link_span_to_current(span: &tracing::Span) {
     use opentelemetry::trace::TraceContextExt;
@@ -34,17 +34,9 @@ pub fn traceparent_of_span(span: &tracing::Span) -> Option<String> {
     span.in_scope(current_traceparent)
 }
 
-pub fn inject_trace_context_into_request(
-    mut builder: reqwest::RequestBuilder,
-) -> reqwest::RequestBuilder {
-    let mut headers = HeaderMap::new();
-    inject_trace_context(&mut headers);
-
-    for (name, value) in headers.iter() {
-        builder = builder.header(name, value);
-    }
-
-    builder
+/// Add the current trace context to `request`. The headers are read now, not at send time.
+pub fn inject_trace_context_into_request(request: xai_grok_net::Request) -> xai_grok_net::Request {
+    request.headers(trace_context_headers())
 }
 
 pub fn trace_context_headers() -> HeaderMap {
@@ -169,6 +161,31 @@ pub fn set_local_trace_subscriber() -> LocalTraceGuard {
 mod tests {
     use super::*;
 
+    /// Send the request `build` makes to a mock server and return the headers it got.
+    /// `build` runs on this thread, so the caller's entered span and context apply.
+    fn headers_on_wire(
+        build: impl FnOnce(&xai_grok_net::HttpClient, &str) -> xai_grok_net::Request,
+    ) -> http::HeaderMap {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime builds");
+        let server = runtime.block_on(wiremock::MockServer::start());
+        runtime.block_on(
+            wiremock::Mock::given(wiremock::matchers::any())
+                .respond_with(wiremock::ResponseTemplate::new(200))
+                .mount(&server),
+        );
+        let client = xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default())
+            .expect("client builds");
+        let request = build(&client, &server.uri());
+        runtime.block_on(async {
+            request.send().await.expect("request sends");
+            let received = server.received_requests().await.expect("recording on");
+            received.into_iter().next().expect("one request").headers
+        })
+    }
+
     #[test]
     fn test_inject_trace_context_no_active_span() {
         let mut headers = HeaderMap::new();
@@ -269,13 +286,14 @@ mod tests {
         let _entered = span.enter();
         link_current_span_to_meta(&meta);
 
-        let client = reqwest::Client::new();
-        let builder = client.get("https://cli-chat-proxy.example.com/v1/chat/completions");
-        let builder = inject_trace_context_into_request(builder);
-        let request = builder.build().expect("Failed to build request");
+        let headers = headers_on_wire(|client, base| {
+            inject_trace_context_into_request(client.get(
+                format!("{base}/v1/chat/completions"),
+                xai_grok_net::Auth::None,
+            ))
+        });
 
-        let traceparent = request
-            .headers()
+        let traceparent = headers
             .get("traceparent")
             .expect("traceparent header missing")
             .to_str()
@@ -381,15 +399,18 @@ mod tests {
         let cx = opentelemetry::Context::current().with_remote_span_context(span_context);
         let _guard = cx.attach();
 
-        let client = reqwest::Client::new();
-        let builder = client
-            .get("https://example.com")
-            .header("x-custom-header", "custom-value")
-            .header("authorization", "Bearer token123");
-
-        let builder = inject_trace_context_into_request(builder);
-        let request = builder.build().expect("Failed to build request");
-        let headers = request.headers();
+        let headers = headers_on_wire(|client, base| {
+            let request = client
+                .get(
+                    base,
+                    xai_grok_net::Auth::ApiKey {
+                        key: "token123".into(),
+                        scheme: xai_grok_net::KeyScheme::Bearer,
+                    },
+                )
+                .header("x-custom-header", "custom-value");
+            inject_trace_context_into_request(request)
+        });
 
         assert_eq!(
             headers.get("x-custom-header").map(|v| v.to_str().unwrap()),

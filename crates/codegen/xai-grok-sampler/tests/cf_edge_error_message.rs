@@ -70,7 +70,7 @@ async fn stream_524_html_uses_status_copy() {
     assert!(!s.contains("<!DOCTYPE") && !s.contains("<html"));
     assert!(
         s.contains(&status_user_message_from(
-            reqwest::StatusCode::from_u16(524).unwrap(),
+            xai_grok_net::StatusCode::from_u16(524).unwrap(),
             "127.0.0.1"
         )),
         "the edge copy names the endpoint that answered: {s}"
@@ -134,7 +134,7 @@ fn status_user_message_matrix() {
         (400, "Request failed"),
     ];
     for &(code, needle) in cases {
-        let msg = status_user_message(reqwest::StatusCode::from_u16(code).unwrap());
+        let msg = status_user_message(xai_grok_net::StatusCode::from_u16(code).unwrap());
         assert!(
             msg.contains(needle),
             "status {code}: expected {needle:?} in {msg:?}"
@@ -148,13 +148,16 @@ fn status_user_message_matrix() {
 
 #[test]
 fn non_json_empty_body_falls_back_to_status() {
-    let msg = user_facing_api_error_message(reqwest::StatusCode::BAD_GATEWAY, b"");
-    assert_eq!(msg, status_user_message(reqwest::StatusCode::BAD_GATEWAY));
+    let msg = user_facing_api_error_message(xai_grok_net::StatusCode::BAD_GATEWAY, b"");
+    assert_eq!(
+        msg,
+        status_user_message(xai_grok_net::StatusCode::BAD_GATEWAY)
+    );
 }
 
 #[test]
 fn structured_json_is_not_replaced_by_status_copy() {
     let bytes = br#"{"error":{"message":"credits exhausted","type":"server_error"}}"#;
-    let msg = user_facing_api_error_message(reqwest::StatusCode::PAYMENT_REQUIRED, bytes);
+    let msg = user_facing_api_error_message(xai_grok_net::StatusCode::PAYMENT_REQUIRED, bytes);
     assert_eq!(msg, "credits exhausted");
 }

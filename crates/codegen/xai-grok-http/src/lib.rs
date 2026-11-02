@@ -13,6 +13,8 @@ pub use xai_grok_extra_ca::endpoint_allowlist;
 
 use std::sync::OnceLock;
 
+use xai_grok_net::{BlockingHttpClient, ClientOptions, HttpClient};
+
 use xai_grok_workspace::permission::ClientType;
 
 /// Per-attempt ceiling for a startup `/settings` or `/v1/models` fetch.
@@ -267,58 +269,56 @@ pub fn user_agent_string_for(origin: &OriginClientInfo) -> String {
     session_user_agent_string(origin)
 }
 
-pub fn shared_client() -> reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+pub fn shared_client() -> HttpClient {
+    static CLIENT: OnceLock<HttpClient> = OnceLock::new();
     CLIENT
         .get_or_init(|| {
             let _timer = startup_timer!("startup.http_client_build");
-            xai_grok_extra_ca::build_reqwest_client(|builder| {
-                builder
+            HttpClient::build(
+                ClientOptions::default()
                     .connect_timeout(std::time::Duration::from_secs(30))
                     .user_agent(process_user_agent_string())
                     .pool_idle_timeout(std::time::Duration::from_secs(30))
                     .http2_keep_alive_interval(std::time::Duration::from_secs(20))
                     .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
-                    .http2_keep_alive_while_idle(true)
-                    .tcp_keepalive(std::time::Duration::from_secs(30))
-            })
+                    .http2_keep_alive_while_idle()
+                    .tcp_keepalive(std::time::Duration::from_secs(30)),
+            )
             .expect("failed to build shared HTTP client")
         })
         .clone()
 }
 
-pub fn with_auth_retry(
-    client: reqwest::Client,
+pub fn auth_retry(
     credentials: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider>,
-) -> reqwest_middleware::ClientWithMiddleware {
-    reqwest_middleware::ClientBuilder::new(client)
-        .with(xai_grok_auth::AuthRetryMiddleware::new(credentials, 1))
-        .build()
+    base_url: &str,
+) -> xai_grok_auth::RequestAuth {
+    xai_grok_auth::retrying_auth(credentials, base_url, 1)
 }
 
-pub fn shared_upload_client() -> reqwest::Client {
-    static UPLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+pub fn shared_upload_client() -> HttpClient {
+    static UPLOAD_CLIENT: OnceLock<HttpClient> = OnceLock::new();
     UPLOAD_CLIENT
         .get_or_init(|| {
-            xai_grok_extra_ca::build_reqwest_client(|builder| {
-                builder
+            HttpClient::build(
+                ClientOptions::default()
                     .http1_only()
                     .pool_max_idle_per_host(2)
                     .pool_idle_timeout(std::time::Duration::from_secs(10))
-                    .user_agent(process_user_agent_string())
-            })
+                    .user_agent(process_user_agent_string()),
+            )
             .expect("failed to build shared upload HTTP client")
         })
         .clone()
 }
 
-pub(crate) fn fresh_http1_client() -> reqwest::Result<reqwest::Client> {
-    xai_grok_extra_ca::build_reqwest_client(|builder| {
-        builder
+pub(crate) fn fresh_http1_client() -> Result<HttpClient, xai_grok_net::Error> {
+    HttpClient::build(
+        ClientOptions::default()
             .http1_only()
             .pool_max_idle_per_host(0)
-            .user_agent(process_user_agent_string())
-    })
+            .user_agent(process_user_agent_string()),
+    )
 }
 
 pub fn error_cause_chain(err: &dyn std::error::Error) -> String {
@@ -370,7 +370,8 @@ pub struct TransportFailure {
 }
 
 impl TransportFailure {
-    pub fn classify(e: &reqwest::Error) -> Self {
+    /// An auth refusal sent nothing, so it is `Permanent`.
+    pub fn classify(e: &xai_grok_net::Error) -> Self {
         let kind = transport_kind(
             certificate_error(e),
             e.is_connect(),
@@ -381,6 +382,67 @@ impl TransportFailure {
             detail: error_cause_chain(e),
         }
     }
+
+    /// Classify the first transport error in `err`'s chain. `None` when nothing in it failed over HTTP.
+    pub fn from_chain(err: &(dyn std::error::Error + 'static)) -> Option<Self> {
+        let (flags, at) = transport_flags_at(err)?;
+        let kind = transport_kind(
+            certificate_error(at),
+            flags.is_connect,
+            flags.is_timeout || flags.is_request || flags.is_body,
+        );
+        Some(Self {
+            kind,
+            detail: error_cause_chain(at),
+        })
+    }
+}
+
+/// What a failed HTTP request reports about itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TransportFlags {
+    pub is_connect: bool,
+    pub is_timeout: bool,
+    pub is_request: bool,
+    pub is_body: bool,
+    pub is_decode: bool,
+}
+
+/// The flags of the first transport error in `err`'s chain.
+pub fn transport_flags(err: &(dyn std::error::Error + 'static)) -> Option<TransportFlags> {
+    transport_flags_at(err).map(|(flags, _)| flags)
+}
+
+fn transport_flags_at<'a>(
+    err: &'a (dyn std::error::Error + 'static),
+) -> Option<(TransportFlags, &'a (dyn std::error::Error + 'static))> {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        if let Some(net) = e.downcast_ref::<xai_grok_net::Error>() {
+            // A refusal sent nothing, so it is not a transport failure.
+            net.as_http()?;
+            let flags = TransportFlags {
+                is_connect: net.is_connect(),
+                is_timeout: net.is_timeout(),
+                is_request: net.is_request(),
+                is_body: net.is_body(),
+                is_decode: net.is_decode(),
+            };
+            return Some((flags, e));
+        }
+        if let Some(bare) = e.downcast_ref::<xai_grok_net::TransportError>() {
+            let flags = TransportFlags {
+                is_connect: bare.is_connect(),
+                is_timeout: bare.is_timeout(),
+                is_request: bare.is_request(),
+                is_body: bare.is_body(),
+                is_decode: bare.is_decode(),
+            };
+            return Some((flags, e));
+        }
+        cur = e.source();
+    }
+    None
 }
 
 fn transport_kind(
@@ -431,14 +493,14 @@ pub async fn send_with_retry_escaping_pool<T, E, Op, OpFut, Backoff, BackoffFut>
 ) -> Result<T, E>
 where
     E: std::fmt::Display,
-    Op: Fn(reqwest::Client) -> OpFut,
+    Op: Fn(HttpClient) -> OpFut,
     OpFut: std::future::Future<Output = Result<T, E>>,
     Backoff: Fn(u32) -> BackoffFut,
     BackoffFut: std::future::Future<Output = ()>,
 {
     let max_attempts = max_attempts.max(1);
     let pooled = shared_client();
-    let mut fresh: Option<reqwest::Client> = None;
+    let mut fresh: Option<HttpClient> = None;
     let mut last_err: Option<E> = None;
 
     for attempt in 0..max_attempts {
@@ -472,18 +534,17 @@ where
     Err(last_err.expect("send_with_retry_escaping_pool ran at least one attempt"))
 }
 
-pub fn shared_startup_blocking_client() -> reqwest::blocking::Client {
-    static BLOCKING_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+pub fn shared_startup_blocking_client() -> BlockingHttpClient {
+    static BLOCKING_CLIENT: OnceLock<BlockingHttpClient> = OnceLock::new();
     BLOCKING_CLIENT
         .get_or_init(|| {
             let _timer = startup_timer!("startup.http_blocking_client_build");
-            xai_grok_extra_ca::build_blocking_reqwest_client(|builder| {
-                builder
-                    .connect_timeout(STARTUP_FETCH_TIMEOUT)
-                    .timeout(STARTUP_FETCH_TIMEOUT)
-                    .user_agent(process_user_agent_string())
-                    .pool_idle_timeout(std::time::Duration::from_secs(30))
-                    .tcp_keepalive(std::time::Duration::from_secs(30))
+            BlockingHttpClient::build_with(xai_grok_net::BlockingOptions {
+                timeout: Some(STARTUP_FETCH_TIMEOUT),
+                connect_timeout: Some(STARTUP_FETCH_TIMEOUT),
+                pool_idle_timeout: Some(std::time::Duration::from_secs(30)),
+                tcp_keepalive: Some(std::time::Duration::from_secs(30)),
+                user_agent: Some(process_user_agent_string()),
             })
             .expect("failed to build shared blocking HTTP client")
         })
@@ -583,8 +644,12 @@ mod tests {
             drop(sock);
         });
 
-        let err = reqwest::blocking::Client::new()
-            .get(format!("http://127.0.0.1:{port}/oauth2/device/code"))
+        let err = BlockingHttpClient::build(None, None)
+            .expect("client")
+            .get(
+                format!("http://127.0.0.1:{port}/oauth2/device/code"),
+                xai_grok_net::Auth::None,
+            )
             .send()
             .expect_err("reset must fail the request");
 
@@ -597,6 +662,49 @@ mod tests {
             "reset must carry an OS code, got {:?}",
             find_os_error_code(&err)
         );
+
+        // Wrapped in a context error, the chain walk still finds it.
+        #[derive(Debug)]
+        struct Context(xai_grok_net::Error);
+        impl std::fmt::Display for Context {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("login failed")
+            }
+        }
+        impl std::error::Error for Context {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+        let wrapped = Context(err);
+        let flags = transport_flags(&wrapped).expect("transport error in chain");
+        assert!(!flags.is_decode);
+        assert_eq!(
+            TransportFailure::from_chain(&wrapped).map(|f| f.kind),
+            Some(TransportFailureKind::Interrupted)
+        );
+        // The bare transport error, as a body read returns it, is found too.
+        let bare = wrapped.0.as_http().expect("transport error");
+        assert_eq!(
+            transport_flags(bare).map(|f| f.is_connect),
+            Some(flags.is_connect)
+        );
+    }
+
+    /// An auth refusal sent nothing, so it is no transport failure.
+    #[test]
+    fn auth_refusal_is_not_a_transport_failure() {
+        let refused = BlockingHttpClient::build(None, None)
+            .expect("client")
+            .get(
+                "https://gateway.example.com/v1",
+                xai_grok_net::Auth::XaiSession("session-token-for-test".into()),
+            )
+            .send()
+            .expect_err("a session token off an xAI host is refused");
+        assert!(refused.auth_refusal().is_some());
+        assert!(transport_flags(&refused).is_none());
+        assert!(TransportFailure::from_chain(&refused).is_none());
     }
 
     #[test]
@@ -678,7 +786,10 @@ mod tests {
         });
 
         let err = shared_startup_blocking_client()
-            .get(format!("https://localhost:{port}/"))
+            .get(
+                format!("https://localhost:{port}/"),
+                xai_grok_net::Auth::None,
+            )
             .send()
             .expect_err("an untrusted certificate must fail the request");
 

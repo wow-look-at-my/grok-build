@@ -50,7 +50,7 @@ fn select_search_error_class(
 /// Only [`Self::for_endpoint`] retains a live credential; the empty default fails closed.
 #[derive(Clone, Default)]
 pub struct EndpointScopedCredentials {
-    endpoint: Option<reqwest::Url>,
+    endpoint: Option<xai_grok_net::Url>,
     auth_credentials: Option<Arc<dyn xai_grok_auth::AuthCredentialProvider>>,
     api_key_provider: Option<xai_grok_tools::types::SharedApiKeyProvider>,
 }
@@ -83,7 +83,7 @@ impl EndpointScopedCredentials {
         api_key_provider: Option<xai_grok_tools::types::SharedApiKeyProvider>,
     ) -> Self {
         if is_trusted(endpoint)
-            && let Ok(url) = reqwest::Url::parse(endpoint)
+            && let Ok(url) = xai_grok_net::Url::parse(endpoint)
         {
             return Self {
                 endpoint: Some(url),
@@ -112,7 +112,7 @@ impl EndpointScopedCredentials {
     fn approved_for(&self, base_url: &str) -> bool {
         match &self.endpoint {
             None => self.is_empty(),
-            Some(endpoint) => reqwest::Url::parse(base_url).is_ok_and(|url| &url == endpoint),
+            Some(endpoint) => xai_grok_net::Url::parse(base_url).is_ok_and(|url| &url == endpoint),
         }
     }
 }
@@ -177,11 +177,11 @@ async fn build_embedding_provider(
     }
 
     if credentials_approved && let Some(creds) = credentials.auth_credentials() {
-        let client = super::embedding::build_middleware_client(creds.clone());
+        let auth = super::embedding::retrying_auth(creds.clone(), base_url);
         return super::embedding::ApiEmbeddingProvider::from_config(
             config,
             base_url.to_owned(),
-            client,
+            auth,
         );
     }
 
@@ -190,6 +190,7 @@ async fn build_embedding_provider(
     } else {
         None
     };
+    // The provider can return a static key or the session, so the key goes as an API key.
     let api_key = per_call_key.or_else(|| static_api_key.map(|s| s.to_owned()))?;
     super::embedding::ApiEmbeddingProvider::from_session(config, base_url.to_owned(), api_key)
 }
@@ -1270,12 +1271,8 @@ mod tests {
     async fn test_trusted_endpoint_prefers_session_credential() {
         struct StubAuth;
         impl xai_grok_auth::HttpAuth for StubAuth {
-            fn apply(
-                &self,
-                builder: reqwest::RequestBuilder,
-                _base_url: &str,
-            ) -> reqwest::RequestBuilder {
-                builder
+            fn request_auth(&self, _base_url: &str) -> xai_grok_auth::RequestAuth {
+                xai_grok_auth::RequestAuth::none()
             }
         }
         #[async_trait::async_trait]

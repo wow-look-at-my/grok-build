@@ -1,7 +1,7 @@
 //! `web_fetch` tool — client-side URL fetching with improved HTML-to-markdown
 //! conversion and SSRF protection.
 //!
-//! Fetches a URL via `reqwest`, converts HTML to markdown via `htmd` (with
+//! Fetches a URL via `xai-grok-net`, converts HTML to markdown via `htmd` (with
 //! `<script>`/`<style>`/etc. stripped), and returns content to the model.
 //! Prefers `text/markdown` in the Accept header so doc sites that serve markdown
 //! directly bypass the HTML conversion entirely.

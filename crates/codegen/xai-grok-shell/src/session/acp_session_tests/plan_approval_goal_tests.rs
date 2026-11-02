@@ -1,3 +1,5 @@
+// plan_approval_goal_tests.rs holds the plan approval goal tests code.
+
 use super::support::*;
 use super::*;
 

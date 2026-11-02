@@ -133,6 +133,30 @@ pub(crate) struct CredentialGeneration {
 }
 
 impl GrokAuth {
+    /// True when `key` is the xAI session, not an xAI API key.
+    pub fn is_session(&self) -> bool {
+        !matches!(self.auth_mode, AuthMode::ApiKey)
+    }
+
+    /// The credential `xai-grok-net` sends for this login.
+    pub fn wire_auth(&self) -> xai_grok_net::Auth {
+        if self.is_session() {
+            xai_grok_net::Auth::XaiSession(self.key.clone())
+        } else {
+            xai_grok_net::Auth::ApiKey {
+                key: self.key.clone(),
+                scheme: xai_grok_net::KeyScheme::Bearer,
+            }
+        }
+    }
+
+    /// Tell `xai-grok-net` this process holds the session token, so it refuses it off an xAI host.
+    pub(crate) fn register_session(&self) {
+        if self.is_session() {
+            xai_grok_net::register_session_token(&self.key);
+        }
+    }
+
     pub(crate) fn generation(&self) -> CredentialGeneration {
         CredentialGeneration {
             key: self.key.clone(),
@@ -316,6 +340,7 @@ pub fn lookup_auth(map: &AuthStore, scope: &str) -> Option<GrokAuth> {
         tracing::info!("auth: ignoring legacy WebLogin token — re-authentication required");
         return None;
     }
+    auth.register_session();
     Some(auth)
 }
 

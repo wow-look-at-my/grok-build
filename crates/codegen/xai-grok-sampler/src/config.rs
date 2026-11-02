@@ -201,7 +201,7 @@ pub type SharedBearerResolver = std::sync::Arc<dyn BearerResolver>;
 
 /// Host trace hooks for the per-attempt HTTP span; the sampler has no OpenTelemetry dependency.
 pub trait HeaderInjector: Send + Sync + std::fmt::Debug {
-    fn inject(&self, headers: &mut reqwest::header::HeaderMap);
+    fn inject(&self, headers: &mut xai_grok_net::header::HeaderMap);
 
     /// Runs right after each streaming HTTP span is created and before it has children.
     /// Default: no-op.

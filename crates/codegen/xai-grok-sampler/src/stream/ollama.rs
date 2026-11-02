@@ -80,7 +80,7 @@ pub fn stream_ollama<'a>(
             // Ollama reports a mid-stream failure as a line carrying only `error`.
             if let Some(message) = chunk.error {
                 let err = SamplingError::Api {
-                    status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                    status: xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR,
                     message,
                     model_metadata: None,
                     retry_after_secs: None,

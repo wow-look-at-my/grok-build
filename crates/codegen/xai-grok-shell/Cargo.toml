@@ -52,14 +52,11 @@ glob = { workspace = true }
 globset = { workspace = true }
 kanal = "0.1"
 regex = { workspace = true }
-# rmcp 2.1 + reqwest 0.13 are quarantined inside `xai-grok-mcp`. The remaining
-# MCP code in this crate (extensions/mcp.rs, mcp_doctor.rs) reaches rmcp model
-# types via `xai_grok_mcp::rmcp::model::*`. reqwest 0.13 is a private impl
-# detail of xai-grok-mcp::servers; shell never sees it. Every HTTP call site
-# in this crate uses workspace reqwest 0.12.
+# The MCP code in this crate (extensions/mcp.rs, mcp_doctor.rs) reaches rmcp
+# model types via `xai_grok_mcp::rmcp::model::*`. Every HTTP and WebSocket
+# call site in this crate goes through xai-grok-net.
 xai-grok-mcp = { workspace = true }
-reqwest = { workspace = true, features = ["stream", "blocking"] }
-reqwest-middleware = { workspace = true }
+xai-grok-net = { workspace = true }
 serde = { workspace = true }
 serde_ignored = "0.1"
 serde_json = { workspace = true, features = ["preserve_order"] }
@@ -90,7 +87,6 @@ xai-acp-lib = { workspace = true }
 axum = { workspace = true, features = ["ws", "multipart"] }
 backon = { workspace = true }
 webbrowser = { workspace = true }
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio-rustls = { version = "0.26", default-features = false, features = [
     "ring",
     "logging",
@@ -170,7 +166,7 @@ xai-grok-plugin-marketplace = { path = "../xai-grok-plugin-marketplace" }
 xai-file-utils = { path = "../xai-file-utils" }
 xai-grok-otel = { workspace = true }
 xai-grok-session-events = { workspace = true }
-xai-grok-auth = { workspace = true, features = ["middleware"] }
+xai-grok-auth = { workspace = true }
 xai-grok-telemetry = { workspace = true }
 xai-grok-http = { workspace = true }
 xai-grok-login = { workspace = true }
@@ -201,6 +197,10 @@ windows = { workspace = true }
 
 [dev-dependencies]
 xai-dirs = { workspace = true }
+# Mock servers in tests: a WebSocket server and raw requests against a mock.
+reqwest = { workspace = true }
+tokio-tungstenite = { workspace = true }
+xai-grok-net = { workspace = true, features = ["test-loopback-session"] }
 xai-grok-status-line = { workspace = true, features = ["test-support"] }
 criterion = { workspace = true }
 # Pre-main unified-log redirect (`test_support::redirect_unified_log_for_tests`).

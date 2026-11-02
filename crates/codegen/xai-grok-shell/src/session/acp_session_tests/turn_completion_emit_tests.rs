@@ -1118,7 +1118,7 @@ fn turn_delta_feedback_manager(addr: std::net::SocketAddr) -> Arc<FeedbackManage
     Arc::new(FeedbackManager::new(
         "test-actor",
         Some(crate::agent::feedback_client::FeedbackClient::with_client(
-            reqwest::Client::new(),
+            xai_grok_net::HttpClient::build(Default::default()).unwrap(),
             format!("http://{addr}/v1"),
             None,
         )),

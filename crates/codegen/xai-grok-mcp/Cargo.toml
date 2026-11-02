@@ -3,29 +3,19 @@ license = "Apache-2.0"
 name = "xai-grok-mcp"
 version = "0.1.0"
 edition.workspace = true
-description = "MCP integration crate. Quarantines rmcp + reqwest 0.13 (rmcp 3.x requires reqwest >= 0.13.2 while the rest of the workspace uses reqwest 0.12) and owns the MCP credential store and OAuth flow orchestrator."
+description = "MCP integration crate. Wraps rmcp, sends its HTTP through xai-grok-net, and owns the MCP credential store and OAuth flow orchestrator."
 authors = ["xAI"]
 
 [dependencies]
+# The streamable-HTTP client and the OAuth HTTP client are this crate's own, over xai-grok-net.
 rmcp = { version = "3.4", features = [
     "auth",
     "client",
     "transport-async-rw",
-    "transport-streamable-http-client-reqwest",
-    "reqwest",
+    "transport-streamable-http-client",
 ] }
-xai-grok-extra-ca = { workspace = true }
+xai-grok-net = { workspace = true }
 xai-grok-version = { workspace = true }
-# reqwest 0.13 feature set for MCP transports. Notably:
-# - `blocking` is for build-script style use (not actually used here today, but
-#   kept for future MCP transports that may need it).
-# - `query`/`form` opt-in features stay off; rmcp transports don't use them.
-reqwest = { version = "0.13", default-features = false, features = [
-    "blocking",
-    "json",
-    "rustls",
-    "stream",
-] }
 
 # Deps for credentials.rs + oauth.rs.
 async-trait = { workspace = true }

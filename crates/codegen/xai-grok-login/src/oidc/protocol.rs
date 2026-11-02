@@ -85,7 +85,7 @@ const ALLOWED_ID_TOKEN_ALGS: &[jsonwebtoken::Algorithm] = &[
     jsonwebtoken::Algorithm::EdDSA,
 ];
 /// Optionally attach an extra access header when the optional non-production feature is enabled and the request targets a matching first-party host.
-pub fn with_alpha_test_key(builder: reqwest::RequestBuilder, url: &str) -> reqwest::RequestBuilder {
+pub fn with_alpha_test_key(builder: xai_grok_net::Request, url: &str) -> xai_grok_net::Request {
     let _ = url;
     builder
 }
@@ -352,7 +352,7 @@ async fn discover_once(issuer_key: &str) -> anyhow::Result<Discovery> {
     tracing::debug!(url = %url, "OIDC: fetching discovery document");
     let resp = with_alpha_test_key(
         xai_grok_http::shared_client()
-            .get(&url)
+            .get(&url, xai_grok_net::Auth::None)
             .timeout(StdDuration::from_secs(10)),
         &url,
     )
@@ -456,7 +456,7 @@ pub(super) async fn exchange_code(
     tracing::debug!(token_endpoint = %token_endpoint, "OIDC: exchanging code for tokens");
     let resp = with_alpha_test_key(
         xai_grok_http::shared_client()
-            .post(token_endpoint)
+            .post(token_endpoint, xai_grok_net::Auth::None)
             .header("x-grok-client-version", xai_grok_version::version())
             .form(&[
                 ("grant_type", "authorization_code"),
@@ -573,7 +573,7 @@ async fn refresh_tokens_once(
     }
     let resp = with_alpha_test_key(
         xai_grok_http::shared_client()
-            .post(token_endpoint)
+            .post(token_endpoint, xai_grok_net::Auth::None)
             .form(&params)
             .timeout(StdDuration::from_secs(15)),
         token_endpoint,
@@ -750,7 +750,7 @@ pub(super) async fn validate_and_extract_user_info(
         .ok_or_else(|| anyhow::Error::new(OidcError::DiscoveryMissingJwksUri))?;
     let jwks: jsonwebtoken::jwk::JwkSet = with_alpha_test_key(
         xai_grok_http::shared_client()
-            .get(jwks_uri)
+            .get(jwks_uri, xai_grok_net::Auth::None)
             .timeout(std::time::Duration::from_secs(10)),
         jwks_uri,
     )

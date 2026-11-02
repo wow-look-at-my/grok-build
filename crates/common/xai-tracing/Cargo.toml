@@ -11,13 +11,11 @@ log = { workspace = true }
 fastrace = { workspace = true }
 fastrace-tonic = { workspace = true }
 fastrace-opentelemetry = { workspace = true }
-fastrace-reqwest = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-http = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
-reqwest = { workspace = true }
-reqwest-middleware = { workspace = true }
+serde = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
 tower = { workspace = true, features = ["full"] }
@@ -25,6 +23,7 @@ tower-http = { workspace = true, features = ["trace"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 uuid = { workspace = true }
+xai-grok-net = { workspace = true }
 
 [dev-dependencies]
 bytes = { workspace = true }

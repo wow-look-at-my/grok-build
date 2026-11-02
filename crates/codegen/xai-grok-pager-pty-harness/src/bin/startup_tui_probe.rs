@@ -1,5 +1,7 @@
 #![allow(clippy::cast_possible_truncation)]
 
+// startup_tui_probe.rs holds the startup tui probe code.
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};

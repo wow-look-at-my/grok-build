@@ -1,3 +1,5 @@
+# Cargo.toml holds the Cargo code.
+
 [package]
 license = "Apache-2.0"
 name = "xai-grok-stamp"

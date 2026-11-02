@@ -16,7 +16,7 @@
 //! image into the project working directory when it needs a persistent asset.
 
 use base64::Engine as _;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
+use xai_grok_net::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use xai_tool_runtime::ToolError;
 
 use crate::attribution::{SharedAttributionCallback, ToolConsumer};
@@ -50,7 +50,9 @@ pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Image generation is a SuperGrok
 /// HTTP client for xAI Imagine API. Cloned per-request; shares `Arc` state.
 #[derive(Clone)]
 pub struct ImageGenClient {
-    http: reqwest::Client,
+    http: xai_grok_net::HttpClient,
+    /// Credential headers from `extra_headers`.
+    credential_headers: HeaderMap,
     base_url: String,
     /// Imagine model slug used by `generate()`. Selected at construction from
     /// `ImageGenConfig::model_override` (falling back to [`XAI_IMAGINE_MODEL`]). `image_edit` uses
@@ -101,12 +103,12 @@ impl ImageGenClient {
             .filter(|m| !m.trim().is_empty())
             .unwrap_or_else(|| super::image_edit::XAI_IMAGINE_EDIT_MODEL.to_owned());
 
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         extra_headers.into_iter().try_for_each(|(key, value)| {
-            let header_name =
-                reqwest::header::HeaderName::from_bytes(key.as_bytes()).map_err(|e| {
+            let header_name = xai_grok_net::header::HeaderName::from_bytes(key.as_bytes())
+                .map_err(|e| {
                     xai_tool_runtime::ToolError::invalid_arguments(format!(
                         "Invalid header name '{key}': {e}"
                     ))
@@ -123,14 +125,15 @@ impl ImageGenClient {
         // Process-cached: timeouts are constants, so the headers key
         // suffices; the session id is attached per request, not here.
         let defaults_have_session_header = headers.contains_key(SESSION_ID_HEADER);
+        let credential_headers = crate::util::shared_http::take_credential_headers(&mut headers);
         let key = crate::util::shared_http::cache_key("image_gen", &headers);
         let http = crate::util::shared_http::cached_client(key, || {
-            xai_grok_extra_ca::build_reqwest_client(|builder| {
-                builder
+            xai_grok_net::HttpClient::build(
+                xai_grok_net::ClientOptions::default()
                     .timeout(std::time::Duration::from_secs(IMAGE_GEN_TIMEOUT_SECS))
                     .read_timeout(std::time::Duration::from_secs(IMAGE_GEN_READ_TIMEOUT_SECS))
-                    .default_headers(headers.clone())
-            })
+                    .default_headers(headers.clone()),
+            )
         })
         .map_err(|e| {
             xai_tool_runtime::ToolError::invalid_arguments(format!(
@@ -140,6 +143,7 @@ impl ImageGenClient {
 
         Ok(Self {
             http,
+            credential_headers,
             base_url: base_url.clone(),
             model,
             edit_model,
@@ -201,12 +205,13 @@ impl ImageGenClient {
         url: &str,
         payload: &serde_json::Value,
         sent_bearer: &str,
-    ) -> reqwest::RequestBuilder {
-        let mut req = self
-            .http
-            .post(url)
-            .json(payload)
-            .header(AUTHORIZATION, format!("Bearer {sent_bearer}"));
+    ) -> xai_grok_net::Request {
+        let auth = crate::util::shared_http::key_auth(
+            Some(sent_bearer),
+            "Bearer",
+            &self.credential_headers,
+        );
+        let mut req = self.http.post(url, auth).json(payload);
         if let Some(ref session) = self.session_header {
             req = req.header(SESSION_ID_HEADER, session.clone());
         }
@@ -251,7 +256,7 @@ impl ImageGenClient {
         })?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
+        if status == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(ToolConsumer::ImageGen, Some(&sent_bearer));
         }
         if !status.is_success() {
@@ -590,22 +595,24 @@ mod tests {
         let client = ImageGenClient::new(&cfg, None)
             .unwrap()
             .with_session_id("sess-42");
-        let req = client
-            .post_json("https://api.x.ai/v1/images", &serde_json::json!({}), "tok")
-            .build()
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::header(SESSION_ID_HEADER, "sess-42"))
+            .and(wiremock::matchers::header("authorization", "Bearer tok"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let response = client
+            .post_json(
+                &format!("{}/v1/images", server.uri()),
+                &serde_json::json!({}),
+                "tok",
+            )
+            .send()
+            .await
             .unwrap();
-        assert_eq!(
-            req.headers()
-                .get(SESSION_ID_HEADER)
-                .and_then(|v| v.to_str().ok()),
-            Some("sess-42")
-        );
-        assert_eq!(
-            req.headers()
-                .get(reqwest::header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok()),
-            Some("Bearer tok")
-        );
+        assert_eq!(response.status(), xai_grok_net::StatusCode::OK);
     }
 
     #[test]

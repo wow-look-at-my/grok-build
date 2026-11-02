@@ -3,12 +3,10 @@ use std::time::Duration;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::error::{Error as WsError, ProtocolError};
-use tokio_tungstenite::tungstenite::handshake::client::Request as WsRequest;
-use tokio_tungstenite::tungstenite::http::HeaderValue;
 use url::Url;
+use xai_grok_net::Auth;
+use xai_grok_net::header::{HeaderMap, HeaderValue};
+use xai_grok_net::ws::{Message, WsError, WsRequest};
 
 use crate::config::VoiceConfig;
 use crate::error::VoiceError;
@@ -33,41 +31,26 @@ pub struct StreamingSttSession {
 
 impl StreamingSttSession {
     /// Connect and wait for `transcript.created` before sending audio.
-    pub async fn connect(config: &VoiceConfig, bearer: &str) -> Result<Self, VoiceError> {
+    /// `auth` is an xAI API key (`Auth::ApiKey`) or the xAI login token (`Auth::XaiSession`).
+    pub async fn connect(config: &VoiceConfig, auth: Auth) -> Result<Self, VoiceError> {
         let url = build_stt_ws_url(config)?;
-        let mut request = url
-            .as_str()
-            .into_client_request()
-            .map_err(|e| VoiceError::WebSocket(format!("request: {e}")))?;
-        request.headers_mut().insert(
-            "Authorization",
-            format!("Bearer {bearer}")
-                .parse()
-                .map_err(|e| VoiceError::WebSocket(format!("auth header: {e}")))?,
-        );
 
         // These headers identify the client so the backend can attribute and meter voice usage, mirroring the sampler and
         // imagine request paths. Billing itself follows the `Authorization` bearer (per-user for OAuth, BYOK key owner
         // otherwise); these only enrich attribution. A skip is never fatal: the connection is fully authorized without them
+        let mut headers = HeaderMap::new();
         insert_optional_header(
-            &mut request,
+            &mut headers,
             "x-grok-client-identifier",
             &config.client_identifier,
         );
-        insert_optional_header(&mut request, "User-Agent", &config.user_agent);
+        insert_optional_header(&mut headers, "User-Agent", &config.user_agent);
 
-        // The default connector never sees the shared trust config.
-        let connector =
-            tokio_tungstenite::Connector::Rustls(xai_grok_extra_ca::rustls_client_config());
-        let disable_nagle = false;
+        let request = WsRequest::new(url.as_str(), auth, headers)
+            .map_err(|e| VoiceError::WebSocket(format!("request: {e}")))?;
         let (ws, _) = tokio::time::timeout(
             Duration::from_secs(15),
-            tokio_tungstenite::connect_async_tls_with_config(
-                request,
-                None,
-                disable_nagle,
-                Some(connector),
-            ),
+            xai_grok_net::ws::connect_ws(request),
         )
         .await
         .map_err(|_| VoiceError::WebSocket("connect timed out".into()))?
@@ -205,24 +188,24 @@ impl Drop for StreamingSttSession {
 /// Disconnects that aren't worth reporting to the user.
 /// A socket torn down without a closing handshake is the normal result of ending a turn: the client or server drops the connection.
 fn is_benign_disconnect(err: &WsError) -> bool {
-    matches!(
-        err,
-        WsError::ConnectionClosed
-            | WsError::AlreadyClosed
-            | WsError::Protocol(ProtocolError::ResetWithoutClosingHandshake)
-    )
+    match err {
+        WsError::ConnectionClosed | WsError::AlreadyClosed => true,
+        // `xai_grok_net::ws` does not export `ProtocolError`, so the variant is matched by its name.
+        WsError::Protocol(protocol) => format!("{protocol:?}") == "ResetWithoutClosingHandshake",
+        _ => false,
+    }
 }
 
 /// Insert `name: value` into the handshake request, unless `value` is empty (header omitted) or invalid (skipped with a debug log).
 /// A missing identity header never fails the connection; the bearer alone fully authorizes the request.
 /// These headers only enrich server-side attribution.
-fn insert_optional_header(request: &mut WsRequest, name: &'static str, value: &str) {
+fn insert_optional_header(headers: &mut HeaderMap, name: &'static str, value: &str) {
     if value.is_empty() {
         return;
     }
     match HeaderValue::from_str(value) {
         Ok(header_value) => {
-            request.headers_mut().insert(name, header_value);
+            headers.insert(name, header_value);
         }
         Err(e) => {
             tracing::debug!(
@@ -309,26 +292,26 @@ mod tests {
 
     #[test]
     fn optional_header_inserted_when_present_skipped_when_empty() {
-        let mut req = "wss://api.x.ai/v1/stt".into_client_request().unwrap();
-        insert_optional_header(&mut req, "x-grok-client-identifier", "grok-shell");
-        insert_optional_header(&mut req, "User-Agent", "");
+        let mut headers = HeaderMap::new();
+        insert_optional_header(&mut headers, "x-grok-client-identifier", "grok-shell");
+        insert_optional_header(&mut headers, "User-Agent", "");
         assert_eq!(
-            req.headers().get("x-grok-client-identifier").unwrap(),
+            headers.get("x-grok-client-identifier").unwrap(),
             "grok-shell"
         );
         assert!(
-            req.headers().get("user-agent").is_none(),
+            headers.get("user-agent").is_none(),
             "empty value must omit the header entirely"
         );
     }
 
     #[test]
     fn optional_header_skips_invalid_value_without_panic() {
-        let mut req = "wss://api.x.ai/v1/stt".into_client_request().unwrap();
+        let mut headers = HeaderMap::new();
         // A control char is not a valid header value; it must be dropped silently, never panic or fail the (already-authorized) handshake
-        insert_optional_header(&mut req, "User-Agent", "bad\nvalue");
+        insert_optional_header(&mut headers, "User-Agent", "bad\nvalue");
         assert!(
-            req.headers().get("user-agent").is_none(),
+            headers.get("user-agent").is_none(),
             "invalid value must omit the header, not panic"
         );
     }

@@ -270,17 +270,23 @@ pub enum SkillsError {
     #[error("no grok.com credentials")]
     NoAuth,
     #[error("network error: {0}")]
-    Network(#[from] reqwest::Error),
+    Network(#[from] xai_grok_net::Error),
     #[error("request failed: {status}")]
     Http { status: u16 },
     #[error("parse error: {0}")]
     Parse(#[from] serde_json::Error),
 }
 
+impl From<xai_grok_net::TransportError> for SkillsError {
+    fn from(e: xai_grok_net::TransportError) -> Self {
+        Self::Network(e.into())
+    }
+}
+
 impl SkillsError {
     fn is_retryable(&self) -> bool {
         match self {
-            SkillsError::Network(_) => true,
+            SkillsError::Network(e) => e.auth_refusal().is_none(),
             SkillsError::Http { status } => *status >= 500,
             SkillsError::NoAuth | SkillsError::Parse(_) => false,
         }
@@ -296,6 +302,21 @@ struct SkillsAuthCandidate {
     /// Untagged same-user alt used when primary is tenant-tagged (OIDC 403 recovery).
     /// The catalog is still cached on success under the **primary** team/org identity so the same team session can hit the TTL.
     untagged_recovery: bool,
+    /// True when `key` is the xAI session, not an xAI API key.
+    is_session: bool,
+}
+
+impl SkillsAuthCandidate {
+    fn wire_auth(&self) -> xai_grok_net::Auth {
+        if self.is_session {
+            xai_grok_net::Auth::XaiSession(self.key.clone())
+        } else {
+            xai_grok_net::Auth::ApiKey {
+                key: self.key.clone(),
+                scheme: xai_grok_net::KeyScheme::Bearer,
+            }
+        }
+    }
 }
 
 fn primary_is_tenant_tagged(auth: &xai_grok_login::GrokAuth) -> bool {
@@ -336,6 +357,7 @@ fn skills_auth_alt_candidates<'a>(
                 user_id: entry.user_id.clone(),
                 email: entry.email.clone(),
                 untagged_recovery: false,
+                is_session: entry.is_session(),
             });
             continue;
         }
@@ -346,6 +368,7 @@ fn skills_auth_alt_candidates<'a>(
                 email: entry.email.clone(),
                 // Recovery only when primary is tenant-scoped; for personal primary this is a normal same-scope alt
                 untagged_recovery: primary_tagged,
+                is_session: entry.is_session(),
             });
         }
         // Drop: tagged alt that does not match primary (includes team-tagged alt when primary is personal, or extra org/team tags)
@@ -358,7 +381,7 @@ fn skills_auth_alt_candidates<'a>(
 
 /// Stateless transport for product Skills REST (grok-web `skillsApi`).
 pub struct SkillsClient {
-    http: reqwest::Client,
+    http: xai_grok_net::HttpClient,
     base_url: String,
     auth: Arc<AuthManager>,
 }
@@ -388,13 +411,11 @@ impl SkillsClient {
 
     fn apply_auth_headers(
         &self,
-        builder: reqwest::RequestBuilder,
-        key: &str,
+        builder: xai_grok_net::Request,
         user_id: &str,
         email: Option<&str>,
-    ) -> reqwest::RequestBuilder {
+    ) -> xai_grok_net::Request {
         let mut builder = builder
-            .header("Authorization", format!("Bearer {key}"))
             .header(
                 "X-XAI-Token-Auth",
                 self.auth.grok_com_config().token_header.clone(),
@@ -409,7 +430,7 @@ impl SkillsClient {
                 crate::http::CLIENT_MODE_HEADER,
                 crate::http::process_client_mode(),
             )
-            .header(reqwest::header::ACCEPT, "application/json");
+            .header(xai_grok_net::header::ACCEPT, "application/json");
         if let Some(email) = email {
             builder = builder.header("x-email", email);
         }
@@ -438,6 +459,7 @@ impl SkillsClient {
             user_id: primary.user_id.clone(),
             email: primary.email.clone(),
             untagged_recovery: false,
+            is_session: primary.is_session(),
         }];
         if primary.auth_mode != AuthMode::Oidc || primary.user_id.is_empty() {
             return out;
@@ -463,14 +485,14 @@ impl SkillsClient {
     async fn list_bundled_with_key(
         &self,
         locale: &str,
-        key: &str,
+        auth: xai_grok_net::Auth,
         user_id: &str,
         email: Option<&str>,
     ) -> Result<ListBundledSkillsResponse, SkillsError> {
         let url = format!("{}/rest/skills", self.base_url);
         let body = serde_json::json!({ "locale": locale });
         let builder = self
-            .apply_auth_headers(self.http.post(&url).json(&body), key, user_id, email)
+            .apply_auth_headers(self.http.post(&url, auth).json(&body), user_id, email)
             .timeout(LIST_REQUEST_TIMEOUT);
         let response = builder.send().await?;
         let status = response.status();
@@ -485,13 +507,13 @@ impl SkillsClient {
 
     async fn list_user_with_key(
         &self,
-        key: &str,
+        auth: xai_grok_net::Auth,
         user_id: &str,
         email: Option<&str>,
     ) -> Result<ListUserSkillsResponse, SkillsError> {
         let url = format!("{}/rest/user-skills", self.base_url);
         let builder = self
-            .apply_auth_headers(self.http.get(&url), key, user_id, email)
+            .apply_auth_headers(self.http.get(&url, auth), user_id, email)
             .timeout(LIST_REQUEST_TIMEOUT);
         let response = builder.send().await?;
         let status = response.status();
@@ -516,7 +538,12 @@ impl SkillsClient {
         let mut last_err = SkillsError::NoAuth;
         for (i, cand) in candidates.iter().enumerate() {
             match self
-                .list_bundled_with_key(locale, &cand.key, &cand.user_id, cand.email.as_deref())
+                .list_bundled_with_key(
+                    locale,
+                    cand.wire_auth(),
+                    &cand.user_id,
+                    cand.email.as_deref(),
+                )
                 .await
             {
                 Ok(r) => {
@@ -554,7 +581,7 @@ impl SkillsClient {
         let mut last_err = SkillsError::NoAuth;
         for (i, cand) in candidates.iter().enumerate() {
             match self
-                .list_user_with_key(&cand.key, &cand.user_id, cand.email.as_deref())
+                .list_user_with_key(cand.wire_auth(), &cand.user_id, cand.email.as_deref())
                 .await
             {
                 Ok(r) => {
