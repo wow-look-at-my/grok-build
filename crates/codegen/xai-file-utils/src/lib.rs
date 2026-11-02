@@ -26,12 +26,8 @@ pub fn auth_retry(
 pub mod gcs;
 pub mod queue;
 pub mod s3;
-<<<<<<< HEAD
-=======
-pub(crate) mod s3_credentials;
 pub(crate) mod s3_http;
 pub(crate) mod s3_sigv4;
->>>>>>> origin/master
 pub mod storage_client;
 pub mod upload_config;
 pub mod workspace_classifier;
