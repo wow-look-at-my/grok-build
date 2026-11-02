@@ -269,7 +269,6 @@ syntect = { version = "5.3", default-features = false, features = ["default-onig
 tar = "0.4"
 tempfile = "3"
 terminput = "0.3"
-termwiz = { version = "0.23", default-features = false }
 textwrap = "0.16"
 thiserror = "2"
 tikv-jemalloc-ctl = "0.7"
