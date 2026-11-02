@@ -2,7 +2,7 @@
 
 - `cargo fmt --all` before pushing. The `fmt` job in `ci.yml` runs `cargo fmt --all --check` and fails the build on any unformatted file. It is its own job, because rustfmt parses and never compiles. It answers in seconds rather than waiting on the cold build.
 - `cargo check -p <touched-crate>` before pushing.
-- `Lint (workspace)` is `--lib --bins`, so it compiles no `#[cfg(test)]` module, and `Build the dependencies` is `cargo test --locked --workspace --no-run`, which compiles all of them. An import clippy calls unused can still be the one a test needs. Removing `std::sync::Mutex` from `xai-grok-telemetry`'s `debug_log.rs` passed the lint and broke the dependency build steps earlier in the same job. Mirror both commands, not whichever one was red.
+- `Lint (workspace)` is `--lib --bins`, so it compiles no `#[cfg(test)]` module, and `Build test harnesses (compile, no-run)` is `cargo test --locked --workspace --no-run`, which compiles all of them. An import clippy calls unused can still be the one a test needs. Removing `std::sync::Mutex` from `xai-grok-telemetry`'s `debug_log.rs` passed the lint and broke the test compile earlier in the same job. Mirror both commands, not whichever one was red.
 - `cargo test -p <touched-crate>` for the crate you changed.
 - Prefer committing real tests that drive the shipped code (not mocks of the unit under test, not hand-built expected objects).
 - **A web session cannot link the workspace.** `target/` reaches ~16 GB after a `cargo check` of the pager, against a ~12 allowance of the GB session disk. So `cargo build -p xai-grok-pager-bin` runs the container out of space. Check the crate, run that crate's tests, push, and let CI produce the binary.

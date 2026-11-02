@@ -31,8 +31,7 @@ rustflags = [
     "link-args=-ObjC",
 ]
 
-# fuse-ld=mold: `cargo test --workspace` links 240 test binaries, and linking is
-# the one part of a build sccache can never cache. Needs mold on PATH
+# Needs mold on PATH (apt install mold). The darwin sections below keep their own
 # (apt install mold). The darwin sections below keep their own linker.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "force-unwind-tables=yes", "-C", "link-arg=-fuse-ld=mold"]
@@ -92,13 +91,10 @@ AARCH64_UNKNOWN_LINUX_MUSL_JEMALLOC_SYS_WITH_BACKGROUND_THREADS = "0"
 
 # Ensure test threads have a stack large enough for the session actor's
 # recursive turn/retry harness (which can temporarily recurse > 2 MiB deep in
-# `session::acp_session` unit tests). libtest spawns each test on its own
-# thread using Rust's default minimum stack (`RUST_MIN_STACK`, 2 MiB by
-# default); on constrained hosts that default aborts these deep-but-bounded
-# turns with a `stack overflow` (SIGABRT) instead of passing. Raise it for
-# every cargo-invoked process so `cargo test -p xai-grok-shell --lib` runs
-# the whole suite to completion. This is a test-environment tweak only: the
-# shipped binaries' threads are sized independently and are unaffected.
+# `session::acp_session` unit tests). Raise it for every cargo-invoked
+# process so `cargo test -p xai-grok-shell --lib` runs the whole suite to
+# completion. This is a test-environment tweak only: the shipped binaries'
+# threads are sized independently and are unaffected.
 RUST_MIN_STACK = "16777216"
 
 # A model request reaches only an allowed endpoint. Tests talk to mock servers

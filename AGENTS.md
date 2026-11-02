@@ -171,7 +171,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## The todo list cannot be discarded or overwritten
 
-- A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Text is changed by sending that id with new content.
+- A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Sending that id with new content changes text.
 - Every `todo_write` is a merge, and an item the call omits survives with its status untouched. `merge: false` used to clear the list and keep only what the call resent. This is how a status update that forgot the flag erased the user's list.
 - `merge` is still accepted on the wire and ignored. It is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
 - `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.
@@ -227,13 +227,9 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `output_config.effort` is 4.6-and-later too. So the older dialect sends the effort as `budget_tokens` instead and nothing beside it. `output_config.format` is untouched — structured outputs are not what 4.6 changed.
 - A budget must clear the API's 1024 floor and stay under `max_tokens`. One that cannot do both leaves thinking off with a warning, rather than sending a request the API answers with a 400.
 
-## CI compile-cache notes
+## CI builds from clean
 
-[docs/ci-compile-cache-notes.md](docs/ci-compile-cache-notes.md) holds this section.
-
-## The dependency tar: one cache entry per dependency set, and why it cannot grow
-
-[docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md](docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md) holds this section.
+- CI has no compile cache. Every job compiles the whole dependency graph, so the number of registry crates is what sets its build time. Check what a new dependency pulls in (`cargo tree -e normal,build,dev -i <crate>`) before adding it.
 
 ## Why build-test is not on the self-hosted runner
 
