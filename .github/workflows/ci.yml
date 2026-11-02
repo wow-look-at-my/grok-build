@@ -172,8 +172,13 @@ jobs:
           - { name: "PTY 2/2", partition: "hash:2/2", pty: true }
     env:
       PAGER_BINARY: ${{ github.workspace }}/.nextest-extract/target/debug/xai-grok-pager
+      # Tests that look up a workspace binary (xai_grok_test_support::ensure_cargo_bin) find the archived one here instead of running cargo build.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.nextest-extract/target
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
+
+      # xai-proto-build's tests compile .proto fixtures at run time.
+      - uses: ./.github/actions/setup-protoc
 
       # ripgrep: rg_path() ends at a bare "rg" on PATH, so without it the grep and glob tests fail on empty output. bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it.
       - name: Install ripgrep and bubblewrap
