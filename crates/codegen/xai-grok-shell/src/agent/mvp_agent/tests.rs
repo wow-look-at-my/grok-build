@@ -440,7 +440,7 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
         let mut cfg = agent.cfg.borrow_mut();
         cfg.features.telemetry = Some(crate::agent::config::TelemetryMode::Enabled);
         cfg.telemetry.trace_upload = Some(true);
-        cfg.endpoints.trace_upload_bucket = Some("gs://harness-trace-test".to_string());
+        cfg.endpoints.trace_upload_url = Some("https://harness-trace-test.example/v1".to_string());
     }
     let sid = acp::SessionId::new("harness-upload-sess");
     let info = crate::session::info::Info {
@@ -452,13 +452,14 @@ async fn upload_harness_trace_turns_numbers_siblings_and_persists_counter() {
     let queue_home = tempfile::tempdir().unwrap();
     let queue_cfg = crate::session::repo_changes::TraceExportConfig {
         bucket_url: Some("gs://harness-trace-test".to_string()),
-        service_account_key: None,
         prefix_dir: None,
         gcs_prefix: None,
         absolute_paths: false,
         archive_name_override: None,
-        upload_method: crate::session::repo_changes::UploadMethod::Direct {
-            service_account_key: None,
+        upload_method: crate::session::repo_changes::UploadMethod::Proxy {
+            proxy_base_url: "https://harness-trace-test.example/v1".to_string(),
+            user_token: "test-token".to_string(),
+            alpha_test_key: None,
         },
     };
     let queue = crate::upload::trace::spawn_upload_queue(
@@ -552,7 +553,7 @@ async fn upload_harness_trace_turns_build_per_turn_manifest() {
         let mut cfg = agent.cfg.borrow_mut();
         cfg.features.telemetry = Some(crate::agent::config::TelemetryMode::Enabled);
         cfg.telemetry.trace_upload = Some(true);
-        cfg.endpoints.trace_upload_bucket = Some("gs://harness-trace-test".to_string());
+        cfg.endpoints.trace_upload_url = Some("https://harness-trace-test.example/v1".to_string());
     }
     let sid = acp::SessionId::new("harness-manifest-sess");
     let info = crate::session::info::Info {
@@ -564,13 +565,14 @@ async fn upload_harness_trace_turns_build_per_turn_manifest() {
     let queue_home = tempfile::tempdir().unwrap();
     let queue_cfg = crate::session::repo_changes::TraceExportConfig {
         bucket_url: Some("gs://harness-trace-test".to_string()),
-        service_account_key: None,
         prefix_dir: None,
         gcs_prefix: None,
         absolute_paths: false,
         archive_name_override: None,
-        upload_method: crate::session::repo_changes::UploadMethod::Direct {
-            service_account_key: None,
+        upload_method: crate::session::repo_changes::UploadMethod::Proxy {
+            proxy_base_url: "https://harness-trace-test.example/v1".to_string(),
+            user_token: "test-token".to_string(),
+            alpha_test_key: None,
         },
     };
     let queue = crate::upload::trace::spawn_upload_queue(
@@ -2631,17 +2633,9 @@ async fn one_shot_rejects_every_custom_trace_destination() {
     let tmp = tempfile::tempdir().unwrap();
     let _env = trace_gate_env(tmp.path());
     type EndpointMutation = fn(&mut crate::agent::config::EndpointsConfig);
-    let cases: [(&str, EndpointMutation); 3] = [
-        ("custom trace_upload_url", |e| {
-            e.trace_upload_url = Some("https://exfil.example/upload".into());
-        }),
-        ("custom trace_upload_bucket", |e| {
-            e.trace_upload_bucket = Some("gs://exfil-bucket".into());
-        }),
-        ("custom trace_upload_endpoint_url", |e| {
-            e.trace_upload_endpoint_url = Some("https://exfil.example".into());
-        }),
-    ];
+    let cases: [(&str, EndpointMutation); 1] = [("custom trace_upload_url", |e| {
+        e.trace_upload_url = Some("https://exfil.example/upload".into());
+    })];
     for (label, mutate) in cases {
         let agent = build_agent_with_auth(personal_xai_oauth_auth());
         make_trace_card_eligible(&agent);
@@ -2663,33 +2657,6 @@ async fn one_shot_requires_a_resolvable_upload_method() {
     assert!(
         crate::agent::config::EndpointsConfig::default()
             .resolve_upload_method(None)
-            .is_none()
-    );
-}
-#[tokio::test]
-#[serial_test::serial]
-async fn one_shot_rejects_non_proxy_upload_methods() {
-    let tmp = tempfile::tempdir().unwrap();
-    let _env = trace_gate_env(tmp.path());
-    let agent = build_agent_with_auth(xai_grok_login::GrokAuth {
-        auth_mode: xai_grok_login::AuthMode::ApiKey,
-        expires_at: Some(chrono::Utc::now() - chrono::Duration::days(1)),
-        ..xai_grok_login::GrokAuth::test_default()
-    });
-    make_trace_card_eligible(&agent);
-    {
-        let mut cfg = agent.cfg.borrow_mut();
-        cfg.endpoints.trace_upload_bucket = Some("gs://test-bucket".to_string());
-        cfg.endpoints.trace_upload_credentials = Some("{}".to_string());
-    }
-    assert!(matches!(
-        agent.cfg.borrow().endpoints.resolve_upload_method(None),
-        Some(crate::session::repo_changes::UploadMethod::Direct { .. })
-    ));
-    assert!(
-        agent
-            .one_shot_feedback_gcs_config("sid".into())
-            .await
             .is_none()
     );
 }

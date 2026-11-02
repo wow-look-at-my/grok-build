@@ -3258,8 +3258,6 @@ telemetry = false
 
 [endpoints]
 xai_api_base_url = "https://inference.acme-corp.example/xai/v1"
-trace_upload_bucket = "s3://acme-trace"
-trace_upload_endpoint_url = "https://s3.acme-corp.example"
 "#,
         )
         .unwrap();
@@ -3285,10 +3283,48 @@ trace_upload_endpoint_url = "https://s3.acme-corp.example"
                 .resolve_managed_config_url()
                 .contains("acme-corp")
         );
-    assert_eq!(
-            cfg.endpoints.trace_upload_endpoint_url.as_deref(),
-            Some("https://s3.acme-corp.example")
-        );
+}
+/// An env var of a removed direct-upload mode fails the config load.
+#[test]
+#[serial_test::serial]
+fn an_env_var_naming_a_removed_upload_mode_fails_the_load() {
+    for &name in crate::agent::config::REMOVED_DIRECT_UPLOAD_ENV_VARS {
+        let _guard = xai_grok_test_support::env::EnvGuard::set(name, "s3://acme-trace");
+        let err = crate::agent::config::Config::new_from_toml_cfg(&toml::Value::Table(
+            Default::default(),
+        ))
+        .err()
+        .expect("a removed upload env var must fail the load");
+        assert!(err.contains(name) && err.contains("removed"), "{err}");
+    }
+}
+/// A requirements layer that names a removed direct-upload key fails the config load.
+#[test]
+#[serial_test::serial]
+fn a_requirement_naming_a_removed_upload_mode_fails_the_load() {
+    let requirements = toml::from_str(
+        r#"
+[endpoints]
+trace_upload_bucket = "s3://acme-trace"
+"#,
+    )
+    .unwrap();
+    let layers = ConfigLayers {
+        system_managed: toml::Value::Table(Default::default()),
+        managed: toml::Value::Table(Default::default()),
+        user: toml::Value::Table(Default::default()),
+        user_requirements: Some(requirements),
+        system_requirements: None,
+        mdm_requirements: None,
+        ..Default::default()
+    };
+    let err = crate::agent::config::Config::new_from_toml_cfg(&layers.effective_config_disk_only())
+        .err()
+        .expect("a removed upload key must fail the load");
+    assert!(
+        err.contains("trace_upload_bucket") && err.contains("removed"),
+        "{err}"
+    );
 }
 /// `[feedback.user]` in the managed layer must survive the layer merge into the resolved `Config` (its presence is the opt-in).
 #[test]
@@ -3432,7 +3468,7 @@ fn apply_requirements_value_overrides_user_settings() {
     let mut cfg = crate::agent::config::Config::new_from_toml_cfg(&raw_config).unwrap();
     cfg.default_yolo_mode = true;
     let requirements: toml::Value = toml::from_str(
-            "[cli]\nauto_update = false\nchannel = \"stable\"\n\n[features]\ntelemetry = false\nfeedback = false\nlsp_tools = false\nweb_fetch = false\nwrite_file = false\nremote_fetch = false\n\n[telemetry]\ntrace_upload = false\nmixpanel_enabled = false\nmixpanel_token = \"enterprise-mp-token\"\n\n[ui]\nyolo = false\n\n[models]\ndefault = \"managed-model\"\nweb_search = \"managed-ws-model\"\n\n[endpoints]\ncli_chat_proxy_base_url = \"https://managed-proxy.example/v1\"\nxai_api_base_url = \"https://managed-api.example/v1\"\nmodels_base_url = \"https://managed-models.example/v1\"\nmodels_list_url = \"https://managed-models.example/v1/models\"\ntrace_upload_endpoint_url = \"https://s3.custom.example.com\"\ntrace_upload_credentials = '{\"aws_access_key_id\":\"AKTEST\",\"aws_secret_access_key\":\"secret\"}'\n",
+            "[cli]\nauto_update = false\nchannel = \"stable\"\n\n[features]\ntelemetry = false\nfeedback = false\nlsp_tools = false\nweb_fetch = false\nwrite_file = false\nremote_fetch = false\n\n[telemetry]\ntrace_upload = false\nmixpanel_enabled = false\nmixpanel_token = \"enterprise-mp-token\"\n\n[ui]\nyolo = false\n\n[models]\ndefault = \"managed-model\"\nweb_search = \"managed-ws-model\"\n\n[endpoints]\ncli_chat_proxy_base_url = \"https://managed-proxy.example/v1\"\nxai_api_base_url = \"https://managed-api.example/v1\"\nmodels_base_url = \"https://managed-models.example/v1\"\nmodels_list_url = \"https://managed-models.example/v1/models\"\n",
         )
         .unwrap();
     let source = RequirementSource::Requirements {
@@ -3485,19 +3521,6 @@ fn apply_requirements_value_overrides_user_settings() {
             enforced
                 .iter()
                 .any(|e| e.path == "ui.yolo" && e.value == "--yolo blocked")
-        );
-    assert_eq!(
-            Some("https://s3.custom.example.com"),
-            cfg.endpoints.trace_upload_endpoint_url.as_deref()
-        );
-    assert!(
-            cfg.endpoints.trace_upload_credentials.is_some(),
-            "trace_upload_credentials should be set"
-        );
-    assert!(
-            enforced
-                .iter()
-                .any(|e| e.path == "endpoints.trace_upload_credentials" && e.value == "[redacted]")
         );
     assert!(!cfg.telemetry.mixpanel_enabled);
     assert_eq!(

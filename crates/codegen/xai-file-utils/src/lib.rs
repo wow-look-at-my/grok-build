@@ -25,7 +25,7 @@ pub fn auth_retry(
 }
 pub mod gcs;
 pub mod queue;
-pub mod s3_presign;
+pub mod s3;
 pub mod storage_client;
 pub mod upload_config;
 pub mod workspace_classifier;

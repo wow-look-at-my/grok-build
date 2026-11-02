@@ -1360,9 +1360,10 @@ mod tests {
             fn resolve(&self) -> TraceExportConfig {
                 TraceExportConfig {
                     bucket_url: Some("gs://test-bucket".to_string()),
-                    service_account_key: None,
-                    upload_method: UploadMethod::Direct {
-                        service_account_key: None,
+                    upload_method: UploadMethod::Proxy {
+                        proxy_base_url: "http://127.0.0.1:1".to_string(),
+                        user_token: "test-token".to_string(),
+                        alpha_test_key: None,
                     },
                     prefix_dir: None,
                     gcs_prefix: None,
@@ -1611,9 +1612,10 @@ mod tests {
             fn resolve(&self) -> TraceExportConfig {
                 TraceExportConfig {
                     bucket_url: Some("gs://test-bucket".to_string()),
-                    service_account_key: None,
-                    upload_method: UploadMethod::Direct {
-                        service_account_key: None,
+                    upload_method: UploadMethod::Proxy {
+                        proxy_base_url: "http://127.0.0.1:1".to_string(),
+                        user_token: "test-token".to_string(),
+                        alpha_test_key: None,
                     },
                     prefix_dir: None,
                     gcs_prefix: None,
@@ -1669,7 +1671,6 @@ mod tests {
             fn resolve(&self) -> TraceExportConfig {
                 TraceExportConfig {
                     bucket_url: Some("gs://test-bucket".to_string()),
-                    service_account_key: None,
                     upload_method: UploadMethod::Proxy {
                         proxy_base_url: self.base.clone(),
                         user_token: "test-token".to_string(),

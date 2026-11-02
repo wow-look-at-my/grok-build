@@ -17,8 +17,6 @@ pub(crate) enum ArtifactStatus {
 #[strum(serialize_all = "snake_case")]
 pub(crate) enum ManifestUploadMethod {
     Proxy,
-    Direct,
-    S3,
 }
 #[derive(Debug, serde::Serialize, Clone)]
 pub(crate) struct FailureDetail {
@@ -163,8 +161,6 @@ pub(crate) fn resolve_upload_method(
 ) -> ManifestUploadMethod {
     match &gcs_config.upload_method {
         crate::session::repo_changes::UploadMethod::Proxy { .. } => ManifestUploadMethod::Proxy,
-        crate::session::repo_changes::UploadMethod::Direct { .. } => ManifestUploadMethod::Direct,
-        crate::session::repo_changes::UploadMethod::S3 { .. } => ManifestUploadMethod::S3,
     }
 }
 pub(crate) async fn write_error_manifest(ctx: &PromptTraceContext) {
@@ -255,7 +251,7 @@ mod tests {
         let tracker = new_artifact_tracker();
         record_artifact(&tracker, "metadata.json", ArtifactResult::Succeeded);
         record_artifact(&tracker, "turn_result.json", ArtifactResult::Enqueued);
-        let manifest = build_manifest(&tracker, ManifestUploadMethod::S3, None);
+        let manifest = build_manifest(&tracker, ManifestUploadMethod::Proxy, None);
         assert!(manifest.fully_uploaded);
         let json: serde_json::Value = serde_json::to_value(&manifest).unwrap();
         assert_eq!(
@@ -291,7 +287,7 @@ mod tests {
         let tracker = new_artifact_tracker();
         record_artifact(&tracker, "metadata.json", ArtifactResult::Succeeded);
         skip_artifact(&tracker, "memory.tar.gz", "artifact_disabled");
-        let manifest = build_manifest(&tracker, ManifestUploadMethod::Direct, None);
+        let manifest = build_manifest(&tracker, ManifestUploadMethod::Proxy, None);
         assert!(manifest.fully_uploaded);
     }
     #[test]
@@ -337,7 +333,7 @@ mod tests {
                 error: Some("HTTP 503: service unavailable"),
             },
         );
-        let manifest = build_manifest(&tracker, ManifestUploadMethod::S3, None);
+        let manifest = build_manifest(&tracker, ManifestUploadMethod::Proxy, None);
         let json: serde_json::Value = serde_json::to_value(&manifest).unwrap();
         assert_eq!(json.get("schema_version").and_then(|v| v.as_u64()), Some(3));
         assert_eq!(
@@ -346,7 +342,7 @@ mod tests {
         );
         assert_eq!(
             json.get("upload_method").and_then(|v| v.as_str()),
-            Some("s3")
+            Some("proxy")
         );
         assert_eq!(
             json.get("artifacts")
@@ -451,11 +447,7 @@ mod tests {
     }
     #[test]
     fn upload_method_as_str_matches_serde() {
-        for method in [
-            ManifestUploadMethod::Proxy,
-            ManifestUploadMethod::Direct,
-            ManifestUploadMethod::S3,
-        ] {
+        for method in [ManifestUploadMethod::Proxy] {
             let serde_str = serde_json::to_value(method)
                 .unwrap()
                 .as_str()

@@ -25,25 +25,10 @@ impl MvpAgent {
 
     fn heap_profile_upload_handles(&self) -> Option<crate::heap_profile::HeapProfileUploadHandles> {
         let method = self.trace_upload_config_snapshot()?;
-        let bucket_url = self
-            .cfg
-            .borrow()
-            .endpoints
-            .resolve_trace_bucket_url()
-            .map(|r| r.value);
-        // Only direct GCS uploads need a bucket.
-        if bucket_url.is_none()
-            && matches!(
-                method,
-                crate::session::repo_changes::UploadMethod::Direct { .. }
-            )
-        {
-            tracing::debug!("no trace bucket configured; heap-profile uploads disabled");
-            return None;
-        }
+        // The proxy picks the bucket.
         Some(build_upload_handles(
             Arc::clone(&self.auth_manager),
-            bucket_url,
+            None,
             method,
         ))
     }
