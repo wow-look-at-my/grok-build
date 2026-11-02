@@ -599,6 +599,12 @@ pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
         why: "a rewind mode is one string key; see ToolNamespace",
     },
     EnumVariantAlias {
+        file: "crates/codegen/xai-grok-sampling-types/src/types.rs",
+        ty: "FinishReason",
+        aliases: &["refusal", "safety"],
+        why: "a finish reason is one string key; see ToolNamespace",
+    },
+    EnumVariantAlias {
         file: "crates/codegen/xai-grok-shell/src/extensions/hooks.rs",
         ty: "ClientHookDecision",
         aliases: &["block"],
