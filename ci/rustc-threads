@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-# A RUSTC_WORKSPACE_WRAPPER: runs the rustc frontend on several threads and turns off LTO across codegen units for workspace crates. Bash, because dash drops CARGO_BIN_EXE_<name> when the name holds a hyphen.
-RUSTC_BOOTSTRAP=1 exec "$@" -Zthreads=4 -Clto=off

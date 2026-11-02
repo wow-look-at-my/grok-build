@@ -41,14 +41,11 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/slopfix@lkgb
-
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
 
   fmt:
     name: Rustfmt
@@ -58,7 +55,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -82,9 +79,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   build-test:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
@@ -92,14 +86,13 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
-    # A ceiling, not a target. The compile is cold every run (measured 31 min) and a hung test is failed by nextest in 60s. A job past this is broken, not slow.
+      actions: write
+    # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s. A job past this is broken, not slow.
     timeout-minutes: 75
     env:
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
       # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build steps alone.
-      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-threads
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -163,12 +156,14 @@ jobs:
           echo "target: $(du -sh target 2>/dev/null | cut -f1)"
 
       - name: Run tests (workspace)
+        if: ${{ !cancelled() }}
         run: |
           cargo nextest run --locked --workspace --profile ci
           "$PAGER_BINARY" --version
 
       # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/.
       - name: Test (PTY end-to-end)
+        if: ${{ !cancelled() }}
         run: |
           cargo nextest run --locked --workspace --profile ci \
             -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_queue)' \
@@ -178,9 +173,6 @@ jobs:
         with:
           name: cargo-timings-build-test
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   # Clippy shares no artifact with the test build, so it needs nothing from build-test.
   lint:
     name: Clippy
@@ -189,7 +181,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -215,16 +206,13 @@ jobs:
             target/debug/.fingerprint
           run: cargo clippy --locked --workspace --lib --bins --keep-going
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   build-release:
     name: Build release (${{ matrix.name }})
     runs-on: ${{ (github.event.repository.visibility == 'public' || !contains(fromJSON('["ubuntu-22.04"]'), matrix.runs-on)) && matrix.runs-on || vars.CI_RUNNER || matrix.runs-on }}
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     timeout-minutes: 45
     strategy:
       # One target's failure leaves the others' results worth reading.
@@ -243,7 +231,7 @@ jobs:
     env:
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
-      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-threads
+      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-no-lto
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -381,9 +369,6 @@ jobs:
           name: grok-linux-amd64
           path: dist/grok-linux-amd64
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
   release:
     name: Create buildhost release
@@ -393,7 +378,7 @@ jobs:
     permissions:
       contents: read
       id-token: write # GitHub OIDC -> buildhost
-      actions: write # fail-fast cancels this run
+      actions: write
     outputs:
       version: ${{ steps.rel.outputs.version }}
     steps:
@@ -406,9 +391,6 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   # One cc, and the only step in the workflow that needs a Mac.
   link-darwin:
     name: Link darwin/arm64 (macOS)
@@ -418,7 +400,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     timeout-minutes: 15
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
@@ -439,9 +421,6 @@ jobs:
           name: grok-darwin-arm64
           path: dist/grok-darwin-arm64
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
@@ -450,7 +429,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     timeout-minutes: 25
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
@@ -465,9 +444,6 @@ jobs:
 
       - name: Test xai-grok-sandbox on macOS
         run: cargo test --locked -p xai-grok-sandbox
-
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
 
   publish:
     # Both binaries are stamped here. Patching bytes needs no Mac, and no signature is restored afterwards: a Homebrew install clears the quarantine that would otherwise make one matter.
@@ -559,6 +535,3 @@ jobs:
       - name: Clean up binary hand-offs
         if: always()
         uses: wow-look-at-my/actions@cache-cleanup#latest
-
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
