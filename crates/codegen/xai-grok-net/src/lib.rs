@@ -18,14 +18,14 @@ pub use error::{AuthRefusal, Error};
 pub use session::register_session_token;
 
 /// The transport error a response body read (`json`, `text`, `bytes`) returns.
-pub type TransportError = reqwest::Error;
+pub type TransportError = request::Error;
 
-pub use reqwest::{
+pub use request::{
     Body, Certificate, Identity, Method, Proxy, Response, StatusCode, Url, Version, header,
     multipart, redirect,
 };
 
 /// The blocking response type.
 pub mod blocking_types {
-    pub use reqwest::blocking::{Body, Response, multipart};
+    pub use request::blocking::{Body, Response, multipart};
 }

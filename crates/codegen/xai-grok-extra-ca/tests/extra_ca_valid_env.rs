@@ -35,6 +35,6 @@ hJAE3EOL2ZddrMPF64QeU9UhvCm0Ch+Ceqa1ZWE0MygccggX5s2yQwtXO2ovJdjH\n\
 
     assert_eq!(xai_grok_extra_ca::extra_root_ders().len(), 1);
 
-    xai_grok_extra_ca::build_reqwest_client(|builder| builder)
+    xai_grok_extra_ca::build_http_client(|builder| builder)
         .expect("client with env-loaded root builds");
 }

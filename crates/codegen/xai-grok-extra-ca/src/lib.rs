@@ -50,35 +50,35 @@ pub fn ensure_default_crypto_provider() {
     });
 }
 
-/// Builds a reqwest client with the grok TLS policy: the shared roots (OS store, Mozilla bundle, and any extra roots).
+/// Builds an HTTP client with the grok TLS policy: the shared roots (OS store, Mozilla bundle, and any extra roots).
 /// The roots are read once per process instead of on each build.
 /// For HTTP/1.1 only, add `http1_only()` in `configure`.
 #[allow(clippy::disallowed_methods)] // the approved async build path
-pub fn build_reqwest_client(
-    configure: impl Fn(reqwest::ClientBuilder) -> reqwest::ClientBuilder,
-) -> reqwest::Result<reqwest::Client> {
+pub fn build_http_client(
+    configure: impl Fn(request::ClientBuilder) -> request::ClientBuilder,
+) -> request::Result<request::Client> {
     ensure_default_crypto_provider();
-    let mut builder = configure(reqwest::Client::builder())
+    let mut builder = configure(request::Client::builder())
         .use_rustls_tls()
         .tls_built_in_native_certs(false)
         .tls_built_in_webpki_certs(true);
-    for cert in shared_reqwest_roots() {
+    for cert in shared_http_roots() {
         builder = builder.add_root_certificate(cert);
     }
     builder.build()
 }
 
-/// [`build_reqwest_client`] for the blocking client type.
+/// [`build_http_client`] for the blocking client type.
 #[allow(clippy::disallowed_methods)] // the approved blocking build path
-pub fn build_blocking_reqwest_client(
-    configure: impl Fn(reqwest::blocking::ClientBuilder) -> reqwest::blocking::ClientBuilder,
-) -> reqwest::Result<reqwest::blocking::Client> {
+pub fn build_blocking_http_client(
+    configure: impl Fn(request::blocking::ClientBuilder) -> request::blocking::ClientBuilder,
+) -> request::Result<request::blocking::Client> {
     ensure_default_crypto_provider();
-    let mut builder = configure(reqwest::blocking::Client::builder())
+    let mut builder = configure(request::blocking::Client::builder())
         .use_rustls_tls()
         .tls_built_in_native_certs(false)
         .tls_built_in_webpki_certs(true);
-    for cert in shared_reqwest_roots() {
+    for cert in shared_http_roots() {
         builder = builder.add_root_certificate(cert);
     }
     builder.build()
@@ -87,10 +87,10 @@ pub fn build_blocking_reqwest_client(
 #[cfg(test)]
 static NATIVE_ROOT_LOADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// The OS store and extra roots as reqwest certificates, parsed once per process.
-/// Mozilla roots come from reqwest's built-in webpki bundle.
-fn shared_reqwest_roots() -> impl Iterator<Item = reqwest::Certificate> {
-    static ROOTS: OnceLock<Vec<reqwest::Certificate>> = OnceLock::new();
+/// The OS store and extra roots as HTTP client certificates, parsed once per process.
+/// Mozilla roots come from the HTTP client's built-in webpki bundle.
+fn shared_http_roots() -> impl Iterator<Item = request::Certificate> {
+    static ROOTS: OnceLock<Vec<request::Certificate>> = OnceLock::new();
     ROOTS
         .get_or_init(|| {
             cached_native_der()
@@ -98,9 +98,9 @@ fn shared_reqwest_roots() -> impl Iterator<Item = reqwest::Certificate> {
                 .map(|der| der.as_ref())
                 .chain(extra_root_ders().iter().map(Vec::as_slice))
                 .filter_map(|der| {
-                    reqwest::Certificate::from_der(der)
+                    request::Certificate::from_der(der)
                         .inspect_err(|error| {
-                            tracing::warn!(error = %error, "root rejected by reqwest; skipping")
+                            tracing::warn!(error = %error, "root rejected by the HTTP client; skipping")
                         })
                         .ok()
                 })
@@ -148,7 +148,7 @@ fn client_config_with_shared_roots() -> rustls::ClientConfig {
         .with_no_client_auth()
 }
 
-/// Shared rustls config for TLS outside reqwest (WebSocket, HTTP/1.1 upgrade), using the process default provider.
+/// Shared rustls config for TLS outside the HTTP client (WebSocket, HTTP/1.1 upgrade), using the process default provider.
 pub fn rustls_client_config() -> Arc<rustls::ClientConfig> {
     static CONFIG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
     CONFIG
