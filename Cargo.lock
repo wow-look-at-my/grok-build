@@ -13131,7 +13131,6 @@ dependencies = [
  "filetime",
  "futures",
  "indexmap",
- "jsonwebtoken",
  "prod-mc-cli-chat-proxy-types",
  "rcgen",
  "reflink-copy",
