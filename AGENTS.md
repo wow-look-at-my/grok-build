@@ -229,6 +229,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## CI builds from clean
 
+- A crate's integration tests build as one `it` binary (`tests/it/main.rs`, one module per former file). Select tests by module path (`cargo nextest run -E 'binary(it) and test(/^module::/)'`). Run them with nextest: several set process-global state (`grok_home()`, env vars, the tracer) and pass only one test per process.
 - CI has no compile cache. Every job compiles the whole dependency graph, so the number of registry crates is what sets its build time. Check what a new dependency pulls in (`cargo tree -e normal,build,dev -i <crate>`) before adding it.
 
 ## Why build-test is not on the self-hosted runner
