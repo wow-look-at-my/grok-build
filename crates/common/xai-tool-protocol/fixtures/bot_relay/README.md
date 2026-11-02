@@ -32,9 +32,4 @@ receive path must report after ingesting `frames` in order:
   key; a redelivered payload with a new `seq` is a new event, and two
   frames that share a `seq` are also two events (`sequence_same_seq_two_payloads`).
 
-The Rust `ReferenceConsumer` in
-`tests/it/bot_relay_conformance.rs` is the behavior a TS / Swift / Kotlin
-harness must reproduce: feed it `frames`, then assert its
-`observed_resyncs` / `observed_events` equal those integers. Do not
-re-derive the integers from the input list (counting channel tags or
-`frames.length`).
+The Rust `ReferenceConsumer` in `tests/it/bot_relay_conformance.rs` is the behavior a TS / Swift / Kotlin harness must reproduce. Feed it `frames`, then assert its `observed_resyncs` / `observed_events` equal those integers. Do not re-derive the integers from the input list (counting channel tags or `frames.length`).
