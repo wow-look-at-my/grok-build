@@ -133,6 +133,7 @@ jobs:
         run: |
           start=$(date +%s)
           # This also builds the pager binary: xai-grok-pager-bin has an integration test.
+          mkdir -p dist
           cargo nextest archive --locked --workspace --profile ci --archive-file dist/nextest-archive.tar.zst
           test -x "$PAGER_BINARY"
           "$PAGER_BINARY" --version
