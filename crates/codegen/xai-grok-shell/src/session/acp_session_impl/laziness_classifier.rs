@@ -700,3 +700,34 @@ pub(crate) fn build_laziness_nudge(
     };
     format!("Idle-stall detector flagged this session: {evidence}\n\n{rule}")
 }
+
+#[cfg(test)]
+mod abort_reason_tests {
+    use super::*;
+    use crate::session::events::{
+        LAZINESS_ABORT_CLASSIFIER_ERROR, LAZINESS_ABORT_MODEL_SWITCH, LAZINESS_ABORT_TIMEOUT,
+        LAZINESS_ABORT_USER_INPUT,
+    };
+
+    #[test]
+    fn laziness_abort_reason_consts_are_distinct() {
+        // Driven off `LazinessAbortReason::all()`, so this test only sees a
+        // new variant once it is added there.
+        let from_enum: std::collections::BTreeSet<&'static str> = LazinessAbortReason::all()
+            .iter()
+            .map(|r| r.as_const_str())
+            .collect();
+        let from_consts: std::collections::BTreeSet<&'static str> = [
+            LAZINESS_ABORT_USER_INPUT,
+            LAZINESS_ABORT_MODEL_SWITCH,
+            LAZINESS_ABORT_TIMEOUT,
+            LAZINESS_ABORT_CLASSIFIER_ERROR,
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            from_enum, from_consts,
+            "LazinessAbortReason variants must map 1:1 to LAZINESS_ABORT_* consts",
+        );
+    }
+}

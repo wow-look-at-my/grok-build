@@ -287,7 +287,7 @@ use run_loop::*;
 #[path = "acp_session_impl/spawn.rs"]
 mod spawn;
 use super::acp_types::*;
-pub use spawn::SessionThread;
+pub(crate) use spawn::SessionThread;
 pub(crate) use spawn::*;
 /// Client-registered hook gates (the `x.ai/hooks/run` reverse request).
 mod hooks;
