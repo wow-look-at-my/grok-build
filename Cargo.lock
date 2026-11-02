@@ -13754,6 +13754,7 @@ dependencies = [
 name = "xai-grok-http"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "rcgen",
  "rustls",
  "serde_json",
@@ -13764,6 +13765,7 @@ dependencies = [
  "xai-grok-net",
  "xai-grok-sampler",
  "xai-grok-telemetry",
+ "xai-grok-test-support",
  "xai-grok-version",
  "xai-grok-workspace",
 ]
@@ -14297,6 +14299,7 @@ dependencies = [
  "bytes",
  "chrono",
  "eventsource-stream",
+ "flate2",
  "futures-util",
  "indexmap",
  "rcgen",

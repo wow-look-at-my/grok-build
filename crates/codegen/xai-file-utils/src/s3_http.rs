@@ -150,7 +150,7 @@ async fn send(
 
     let response = http::Response::<xai_grok_net::Body>::from(response);
     let response = response.map(SdkBody::from_body_1_x);
-    HttpResponse::try_from(response).map_err(|e| ConnectorError::other(e, None))
+    HttpResponse::try_from(response).map_err(|e| ConnectorError::other(Box::new(e), None))
 }
 
 fn connector_error(e: xai_grok_net::Error) -> ConnectorError {
