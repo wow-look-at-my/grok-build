@@ -19,7 +19,38 @@ const LOOP_GROWTH_RESERVE_TOKENS: u64 = 16_000;
 /// The canonical name of the append-capable task-list tool.
 const TODO_WRITE: &str = "todo_write";
 
-pub use crate::session::actor_types::{TodoCaptureError, TodoCaptureOutcome};
+/// What a `/todo` run put on the list.
+#[derive(Debug, Clone)]
+pub struct TodoCaptureOutcome {
+    /// Contents of the appended items, in the order they were added.
+    pub added: Vec<String>,
+    /// Read-only tool calls the capture agent spent getting there.
+    pub tools_used: usize,
+    /// The "the user assigned this" text to start a turn with, when no turn was running and nothing was put in front of the agent.
+    pub wake_reminder: Option<String>,
+}
+
+/// Failure surface of a `/todo` capture run. Typed to the ACP boundary so
+/// model errors keep the canonical mapping (rate limits, auth) instead of a
+/// flattened string, same as [`SideQuestionError`](crate::session::SideQuestionError).
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum TodoCaptureError {
+    #[error("todo capture model call failed: {0}")]
+    Sampling(#[from] SamplingError),
+    #[error("failed to prepare client: {0}")]
+    PrepareClient(String),
+    #[error(
+        "/todo needs a task-list tool whose items carry ids (`todo_write`); this session's is `{0}`, which identifies items by their text alone, so a capture cannot address the one it adds"
+    )]
+    UnsupportedTodoTool(String),
+    #[error(
+        "the capture agent finished without adding a todo ({reason}). Transcript: {transcript}"
+    )]
+    NothingAdded { reason: String, transcript: String },
+    #[error("adding the todo failed: {0}")]
+    TodoWriteFailed(String),
+}
 
 /// Tool kinds the capture agent may run. Narrower than the main turn's
 /// read-only set (`prepare_tool_call`): `EnterPlan`/`ExitPlan` change session

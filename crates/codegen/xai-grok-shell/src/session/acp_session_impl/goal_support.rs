@@ -254,7 +254,10 @@ pub(super) fn goal_reminder_plan_path(
         .flatten()
 }
 
-pub(crate) use crate::session::actor_types::GOAL_REVERIFY_AFTER_DEFAULT;
+/// Worker rounds a refuted goal may run without re-running verification before the continuation directive escalates to a forceful "re-verify now" block.
+/// A refuted weak model can otherwise churn indefinitely.
+/// Override with `GROK_GOAL_REVERIFY_AFTER` (floored at 1).
+pub(crate) const GOAL_REVERIFY_AFTER_DEFAULT: u32 = 8;
 
 /// Stable substring present in every rendered continuation directive (from [`GOAL_CONTINUATION_DIRECTIVE_TEMPLATE`]) and in no other reminder.
 /// Used to find and drop the prior turn's directive from history so only the latest copy persists.

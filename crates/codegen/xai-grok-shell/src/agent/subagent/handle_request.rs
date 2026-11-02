@@ -1826,6 +1826,7 @@ pub(crate) async fn run_shell_child(
                     child_signals: child_handle.signals_handle.clone(),
                     _child_thread: None,
                     receipt_sink,
+                    #[cfg(test)]
                     force_queue_envelope: false,
                     active_message_parent_session_id: ctx.parent_session_id.clone(),
                     active_message_parent_prompt_index: ctx

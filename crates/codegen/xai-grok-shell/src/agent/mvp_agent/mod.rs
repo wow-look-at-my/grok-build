@@ -104,9 +104,47 @@ pub(crate) fn reject_direct_hub_cloud_meta(
     }
     Ok(())
 }
-pub(crate) use crate::agent::telemetry_config::{
-    jwt_tier_claim, resolve_subscription_tier_for_telemetry,
-};
+/// Extract the numeric `tier` claim from a JWT access token (no signature verification).
+/// Maps subscription-tier enum values to display strings the telemetry crate canonicalizes.
+pub(crate) fn jwt_tier_claim(jwt: &str) -> Option<String> {
+    use base64::Engine;
+    let payload_b64 = jwt.split('.').nth(1)?;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .ok()?;
+    let claims: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+    let tier = claims.get("tier")?.as_u64()?;
+    Some(
+        match tier {
+            1 => "supergrok",
+            2 => "x_basic",
+            3 => "x_premium",
+            4 => "x_premium_plus",
+            5 => "supergrok_heavy",
+            6 => "supergrok_lite",
+            7 => "supergrok_plus",
+            0 => "free",
+            _ => return Some(tier.to_string()),
+        }
+            .to_string(),
+    )
+}
+/// Resolve telemetry / AuthMeta `subscription_tier`.
+/// Precedence: CCP `/settings` `subscription_tier_display` (when present and non-empty) [`AuthMode::ApiKey`] resolves to `"api_key"` (never free)
+/// JWT `tier` claim via [`jwt_tier_claim`] (OAuth free resolves to `"free"`)
+pub(crate) fn resolve_subscription_tier_for_telemetry(
+    display: Option<String>,
+    auth: Option<&xai_grok_login::GrokAuth>,
+) -> Option<String> {
+    if let Some(t) = display.filter(|s| !s.trim().is_empty()) {
+        return Some(t);
+    }
+    let auth = auth?;
+    if auth.auth_mode == xai_grok_login::AuthMode::ApiKey {
+        return Some("api_key".into());
+    }
+    jwt_tier_claim(&auth.key)
+}
 /// Whether a JWT `tier` claim (from [`jwt_tier_claim`]) reflects the live `/user?include=subscription` tier string. That string comes from the subscription API (QUALIFYING_TIERS).
 /// The post-unblock catalog refresh must not treat *any* present claim as enough.
 /// An older paid claim (e.g. `x_basic`) can remain on the access token while `/user` already reports a newly qualifying tier (e.g. `SuperGrokPro`). In that case `/v1/models` would still be targeted at the stale level (the "stale JWT tier skips retry" bug).
@@ -1180,7 +1218,7 @@ mod session_registry;
 mod session_lifecycle;
 mod agent_ops;
 mod acp_agent;
-pub(crate) use crate::agent::models_effort as reasoning_effort;
+pub(crate) mod reasoning_effort;
 mod sampler_prewarm;
 mod session_setup;
 pub use session_setup::SessionSetupPhase;

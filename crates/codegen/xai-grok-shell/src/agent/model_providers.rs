@@ -1,0 +1,1572 @@
+use std::num::NonZeroU64;
+
+use indexmap::IndexMap;
+
+use xai_grok_sampling_types::{
+    CompactionAtTokens, CompactionsRemaining, ReasoningEffort, ReasoningEffortOption,
+};
+
+use super::config::{ConfigModelOverride, EnvKeys};
+use super::config_model_override_parse::{ConfigWarning, ConfigWarningKind};
+use crate::sampling::ApiBackend;
+
+/// A `[model_providers.<id>]` block: the settings every model behind one
+/// endpoint shares. A `[model.<id>]` that names the provider with
+/// `model_provider = "<id>"` inherits each field it leaves unset, so an
+/// endpoint, a credential. A wire format or a header set is written once.
+/// Every field here is also a `[model.<id>]` field, and the model's own value
+/// always wins. What is NOT here is what identifies one model: `model`,
+/// `name`, `description`.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct ModelProviderConfig {
+    pub base_url: Option<String>,
+    pub api_base_url: Option<String>,
+    pub env_key: Option<EnvKeys>,
+    pub api_key: Option<String>,
+    pub api_backend: Option<ApiBackend>,
+    /// Static request headers.
+    pub extra_headers: IndexMap<String, String>,
+    /// Query parameters folded into every request URL; inherited per key.
+    pub query_params: IndexMap<String, String>,
+    /// Header name to environment variable; inherited per key, resolved at client build.
+    pub env_http_headers: IndexMap<String, String>,
+    pub auth_provider: Option<String>,
+    pub auth: Option<xai_grok_config_types::AuthProviderConfig>,
+    pub context_window: Option<u64>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub max_completion_tokens: Option<u32>,
+    pub max_retries: Option<u32>,
+    pub inference_idle_timeout_secs: Option<u64>,
+    pub stream_tool_calls: Option<bool>,
+    pub strict_message_schema: Option<bool>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+    pub supports_reasoning_effort: Option<bool>,
+    pub reasoning_efforts: Vec<ReasoningEffortOption>,
+    pub supports_backend_search: Option<bool>,
+    pub show_model_fingerprint: Option<bool>,
+    pub use_concise: Option<bool>,
+    pub agent_type: Option<String>,
+    pub hidden: Option<bool>,
+    pub supported_in_api: Option<bool>,
+    pub compactions_remaining: Option<CompactionsRemaining>,
+    pub compaction_at_tokens: Option<CompactionAtTokens>,
+    pub pricing: Option<xai_grok_sampling_types::ModelPricing>,
+    pub min_output_tokens_per_sec: Option<f64>,
+    pub ttft_timeout_secs: Option<u64>,
+    /// Ask this provider for its model list. Default on.
+    pub models_autodetect: Option<bool>,
+    /// Listing URL for the discovery above. Unset asks `<base_url>/models`.
+    pub models_list_url: Option<String>,
+    /// Globs that mark a discovered or configured model of this provider as a favorite.
+    pub favorite_models: Vec<String>,
+    /// Which shape this provider's model listing has. The default reads an OpenAI `{data: [...]}` body.
+    pub models_list_dialect: Option<ModelsListDialect>,
+    /// Which window a local dialect reports: the one the runner is LOADED at, or the model's maximum.
+    pub context_window_source: Option<ContextWindowSource>,
+    /// Suppress the modelinfo price lookup for this provider's models.
+    pub pricing_lookup_enabled: Option<bool>,
+    /// Extra top-level fields merged into every request body this provider serves.
+    pub extra_body: IndexMap<String, toml::Value>,
+    /// Request-body cap of this endpoint; inherited by models that set none of their own.
+    pub max_request_bytes: Option<NonZeroU64>,
+}
+
+/// The shape of a provider's model listing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelsListDialect {
+    /// `GET <base>/models` answering `{ "data": [...] }`.
+    #[default]
+    Openai,
+    /// `GET <host>/api/tags`, with `POST <host>/api/show` per model for the window and capabilities and `GET <host>/api/ps` for residency.
+    Ollama,
+    /// `GET <host>/api/v1/models`, which carries all of them in one answer.
+    Lmstudio,
+}
+
+impl ModelsListDialect {
+    /// Whether this dialect describes a local runtime — one that serves models
+    /// off this machine, charges nothing, and loads and unloads them.
+    pub(crate) fn is_local_runtime(self) -> bool {
+        matches!(self, Self::Ollama | Self::Lmstudio)
+    }
+}
+
+/// Which of a local runtime's windows reaches the catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextWindowSource {
+    /// The window the loaded instance is running at.
+    #[default]
+    Loaded,
+    /// The model's own maximum, whatever it is loaded at.
+    Max,
+}
+
+impl ModelProviderConfig {
+    /// Discovery is on unless the provider turns it off.
+    pub(crate) fn autodetect_enabled(&self) -> bool {
+        self.models_autodetect.unwrap_or(true)
+    }
+
+    /// Which listing shape to read. Unset means the OpenAI one.
+    pub(crate) fn dialect(&self) -> ModelsListDialect {
+        self.models_list_dialect.unwrap_or_default()
+    }
+
+    /// Which window a local dialect reports.
+    pub(crate) fn window_source(&self) -> ContextWindowSource {
+        self.context_window_source.unwrap_or_default()
+    }
+
+    /// The URL that lists this provider's models, or `None` when the provider
+    /// declares no endpoint to ask.
+    pub(crate) fn resolve_models_list_url(&self) -> Option<String> {
+        if let Some(url) = self.models_list_url.as_deref().map(str::trim)
+            && !url.is_empty()
+        {
+            return Some(url.to_owned());
+        }
+        let base = self
+            .base_url
+            .as_deref()
+            .or(self.api_base_url.as_deref())
+            .map(str::trim)
+            .filter(|b| !b.is_empty())?;
+        Some(crate::remote::models_list_url_for_base(
+            base.trim_end_matches('/'),
+        ))
+    }
+}
+
+/// The defaults a well-known provider id carries, so
+/// `[model_providers.ollama]` with nothing in it is a complete configuration.
+/// Only fields the user LEFT UNSET are filled. Someone who runs Ollama on
+/// another port writes `base_url` and keeps the dialect; someone who wants
+/// the OpenAI listing writes `models_list_dialect = "openai"` and keeps the
+/// URL.
+pub(crate) fn apply_builtin_preset(id: &str, provider: &mut ModelProviderConfig) {
+    let (default_base, dialect) = match id {
+        "ollama" => ("http://localhost:11434/v1", ModelsListDialect::Ollama),
+        "lmstudio" | "lm-studio" | "lm_studio" => {
+            ("http://localhost:1234/v1", ModelsListDialect::Lmstudio)
+        }
+        _ => return,
+    };
+    if provider.base_url.is_none() && provider.api_base_url.is_none() {
+        provider.base_url = Some(default_base.to_owned());
+    }
+    if provider.models_list_dialect.is_none() {
+        provider.models_list_dialect = Some(dialect);
+    }
+    // A local runtime needs no credential, and a session bearer must never be
+    // sent to one.
+    if provider.pricing_lookup_enabled.is_none() {
+        provider.pricing_lookup_enabled = Some(false);
+    }
+}
+
+/// Fill the provider's header defaults into a model's own set. The presence
+/// check is case-insensitive because these lower into an `http::HeaderMap`, so
+/// a provider `X-Foo` must not shadow a model's `x-foo`.
+pub(crate) fn inherit_headers(
+    model: &mut IndexMap<String, String>,
+    provider: &IndexMap<String, String>,
+) {
+    for (name, value) in provider {
+        if !model.keys().any(|own| own.eq_ignore_ascii_case(name)) {
+            model.insert(name.clone(), value.clone());
+        }
+    }
+}
+
+pub(crate) fn model_provider_auth_name(provider_id: &str) -> String {
+    format!("model_provider:{provider_id}")
+}
+
+pub(crate) fn auth_config_issues(
+    config: &xai_grok_config_types::AuthProviderConfig,
+) -> Vec<(&'static str, ConfigWarningKind, String)> {
+    let mut issues = Vec::new();
+    if !config.is_usable() {
+        issues.push((
+            "command",
+            ConfigWarningKind::InvalidValue,
+            "missing or empty command; models resolve with no credential".to_owned(),
+        ));
+    }
+    let skew = xai_grok_login::PROVIDER_TOKEN_EXPIRY_SKEW_SECS;
+    if config.token_ttl_secs.is_some_and(|ttl| ttl <= skew) {
+        issues.push((
+            "token_ttl_secs",
+            ConfigWarningKind::InvalidValue,
+            format!(
+                "at or below the {skew}s refresh margin; the command will run before every turn"
+            ),
+        ));
+    }
+    if let Some(timeout) = config.timeout_secs
+        && !(1..=xai_grok_login::PROVIDER_TIMEOUT_CEILING_SECS).contains(&timeout)
+    {
+        let ceiling = xai_grok_login::PROVIDER_TIMEOUT_CEILING_SECS;
+        issues.push((
+            "timeout_secs",
+            ConfigWarningKind::InvalidValue,
+            if timeout == 0 {
+                "below the 1 second minimum; clamped to 1".to_owned()
+            } else {
+                format!("above the {ceiling}s maximum; clamped to {ceiling}")
+            },
+        ));
+    }
+    issues
+}
+
+pub(crate) fn parse_model_providers(
+    raw_config: &toml::Value,
+) -> (IndexMap<String, ModelProviderConfig>, Vec<ConfigWarning>) {
+    let mut providers = IndexMap::new();
+    let mut warnings = Vec::new();
+    let Some(section) = raw_config.get("model_providers") else {
+        return (providers, warnings);
+    };
+    let Some(table) = section.as_table() else {
+        warnings.push(ConfigWarning::model_provider_section(
+            ConfigWarningKind::NotATable,
+            format!(
+                "`model_providers` must be a table of [model_providers.<id>] entries, got {}; \
+                 all model providers ignored",
+                section.type_str()
+            ),
+        ));
+        return (providers, warnings);
+    };
+    for (id, value) in table {
+        let mut unknown = Vec::new();
+        match serde_ignored::deserialize::<_, _, ModelProviderConfig>(value.clone(), |path| {
+            unknown.push(path.to_string());
+        }) {
+            Ok(mut provider) => {
+                apply_builtin_preset(id, &mut provider);
+                for key in unknown {
+                    warnings.push(ConfigWarning::model_provider(
+                        id,
+                        Some(key.as_str()),
+                        ConfigWarningKind::UnknownField,
+                        "unrecognized key; field ignored".to_owned(),
+                    ));
+                }
+                if let Some(auth) = &provider.auth {
+                    for (field, kind, reason) in auth_config_issues(auth) {
+                        warnings.push(ConfigWarning::model_provider(
+                            id,
+                            Some(&format!("auth.{field}")),
+                            kind,
+                            reason,
+                        ));
+                    }
+                }
+                let has_helper = provider.auth.is_some() || provider.auth_provider.is_some();
+                let has_static_api_key = provider
+                    .api_key
+                    .as_deref()
+                    .map(str::trim)
+                    .is_some_and(|k| !k.is_empty());
+                if has_helper && has_static_api_key {
+                    warnings.push(ConfigWarning::model_provider(
+                        id,
+                        Some("api_key"),
+                        ConfigWarningKind::ConflictingFields,
+                        "api_key shadows this provider's auth helper; the static key always \
+                         takes precedence, so the helper never runs for inheriting models"
+                            .to_owned(),
+                    ));
+                } else if has_helper
+                    && provider
+                        .env_key
+                        .as_ref()
+                        .and_then(EnvKeys::primary)
+                        .is_some()
+                {
+                    warnings.push(ConfigWarning::model_provider(
+                        id,
+                        Some("env_key"),
+                        ConfigWarningKind::ConflictingFields,
+                        "env_key may shadow this provider's auth helper; env_key takes precedence \
+                         when its variable resolves, otherwise the helper runs"
+                            .to_owned(),
+                    ));
+                }
+                if provider.auth_provider.is_some() && provider.auth.is_some() {
+                    warnings.push(ConfigWarning::model_provider(
+                        id,
+                        Some("auth"),
+                        ConfigWarningKind::ConflictingFields,
+                        "inline auth is shadowed by auth_provider on this provider; the referenced \
+                         provider takes precedence, so the inline helper never runs"
+                            .to_owned(),
+                    ));
+                }
+                providers.insert(id.clone(), provider);
+            }
+            Err(error) => {
+                warnings.push(ConfigWarning::model_provider(
+                    id,
+                    None,
+                    ConfigWarningKind::InvalidValue,
+                    format!(
+                        "failed to parse ({error}); provider skipped, inheriting models \
+                         resolve with defaults"
+                    ),
+                ));
+            }
+        }
+    }
+    (providers, warnings)
+}
+
+impl ConfigModelOverride {
+    pub(crate) fn with_provider_defaults(
+        &self,
+        provider: &ModelProviderConfig,
+        provider_id: &str,
+    ) -> Self {
+        let ModelProviderConfig {
+            base_url,
+            api_base_url,
+            env_key,
+            api_key,
+            api_backend,
+            extra_headers,
+            query_params,
+            env_http_headers,
+            auth_provider,
+            auth,
+            context_window,
+            temperature,
+            top_p,
+            max_completion_tokens,
+            max_retries,
+            inference_idle_timeout_secs,
+            stream_tool_calls,
+            strict_message_schema,
+            reasoning_effort,
+            supports_reasoning_effort,
+            reasoning_efforts,
+            supports_backend_search,
+            show_model_fingerprint,
+            use_concise,
+            agent_type,
+            hidden,
+            supported_in_api,
+            compactions_remaining,
+            compaction_at_tokens,
+            pricing,
+            min_output_tokens_per_sec,
+            ttft_timeout_secs,
+            // Discovery and favorites describe the provider's LISTING, not a model's connection.
+            models_autodetect: _,
+            models_list_url: _,
+            favorite_models: _,
+            models_list_dialect: _,
+            context_window_source: _,
+            pricing_lookup_enabled: _,
+            extra_body,
+            max_request_bytes,
+        } = provider;
+
+        let mut merged = self.clone();
+        merged.model_provider = None;
+        merged.base_url = merged.base_url.or_else(|| base_url.clone());
+        merged.api_base_url = merged.api_base_url.or_else(|| api_base_url.clone());
+        // A provider has a single URL, `base_url`. `api_base_url` is an
+        // older spelling of it.
+        if merged.base_url.is_none() {
+            merged.base_url = merged.api_base_url.take();
+        } else {
+            merged.api_base_url = None;
+        }
+        merged.api_backend = merged.api_backend.or_else(|| api_backend.clone());
+        merged.context_window = merged.context_window.or(*context_window);
+        merged.temperature = merged.temperature.or(*temperature);
+        merged.top_p = merged.top_p.or(*top_p);
+        merged.max_completion_tokens = merged.max_completion_tokens.or(*max_completion_tokens);
+        merged.max_retries = merged.max_retries.or(*max_retries);
+        merged.inference_idle_timeout_secs = merged
+            .inference_idle_timeout_secs
+            .or(*inference_idle_timeout_secs);
+        merged.stream_tool_calls = merged.stream_tool_calls.or(*stream_tool_calls);
+        merged.strict_message_schema = merged.strict_message_schema.or(*strict_message_schema);
+        merged.reasoning_effort = merged.reasoning_effort.or(*reasoning_effort);
+        merged.supports_reasoning_effort = merged
+            .supports_reasoning_effort
+            .or(*supports_reasoning_effort);
+        merged.supports_backend_search =
+            merged.supports_backend_search.or(*supports_backend_search);
+        merged.show_model_fingerprint = merged.show_model_fingerprint.or(*show_model_fingerprint);
+        merged.use_concise = merged.use_concise.or(*use_concise);
+        merged.agent_type = merged.agent_type.or_else(|| agent_type.clone());
+        merged.hidden = merged.hidden.or(*hidden);
+        merged.supported_in_api = merged.supported_in_api.or(*supported_in_api);
+        merged.compactions_remaining = merged.compactions_remaining.or(*compactions_remaining);
+        merged.compaction_at_tokens = merged.compaction_at_tokens.or(*compaction_at_tokens);
+        merged.pricing = merged.pricing.or_else(|| pricing.clone());
+        merged.min_output_tokens_per_sec = merged
+            .min_output_tokens_per_sec
+            .or(*min_output_tokens_per_sec);
+        merged.ttft_timeout_secs = merged.ttft_timeout_secs.or(*ttft_timeout_secs);
+        merged.max_request_bytes = merged.max_request_bytes.or(*max_request_bytes);
+        if merged.reasoning_efforts.is_empty() {
+            merged.reasoning_efforts = reasoning_efforts.clone();
+        }
+        // Per KEY, not wholesale.
+        inherit_headers(&mut merged.extra_headers, extra_headers);
+        inherit_headers(&mut merged.env_http_headers, env_http_headers);
+        for (k, v) in query_params {
+            if !merged.query_params.contains_key(k) {
+                merged.query_params.insert(k.clone(), v.clone());
+            }
+        }
+        // Per key for the same reason as the headers: a model that sets one
+        // body field of its own keeps the provider's others.
+        for (k, v) in extra_body {
+            if !merged.extra_body.contains_key(k) {
+                merged.extra_body.insert(k.clone(), v.clone());
+            }
+        }
+        let model_sets_own_api_key = self
+            .api_key
+            .as_deref()
+            .is_some_and(|k| !k.trim().is_empty());
+        let model_sets_own_env_key = self.env_key.as_ref().and_then(EnvKeys::primary).is_some();
+        let model_has_own_auth =
+            model_sets_own_api_key || model_sets_own_env_key || self.auth_provider.is_some();
+        if !model_has_own_auth {
+            merged.api_key = api_key.clone();
+            merged.env_key = env_key.clone();
+            merged.auth_provider = auth_provider
+                .clone()
+                .or_else(|| auth.as_ref().map(|_| model_provider_auth_name(provider_id)));
+        }
+        merged
+    }
+
+    pub(crate) fn with_missing_provider(&self) -> Self {
+        let mut merged = self.clone();
+        merged.model_provider = None;
+        merged
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU64;
+
+    use crate::agent::config::{
+        Config, any_provider_has_own_credentials, first_provider_with_own_credentials,
+        resolve_credentials, resolve_model_list, sampling_config_for_model,
+    };
+
+    /// The whole point of the provider-side credential probe: a session that
+    /// declared another endpoint must not be sent to the grok.com sign-in. The
+    /// catalog cannot say so here because autodetection has not run yet.
+    #[test]
+    fn a_declared_provider_is_byok_before_any_of_its_models_are_known() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.generic]
+            base_url = "https://generic.example/v1"
+            api_key = "sk-generic"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+
+        let models = resolve_model_list(&cfg, None);
+        assert!(
+            !models
+                .values()
+                .any(crate::agent::config::ModelEntry::has_own_credentials),
+            "no [model.<id>] block was written, so the catalog carries no BYOK model",
+        );
+        assert_eq!(first_provider_with_own_credentials(&cfg), Some("generic"));
+        assert!(
+            crate::agent::auth_method::should_advertise_xai_api_key(
+                false,
+                models.values(),
+                any_provider_has_own_credentials(&cfg),
+            ),
+            "the provider's own credential is what makes the sign-in optional",
+        );
+    }
+
+    /// A provider that declares no endpoint of its own resolves to the xAI base
+    /// with no credential. Nothing there stands in for a sign-in.
+    #[test]
+    fn a_provider_that_declares_no_endpoint_is_not_a_credential() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.tweaks]
+            temperature = 0.5
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        assert!(!any_provider_has_own_credentials(&cfg));
+    }
+
+    /// The admin kill switch is above every credential, provider included.
+    #[test]
+    fn disable_api_key_auth_still_wins_over_a_provider() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.generic]
+            base_url = "https://generic.example/v1"
+            api_key = "sk-generic"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        assert!(any_provider_has_own_credentials(&cfg));
+        assert!(!crate::agent::auth_method::should_advertise_xai_api_key(
+            true,
+            resolve_model_list(&cfg, None).values(),
+            any_provider_has_own_credentials(&cfg),
+        ));
+    }
+    #[test]
+    fn a_provider_with_only_api_base_url_routes_its_models_there() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [endpoints]
+            cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.com/v1"
+
+            [model_providers.messages]
+            api_base_url = "https://inference.internal/anthropic"
+
+            [model.claude]
+            model = "claude-opus-5"
+            model_provider = "messages"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("claude").expect("model should exist");
+        assert_eq!(model.info.base_url, "https://inference.internal/anthropic");
+    }
+    #[test]
+    fn model_inherits_provider_connection_defaults() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            context_window = 123456
+
+            [model_providers.gateway.extra_headers]
+            X-Corp = "yes"
+
+            [model.via-gateway]
+            model = "m"
+            model_provider = "gateway"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        assert!(cfg.model_providers.contains_key("gateway"));
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("via-gateway").expect("model should exist");
+        assert_eq!(model.info.base_url, "https://gateway.example/v1");
+        assert_eq!(model.info.context_window.get(), 123456);
+        assert_eq!(
+            model.info.extra_headers.get("X-Corp").map(String::as_str),
+            Some("yes")
+        );
+        assert!(
+            model.has_own_credentials(),
+            "a custom endpoint without a credential is BYOK, not session-authed"
+        );
+        assert_eq!(
+            resolve_credentials(model, Some("session-jwt")).api_key,
+            None,
+            "the session token must not leak to the provider's custom endpoint"
+        );
+    }
+
+    #[test]
+    fn model_fields_override_provider_defaults() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            context_window = 100000
+
+            [model.override-url]
+            model = "m"
+            model_provider = "gateway"
+            base_url = "https://model-specific.example/v1"
+            context_window = 200000
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("override-url").expect("model should exist");
+        assert_eq!(model.info.base_url, "https://model-specific.example/v1");
+        assert_eq!(model.info.context_window.get(), 200000);
+    }
+
+    #[test]
+    fn model_inherits_provider_max_request_bytes() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.messages-gateway]
+            base_url = "https://gateway.example/v1"
+            api_backend = "messages"
+            max_request_bytes = 20000000
+
+            [model.inherits]
+            model = "claude-sonnet"
+            model_provider = "messages-gateway"
+
+            [model.overrides]
+            model = "claude-opus"
+            model_provider = "messages-gateway"
+            max_request_bytes = 10000000
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let max_request_bytes = |key: &str| {
+            let model = resolved.get(key).expect("model should exist");
+            sampling_config_for_model(model, resolve_credentials(model, None), None, None, None)
+                .max_request_bytes
+        };
+        assert_eq!(
+            NonZeroU64::new(20_000_000),
+            max_request_bytes("inherits"),
+            "the provider cap reaches a model that sets none and beats the messages default"
+        );
+        assert_eq!(
+            NonZeroU64::new(10_000_000),
+            max_request_bytes("overrides"),
+            "the model's own cap overrides the provider's"
+        );
+    }
+
+    #[test]
+    fn model_provider_inline_auth_registers_synthetic_provider() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            context_window = 200000
+
+            [model_providers.gateway.auth]
+            command = "printf gw-token"
+            token_ttl_secs = 3600
+
+            [model.byok-via-gateway]
+            model = "m"
+            model_provider = "gateway"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        assert_eq!(
+            cfg.auth_providers
+                .get("model_provider:gateway")
+                .map(|c| c.command.as_str()),
+            Some("printf gw-token"),
+            "inline auth registers a synthetic provider keyed by the id"
+        );
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved
+            .get("byok-via-gateway")
+            .expect("model should exist");
+        let provider = model
+            .auth_provider
+            .as_ref()
+            .expect("the model inherits the provider's auth");
+        assert_eq!(provider.name, "model_provider:gateway");
+        assert_eq!(provider.config.command, "printf gw-token");
+        assert!(
+            model.has_own_credentials(),
+            "a provider-backed model is BYOK (session token must not leak)"
+        );
+    }
+
+    #[test]
+    fn model_with_own_key_ignores_provider_auth() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            context_window = 200000
+
+            [model_providers.gateway.auth]
+            command = "printf gw-token"
+
+            [model.own-key]
+            model = "m"
+            model_provider = "gateway"
+            api_key = "sk-model-own"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("own-key").expect("model should exist");
+        assert_eq!(
+            model.info.base_url, "https://gateway.example/v1",
+            "non-auth connection fields are still inherited"
+        );
+        assert_eq!(
+            model.effective_auth_provider().map(|p| p.name.as_str()),
+            None,
+            "the model's own key shadows the provider's auth"
+        );
+        let creds = resolve_credentials(model, Some("session-jwt"));
+        assert_eq!(creds.api_key.as_deref(), Some("sk-model-own"));
+    }
+
+    #[test]
+    fn undefined_model_provider_fails_closed() {
+        use super::super::config_model_override_parse::{ConfigWarningKind, WarningTarget};
+
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model.dangling]
+            model = "m"
+            base_url = "https://third-party.example/v1"
+            context_window = 200000
+            model_provider = "ghost"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        assert!(
+            cfg.config_warnings.iter().any(|w| {
+                w.kind == ConfigWarningKind::InvalidValue
+                    && matches!(
+                        &w.target,
+                        WarningTarget::Model { field, .. }
+                            if field.as_deref() == Some("model_provider")
+                    )
+            }),
+            "an undefined provider reference warns: {:?}",
+            cfg.config_warnings
+        );
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("dangling").expect("model should exist");
+        assert_eq!(
+            model.info.base_url, "https://third-party.example/v1",
+            "the model keeps its own connection fields"
+        );
+        assert!(
+            model.has_own_credentials(),
+            "an undefined provider leaves the model BYOK, not session-authed"
+        );
+        let creds = resolve_credentials(model, Some("session-jwt"));
+        assert_eq!(
+            creds.api_key, None,
+            "no credential resolves and the session token does not leak to the model's base_url"
+        );
+    }
+
+    #[test]
+    fn undefined_model_provider_keeps_model_own_key() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model.own-key]
+            model = "m"
+            base_url = "https://third-party.example/v1"
+            context_window = 200000
+            api_key = "sk-model-own"
+            model_provider = "ghost"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("own-key").expect("model should exist");
+        let creds = resolve_credentials(model, Some("session-jwt"));
+        assert_eq!(creds.api_key.as_deref(), Some("sk-model-own"));
+    }
+
+    #[test]
+    fn model_provider_parse_warnings_are_lenient_and_specific() {
+        use super::super::config_model_override_parse::{ConfigWarningKind, WarningTarget};
+
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.good]
+            base_url = "https://good.example/v1"
+
+            [model_providers.bad-type]
+            context_window = "not-a-number"
+
+            [model_providers.typo]
+            base_url = "https://typo.example/v1"
+            unknown_field = 5
+
+            [model.on-broken-provider]
+            model = "m"
+            base_url = "https://x.example/v1"
+            context_window = 200000
+            model_provider = "bad-type"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config)
+            .expect("one bad provider must not fail the config");
+        assert!(cfg.model_providers.contains_key("good"));
+        assert!(
+            !cfg.model_providers.contains_key("bad-type"),
+            "a malformed provider is skipped"
+        );
+
+        let has_provider = |id: &str, field: Option<&str>, kind: ConfigWarningKind| {
+            cfg.config_warnings.iter().any(|w| {
+                w.kind == kind
+                    && matches!(
+                        &w.target,
+                        WarningTarget::ModelProvider { id: i, field: f }
+                            if i == id && f.as_deref() == field
+                    )
+            })
+        };
+        assert!(has_provider(
+            "bad-type",
+            None,
+            ConfigWarningKind::InvalidValue
+        ));
+        assert!(has_provider(
+            "typo",
+            Some("unknown_field"),
+            ConfigWarningKind::UnknownField
+        ));
+        assert!(
+            !cfg.config_warnings.iter().any(|w| {
+                matches!(
+                    &w.target,
+                    WarningTarget::Model { field, .. }
+                        if field.as_deref() == Some("model_provider")
+                )
+            }),
+            "a declared-but-malformed provider must not also warn as undefined: {:?}",
+            cfg.config_warnings
+        );
+
+        let raw_config: toml::Value = toml::from_str(r#"model_providers = "oops""#).unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config)
+            .expect("a non-table model_providers must not fail the config");
+        assert!(cfg.model_providers.is_empty());
+        assert!(
+            cfg.config_warnings.iter().any(|w| {
+                matches!(w.target, WarningTarget::ModelProviderSection)
+                    && w.kind == ConfigWarningKind::NotATable
+            }),
+            "non-table section warns: {:?}",
+            cfg.config_warnings
+        );
+    }
+
+    #[test]
+    fn model_provider_conflicting_credentials_warn() {
+        use super::super::config_model_override_parse::{ConfigWarningKind, WarningTarget};
+
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.static-shadows]
+            base_url = "https://a.example/v1"
+            api_key = "sk-static"
+            [model_providers.static-shadows.auth]
+            command = "printf tok"
+
+            [model_providers.env-shadows]
+            base_url = "https://b.example/v1"
+            env_key = "SOME_VAR"
+            [model_providers.env-shadows.auth]
+            command = "printf tok"
+
+            [model_providers.two-helpers]
+            base_url = "https://c.example/v1"
+            auth_provider = "corp"
+            [model_providers.two-helpers.auth]
+            command = "printf tok"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let has = |id: &str, field: &str| {
+            cfg.config_warnings.iter().any(|w| {
+                w.kind == ConfigWarningKind::ConflictingFields
+                    && matches!(
+                        &w.target,
+                        WarningTarget::ModelProvider { id: i, field: f }
+                            if i == id && f.as_deref() == Some(field)
+                    )
+            })
+        };
+        assert!(
+            has("static-shadows", "api_key"),
+            "a static api_key shadows the helper: {:?}",
+            cfg.config_warnings
+        );
+        assert!(
+            has("env-shadows", "env_key"),
+            "an env_key may shadow the helper: {:?}",
+            cfg.config_warnings
+        );
+        assert!(
+            has("two-helpers", "auth"),
+            "auth_provider shadows the inline auth helper: {:?}",
+            cfg.config_warnings
+        );
+    }
+
+    #[test]
+    fn model_provider_undefined_auth_provider_warns() {
+        use super::super::config_model_override_parse::{ConfigWarningKind, WarningTarget};
+
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            auth_provider = "nonexistent"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        assert!(
+            cfg.config_warnings.iter().any(|w| {
+                w.kind == ConfigWarningKind::InvalidValue
+                    && matches!(
+                        &w.target,
+                        WarningTarget::ModelProvider { id, field }
+                            if id == "gateway" && field.as_deref() == Some("auth_provider")
+                    )
+            }),
+            "an undefined provider auth_provider reference warns: {:?}",
+            cfg.config_warnings
+        );
+    }
+
+    #[test]
+    fn model_provider_inline_auth_namespace_collision_warns() {
+        use super::super::config_model_override_parse::{ConfigWarningKind, WarningTarget};
+
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [auth_provider."model_provider:gateway"]
+            command = "printf hand-written"
+
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+
+            [model_providers.gateway.auth]
+            command = "printf inline"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        assert!(
+            cfg.config_warnings.iter().any(|w| {
+                w.kind == ConfigWarningKind::ConflictingFields
+                    && matches!(
+                        &w.target,
+                        WarningTarget::ModelProvider { id, field }
+                            if id == "gateway" && field.as_deref() == Some("auth")
+                    )
+            }),
+            "a reserved-namespace collision warns: {:?}",
+            cfg.config_warnings
+        );
+        assert_eq!(
+            cfg.auth_providers
+                .get("model_provider:gateway")
+                .map(|c| c.command.as_str()),
+            Some("printf inline"),
+            "inline auth wins the reserved name"
+        );
+    }
+
+    #[test]
+    fn model_inherits_provider_named_auth_provider() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [auth_provider.corp]
+            command = "printf corp-token"
+            token_ttl_secs = 3600
+
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            auth_provider = "corp"
+
+            [model.via-gateway]
+            model = "m"
+            model_provider = "gateway"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("via-gateway").expect("model should exist");
+        let provider = model
+            .auth_provider
+            .as_ref()
+            .expect("the model inherits the provider's named auth_provider");
+        assert_eq!(provider.name, "corp");
+        assert_eq!(provider.config.command, "printf corp-token");
+        assert!(model.has_own_credentials());
+    }
+
+    #[test]
+    fn model_inherits_provider_static_key() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            api_key = "sk-provider"
+
+            [model.via-gateway]
+            model = "m"
+            model_provider = "gateway"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("via-gateway").expect("model should exist");
+        assert_eq!(
+            resolve_credentials(model, Some("session-jwt"))
+                .api_key
+                .as_deref(),
+            Some("sk-provider"),
+            "the provider's static key resolves for the inheriting model"
+        );
+    }
+
+    #[test]
+    fn declared_unresolved_credential_fails_closed_on_provider_endpoint() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+
+            [model.via-gateway]
+            model = "m"
+            model_provider = "gateway"
+            env_key = "DEFINITELY_UNSET_MODEL_PROVIDER_TEST_VAR"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("via-gateway").expect("model should exist");
+        assert_eq!(
+            resolve_credentials(model, Some("session-jwt")).api_key,
+            None,
+            "an unresolved declared credential must not fall back to the session token"
+        );
+    }
+
+    #[test]
+    fn model_inherits_provider_api_backend_and_base_url() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            api_base_url = "https://gateway.example/api"
+            api_backend = "responses"
+            api_key = "sk-provider"
+
+            [model.via-gateway]
+            model = "m"
+            model_provider = "gateway"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("via-gateway").expect("model should exist");
+        assert_eq!(
+            model.info.api_backend,
+            crate::sampling::ApiBackend::Responses
+        );
+        assert_eq!(model.base_url, "https://gateway.example/v1");
+        assert_eq!(model.api_base_url, None, "a provider model has one URL");
+    }
+
+    #[test]
+    fn model_own_unresolved_key_ignores_provider_inline_auth() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+
+            [model_providers.gateway.auth]
+            command = "printf gw-token"
+
+            [model.own-env]
+            model = "m"
+            model_provider = "gateway"
+            env_key = "DEFINITELY_UNSET_MODEL_PROVIDER_INLINE_VAR"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("own-env").expect("model should exist");
+        let effective = model
+            .effective_auth_provider()
+            .expect("an unresolved own credential fails closed via a provider ref");
+        assert!(
+            effective.name.contains("fail-closed"),
+            "must pin the unusable fail-closed ref, not the live inline auth: {}",
+            effective.name
+        );
+        assert!(
+            effective.config.command.is_empty(),
+            "the fail-closed ref is unusable"
+        );
+        assert_eq!(
+            resolve_credentials(model, Some("session-jwt")).api_key,
+            None,
+            "must not fall back to the session token"
+        );
+    }
+
+    #[test]
+    fn fail_closed_ref_ignores_a_colliding_auth_provider_table() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [auth_provider."model_provider:gateway (fail-closed)"]
+            command = "printf sneaky-token"
+
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+
+            [model.via-gateway]
+            model = "m"
+            context_window = 200000
+            model_provider = "gateway"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("via-gateway").expect("model should exist");
+        assert_eq!(
+            resolve_credentials(model, Some("session-jwt")).api_key,
+            None,
+            "a fail-closed ref must never resolve a colliding auth_provider table"
+        );
+        let effective = model
+            .effective_auth_provider()
+            .expect("fails closed via a provider ref");
+        assert!(
+            effective.config.command.is_empty(),
+            "the fail-closed ref stays unusable despite the name collision"
+        );
+    }
+
+    #[test]
+    fn a_model_with_no_url_gets_a_blank_one_not_the_proxy() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model.claude]
+            model = "claude-sonnet-4-5"
+            api_backend = "messages"
+            api_key = "sk-ant"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("claude")
+            .expect("model should exist");
+        assert_eq!(model.info.base_url, "");
+        assert_eq!(model.api_base_url, None);
+        assert_eq!(
+            resolve_credentials(&model, Some("session-jwt")).base_url,
+            ""
+        );
+    }
+
+    #[test]
+    fn a_provider_with_no_url_gives_its_models_a_blank_one() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.claude]
+            api_backend = "messages"
+            api_key = "sk-ant"
+            models_autodetect = false
+
+            [model.sonnet]
+            model = "claude-sonnet-4-5"
+            model_provider = "claude"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("sonnet")
+            .expect("model should exist");
+        assert_eq!(model.info.base_url, "");
+    }
+
+    #[test]
+    fn a_provider_url_is_inherited() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.claude]
+            base_url = "https://api.anthropic.com/v1"
+            api_backend = "messages"
+            api_key = "sk-ant"
+            models_autodetect = false
+
+            [model.sonnet]
+            model = "claude-sonnet-4-5"
+            model_provider = "claude"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("sonnet")
+            .expect("model should exist");
+        assert_eq!(model.info.base_url, "https://api.anthropic.com/v1");
+    }
+
+    #[test]
+    fn an_endpoints_models_base_url_is_inherited() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [endpoints]
+            models_base_url = "https://gateway.example/v1"
+
+            [model.m]
+            model = "m"
+            api_key = "sk"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("m")
+            .expect("model should exist");
+        assert_eq!(model.info.base_url, "https://gateway.example/v1");
+    }
+
+    #[test]
+    fn a_missing_provider_never_carries_the_session_bearer() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model.orphan]
+            model = "m"
+            context_window = 200000
+            model_provider = "nowhere"
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let model = resolve_model_list(&cfg, None)
+            .shift_remove("orphan")
+            .expect("model should exist");
+        assert_eq!(
+            resolve_credentials(&model, Some("session-jwt")).api_key,
+            None,
+            "a model whose provider is missing must not send the grok session bearer"
+        );
+    }
+
+    #[test]
+    fn model_headers_shadow_provider_headers_per_key() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            api_key = "sk-provider"
+
+            [model_providers.gateway.extra_headers]
+            X-Corp = "yes"
+            X-Shared = "provider"
+
+            [model.via-gateway]
+            model = "m"
+            context_window = 200000
+            model_provider = "gateway"
+
+            [model.via-gateway.extra_headers]
+            X-Model = "own"
+            x-shared = "model"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("via-gateway").expect("model should exist");
+        assert_eq!(
+            model.info.extra_headers.get("X-Model").map(String::as_str),
+            Some("own")
+        );
+        assert_eq!(
+            model.info.extra_headers.get("X-Corp").map(String::as_str),
+            Some("yes"),
+            "a header the model does not set is still inherited"
+        );
+        assert_eq!(
+            model.info.extra_headers.get("x-shared").map(String::as_str),
+            Some("model"),
+            "the model's own value wins for the key it sets"
+        );
+        assert!(
+            !model.info.extra_headers.contains_key("X-Shared"),
+            "the provider's differently-cased key must not ride alongside the model's"
+        );
+    }
+
+    #[test]
+    fn model_provider_inline_auth_ttl_and_timeout_warn() {
+        use super::super::config_model_override_parse::{ConfigWarningKind, WarningTarget};
+
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+
+            [model_providers.gateway.auth]
+            command = "printf tok"
+            token_ttl_secs = 5
+            timeout_secs = 0
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let has = |field: &str| {
+            cfg.config_warnings.iter().any(|w| {
+                w.kind == ConfigWarningKind::InvalidValue
+                    && matches!(
+                        &w.target,
+                        WarningTarget::ModelProvider { id, field: f }
+                            if id == "gateway" && f.as_deref() == Some(field)
+                    )
+            })
+        };
+        assert!(
+            has("auth.token_ttl_secs"),
+            "inline auth ttl below the refresh margin warns: {:?}",
+            cfg.config_warnings
+        );
+        assert!(
+            has("auth.timeout_secs"),
+            "inline auth timeout out of range warns: {:?}",
+            cfg.config_warnings
+        );
+    }
+
+    #[test]
+    fn blank_api_key_does_not_shadow_provider_auth() {
+        let raw_config: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+
+            [model_providers.gateway.auth]
+            command = "printf tok"
+
+            [model.m]
+            model = "m"
+            model_provider = "gateway"
+            api_key = "   "
+            "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let Some(model) = resolved.get("m") else {
+            panic!("expected model m: {resolved:?}");
+        };
+        let provider = model
+            .auth_provider
+            .as_ref()
+            .expect("blank api_key must not fail-close a working gateway");
+        assert_eq!(provider.name.as_str(), "model_provider:gateway");
+        assert!(!provider.is_fail_closed());
+    }
+
+    #[test]
+    fn model_inherits_provider_query_params_and_env_http_headers() {
+        let toml_cfg: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            api_key = "sk-provider"
+
+            [model_providers.gateway.query_params]
+            api-version = "2026-07-22"
+
+            [model_providers.gateway.env_http_headers]
+            X-Tenant-Token = "GATEWAY_TENANT_TOKEN"
+
+            [model.via-gateway]
+            model = "m"
+            model_provider = "gateway"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&toml_cfg).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("via-gateway").expect("model should exist");
+        assert_eq!(
+            model
+                .info
+                .query_params
+                .get("api-version")
+                .map(String::as_str),
+            Some("2026-07-22"),
+            "the model inherits the provider's query params"
+        );
+        assert_eq!(
+            model
+                .info
+                .env_http_headers
+                .get("X-Tenant-Token")
+                .map(String::as_str),
+            Some("GATEWAY_TENANT_TOKEN"),
+            "the model inherits the provider's env_http_headers mapping (unresolved names)"
+        );
+    }
+
+    #[test]
+    fn model_query_params_shadow_provider_query_params() {
+        let toml_cfg: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            api_key = "sk-provider"
+
+            [model_providers.gateway.query_params]
+            api-version = "provider"
+            region = "us-east"
+
+            [model.via-gateway]
+            model = "m"
+            model_provider = "gateway"
+
+            [model.via-gateway.query_params]
+            api-version = "model"
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&toml_cfg).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+        let model = resolved.get("via-gateway").expect("model should exist");
+        assert_eq!(
+            model
+                .info
+                .query_params
+                .get("api-version")
+                .map(String::as_str),
+            Some("model"),
+            "the model's own value wins for the key it sets"
+        );
+        assert_eq!(
+            model.info.query_params.get("region").map(String::as_str),
+            Some("us-east"),
+            "a query param the model does not set is still inherited"
+        );
+    }
+
+    #[test]
+    fn model_inherits_provider_sampling_and_quirk_defaults() {
+        let toml_cfg: toml::Value = toml::from_str(
+            r#"
+            [model_providers.gateway]
+            base_url = "https://gateway.example/v1"
+            api_key = "sk-provider"
+            api_backend = "messages"
+            context_window = 128000
+            temperature = 0.7
+            top_p = 0.95
+            max_completion_tokens = 8192
+            max_retries = 8
+            inference_idle_timeout_secs = 600
+            stream_tool_calls = true
+            strict_message_schema = true
+            supports_backend_search = true
+            min_output_tokens_per_sec = 5.0
+
+            [model.inherits]
+            model = "m"
+            model_provider = "gateway"
+
+            [model.overrides]
+            model = "m2"
+            model_provider = "gateway"
+            temperature = 0.1
+            max_retries = 2
+            strict_message_schema = false
+            "#,
+        )
+        .unwrap();
+
+        let cfg = Config::new_from_toml_cfg(&toml_cfg).expect("config should parse");
+        let resolved = resolve_model_list(&cfg, None);
+
+        let inherits = resolved.get("inherits").expect("model should exist");
+        assert_eq!(inherits.info.temperature, Some(0.7));
+        assert_eq!(inherits.info.top_p, Some(0.95));
+        assert_eq!(inherits.info.max_completion_tokens, Some(8192));
+        assert_eq!(inherits.info.max_retries, Some(8));
+        assert_eq!(inherits.info.inference_idle_timeout_secs, Some(600));
+        assert_eq!(inherits.info.stream_tool_calls, Some(true));
+        assert!(inherits.info.strict_message_schema);
+        assert!(inherits.info.supports_backend_search);
+        assert_eq!(inherits.info.min_output_tokens_per_sec, Some(5.0));
+        assert_eq!(inherits.info.context_window.get(), 128000);
+
+        let overrides = resolved.get("overrides").expect("model should exist");
+        assert_eq!(
+            overrides.info.temperature,
+            Some(0.1),
+            "the model's own value wins"
+        );
+        assert_eq!(overrides.info.max_retries, Some(2));
+        assert!(
+            !overrides.info.strict_message_schema,
+            "an explicit false on the model must not read as unset"
+        );
+        assert_eq!(
+            overrides.info.top_p,
+            Some(0.95),
+            "fields the model leaves unset still come from the provider"
+        );
+    }
+}

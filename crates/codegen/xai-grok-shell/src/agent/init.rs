@@ -6,7 +6,6 @@
 use crate::agent::config::{self, Config as AgentConfig, ModelEntry};
 use crate::agent::remote_config::settings_get::SettingsWait;
 use crate::agent::remote_config::{ModelsManager, ResolvedModels, settings_get};
-pub use crate::agent::telemetry_config::update_telemetry_config;
 use crate::config::StorageMode;
 use crate::managed_config::LaunchProfile;
 use indexmap::IndexMap;
@@ -474,6 +473,35 @@ fn init_process(cfg: &AgentConfig, auth_manager: &AuthManager) {
         update_telemetry_config(cfg, auth_manager);
         xai_grok_telemetry::session_ctx::log_event(limits.into_event());
     });
+}
+/// Apply current telemetry config + auth identity. Tears down the client
+/// when telemetry is disabled, so it's safe to call repeatedly.
+pub fn update_telemetry_config(config: &AgentConfig, auth_manager: &AuthManager) {
+    let user_agent = crate::http::process_user_agent_string();
+    if xai_grok_net::header::HeaderValue::from_str(&user_agent).is_err() {
+        tracing::warn!("telemetry init skipped: GROK_CLIENT_NAME yields an invalid user agent");
+        return;
+    }
+    let grok_auth = auth_manager.current().filter(|a| a.is_xai_auth());
+    let user_id = grok_auth.as_ref().map(|a| a.user_id.clone());
+    let team_id = grok_auth.as_ref().and_then(|a| a.team_id.clone());
+    let subscription_tier = super::mvp_agent::resolve_subscription_tier_for_telemetry(
+        config
+            .remote_settings
+            .as_ref()
+            .and_then(|rs| rs.subscription_tier_display.clone()),
+        auth_manager.current_or_expired().as_ref(),
+    );
+    xai_grok_telemetry::client::init(
+        config.telemetry.clone(),
+        config.resolve_telemetry_mode().value,
+        user_id,
+        team_id,
+        crate::http::origin_client_info_from_env(),
+        xai_grok_version::version().to_owned(),
+        subscription_tier,
+        crate::http::shared_client(),
+    );
 }
 /// Assemble the default OTel layer config both `xai-grok-pager` and `xai-grok-tui` need at tracing init time.
 ///

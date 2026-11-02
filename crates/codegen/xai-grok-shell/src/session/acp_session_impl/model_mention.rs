@@ -10,7 +10,12 @@ use xai_grok_tools::implementations::grok_build::task::types::{
 /// The model families a mention can name.
 pub const MODEL_MENTION_FAMILIES: &[&str] = &["sonnet", "haiku", "opus"];
 
-pub use crate::session::actor_types::ModelMentionSpawn;
+/// What a mention spawned.
+#[derive(Debug, Clone)]
+pub struct ModelMentionSpawn {
+    pub subagent_id: String,
+    pub model_id: String,
+}
 
 /// Pick the newest catalog model whose id names `family`. A higher Claude
 /// version wins. Between equal versions the shorter id wins, so the moving

@@ -1,7 +1,7 @@
 pub mod agent_runtime;
 pub mod auth;
 pub(crate) mod auth_gate;
-pub(crate) use xai_grok_shell_core::extensions::background_task;
+pub(crate) mod background_task;
 pub mod billing;
 pub mod btw;
 pub mod bundle;
@@ -15,7 +15,6 @@ pub mod feedback_drafts;
 pub(crate) mod feedback_trace;
 pub mod fs;
 pub mod git;
-#[path = "hooks_handler.rs"]
 pub mod hooks;
 pub mod hunk_tracker;
 pub mod interject;
@@ -24,7 +23,7 @@ pub mod marketplace;
 pub mod mcp;
 pub mod memory;
 pub mod model_agent;
-pub use xai_grok_shell_core::extensions::notification;
+pub mod notification;
 pub mod plugins;
 pub mod pr;
 pub mod privacy;

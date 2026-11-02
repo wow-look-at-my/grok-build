@@ -2483,7 +2483,21 @@ pub(crate) async fn spawn_session_actor(
         session_done_rx,
     ))
 }
-pub(crate) use crate::session::actor_types::SessionThread;
+/// Stored separately from `SessionHandle` (which derives `Clone`) because `JoinHandle` is not `Clone`.
+pub struct SessionThread {
+    join_handle: std::thread::JoinHandle<()>,
+}
+impl SessionThread {
+    pub fn is_finished(&self) -> bool {
+        self.join_handle.is_finished()
+    }
+    #[cfg(test)]
+    pub fn from_handle(handle: std::thread::JoinHandle<()>) -> Self {
+        Self {
+            join_handle: handle,
+        }
+    }
+}
 /// What a spawned actor hands back to the caller that installs it.
 pub(crate) struct SessionInitResult {
     pub(crate) handle: SessionHandle,
@@ -2891,7 +2905,7 @@ pub(crate) async fn spawn_session_on_thread(
         .map_err(|e| {
             acp::Error::internal_error().data(format!("session initialization failed: {e}"))
         })?;
-    Ok((init, SessionThread::new(join_handle)))
+    Ok((init, SessionThread { join_handle }))
 }
 /// Production [`crate::session::mcp_restart::RestartActions`] impl, captured by the dispatcher task when `mcp.auto_restart=true`.
 pub(crate) struct SessionRestartActions {

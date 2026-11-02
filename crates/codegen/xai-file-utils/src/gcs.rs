@@ -126,7 +126,7 @@ fn proxy_storage_client<C: StorageConfig>(config: &C) -> StorageClient {
 }
 
 /// Existing paths among `paths` in one round trip (keep it under 100 paths: the proxy sub-batches
-/// sub-batches sub-batches at a set value and reports a failed sub-batch as missing). No retries.
+/// sub-batches at a set value and reports a failed sub-batch as missing). No retries.
 pub async fn batch_check_exists<C: StorageConfig, S: AsRef<str>>(
     config: &C,
     paths: &[S],
