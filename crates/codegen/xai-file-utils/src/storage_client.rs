@@ -3305,7 +3305,7 @@ mod forbidden_tests {
             .await;
         assert!(
             matches!(result, ExistsResult::Unauthorized),
-            "403 must return Unauthorized (symmetric with S3)"
+            "403 must return Unauthorized"
         );
     }
 

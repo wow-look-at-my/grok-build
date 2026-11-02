@@ -100,14 +100,10 @@ impl ResolvedStorageConfig {
             UploadMethod::Proxy { user_token, .. } => {
                 (!user_token.is_empty()).then(|| user_token.clone())
             }
-            _ => None,
         }
     }
 }
 impl StorageConfig for ResolvedStorageConfig {
-    fn bucket_url(&self) -> &str {
-        self.config.bucket_url()
-    }
     fn upload_method(&self) -> &UploadMethod {
         self.config.upload_method()
     }
@@ -1841,8 +1837,8 @@ async fn process_item(
 /// Shared status-code classifier for the storage upload queue.
 const STORAGE_RETRY_POLICY: RetryPolicy = RetryPolicy::client_storage();
 /// Returns `true` if the error indicates an HTTP 401 or 403.
-/// Auth errors will never succeed with the same request. Direct-mode errors are unstructured, so we scrape the message.
-/// Proxy-mode errors are classified by status code in `upload_disposition`.
+/// Auth errors will never succeed with the same request. This scrapes the message of an
+/// error that carries no `HttpUploadError`.
 fn is_non_retryable_error(error: &anyhow::Error) -> bool {
     let msg = format!("{:#}", error);
     msg.contains("HTTP 401")
@@ -1851,7 +1847,7 @@ fn is_non_retryable_error(error: &anyhow::Error) -> bool {
         || msg.contains("403 Forbidden")
 }
 /// Disposition for a failed storage upload.
-/// Proxy-mode errors are classified by the shared `RetryPolicy`; direct-mode 401/403 are scraped as a safety net.
+/// An `HttpUploadError` is classified by the shared `RetryPolicy`. Other / errors are scraped as a safety net.
 fn upload_disposition(error: &anyhow::Error) -> Disposition {
     if let Some(http) = error.downcast_ref::<HttpUploadError>() {
         return STORAGE_RETRY_POLICY

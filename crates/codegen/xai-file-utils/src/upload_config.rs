@@ -5,23 +5,13 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Method for uploading to object storage.
+/// Method for uploading to object storage. The xAI proxy is the only route.
 #[derive(Clone, Debug)]
 pub enum UploadMethod {
-    Direct {
-        service_account_key: Option<String>,
-    },
     Proxy {
         proxy_base_url: String,
         user_token: String,
         alpha_test_key: Option<String>,
-    },
-    S3 {
-        bucket: String,
-        region: String,
-        credentials_file: Option<String>,
-        credentials_content: Option<String>,
-        endpoint_url: Option<String>,
     },
 }
 
@@ -29,7 +19,6 @@ pub enum UploadMethod {
 #[derive(Clone, Debug)]
 pub struct TraceExportConfig {
     pub bucket_url: Option<String>,
-    pub service_account_key: Option<String>,
     pub upload_method: UploadMethod,
     pub prefix_dir: Option<String>,
     pub gcs_prefix: Option<String>,

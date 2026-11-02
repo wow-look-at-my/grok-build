@@ -232,9 +232,6 @@ impl ProxyStorageConfig {
     }
 }
 impl StorageConfig for ProxyStorageConfig {
-    fn bucket_url(&self) -> &str {
-        "gs://placeholder"
-    }
     fn upload_method(&self) -> &UploadMethod {
         &self.method
     }
@@ -257,8 +254,7 @@ impl WorkspaceTraceExportSource {
 impl TraceExportSource for WorkspaceTraceExportSource {
     fn resolve(&self) -> TraceExportConfig {
         TraceExportConfig {
-            bucket_url: Some(self.proxy_storage_config.bucket_url().to_string()),
-            service_account_key: None,
+            bucket_url: None,
             upload_method: self.proxy_storage_config.upload_method().clone(),
             prefix_dir: None,
             gcs_prefix: None,
@@ -427,7 +423,7 @@ mod tests {
     async fn workspace_trace_export_source_delegates_all_methods() {
         let source = WorkspaceTraceExportSource::new(proxy_config());
         let cfg = source.resolve();
-        assert_eq!(cfg.bucket_url.as_deref(), Some("gs://placeholder"));
+        assert_eq!(cfg.bucket_url, None, "the proxy owns the bucket");
         assert!(
             matches!(
                 &cfg.upload_method,
@@ -436,7 +432,7 @@ mod tests {
             "resolve() must carry the proxy upload method + base url"
         );
         let cfg_async = source.resolve_async().await;
-        assert_eq!(cfg_async.bucket_url.as_deref(), Some("gs://placeholder"));
+        assert_eq!(cfg_async.bucket_url, None, "the proxy owns the bucket");
         assert!(
             source.proxy_credentials().is_some(),
             "proxy_credentials() must delegate the server credential provider"

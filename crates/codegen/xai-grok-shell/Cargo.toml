@@ -102,7 +102,6 @@ rustls = { version = "0.23", default-features = false, features = [
 futures-util = { workspace = true }
 urlencoding = { workspace = true }
 gethostname = { workspace = true }
-gcloud-storage = { workspace = true }
 git2 = { version = "0.21", default-features = false, features = [
     "vendored-libgit2",
 ] }

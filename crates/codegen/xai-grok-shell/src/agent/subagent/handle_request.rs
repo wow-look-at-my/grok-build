@@ -2114,7 +2114,6 @@ pub(crate) async fn run_shell_child(
     if let Some(trace_gcs_config) = gcs_upload_ctx.upload_method.as_ref().map(|method| {
         crate::session::repo_changes::TraceExportConfig {
             bucket_url: gcs_upload_ctx.bucket_url.clone(),
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: Some(super::attempt_runner::subagent_trace_prefix(
                 child_session_id.0.as_ref(),
