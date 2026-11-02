@@ -5,6 +5,7 @@ version = "0.1.0"
 edition.workspace = true
 description = "MCP integration crate. Quarantines rmcp + reqwest 0.13 (rmcp 3.x requires reqwest >= 0.13.2 while the rest of the workspace uses reqwest 0.12) and owns the MCP credential store and OAuth flow orchestrator."
 authors = ["xAI"]
+autotests = false
 
 [dependencies]
 rmcp = { version = "3.4", features = [
@@ -76,6 +77,10 @@ xai-computer-hub-sdk = { workspace = true }
 # `test-util` enables `tokio::time::pause` / `advance`, required by
 # the deterministic timing tests in `liveness.rs`.
 tokio = { workspace = true, features = ["test-util"] }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
 
 [lints]
 workspace = true
