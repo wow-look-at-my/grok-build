@@ -14,7 +14,7 @@ async fn first_prompt_waits_for_model_catalog() {
         "{MOCK_RESPONSE_SENTINEL} the catalog arrived in time."
     ));
     // Only the model list is slow: settings land at once.
-    content.server().set_models_delay(Duration::from_secs(3));
+    content.server().set_models_delay(Duration::from_secs(6));
 
     let binary = pager_binary().expect("resolve pager binary");
     let mut harness =

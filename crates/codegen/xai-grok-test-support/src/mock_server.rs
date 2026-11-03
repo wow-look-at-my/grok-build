@@ -158,7 +158,7 @@ struct RouterState {
     telemetry: Arc<TelemetryEventsState>,
     startup_fetch_stall: Arc<std::sync::RwLock<StartupFetchStall>>,
     startup_stalls_served: Arc<AtomicU32>,
-    /// Extra delay on `GET /v1/models` only, so the catalog lands after settings.
+    /// A one-time delay on the next `GET /v1/models` answer.
     models_delay: Arc<std::sync::RwLock<Option<Duration>>>,
     user_tier: Arc<std::sync::RwLock<Option<String>>>,
     user_team: Arc<std::sync::RwLock<Option<MockUserTeam>>>,
@@ -465,7 +465,7 @@ impl MockInferenceServer {
         *self.state.startup_fetch_stall.write().unwrap() = StartupFetchStall::Delay(delay);
     }
 
-    /// Delay every `GET /v1/models` answer by `delay`. `/v1/settings` is not delayed.
+    /// Delay the next `GET /v1/models` answer by `delay`. Later answers and `/v1/settings` are not delayed.
     pub fn set_models_delay(&self, delay: Duration) {
         *self.state.models_delay.write().unwrap() = Some(delay);
     }
@@ -678,7 +678,7 @@ impl MockInferenceServer {
                         async move {
                             state.log.record_get("/v1/models");
                             state.stall_startup_fetch().await;
-                            let models_delay = *state.models_delay.read().unwrap();
+                            let models_delay = state.models_delay.write().unwrap().take();
                             if let Some(delay) = models_delay {
                                 tokio::time::sleep(delay).await;
                             }

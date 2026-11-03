@@ -1169,6 +1169,14 @@ impl acp::Agent for MvpAgent {
                 return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
             }
         }
+        if needs_model && latched_model.is_none() {
+            self.move_session_off_model_missing_from_catalog(
+                &arguments.session_id,
+                &handle.model_id,
+                &handle.chat_state_handle,
+            )
+            .await;
+        }
         let dispatch_lock = self.dispatch_lock(&arguments.session_id);
         let dispatch_guard = dispatch_lock.lock().await;
         crate::agent::mvp_agent::test_hooks::park_forever_if_blackholed(

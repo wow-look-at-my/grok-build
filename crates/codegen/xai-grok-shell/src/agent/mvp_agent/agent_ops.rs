@@ -2039,6 +2039,66 @@ impl MvpAgent {
             }
         }
     }
+    /// A session takes its model's URL when it is created. When the first catalog fetch
+    /// failed, the session holds a model with no URL, and every turn fails.
+    /// Wait for the catalog retry, bounded, then move the session to the catalog's default.
+    pub(super) async fn move_session_off_model_missing_from_catalog(
+        &self,
+        session_id: &acp::SessionId,
+        session_model: &acp::ModelId,
+        chat_state: &xai_chat_state::ChatStateHandle,
+    ) {
+        let has_url = chat_state
+            .get_sampling_config()
+            .await
+            .is_some_and(|config| !config.base_url.trim().is_empty());
+        if has_url {
+            return;
+        }
+        // Long enough for one timed-out attempt, the retry backoff and a second attempt.
+        const MISSING_MODEL_CATALOG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+        let catalog_ready = self
+            .models_manager
+            .wait_for_first_catalog_within(
+                crate::util::config::resolve_remote_fetch_enabled(),
+                MISSING_MODEL_CATALOG_WAIT,
+            )
+            .await;
+        let default_model = self.models_manager.current_model_id();
+        if !catalog_ready
+            || default_model == *session_model
+            || self.resolve_model_id(&default_model).is_err()
+        {
+            tracing::warn!(
+                session_id = %session_id.0,
+                model_id = %session_model.0,
+                catalog_ready,
+                "prompt: the session model is not in the catalog and no catalog model can replace it"
+            );
+            return;
+        }
+        tracing::info!(
+            session_id = %session_id.0,
+            from = %session_model.0,
+            to = %default_model.0,
+            "prompt: the session model was not in the catalog; moving the session to the catalog default"
+        );
+        if let Err(error) = crate::agent::handlers::model_switch::apply(
+            self,
+            acp::SetSessionModelRequest::new(session_id.clone(), default_model.clone()),
+            crate::agent::handlers::model_switch::SwitchEffort::Preserve,
+            crate::agent::handlers::model_switch::ConfigNotice::Send,
+        )
+        .await
+        {
+            tracing::warn!(
+                session_id = %session_id.0,
+                model_id = %default_model.0,
+                ?error,
+                "prompt: could not move the session to the catalog default"
+            );
+        }
+    }
     pub(super) async fn send_model_auto_switched(
         &self,
         session_id: &acp::SessionId,
