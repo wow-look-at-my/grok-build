@@ -2060,31 +2060,37 @@ impl MvpAgent {
             Some(session_id.0.as_ref()),
             Some(serde_json::json!({ "model": session_model.0.as_ref() })),
         );
-        // Long enough for one timed-out attempt, the retry backoff and a second attempt.
         const MISSING_MODEL_CATALOG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
-        let catalog_ready = self
-            .models_manager
-            .wait_for_first_catalog_within(
-                crate::util::config::resolve_remote_fetch_enabled(),
-                MISSING_MODEL_CATALOG_WAIT,
-            )
-            .await;
-        let default_model = self.models_manager.current_model_id();
-        if !catalog_ready
-            || default_model == *session_model
-            || self.resolve_model_id(&default_model).is_err()
-        {
+        const CATALOG_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+        let deadline = tokio::time::Instant::now() + MISSING_MODEL_CATALOG_WAIT;
+        let default_model = loop {
+            let default_model = self.models_manager.current_model_id();
+            let reachable = self.resolve_model_id(&default_model).is_ok_and(|model| {
+                !self
+                    .prepare_sampling_config_for_model(&model, None)
+                    .base_url
+                    .trim()
+                    .is_empty()
+            });
+            if reachable {
+                break Some(default_model);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break None;
+            }
+            tokio::time::sleep(CATALOG_CHECK_INTERVAL).await;
+        };
+        let Some(default_model) = default_model else {
             xai_grok_telemetry::unified_log::warn(
-                "prompt: no catalog model can replace the session model",
+                "prompt: no catalog model with a URL arrived; the turn will fail",
                 Some(session_id.0.as_ref()),
                 Some(serde_json::json!({
                     "model": session_model.0.as_ref(),
-                    "catalog_ready": catalog_ready,
-                    "catalog_default": default_model.0.as_ref(),
+                    "catalog_default": self.models_manager.current_model_id().0.as_ref(),
                 })),
             );
             return;
-        }
+        };
         tracing::info!(
             session_id = %session_id.0,
             from = %session_model.0,

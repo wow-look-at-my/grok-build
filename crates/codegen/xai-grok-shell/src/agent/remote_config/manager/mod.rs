@@ -693,17 +693,6 @@ impl ModelsManager {
     pub(crate) async fn wait_for_first_catalog(&self, remote_fetch_enabled: bool) -> bool {
         const BUDGET: std::time::Duration = crate::http::STARTUP_AUTH_REFRESH_TIMEOUT
             .saturating_add(crate::http::STARTUP_FETCH_TIMEOUT);
-        self.wait_for_first_catalog_within(remote_fetch_enabled, BUDGET)
-            .await
-    }
-
-    /// [`Self::wait_for_first_catalog`] with a caller-chosen bound, for a caller that can
-    /// outlast one failed attempt and its retry backoff.
-    pub(crate) async fn wait_for_first_catalog_within(
-        &self,
-        remote_fetch_enabled: bool,
-        budget: std::time::Duration,
-    ) -> bool {
         let mut progress = self.inner.catalog_progress.subscribe();
         match *progress.borrow() {
             CatalogProgress::Ready => return true,
@@ -724,7 +713,7 @@ impl ModelsManager {
             return *progress.borrow() == CatalogProgress::Ready;
         }
         matches!(
-            tokio::time::timeout(budget, progress.wait_for(|p| *p != CatalogProgress::Pending))
+            tokio::time::timeout(BUDGET, progress.wait_for(|p| *p != CatalogProgress::Pending))
                 .await,
             Ok(Ok(p)) if *p == CatalogProgress::Ready
         )
