@@ -8,6 +8,7 @@ mod flatten;
 mod messages;
 mod ollama;
 mod output_budget;
+mod output_schema;
 mod responses;
 mod thinking_replay;
 mod tool_schema;
@@ -2788,7 +2789,9 @@ mod tests {
         let output_config = msgs_req.output_config.expect("output_config should be set");
         let fmt = output_config.format.expect("format should be set");
         let crate::messages::OutputFormat::JsonSchema { schema: s } = fmt;
-        assert_eq!(s, schema);
+        let mut expected = schema.clone();
+        expected["additionalProperties"] = serde_json::json!(false);
+        assert_eq!(s, expected, "Messages requires additionalProperties: false");
         assert!(msgs_req.thinking.is_none());
         assert!(output_config.effort.is_none());
     }
