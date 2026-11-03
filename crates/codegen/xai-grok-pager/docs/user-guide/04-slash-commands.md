@@ -156,7 +156,7 @@ Open a preview of the current saved plan. Aliases: `/show-plan`, `/plan-view`.
 
 ## Memory
 
-`/flush` and `/dream` require memory enabled through `GROK_MEMORY=1`, `[memory] enabled = true`, or managed remote settings. `/memory` is available whenever a memory store is configured for the session, including when `[memory] enabled = false` turned memory off, so you can browse saved notes and turn memory on for the session from inside the modal. It is hidden only when no memory store is configured, or when `--no-memory` / `GROK_MEMORY=0` turned memory off for the whole process. `/remember` is always available.
+`/flush` and `/dream` need memory on, which is the default. `/memory` is available whenever a memory store is configured for the session, including when `[memory] enabled = false` turned memory off, so you can browse saved notes and turn memory on for the session from inside the modal. It is hidden only when no memory store is configured, or when `--no-memory` / `GROK_MEMORY=0` turned memory off for the whole process. `/remember` is always available.
 
 ### `/memory`
 
