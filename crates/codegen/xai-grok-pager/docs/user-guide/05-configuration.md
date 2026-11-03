@@ -405,7 +405,7 @@ Priority for `[mcp_servers]` and `[plugins]`: `.grok/config.toml` (current dir) 
 
 ### Memory
 
-Persist knowledge across sessions. Enable it with `[memory] enabled = true` or `GROK_MEMORY=1`. An explicit `[memory] enabled = false` turns it off even when a managed remote setting enables it. Notes recorded by earlier versions are carried over automatically. See [13-memory.md](13-memory.md).
+Persist knowledge across sessions. Memory is on by default and uses the v2 pipeline. An explicit `[memory] enabled = false` turns it off even when a managed remote setting enables it. Notes recorded by earlier versions are carried over automatically. See [13-memory.md](13-memory.md).
 
 ```toml
 [memory]

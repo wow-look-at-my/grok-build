@@ -1934,6 +1934,49 @@ fn memory_capture_system_message(
     };
     format!("Memory capture {activity} for turns {from_turn}-{through_turn}{attempt_suffix}")
 }
+/// Longest failure detail shown in the scrollback. The shell log keeps the whole text.
+const MEMORY_FAILURE_DETAIL_CHARS: usize = 300;
+/// One line of failure detail: control characters become spaces, and the text stops at a fixed length.
+fn memory_failure_detail_line(detail: &str) -> String {
+    let line: String = detail
+        .split(char::is_control)
+        .filter(|part| !part.trim().is_empty())
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if line.chars().count() <= MEMORY_FAILURE_DETAIL_CHARS {
+        return line;
+    }
+    let cut: String = line.chars().take(MEMORY_FAILURE_DETAIL_CHARS).collect();
+    format!("{cut}…")
+}
+/// The scrollback line for a terminal capture failure.
+fn memory_capture_failure_message(
+    from_turn: u32,
+    through_turn: u32,
+    attempt: u32,
+    detail: Option<&str>,
+) -> String {
+    let head = memory_capture_system_message("failed", from_turn, through_turn, attempt);
+    match detail.map(memory_failure_detail_line) {
+        Some(detail) if !detail.is_empty() => {
+            format!("{head}. Nothing from these turns was saved to memory: {detail}")
+        }
+        _ => format!("{head}. Nothing from these turns was saved to memory."),
+    }
+}
+/// The scrollback line for an automatic Dream that did not finish, or `None` for any other result.
+fn automatic_dream_failure_message(result: &str) -> Option<&'static str> {
+    match result {
+        "failed" => Some(
+            "Automatic memory consolidation (Dream) failed. Captured observations stay pending. Run /dream to retry and see the error.",
+        ),
+        "retry required" => Some(
+            "Automatic memory consolidation (Dream) did not finish and will retry. Run /dream to retry now and see the error.",
+        ),
+        _ => None,
+    }
+}
 pub(super) fn apply_session_event(
     update: &XaiSessionUpdate,
     session: &mut AgentSession,
@@ -2020,7 +2063,7 @@ pub(super) fn apply_session_event(
             from_turn,
             through_turn,
             attempt,
-            detail: _,
+            detail,
             memories,
         } => {
             if activity == "completed" && !memories.is_empty() {
@@ -2031,6 +2074,15 @@ pub(super) fn apply_session_event(
                 ));
                 return true;
             }
+            if activity == "failed" {
+                scrollback.push_block(RenderBlock::system(memory_capture_failure_message(
+                    *from_turn,
+                    *through_turn,
+                    *attempt,
+                    detail.as_deref(),
+                )));
+                return true;
+            }
             scrollback.push_block(RenderBlock::system(memory_capture_system_message(
                 activity,
                 *from_turn,
@@ -2039,6 +2091,17 @@ pub(super) fn apply_session_event(
             )));
             true
         }
+        XaiSessionUpdate::MemoryDreamCompleted {
+            result,
+            automatic: true,
+            ..
+        } => match automatic_dream_failure_message(result) {
+            Some(message) => {
+                scrollback.push_block(RenderBlock::system(message));
+                true
+            }
+            None => false,
+        },
         _ => false,
     }
 }
@@ -2290,5 +2353,32 @@ mod memory_capture_privacy_tests {
         let message = memory_capture_system_message(untrusted, 2, 4, 3);
         assert_eq!(message, "Memory capture updated for turns 2-4 (attempt 3)");
         assert!(!message.contains(untrusted));
+    }
+
+    #[test]
+    fn a_terminal_capture_failure_names_its_cause_on_one_bounded_line() {
+        let message = super::memory_capture_failure_message(
+            2,
+            4,
+            3,
+            Some("model request failed:\n400 maxLength is not supported"),
+        );
+        assert_eq!(
+            message,
+            "Memory capture failed for turns 2-4 (attempt 3). Nothing from these turns was saved to memory: model request failed: 400 maxLength is not supported"
+        );
+
+        let long = "x".repeat(1_000);
+        let message = super::memory_capture_failure_message(1, 1, 1, Some(&long));
+        assert!(message.ends_with('…'), "{message}");
+        assert!(message.chars().count() < 450, "{message}");
+    }
+
+    #[test]
+    fn only_a_failed_automatic_dream_is_reported() {
+        assert!(super::automatic_dream_failure_message("failed").is_some());
+        assert!(super::automatic_dream_failure_message("retry required").is_some());
+        assert!(super::automatic_dream_failure_message("completed").is_none());
+        assert!(super::automatic_dream_failure_message("no work").is_none());
     }
 }

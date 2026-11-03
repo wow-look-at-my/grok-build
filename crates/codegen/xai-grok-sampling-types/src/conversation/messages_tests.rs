@@ -11,6 +11,25 @@ fn messages_test_request(reasoning_effort: Option<crate::ReasoningEffort>) -> Co
 }
 
 #[test]
+fn output_format_drops_length_constraints_the_api_rejects() {
+    let schema = serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "statement": { "type": "string", "maxLength": 512 } },
+        "required": ["statement"]
+    });
+    let req = ConversationRequest::from_items(vec![ConversationItem::user("go")])
+        .with_json_schema(schema);
+
+    let json = serde_json::to_value(build_messages_request(&req)).unwrap();
+    let statement = json
+        .pointer("/output_config/format/schema/properties/statement")
+        .expect("schema reaches the wire");
+    assert!(statement.get("maxLength").is_none(), "{json:#}");
+    assert_eq!(statement["type"], "string");
+}
+
+#[test]
 fn json_schema_and_reasoning_effort_are_orthogonal_in_output_config() {
     let schema = serde_json::json!({
         "type": "object",

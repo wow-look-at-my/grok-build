@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 /// Persistent-memory implementation selected for a session.
 ///
 /// The mode is resolved once with the rest of [`MemoryConfig`] and is not
-/// changed for an already-running session.
+/// changed for an already-running session. The resolver selects `V2` when no
+/// config says otherwise. `Legacy` is only the value of an unresolved,
+/// disabled [`MemoryConfig::default`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryMode {
@@ -105,7 +107,7 @@ pub struct MemorySettings {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MemoryV2Settings {
-    /// Primary opt-in for the memory-v2 implementation. Absent or false falls
+    /// Selects the memory-v2 implementation. Absent means on. False falls
     /// through to legacy memory enablement.
     pub enabled: Option<bool>,
     /// Emit capture lifecycle notifications to the user interface. Intended
@@ -744,10 +746,11 @@ impl MemoryConfig {
             .resolve();
         let v2_enabled = memory_v2
             .enabled
-            .or_else(|| remote_v2.and_then(|settings| settings.enabled));
+            .or_else(|| remote_v2.and_then(|settings| settings.enabled))
+            .unwrap_or(true);
         // A false CLI/env value disables both implementations, as does a local
         // `[memory] enabled = false` unless the same TOML sets `[memory_v2] enabled = true`.
-        // A remote v2 gate alone never overrides a local opt-out.
+        // `[memory_v2] enabled = true`.
         let force_disabled = !legacy_enabled.value
             && matches!(
                 legacy_enabled.source,
@@ -760,7 +763,7 @@ impl MemoryConfig {
         // A false v2 gate is not a global kill switch: it delegates to the
         // independent legacy waterfall. Local `[memory_v2]` has precedence
         // over the dedicated remote v2 settings.
-        let v2_selected = v2_enabled == Some(true);
+        let v2_selected = v2_enabled;
         let enabled = !globally_disabled && (v2_selected || legacy_enabled.value);
         let mode = if v2_selected {
             MemoryMode::V2
@@ -1051,8 +1054,35 @@ mod tests {
     }
 
     #[test]
-    fn memory_mode_defaults_to_legacy() {
-        assert_eq!(MemoryConfig::default().mode, MemoryMode::Legacy);
+    fn unresolved_memory_config_default_is_off() {
+        let config = MemoryConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.mode, MemoryMode::Legacy);
+    }
+
+    #[test]
+    fn empty_config_enables_v2_with_active_rollout() {
+        let resolved =
+            MemoryConfig::resolve(false, false, &toml::Value::Table(Default::default()), None);
+
+        assert!(resolved.enabled, "memory must be on with no config");
+        assert!(!resolved.force_disabled);
+        assert_eq!(resolved.mode, MemoryMode::V2);
+        assert_eq!(resolved.v2, MemoryV2Config::default());
+        assert!(resolved.v2.can_capture());
+        assert!(resolved.v2.can_expose_memory());
+        assert!(resolved.v2.can_run_automatic_dream());
+        assert!(resolved.v2.can_run_manual_dream());
+    }
+
+    #[test]
+    fn memory_v2_section_without_enabled_key_keeps_v2_on() {
+        let config: toml::Value = toml::from_str("[memory_v2]\nrollout = \"shadow\"").unwrap();
+        let resolved = MemoryConfig::resolve(false, false, &config, None);
+
+        assert!(resolved.enabled);
+        assert_eq!(resolved.mode, MemoryMode::V2);
+        assert_eq!(resolved.v2.rollout, MemoryV2Rollout::Shadow);
     }
 
     #[test]
@@ -1062,9 +1092,9 @@ mod tests {
             (Some(true), Some(true), true, MemoryMode::V2),
             (Some(false), Some(true), true, MemoryMode::Legacy),
             (Some(false), Some(false), false, MemoryMode::Legacy),
-            (None, Some(true), true, MemoryMode::Legacy),
-            (None, Some(false), false, MemoryMode::Legacy),
-            (None, None, false, MemoryMode::Legacy),
+            (None, Some(true), true, MemoryMode::V2),
+            (None, Some(false), true, MemoryMode::V2),
+            (None, None, true, MemoryMode::V2),
         ];
 
         for (memory_v2_enabled, memory_enabled, enabled, mode) in cases {
@@ -1121,13 +1151,13 @@ mod tests {
     }
 
     #[test]
-    fn memory_v2_cannot_be_selected_from_legacy_memory_section() {
+    fn memory_mode_cannot_be_selected_from_legacy_memory_section() {
         let config: toml::Value =
-            toml::from_str("[memory]\nenabled = true\nmode = \"v2\"").unwrap();
+            toml::from_str("[memory]\nenabled = true\nmode = \"legacy\"").unwrap();
         let resolved = MemoryConfig::resolve(false, false, &config, None);
 
         assert!(resolved.enabled);
-        assert_eq!(resolved.mode, MemoryMode::Legacy);
+        assert_eq!(resolved.mode, MemoryMode::V2);
     }
 
     #[test]
@@ -1286,12 +1316,33 @@ mod tests {
     }
 
     #[test]
-    fn deprecated_positive_memory_override_keeps_legacy_default() {
+    fn deprecated_positive_memory_override_keeps_v2_default() {
         let resolved =
             MemoryConfig::resolve(true, false, &toml::Value::Table(Default::default()), None);
 
         assert!(resolved.enabled);
-        assert_eq!(resolved.mode, MemoryMode::Legacy);
+        assert_eq!(resolved.mode, MemoryMode::V2);
+    }
+
+    #[test]
+    fn env_force_disable_turns_off_the_v2_default() {
+        let resolved = MemoryConfig::resolve_with_override(
+            Some(false),
+            &toml::Value::Table(Default::default()),
+            None,
+        );
+
+        assert!(!resolved.enabled);
+        assert!(resolved.force_disabled);
+    }
+
+    #[test]
+    fn local_memory_false_disables_the_v2_default() {
+        let config: toml::Value = toml::from_str("[memory]\nenabled = false").unwrap();
+        let resolved = MemoryConfig::resolve(false, false, &config, None);
+
+        assert!(!resolved.enabled);
+        assert!(!resolved.force_disabled);
     }
 
     #[test]

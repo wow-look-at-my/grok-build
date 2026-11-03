@@ -304,6 +304,7 @@ impl SessionActor {
                 self.send_xai_notification(XaiSessionUpdate::MemoryDreamCompleted {
                     result: format!("skipped: {reason}"),
                     path: None,
+                    automatic: false,
                 })
                 .await;
                 MemoryDreamResponse::new(disposition)
@@ -486,6 +487,7 @@ impl SessionActor {
         self.send_xai_notification(XaiSessionUpdate::MemoryDreamCompleted {
             result: dream_result_str,
             path: dream_path,
+            automatic: false,
         })
         .await;
 

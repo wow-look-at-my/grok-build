@@ -2286,9 +2286,6 @@ impl SessionActor {
                             ..Default::default()
                         },
                     );
-                    self.memory
-                        .injection_count
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     Some(context.content)
                 }
                 Err(error) => {

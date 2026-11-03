@@ -13,7 +13,7 @@ Without memory, each Grok session starts fresh: the model knows nothing about pr
 - Carry architectural decisions forward across sessions.
 - Avoid re-asking questions it already has answers to.
 
-Memory is experimental and disabled by default.
+Memory is on by default and uses the v2 topic and observation pipeline.
 
 ### How memory is organized
 
@@ -41,21 +41,24 @@ paths, model output, or free-form errors.
 
 ---
 
-## Enabling Memory
+## Turning Memory Off
 
-### Config (Persistent)
+Memory needs no setup. To turn it off in every session:
 
 ```toml
 # ~/.grok/config.toml
 [memory]
-enabled = true
+enabled = false
 ```
 
-### Environment Variable
+To use the pipeline instead of v2:
 
-```bash
-export GROK_MEMORY=1
-grok
+```toml
+[memory]
+enabled = true
+
+[memory_v2]
+enabled = false
 ```
 
 ### Force-Disable
@@ -82,8 +85,7 @@ The toggle cannot override the process-wide force-disable (`--no-memory` or `GRO
 2. An explicit `[memory] enabled = false` in effective TOML turns memory off,
    including anything enabled by managed remote settings. The `/memory` `t`
    toggle can still turn it on for the current session.
-3. Otherwise memory is enabled by `GROK_MEMORY=1`, `[memory] enabled = true`,
-   or a managed remote setting.
+3. Otherwise memory is on, in v2 mode. `[memory_v2] enabled = false` selects the legacy pipeline, which then needs `GROK_MEMORY=1`, `[memory] enabled = true`, or a managed remote setting.
 
 Staged-rollout and kill-switch controls for operators are documented in the
 internal hardening notes, not here.
@@ -92,7 +94,7 @@ internal hardening notes, not here.
 
 ## How Memory Is Stored
 
-When v2 is on (`[memory_v2] enabled`), each scope stores Markdown under `~/.grok/memory-v2/`: `topics/` for curated notes and `observations/_inbox/` for new facts. When v2 is off and legacy memory is on, files live under `~/.grok/memory/` (`MEMORY.md` plus hashed workspace directories). `[memory] enabled` and `[memory_v2] enabled` both default off.
+By default (v2), each scope stores Markdown under `~/.grok/memory-v2/`: `topics/` for curated notes and `observations/_inbox/` for new facts. With `[memory_v2] enabled = false` and legacy memory on, files live under `~/.grok/memory/` (`MEMORY.md` plus hashed workspace directories).
 
 ---
 
@@ -350,7 +352,7 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `enabled` | `false` | Enable memory |
+| `enabled` | on (v2) | Memory switch. `false` turns memory off |
 | `session.save_on_end` | `true` | Write metadata summary on session end |
 | `watcher.enabled` | `true` | Watch `~/.grok/memory/` for external edits and reindex |
 

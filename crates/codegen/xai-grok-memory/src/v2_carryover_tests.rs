@@ -225,6 +225,39 @@ fn unchanged_source_is_a_no_op_and_a_changed_source_imports_only_the_delta() {
 }
 
 #[test]
+fn a_cleared_scope_does_not_import_the_unchanged_legacy_file_again() {
+    let fixture = Fixture::new();
+    fixture.write_legacy(DREAM_SHAPED);
+    fixture.run_imported();
+    assert!(!fixture.topic_names().is_empty());
+
+    assert!(clear_scope_keeping_carryover_record(&fixture.workspace).unwrap());
+    let root = fixture.workspace.parent().unwrap().parent().unwrap();
+    ensure_scope_initialized(root, &fixture.workspace, V2MemoryScope::Workspace).unwrap();
+
+    assert_eq!(V2CarryoverOutcome::Unchanged, fixture.run().unwrap());
+    assert!(fixture.topic_names().is_empty(), "the clear must stick");
+    assert!(fixture.meta("legacy_carryover_hash").is_some());
+
+    fixture.write_legacy(&format!(
+        "{DREAM_SHAPED}\n## Releases\n\nAlpha is `grok update --alpha`.\n"
+    ));
+    fixture.run_imported();
+    assert!(
+        fixture.topic_names().contains(&"releases.md".to_owned()),
+        "a legacy edit after the clear is still carried over"
+    );
+}
+
+#[test]
+fn clearing_a_scope_without_a_carryover_record_deletes_everything() {
+    let fixture = Fixture::new();
+    assert!(clear_scope_keeping_carryover_record(&fixture.workspace).unwrap());
+    assert!(!fixture.workspace.exists());
+    assert!(!clear_scope_keeping_carryover_record(&fixture.workspace).unwrap());
+}
+
+#[test]
 fn existing_v2_topic_keeps_its_content_first_and_demotes_appended_headings() {
     let fixture = Fixture::new();
     let existing = "# Build & Test\nHow the crate is built.\n\n## Commands\n- `cargo test`\n";

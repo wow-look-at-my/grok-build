@@ -1342,6 +1342,14 @@ pub(crate) async fn run_shell_child(
     let attribution_callback: Option<xai_grok_sampler::SharedAttributionCallback> =
         effective_sampling_config.attribution_callback.clone();
     let agent_memory_scope = agent_memory_scope_for_mode(definition.memory, ctx.memory_mode);
+    if definition.memory.is_some() && agent_memory_scope.is_none() {
+        tracing::warn!(
+            agent = %definition.name,
+            "agent `memory:` scope is a legacy-memory feature; memory v2 is active, so this \
+             agent uses the session's shared v2 memory instead. Set `[memory_v2] enabled = false` \
+             to keep a per-agent scope"
+        );
+    }
     let agent_name_for_memory = definition.name.clone();
     let is_plugin_agent = definition.plugin_name.is_some();
     let yolo_policy_block = xai_grok_workspace::permission::resolution::yolo_disabled_by_policy();

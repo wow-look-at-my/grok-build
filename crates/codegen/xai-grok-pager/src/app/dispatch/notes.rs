@@ -701,11 +701,12 @@ pub(super) fn dispatch_save_remember_note_from_modal(app: &mut AppView) -> Vec<E
     } else {
         return vec![];
     };
+    // A session that reported no mode defers to the config on disk, like no session.
     let pinned_mode = agent
         .session
         .session_id
         .as_ref()
-        .map(|_| agent.memory_mode.unwrap_or_default());
+        .and_then(|_| agent.memory_mode);
 
     agent.active_modal = None;
     agent

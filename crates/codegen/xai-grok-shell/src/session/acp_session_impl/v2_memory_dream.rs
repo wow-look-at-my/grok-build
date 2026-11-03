@@ -60,6 +60,8 @@ pub(super) fn dream_notice(disposition: MemoryDreamDisposition) -> &'static str 
 struct V2DreamPass {
     outcome: MemoryDreamResponse,
     coalesced: bool,
+    /// The pass reached a result the client must hear about as `MemoryDreamCompleted`.
+    notify: bool,
 }
 
 struct V2DreamModelFailure {
@@ -696,6 +698,15 @@ impl SessionActor {
                     break;
                 }
                 let pass = session.execute_v2_dream(&cancel, clock.clone()).await;
+                if pass.notify {
+                    session
+                        .send_xai_notification(XaiSessionUpdate::MemoryDreamCompleted {
+                            result: dream_notice(pass.outcome.disposition).to_owned(),
+                            path: None,
+                            automatic: matches!(invocation, V2DreamInvocation::Automatic),
+                        })
+                        .await;
+                }
                 outcome = outcome.then(pass.outcome);
                 // Promotion can be deferred by the lease this Dream just released.
                 // Retrying here makes rollout activation converge without requiring
@@ -717,7 +728,7 @@ impl SessionActor {
         outcome
     }
 
-    /// Sends the completion notification and packages the pass result.
+    /// Packages the pass result. The caller sends the completion notification.
     async fn finish_v2_dream(
         &self,
         disposition: MemoryDreamDisposition,
@@ -725,12 +736,8 @@ impl SessionActor {
         topics_affected: usize,
         coalesced: bool,
     ) -> V2DreamPass {
-        self.send_xai_notification(XaiSessionUpdate::MemoryDreamCompleted {
-            result: dream_notice(disposition).to_owned(),
-            path: None,
-        })
-        .await;
         V2DreamPass {
+            notify: true,
             outcome: MemoryDreamResponse {
                 disposition,
                 observation_count,
@@ -768,6 +775,7 @@ impl SessionActor {
         let cancelled = |coalesced| V2DreamPass {
             outcome: MemoryDreamResponse::new(MemoryDreamDisposition::Cancelled),
             coalesced,
+            notify: false,
         };
         let started_at = std::time::Instant::now();
         if cancel.is_cancelled() {
@@ -777,6 +785,7 @@ impl SessionActor {
             return V2DreamPass {
                 outcome: MemoryDreamResponse::new(MemoryDreamDisposition::Disabled),
                 coalesced: false,
+                notify: false,
             };
         };
         self.send_xai_notification(XaiSessionUpdate::MemoryDreamQueued)
