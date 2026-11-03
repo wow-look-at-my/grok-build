@@ -459,6 +459,12 @@ impl ModelsManager {
         }
     }
 
+    /// Whether a catalog fetch or a catalog retry sequence runs now.
+    pub(crate) fn catalog_fetch_running(&self) -> bool {
+        self.inner.fetches_in_flight.load(Ordering::Acquire) > 0
+            || self.inner.retry_in_flight.load(Ordering::Acquire)
+    }
+
     pub fn current_model_id(&self) -> acp::ModelId {
         self.inner.current_model_id.read().clone()
     }

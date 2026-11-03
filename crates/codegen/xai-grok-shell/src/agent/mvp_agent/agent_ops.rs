@@ -2052,7 +2052,13 @@ impl MvpAgent {
             .get_sampling_config()
             .await
             .is_some_and(|config| !config.base_url.trim().is_empty());
-        if has_url {
+        // A loaded catalog will not change, so waiting can only help before it loads.
+        let catalog_pending = self
+            .models_manager
+            .task_model_catalog_snapshot(crate::util::config::resolve_remote_fetch_enabled())
+            .authority
+            == crate::agent::remote_config::task_model_policy::CatalogAuthority::Provisional;
+        if has_url || !catalog_pending || !self.models_manager.catalog_fetch_running() {
             return;
         }
         xai_grok_telemetry::unified_log::warn(
@@ -2063,19 +2069,25 @@ impl MvpAgent {
         const MISSING_MODEL_CATALOG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
         const CATALOG_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
         let deadline = tokio::time::Instant::now() + MISSING_MODEL_CATALOG_WAIT;
-        let default_model = loop {
+        let reachable_default = || {
             let default_model = self.models_manager.current_model_id();
-            let reachable = self.resolve_model_id(&default_model).is_ok_and(|model| {
-                !self
-                    .prepare_sampling_config_for_model(&model, None)
-                    .base_url
-                    .trim()
-                    .is_empty()
-            });
-            if reachable {
+            self.resolve_model_id(&default_model)
+                .is_ok_and(|model| {
+                    !self
+                        .prepare_sampling_config_for_model(&model, None)
+                        .base_url
+                        .trim()
+                        .is_empty()
+                })
+                .then_some(default_model)
+        };
+        let default_model = loop {
+            // Read the fetch state first.
+            let fetching = self.models_manager.catalog_fetch_running();
+            if let Some(default_model) = reachable_default() {
                 break Some(default_model);
             }
-            if tokio::time::Instant::now() >= deadline {
+            if !fetching || tokio::time::Instant::now() >= deadline {
                 break None;
             }
             tokio::time::sleep(CATALOG_CHECK_INTERVAL).await;
