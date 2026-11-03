@@ -82,7 +82,7 @@ fn provider_listing(
     listing
 }
 
-/// Fetch a provider listing on its own OS thread. `reqwest::blocking` builds a
+/// Fetch a provider listing on its own OS thread. `request::blocking` builds a
 /// runtime that panics inside an async context. The deadline stops a provider
 /// that never answers from stalling the catalog build.
 fn fetch_provider_listing(

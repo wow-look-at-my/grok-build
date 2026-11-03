@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 
 use crate::MockInferenceServer;
 
-async fn post_events(server: &MockInferenceServer, body: &Value) -> reqwest::Response {
-    reqwest::Client::new()
+async fn post_events(server: &MockInferenceServer, body: &Value) -> request::Response {
+    request::Client::new()
         .post(format!("{}/events", server.url()))
         .json(body)
         .send()
@@ -23,7 +23,7 @@ async fn post_v1_events_flattens_batches_in_arrival_order() {
         &json!({ "api_key": "pty-capture", "events": [first.clone(), second.clone()] }),
     )
     .await;
-    assert_eq!(reqwest::StatusCode::OK, response.status());
+    assert_eq!(request::StatusCode::OK, response.status());
     post_events(&server, &json!({ "events": [third.clone()] })).await;
 
     assert_eq!(vec![first, second, third], server.telemetry_events());
@@ -33,14 +33,14 @@ async fn post_v1_events_flattens_batches_in_arrival_order() {
 async fn post_v1_events_keeps_an_unparseable_body_visible() {
     let server = MockInferenceServer::start().await.unwrap();
 
-    let response = reqwest::Client::new()
+    let response = request::Client::new()
         .post(format!("{}/events", server.url()))
         .body("not json")
         .send()
         .await
         .expect("POST /v1/events");
 
-    assert_eq!(reqwest::StatusCode::OK, response.status());
+    assert_eq!(request::StatusCode::OK, response.status());
     assert_eq!(
         vec![json!({ "unparsed_events_body": "not json" })],
         server.telemetry_events()

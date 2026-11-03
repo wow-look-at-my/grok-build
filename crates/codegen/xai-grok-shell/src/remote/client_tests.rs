@@ -1015,7 +1015,7 @@ async fn fetch_bundle_propagates_legacy_error_after_fallback() {
     ));
     server.abort();
 }
-/// Regression: reqwest .header() appends, so duplicate or overlapping headers cause Cloudflare to reject the request.
+/// Regression: request .header() appends, so duplicate or overlapping headers cause Cloudflare to reject the request.
 #[tokio::test(flavor = "current_thread")]
 #[allow(clippy::disallowed_methods)]
 async fn auth_headers_do_not_collide_with_json() {
@@ -1026,7 +1026,7 @@ async fn auth_headers_do_not_collide_with_json() {
         !auth_headers.contains_key("content-type"),
         "content-type in auth map would overwrite .json()"
     );
-    let request = reqwest::Client::new()
+    let request = request::Client::new()
         .put("http://localhost/sessions/test")
         .json(&serde_json::json!({"test": true}))
         .headers(auth_headers)
@@ -1454,7 +1454,7 @@ async fn resolve_context_window_from_provider_reads_openrouter_context_length() 
     let api_base = format!("{base}/v1");
 
     // Run the shipped resolver exactly as the request path does. It spawns a
-    // dedicated OS thread and does a blocking reqwest fetch against the model's
+    // dedicated OS thread and does a blocking request fetch against the model's
     // own base, then matches the requested slug.
     let resolved = {
         let api_base = api_base.clone();

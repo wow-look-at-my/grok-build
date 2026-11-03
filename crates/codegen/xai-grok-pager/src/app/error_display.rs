@@ -578,7 +578,7 @@ fn clean_detail(s: &str) -> Option<String> {
 }
 
 /// Remove `http(s)://…` tokens so no endpoint leaks into a banner; `sanitize_user_error` only rewrites known service names, not URLs.
-/// Also drops the `for url (…)` clause reqwest wraps its URL in.
+/// Also drops the `for url (…)` clause request wraps its URL in.
 fn strip_urls(s: &str) -> String {
     if !s.contains("http://") && !s.contains("https://") {
         return s.to_string();
@@ -896,7 +896,7 @@ mod tests {
     }
 
     #[test]
-    fn strips_reqwest_url_from_connection_error() {
+    fn strips_request_url_from_connection_error() {
         let formatted = format_request_failure(
             None,
             Some(WireErrorType::Http),

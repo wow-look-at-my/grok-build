@@ -287,7 +287,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - A response stream that dies mid-body has its own retry budget: `STREAM_INTERRUPT_MAX_RETRIES` = 10, on the transport path's exponential backoff (2s, 4s, 8s, ... capped at `MAX_RETRY_BACKOFF`, jittered). `SamplingError::is_stream_interrupted` names the class. `request_task` charges it to `stream_retry_count` and not to the transport budget. A dropped connection is not a server fault, and the next 5xx still needs its own retries.
 - The budget is a floor as well as a cap. A model configured with `max_retries = 3` still gets these 10. Only `max_retries = 0` (observe-only) and a caller that cannot take duplicate output (`retry_only_before_output` after output) get zero, through `stream_interrupt_budget`.
-- A reqwest decode failure is in that class, and `is_retryable_reqwest` answers true for it. Its Display is "error decoding response body". A body that stopped arriving mid-read is transient, so calling it fatal ends a turn on one network blip. The same failure reaches the user as `EventStreamError` when the SSE stream is what broke.
+- An HTTP decode failure is in that class, and `is_retryable_request` answers true for it. Its Display is "error decoding response body". A body that stopped arriving mid-read is transient, so calling it fatal ends a turn on one network blip. The same failure reaches the user as `EventStreamError` when the SSE stream is what broke.
 
 ## Output-rate floor notes
 
@@ -322,7 +322,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - The pricing catalog is the one compiled-in endpoint (`DEFAULT_PRICING_CATALOG_URL`, modelinfo), and its request skips the allowlist (`check_catalog_url`). Nothing else prices an Anthropic model: the wire carries no cost and `/v1/models` lists no price. The proxy, the xAI API, the grok.com clients, the env crate's hosts and voice all resolve to BLANK when unconfigured. A blank URL builds no request.
 - A model request reaches only an endpoint in `[endpoints] allowed_endpoints` or `GROK_ALLOWED_ENDPOINTS` (`xai_grok_extra_ca::endpoint_allowlist`), or one the user or admin config names as a URL. Every `*url` string in those config layers adds its origin (`allow_urls_written_in_config` in `util/config/campaigns.rs`), so a provider's `base_url` needs no second entry. Campaigns and remote settings add nothing: nobody local wrote them. The check runs where each request is made. Those places are `SamplingClient::new`, the model listings, the local-runtime reads, web search, image and video generation, embeddings, voice and pricing.
-- A DNS resolver or a connector layer cannot enforce it. Behind a proxy the resolver sees the proxy's host, and reqwest keeps a connector's target URI private.
+- A DNS resolver or a connector layer cannot enforce it. Behind a proxy the resolver sees the proxy's host. The HTTP client keeps a connector's target URI private.
 - `.cargo/config.toml` sets `GROK_ALLOWED_ENDPOINTS` to loopback so tests reach their mock servers. An installed binary does not get it.
 
 ## `[model_providers.<id>]` notes

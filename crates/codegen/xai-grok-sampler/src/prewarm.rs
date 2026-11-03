@@ -257,7 +257,7 @@ mod first_use {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Warm freshness at first use, not observed pool reuse — reqwest
+    /// Warm freshness at first use, not observed pool reuse — request
     /// exposes no pool-hit signal.
     #[derive(Clone, Copy, Debug, PartialEq, Eq, strum::AsRefStr, strum::IntoStaticStr)]
     pub(super) enum Freshness {

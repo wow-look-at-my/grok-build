@@ -243,8 +243,7 @@ rayon = "1"
 rcgen = { version = "0.13", features = ["pem"] }
 reflink-copy = "0.1"
 regex = "1"
-reqwest = { version = "0.12", features = ["rustls-tls", "stream", "json", "multipart", "http2", "blocking", "socks", "gzip", "brotli", "deflate", "zstd"], default-features = false }
-# The same crate under the name `xai-grok-net` and `xai-grok-extra-ca` use for it.
+# The HTTP client. Every crate names it `request`; crates.io publishes it as `reqwest`.
 request = { package = "reqwest", version = "0.12", features = ["rustls-tls", "stream", "json", "multipart", "http2", "blocking", "socks", "gzip", "brotli", "deflate", "zstd"], default-features = false }
 reqwest-middleware = { version = "0.4.1", features = ["json", "multipart"] }
 resvg = { version = "0.47", default-features = false, features = ["text"] }

@@ -59,7 +59,7 @@ xai-spawn = { workspace = true }
 
 [dev-dependencies]
 xai-interjection-core = { workspace = true }
-reqwest = { workspace = true }
+request = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 # Fixture helpers for the spawn tests. All of these are already in the pager

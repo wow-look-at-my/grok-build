@@ -625,7 +625,7 @@ mod managed_gateway_error_tests {
     }
     #[tokio::test]
     async fn transport_error_maps_to_network_error_without_url() {
-        let transport = reqwest::Client::new()
+        let transport = request::Client::new()
             .post("http://127.0.0.1:1/mcp/tools/call")
             .send()
             .await

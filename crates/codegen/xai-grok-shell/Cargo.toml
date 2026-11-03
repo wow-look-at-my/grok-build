@@ -199,7 +199,7 @@ windows = { workspace = true }
 [dev-dependencies]
 xai-dirs = { workspace = true }
 # Mock servers in tests: a WebSocket server and raw requests against a mock.
-reqwest = { workspace = true }
+request = { workspace = true }
 tokio-tungstenite = { workspace = true }
 xai-grok-net = { workspace = true, features = ["test-loopback-session"] }
 xai-grok-status-line = { workspace = true, features = ["test-support"] }
@@ -277,9 +277,9 @@ harness = false
 [lints]
 workspace = true
 [build-dependencies]
-# build.rs only downloads ripgrep — no rmcp involvement. Workspace reqwest
+# build.rs only downloads ripgrep — no rmcp involvement. Workspace request
 # (0.12) is plenty.
-reqwest = { workspace = true, features = ["blocking"] }
+request = { workspace = true, features = ["blocking"] }
 flate2 = { workspace = true }
 tar = { workspace = true }
 
