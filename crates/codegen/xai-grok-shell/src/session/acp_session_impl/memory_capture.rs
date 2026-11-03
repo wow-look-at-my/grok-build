@@ -1566,7 +1566,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn capture_status_notifications_are_hidden_unless_debug_enabled() {
+    async fn only_a_terminal_capture_failure_shows_without_the_debug_flag() {
         tokio::task::LocalSet::new()
             .run_until(async {
                 for capture_status_enabled in [false, true] {
@@ -1590,8 +1590,17 @@ mod tests {
                     .await;
                     while persistence_rx.try_recv().is_ok() {}
 
+                    let failure = || {
+                        Some((
+                            xai_grok_telemetry::memory_telemetry::MemoryV2FailureClass::Model,
+                            "model rejected the extraction request".to_owned(),
+                        ))
+                    };
                     actor
-                        .emit_v2_capture_activity(CaptureActivity::Failed, 1, 1, 1, 0, 0, None)
+                        .emit_v2_capture_activity(CaptureActivity::Retry, 1, 1, 1, 0, 0, failure())
+                        .await;
+                    actor
+                        .emit_v2_capture_activity(CaptureActivity::Failed, 1, 1, 3, 0, 0, failure())
                         .await;
                     actor
                         .emit_v2_capture_activity_with_memories(
@@ -1611,10 +1620,28 @@ mod tests {
                         )
                         .await;
 
+                    let sent: Vec<String> = std::iter::from_fn(|| gateway_rx.try_recv().ok())
+                        .map(|message| format!("{message:?}"))
+                        .collect();
                     assert_eq!(
-                        std::iter::from_fn(|| gateway_rx.try_recv().ok()).count(),
-                        if capture_status_enabled { 2 } else { 0 },
-                        "failures and generated memory content must share the debug-only UI gate"
+                        sent.len(),
+                        if capture_status_enabled { 3 } else { 1 },
+                        "a retry and generated memory content are debug-only; a terminal failure always shows: {sent:#?}"
+                    );
+                    assert_eq!(
+                        sent.iter()
+                            .filter(|message| {
+                                message.contains("model rejected the extraction request")
+                            })
+                            .count(),
+                        1,
+                        "only the terminal failure carries its cause to the UI: {sent:#?}"
+                    );
+                    assert_eq!(
+                        sent.iter()
+                            .any(|message| message.contains("Private generated memory")),
+                        capture_status_enabled,
+                        "generated memory content stays behind the debug flag"
                     );
                     assert!(
                         persistence_rx.try_recv().is_err(),
