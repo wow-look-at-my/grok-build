@@ -1,0 +1,41 @@
+// Per-test-case module for the `pty_e2e` integration test crate.
+#[allow(unused_imports)]
+use super::common::*;
+
+/// A prompt sent before the first model-catalog fetch lands must still reach the model.
+/// The session takes its model's URL when it is created. Before the fix, a session made
+/// during the fetch kept an empty URL, and the turn showed "Server error".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore]
+async fn first_prompt_waits_for_model_catalog() {
+    let content = ContentController::start().await.expect("start content");
+    content.set_response(format!(
+        "{MOCK_RESPONSE_SENTINEL} the catalog arrived in time."
+    ));
+    content
+        .server()
+        .set_startup_fetch_delay(Duration::from_secs(3));
+
+    let binary = pager_binary().expect("resolve pager binary");
+    let mut harness =
+        PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, DEFAULT_COLS, &content, &[])
+            .expect("spawn pager with content");
+
+    harness
+        .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
+        .expect("welcome text");
+    harness
+        .inject_keys(format!("{PROMPT}\r").as_bytes())
+        .expect("submit prompt");
+
+    harness
+        .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
+        .expect("the first prompt is answered once the catalog lands");
+    assert!(
+        !harness.contains_text("Server error"),
+        "a prompt sent during the catalog fetch must not fail\nscreen:\n{}",
+        harness.screen_contents()
+    );
+
+    harness.quit().expect("clean quit");
+}
