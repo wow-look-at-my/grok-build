@@ -1097,6 +1097,7 @@ impl acp::Agent for MvpAgent {
             .session_registry
             .unavailable_model(&arguments.session_id)
             .filter(|_| needs_model);
+        let had_latched_model = latched_model.is_some();
         if let Some(unavailable_model) = latched_model {
             let models = self.models_manager.models();
             let available = self.models_manager.available();
@@ -1169,7 +1170,7 @@ impl acp::Agent for MvpAgent {
                 return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
             }
         }
-        if needs_model && latched_model.is_none() {
+        if needs_model && !had_latched_model {
             self.move_session_off_model_missing_from_catalog(
                 &arguments.session_id,
                 &handle.model_id,
