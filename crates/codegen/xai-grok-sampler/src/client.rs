@@ -2999,7 +2999,7 @@ fn parse_ndjson_line<T: serde::de::DeserializeOwned>(line: &[u8]) -> Option<Resu
     }
 }
 
-/// Read a whole response body. The error that reqwest gives for a body that
+/// Read a whole response body. The error that request gives for a body that
 /// stops mid-read carries no status, so this logs the status that the
 /// headers already gave.
 async fn read_body(
@@ -3564,7 +3564,7 @@ mod tests {
             output_rate: None,
             credential: xai_grok_sampling_types::SentCredential::Unknown,
         };
-        // SamplingError is not PartialEq (it carries reqwest/serde errors), so destructure once and compare all fields in a single assert
+        // SamplingError is not PartialEq (it carries request/serde errors), so destructure once and compare all fields in a single assert
         let SamplingError::Api {
             status,
             message,

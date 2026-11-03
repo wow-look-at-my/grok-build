@@ -95,7 +95,7 @@ pub(super) fn transient_retry_eligible(error: &xai_grok_sampler::SamplingErrorIn
         return false;
     }
     match error.kind {
-        // `clone_error` erases reqwest retryability, so all Http kinds retry here (bounded)
+        // `clone_error` erases request retryability, so all Http kinds retry here (bounded)
         SamplingErrorKind::IdleTimeout | SamplingErrorKind::Http => true,
         // The canonical retryable-status rule; 429 is excluded explicitly because it classifies as `RateLimited`
         SamplingErrorKind::Api => error.status_code.is_some_and(|status| {

@@ -187,7 +187,7 @@ fn split_authority_path(s: &str) -> (&str, &str) {
     }
 }
 
-/// Runtime MCP URL reduced to connect-time components by the WHATWG parser reqwest uses. Hand-parsing diverges from the connect target.
+/// Runtime MCP URL reduced to connect-time components by the WHATWG parser request uses. Hand-parsing diverges from the connect target.
 /// Patterns must not use this: they may hold globs the parser rejects.
 struct RuntimeUrl {
     scheme: String,
@@ -246,7 +246,7 @@ struct CompiledAllow {
     path: AllowPath,
 }
 
-/// Schemes the MCP HTTP/SSE transport can connect to (reqwest refuses every
+/// Schemes the MCP HTTP/SSE transport can connect to (request refuses every
 /// other). A bare `*` grants exactly this set; a new transport must opt in here.
 const SUPPORTED_REMOTE_SCHEMES: [&str; 2] = ["http", "https"];
 

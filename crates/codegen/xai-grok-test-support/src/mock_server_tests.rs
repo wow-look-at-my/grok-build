@@ -64,8 +64,8 @@ fn endpoint_url(server: &MockInferenceServer, endpoint: InferenceEndpoint) -> St
     format!("{}{}", server.origin(), endpoint.path())
 }
 
-async fn post_chat(server: &MockInferenceServer, content: &str) -> reqwest::Response {
-    reqwest::Client::new()
+async fn post_chat(server: &MockInferenceServer, content: &str) -> request::Response {
+    request::Client::new()
         .post(format!("{}/chat/completions", server.url()))
         .json(&json!({
             "model": "test-model",
@@ -81,7 +81,7 @@ async fn read_foreground(
     endpoint: InferenceEndpoint,
     request_id: &str,
     content: &str,
-) -> (reqwest::StatusCode, String) {
+) -> (request::StatusCode, String) {
     read_foreground_body(
         server,
         endpoint,
@@ -96,8 +96,8 @@ async fn read_foreground_body(
     endpoint: InferenceEndpoint,
     request_id: &str,
     body: Value,
-) -> (reqwest::StatusCode, String) {
-    let response = reqwest::Client::new()
+) -> (request::StatusCode, String) {
+    let response = request::Client::new()
         .post(endpoint_url(server, endpoint))
         .header("x-grok-req-id", request_id)
         .header("x-grok-turn-idx", "1")
@@ -138,8 +138,8 @@ async fn post_chat_turn(server: &MockInferenceServer, system: &str) -> String {
 async fn send_chat_turn(
     server: &MockInferenceServer,
     system: &str,
-) -> reqwest::Result<reqwest::Response> {
-    reqwest::Client::new()
+) -> request::Result<request::Response> {
+    request::Client::new()
         .post(endpoint_url(server, InferenceEndpoint::ChatCompletions))
         .header("x-grok-turn-idx", "1")
         .json(&chat_body(system))
@@ -382,7 +382,7 @@ async fn overlapping_duplicate_replays_but_sequential_identical_request_claims_n
         let url = endpoint_url(&server, InferenceEndpoint::Responses);
         let body = foreground_body(InferenceEndpoint::Responses, "same body");
         async move {
-            let response = reqwest::Client::new()
+            let response = request::Client::new()
                 .post(url)
                 .header("x-grok-req-id", "turn-id")
                 .header("x-grok-turn-idx", "1")
@@ -522,7 +522,7 @@ async fn cancelling_replay_waits_for_primary_before_satisfaction() {
         let url = endpoint_url(&server, InferenceEndpoint::Responses);
         let body = foreground_body(InferenceEndpoint::Responses, "same body");
         async move {
-            reqwest::Client::new()
+            request::Client::new()
                 .post(url)
                 .header("x-grok-req-id", "cancel-replay")
                 .header("x-grok-turn-idx", "1")
@@ -601,7 +601,7 @@ async fn fixed_mode_reconstructs_byte_exact_over_http() {
     let body = post_chat(&server, "ignored").await.text().await.unwrap();
     assert_eq!(MERMAID_TEXT, chat_stream_text(&body));
 
-    let body = reqwest::Client::new()
+    let body = request::Client::new()
         .post(format!("{}/responses", server.url()))
         .json(&json!({
             "model": "test-model",
@@ -615,7 +615,7 @@ async fn fixed_mode_reconstructs_byte_exact_over_http() {
         .unwrap();
     assert_eq!(MERMAID_TEXT, responses_stream_text(&body));
 
-    let body = reqwest::Client::new()
+    let body = request::Client::new()
         .post(format!("{}/messages", server.url()))
         .json(&json!({
             "model": "test-model",
@@ -646,11 +646,11 @@ async fn settings_404_until_set_then_200() {
     let server = MockInferenceServer::start().await.unwrap();
     let url = format!("{}/settings", server.url());
 
-    let resp = reqwest::get(&url).await.unwrap();
+    let resp = request::get(&url).await.unwrap();
     assert_eq!(404, resp.status());
 
     server.set_settings(json!({ "tips": ["t1"] }));
-    let resp = reqwest::get(&url).await.unwrap();
+    let resp = request::get(&url).await.unwrap();
     assert_eq!(200, resp.status());
     let body: Value = resp.json().await.unwrap();
     assert_eq!(json!({ "tips": ["t1"] }), body);
@@ -728,7 +728,7 @@ async fn user_route_serves_exactly_the_fields_set() {
     ];
     for (label, apply, expected) in steps {
         apply(&server);
-        let body: Value = reqwest::get(&url).await.unwrap().json().await.unwrap();
+        let body: Value = request::get(&url).await.unwrap().json().await.unwrap();
         assert_eq!(expected, body, "{label}");
     }
 }
@@ -744,7 +744,7 @@ async fn startup_fetch_delay_slows_models_and_settings_then_clears() {
 
     for url in [&models_url, &settings_url] {
         let started = std::time::Instant::now();
-        let resp = reqwest::get(url).await.unwrap();
+        let resp = request::get(url).await.unwrap();
         assert!(resp.status().is_success() || resp.status() == 404, "{url}");
         assert!(
             started.elapsed() >= delay,
@@ -756,7 +756,7 @@ async fn startup_fetch_delay_slows_models_and_settings_then_clears() {
     server.set_hang(true);
     server.set_startup_fetch_delay(delay);
     let started = std::time::Instant::now();
-    tokio::time::timeout(delay * 4, reqwest::get(&models_url))
+    tokio::time::timeout(delay * 4, request::get(&models_url))
         .await
         .expect("the delay must replace the hang")
         .unwrap();
@@ -767,7 +767,7 @@ async fn startup_fetch_delay_slows_models_and_settings_then_clears() {
 
     server.clear_startup_fetch_stall();
     let started = std::time::Instant::now();
-    reqwest::get(&models_url).await.unwrap();
+    request::get(&models_url).await.unwrap();
     assert!(
         started.elapsed() < delay,
         "clearing the delay should make /v1/models fast again, took {:?}",
@@ -784,7 +784,7 @@ async fn privacy_coding_data_retention_serves_scripted_denial_then_echoes_and_lo
         ScriptedResponse::json(403, json!({ "error": "team policy" })),
     );
     let put = || {
-        reqwest::Client::new()
+        request::Client::new()
             .put(&url)
             .json(&json!({ "codingDataRetentionOptOut": true }))
             .send()
@@ -837,7 +837,7 @@ async fn scripted_responses_serve_fifo_per_path_then_fall_back() {
     assert_eq!("Echo: ping pong", chat_stream_text(&body));
 
     server.enqueue_response("/v1/chat/completions", ScriptedResponse::text(503, "later"));
-    let resp = reqwest::Client::new()
+    let resp = request::Client::new()
         .post(format!("{}/responses", server.url()))
         .json(&json!({
             "model": "test-model",
@@ -1054,7 +1054,7 @@ async fn compatibility_completion_gate_holds_sse_terminals_but_not_json_or_raw()
 async fn request_log_captures_arbitrary_headers() {
     let server = MockInferenceServer::start().await.unwrap();
 
-    reqwest::Client::new()
+    request::Client::new()
         .post(format!("{}/chat/completions", server.url()))
         .header("authorization", "Bearer log-me")
         .header("x-test-marker", "zap")
@@ -1082,7 +1082,7 @@ async fn required_auth_rejects_a_missing_bearer_and_admits_the_token() {
     )
     .await
     .unwrap();
-    let client = reqwest::Client::new();
+    let client = request::Client::new();
     let url = format!("{}/chat/completions", server.url());
     let req_body = json!({
         "model": "test-model",
@@ -1113,7 +1113,7 @@ async fn session_writeback_routes_are_logged_and_gated_by_required_auth() {
     )
     .await
     .unwrap();
-    let client = reqwest::Client::new();
+    let client = request::Client::new();
     let origin = server.origin();
     let data =
         json!({ "messages": [{ "content": "x" }], "metadata": { "title": "Manual", "cwd": "/" } });
@@ -1379,7 +1379,7 @@ async fn auth_rejection_and_concurrency_cap_are_on_the_log_as_status_failures() 
     .await
     .unwrap();
     server.set_inference_concurrency_cap(0, Duration::ZERO, 1);
-    let client = reqwest::Client::new();
+    let client = request::Client::new();
     let url = endpoint_url(&server, InferenceEndpoint::ChatCompletions);
     let body = json!({ "model": "test-model", "messages": [{ "role": "user", "content": "hi" }] });
 
@@ -1416,7 +1416,7 @@ async fn tls_server_serves_models_only_to_a_client_trusting_the_throwaway_ca() {
 
     // An ambient HTTPS_PROXY would intercept the loopback handshake and
     // make a proxy failure look like a CA or server bug.
-    let untrusting = reqwest::Client::builder()
+    let untrusting = request::Client::builder()
         .use_rustls_tls()
         .no_proxy()
         .build()
@@ -1430,10 +1430,10 @@ async fn tls_server_serves_models_only_to_a_client_trusting_the_throwaway_ca() {
     assert_eq!(0, server.request_count_for("/v1/models"));
 
     let ca_pem = std::fs::read(server.ca_pem_path().expect("TLS server exposes its CA")).unwrap();
-    let trusting = reqwest::Client::builder()
+    let trusting = request::Client::builder()
         .use_rustls_tls()
         .no_proxy()
-        .add_root_certificate(reqwest::Certificate::from_pem(&ca_pem).unwrap())
+        .add_root_certificate(request::Certificate::from_pem(&ca_pem).unwrap())
         .build()
         .unwrap();
     let resp = trusting

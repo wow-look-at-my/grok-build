@@ -101,7 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let bytes: Vec<u8> = {
-        let resp = reqwest::blocking::get(&url).map_err(|e| {
+        let resp = request::blocking::get(&url).map_err(|e| {
             format!(
                 "Failed to download ripgrep: {}\nSet GROK_SHELL_BUNDLE_RG_PATH to a local rg for offline builds.",
                 e

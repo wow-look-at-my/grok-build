@@ -133,7 +133,7 @@ axum = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 xai-test-utils = { path = "../../common/xai-test-utils" }
 # The binary tests read the diag server over plain HTTP.
-reqwest = { workspace = true }
+request = { workspace = true }
 
 [lints]
 workspace = true

@@ -3,11 +3,11 @@ license = "Apache-2.0"
 name = "xai-grok-http"
 version = "0.1.0"
 edition.workspace = true
-description = "Shared reqwest HTTP clients and User-Agent construction for the grok CLI."
+description = "Shared HTTP clients and User-Agent construction for the grok CLI."
 
 [dependencies]
 xai-grok-net = { workspace = true }
-# Same 0.23 as reqwest's rustls, so the certificate classifier's downcast resolves.
+# Same 0.23 as the HTTP client's rustls, so the certificate classifier's downcast resolves.
 rustls = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

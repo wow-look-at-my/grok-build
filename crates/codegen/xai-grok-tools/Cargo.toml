@@ -127,7 +127,7 @@ name = "test_subagent_soak"
 path = "tests/test_subagent_soak.rs"
 
 [build-dependencies]
-reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
+request = { workspace = true, features = ["blocking", "rustls-tls"] }
 flate2 = { workspace = true }
 sha2 = { workspace = true }
 tar = { workspace = true }

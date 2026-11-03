@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 
 use crate::MockInferenceServer;
 
-async fn post_feedback(server: &MockInferenceServer, body: &Value) -> reqwest::Response {
-    reqwest::Client::new()
+async fn post_feedback(server: &MockInferenceServer, body: &Value) -> request::Response {
+    request::Client::new()
         .post(format!("{}/feedback", server.url()))
         .header("authorization", "Bearer mock-feedback-token")
         .json(body)
@@ -23,7 +23,7 @@ async fn post_v1_feedback_records_body_and_answers_feedback_id() {
 
     let response = post_feedback(&server, &body).await;
 
-    assert_eq!(reqwest::StatusCode::OK, response.status());
+    assert_eq!(request::StatusCode::OK, response.status());
     assert_eq!(
         json!({ "feedbackId": "mock-feedback-1", "createdAt": "2026-01-01T00:00:00Z" }),
         response.json::<Value>().await.unwrap()
@@ -46,7 +46,7 @@ async fn post_v1_feedback_failure_toggle_returns_500_and_still_records() {
     server.set_feedback_failure(true);
     let response = post_feedback(&server, &json!({ "feedbackText": "first" })).await;
     assert_eq!(
-        reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+        request::StatusCode::INTERNAL_SERVER_ERROR,
         response.status()
     );
     assert_eq!(
@@ -57,7 +57,7 @@ async fn post_v1_feedback_failure_toggle_returns_500_and_still_records() {
 
     server.set_feedback_failure(false);
     let response = post_feedback(&server, &json!({ "feedbackText": "second" })).await;
-    assert_eq!(reqwest::StatusCode::OK, response.status());
+    assert_eq!(request::StatusCode::OK, response.status());
     assert_eq!(
         Some(&json!("mock-feedback-2")),
         response.json::<Value>().await.unwrap().get("feedbackId")
@@ -69,14 +69,14 @@ async fn post_v1_feedback_failure_toggle_returns_500_and_still_records() {
 async fn post_v1_feedback_keeps_an_unparseable_body_visible() {
     let server = MockInferenceServer::start().await.unwrap();
 
-    let response = reqwest::Client::new()
+    let response = request::Client::new()
         .post(format!("{}/feedback", server.url()))
         .body("not json")
         .send()
         .await
         .expect("POST /v1/feedback");
 
-    assert_eq!(reqwest::StatusCode::OK, response.status());
+    assert_eq!(request::StatusCode::OK, response.status());
     assert_eq!(
         Some(&json!({ "unparsed_feedback_body": "not json" })),
         server.feedback_posts().first().map(|post| &post.body)
@@ -95,7 +95,7 @@ async fn post_v1_feedback_over_cap_drops_only_the_images() {
 
     let response = post_feedback(&server, &body).await;
 
-    assert_eq!(reqwest::StatusCode::OK, response.status());
+    assert_eq!(request::StatusCode::OK, response.status());
     assert_eq!(
         Some(&json!({
             "feedbackText": "screenshot attached",
