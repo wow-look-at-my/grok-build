@@ -2,9 +2,10 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// A prompt sent before the first model-catalog fetch lands must still reach the model.
-/// The session takes its model's URL when it is created. Before the fix, a session made
-/// during the fetch kept an empty URL, and the turn showed "Server error".
+/// A prompt sent while the first model-catalog fetch is still in flight must still reach
+/// the model. A session takes its model's URL. This happens when it is created, so a
+/// session that started before the catalog would send to a model with no URL ("Server
+/// error").
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn first_prompt_waits_for_model_catalog() {

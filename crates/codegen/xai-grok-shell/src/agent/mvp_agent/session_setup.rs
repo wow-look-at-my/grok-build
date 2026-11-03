@@ -400,16 +400,6 @@ impl MvpAgent {
         self.spawn_settings_reapply();
         // The session copies its model's URL now.
         self.models_manager.wait_for_provider_discovery().await;
-        // A model that the first catalog fetch has not delivered yet has no URL. A session made before the fetch lands keeps that empty URL, and every turn then fails. The wait
-        // is bounded and ends at once when no fetch runs.
-        if self
-            .resolve_model_id(&self.models_manager.current_model_id())
-            .is_err()
-        {
-            self.models_manager
-                .wait_for_first_catalog(crate::util::config::resolve_remote_fetch_enabled())
-                .await;
-        }
         self.report_setup_phase(SessionSetupPhase::ResolveWorkspace);
         let SessionWorkspace {
             cwd,
