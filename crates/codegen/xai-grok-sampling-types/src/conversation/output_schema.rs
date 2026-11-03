@@ -14,11 +14,25 @@ const UNSUPPORTED: [&str; 8] = [
     "maxItems",
 ];
 
+/// String formats the Messages API accepts.
+const SUPPORTED_STRING_FORMATS: [&str; 10] = [
+    "date-time",
+    "time",
+    "date",
+    "duration",
+    "email",
+    "hostname",
+    "uri",
+    "ipv4",
+    "ipv6",
+    "uuid",
+];
+
 /// Keys whose value is one subschema.
-const SUBSCHEMA_KEYS: [&str; 3] = ["items", "not", "additionalProperties"];
+const SUBSCHEMA_KEYS: [&str; 2] = ["items", "not"];
 
 /// Keys whose value is an array of subschemas.
-const SUBSCHEMA_LIST_KEYS: [&str; 4] = ["anyOf", "oneOf", "allOf", "prefixItems"];
+const SUBSCHEMA_LIST_KEYS: [&str; 3] = ["anyOf", "allOf", "prefixItems"];
 
 /// Keys whose value is a map of name to subschema.
 const SUBSCHEMA_MAP_KEYS: [&str; 3] = ["properties", "$defs", "definitions"];
@@ -48,11 +62,29 @@ fn sanitize(schema: &mut Value) {
     {
         notes.push(format!("minItems: {value}"));
     }
+    if obj
+        .get("format")
+        .and_then(Value::as_str)
+        .is_some_and(|format| !SUPPORTED_STRING_FORMATS.contains(&format))
+        && let Some(value) = obj.remove("format")
+    {
+        notes.push(format!("format: {value}"));
+    }
+    // The API supports `anyOf` but not `oneOf`. The SDK makes the same rewrite.
+    if !obj.contains_key("anyOf")
+        && let Some(variants) = obj.remove("oneOf")
+    {
+        obj.insert("anyOf".to_owned(), variants);
+    }
+    // Every object must have `additionalProperties: false`.
+    if is_object_schema(obj) {
+        match obj.insert("additionalProperties".to_owned(), Value::Bool(false)) {
+            None | Some(Value::Bool(false)) => {}
+            Some(other) => notes.push(format!("additionalProperties: {other}")),
+        }
+    }
     if !notes.is_empty() {
         append_description(obj, &notes.join(", "));
-    }
-    if is_object_schema(obj) && !obj.contains_key("additionalProperties") {
-        obj.insert("additionalProperties".to_owned(), Value::Bool(false));
     }
     for key in SUBSCHEMA_KEYS {
         if let Some(child) = obj.get_mut(key) {
@@ -133,9 +165,48 @@ mod tests {
     }
 
     #[test]
-    fn an_explicit_additional_properties_is_kept() {
+    fn every_object_gets_additional_properties_false() {
         let schema = json!({ "type": "object", "additionalProperties": { "type": "string" } });
-        assert_eq!(for_messages_api(&schema), schema);
+        assert_eq!(
+            for_messages_api(&schema),
+            json!({
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Constraint: additionalProperties: {\"type\":\"string\"}"
+            })
+        );
+        let open = json!({ "type": "object", "additionalProperties": true });
+        assert_eq!(
+            for_messages_api(&open)["additionalProperties"],
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn one_of_becomes_any_of() {
+        let schema = json!({ "oneOf": [ { "type": "string" }, { "type": "null" } ] });
+        assert_eq!(
+            for_messages_api(&schema),
+            json!({ "anyOf": [ { "type": "string" }, { "type": "null" } ] })
+        );
+    }
+
+    #[test]
+    fn only_supported_string_formats_stay() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "at": { "type": "string", "format": "date-time" },
+                "path": { "type": "string", "format": "uri-reference" }
+            }
+        });
+        let out = for_messages_api(&schema);
+        assert_eq!(out["properties"]["at"]["format"], json!("date-time"));
+        assert_eq!(
+            out["properties"]["path"],
+            json!({ "type": "string", "description": "Constraint: format: \"uri-reference\"" })
+        );
     }
 
     #[test]

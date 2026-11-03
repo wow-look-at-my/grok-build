@@ -21,6 +21,7 @@ pub use flatten::{FlattenReport, flatten_conversation, needs_flattening};
 pub use messages::build_messages_request;
 pub use ollama::{NUM_CTX_OPTION, NUM_PREDICT_OPTION, build_ollama_chat_request};
 pub use output_budget::{OutputBudgetClamp, estimate_item_tokens, estimate_tool_spec_tokens};
+pub use output_schema::for_messages_api as structured_output_schema_for_messages_api;
 pub use responses::{
     extra_tool_entries, patch_reasoning_text_types, response_to_conversation_items,
 };

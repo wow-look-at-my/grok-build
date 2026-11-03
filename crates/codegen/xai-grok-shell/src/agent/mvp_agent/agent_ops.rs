@@ -2039,6 +2039,92 @@ impl MvpAgent {
             }
         }
     }
+    /// A session takes its model's URL when it is created. When the first catalog fetch
+    /// failed, the session holds a model with no URL, and every turn fails.
+    /// Wait for the catalog retry, bounded, then move the session to the catalog's default.
+    pub(super) async fn move_session_off_model_missing_from_catalog(
+        &self,
+        session_id: &acp::SessionId,
+        session_model: &acp::ModelId,
+        chat_state: &xai_chat_state::ChatStateHandle,
+    ) {
+        let has_url = chat_state
+            .get_sampling_config()
+            .await
+            .is_some_and(|config| !config.base_url.trim().is_empty());
+        // A loaded catalog will not change, so waiting can only help before it loads.
+        let catalog_pending = self
+            .models_manager
+            .task_model_catalog_snapshot(crate::util::config::resolve_remote_fetch_enabled())
+            .authority
+            == crate::agent::remote_config::task_model_policy::CatalogAuthority::Provisional;
+        if has_url || !catalog_pending || !self.models_manager.catalog_fetch_running() {
+            return;
+        }
+        xai_grok_telemetry::unified_log::warn(
+            "prompt: the session model has no URL; waiting for the model catalog",
+            Some(session_id.0.as_ref()),
+            Some(serde_json::json!({ "model": session_model.0.as_ref() })),
+        );
+        const MISSING_MODEL_CATALOG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+        const CATALOG_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+        let deadline = tokio::time::Instant::now() + MISSING_MODEL_CATALOG_WAIT;
+        let reachable_default = || {
+            let default_model = self.models_manager.current_model_id();
+            self.resolve_model_id(&default_model)
+                .is_ok_and(|model| {
+                    !self
+                        .prepare_sampling_config_for_model(&model, None)
+                        .base_url
+                        .trim()
+                        .is_empty()
+                })
+                .then_some(default_model)
+        };
+        let default_model = loop {
+            // Read the fetch state first.
+            let fetching = self.models_manager.catalog_fetch_running();
+            if let Some(default_model) = reachable_default() {
+                break Some(default_model);
+            }
+            if !fetching || tokio::time::Instant::now() >= deadline {
+                break None;
+            }
+            tokio::time::sleep(CATALOG_CHECK_INTERVAL).await;
+        };
+        let Some(default_model) = default_model else {
+            xai_grok_telemetry::unified_log::warn(
+                "prompt: no catalog model with a URL arrived; the turn will fail",
+                Some(session_id.0.as_ref()),
+                Some(serde_json::json!({
+                    "model": session_model.0.as_ref(),
+                    "catalog_default": self.models_manager.current_model_id().0.as_ref(),
+                })),
+            );
+            return;
+        };
+        tracing::info!(
+            session_id = %session_id.0,
+            from = %session_model.0,
+            to = %default_model.0,
+            "prompt: the session model was not in the catalog; moving the session to the catalog default"
+        );
+        if let Err(error) = crate::agent::handlers::model_switch::apply(
+            self,
+            acp::SetSessionModelRequest::new(session_id.clone(), default_model.clone()),
+            crate::agent::handlers::model_switch::SwitchEffort::Preserve,
+            crate::agent::handlers::model_switch::ConfigNotice::Send,
+        )
+        .await
+        {
+            tracing::warn!(
+                session_id = %session_id.0,
+                model_id = %default_model.0,
+                ?error,
+                "prompt: could not move the session to the catalog default"
+            );
+        }
+    }
     pub(super) async fn send_model_auto_switched(
         &self,
         session_id: &acp::SessionId,
