@@ -2055,6 +2055,11 @@ impl MvpAgent {
         if has_url {
             return;
         }
+        xai_grok_telemetry::unified_log::warn(
+            "prompt: the session model has no URL; waiting for the model catalog",
+            Some(session_id.0.as_ref()),
+            Some(serde_json::json!({ "model": session_model.0.as_ref() })),
+        );
         // Long enough for one timed-out attempt, the retry backoff and a second attempt.
         const MISSING_MODEL_CATALOG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
         let catalog_ready = self
@@ -2069,11 +2074,14 @@ impl MvpAgent {
             || default_model == *session_model
             || self.resolve_model_id(&default_model).is_err()
         {
-            tracing::warn!(
-                session_id = %session_id.0,
-                model_id = %session_model.0,
-                catalog_ready,
-                "prompt: the session model is not in the catalog and no catalog model can replace it"
+            xai_grok_telemetry::unified_log::warn(
+                "prompt: no catalog model can replace the session model",
+                Some(session_id.0.as_ref()),
+                Some(serde_json::json!({
+                    "model": session_model.0.as_ref(),
+                    "catalog_ready": catalog_ready,
+                    "catalog_default": default_model.0.as_ref(),
+                })),
             );
             return;
         }
