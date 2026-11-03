@@ -158,6 +158,8 @@ struct RouterState {
     telemetry: Arc<TelemetryEventsState>,
     startup_fetch_stall: Arc<std::sync::RwLock<StartupFetchStall>>,
     startup_stalls_served: Arc<AtomicU32>,
+    /// Extra delay on `GET /v1/models` only, so the catalog lands after settings.
+    models_delay: Arc<std::sync::RwLock<Option<Duration>>>,
     user_tier: Arc<std::sync::RwLock<Option<String>>>,
     user_team: Arc<std::sync::RwLock<Option<MockUserTeam>>>,
     user_can_administer_team: Arc<std::sync::RwLock<MockCanAdministerTeam>>,
@@ -272,6 +274,7 @@ impl MockInferenceServer {
             telemetry: Arc::new(TelemetryEventsState::default()),
             startup_fetch_stall: Arc::new(std::sync::RwLock::new(StartupFetchStall::None)),
             startup_stalls_served: Arc::new(AtomicU32::new(0)),
+            models_delay: Arc::new(std::sync::RwLock::new(None)),
             user_tier: Arc::new(std::sync::RwLock::new(None)),
             user_team: Arc::new(std::sync::RwLock::new(None)),
             user_can_administer_team: Arc::new(std::sync::RwLock::new(
@@ -460,6 +463,11 @@ impl MockInferenceServer {
 
     pub fn set_startup_fetch_delay(&self, delay: Duration) {
         *self.state.startup_fetch_stall.write().unwrap() = StartupFetchStall::Delay(delay);
+    }
+
+    /// Delay every `GET /v1/models` answer by `delay`. `/v1/settings` is not delayed.
+    pub fn set_models_delay(&self, delay: Duration) {
+        *self.state.models_delay.write().unwrap() = Some(delay);
     }
 
     pub fn clear_startup_fetch_stall(&self) {
@@ -670,6 +678,10 @@ impl MockInferenceServer {
                         async move {
                             state.log.record_get("/v1/models");
                             state.stall_startup_fetch().await;
+                            let models_delay = *state.models_delay.read().unwrap();
+                            if let Some(delay) = models_delay {
+                                tokio::time::sleep(delay).await;
+                            }
                             let models_json = state.models.read().unwrap().clone();
                             Json(json!({
                                 "object": "list",
