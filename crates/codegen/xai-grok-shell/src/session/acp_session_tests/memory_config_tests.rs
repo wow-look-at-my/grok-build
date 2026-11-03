@@ -225,6 +225,7 @@ pub(super) async fn create_test_actor_with_memory(
             config_opt_out: memory_config
                 .as_ref()
                 .is_some_and(|config| !config.enabled && !config.force_disabled),
+            unavailable: None,
             v2_legacy_carryover: false,
             prompt_sync_pending: std::sync::atomic::AtomicBool::new(false),
             flush_config: memory_config

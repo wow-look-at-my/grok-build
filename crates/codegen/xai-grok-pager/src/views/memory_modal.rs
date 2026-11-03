@@ -108,6 +108,19 @@ remembered is kept on disk."
 This session's memory settings were pinned when it started, and they disable memory, so it \
 can't be turned on here. Press **s** for details."
         }
+        Some(MemoryDisabledReason::EphemeralWorkspace) => {
+            "\
+**Memory is unavailable in a temporary directory.** Start Grok Build in a project directory to use it.
+
+Memory belongs to a workspace, and a temporary directory is not one Grok Build can find again."
+        }
+        Some(MemoryDisabledReason::InitFailed) => {
+            "\
+**Memory failed to start for this session.** Start a new session to retry.
+
+Memory storage could not be initialized when this session started. The log has the error \
+(search for `MEMORY_INIT`). Anything already remembered is kept on disk."
+        }
         Some(MemoryDisabledReason::NotConfigured) => {
             "\
 **Memory isn't configured.** Press **s** for details.

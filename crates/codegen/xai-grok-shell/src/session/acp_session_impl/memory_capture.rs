@@ -1321,16 +1321,19 @@ impl SessionActor {
             attempt,
             "memory-v2 capture lifecycle"
         );
-        if let Some((_, detail)) = failure {
+        let detail = failure.map(|(_, detail)| {
             tracing::warn!(error = %detail, "memory-v2 capture activity failed");
-        }
-        if self.memory.v2_config.capture_status_enabled {
+            detail
+        });
+        // The debug flag shows every lifecycle step.
+        let terminal_failure = matches!(activity, CaptureActivity::Failed);
+        if self.memory.v2_config.capture_status_enabled || terminal_failure {
             self.send_xai_notification_transient(XaiSessionUpdate::MemoryCaptureActivity {
                 activity: activity.as_str().to_owned(),
                 from_turn,
                 through_turn,
                 attempt,
-                detail: None,
+                detail: if terminal_failure { detail } else { None },
                 memories,
             });
         }

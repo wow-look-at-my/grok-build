@@ -289,10 +289,10 @@ impl MvpAgent {
                 .as_ref()
                 .map(|config| config.mode)
                 .unwrap_or_else(|| {
-                    if self.cfg.borrow().memory_v2.enabled == Some(true) {
-                        crate::config::MemoryMode::V2
-                    } else {
+                    if self.cfg.borrow().memory_v2.enabled == Some(false) {
                         crate::config::MemoryMode::Legacy
+                    } else {
+                        crate::config::MemoryMode::V2
                     }
                 }),
             web_search_sampling_config: self.prepare_web_search_sampling_config(&parent_base_url),

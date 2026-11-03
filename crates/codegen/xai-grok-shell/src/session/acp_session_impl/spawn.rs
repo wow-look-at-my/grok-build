@@ -899,6 +899,7 @@ pub(crate) async fn spawn_session_actor(
         )
     });
     let mut memory_storage_for_session = None;
+    let mut memory_unavailable = None;
     match select_memory_storage(configured_memory_storage.as_ref(), memory_config.as_ref()) {
         MemoryStorageSelection::Enabled => {
             memory_storage_for_session = configured_memory_storage.clone();
@@ -911,6 +912,8 @@ pub(crate) async fn spawn_session_actor(
                 "MEMORY_INIT: memory-v2 is disabled for ephemeral (temp-dir) workspaces"
             );
             configured_memory_storage = None;
+            memory_unavailable =
+                Some(crate::extensions::notification::MemoryDisabledReason::EphemeralWorkspace);
         }
     }
     let memory_initial_injection_config = memory_config
@@ -948,6 +951,8 @@ pub(crate) async fn spawn_session_actor(
                     );
                     memory_storage_for_session = None;
                     configured_memory_storage = None;
+                    memory_unavailable =
+                        Some(crate::extensions::notification::MemoryDisabledReason::InitFailed);
                 }
             }
         } else if let Err(error) =
@@ -1857,6 +1862,7 @@ pub(crate) async fn spawn_session_actor(
             config_opt_out: memory_config
                 .as_ref()
                 .is_some_and(|config| !config.enabled && !config.force_disabled),
+            unavailable: memory_unavailable,
             v2_legacy_carryover: memory_v2_legacy_carryover,
             prompt_sync_pending: std::sync::atomic::AtomicBool::new(false),
             flush_config: memory_config.as_ref().map_or_else(

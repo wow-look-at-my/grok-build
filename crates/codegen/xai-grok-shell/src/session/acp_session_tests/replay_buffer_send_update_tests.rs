@@ -154,6 +154,7 @@ pub(super) async fn make_replay_send_update_fixture() -> ReplaySendUpdateFixture
             configured_storage: None,
             process_disabled: false,
             config_opt_out: false,
+            unavailable: None,
             v2_legacy_carryover: false,
             prompt_sync_pending: std::sync::atomic::AtomicBool::new(false),
             flush_config: crate::config::MemoryFlushConfig::default(),

@@ -183,6 +183,77 @@ pub fn carry_over_legacy_memory(
     Ok(V2CarryoverOutcome::Imported(report))
 }
 
+/// Delete the v2 scope at `scope_dir`, but keep its carry-over record. A
+/// clear that dropped the record would let the next session start import the
+/// unchanged legacy `MEMORY.md` again, and the cleared notes would come back.
+/// Returns whether the scope existed.
+/// # Errors
+/// Returns the I/O error of the delete, or of the new record.
+pub(crate) fn clear_scope_keeping_carryover_record(scope_dir: &Path) -> std::io::Result<bool> {
+    let state_path = scope_dir.join("memory_state.sqlite");
+    let record = read_carryover_record(&state_path);
+    match std::fs::remove_dir_all(scope_dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    }
+    if record.is_empty() {
+        return Ok(true);
+    }
+    std::fs::create_dir_all(scope_dir)?;
+    write_carryover_record(&state_path, &record).map_err(std::io::Error::other)?;
+    Ok(true)
+}
+
+fn read_carryover_record(state_path: &Path) -> Vec<(&'static str, String)> {
+    if !state_path.is_file() {
+        return Vec::new();
+    }
+    let Ok(connection) = JournalMode::for_db_path(state_path).open(state_path) else {
+        tracing::warn!(
+            path = %state_path.display(),
+            "MEMORY_CARRYOVER: cannot open the state database before a clear; legacy notes may be imported again"
+        );
+        return Vec::new();
+    };
+    [META_HASH_KEY, META_AT_KEY]
+        .into_iter()
+        .filter_map(|key| {
+            connection
+                .query_row(
+                    "SELECT value FROM meta WHERE key = ?1",
+                    params![key],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .ok()
+                .flatten()
+                .map(|value| (key, value))
+        })
+        .collect()
+}
+
+fn write_carryover_record(
+    state_path: &Path,
+    record: &[(&'static str, String)],
+) -> rusqlite::Result<()> {
+    let connection = JournalMode::for_db_path(state_path).open(state_path)?;
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );",
+    )?;
+    for (key, value) in record {
+        connection.execute(
+            "INSERT INTO meta(key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+    }
+    Ok(())
+}
+
 fn read_source(source: &Path) -> Result<Option<String>> {
     let metadata = match std::fs::symlink_metadata(source) {
         Ok(metadata) => metadata,

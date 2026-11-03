@@ -526,6 +526,9 @@ impl MemoryStorage {
     /// Deletes MEMORY.md, sessions/, index.sqlite, and any other workspace files.
     /// The directory will be recreated on next session start via `ensure_initialized()`.
     pub fn clear_workspace(&self) -> std::io::Result<bool> {
+        if self.mode.is_v2() {
+            return crate::v2_carryover::clear_scope_keeping_carryover_record(&self.workspace_dir);
+        }
         match std::fs::remove_dir_all(&self.workspace_dir) {
             Ok(()) => {
                 tracing::info!(path = %self.workspace_dir.display(), "cleared workspace memory");
@@ -541,11 +544,7 @@ impl MemoryStorage {
     /// The file will be recreated on next session start via `ensure_initialized()`.
     pub fn clear_global(&self) -> std::io::Result<bool> {
         if self.mode.is_v2() {
-            return match std::fs::remove_dir_all(&self.global_dir) {
-                Ok(()) => Ok(true),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-                Err(error) => Err(error),
-            };
+            return crate::v2_carryover::clear_scope_keeping_carryover_record(&self.global_dir);
         }
         let path = self.global_memory_file();
         match std::fs::remove_file(&path) {

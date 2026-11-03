@@ -136,6 +136,8 @@ pub(crate) struct SessionMemory {
     /// The effective TOML started this session with `[memory] enabled = false`.
     /// The `/memory` toggle can still enable memory for the session.
     pub config_opt_out: bool,
+    /// Spawn could not provide memory storage, and why. The `/memory` toggle cannot fix it.
+    pub unavailable: Option<crate::extensions::notification::MemoryDisabledReason>,
     /// Whether enabling v2 carries curated legacy `MEMORY.md` files into the v2 scopes.
     /// Resolved at spawn from the root override and the maintenance rollout gate.
     pub v2_legacy_carryover: bool,
@@ -251,6 +253,8 @@ impl SessionMemory {
                 || !self.v2_config.file_writes_enabled);
         Some(if self.process_disabled {
             MemoryDisabledReason::ProcessDisabled
+        } else if let Some(reason) = self.unavailable {
+            reason
         } else if v2_restricted {
             MemoryDisabledReason::RolloutRestricted
         } else if self.configured_storage.is_none() {

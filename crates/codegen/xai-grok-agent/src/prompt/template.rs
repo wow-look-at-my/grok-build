@@ -399,6 +399,36 @@ mod tests {
         assert!(!prompt.contains("memory_save"));
     }
 
+    #[test]
+    fn test_subagent_memory_v2_renders_roots_and_write_rules() {
+        let mut placeholders = default_placeholders();
+        jset(
+            &mut placeholders,
+            "memory_v2_enabled",
+            serde_json::json!(true),
+        );
+        jset(
+            &mut placeholders,
+            "memory_global_path",
+            serde_json::json!("/home/test/.grok/memory-v2/global"),
+        );
+        jset(
+            &mut placeholders,
+            "memory_workspace_path",
+            serde_json::json!("/home/test/.grok/memory-v2/workspaces/project"),
+        );
+
+        let prompt = render_subagent(&default_renderer(), &placeholders);
+        assert!(prompt.contains("<memory>"));
+        assert!(prompt.contains("/home/test/.grok/memory-v2/global/topics/"));
+        assert!(prompt.contains("/home/test/.grok/memory-v2/workspaces/project/topics/"));
+        assert!(prompt.contains("observations/_inbox/"));
+        assert!(prompt.contains("never read `MEMORY.md` itself"));
+
+        let without = render_subagent(&default_renderer(), &default_placeholders());
+        assert!(!without.contains("<memory>"));
+    }
+
     // ── Web search disabled ─────────────────────────────────────────
 
     #[test]
