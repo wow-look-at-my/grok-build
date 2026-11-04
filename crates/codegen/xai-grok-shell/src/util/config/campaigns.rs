@@ -303,7 +303,7 @@ pub(crate) fn collect_url_origins(value: &toml::Value, out: &mut Vec<String>) {
             for (key, v) in table {
                 if let toml::Value::String(s) = v
                     && key.to_ascii_lowercase().ends_with("url")
-                    && let Ok(url) = reqwest::Url::parse(s.trim())
+                    && let Ok(url) = xai_grok_net::Url::parse(s.trim())
                     && matches!(url.scheme(), "http" | "https")
                     && url.host_str().is_some()
                 {
@@ -527,7 +527,7 @@ pub(super) async fn persist_user_choice(
 ) -> anyhow::Result<()> {
     // Config-layer reads and the flock'd read-modify-write are blocking I/O; keep them off the async worker The task is awaited before the config write so the dismiss-before-write ordering above holds
     // A panicked/cancelled dismiss task must NOT abort the user's write Bookkeeping failure is logged and the write proceeds (the campaign may re-nudge; the pick is never lost)
-    let dismissed = tokio::task::spawn_blocking(move || {
+    let dismissed = xai_spawn::spawn_blocking(move || {
         let ids = ids_touching_paths(&resolve_dismissable_campaigns(), &[path]);
         if !ids.is_empty() {
             tracing::info!(

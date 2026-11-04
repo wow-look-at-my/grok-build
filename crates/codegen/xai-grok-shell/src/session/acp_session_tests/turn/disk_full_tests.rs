@@ -38,7 +38,7 @@ fn capture_hook_events(
 ) -> std::rc::Rc<std::cell::RefCell<Vec<serde_json::Value>>> {
     let fired = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let sink = fired.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::SessionNotification(args) => {
@@ -58,7 +58,7 @@ fn capture_hook_events(
 }
 
 fn drain_persistence_flush_enospc(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Err(std::io::Error::from(std::io::ErrorKind::StorageFull)));
@@ -140,7 +140,7 @@ pub(super) async fn actor_with_mock_sampler_configured(
     {
         let drainer = actor.clone();
         let mut sampler_event_rx = sampler_event_rx;
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(event) = sampler_event_rx.recv().await {
                 drainer.handle_sampling_event(event).await;
             }

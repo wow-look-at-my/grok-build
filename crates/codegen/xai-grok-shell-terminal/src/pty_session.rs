@@ -293,7 +293,7 @@ pub async fn create_pty(
     let mut shell = UnregisteredShell::new(child);
     if let Some(pid) = shell.pid() {
         // `enroll_terminal_pid` reaps with a grace wait if it loses the close race, so run it off-task
-        let enrolled = tokio::task::spawn_blocking(move || {
+        let enrolled = xai_spawn::spawn_blocking(move || {
             xai_tty_utils::global_process_scope().enroll_terminal_pid(pid)
         })
         .await
@@ -370,13 +370,13 @@ pub async fn create_pty(
     drop(registry);
 
     let pty_id_clone = pty_id.clone();
-    tokio::task::spawn_local(run_pty_output_loop(reader, entry, pty_id_clone, gateway));
+    xai_spawn::spawn_local(run_pty_output_loop(reader, entry, pty_id_clone, gateway));
 
     Ok(pty_id)
 }
 
 fn spawn_pty_input_loop(mut writer: Box<dyn Write + Send>, mut input_rx: mpsc::Receiver<Vec<u8>>) {
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         while let Some(mut chunk) = input_rx.blocking_recv() {
             while let Ok(more) = input_rx.try_recv() {
                 chunk.extend_from_slice(&more);
@@ -469,7 +469,7 @@ async fn run_pty_output_loop(
     }
 
     // The reader ending does not prove the shell did, so poll rather than blocking on `wait`: teardown needs this lock to hang the shell up
-    let (exit_code, signal, target_client_id, was_busy) = tokio::task::spawn_blocking({
+    let (exit_code, signal, target_client_id, was_busy) = xai_spawn::spawn_blocking({
         let pty = pty.clone();
         move || {
             loop {
@@ -641,7 +641,7 @@ pub async fn is_exited(pty_id: &str) -> bool {
 pub async fn close_pty(pty_id: &str) -> Result<(), String> {
     let entry = { PTY_REGISTRY.lock().await.remove(pty_id) };
     if let Some(entry) = entry {
-        tokio::task::spawn_blocking(move || reap(&entry))
+        xai_spawn::spawn_blocking(move || reap(&entry))
             .await
             .map_err(|e| format!("close task failed: {e}"))?;
     }
@@ -685,7 +685,7 @@ pub async fn close_all() {
         reg.drain().map(|(_, v)| v).collect()
     };
     for entry in entries {
-        let _ = tokio::task::spawn_blocking(move || reap(&entry)).await;
+        let _ = xai_spawn::spawn_blocking(move || reap(&entry)).await;
     }
 }
 
@@ -867,7 +867,7 @@ mod tests {
         let (sender, receiver) = acp_gateway::<acp::AgentSide, _>(RecordingClient {
             notifications: notifications.clone(),
         });
-        tokio::task::spawn_local(receiver.run());
+        xai_spawn::spawn_local(receiver.run());
         (sender, notifications)
     }
 

@@ -1942,7 +1942,7 @@ mod tests {
         let notify = t.notify_handle();
         let t2 = t.clone();
         let waiter =
-            tokio::spawn(
+            xai_spawn::spawn(
                 async move { t2.wait_for_change(std::time::Duration::from_secs(5)).await },
             );
         tokio::task::yield_now().await;
@@ -2252,7 +2252,7 @@ mod tests {
         t.turn_started("sess-a", 1);
 
         let t2 = t.clone();
-        let waiter = tokio::spawn(async move {
+        let waiter = xai_spawn::spawn(async move {
             t2.wait_for_change(std::time::Duration::from_secs(5)).await;
         });
 

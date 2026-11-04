@@ -206,27 +206,6 @@ fn close_inactive_agent_drops_it() {
     assert_eq!(app.agents.len(), 2);
 }
 #[test]
-fn close_agent_releases_retained_memory() {
-    use crate::memory_release::test_support;
-    test_support::install_counting_hook();
-    let mut app = three_agent_app();
-    let before = test_support::calls();
-    dispatch_sessions_confirm_close(&mut app, AgentId(2));
-    assert!(!app.agents.contains_key(&AgentId(2)));
-    assert_eq!(
-        test_support::calls(),
-        before + 1,
-        "dropping the closed AgentView must purge retained pages"
-    );
-    let before = test_support::calls();
-    dispatch_sessions_confirm_close(&mut app, AgentId(999));
-    assert_eq!(
-        test_support::calls(),
-        before,
-        "a no-op close must not purge"
-    );
-}
-#[test]
 fn close_clears_forked_from_on_surviving_children() {
     let mut app = three_agent_app();
     set_forked_from(&mut app, AgentId(2), AgentId(1));

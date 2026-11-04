@@ -1,3 +1,5 @@
+// Process-wide cache for `[ui].follow_up_behavior == "steer"`.
+
 use super::persist::{update_config, update_config_removing};
 use crate::agent::config::Feature;
 use anyhow::{Context, Result};
@@ -48,7 +50,8 @@ pub async fn follow_up_steer_enabled() -> bool {
     let mtime = follow_up_config_mtime_ns();
     let cached_mtime = FOLLOW_UP_STEER_MTIME_NS.load(Ordering::Relaxed);
     let cached = FOLLOW_UP_STEER_CACHE.load(Ordering::Relaxed);
-    if cached != FOLLOW_UP_CACHE_UNKNOWN && mtime != 0 && mtime == cached_mtime {
+    // A missing `config.toml` reads as the first mtime. That is a stable state too, so the cache holds until the file appears.
+    if cached != FOLLOW_UP_CACHE_UNKNOWN && mtime == cached_mtime {
         return cached == FOLLOW_UP_CACHE_STEER;
     }
     let root = match crate::config::load_effective_config() {
@@ -397,10 +400,150 @@ pub(crate) fn apply_harness_model(
         "goal_strategist" => m.goal_strategist = value,
         "goal_skeptic" => m.goal_skeptic = value,
         "goal_summarizer" => m.goal_summarizer = value,
-        "subagent_default" => m.subagent_default = value,
         // Unreachable: the id was checked against the slot table above.
         other => tracing::error!(slot = other, "harness model slot has no config field"),
     }
+}
+
+/// Persist the model of one model group into `[model_groups.<id>] model`. An
+/// empty `value` removes the key. A non-empty write also removes the
+/// `[models]` entry of each member, so no hidden per-slot pin stays behind.
+pub async fn set_model_group_model(group_id: &str, value: String) -> Result<()> {
+    if value.len() > MAX_DEFAULT_MODEL_LEN {
+        anyhow::bail!(
+            "model name too long ({} > {} bytes)",
+            value.len(),
+            MAX_DEFAULT_MODEL_LEN
+        );
+    }
+    let group_id = group_id.to_owned();
+    rewrite_user_config_locked("model group", move |path| {
+        rewrite_user_config_table(
+            path,
+            "model group",
+            crate::util::config::persist::atomic_write_follow_bound,
+            |root| apply_model_group_model(root, &group_id, &value),
+        )
+    })
+    .await
+}
+
+/// The edit behind [`set_model_group_model`], on the parsed root table.
+pub(crate) fn apply_model_group_model(
+    root: &mut toml::map::Map<String, toml::Value>,
+    group_id: &str,
+    value: &str,
+) -> Result<()> {
+    let user: std::collections::BTreeMap<String, xai_grok_models::ModelGroupConfig> = root
+        .get("model_groups")
+        .cloned()
+        .map(toml::Value::try_into)
+        .transpose()
+        .context("[model_groups] is invalid")?
+        .unwrap_or_default();
+    let groups = xai_grok_models::resolve_model_groups(&user).map_err(anyhow::Error::msg)?;
+    let group = groups
+        .iter()
+        .find(|g| g.id == group_id)
+        .with_context(|| format!("unknown model group '{group_id}'"))?;
+    if value.is_empty() {
+        let Some(all) = root
+            .get_mut("model_groups")
+            .and_then(toml::Value::as_table_mut)
+        else {
+            return Ok(());
+        };
+        if let Some(table) = all.get_mut(group_id).and_then(toml::Value::as_table_mut) {
+            table.remove("model");
+            if table.is_empty() {
+                all.remove(group_id);
+            }
+        }
+        if all.is_empty() {
+            root.remove("model_groups");
+        }
+        return Ok(());
+    }
+    let table = root
+        .entry("model_groups".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .context("[model_groups] must be a table")?
+        .entry(group_id.to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .with_context(|| format!("[model_groups.{group_id}] must be a table"))?;
+    table.insert("model".to_owned(), toml::Value::String(value.to_owned()));
+    if let Some(models) = root.get_mut("models").and_then(toml::Value::as_table_mut) {
+        for member in &group.members {
+            models.remove(*member);
+        }
+    }
+    Ok(())
+}
+
+/// Persist one subagent type's model into `[subagents.models].<type>`. An
+/// empty `value` removes the key and any table it leaves empty.
+pub async fn set_subagent_model(agent_type: &str, value: String) -> Result<()> {
+    if value.len() > MAX_DEFAULT_MODEL_LEN {
+        anyhow::bail!(
+            "model name too long ({} > {} bytes)",
+            value.len(),
+            MAX_DEFAULT_MODEL_LEN
+        );
+    }
+    if agent_type.trim().is_empty() {
+        anyhow::bail!("subagent type must not be empty");
+    }
+    let agent_type = agent_type.to_owned();
+    rewrite_user_config_locked("subagent model", move |path| {
+        rewrite_user_config_table(
+            path,
+            "subagent model",
+            crate::util::config::persist::atomic_write_follow_bound,
+            |root| apply_subagent_model(root, &agent_type, &value),
+        )
+    })
+    .await
+}
+
+/// The edit behind [`set_subagent_model`], on the parsed root table.
+pub(crate) fn apply_subagent_model(
+    root: &mut toml::map::Map<String, toml::Value>,
+    agent_type: &str,
+    value: &str,
+) -> Result<()> {
+    if value.is_empty() {
+        let Some(subagents) = root
+            .get_mut("subagents")
+            .and_then(toml::Value::as_table_mut)
+        else {
+            return Ok(());
+        };
+        if let Some(models) = subagents
+            .get_mut("models")
+            .and_then(toml::Value::as_table_mut)
+        {
+            models.remove(agent_type);
+            if models.is_empty() {
+                subagents.remove("models");
+            }
+        }
+        if subagents.is_empty() {
+            root.remove("subagents");
+        }
+        return Ok(());
+    }
+    root.entry("subagents".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .context("[subagents] must be a table")?
+        .entry("models".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .context("[subagents.models] must be a table")?
+        .insert(agent_type.to_owned(), toml::Value::String(value.to_owned()));
+    Ok(())
 }
 
 /// Bounds for [`set_max_thoughts_width`].
@@ -523,8 +666,8 @@ pub async fn set_show_thinking_blocks(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.show_thinking_blocks = Some(value)).await
 }
 
-/// Persist `[ui].thinking_summaries` via `update_config`. A session resolves it
-/// once at spawn, so the change reaches the next session.
+/// Persist `[ui].thinking_summaries` via `update_config`. The config watcher
+/// applies it to every running session.
 pub async fn set_thinking_summaries(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.thinking_summaries = Some(value)).await
 }

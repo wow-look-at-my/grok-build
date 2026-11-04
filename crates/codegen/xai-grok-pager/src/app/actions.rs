@@ -570,6 +570,10 @@ pub enum Action {
     SetThinkingSummaryHistoryMinCount(i64),
     /// Commit one harness model slot into `[models]`.
     SetHarnessModel(&'static str, String),
+    /// Commit one model group into `[model_groups.<id>] model`.
+    SetModelGroupModel(&'static str, String),
+    /// Commit one subagent type's model into `[subagents.models].<type>`.
+    SetSubagentModel(&'static str, String),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
     /// Restart-required: tips are resolved once at startup.
     SetShowTips(bool),
@@ -721,6 +725,13 @@ pub enum Action {
         /// The user typed `/TODO`, so the items go to the top of the list.
         urgent: bool,
     },
+    /// Spawn a background subagent on a model family (`@sonnet`, `@haiku`, `@opus`).
+    /// Bypasses the queue, so it works while the agent is busy.
+    SpawnModelAgent {
+        family: String,
+        effort: Option<String>,
+        prompt: String,
+    },
     /// Request a session recap ("where was I" summary).
     /// `auto` is `true` for the automatic return-from-away recap, `false` for an explicit `/recap`.
     /// Bypasses the prompt queue (works while the agent is busy).
@@ -833,6 +844,8 @@ pub enum Action {
     DashboardStop,
     /// Confirm permanent delete of the armed dashboard row.
     DashboardDelete,
+    /// The row's `[✗]`: Idle rows dismiss to Inactive; Inactive rows arm permanent delete.
+    DashboardDismissRow(crate::views::dashboard::DashboardRowId),
     /// Cycle the dispatch input's mode for the next spawned agent: Normal, Plan, Auto, Always-Approve, then back around.
     /// Auto is skipped when gated off. Bound to Shift+Tab.
     DashboardCycleMode,
@@ -2072,6 +2085,14 @@ pub enum Effect {
         /// Names the tasks-pane row opened for this capture, so the shell's progress updates can find it.
         capture_id: String,
     },
+    /// Spawn a model-family subagent via the `x.ai/model_agent` ext method.
+    SpawnModelAgent {
+        agent_id: AgentId,
+        session_id: acp::SessionId,
+        family: String,
+        effort: Option<String>,
+        prompt: String,
+    },
     /// Request a session recap via the x.ai/recap ext method.
     /// Fire-and-forget: the recap arrives later as a `SessionRecap` notification.
     SendRecap {
@@ -3059,6 +3080,12 @@ pub enum TaskResult {
         agent_id: AgentId,
         request: String,
         result: Result<Vec<String>, String>,
+    },
+    /// `x.ai/model_agent` answered: the model the subagent runs on, or why no subagent started.
+    ModelAgentSpawned {
+        agent_id: AgentId,
+        family: String,
+        result: Result<String, String>,
     },
     /// `x.ai/recap` request acknowledged (fire-and-forget).
     /// The recap itself arrives separately as a `SessionRecap` notification; this only carries a transport error, if any, for logging.

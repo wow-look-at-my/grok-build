@@ -9,12 +9,10 @@ description = "Bounded, metadata-only discovery of foreign coding-agent sessions
 default = []
 
 [dependencies]
-# Home/config discovery for the per-tool session stores.
-dirs = "6"
 # Non-UNC canonicalization so Windows path comparisons stay comparable.
 dunce = { workspace = true }
-# Branch lookup for session summaries.
-git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
+# Repository and worktree discovery for project scoping.
+xai-gix-status = { workspace = true }
 # Per-workspace store-directory hashing for the optional peer-editor scanner.
 md5 = { workspace = true, optional = true }
 serde_json = { workspace = true }

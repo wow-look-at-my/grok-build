@@ -31,8 +31,7 @@ rustflags = [
     "link-args=-ObjC",
 ]
 
-# fuse-ld=mold: `cargo test --workspace` links 240 test binaries, and linking is
-# the one part of a build sccache can never cache. Needs mold on PATH
+# Needs mold on PATH (apt install mold). The darwin sections below keep their own
 # (apt install mold). The darwin sections below keep their own linker.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "force-unwind-tables=yes", "-C", "link-arg=-fuse-ld=mold"]
@@ -67,15 +66,6 @@ rustflags = ["-C", "force-unwind-tables=yes", "-C", "target-feature=+crt-static"
 [target.aarch64-pc-windows-msvc]
 rustflags = ["-C", "force-unwind-tables=yes", "-C", "target-feature=+crt-static"]
 
-
-# jemalloc page size for Apple Silicon (macOS aarch64 uses 16KB pages = 2^14).
-# This target-prefixed env var is consumed by tikv-jemalloc-sys's build.rs
-# and only takes effect when TARGET=aarch64-apple-darwin. Other targets
-# (x86_64, linux) are unaffected — they check their own prefix first and
-# fall back to the default 4KB page size.
-# Some aarch64 Linux hosts use 64KB kernel pages = 2^16; set the matching
-# env vars below for those platforms.
-# See: https://github.com/tikv/jemallocator/issues/122
 [env]
 SYSTEM_DEPS_DAV1D_BUILD_INTERNAL = "auto"
 # rusty_ffmpeg (rsmpeg): link the hermetic static FFmpeg staged by
@@ -85,20 +75,13 @@ SYSTEM_DEPS_DAV1D_BUILD_INTERNAL = "auto"
 FFMPEG_BINDING_PATH = { value = "third_party/ffmpeg/binding.rs", relative = true }
 FFMPEG_LIBS_DIR = { value = "third_party/ffmpeg/local/lib", relative = true }
 FFMPEG_LINK_MODE = "static"
-AARCH64_APPLE_DARWIN_JEMALLOC_SYS_WITH_LG_PAGE = "14"
-AARCH64_UNKNOWN_LINUX_GNU_JEMALLOC_SYS_WITH_LG_PAGE = "16"
-AARCH64_UNKNOWN_LINUX_MUSL_JEMALLOC_SYS_WITH_LG_PAGE = "16"
-AARCH64_UNKNOWN_LINUX_MUSL_JEMALLOC_SYS_WITH_BACKGROUND_THREADS = "0"
 
 # Ensure test threads have a stack large enough for the session actor's
 # recursive turn/retry harness (which can temporarily recurse > 2 MiB deep in
-# `session::acp_session` unit tests). libtest spawns each test on its own
-# thread using Rust's default minimum stack (`RUST_MIN_STACK`, 2 MiB by
-# default); on constrained hosts that default aborts these deep-but-bounded
-# turns with a `stack overflow` (SIGABRT) instead of passing. Raise it for
-# every cargo-invoked process so `cargo test -p xai-grok-shell --lib` runs
-# the whole suite to completion. This is a test-environment tweak only: the
-# shipped binaries' threads are sized independently and are unaffected.
+# `session::acp_session` unit tests). Raise it for every cargo-invoked
+# process so `cargo test -p xai-grok-shell --lib` runs the whole suite to
+# completion. This is a test-environment tweak only: the shipped binaries'
+# threads are sized independently and are unaffected.
 RUST_MIN_STACK = "16777216"
 
 # A model request reaches only an allowed endpoint. Tests talk to mock servers

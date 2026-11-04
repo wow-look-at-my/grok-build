@@ -506,6 +506,34 @@ fn every_dynamic_enum_setting_has_action_for_string_arm() {
                     "`{key}` non-empty canonical must set its slot, got {nonempty_action:?}",
                 );
             }
+            key if crate::settings::model_groups::group_for_setting_key(key).is_some() => {
+                let group = crate::settings::model_groups::group_for_setting_key(key)
+                    .expect("guard matched");
+                assert!(
+                    matches!(empty_action, Some(Action::SetModelGroupModel(id, ref m))
+                        if id == group.id && m.is_empty()),
+                    "`{key}` empty canonical must clear the group, got {empty_action:?}",
+                );
+                assert!(
+                    matches!(nonempty_action, Some(Action::SetModelGroupModel(id, ref m))
+                        if id == group.id && !m.is_empty()),
+                    "`{key}` non-empty canonical must set its group, got {nonempty_action:?}",
+                );
+            }
+            key if crate::settings::subagent_models::is_setting_key(key) => {
+                let agent_type = crate::settings::subagent_models::type_for_setting_key(key)
+                    .expect("guard matched");
+                assert!(
+                    matches!(empty_action, Some(Action::SetSubagentModel(name, ref m))
+                        if name == agent_type && m.is_empty()),
+                    "`{key}` empty canonical must clear its own type, got {empty_action:?}",
+                );
+                assert!(
+                    matches!(nonempty_action, Some(Action::SetSubagentModel(name, ref m))
+                        if name == agent_type && !m.is_empty()),
+                    "`{key}` non-empty canonical must set its own type, got {nonempty_action:?}",
+                );
+            }
             other => panic!(
                 "Unknown DynamicEnum key `{other}` — add a discriminating arm in \
                  every_dynamic_enum_setting_has_action_for_string_arm so future \
@@ -798,7 +826,20 @@ fn rows_contain_categories_and_settings_through_pr_14() {
     expected.extend(
         xai_grok_models::HARNESS_MODEL_SLOTS
             .iter()
-            .map(|slot| slot.setting_key()),
+            .filter_map(
+                |slot| match crate::settings::model_groups::group_holding_slot(slot.id) {
+                    None => Some(slot.setting_key()),
+                    Some(group) if group.members.first() == Some(&slot.id) => {
+                        Some(group.setting_key)
+                    }
+                    Some(_) => None,
+                },
+            ),
+    );
+    expected.extend(
+        crate::settings::subagent_models::rows()
+            .iter()
+            .map(|row| row.setting_key),
     );
     expected.extend_from_slice(&[
         // `auto_compact_threshold_percent` (Session category) is not exposed in the modal. Advanced category.
@@ -4006,24 +4047,222 @@ fn render_settings_modal_routes_to_picker_when_mode_is_picking_enum() {
     );
 }
 
-/// Scroll wheel during PickingEnum mode is a no-op AND does NOT mutate `state.selected` (the underlying Browse selection). Regression test.
+/// Scroll wheel over an open picker moves the focused choice and keeps the
+/// picker open; the Browse selection underneath is untouched.
 #[test]
-fn picker_mode_scroll_wheel_is_noop_and_preserves_browse_selection() {
+fn picker_scroll_wheel_moves_the_selection_and_stays_open() {
     let mut s = picker_test_state();
     let selected_before = s.selected;
+    // The synthetic picker has choices; open on the first.
     let outcome = handle_settings_mouse(&mut s, MouseEventKind::ScrollDown, 10, 5);
+    // Without rendered choice rects there is no list under the cursor.
     assert!(
         matches!(outcome, SettingsKeyOutcome::Unchanged),
-        "Scroll in picker mode must be Unchanged, got {outcome:?}"
+        "a wheel event outside the choice list must do nothing, got {outcome:?}"
     );
+
+    // Give the first, second and third choices rows, as the renderer would.
+    s.picker_choice_rects = vec![
+        Rect {
+            x: 0,
+            y: 3,
+            width: 20,
+            height: 1,
+        },
+        Rect {
+            x: 0,
+            y: 4,
+            width: 20,
+            height: 1,
+        },
+        Rect {
+            x: 0,
+            y: 5,
+            width: 20,
+            height: 1,
+        },
+    ];
+    let outcome = handle_settings_mouse(&mut s, MouseEventKind::ScrollDown, 10, 4);
+    assert!(
+        matches!(outcome, SettingsKeyOutcome::Changed),
+        "scroll over the list must move the selection, got {outcome:?}"
+    );
+    match s.mode() {
+        SettingsModalMode::PickingEnum { choices_idx, .. } => {
+            assert!(choices_idx > 0, "scroll must move the picker focus");
+        }
+        other => panic!("scroll must keep the picker open, got {other:?}"),
+    }
     assert_eq!(
         s.selected, selected_before,
         "scroll in picker mode must NOT mutate Browse selection"
     );
 
-    let outcome = handle_settings_mouse(&mut s, MouseEventKind::ScrollUp, 10, 5);
-    assert!(matches!(outcome, SettingsKeyOutcome::Unchanged));
+    let outcome = handle_settings_mouse(&mut s, MouseEventKind::ScrollUp, 10, 4);
+    assert!(
+        matches!(outcome, SettingsKeyOutcome::Changed),
+        "scroll up must move the selection back, got {outcome:?}"
+    );
     assert_eq!(s.selected, selected_before);
+}
+
+/// A model picker with a blank catalog display name for `blank-id`.
+fn model_picker_state() -> SettingsModalState {
+    use agent_client_protocol as acp;
+    let snapshot = PagerLocalSnapshot {
+        available_models: vec![
+            (
+                "Grok 4.5".to_string(),
+                acp::ModelId::new(std::sync::Arc::from("grok-4.5")),
+            ),
+            (
+                "Fast".to_string(),
+                acp::ModelId::new(std::sync::Arc::from("fast-model")),
+            ),
+            (
+                String::new(),
+                acp::ModelId::new(std::sync::Arc::from("blank-id")),
+            ),
+        ],
+        ..PagerLocalSnapshot::default()
+    };
+    let mut state = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        snapshot,
+    );
+    assert!(state.focus_key("models.goal_planner"));
+    let outcome = handle_settings_key(
+        &mut state,
+        &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+    assert!(
+        matches!(outcome, SettingsKeyOutcome::Changed),
+        "Enter on a model row opens its picker, got {outcome:?}"
+    );
+    state
+}
+
+fn type_text(state: &mut SettingsModalState, text: &str) {
+    for ch in text.chars() {
+        let _ = handle_settings_key(state, &KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+}
+
+/// Typing narrows the model picker by display name and id, an empty query
+/// restores every choice, and Enter commits the focused match.
+#[test]
+fn model_picker_filters_by_label_and_id_and_commits_the_match() {
+    let mut s = model_picker_state();
+    assert_eq!(picker_choices_len(&s, "models.goal_planner"), 4);
+
+    type_text(&mut s, "fast");
+    assert_eq!(
+        picker_choices_len(&s, "models.goal_planner"),
+        1,
+        "a label match must narrow the list"
+    );
+    let outcome = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        matches!(outcome, SettingsKeyOutcome::Action(Action::SetHarnessModel("goal_planner", ref m)) if m == "fast-model"),
+        "Enter must commit the focused match, got {outcome:?}"
+    );
+
+    let mut by_id = model_picker_state();
+    type_text(&mut by_id, "blank-id");
+    assert_eq!(
+        picker_choices_len(&by_id, "models.goal_planner"),
+        1,
+        "a model id match must narrow the list"
+    );
+    let outcome = handle_settings_key(
+        &mut by_id,
+        &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+    assert!(
+        matches!(outcome, SettingsKeyOutcome::Action(Action::SetHarnessModel("goal_planner", ref m)) if m == "blank-id"),
+        "a blank display name commits its model id, got {outcome:?}"
+    );
+
+    let mut cleared = model_picker_state();
+    type_text(&mut cleared, "grok");
+    assert_eq!(picker_choices_len(&cleared, "models.goal_planner"), 1);
+    for _ in 0..4 {
+        let _ = handle_settings_key(
+            &mut cleared,
+            &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        );
+    }
+    assert_eq!(
+        picker_choices_len(&cleared, "models.goal_planner"),
+        4,
+        "an empty query restores every choice"
+    );
+
+    let mut none = model_picker_state();
+    type_text(&mut none, "zzz");
+    assert_eq!(picker_choices_len(&none, "models.goal_planner"), 0);
+    let outcome = handle_settings_key(
+        &mut none,
+        &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+    assert!(
+        matches!(outcome, SettingsKeyOutcome::Unchanged),
+        "Enter with no matches must not commit, got {outcome:?}"
+    );
+    assert!(
+        matches!(none.mode(), SettingsModalMode::PickingEnum { .. }),
+        "a no-match picker stays open"
+    );
+}
+
+/// The picker never draws a blank choice: a blank display name shows the
+/// model id, and a no-match query shows a message.
+#[test]
+fn model_picker_draws_ids_instead_of_blank_labels() {
+    let mut s = model_picker_state();
+    let area = Rect {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 30,
+    };
+    let mut buf = Buffer::empty(area);
+    render_settings_modal(&mut buf, area, &mut s, false, None);
+    let text = buffer_text(&buf, area);
+    assert!(
+        text.contains("blank-id"),
+        "a blank display name must render its model id, got:\n{text}"
+    );
+
+    type_text(&mut s, "zzz");
+    let mut buf = Buffer::empty(area);
+    render_settings_modal(&mut buf, area, &mut s, false, None);
+    let text = buffer_text(&buf, area);
+    assert!(
+        text.contains("No matches"),
+        "a no-match query must show the empty state, got:\n{text}"
+    );
+    let filter_y =
+        find_text_row(&buf, area, "Search: zzz").expect("the query must render above the choices");
+    let no_match_y = find_text_row(&buf, area, "No matches").expect("the empty state must render");
+    assert!(
+        no_match_y > filter_y,
+        "the empty state must sit below the query row; filter_y={filter_y} no_match_y={no_match_y}"
+    );
+}
+
+fn buffer_text(buf: &Buffer, area: Rect) -> String {
+    let mut text = String::new();
+    for y in 0..area.height {
+        for x in 0..area.width {
+            if let Some(cell) = buf.cell((x, y)) {
+                text.push_str(cell.symbol());
+            }
+        }
+        text.push('\n');
+    }
+    text
 }
 
 /// A click with no choice hit-rects is a no-op (nothing to focus or select).
@@ -7811,5 +8050,180 @@ fn locked_coding_data_sharing_expanded_description_replaces_with_reason() {
     assert!(
         !text.contains("Managed by your team admin."),
         "unlocked expansion must not mention the team-admin lock: {text:?}"
+    );
+}
+
+/// A model picker with `n` models, opened and drawn by the full modal renderer.
+fn rendered_big_model_picker(n: usize) -> (SettingsModalState, Buffer) {
+    use agent_client_protocol as acp;
+    let snapshot = PagerLocalSnapshot {
+        available_models: (0..n)
+            .map(|i| {
+                (
+                    format!("Model {i:03}"),
+                    acp::ModelId::new(Arc::from(format!("vendor/model-{i:03}"))),
+                )
+            })
+            .collect(),
+        ..PagerLocalSnapshot::default()
+    };
+    let mut s = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        snapshot,
+    );
+    assert!(s.focus_key("models.goal_planner"));
+    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!(picker_choice_idx(&s), 0);
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buf = Buffer::empty(area);
+    render_settings_modal(&mut buf, area, &mut s, false, None);
+    (s, buf)
+}
+
+fn buffer_row_text(buf: &Buffer, y: u16) -> String {
+    (0..buf.area.width)
+        .map(|x| buf[(x, y)].symbol().to_string())
+        .collect()
+}
+
+fn find_row(buf: &Buffer, needle: &str) -> u16 {
+    (0..buf.area.height)
+        .find(|&y| buffer_row_text(buf, y).contains(needle))
+        .unwrap_or_else(|| panic!("no row contains {needle:?}"))
+}
+
+/// The wheel scrolls the picker from any row of its list: a choice, the
+/// `… N more` row, and the blank row below the last choice. It does nothing
+/// over the title, which is not part of the list.
+#[test]
+fn picker_wheel_scrolls_from_anywhere_in_the_list() {
+    let (mut s, buf) = rendered_big_model_picker(200);
+    let col = s.list_area.x + 10;
+
+    let more_row = find_row(&buf, "more");
+    assert!(rect_contains_for_test(s.list_area, col, more_row));
+    let out = handle_settings_mouse(&mut s, MouseEventKind::ScrollDown, col, more_row);
+    assert!(matches!(out, SettingsKeyOutcome::Changed), "got {out:?}");
+    assert_eq!(picker_choice_idx(&s), 3, "the `… N more` row must scroll");
+
+    let choice_row = find_row(&buf, "Model 002");
+    let _ = handle_settings_mouse(&mut s, MouseEventKind::ScrollDown, col, choice_row);
+    assert_eq!(picker_choice_idx(&s), 6, "a choice row must scroll");
+
+    let _ = handle_settings_mouse(&mut s, MouseEventKind::ScrollUp, col, choice_row);
+    assert_eq!(picker_choice_idx(&s), 3, "the wheel must scroll back up");
+
+    let title_row = find_row(&buf, "Settings");
+    let out = handle_settings_mouse(&mut s, MouseEventKind::ScrollDown, col, title_row);
+    assert!(matches!(out, SettingsKeyOutcome::Unchanged), "got {out:?}");
+    assert_eq!(picker_choice_idx(&s), 3);
+
+    // Scroll far enough that the viewport must move, then check the frame.
+    for _ in 0..20 {
+        let _ = handle_settings_mouse(&mut s, MouseEventKind::ScrollDown, col, choice_row);
+    }
+    assert_eq!(picker_choice_idx(&s), 63);
+    let area = buf.area;
+    let mut buf = Buffer::empty(area);
+    render_settings_modal(&mut buf, area, &mut s, false, None);
+    find_row(&buf, "Model 062");
+    assert!(
+        !(0..area.height).any(|y| buffer_row_text(&buf, y).contains("Model 000")),
+        "the viewport must follow the focus"
+    );
+
+    // The blank rows below a short list scroll it too.
+    let (mut short, _) = rendered_big_model_picker(3);
+    let last_choice = short
+        .picker_choice_rects
+        .iter()
+        .map(|r| r.y + r.height)
+        .max()
+        .unwrap();
+    assert!(last_choice < short.list_area.y + short.list_area.height);
+    let out = handle_settings_mouse(&mut short, MouseEventKind::ScrollDown, col, last_choice);
+    assert!(matches!(out, SettingsKeyOutcome::Changed), "got {out:?}");
+    assert_eq!(picker_choice_idx(&short), 3);
+}
+
+fn rect_contains_for_test(r: Rect, column: u16, row: u16) -> bool {
+    column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height
+}
+
+/// `/` starts a search in a model picker. It is not part of the query, but a
+/// `/` typed after it is, because model ids contain one.
+#[test]
+fn slash_starts_a_search_in_the_model_picker() {
+    let (mut s, buf) = rendered_big_model_picker(200);
+    find_row(&buf, "Press / or type to search");
+    find_row(&buf, "/ search");
+
+    let out = handle_settings_key(
+        &mut s,
+        &KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+    );
+    assert!(matches!(out, SettingsKeyOutcome::Changed), "got {out:?}");
+    assert!(s.picker_search_active);
+    assert_eq!(s.picker_query, "");
+    let area = buf.area;
+    let mut buf = Buffer::empty(area);
+    render_settings_modal(&mut buf, area, &mut s, false, None);
+    find_row(&buf, "Search: \u{258F}");
+
+    type_text(&mut s, "vendor/model-15");
+    assert_eq!(s.picker_query, "vendor/model-15");
+    assert_eq!(picker_choices_len(&s, "models.goal_planner"), 10);
+    let out = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(
+        matches!(out, SettingsKeyOutcome::Action(Action::SetHarnessModel("goal_planner", ref m)) if m == "vendor/model-150"),
+        "Enter commits the first match, got {out:?}"
+    );
+}
+
+/// `/` starts a search in a static picker too. While it is on, letters such
+/// as `j` and `d` go to the query. Esc leaves the search, then the picker.
+#[test]
+fn slash_starts_a_search_in_a_static_picker_and_esc_backs_out() {
+    let mut s = enter_picker_for("theme");
+    let all = picker_choices_len(&s, "theme");
+    assert!(all > 2);
+    let target = picker_choices(&s, "theme")
+        .into_iter()
+        .last()
+        .expect("theme has choices");
+
+    let _ = handle_settings_key(
+        &mut s,
+        &KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+    );
+    assert!(s.picker_search_active);
+    type_text(&mut s, &target.display);
+    assert_eq!(s.picker_query, target.display);
+    let idx = picker_choice_idx(&s);
+    assert_eq!(
+        picker_choices_for_query(&s, "theme")[idx].canonical,
+        target.canonical,
+        "the focus must land on the match"
+    );
+
+    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(
+        matches!(s.mode(), SettingsModalMode::PickingEnum { .. }),
+        "the first Esc only leaves the search"
+    );
+    assert!(!s.picker_search_active);
+    assert_eq!(s.picker_query, "");
+    assert_eq!(picker_choices_len(&s, "theme"), all);
+    assert_eq!(
+        picker_choices(&s, "theme")[picker_choice_idx(&s)].canonical,
+        target.canonical,
+        "clearing the search keeps the focused choice"
+    );
+
+    let _ = handle_settings_key(&mut s, &KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(
+        !matches!(s.mode(), SettingsModalMode::PickingEnum { .. }),
+        "the second Esc leaves the picker"
     );
 }

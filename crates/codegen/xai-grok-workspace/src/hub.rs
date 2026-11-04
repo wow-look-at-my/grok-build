@@ -1023,7 +1023,7 @@ mod tests {
             .shared()
             .activity_notify_handle
             .store(Arc::new(Some(sink)));
-        tokio::spawn(crate::handle::run_activity_feed(
+        xai_spawn::spawn(crate::handle::run_activity_feed(
             handle.activity_tracker().clone(),
             rx,
         ));
@@ -1351,7 +1351,7 @@ mod tests {
     async fn activity_feed_drains_and_dedups_by_task_id() {
         let tracker = Arc::new(crate::activity::ActivityTracker::new());
         let (sink, rx) = ToolNotificationHandle::channel();
-        let feed = tokio::spawn(crate::handle::run_activity_feed(tracker.clone(), rx));
+        let feed = xai_spawn::spawn(crate::handle::run_activity_feed(tracker.clone(), rx));
         sink.send(bg_started_notif("dup"));
         sink.send(bg_started_notif("dup"));
         let one = wait_until(

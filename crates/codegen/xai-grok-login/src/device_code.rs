@@ -21,7 +21,7 @@ const DEVICE_SLOW_DOWN_INCREMENT_SECS: u64 = 5;
 const MIN_DEVICE_CODE_EXPIRY_FALLBACK_SECS: i64 = 10 * 60;
 
 /// Only the 404 "no device endpoint" case is typed, because the login flow matches on it to fall back to loopback. Every other device-code failure stays a plain `anyhow` error.
-/// Wrapping one in a `#[error(transparent)]` variant hides the `reqwest::Error` the login funnel classifies. Transparent forwards `source()` past the error it wraps.
+/// Wrapping one in a `#[error(transparent)]` variant hides the transport error the login funnel classifies. Transparent forwards `source()` past the error it wraps.
 #[derive(Debug, Error)]
 pub enum DeviceCodeError {
     #[error(
@@ -119,7 +119,7 @@ pub async fn request_device_code(
 
     let resp = with_alpha_test_key(
         client
-            .post(&url)
+            .post(&url, xai_grok_net::Auth::None)
             // Lets oauth2-provider segment device-flow success by client version.
             .header("x-grok-client-version", xai_grok_version::version())
             // Lets oauth2-provider separate human-completable logins from headless automation in the device-flow funnel metrics
@@ -203,7 +203,7 @@ pub async fn complete_device_code_login(
 
         let resp = with_alpha_test_key(
             client
-                .post(&token_url)
+                .post(&token_url, xai_grok_net::Auth::None)
                 .header("x-grok-client-version", xai_grok_version::version())
                 .header("x-grok-client-surface", surface.as_ref())
                 .form(&[
@@ -355,7 +355,7 @@ async fn prompt_and_poll(
 /// The CLI eprintlns; the TUI does nothing since the URL is already rendered in the widget.
 async fn open_browser_detached(url: &str) -> bool {
     let url = url.to_owned();
-    match tokio::task::spawn_blocking(move || webbrowser::open(&url)).await {
+    match xai_spawn::spawn_blocking(move || webbrowser::open(&url)).await {
         Ok(Ok(())) => true,
         Ok(Err(e)) => {
             tracing::info!(error = %e, "device auth: could not open browser automatically");
@@ -744,7 +744,7 @@ pub mod tests {
                 }
             }),
         );
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (issuer, handle)
     }
 

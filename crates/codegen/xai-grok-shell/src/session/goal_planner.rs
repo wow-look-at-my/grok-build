@@ -268,10 +268,7 @@ pub(crate) enum GoalPlannerOutcome {
         todos: Vec<String>,
         latency_ms: u64,
     },
-    /// Produced only by the planner's [`ChannelSpawner`], whose
-    /// `cancel_token` is wired to `start_planner_run`; when the token fires
-    /// mid-spawn (a user Stop, or the turn being cancelled) the attempt
-    /// returns `Interrupted`.
+    /// Produced only by the planner's [`ChannelSpawner`], whose `cancel_token` is wired to `start_planner_run`.
     Interrupted,
     FailClosed {
         reason: GoalPlannerFailClosedReason,
@@ -782,7 +779,7 @@ mod tests {
             subagent_id_slot: None,
             fallback: RoleFallbackReporter::default(),
         };
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let _ = spawner
                 .spawn_planner("plan-id", role_prompt("prompt"))
                 .await;
@@ -1316,7 +1313,7 @@ mod tests {
             subagent_id_slot: None,
             fallback: RoleFallbackReporter::default(),
         };
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let _ = spawner
                 .spawn_planner("plan-id", role_prompt("prompt"))
                 .await;
@@ -1733,7 +1730,7 @@ mod tests {
         let plan_for_coord = plan_file.clone();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         // Fake coordinator: explicit-model spawn fails; the inherit retry (model None) writes the plan and succeeds
-        let coord = tokio::spawn(async move {
+        let coord = xai_spawn::spawn(async move {
             while let Some(ev) = rx.recv().await {
                 let SubagentEvent::Spawn(req) = ev else {
                     continue;
@@ -1803,7 +1800,7 @@ mod tests {
         let spawns_coord = spawns.clone();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         // Fake coordinator: every spawn reports a cancellation.
-        let coord = tokio::spawn(async move {
+        let coord = xai_spawn::spawn(async move {
             while let Some(ev) = rx.recv().await {
                 let SubagentEvent::Spawn(req) = ev else {
                     continue;

@@ -49,6 +49,12 @@ impl DashboardState {
                 self.copy_usage_modal_text(&text);
                 InputOutcome::Changed
             }
+            UsageModalOutcome::OpenPath(path) => {
+                if !crate::views::usage_modal::open_transcript(&path) {
+                    self.copy_usage_modal_text(&path);
+                }
+                InputOutcome::Changed
+            }
             UsageModalOutcome::Changed => InputOutcome::Changed,
             UsageModalOutcome::Unchanged => InputOutcome::Unchanged,
         }

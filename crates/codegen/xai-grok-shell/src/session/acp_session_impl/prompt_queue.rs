@@ -197,7 +197,6 @@ impl SessionActor {
                 if let Some(template) = self.trace_config_template.borrow().clone() {
                     let cfg = crate::session::repo_changes::TraceExportConfig {
                         bucket_url: template.bucket_url,
-                        service_account_key: None,
                         prefix_dir: None,
                         gcs_prefix: Some(format!(
                             "{}/turn_{}",
@@ -320,7 +319,6 @@ impl SessionActor {
         let harvest_into_wait = !send_now
             && turn_running
             && blocked_in_wait
-            && !goal_active
             && !state.pending_inputs.iter().any(|queued| queued.send_now);
         let front_awaiting_commit_now = Self::front_awaiting_commit(&state);
         let cancel_running_turn =
@@ -378,7 +376,7 @@ impl SessionActor {
         }
         drop(state);
         if harvest_into_wait {
-            self.harvest_queued_prompts_into_interjections(false).await;
+            self.harvest_queued_prompts_into_interjections(true).await;
         }
         cancel_running_turn
     }

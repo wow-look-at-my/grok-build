@@ -346,7 +346,7 @@ impl WorkflowManager {
         let script = execution_script;
         let args = spec.args;
         let exec_cancel = cancel.clone();
-        let exec = tokio::task::spawn_blocking(move || {
+        let exec = xai_spawn::spawn_blocking(move || {
             xai_workflow::run_workflow(WorkflowRunParams {
                 script,
                 args,
@@ -379,7 +379,7 @@ impl WorkflowManager {
         let watcher_agent_stats = agent_stats;
         let watcher_workflow_name = workflow_name;
         let execution_epoch = self.tracker.lock().execution_epoch(&run_id).unwrap_or(0);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _active = active;
             let _work = work;
             let mut outcome = exec.await.unwrap_or_else(|e| WorkflowOutcome::Failed {
@@ -946,7 +946,7 @@ mod tests {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let cancels: CancelLog = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let cancels_stub = cancels.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(event) = raw_rx.recv().await {
                 match event {
                     SubagentEvent::Cancel(request) => {
@@ -963,7 +963,7 @@ mod tests {
         });
 
         let (persist_tx, mut persist_rx) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(message) = persist_rx.recv().await {
                 if let PersistenceMsg::WorkflowRunStateAndAck { respond_to, .. } = message {
                     let _ = respond_to.send(Ok(()));

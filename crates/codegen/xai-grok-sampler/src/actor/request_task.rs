@@ -646,6 +646,7 @@ async fn apply_retry_decision(
             let stripped = request.strip_unsupported_message_properties(
                 err.names_unsupported_model_id(),
                 err.names_unsupported_reasoning_content(),
+                err.names_unsupported_reasoning(),
             );
             if !stripped {
                 // Already as narrow as this recovery can make it.
@@ -1151,7 +1152,7 @@ async fn drive_l2(
                         }
                     }
                 }
-                publish_rate(&gate, now, &request_id, event_tx, &mut last_published);
+                publish_rate(&mut gate, now, &request_id, event_tx, &mut last_published);
             }
             signal = next_backup_signal(&mut hedge) => match signal {
                 BackupSignal::Event(event) => {
@@ -1586,7 +1587,7 @@ impl Backup<'_> {
 /// The event also carries how long that has lasted, and that number moves even when
 /// the rate does not. This happens while the rate is under the floor.
 fn publish_rate(
-    gate: &OutputRateGate,
+    gate: &mut OutputRateGate,
     now: std::time::Instant,
     request_id: &RequestId,
     event_tx: &mpsc::UnboundedSender<SamplingEvent>,
@@ -1655,8 +1656,8 @@ fn synthesize_from_info(info: &SamplingErrorInfo) -> SamplingError {
         SamplingErrorKind::Api | SamplingErrorKind::RateLimited => {
             let status = info
                 .status_code
-                .and_then(|c| reqwest::StatusCode::from_u16(c).ok())
-                .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+                .and_then(|c| xai_grok_net::StatusCode::from_u16(c).ok())
+                .unwrap_or(xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR);
             SamplingError::Api {
                 status,
                 message: info.message.clone(),
@@ -1883,7 +1884,7 @@ fn send_completion(
 mod tests {
     use super::*;
     use futures_util::stream;
-    use reqwest::StatusCode;
+    use xai_grok_net::StatusCode;
     use xai_grok_sampling_types::ApiErrorCode;
 
     #[test]
@@ -2268,7 +2269,7 @@ mod tests {
     #[test]
     fn synthesize_preserves_error_code_and_image_classification() {
         let original = SamplingError::Api {
-            status: reqwest::StatusCode::BAD_REQUEST,
+            status: xai_grok_net::StatusCode::BAD_REQUEST,
             message: "some future wording without the legacy phrase".to_string(),
             model_metadata: None,
             retry_after_secs: None,

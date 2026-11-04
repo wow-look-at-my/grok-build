@@ -229,14 +229,6 @@ pub const HARNESS_MODEL_SLOTS: &[ModelSlot] = &[
         keywords: &["goal", "summarizer", "summary", "model"],
         fallback: SlotFallback::SessionModel,
     },
-    ModelSlot {
-        id: "subagent_default",
-        label: "Subagent default model",
-        description: "Model every subagent runs on unless its own type pins one.",
-        env: "GROK_MODEL_SUBAGENT_DEFAULT",
-        keywords: &["subagent", "agent", "task", "default", "model"],
-        fallback: SlotFallback::SessionModel,
-    },
 ];
 
 /// The settings-modal key for each slot, as `(slot id, setting key)`. The
@@ -261,7 +253,6 @@ pub fn slot_setting_keys() -> &'static [(&'static str, &'static str)] {
         ("goal_strategist", "models.goal_strategist"),
         ("goal_skeptic", "models.goal_skeptic"),
         ("goal_summarizer", "models.goal_summarizer"),
-        ("subagent_default", "models.subagent_default"),
     ]
 }
 
@@ -330,6 +321,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_subagent_model_comes_from_its_agent_type_not_a_shared_slot() {
+        assert!(slot_by_id("subagent_default").is_none());
+        assert!(slot_for_setting_key("models.subagent_default").is_none());
+        assert!(
+            HARNESS_MODEL_SLOTS
+                .iter()
+                .all(|slot| slot.env != "GROK_MODEL_SUBAGENT_DEFAULT")
+        );
     }
 
     #[test]

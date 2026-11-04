@@ -2259,7 +2259,7 @@ impl SessionActor {
             }
             let inject_start = std::time::Instant::now();
             let storage = self.memory.storage()?;
-            let context = tokio::task::spawn_blocking(move || {
+            let context = xai_spawn::spawn_blocking(move || {
                 crate::session::helpers::memory_context::format_v2_memory_context(&storage)
             })
             .await
@@ -2286,9 +2286,6 @@ impl SessionActor {
                             ..Default::default()
                         },
                     );
-                    self.memory
-                        .injection_count
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     Some(context.content)
                 }
                 Err(error) => {
@@ -2859,7 +2856,7 @@ impl SessionActor {
             }
             // Ahead of the drain, and so ahead of a model request.
             if should_harvest_before_request(loop_index, first_round) {
-                self.harvest_queued_prompts_into_interjections(false).await;
+                self.harvest_queued_prompts_into_interjections(true).await;
             }
             if identical_tool_calls.take_nudge() {
                 let run_len = identical_tool_calls.run_len;
@@ -2933,7 +2930,7 @@ impl SessionActor {
                 && self.compaction.prefire.try_begin()
             {
                 let actor = std::sync::Arc::clone(self);
-                let handle = tokio::task::spawn_local(async move {
+                let handle = xai_spawn::spawn_local(async move {
                     actor.run_prefire_pass1().await;
                 });
                 self.compaction.prefire.set_handle(handle);

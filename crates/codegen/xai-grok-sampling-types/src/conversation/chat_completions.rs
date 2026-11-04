@@ -133,6 +133,7 @@ pub fn conversation_item_to_chat_message_with_profile(
                 tool_call_id: None,
                 model_id: None,
                 reasoning_content: None,
+                reasoning_alias: None,
             }
         }
         ConversationItem::Assistant(a) => {
@@ -159,6 +160,7 @@ pub fn conversation_item_to_chat_message_with_profile(
                     None
                 },
                 reasoning_content: None,
+                reasoning_alias: None,
             }
         }
         ConversationItem::ToolResult(t) => {
@@ -185,6 +187,7 @@ pub fn conversation_item_to_chat_message_with_profile(
                     tool_call_id: Some(t.tool_call_id),
                     model_id: None,
                     reasoning_content: None,
+                    reasoning_alias: None,
                 }
             }
         }
@@ -198,6 +201,7 @@ pub fn conversation_item_to_chat_message_with_profile(
             tool_call_id: None,
             model_id: None,
             reasoning_content: None,
+            reasoning_alias: None,
         },
         // The only caller folds `Reasoning` into the following assistant.
         ConversationItem::Reasoning(_) => unreachable!(
@@ -240,13 +244,10 @@ pub fn conversation_to_chat_messages_with_profile(
             ConversationItem::Assistant(_) => {
                 let mut msg = conversation_item_to_chat_message_with_profile(item, profile);
                 if !pending_reasoning.is_empty() {
-                    // Fold first, then let the profile decide whether the
-                    // target sees it: the fold itself is provider-agnostic.
-                    msg.reasoning_content = if profile.accepts_reasoning_content {
-                        Some(pending_reasoning.join("\n"))
-                    } else {
-                        None
-                    };
+                    // Fold first, then let the profile decide whether the target sees it.
+                    let text = pending_reasoning.join("\n");
+                    msg.reasoning_content = profile.accepts_reasoning_content.then(|| text.clone());
+                    msg.reasoning_alias = profile.accepts_reasoning.then_some(text);
                     pending_reasoning.clear();
                 }
                 out.push(msg);

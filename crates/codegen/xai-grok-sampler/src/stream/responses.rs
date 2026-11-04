@@ -444,7 +444,7 @@ pub(crate) fn stream_responses_tracked<'a>(
                         .map(|e| format!("{}: {}", e.code, e.message))
                         .unwrap_or_else(|| "Response failed with unknown error".to_string());
                     let err = SamplingError::Api {
-                        status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                        status: xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR,
                         message: error_message,
                         model_metadata: None,
                         retry_after_secs: None,
@@ -468,7 +468,7 @@ pub(crate) fn stream_responses_tracked<'a>(
                         error_event.message
                     );
                     let err = SamplingError::Api {
-                        status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                        status: xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR,
                         message: error_message,
                         model_metadata: None,
                         retry_after_secs: None,
@@ -594,7 +594,7 @@ pub(crate) fn stream_responses_tracked<'a>(
             Some(r) => r,
             None => {
                 let err = SamplingError::Api {
-                    status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                    status: xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR,
                     message: "No ResponseCompleted or ResponseIncomplete event received from \
                               Responses API"
                         .to_string(),

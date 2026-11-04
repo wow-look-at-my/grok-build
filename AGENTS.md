@@ -19,6 +19,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Commit messages: concise, imperative mood, describing the change.
 - Keep the working tree clean before switching context. Use `git stash` / `git stash pop` for temporary changes and restore them promptly.
 
+## Build prerequisites
+
+- A Linux build needs `mold` (`.cargo/config.toml` links with `-fuse-ld=mold`) and `protoc` (`xai-grok-tools-api`'s build script). Install both before the first `cargo check`: `apt-get install -y mold protobuf-compiler`.
+- `bin/protoc` is a dotslash file. Without `dotslash` on `PATH`, the build script falls back to the `protoc` on `PATH`, and fails when there is none.
+
 ## Verification
 
 [docs/verification.md](docs/verification.md) holds this section.
@@ -42,7 +47,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## Branch-stats notes
 
 - The status bar shows `↑ahead ↓behind +ins -del` after the branch name (`branch_stats.rs`, drawn in `agent_view/render.rs`). A count of zero is not drawn.
-- Ahead/behind is against the branch HEAD was created from. The order is: the reflog's `branch: Created from X`, an upstream that names a DIFFERENT branch, `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. The current branch is never its own base, so `master` compares against `origin/master`.
+- Ahead/behind is against the branch the checkout tracks. The order is: the checked-out branch's configured upstream, including the same-named remote-tracking branch, the reflog's `branch: Created from X`, `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. The current branch's local ref is never its own base, so a branch tracking `origin/<name>` compares against that remote copy.
 - The +/- counts are the working tree against HEAD: staged, unstaged, and untracked files git does not ignore.
 - The diff reads the working tree. It runs off-thread behind a 5 s throttle in its own cache, not on the render path.
 
@@ -53,13 +58,16 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## A blocking wait is a gap, in Queue mode too
 
 - The turn loop harvests queued follow-ups before each model request (`harvest_queued_prompts_into_interjections`). A turn parked in an interruptible wait tool (`get_task_output` with a wait, `wait_tasks`, `Await`) makes no request until the task ends. As a result, Queue mode held the row behind a task that can run for minutes.
-- The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. A foreground subagent call is such a wait (`is_foreground_task_call`). The default agent renames its `run_in_background` flag to `background`. The check reads both names. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. An active goal and a pending send-now are exempt.
+- The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. A foreground subagent call is such a wait (`is_foreground_task_call`). The default agent renames its `run_in_background` flag to `background`. The check reads both names. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. A pending send-now is exempt.
+- A wait, and the harvest before each model request, take every row an empty Enter will (`harvest_queued_prompts_into_interjections(true)`), a row queued before the turn started included. A goal run is not exempt, in the shell or in the pager (`is_parked_on_sendable_wait`). A message never needs the empty-Enter force-send to end a wait.
+- A foreground call is a gap too (`ForegroundHandoff` in `tool_calls.rs`). A queued row moves a shell command to the background by its call id. The command keeps running. An MCP call, or a built-in tool that only reads or fetches (`is_detachable_kind`: web, media generation, deploy, LSP), runs on its own task. The row answers the call as backgrounded (`bg-<call id>`), and `report_detached_call` sends its result through the background-task completion path. A tool that edits files or waits on the user keeps the turn waiting. The whole result is written under `{session_dir}/background_tool_calls/`.
 - A `/skill` typed mid-turn takes the shell queue like plain text (the `InjectSkill` arm in `dispatch/prompt.rs`). The harvest folds a slash row whose leading token is a skill (`slash_commands::leading_token_is_skill`). The drain expands it. A builtin still waits for its own turn, because only `resolve` runs one.
 
-## `/context` Messages breakdown
+## `/context` shows provider counts only
 
-- Kind itemizes messages: user, assistant text, reasoning, tool-call arguments, tool results (`estimate_messages_breakdown` in `xai-chat-state`, carried on `ContextInfo::message_breakdown`). The parts sum to `message_tokens`.
-- Overhead is a remainder: occupancy minus system minus the Messages estimate. It is not reasoning. It is hidden when the estimate meets occupancy. The sub-rows scale to the capped Messages count.
+- The bar and legend are the last request's usage JSON: cache read, cache write, uncached input, output (`ProviderUsage` in `xai_chat_state::context_ledger`). No bytes/4 estimate is drawn. Before any request reports usage, the bar is empty and says so.
+- Each main-loop response records a `ContextSample` before its assistant item is pushed (`record_prompt_measurement`). The modal lists one row per request. A row expands into the items it added, with their real byte size. A replace (compaction) or restore clears the samples. A rewind keeps only the ones before it.
+- `o` or the footer button opens `chat_history.jsonl`. When no opener runs, it copies the path.
 
 ## Compaction report
 
@@ -110,12 +118,29 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
 - The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier try added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
+## Open todos block the goal validator
+
+- While the todo list has a `pending` or `in_progress` item, no validator runs. `run_goal_round_end` skips the evaluator and the panel and continues the round (`bounce_round_for_unfinished_todos`). `update_goal(completed: true)` is rejected with `RejectReason::UnfinishedTodos` before the lite check, the classifier, or the mid-turn deferral.
+- Both answers start with `UNFINISHED_TODOS_BOUNCE` and list every open item with its status and id (`unfinished_todos_bounce` in `goal_support.rs`). A missing todo resource reads as no open item. The validator still runs.
+
 ## Lite `/goal` mode
 
 - `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
 - The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is last.
 - Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
 - On the legacy driver, a lite `update_goal(completed: true)` makes one evaluator call and is refused with `LiteCheckNotMet` unless the verdict is `candidate_complete`.
+
+## A give-up claim is reviewed, not counted
+
+- The agent claims it cannot finish with a `## Cannot complete` section in its reply. On the legacy driver, `update_goal(blocked_reason)` also counts. The round end calls `review_blocked_claim` (`acp_session_impl/goal.rs`) before the todo bounce. Lite and full share this path.
+- The evaluator judges the claim first (`build_blocked_claim_request` in `goal_evaluator.rs`). A rejection must list concrete untried steps, and `is_vague_step` refuses "try harder" steps. An upheld claim must name the user action. The next review gets the last rejected steps.
+- Both modes send an upheld claim to the panel a completion candidate gets (`verify_goal_candidate(Some(claim))`). A lite goal's panel is one skeptic and no summarizer. The `## Cannot complete` rule in `goal_verifier_prompt.md` tells the skeptics how to judge it.
+
+## `@sonnet` / `@haiku` / `@opus` subagents
+
+- A prompt that starts with `@sonnet [level] <task>` runs as `/sonnet` (`rewrite_model_mention` in `slash/commands/model_agent.rs`). The same goes for `@haiku` and `@opus`. The level is an optional `ReasoningEffort` word. Like `/btw`, it skips the queue and works mid-turn.
+- The pager sends `x.ai/model_agent`. The shell picks the newest eligible catalog model whose id names the family (`resolve_family_model` in `acp_session_impl/model_mention.rs`). It spawns a background `general-purpose` child with that model and effort and no owning prompt. A Stop does not cancel it. Its completion reaches the main agent like a background `task` child's.
+- No model of the family in the catalog is an error that lists the available ids. It never falls back to the parent model.
 
 ## `/todo` capture feature notes
 
@@ -127,6 +152,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - It arrives after its model call ends, keyed by `stream_start_ms`. The root agent and the child-session handler both route it to `set_thinking_summary` on their own tracker.
 - A summarized thought is `RunStep::Transparent` in a verb-group run. It keeps its row rather than fold to height 0.
 - The summary is strictly async: nothing waits for it. The row redraws when the summary lands.
+- `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` apply to a session that already runs. The config watcher sends `ReloadThinkingSummaries` to every resident session, the same path as the output-rate floor.
 - Headless `streaming-json` emits a `thinking_summary` line. The Messages format has no field for it and drops it.
 
 ## Streaming tool-call notes
@@ -138,9 +164,20 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The byte count beside the name is what the tail cannot say. A tail of a large body looks the same at any size.
 - The preview truncates each line. It never wraps one. Every fragment redraws it. A wrapped line changes the block's height as the model types, which makes the whole transcript jump.
 
+## Explore-mode `git` tool
+
+- Explore has no shell. Its `git` tool (`grok_build/git/`) runs an argument array, not a shell line. `policy.rs` allowlists the subcommands. `branch`, `tag`, `config`, `stash`, `remote`, `worktree`, `notes`, `reflog`, `symbolic-ref` and `submodule` run only their listing forms.
+- In those subcommands a value option must be `--opt=value`. A bare `--sort` takes the next argument as its value, so `branch --sort --list foo` creates `foo`. A denied long option matches by prefix, and the arguments after `--` are checked too.
+- Argument checks alone are not enough. `git diff` and `describe --dirty` rewrite `.git/index`, even with `GIT_OPTIONAL_LOCKS=0`. So git runs in `xai_grok_sandbox::read_only_child`, which denies every write but `/dev/null`: Landlock on Linux, `sandbox-exec` on macOS. Other platforms refuse to run the tool.
+
+## Todo detail popup
+
+- A double-click or `Enter` on a todo pane row opens `views/todo_detail.rs`. It shows the full text, status, priority, the `verification` condition with its verifier verdict, and any `meta`. `←`/`→` (`h`/`l`) step through the rows the pane shows and wrap. `↑`/`↓` scroll. `Esc` closes it. Input lives in `agent_view/todo_detail_overlay.rs`.
+- Pane clicks map against the list body the last render drew (`TodoPane::body`), not the whole pane. The whole pane includes the `done/total` header row, so a map against it is one row off.
+
 ## The todo list cannot be discarded or overwritten
 
-- A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Text is changed by sending that id with new content.
+- A todo is the user's. Nothing can delete one: an item leaves the actionable set only by becoming `Completed` or `Cancelled`, both of which name it by id. Sending that id with new content changes text.
 - Every `todo_write` is a merge, and an item the call omits survives with its status untouched. `merge: false` used to clear the list and keep only what the call resent. This is how a status update that forgot the flag erased the user's list.
 - `merge` is still accepted on the wire and ignored. It is `#[schemars(skip)]` now that both values behave the same — advertising it will describe a choice the tool no longer offers.
 - `TodoState` has no `clear` and no remove of any shape. The guarantee lives in the data structure so a later caller cannot reach around it.
@@ -196,13 +233,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `output_config.effort` is 4.6-and-later too. So the older dialect sends the effort as `budget_tokens` instead and nothing beside it. `output_config.format` is untouched — structured outputs are not what 4.6 changed.
 - A budget must clear the API's 1024 floor and stay under `max_tokens`. One that cannot do both leaves thinking off with a warning, rather than sending a request the API answers with a 400.
 
-## CI compile-cache notes
+## CI builds from clean
 
-[docs/ci-compile-cache-notes.md](docs/ci-compile-cache-notes.md) holds this section.
-
-## The dependency tar: one cache entry per dependency set, and why it cannot grow
-
-[docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md](docs/the-dependency-tar-one-cache-entry-per-dependency-set-and-why-it-cannot-grow.md) holds this section.
+- A crate's integration tests build as one `it` binary (`tests/it/main.rs`, one module per former file). Select tests by module path (`cargo nextest run -E 'binary(it) and test(/^module::/)'`). Run them with nextest: several set process-global state (`grok_home()`, env vars, the tracer) and pass only one test per process.
+- CI has no compile cache. Every job compiles the whole dependency graph, so the number of registry crates is what sets its build time. Check what a new dependency pulls in (`cargo tree -e normal,build,dev -i <crate>`) before adding it.
+- Spawn tasks through `xai_spawn` (`spawn`, `spawn_blocking`, `spawn_local`, `spawn_on`, `spawn_in`), not through tokio directly. tokio compiles its task code once for each future type. The wrappers box the future first, so tokio compiles it once for each output type.
+- The read tools reach `pdf_oxide` only through `xai_tool_types::pdf`. `xai-grok-pdf` holds the engine, and each binary calls `xai_grok_pdf::install()` in `main`. Never add `pdf_oxide` or `xai-grok-pdf` to a library's `[dependencies]`. That puts a crate of several hundred thousand lines back in front of tools, workspace, shell and pager.
 
 ## Why build-test is not on the self-hosted runner
 
@@ -256,7 +292,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - A response stream that dies mid-body has its own retry budget: `STREAM_INTERRUPT_MAX_RETRIES` = 10, on the transport path's exponential backoff (2s, 4s, 8s, ... capped at `MAX_RETRY_BACKOFF`, jittered). `SamplingError::is_stream_interrupted` names the class. `request_task` charges it to `stream_retry_count` and not to the transport budget. A dropped connection is not a server fault, and the next 5xx still needs its own retries.
 - The budget is a floor as well as a cap. A model configured with `max_retries = 3` still gets these 10. Only `max_retries = 0` (observe-only) and a caller that cannot take duplicate output (`retry_only_before_output` after output) get zero, through `stream_interrupt_budget`.
-- A reqwest decode failure is in that class, and `is_retryable_reqwest` answers true for it. Its Display is "error decoding response body". A body that stopped arriving mid-read is transient, so calling it fatal ends a turn on one network blip. The same failure reaches the user as `EventStreamError` when the SSE stream is what broke.
+- An HTTP decode failure is in that class, and `is_retryable_request` answers true for it. Its Display is "error decoding response body". A body that stopped arriving mid-read is transient, so calling it fatal ends a turn on one network blip. The same failure reaches the user as `EventStreamError` when the SSE stream is what broke.
 
 ## Output-rate floor notes
 
@@ -291,7 +327,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 - The pricing catalog is the one compiled-in endpoint (`DEFAULT_PRICING_CATALOG_URL`, modelinfo), and its request skips the allowlist (`check_catalog_url`). Nothing else prices an Anthropic model: the wire carries no cost and `/v1/models` lists no price. The proxy, the xAI API, the grok.com clients, the env crate's hosts and voice all resolve to BLANK when unconfigured. A blank URL builds no request.
 - A model request reaches only an endpoint in `[endpoints] allowed_endpoints` or `GROK_ALLOWED_ENDPOINTS` (`xai_grok_extra_ca::endpoint_allowlist`), or one the user or admin config names as a URL. Every `*url` string in those config layers adds its origin (`allow_urls_written_in_config` in `util/config/campaigns.rs`), so a provider's `base_url` needs no second entry. Campaigns and remote settings add nothing: nobody local wrote them. The check runs where each request is made. Those places are `SamplingClient::new`, the model listings, the local-runtime reads, web search, image and video generation, embeddings, voice and pricing.
-- A DNS resolver or a connector layer cannot enforce it. Behind a proxy the resolver sees the proxy's host, and reqwest keeps a connector's target URI private.
+- A DNS resolver or a connector layer cannot enforce it. Behind a proxy the resolver sees the proxy's host. The HTTP client keeps a connector's target URI private.
 - `.cargo/config.toml` sets `GROK_ALLOWED_ENDPOINTS` to loopback so tests reach their mock servers. An installed binary does not get it.
 
 ## `[model_providers.<id>]` notes

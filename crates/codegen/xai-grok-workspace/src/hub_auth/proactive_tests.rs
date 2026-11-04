@@ -357,7 +357,7 @@ async fn spawn_mock_idp(
                     }
                 }),
             );
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     tokio::task::yield_now().await;
@@ -589,7 +589,7 @@ async fn failed_refresh_retries_faster_than_min_interval_then_exhausts() {
                     }
                 }),
             );
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     tokio::task::yield_now().await;
@@ -764,7 +764,7 @@ async fn invalid_expires_in_keeps_rotated_refresh_token() {
                     }
                 }),
             );
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     tokio::task::yield_now().await;
@@ -989,7 +989,7 @@ async fn a_rejected_discovery_document_keeps_retrying() {
             }
         }),
     );
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     tokio::task::yield_now().await;
@@ -1207,7 +1207,7 @@ async fn spawn_rate_limited_idp(hits: Arc<AtomicU32>, retry_after: &'static str)
                     }
                 }),
             );
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
     tokio::task::yield_now().await;

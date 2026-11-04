@@ -192,8 +192,7 @@ async fn handle_get_billing(agent: &MvpAgent) -> ExtResult {
     // Fetch the credits balance and usage (new billing system) via the CLI proxy, which forwards to the backend `GetGrokCreditsConfig`
     let credits_url = format!("{}/billing?format=credits", base);
     let credits_resp = crate::http::shared_client()
-        .get(&credits_url)
-        .header("Authorization", format!("Bearer {}", &auth.key))
+        .get(&credits_url, auth.wire_auth())
         .header(
             "X-XAI-Token-Auth",
             xai_grok_login::GrokComConfig::default().token_header,
@@ -282,8 +281,7 @@ async fn handle_get_auto_topup_rule(agent: &MvpAgent) -> ExtResult {
     // Fetch the auto top-up rule via the CLI proxy, which forwards to the backend `GetAutoTopupRule`
     let url = format!("{}/auto-topup-rule", base);
     let response = crate::http::shared_client()
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", &auth.key))
+        .get(&url, auth.wire_auth())
         .header(
             "X-XAI-Token-Auth",
             xai_grok_login::GrokComConfig::default().token_header,

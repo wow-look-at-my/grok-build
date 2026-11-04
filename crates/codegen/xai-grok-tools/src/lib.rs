@@ -1,4 +1,5 @@
 #![allow(clippy::cast_lossless)] // Hits predate the gate
+// lib.rs holds the lib code.
 #![allow(clippy::cast_possible_truncation)] // Hits predate the gate
 #![allow(clippy::cast_possible_wrap)] // Hits predate the gate
 #![allow(clippy::cast_precision_loss)] // Hits predate the gate
@@ -11,6 +12,12 @@
 #![deny(clippy::indexing_slicing)]
 
 pub use xai_grok_version::version;
+
+#[cfg(test)]
+#[ctor::ctor]
+fn install_pdf_engine_for_tests() {
+    xai_grok_pdf::install();
+}
 
 /// Default maximum output size (in bytes) for tool results sent to the model.
 /// 40 KB ≈ 10 000 tokens

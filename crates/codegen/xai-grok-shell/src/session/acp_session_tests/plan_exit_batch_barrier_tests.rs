@@ -115,7 +115,7 @@ fn spawn_exit_capture(
 ) {
     let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
     let captured_for_task = captured.clone();
-    let handle = tokio::task::spawn_local(async move {
+    let handle = xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
@@ -267,7 +267,7 @@ async fn mixed_permission_cancel_skips_exit_reverse_request() {
 
             let exit_fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             let exit_fired_task = exit_fired.clone();
-            let responder = tokio::task::spawn_local(async move {
+            let responder = xai_spawn::spawn_local(async move {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::RequestPermission(args) => {

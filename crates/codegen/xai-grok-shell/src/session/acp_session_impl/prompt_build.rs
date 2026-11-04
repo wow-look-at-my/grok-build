@@ -602,9 +602,7 @@ impl SessionActor {
             })
             .unwrap_or_default();
         let on_disk_cwd = std::path::Path::new(&self.session_info.cwd);
-        let on_disk_root = git2::Repository::discover(on_disk_cwd)
-            .ok()
-            .and_then(|repo| repo.workdir().map(std::path::Path::to_path_buf))
+        let on_disk_root = xai_gix_status::discover::discover_workdir(on_disk_cwd)
             .unwrap_or_else(|| on_disk_cwd.to_path_buf());
         let display_root = self
             .display_cwd

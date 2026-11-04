@@ -117,7 +117,7 @@ fn bundle_fd() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let bytes: Vec<u8> = {
-        let resp = reqwest::blocking::get(&url).map_err(|e| {
+        let resp = request::blocking::get(&url).map_err(|e| {
             format!(
                 "Failed to download fd: {e}\nSet GROK_TOOLS_BUNDLE_FD_PATH to a local fd for offline builds."
             )
@@ -314,7 +314,7 @@ fn bundle_rg() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let bytes: Vec<u8> = {
-        let resp = reqwest::blocking::get(&url).map_err(|e| {
+        let resp = request::blocking::get(&url).map_err(|e| {
             format!(
                 "Failed to download ripgrep: {}\nSet GROK_TOOLS_BUNDLE_RG_PATH to a local rg for offline builds.",
                 e

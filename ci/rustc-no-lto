@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# A RUSTC_WORKSPACE_WRAPPER for the release builds: turns off LTO across codegen units, adds the parallel frontend, and lets a workspace crate link the generic instances an upstream workspace crate already compiled instead of compiling its own. Bash, because dash drops CARGO_BIN_EXE_<name> when the name holds a hyphen.
+exec "$(dirname "$0")/rustc-parallel-frontend" "$@" -Clto=off -Zshare-generics=y

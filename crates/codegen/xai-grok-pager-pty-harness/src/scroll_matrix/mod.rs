@@ -5,7 +5,7 @@
 //! [`session`] spawns the primed pager and the cell's [`gestures`] table is replayed as timed SGR reports.
 //! [`log`] parses and groups the recorder JSONL (finalize-synchronized, no fixed sleeps).
 //! [`invariants`] judge the [`cells`] row's verdict, xfail-aware, and [`report`] renders the verdicts (table, `report.json`, exit code).
-//! Entry points: the curated CI tier (`tests/scroll_matrix_curated.rs`) and the local full sweep (`src/bin/scroll_matrix.rs`).
+//! Entry points: the curated CI tier (`tests/it/scroll_matrix_curated.rs`) and the local full sweep (`src/bin/scroll_matrix.rs`).
 //!
 //! ## No pager dependency
 //!

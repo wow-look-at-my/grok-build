@@ -282,7 +282,7 @@ impl RecordingGateway {
             captured: Arc::new(std::sync::Mutex::new(CapturedPrompt::default())),
         };
         let (prompts, captured) = (this.prompts.clone(), this.captured.clone());
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let mut gateway_rx = gateway_rx;
             while let Some(msg) = gateway_rx.recv().await {
                 match msg {

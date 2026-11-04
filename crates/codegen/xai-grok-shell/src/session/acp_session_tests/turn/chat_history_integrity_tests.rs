@@ -146,7 +146,7 @@ async fn mid_turn_user_injection_must_not_duplicate_tool_results_for_one_tool_us
             {
                 let drainer = actor.clone();
                 let mut sampler_event_rx = sampler_event_rx;
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     while let Some(event) = sampler_event_rx.recv().await {
                         drainer.handle_sampling_event(event).await;
                     }

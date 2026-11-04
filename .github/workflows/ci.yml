@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  id-token: write
   contents: read
 
 # A push to a branch cancels that branch's running build. Runs on master each get their own group and complete.
@@ -20,7 +21,7 @@ env:
   # xai-grok-sandbox's `fails_closed_on_non_utf8_*` hit errno 84 under a non-UTF-8 locale.
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
-  # Cargo reuses its own per-package artifacts in target/, which a compilation cache in front of it cannot do. A hit there still runs a process and writes the object out.
+  # Every job builds from a clean target/ one time, so incremental state is never read back.
   CARGO_INCREMENTAL: "0"
   # Debuginfo on every test binary needs >37 GB of target/ against a runner's ~14 GB, and ld then dies on a bus error.
   CARGO_PROFILE_DEV_DEBUG: "0"
@@ -41,14 +42,11 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
       - uses: wow-look-at-my/slopfix@lkgb
-
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
 
   fmt:
     name: Rustfmt
@@ -58,7 +56,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -82,9 +80,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   build-test:
     name: Build & test
     # Hosted deliberately: this suite asserts host semantics the org's lean self-hosted image lacks. See AGENTS.md.
@@ -92,13 +87,15 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     # A ceiling, not a target. The compile is cold every run (measured 31 min at -j3) and a hung test is failed by nextest in 60s. A job past this is broken, not slow.
     timeout-minutes: 75
     env:
       # The harness builds this itself when unset, once per nextest process, all queued on cargo's package lock.
       PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
-      # No global CARGO_BUILD_JOBS: the -j3 compile-RAM cap belongs to the build step alone.
+      # Job-wide, so the nextest steps reuse the compile instead of rebuilding under a different wrapper.
+      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-parallel-frontend
+      # No global CARGO_BUILD_JOBS: the compile-RAM cap belongs to the build steps alone.
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -109,15 +106,16 @@ jobs:
 
       - uses: ./.github/actions/setup-cargo-timings
 
-      # rg_path() ends at a bare "rg" on PATH, so without this the grep and glob tests fail on empty output.
-      - name: Install ripgrep
-        uses: wow-look-at-my/actions@cache-rg#latest
+      # ripgrep: rg_path() ends at a bare "rg" on PATH, so without it the grep and glob tests fail on empty output. bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it.
+      - name: Install ripgrep, bubblewrap and mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep bubblewrap mold
 
-      # bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it. mold: .cargo/config.toml links x86_64-unknown-linux-gnu with it. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
-      - name: Install bubblewrap and mold
-        uses: wow-look-at-my/actions@cached-apt#latest
+      # Consider the gh shim e2e tests. Those tests serve sandbox/gh.xml with the real api-cli, and workspace_gh_slopfix_e2e runs slopfix in the sandbox.
+      - uses: ./.github/actions/setup-org-tools
         with:
-          packages: bubblewrap mold
+          tools: api-cli slopfix
 
       # Each test runs in its own process under a per-test timeout (.config/nextest.toml), which cargo test has none of.
       - name: Install cargo-nextest
@@ -128,57 +126,126 @@ jobs:
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
           echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
 
-      # The registry dependencies, cached by cached-run's cargo mode. See AGENTS.md, "The dependency tar". The script runs on a hit too, so the workspace compiles here once and the next step finds it fresh.
-      - name: Build the dependencies
-        uses: wow-look-at-my/actions@cached-run#latest
+      # The archive holds every test binary plus the pager binary (.config/nextest.toml `[profile.ci.archive]`), so the test shards run without a compiler.
+      - name: Build test harnesses into a nextest archive
         env:
-          CARGO_BUILD_JOBS: "3"
-        with:
-          key: rustdeps-dev
-          skip-on-hit: false
-          paths: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/debug/deps
-            target/debug/build
-            target/debug/.fingerprint
-          run: cargo test --locked --workspace --no-run --no-fail-fast
-
-      # -j3 is the widest -j the runner's 15 GiB holds.
-      - name: Build test harnesses (compile, no-run)
-        env:
-          CARGO_BUILD_JOBS: "3"
+          CARGO_BUILD_JOBS: "4"
         run: |
           start=$(date +%s)
           # This also builds the pager binary: xai-grok-pager-bin has an integration test.
-          cargo test --locked --workspace --no-run --no-fail-fast
+          mkdir -p dist
+          # nextest runs cargo by its own path, past the ci/cargo timings wrapper, so the flag goes here.
+          cargo nextest archive --locked --workspace --profile ci --timings --archive-file dist/nextest-archive.tar.zst
           test -x "$PAGER_BINARY"
+          "$PAGER_BINARY" --version
           echo "compile wall: $(( $(date +%s) - start )) s"
           echo "target: $(du -sh target 2>/dev/null | cut -f1)"
+          echo "archive: $(du -sh dist/nextest-archive.tar.zst | cut -f1)"
 
-      - name: Run tests (workspace)
-        run: |
-          cargo nextest run --locked --workspace --profile ci
-          "$PAGER_BINARY" --version
-
-      # The check that turns a banned pattern into a red branch. An entry set to `deny` in `[workspace.lints.clippy]` is a compile error here. The lint names the file that reintroduced it. `clippy.toml`'s `disallowed-methods` list covers the calls no lint of clippy's covers, and is denied through the same table. A deny lands only with the per-crate exceptions for the hits that predate it. The tree is green the moment the entry is added. Warnings that are not denied stay warnings. `-D warnings` over a workspace this size buries the one line that matters, and this repo has never gated on clippy style before. `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process. A test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build. The deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here. `!cancelled()` keeps a test failure from hiding a lint failure, and the other way round. `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally, and the lint tables differ between versions. One crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
-      - name: Lint (workspace)
-        run: cargo clippy --locked --workspace --lib --bins --keep-going
-
-      # The PTY cases are #[ignore]d, so the run above built their binaries and skipped every case; this is the only thing that executes them. Same `--workspace` scope as the compile step on purpose: `-p xai-grok-pager` resolves its own feature set and rebuilds the graph instead of reusing target/.
-      - name: Test (PTY end-to-end)
-        run: |
-          cargo nextest run --locked --workspace --profile ci \
-            -E 'binary(pty_e2e_smoke) or binary(pty_e2e_config_ui) or binary(pty_e2e_queue)' \
-            --run-ignored all --test-threads 4
+      - uses: wow-look-at-my/actions@cache-upload#latest
+        with:
+          name: nextest-archive
+          path: dist/nextest-archive.tar.zst
 
       - uses: ./.github/actions/upload-cargo-timings
         with:
           name: cargo-timings-build-test
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
+  # Each shard runs one hash partition of the archive on its own runner, so the test wall is the slowest shard, not the sum.
+  test:
+    name: Test (${{ matrix.name }})
+    needs: build-test
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
+    permissions:
+      id-token: write
+      contents: read
+      actions: write
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "workspace 1/8", partition: "hash:1/8", pty: false }
+          - { name: "workspace 2/8", partition: "hash:2/8", pty: false }
+          - { name: "workspace 3/8", partition: "hash:3/8", pty: false }
+          - { name: "workspace 4/8", partition: "hash:4/8", pty: false }
+          - { name: "workspace 5/8", partition: "hash:5/8", pty: false }
+          - { name: "workspace 6/8", partition: "hash:6/8", pty: false }
+          - { name: "workspace 7/8", partition: "hash:7/8", pty: false }
+          - { name: "workspace 8/8", partition: "hash:8/8", pty: false }
+          - { name: "PTY 1/3", partition: "hash:1/3", pty: true }
+          - { name: "PTY 2/3", partition: "hash:2/3", pty: true }
+          - { name: "PTY 3/3", partition: "hash:3/3", pty: true }
+    env:
+      PAGER_BINARY: ${{ github.workspace }}/target/debug/xai-grok-pager
+    steps:
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
+
+      # xai-proto-build's tests compile .proto fixtures at run time.
+      - uses: ./.github/actions/setup-protoc
+
+      # ripgrep: rg_path() ends at a bare "rg" on PATH, so without it the grep and glob tests fail on empty output. bubblewrap: jail_bwrap_e2e drives the `--sandbox` command builder against real bwrap, and reports a skip without it.
+      - name: Install ripgrep and bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep bubblewrap
+
+      # Consider the gh shim e2e tests. Those tests serve sandbox/gh.xml with the real api-cli, and workspace_gh_slopfix_e2e runs slopfix in the sandbox.
+      - uses: ./.github/actions/setup-org-tools
+        with:
+          tools: api-cli slopfix
+
+      - name: Install cargo-nextest
+        run: |
+          mkdir -p "${{ runner.temp }}/nextest-bin"
+          curl -fsSL -o "${{ runner.temp }}/nextest.tar.gz" \
+            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
+          echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
+
+      - uses: wow-look-at-my/actions@cache-download#latest
+        with:
+          name: nextest-archive
+          path: dist
+
+      # The archive unpacks its target/ into the checkout, at the same path the build runner used. Test binaries carry CARGO_BIN_EXE_* and CARGO_MANIFEST_DIR as compiled-in absolute paths, so any other location breaks them.
+      - name: Run tests (workspace)
+        if: ${{ !matrix.pty }}
+        run: |
+          cargo nextest run --archive-file dist/nextest-archive.tar.zst --workspace-remap . \
+            --extract-to . --extract-overwrite --profile ci --partition ${{ matrix.partition }}
+
+      # The PTY cases are #[ignore]d, so the workspace shards skip every case; this is the only thing that executes them.
+      - name: Test (PTY end-to-end)
+        if: ${{ matrix.pty }}
+        run: |
+          cargo nextest run --archive-file dist/nextest-archive.tar.zst --workspace-remap . \
+            --extract-to . --extract-overwrite --profile ci --partition ${{ matrix.partition }} \
+            -E 'binary_id(xai-grok-pager-pty-harness::it) and (test(/^pty_e2e_smoke::/) or test(/^pty_e2e_config_ui::/) or test(/^pty_e2e_queue::/) or test(/^common::/))' \
+            --run-ignored all --test-threads 4
+
+  # Clippy shares no artifact with the test build, so it needs nothing from build-test.
+  lint:
+    name: Clippy
+    runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: wow-look-at-my/actions@parallel-checkout#latest
+
+      - uses: ./.github/actions/setup-protoc
+
+      # Build scripts and proc-macros still link, and .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
+      - name: Install mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mold
+
+      # The check that turns a banned pattern into a red branch. An entry set to `deny` in `[workspace.lints.clippy]` is a compile error here. The lint names the file that reintroduced it. `clippy.toml`'s `disallowed-methods` list covers the calls no lint of clippy's covers, and is denied through the same table. A deny lands only with the per-crate exceptions for the hits that predate it. The tree is green the moment the entry is added. Warnings that are not denied stay warnings. `-D warnings` over a workspace this size buries the one line that matters, and this repo has never gated on clippy style before. `--lib --bins` rather than `--all-targets` because that is what makes `unwrap_used` and `expect_used` mean what they are for. Those two lints exist to stop a panic on data from outside the process. A test asserting on a value it just built is not that. Compiling the lib and the binaries leaves every `#[cfg(test)]` module out of the build. The deny covers exactly the shipped code and a test module can still use `unwrap` without an attribute on it. Integration tests under `tests/` are a separate target and are linted by nothing here. `--keep-going` because a denied lint stops the crate that hit it, and a crate behind it in the graph never gets compiled. The runner's clippy is not necessarily the clippy a developer has locally, and the lint tables differ between versions. One crate's failure must not hide the crates whose hits this runner also finds. Without the flag that becomes one CI cycle per crate.
+      - name: Lint (workspace)
+        run: cargo clippy --locked --workspace --lib --bins --keep-going
 
   build-release:
     name: Build release (${{ matrix.name }})
@@ -186,7 +253,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     timeout-minutes: 45
     strategy:
       # One target's failure leaves the others' results worth reading.
@@ -205,6 +272,7 @@ jobs:
     env:
       SDKROOT: ${{ github.workspace }}/.darwin-sdk
       GROK_DARWIN_LINK_BUNDLE: ${{ github.workspace }}/.darwin-link
+      RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/ci/rustc-no-lto
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
 
@@ -226,7 +294,7 @@ jobs:
           echo "${{ runner.temp }}/zig" >> "$GITHUB_PATH"
           "${{ runner.temp }}/zig/zig" version
 
-      # aws-lc-sys and its siblings include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
+      # C build scripts in the graph include Apple headers (CoreServices, CoreFoundation), which zig does not carry.
       - name: Install the macOS SDK (pinned 14.5)
         if: matrix.darwin
         run: |
@@ -236,11 +304,11 @@ jobs:
           mkdir -p "$SDKROOT"
           tar -xJf "${{ runner.temp }}/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
 
-      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold. Restored files need no apt index, so the version the image's index pins and the mirror has dropped stops mattering.
+      # .cargo/config.toml links x86_64-unknown-linux-gnu with mold.
       - name: Install mold
-        uses: wow-look-at-my/actions@cached-apt#latest
-        with:
-          packages: mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mold
 
       # cc-rs reads these per-target. ci/zig-cc replaces the target cc-rs chooses, which zig rejects; ar and ranlib take no target.
       - name: Point the C toolchain at zig
@@ -262,24 +330,6 @@ jobs:
         run: |
           cargo build --locked --release -p xai-darwin-link
           echo "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=$PWD/target/release/xai-darwin-link" >> "$GITHUB_ENV"
-
-      # The registry dependencies for this row's target, the way build-test caches its own. The target is in the label so a fallback restore never takes the other row's entry.
-      - name: Build the dependencies
-        uses: wow-look-at-my/actions@cached-run#latest
-        with:
-          key: rustdeps-release-${{ matrix.target }}
-          skip-on-hit: false
-          paths: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/${{ matrix.target }}/release/deps
-            target/${{ matrix.target }}/release/build
-            target/${{ matrix.target }}/release/.fingerprint
-            target/release/deps
-            target/release/build
-            target/release/.fingerprint
-          run: cargo build --locked --release --target ${{ matrix.target }} -p xai-grok-pager-bin
 
       # On the darwin row the link at the end of this records itself into GROK_DARWIN_LINK_BUNDLE rather than running.
       - name: Build release binary
@@ -342,19 +392,16 @@ jobs:
           name: grok-linux-amd64
           path: dist/grok-linux-amd64
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   # buildhost assigns the number here, after every build and test passed, so a number only ever names a tree that already built and passed.
   release:
     name: Create buildhost release
-    needs: [slopfix, fmt, build-test, test-darwin-sandbox, build-release, link-darwin]
+    needs: [slopfix, fmt, lint, build-test, test, test-darwin-sandbox, build-release, link-darwin]
     runs-on: ${{ github.event.repository.visibility == 'public' && 'ubuntu-22.04' || vars.CI_RUNNER || 'ubuntu-22.04' }}
     timeout-minutes: 10
     permissions:
       contents: read
       id-token: write # GitHub OIDC -> buildhost
-      actions: write # fail-fast cancels this run
+      actions: write
     outputs:
       version: ${{ steps.rel.outputs.version }}
     steps:
@@ -367,19 +414,16 @@ jobs:
           server: ${{ env.BUILDHOST_SERVER }}
           project: ${{ env.BUILDHOST_PROJECT }}
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   # One cc, and the only step in the workflow that needs a Mac.
   link-darwin:
     name: Link darwin/arm64 (macOS)
     needs: build-release
     if: github.event.repository.visibility == 'public'
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     timeout-minutes: 15
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
@@ -400,18 +444,15 @@ jobs:
           name: grok-darwin-arm64
           path: dist/grok-darwin-arm64
 
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
-
   # The jail and the CI host worker have a macOS half (Seatbelt, sandbox-exec) that a Linux runner cannot execute. This crate is small enough to compile natively here.
   test-darwin-sandbox:
     name: Test sandbox crate (macOS)
     if: github.event.repository.visibility == 'public'
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       id-token: write
       contents: read
-      actions: write # fail-fast cancels this run
+      actions: write
     timeout-minutes: 25
     steps:
       - uses: wow-look-at-my/actions@parallel-checkout#latest
@@ -419,11 +460,13 @@ jobs:
       - name: Install Rust toolchain (pinned by rust-toolchain.toml)
         run: rustup show
 
+      # The gh shim e2e tests need the real api-cli, and workspace_gh_slopfix_e2e needs slopfix.
+      - uses: ./.github/actions/setup-org-tools
+        with:
+          tools: api-cli slopfix
+
       - name: Test xai-grok-sandbox on macOS
         run: cargo test --locked -p xai-grok-sandbox
-
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()
 
   publish:
     # Both binaries are stamped here. Patching bytes needs no Mac, and no signature is restored afterwards: a Homebrew install clears the quarantine that would otherwise make one matter.
@@ -454,9 +497,9 @@ jobs:
 
       # .cargo/config.toml links x86_64-unknown-linux-gnu with mold, and this job compiles the stamper. Without it `cc` answers "cannot find 'ld'".
       - name: Install mold
-        uses: wow-look-at-my/actions@cached-apt#latest
-        with:
-          packages: mold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mold
 
       - name: Build the stamper
         run: cargo build --locked --release -p xai-grok-stamp
@@ -515,6 +558,3 @@ jobs:
       - name: Clean up binary hand-offs
         if: always()
         uses: wow-look-at-my/actions@cache-cleanup#latest
-
-      - uses: wow-look-at-my/actions@fail-fast#latest
-        if: failure()

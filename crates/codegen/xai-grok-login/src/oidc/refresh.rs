@@ -68,11 +68,7 @@ impl SuspendProbe {
 /// `true` when `err`'s chain shows the request never reached the server: DNS failure, TCP connect failure, or timeout.
 /// Used to mark [`OidcRefreshResult::Failed::network_unreachable`].
 fn is_network_unreachable(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .downcast_ref::<reqwest::Error>()
-            .is_some_and(|re| re.is_connect() || re.is_timeout())
-    })
+    xai_grok_http::transport_flags(err.as_ref()).is_some_and(|f| f.is_connect || f.is_timeout)
 }
 
 /// Exchange a refresh_token for fresh tokens at the IdP.

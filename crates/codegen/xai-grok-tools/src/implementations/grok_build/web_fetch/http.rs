@@ -1,6 +1,6 @@
 //! Cached HTTP client with atomic invalidation for `web_fetch`.
 //!
-//! The `reqwest::Client` is held behind an `ArcSwapOption` so it can be
+//! The `xai_grok_net::HttpClient` is held behind an `ArcSwapOption` so it can be
 //! atomically invalidated on transport errors, forcing the next call to rebuild
 //! with a fresh connection pool. This prevents connection pool poisoning
 //! (half-read connections being returned to the pool and corrupting subsequent
@@ -18,7 +18,7 @@ use super::error::WebFetchError;
 /// next `get_or_rebuild()` falls through and builds a fresh client with a clean connection pool.
 #[derive(Clone, Debug)]
 pub(crate) struct HttpClient {
-    inner: Arc<ArcSwapOption<reqwest::Client>>,
+    inner: Arc<ArcSwapOption<xai_grok_net::HttpClient>>,
     params: WebFetchParams,
 }
 
@@ -27,7 +27,7 @@ impl HttpClient {
         // Validate the proxy eagerly; the transport builds lazily
         // (`invalidate()` promises a fresh pool).
         if let Some(ref endpoint) = params.proxy_endpoint {
-            reqwest::Proxy::all(endpoint)
+            xai_grok_net::Proxy::all(endpoint)
                 .map_err(|e| WebFetchError::ProxyConfigError(e.to_string()))?;
         }
         Ok(Self {
@@ -37,7 +37,7 @@ impl HttpClient {
     }
 
     /// Get the current client, rebuilding if it was invalidated.
-    pub(crate) fn get_or_rebuild(&self) -> Result<Arc<reqwest::Client>, WebFetchError> {
+    pub(crate) fn get_or_rebuild(&self) -> Result<Arc<xai_grok_net::HttpClient>, WebFetchError> {
         // Fast path: lock-free atomic load.
         if let Some(client) = self.inner.load_full() {
             return Ok(client);
@@ -54,33 +54,28 @@ impl HttpClient {
         self.inner.store(None);
     }
 
-    fn build(params: &WebFetchParams) -> Result<reqwest::Client, WebFetchError> {
+    fn build(params: &WebFetchParams) -> Result<xai_grok_net::HttpClient, WebFetchError> {
         // Route all traffic through the egress proxy when configured.
         let proxy = params
             .proxy_endpoint
             .as_ref()
-            .map(reqwest::Proxy::all)
+            .map(xai_grok_net::Proxy::all)
             .transpose()
             .map_err(|e| WebFetchError::ProxyConfigError(e.to_string()))?;
-        xai_grok_extra_ca::build_reqwest_client(|builder| {
-            let mut builder = builder
-                .timeout(params.timeout_secs())
-                .connect_timeout(std::time::Duration::from_secs(10))
-                // We manage redirects for SSRF.
-                .redirect(reqwest::redirect::Policy::none())
-                .pool_max_idle_per_host(2)
-                .pool_idle_timeout(std::time::Duration::from_secs(30))
-                .tcp_nodelay(true)
-                // Reduce size of incoming payloads.
-                .gzip(true)
-                .brotli(true)
-                .deflate(true);
-            if let Some(proxy) = proxy.clone() {
-                builder = builder.proxy(proxy);
-            }
-            builder
-        })
-        .map_err(WebFetchError::ClientBuildError)
+        let mut options = xai_grok_net::ClientOptions::default()
+            .timeout(params.timeout_secs())
+            .connect_timeout(std::time::Duration::from_secs(10))
+            // We manage redirects for SSRF.
+            .no_redirects()
+            .pool_max_idle_per_host(2)
+            .pool_idle_timeout(std::time::Duration::from_secs(30))
+            .tcp_nodelay()
+            // Reduce size of incoming payloads.
+            .decompress();
+        if let Some(proxy) = proxy {
+            options = options.proxy(proxy);
+        }
+        xai_grok_net::HttpClient::build(options).map_err(WebFetchError::ClientBuildError)
     }
 }
 
@@ -116,7 +111,7 @@ mod tests {
             proxy_endpoint: Some("https://proxy.corp.example.com".into()),
             ..Default::default()
         };
-        // Should succeed — reqwest accepts the proxy URL.
+        // Should succeed — request accepts the proxy URL.
         let client = HttpClient::new(&params);
         assert!(client.is_ok());
     }

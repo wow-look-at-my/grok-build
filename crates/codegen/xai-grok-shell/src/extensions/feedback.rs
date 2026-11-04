@@ -334,7 +334,7 @@ pub async fn draft_send_input(
     let draft_id = request.draft_id;
     let lookup_store = store.clone();
     let lookup_id = draft_id.clone();
-    let is_present = tokio::task::spawn_blocking(move || lookup_store.get(&lookup_id))
+    let is_present = xai_spawn::spawn_blocking(move || lookup_store.get(&lookup_id))
         .await
         .map_err(|error| acp::Error::internal_error().data(error.to_string()))?
         .map_err(|error| acp::Error::internal_error().data(error.to_string()))?
@@ -386,7 +386,7 @@ pub async fn delete_sent_draft(cleanup: Option<DraftCleanup>) -> FeedbackOutcome
         return FeedbackOutcome::Submitted;
     };
 
-    let deleted = tokio::task::spawn_blocking(move || store.delete(&draft_id))
+    let deleted = xai_spawn::spawn_blocking(move || store.delete(&draft_id))
         .await
         .map_err(|error| error.to_string())
         .and_then(|result| result.map_err(|error| error.to_string()));
@@ -402,15 +402,18 @@ pub async fn delete_sent_draft(cleanup: Option<DraftCleanup>) -> FeedbackOutcome
 fn is_feedback_outcome_unknown(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
-            .downcast_ref::<reqwest::Error>()
+            .downcast_ref::<xai_grok_net::Error>()
             .is_some_and(request_may_have_arrived)
     })
 }
 
-/// False only when the request never left (bad URL, connection refused) or the proxy answered.
-/// A retry after false cannot send a duplicate.
-pub fn request_may_have_arrived(error: &reqwest::Error) -> bool {
-    !error.is_builder() && !error.is_connect() && !error.is_status()
+/// False only when the request never left (bad URL, connection refused, a refused
+/// credential) or the proxy answered. A retry after false cannot send a duplicate.
+pub fn request_may_have_arrived(error: &xai_grok_net::Error) -> bool {
+    match error.as_http() {
+        Some(e) => !e.is_builder() && !e.is_connect() && !e.is_status(),
+        None => false,
+    }
 }
 
 /// Tells the proxy that the user dismissed a solicited feedback request.

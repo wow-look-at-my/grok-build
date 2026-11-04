@@ -124,11 +124,12 @@ fn with_grok_memory<T>(value: &str, f: impl FnOnce() -> T) -> T {
     with_env_var_opt("GROK_MEMORY", Some(value), f)
 }
 #[test]
-fn memory_config_default_disabled() {
+fn memory_config_default_enables_v2() {
     without_grok_memory(|| {
         let config = toml::Value::Table(toml::map::Map::new());
         let mem = MemoryConfig::resolve(false, false, &config, None);
-        assert!(!mem.enabled);
+        assert!(mem.enabled);
+        assert_eq!(mem.mode, crate::config::MemoryMode::V2);
     });
 }
 #[test]
@@ -3258,8 +3259,6 @@ telemetry = false
 
 [endpoints]
 xai_api_base_url = "https://inference.acme-corp.example/xai/v1"
-trace_upload_bucket = "s3://acme-trace"
-trace_upload_endpoint_url = "https://s3.acme-corp.example"
 "#,
         )
         .unwrap();
@@ -3285,10 +3284,48 @@ trace_upload_endpoint_url = "https://s3.acme-corp.example"
                 .resolve_managed_config_url()
                 .contains("acme-corp")
         );
-    assert_eq!(
-            cfg.endpoints.trace_upload_endpoint_url.as_deref(),
-            Some("https://s3.acme-corp.example")
-        );
+}
+/// An env var of a removed direct-upload mode fails the config load.
+#[test]
+#[serial_test::serial]
+fn an_env_var_naming_a_removed_upload_mode_fails_the_load() {
+    for &name in crate::agent::config::REMOVED_DIRECT_UPLOAD_ENV_VARS {
+        let _guard = xai_grok_test_support::env::EnvGuard::set(name, "s3://acme-trace");
+        let err = crate::agent::config::Config::new_from_toml_cfg(&toml::Value::Table(
+            Default::default(),
+        ))
+        .err()
+        .expect("a removed upload env var must fail the load");
+        assert!(err.contains(name) && err.contains("removed"), "{err}");
+    }
+}
+/// A requirements layer that names a removed direct-upload key fails the config load.
+#[test]
+#[serial_test::serial]
+fn a_requirement_naming_a_removed_upload_mode_fails_the_load() {
+    let requirements = toml::from_str(
+        r#"
+[endpoints]
+trace_upload_bucket = "s3://acme-trace"
+"#,
+    )
+    .unwrap();
+    let layers = ConfigLayers {
+        system_managed: toml::Value::Table(Default::default()),
+        managed: toml::Value::Table(Default::default()),
+        user: toml::Value::Table(Default::default()),
+        user_requirements: Some(requirements),
+        system_requirements: None,
+        mdm_requirements: None,
+        ..Default::default()
+    };
+    let err = crate::agent::config::Config::new_from_toml_cfg(&layers.effective_config_disk_only())
+        .err()
+        .expect("a removed upload key must fail the load");
+    assert!(
+        err.contains("trace_upload_bucket") && err.contains("removed"),
+        "{err}"
+    );
 }
 /// `[feedback.user]` in the managed layer must survive the layer merge into the resolved `Config` (its presence is the opt-in).
 #[test]
@@ -3337,7 +3374,7 @@ fn project_config_never_sources_feedback_user() {
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
@@ -3432,7 +3469,7 @@ fn apply_requirements_value_overrides_user_settings() {
     let mut cfg = crate::agent::config::Config::new_from_toml_cfg(&raw_config).unwrap();
     cfg.default_yolo_mode = true;
     let requirements: toml::Value = toml::from_str(
-            "[cli]\nauto_update = false\nchannel = \"stable\"\n\n[features]\ntelemetry = false\nfeedback = false\nlsp_tools = false\nweb_fetch = false\nwrite_file = false\nremote_fetch = false\n\n[telemetry]\ntrace_upload = false\nmixpanel_enabled = false\nmixpanel_token = \"enterprise-mp-token\"\n\n[ui]\nyolo = false\n\n[models]\ndefault = \"managed-model\"\nweb_search = \"managed-ws-model\"\n\n[endpoints]\ncli_chat_proxy_base_url = \"https://managed-proxy.example/v1\"\nxai_api_base_url = \"https://managed-api.example/v1\"\nmodels_base_url = \"https://managed-models.example/v1\"\nmodels_list_url = \"https://managed-models.example/v1/models\"\ntrace_upload_endpoint_url = \"https://s3.custom.example.com\"\ntrace_upload_credentials = '{\"aws_access_key_id\":\"AKTEST\",\"aws_secret_access_key\":\"secret\"}'\n",
+            "[cli]\nauto_update = false\nchannel = \"stable\"\n\n[features]\ntelemetry = false\nfeedback = false\nlsp_tools = false\nweb_fetch = false\nwrite_file = false\nremote_fetch = false\n\n[telemetry]\ntrace_upload = false\nmixpanel_enabled = false\nmixpanel_token = \"enterprise-mp-token\"\n\n[ui]\nyolo = false\n\n[models]\ndefault = \"managed-model\"\nweb_search = \"managed-ws-model\"\n\n[endpoints]\ncli_chat_proxy_base_url = \"https://managed-proxy.example/v1\"\nxai_api_base_url = \"https://managed-api.example/v1\"\nmodels_base_url = \"https://managed-models.example/v1\"\nmodels_list_url = \"https://managed-models.example/v1/models\"\n",
         )
         .unwrap();
     let source = RequirementSource::Requirements {
@@ -3485,19 +3522,6 @@ fn apply_requirements_value_overrides_user_settings() {
             enforced
                 .iter()
                 .any(|e| e.path == "ui.yolo" && e.value == "--yolo blocked")
-        );
-    assert_eq!(
-            Some("https://s3.custom.example.com"),
-            cfg.endpoints.trace_upload_endpoint_url.as_deref()
-        );
-    assert!(
-            cfg.endpoints.trace_upload_credentials.is_some(),
-            "trace_upload_credentials should be set"
-        );
-    assert!(
-            enforced
-                .iter()
-                .any(|e| e.path == "endpoints.trace_upload_credentials" && e.value == "[redacted]")
         );
     assert!(!cfg.telemetry.mixpanel_enabled);
     assert_eq!(
@@ -4042,7 +4066,7 @@ fn simulate_release_build() -> xai_grok_test_support::EnvGuard {
 fn project_overlay_tracks_authoritative_trust_transitions() {
     let source_root = tempfile::tempdir().unwrap();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     write_subagent_definitions(
         &repo.path().join(".grok"),
         &[("shared", "Project"), ("project-only", "Project")],
@@ -4145,7 +4169,7 @@ fn resolve_effective_plugins_config_gates_project_paths_on_folder_trust() {
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
@@ -4199,7 +4223,7 @@ fn discover_plugins_excludes_untrusted_configpath_plugin_end_to_end() {
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let cwd = repo.path();
     let plugin_dir = cwd.join("cfgpath-probe");
     std::fs::create_dir_all(&plugin_dir).unwrap();
@@ -4268,7 +4292,7 @@ fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
     let _flag = EnvGuard::unset("GROK_FOLDER_TRUST");
     let _sim = simulate_release_build();
     let repo = tempfile::tempdir().unwrap();
-    git2::Repository::init(repo.path()).unwrap();
+    gix::init(repo.path()).unwrap();
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./proj-plugin\"]\n")
@@ -4449,7 +4473,7 @@ fn plugin_config_writes_keep_the_caller_local_set_live() {
     rt.block_on(
         local
             .run_until(async move {
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     loop {
                         tokio::time::sleep(Duration::from_millis(5)).await;
                         ticker_ticks.set(ticker_ticks.get() + 1);

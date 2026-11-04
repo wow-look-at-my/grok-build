@@ -117,7 +117,7 @@ async fn run_task_call_with_queued_message(
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
     let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(event) = event_rx.recv().await {
             if let SubagentEvent::HandOffForeground(SubagentHandOffForegroundRequest {
                 prompt_id,
@@ -158,7 +158,7 @@ async fn run_task_call_with_queued_message(
     }
 
     let call_actor = actor.clone();
-    let call = tokio::task::spawn_local(async move {
+    let call = xai_spawn::spawn_local(async move {
         call_actor
             .execute_tool_calls(vec![task_call("task-1", run_in_background)], None)
             .await
@@ -203,6 +203,7 @@ async fn run_task_call_with_queued_message(
 
 /// Every follow-up mode and queue timing: the row arrives during the call, or sat queued before it began.
 #[tokio::test(flavor = "current_thread")]
+#[serial_test::serial(follow_up_steer_cache)]
 async fn queued_message_backgrounds_a_foreground_task_call() {
     let local = tokio::task::LocalSet::new();
     local
@@ -233,6 +234,7 @@ async fn queued_message_backgrounds_a_foreground_task_call() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[serial_test::serial(follow_up_steer_cache)]
 async fn queued_message_leaves_a_background_task_call_alone() {
     let local = tokio::task::LocalSet::new();
     local

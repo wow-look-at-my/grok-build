@@ -1474,7 +1474,7 @@ mod helper_tests {
     fn find_git_dir_discovers_real_repo_and_from_subdir() {
         // A real repo's `.git` is found from the root and from a subdir.
         let temp = TempDir::new().unwrap();
-        git2::Repository::init(temp.path()).unwrap();
+        xai_test_utils::git::init_git_repo(temp.path());
 
         let gd = find_git_dir(temp.path()).expect("repo .git found");
         assert!(gd.ends_with(".git") && gd.is_dir(), "got {gd:?}");
@@ -1548,7 +1548,8 @@ mod helper_tests {
         let temp = TempDir::new().unwrap();
         let main = temp.path().join("main");
         fs::create_dir_all(&main).unwrap();
-        let real_gitdir = git2::Repository::init(&main).unwrap().path().to_path_buf();
+        xai_test_utils::git::init_git_repo(&main);
+        let real_gitdir = main.join(".git");
         let real_gitdir = dunce::canonicalize(&real_gitdir).unwrap_or(real_gitdir);
 
         let linked = temp.path().join("linked");

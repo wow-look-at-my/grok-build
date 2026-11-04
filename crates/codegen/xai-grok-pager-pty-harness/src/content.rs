@@ -351,7 +351,7 @@ mod tests {
 
     async fn read_foreground(url: String, endpoint: InferenceEndpoint) -> String {
         let (path, body) = foreground_request(endpoint);
-        reqwest::Client::new()
+        request::Client::new()
             .post(format!("{url}{path}"))
             .header("x-grok-turn-idx", "1")
             .header("x-grok-req-id", format!("direct-{endpoint:?}"))
@@ -370,7 +370,7 @@ mod tests {
     async fn settings_endpoint_allows_access_by_default() {
         let content = ContentController::start().await.unwrap();
 
-        let resp = reqwest::get(format!("{}/settings", content.url()))
+        let resp = request::get(format!("{}/settings", content.url()))
             .await
             .unwrap();
         assert_eq!(resp.status(), 200);
@@ -383,7 +383,7 @@ mod tests {
     async fn default_response_streams_fixed_text() {
         let content = ContentController::start().await.unwrap();
 
-        let body = reqwest::Client::new()
+        let body = request::Client::new()
             .post(format!("{}/chat/completions", content.url()))
             .json(&serde_json::json!({
                 "model": "test-model",
@@ -423,7 +423,7 @@ mod tests {
         ] {
             let content = ContentController::start().await.unwrap();
             let mut turn = content.expect_agent_turn("either endpoint", "MATCHED_TURN");
-            let request = tokio::spawn(read_foreground(content.url(), endpoint));
+            let request = xai_spawn::spawn(read_foreground(content.url(), endpoint));
 
             tokio::time::timeout(EXPECTATION_TIMEOUT, turn.wait_received())
                 .await
@@ -460,7 +460,7 @@ mod tests {
             let content = ContentController::start().await.unwrap();
             let mut turn =
                 content.expect_agent_turn_blocked("blocked turn", "BLOCKED_MATCHED_TURN");
-            let mut request = tokio::spawn(read_foreground(content.url(), endpoint));
+            let mut request = xai_spawn::spawn(read_foreground(content.url(), endpoint));
 
             tokio::time::timeout(EXPECTATION_TIMEOUT, turn.wait_received())
                 .await

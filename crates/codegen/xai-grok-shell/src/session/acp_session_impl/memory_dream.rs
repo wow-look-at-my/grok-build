@@ -304,6 +304,7 @@ impl SessionActor {
                 self.send_xai_notification(XaiSessionUpdate::MemoryDreamCompleted {
                     result: format!("skipped: {reason}"),
                     path: None,
+                    automatic: false,
                 })
                 .await;
                 MemoryDreamResponse::new(disposition)
@@ -486,6 +487,7 @@ impl SessionActor {
         self.send_xai_notification(XaiSessionUpdate::MemoryDreamCompleted {
             result: dream_result_str,
             path: dream_path,
+            automatic: false,
         })
         .await;
 
@@ -576,7 +578,7 @@ impl SessionActor {
                 .flush_config
                 .flush_model
                 .clone()
-                .or_else(|| self.harness_models.get("memory_flush").map(str::to_owned));
+                .or_else(|| self.harness_model("memory_flush"));
             let flush_sampler = match flush_model.as_deref() {
                 Some(slug) => self.resolve_sampler_for_model("memory_flush", slug).await,
                 None => None,
@@ -664,7 +666,7 @@ impl SessionActor {
             };
 
             // Run on the multi-threaded runtime so it doesn't block the session's LocalSet
-            let handle = tokio::spawn(async move {
+            let handle = xai_spawn::spawn(async move {
                 let response = sampling_client
                     .conversation_collect(request)
                     .await

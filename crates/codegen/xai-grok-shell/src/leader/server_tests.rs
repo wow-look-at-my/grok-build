@@ -100,7 +100,7 @@ async fn wait_for_leader_auth_resolves_when_wired_late() {
     let waiter = {
         let ws = ws.clone();
         let cancel = cancel.clone();
-        tokio::spawn(async move { wait_for_leader_auth(&ws, &cancel).await.is_ok() })
+        xai_spawn::spawn(async move { wait_for_leader_auth(&ws, &cancel).await.is_ok() })
     };
     tokio::task::yield_now().await;
     ws.auth.send_replace(Some(Arc::new(TestAuth)));
@@ -227,7 +227,7 @@ async fn setup_persistent_server_with_agent(
     let (_ready_tx, ready_rx) = watch::channel(true);
     let (shutdown_tx, _shutdown_rx) =
         watch::channel(super::super::protocol::ShutdownReason::Manual);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = run_leader_server(
             sock_clone,
             acp_tx,
@@ -471,14 +471,14 @@ async fn shutdown_waits_for_in_flight_cpu_profile_stop() {
     };
 
     let control_state_for_shutdown = control_state.clone();
-    let shutdown_wait = tokio::spawn(async move {
+    let shutdown_wait = xai_spawn::spawn(async move {
         finalize_cpu_profile_on_shutdown(control_state_for_shutdown).await;
     });
 
     let control_state_for_stop = control_state.clone();
-    let in_flight_stop = tokio::spawn(async move {
+    let in_flight_stop = xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_millis(50)).await;
-        let result = tokio::task::spawn_blocking(move || stop_handle.finish())
+        let result = xai_spawn::spawn_blocking(move || stop_handle.finish())
             .await
             .unwrap()
             .unwrap();
@@ -2357,7 +2357,7 @@ async fn client_count_returns_to_zero_after_all_disconnect() {
     let cancel_clone = server_cancel.clone();
     let count_clone = client_count.clone();
     let busy_clone = agent_busy.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = run_leader_server(
             sock_clone,
             acp_tx,
@@ -2432,7 +2432,7 @@ async fn fallback_routing_forwards_notifications_but_drops_responses() {
     let sock_clone = sock_path.clone();
     let cancel_clone = server_cancel.clone();
     let count_clone = client_count.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = run_leader_server(
             sock_clone,
             acp_tx,
@@ -2699,7 +2699,7 @@ async fn server_sends_shutting_down_before_shutdown() {
     let cancel_clone = cancel.clone();
     let sock_clone = sock_path.clone();
     let cc = client_count.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = run_leader_server(
             sock_clone,
             acp_tx,
@@ -2966,7 +2966,7 @@ async fn agent_busy_clears_when_client_disconnects_mid_request() {
     let cancel_clone = cancel.clone();
     let count_clone = client_count.clone();
     let busy_clone = agent_busy.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = run_leader_server(
             sock_clone,
             acp_tx,
@@ -3130,7 +3130,7 @@ async fn evict_sessions_notification_on_disconnect() {
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = run_leader_server(
             sock_clone,
             acp_tx,
@@ -3214,7 +3214,7 @@ async fn no_eviction_when_client_has_no_sessions() {
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = run_leader_server(
             sock_clone,
             acp_tx,
@@ -4254,7 +4254,7 @@ async fn driver_disconnect_transfers_not_evicts() {
 
     let sock_clone = sock_path.clone();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = run_leader_server(
             sock_clone,
             acp_tx,

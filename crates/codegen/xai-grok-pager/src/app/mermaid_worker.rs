@@ -309,13 +309,12 @@ pub fn render_via_subprocess(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .envs(xai_tty_utils::pager_env());
-    // The child runs under an `RLIMIT_AS` cap (see `cap_child_address_space`)
-    // On a many-core box that reservation can approach the cap at startup and abort every render
-    // Pinning it to a single arena thus keeps the reservation well under the cap regardless of host core count
+    // The child runs under an `RLIMIT_AS` cap (see
+    // `cap_child_address_space`). glibc reserves address space for each
+    // malloc arena.
     #[cfg(target_os = "linux")]
     {
-        cmd.env("_RJEM_MALLOC_CONF", "narenas:1")
-            .env("MALLOC_CONF", "narenas:1");
+        cmd.env("MALLOC_ARENA_MAX", "1");
     }
     // setsid/console detach via the sanctioned helper (never a raw pre_exec).
     xai_tty_utils::detach_std_command(&mut cmd);
@@ -1084,7 +1083,9 @@ impl AgentView {
         };
         match tokio::runtime::Handle::try_current() {
             Ok(handle) => {
-                handle.spawn_blocking(move || sweep_session_cache(&dir, SESSION_DISK_CAP_BYTES));
+                xai_spawn::spawn_blocking_on(&handle, move || {
+                    sweep_session_cache(&dir, SESSION_DISK_CAP_BYTES)
+                });
             }
             Err(_) => sweep_session_cache(&dir, SESSION_DISK_CAP_BYTES),
         }

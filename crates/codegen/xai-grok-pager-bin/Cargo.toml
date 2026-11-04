@@ -18,6 +18,7 @@ xai-grok-pager = { path = "../xai-grok-pager" }
 
 # Agent runtime + leader/stdio/headless entry points.
 xai-grok-login = { workspace = true }
+xai-grok-pdf = { workspace = true }
 xai-grok-shell = { workspace = true }
 xai-grok-version = { workspace = true }
 xai-grok-telemetry = { workspace = true }
@@ -45,26 +46,10 @@ xai-tty-utils = { workspace = true }
 xai-grok-config = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 xai-grok-extra-ca = { workspace = true }
-
-# Binary hardening: compile-time string + control-flow obfuscation.
-obfstr = { workspace = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
+xai-spawn = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
-# Default allocator on Unix; gated by the `jemalloc` feature (see main.rs
-# `#[global_allocator]`, cfg(all(feature = "jemalloc", unix))).
-# `stats` is binary-scoped only (not workspace-wide) so this CLI jemalloc
-# link gets --enable-stats for stats.allocated / stats.resident mallctl.
-tikv-jemallocator = { workspace = true, optional = true, features = ["stats"] }
-# Raw mallctl for the memory-cliff arena purge hook (see
-# `purge_jemalloc_retained_pages` + the `install_release_hook` call in
-# main.rs). Same version family as the
-# allocator; adds no new build units beyond what tikv-jemallocator pulls in.
-tikv-jemalloc-sys = { workspace = true, optional = true }
-# Heap-profile / stats mallctl helpers (prof.active, prof.dump, epoch, stats.*).
-tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats", "use_std"] }
 
 [dev-dependencies]
 serial_test = { workspace = true }
@@ -74,15 +59,12 @@ clap = { workspace = true, features = ["derive"] }
 
 [features]
 default = [
-    "jemalloc",
     "sandbox-enforce",
     ]
 default-bazel = [
-    "jemalloc",
     "sandbox-enforce",
     "local-workspace",
     ]
-jemalloc = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-sys", "dep:tikv-jemalloc-ctl"]
 # xai-grok-workspace no longer enables sandbox-enforce by default, so enable it here.
 sandbox-enforce = ["xai-grok-pager/sandbox-enforce", "xai-grok-workspace/sandbox-enforce"]
 local-workspace = ["xai-grok-pager/local-workspace"]

@@ -9,6 +9,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
+use xai_grok_net::{ClientOptions, HttpClient};
 use xai_grok_sampling_types::SamplingError;
 
 use super::{configure_http1, configure_http2, sharing_disabled};
@@ -23,7 +24,7 @@ struct MtlsClientCacheKey {
 }
 
 struct MtlsClientCacheEntry {
-    client: reqwest::Client,
+    client: HttpClient,
     last_used: u64,
 }
 
@@ -36,7 +37,7 @@ struct MtlsClientCache {
 pub(crate) fn client(
     cert_dir: &Path,
     force_http1: bool,
-) -> xai_grok_sampling_types::Result<reqwest::Client> {
+) -> xai_grok_sampling_types::Result<HttpClient> {
     let (cert_path, key_path) = identity_paths(cert_dir)?;
     let cert_pem = read_identity_file(&cert_path)?;
     let key_pem = read_identity_file(&key_path)?;
@@ -47,7 +48,7 @@ pub(crate) fn client(
     }
     identity_pem.extend_from_slice(&key_pem);
     let build = || {
-        let identity = reqwest::Identity::from_pem(&identity_pem).map_err(|error| {
+        let identity = xai_grok_net::Identity::from_pem(&identity_pem).map_err(|error| {
             SamplingError::MtlsConfiguration(format!(
                 "invalid mTLS client identity from certificate '{}' and key '{}': {}",
                 cert_path.display(),
@@ -56,22 +57,12 @@ pub(crate) fn client(
             ))
         })?;
 
-        let built = if force_http1 {
-            xai_grok_extra_ca::build_reqwest_client(|builder| {
-                configure_http1(builder)
-                    .identity(identity.clone())
-                    .https_only(true)
-                    .redirect(reqwest::redirect::Policy::none())
-            })
+        let base = if force_http1 {
+            configure_http1(ClientOptions::default())
         } else {
-            xai_grok_extra_ca::build_reqwest_client(|builder| {
-                configure_http2(builder)
-                    .identity(identity.clone())
-                    .https_only(true)
-                    .redirect(reqwest::redirect::Policy::none())
-            })
+            configure_http2(ClientOptions::default())
         };
-        built.map_err(|error| {
+        HttpClient::build(base.identity(identity).https_only().no_redirects()).map_err(|error| {
             SamplingError::MtlsConfiguration(format!(
                 "failed to build mTLS HTTP client from certificate '{}' and key '{}': {}",
                 cert_path.display(),
@@ -101,8 +92,8 @@ fn client_cache_key(cert_pem: &[u8], key_pem: &[u8], force_http1: bool) -> MtlsC
 
 fn cached_client<E>(
     key: MtlsClientCacheKey,
-    build: impl FnOnce() -> Result<reqwest::Client, E>,
-) -> Result<reqwest::Client, E> {
+    build: impl FnOnce() -> Result<HttpClient, E>,
+) -> Result<HttpClient, E> {
     static CACHE: OnceLock<Mutex<MtlsClientCache>> = OnceLock::new();
     let mut cache = CACHE
         .get_or_init(Default::default)
@@ -196,7 +187,6 @@ fn error_detail(error: &dyn std::error::Error) -> String {
     detail
 }
 
-#[allow(clippy::disallowed_methods)] // Tests intentionally build isolated reqwest clients.
 #[cfg(test)]
 #[path = "mtls_tests.rs"]
 mod tests;

@@ -48,9 +48,9 @@ pub trait TraceExportSource: Send + Sync {
     fn proxy_credentials(&self) -> Option<Arc<dyn AuthCredentialProvider>> {
         None
     }
-    /// Tuned `reqwest::Client` for the per-upload `StorageClient`. Default
-    /// `None` falls back to `reqwest::Client::new()` inside the helpers.
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    /// Tuned HTTP client for the per-upload `StorageClient`. Default
+    /// `None` falls back to a default client inside the helpers.
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         None
     }
     /// Park-on-401 recovery: a future resolving `true` iff credentials changed within `timeout`.
@@ -77,7 +77,7 @@ struct ResolvedStorageConfig {
     config: TraceExportConfig,
     attribution: Option<Arc<dyn Auth401AttributionCallback>>,
     credentials: Option<Arc<dyn AuthCredentialProvider>>,
-    http_client: Option<reqwest::Client>,
+    http_client: Option<xai_grok_net::HttpClient>,
 }
 impl ResolvedStorageConfig {
     /// Resolve config with fresh auth via `resolve_async`.
@@ -90,7 +90,7 @@ impl ResolvedStorageConfig {
         }
     }
     /// Bearer this resolved config puts on the wire — `snapshot()` mirrors
-    /// `HttpAuth::apply` for provider-backed configs; the static fallback
+    /// `AuthCredentialProvider::current_auth` for provider-backed configs; the static fallback
     /// is the inline user token.
     fn wire_bearer(&self) -> Option<String> {
         if let Some(ref creds) = self.credentials {
@@ -100,14 +100,10 @@ impl ResolvedStorageConfig {
             UploadMethod::Proxy { user_token, .. } => {
                 (!user_token.is_empty()).then(|| user_token.clone())
             }
-            _ => None,
         }
     }
 }
 impl StorageConfig for ResolvedStorageConfig {
-    fn bucket_url(&self) -> &str {
-        self.config.bucket_url()
-    }
     fn upload_method(&self) -> &UploadMethod {
         self.config.upload_method()
     }
@@ -117,7 +113,7 @@ impl StorageConfig for ResolvedStorageConfig {
     fn proxy_credentials(&self) -> Option<Arc<dyn AuthCredentialProvider>> {
         self.credentials.clone()
     }
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         self.http_client.clone()
     }
 }
@@ -552,7 +548,7 @@ impl UploadQueue {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let worker_resolver = resolver.clone();
         let worker_stats = stats.clone();
-        let worker_handle = tokio::spawn(upload_worker(
+        let worker_handle = xai_spawn::spawn(upload_worker(
             rx,
             shutdown_rx,
             worker_resolver,
@@ -1355,7 +1351,7 @@ impl UploadQueue {
         let semaphore = self.inline_fallback_semaphore.clone();
         let permits = inline_fallback_permits(original_size);
         let parent_span = tracing::Span::current();
-        tokio::spawn(
+        xai_spawn::spawn(
             async move {
                 let _permit = semaphore
                     .acquire_many_owned(permits)
@@ -1408,7 +1404,7 @@ impl UploadQueue {
         let stats = self.stats.clone();
         let permits = inline_fallback_permits(original_size);
         let parent_span = tracing::Span::current();
-        tokio::spawn(
+        xai_spawn::spawn(
             async move {
                 let _permit = semaphore
                     .acquire_many_owned(permits)
@@ -1462,7 +1458,7 @@ impl UploadQueue {
         let semaphore = self.inline_fallback_semaphore.clone();
         let permits = inline_fallback_permits(size);
         let parent_span = tracing::Span::current();
-        tokio::spawn(
+        xai_spawn::spawn(
             async move {
                 let _permit = semaphore
                     .acquire_many_owned(permits)
@@ -1498,7 +1494,7 @@ impl UploadQueue {
         let gcs_path = gcs_path.to_string();
         let content_type = content_type.to_string();
         let parent_span = tracing::Span::current();
-        tokio::spawn(
+        xai_spawn::spawn(
             async move {
                 let _permit = semaphore
                     .acquire_many_owned(permits)
@@ -1582,7 +1578,8 @@ async fn dispatch_item(
         gcs_path = %item.gcs_path,
         client_version = %item.client_version.as_deref().unwrap_or("unknown"),
     );
-    tasks.spawn(
+    xai_spawn::spawn_in(
+        tasks,
         async move {
             process_item(
                 item,
@@ -1841,8 +1838,8 @@ async fn process_item(
 /// Shared status-code classifier for the storage upload queue.
 const STORAGE_RETRY_POLICY: RetryPolicy = RetryPolicy::client_storage();
 /// Returns `true` if the error indicates an HTTP 401 or 403.
-/// Auth errors will never succeed with the same request. Direct-mode errors are unstructured, so we scrape the message.
-/// Proxy-mode errors are classified by status code in `upload_disposition`.
+/// Auth errors will never succeed with the same request. This scrapes the message of an
+/// error that carries no `HttpUploadError`.
 fn is_non_retryable_error(error: &anyhow::Error) -> bool {
     let msg = format!("{:#}", error);
     msg.contains("HTTP 401")
@@ -1851,7 +1848,7 @@ fn is_non_retryable_error(error: &anyhow::Error) -> bool {
         || msg.contains("403 Forbidden")
 }
 /// Disposition for a failed storage upload.
-/// Proxy-mode errors are classified by the shared `RetryPolicy`; direct-mode 401/403 are scraped as a safety net.
+/// An `HttpUploadError` is classified by the shared `RetryPolicy`. Other / errors are scraped as a safety net.
 fn upload_disposition(error: &anyhow::Error) -> Disposition {
     if let Some(http) = error.downcast_ref::<HttpUploadError>() {
         return STORAGE_RETRY_POLICY

@@ -149,6 +149,7 @@ async fn create_test_actor(
             configured_storage: None,
             process_disabled: false,
             config_opt_out: false,
+            unavailable: None,
             v2_legacy_carryover: false,
             prompt_sync_pending: std::sync::atomic::AtomicBool::new(false),
             flush_config: crate::config::MemoryFlushConfig::default(),
@@ -225,7 +226,6 @@ async fn create_test_actor(
         )),
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-        goal_blocked_streak: std::sync::atomic::AtomicU32::new(0),
         goal_update_rx: std::cell::RefCell::new(None),
         goal_update_tx: tokio::sync::mpsc::unbounded_channel().0,
         workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle().0,
@@ -288,7 +288,7 @@ async fn create_test_actor(
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
         title_refresh_enabled: false,
-        thinking_summaries_enabled: false,
+        thinking_summaries_enabled: std::cell::Cell::new(false),
         thinking_summary_history: Default::default(),
         thinking_summary_tail: Default::default(),
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -818,13 +818,13 @@ async fn spawn_capturing_status_body_server(
     };
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = Arc::clone(&captured);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((mut stream, _)) = listener.accept().await else {
                 break;
             };
             let sink = Arc::clone(&sink);
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut raw = Vec::new();
                 let mut buf = [0u8; 8192];

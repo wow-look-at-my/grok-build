@@ -1,4 +1,5 @@
 #![allow(clippy::cast_lossless)] // Hits predate the gate
+// lib.rs holds the lib code.
 #![allow(clippy::cast_possible_truncation)] // Hits predate the gate
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_precision_loss)] // Hits predate the gate
@@ -38,6 +39,8 @@ pub use probe::{
     InputDeviceInfo, VoiceProbeOptions, VoiceProbeReport, format_probe_report, input_device_info,
     run_streaming_probe,
 };
+/// The credential types a [`VoiceAuthProvider`] returns.
+pub use xai_grok_net::{Auth, KeyScheme};
 
 /// Linux shells out to a system recorder (`pw-record`/`parec`/`arecord`) so the static-musl binary links no audio
 /// library. On Linux a `true` value means capture is *compiled in*; whether a recorder is actually installed is reported

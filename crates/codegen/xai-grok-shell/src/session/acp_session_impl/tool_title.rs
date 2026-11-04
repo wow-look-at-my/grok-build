@@ -199,6 +199,7 @@ fn input_title(
         ToolInput::SchedulerDelete(sd) => format!("Delete scheduled task: {}", sd.id),
         ToolInput::SchedulerList(_) => "List scheduled tasks".to_string(),
         ToolInput::Ci(ci) => ci_tool_title(ci),
+        ToolInput::Git(git) => format!("git {}", git.args.join(" ")),
         ToolInput::CopyMove(cm) => {
             // `copy_file` and `move_file` share one input and one kind.
             let verb = if wire_name.contains("copy") {

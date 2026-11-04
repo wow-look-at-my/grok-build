@@ -4982,7 +4982,7 @@ fn dashboard_overlay_cycle_order_matches_visible_rows() {
     app.agents.insert(id3, agent3);
     open_dashboard(&mut app);
     let d = app.dashboard.as_ref().unwrap();
-    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents);
+    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents, None);
     assert_eq!(
         order,
         vec![AgentId(2), AgentId(1), AgentId(0)],
@@ -4995,12 +4995,54 @@ fn dashboard_overlay_cycle_order_matches_visible_rows() {
             )));
     }
     let d = app.dashboard.as_ref().unwrap();
-    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents);
+    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents, None);
     assert_eq!(
         order,
         vec![AgentId(0), AgentId(2), AgentId(1)],
         "pinned rows must lead the cycle order, just like the visible list",
     );
+}
+/// `‹`/`›` skip a row dismissed to Inactive. The attached Inactive agent stays
+/// in the order, so `›` can still leave it.
+#[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_overlay_cycle_skips_dismissed_inactive_rows() {
+    use crate::views::dashboard::DashboardRowId;
+    let mut app = test_app_with_agent();
+    app.leader_mode = false;
+    app.dashboard_local_sessions.clear();
+    mark_agent_nonempty(&mut app, AgentId(0));
+    for (n, sid) in [(1, "agent2"), (2, "agent3")] {
+        let id = AgentId(n);
+        let session = make_test_agent_session(&app, id, sid);
+        let mut agent = AgentView::new(session, ScrollbackState::new());
+        agent.generated_session_title = Some(format!("Agent {n}"));
+        app.agents.insert(id, agent);
+    }
+    open_dashboard(&mut app);
+    for id in [AgentId(1), AgentId(2)] {
+        let _ = dispatch(
+            Action::DashboardDismissRow(DashboardRowId::TopLevel(id)),
+            &mut app,
+        );
+    }
+    let d = app.dashboard.as_ref().unwrap();
+    assert_eq!(
+        crate::app::dispatch::overlay_cycle_ids(&app, d, AgentId(0)),
+        vec![AgentId(0)],
+        "the dismissed rows must not count toward i/n",
+    );
+
+    let _ = dispatch_dashboard_attach(&mut app, DashboardRowId::TopLevel(AgentId(0)));
+    let _ = dispatch_dashboard_overlay_cycle(&mut app, 1);
+    assert_eq!(ActiveView::Agent(AgentId(0)), app.active_view);
+
+    let _ = dispatch_dashboard_attach(&mut app, DashboardRowId::TopLevel(AgentId(2)));
+    let d = app.dashboard.as_ref().unwrap();
+    let order = crate::app::dispatch::overlay_cycle_ids(&app, d, AgentId(2));
+    assert_eq!(order, vec![AgentId(0), AgentId(2)]);
+    let _ = dispatch_dashboard_overlay_cycle(&mut app, 1);
+    assert_eq!(ActiveView::Agent(AgentId(0)), app.active_view);
 }
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]
 /// Regression: the cycle anchors on the viewed agent, not a stale
@@ -5021,7 +5063,7 @@ fn dashboard_overlay_cycle_anchors_on_visible_agent_not_stale_attach() {
     app.agents.insert(id3, agent3);
     open_dashboard(&mut app);
     let d = app.dashboard.as_ref().unwrap();
-    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents);
+    let order = crate::views::dashboard::overlay_cycle_order(d, &app.agents, None);
     assert_eq!(order, vec![AgentId(2), AgentId(1), AgentId(0)]);
     let [first, _, third] = order.as_slice() else {
         panic!("expected 3 cycle agents: {order:?}");
@@ -5332,8 +5374,11 @@ fn dashboard_overlay_cycle_non_overlay_noop_when_current_agent_hidden() {
     app.agents.insert(id2, agent2);
     app.active_view = ActiveView::Agent(current);
     ensure_dashboard_state(&mut app);
-    let order =
-        crate::views::dashboard::overlay_cycle_order(app.dashboard.as_ref().unwrap(), &app.agents);
+    let order = crate::views::dashboard::overlay_cycle_order(
+        app.dashboard.as_ref().unwrap(),
+        &app.agents,
+        None,
+    );
     assert_eq!(
         order,
         vec![id2, id1],
@@ -7161,6 +7206,195 @@ fn dashboard_delete_confirm_rechecks_settled_row() {
         Some("Stop the session before deleting"),
     );
 }
+/// The `[✗]` on an Idle row moves it into Inactive: no confirmation, no deletion
+/// effect, and the loaded session keeps its identity and label.
+#[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_dismiss_idle_row_moves_to_inactive_without_deleting() {
+    use crate::views::dashboard::{DashboardRowId, RowState};
+    let mut app = test_app_with_agent();
+    let agent_id = AgentId(0);
+    app.leader_mode = false;
+    mark_agent_nonempty(&mut app, agent_id);
+    app.agents.get_mut(&agent_id).unwrap().display_name = Some("Dismiss me".into());
+    open_dashboard(&mut app);
+    let row_id = DashboardRowId::TopLevel(agent_id);
+    let effects = dispatch(Action::DashboardDismissRow(row_id.clone()), &mut app);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::DeleteSession { .. })),
+        "dismissing an idle row must not delete history: {effects:?}",
+    );
+    assert!(
+        app.agents.contains_key(&agent_id),
+        "the session stays loaded in the pager",
+    );
+    let dashboard = app.dashboard.as_ref().unwrap();
+    assert!(
+        dashboard.delete_confirm.is_none(),
+        "the move takes no confirmation",
+    );
+    assert!(dashboard.is_dismissed_to_inactive(&row_id));
+    let rows = dashboard_rows(&app);
+    let row = rows
+        .iter()
+        .find(|row| row.id == row_id)
+        .expect("dismissed row stays in the list");
+    assert_eq!(row.state, RowState::Inactive);
+    assert_eq!(row.session_id.as_deref(), Some("test-session"));
+    assert_eq!(row.label, "Dismiss me");
+}
+
+/// A dismissed Idle row sorts first in Inactive; the rest of the group keeps the
+/// most-recently-active-first order.
+#[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[test]
+fn dismissed_idle_row_sorts_first_in_inactive_by_recency() {
+    use crate::views::dashboard::{DashboardRowId, RowState};
+    let mut app = test_app_with_agent();
+    let agent_id = AgentId(0);
+    app.leader_mode = false;
+    mark_agent_nonempty(&mut app, agent_id);
+    let mut newer = idle_roster_entry("newer-dormant", "Newer dormant");
+    newer.last_change_unix_ms = 1_700_000_100_000;
+    let mut older = idle_roster_entry("older-dormant", "Older dormant");
+    older.last_change_unix_ms = 1_700_000_000_000;
+    app.dashboard_local_sessions = vec![newer, older];
+    open_dashboard(&mut app);
+    let dismissed = DashboardRowId::TopLevel(agent_id);
+    let effects = dispatch(Action::DashboardDismissRow(dismissed.clone()), &mut app);
+    assert!(effects.is_empty());
+
+    let inactive: Vec<_> = dashboard_rows(&app)
+        .into_iter()
+        .filter(|row| row.state == RowState::Inactive)
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(
+        vec![
+            dismissed,
+            DashboardRowId::Roster {
+                session_id: "newer-dormant".into()
+            },
+            DashboardRowId::Roster {
+                session_id: "older-dormant".into()
+            },
+        ],
+        inactive,
+        "the moved row must lead, then recency",
+    );
+}
+
+/// The `[✗]` on an Inactive row only arms the confirmation. A second gesture
+/// (`y` / another `[✗]`) deletes exactly that session.
+#[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_dismiss_inactive_row_confirms_before_delete() {
+    use crate::views::dashboard::DashboardRowId;
+    let mut app = test_app();
+    app.leader_mode = false;
+    app.dashboard_local_sessions = vec![idle_roster_entry("dormant-1", "Dormant one")];
+    open_dashboard(&mut app);
+    let row = DashboardRowId::Roster {
+        session_id: "dormant-1".into(),
+    };
+    let effects = dispatch(Action::DashboardDismissRow(row.clone()), &mut app);
+    assert!(effects.is_empty(), "the first gesture must not delete");
+    assert_eq!(
+        app.dashboard
+            .as_ref()
+            .unwrap()
+            .delete_confirm
+            .as_ref()
+            .map(|(armed, _)| armed),
+        Some(&row),
+        "the first gesture arms the permanent-delete confirmation",
+    );
+    assert!(
+        app.dashboard_local_sessions
+            .iter()
+            .any(|entry| entry.session_id == "dormant-1"),
+        "nothing changes before confirmation",
+    );
+
+    let effects = dispatch(Action::DashboardDelete, &mut app);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::DeleteSession { session_id, .. }] if session_id == "dormant-1"
+        ),
+        "confirming deletes exactly the armed session: {effects:?}",
+    );
+}
+
+#[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_dismiss_inactive_row_cancel_preserves_the_session() {
+    use crate::views::dashboard::DashboardRowId;
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    let mut app = test_app();
+    app.leader_mode = false;
+    app.dashboard_local_sessions = vec![idle_roster_entry("dormant-2", "Dormant two")];
+    open_dashboard(&mut app);
+    let row = DashboardRowId::Roster {
+        session_id: "dormant-2".into(),
+    };
+    let effects = dispatch(Action::DashboardDismissRow(row.clone()), &mut app);
+    assert!(effects.is_empty());
+    assert!(app.dashboard.as_ref().unwrap().delete_confirm.is_some());
+    // A click on the dispatch input dismisses the confirmation (a real cancel path).
+    app.dashboard.as_mut().unwrap().dispatch_rect = Some(ratatui::layout::Rect::new(0, 20, 40, 1));
+    let _ = app.handle_input(&Event::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 2,
+        row: 20,
+        modifiers: KeyModifiers::NONE,
+    }));
+    assert!(
+        app.dashboard.as_ref().unwrap().delete_confirm.is_none(),
+        "cancel disarms the confirmation",
+    );
+    assert!(
+        app.dashboard_local_sessions
+            .iter()
+            .any(|entry| entry.session_id == "dormant-2"),
+        "cancel preserves the session",
+    );
+    assert!(dashboard_rows(&app).iter().any(|r| r.id == row));
+}
+
+/// The Idle-row move works with a single open session. The session stays loaded
+/// and re-attachable; the cursor falls back to the `+ New Agent` button.
+#[serial_test::serial(GROK_AGENT_DASHBOARD)]
+#[test]
+fn dashboard_dismiss_only_idle_row_keeps_it_open() {
+    use crate::views::dashboard::{DashboardRowId, RowState};
+    let mut app = test_app_with_agent();
+    let agent_id = AgentId(0);
+    app.leader_mode = false;
+    app.dashboard_local_sessions.clear();
+    mark_agent_nonempty(&mut app, agent_id);
+    open_dashboard(&mut app);
+    let before = dashboard_rows(&app);
+    assert_eq!(1, before.len(), "the only row is visible before the move");
+    assert_eq!(RowState::Idle, before[0].state);
+
+    let id = DashboardRowId::TopLevel(agent_id);
+    let effects = dispatch(Action::DashboardDismissRow(id.clone()), &mut app);
+    assert!(effects.is_empty());
+    assert!(app.agents.contains_key(&agent_id));
+    let rows = dashboard_rows(&app);
+    assert_eq!(1, rows.len());
+    assert_eq!(RowState::Inactive, rows[0].state);
+    let dashboard = app.dashboard.as_ref().unwrap();
+    assert!(dashboard.selected.is_none());
+    assert!(dashboard.new_agent_button_focused());
+
+    let _ = dispatch(Action::DashboardAttach(id), &mut app);
+    assert_eq!(ActiveView::Agent(agent_id), app.active_view);
+}
+
 /// A settled chat-conversation roster row must not arm on Ctrl+X: delete
 /// isn't supported for conversations, so a confirm could never succeed.
 #[serial_test::serial(GROK_AGENT_DASHBOARD)]

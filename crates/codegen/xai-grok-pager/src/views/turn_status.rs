@@ -1477,6 +1477,37 @@ mod tests {
         );
     }
 
+    /// A reading that jumps tenfold, and one that collapses toward zero, each
+    /// redraw the number. Neither may drop the segment: a counter that
+    /// disappears on a burst reads to a user as the measurement having failed.
+    #[test]
+    fn a_large_change_redraws_the_rate_rather_than_dropping_it() {
+        let responding = Some(TurnActivity::Responding);
+        let mut seen = Vec::new();
+        for tokens_per_sec in [42.0, 420.0, 4.2, 0.3] {
+            let mut args = idle_args(Watchers::default());
+            args.state = &AgentState::TurnRunning;
+            args.activity = &responding;
+            args.turn_elapsed = Some(Duration::from_secs(30));
+            args.output_rate = Some(crate::acp::tracker::OutputRate {
+                tokens_per_sec,
+                window_secs: 10,
+                floor_tokens_per_sec: None,
+                slow_for: None,
+            });
+            let text = render_row_text(args, 100);
+            assert!(
+                text.contains("tok/s"),
+                "{tokens_per_sec} tok/s must keep its segment: {text:?}"
+            );
+            seen.push(text);
+        }
+        assert!(seen[0].contains("42 tok/s"), "{:?}", seen[0]);
+        assert!(seen[1].contains("420 tok/s"), "{:?}", seen[1]);
+        assert!(seen[2].contains("4.2 tok/s"), "{:?}", seen[2]);
+        assert!(seen[3].contains("0.3 tok/s"), "{:?}", seen[3]);
+    }
+
     /// With no floor configured there is nothing to be near or under, so the
     /// rate renders plainly however low it goes.
     #[test]

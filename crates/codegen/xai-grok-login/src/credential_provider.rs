@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use reqwest::RequestBuilder;
-use xai_grok_auth::{AuthCredentialProvider, CredentialSnapshot, HttpAuth};
+use xai_grok_auth::{AuthCredentialProvider, CredentialSnapshot, HttpAuth, RequestAuth};
+use xai_grok_net::{Auth, KeyScheme};
 
 use crate::AuthManager;
 use crate::backend::{ActiveAuthBackend, AuthBackend};
@@ -114,24 +114,30 @@ impl std::fmt::Debug for ShellAuthCredentialProvider {
 }
 
 impl HttpAuth for ShellAuthCredentialProvider {
-    fn apply(&self, builder: RequestBuilder, base_url: &str) -> RequestBuilder {
+    fn request_auth(&self, base_url: &str) -> RequestAuth {
         // This trait is sync, so no refresh happens here: the proactive task keeps the cache hot and `refresh_after_unauthorized()` handles 401s
         // Wire-valid only: never stamp a hard-expired access token
         let mut creds = self.static_credentials.clone();
         // A session minted elsewhere must not reach an xAI host.
-        if ActiveAuthBackend::default().is_xai_authority()
-            && let Some(auth) = self.auth_manager.current_wire_valid()
-        {
-            creds.user_token = Some(auth.key);
+        let live = ActiveAuthBackend::default()
+            .is_xai_authority()
+            .then(|| self.auth_manager.current_wire_valid())
+            .flatten();
+        if let Some(auth) = &live {
+            creds.user_token = Some(auth.key.clone());
         }
-        creds.apply(builder, base_url)
+        let mut request_auth = creds.request_auth(base_url);
+        if let Some(auth) = &live {
+            request_auth.auth = auth.wire_auth();
+        }
+        request_auth
     }
 }
 
 #[async_trait::async_trait]
 impl AuthCredentialProvider for ShellAuthCredentialProvider {
     fn snapshot(&self) -> CredentialSnapshot {
-        // The token must match what `HttpAuth::apply` puts on the wire (wire-valid only)
+        // The token must match what `HttpAuth::request_auth` puts on the wire (wire-valid only)
         // Identity fields may still come from a soft-expired cache
         let identity = self.auth_manager.current_or_expired();
         let user_id = identity.as_ref().map(|a| a.user_id.clone());
@@ -264,14 +270,22 @@ impl std::fmt::Debug for OtelAuthCredentialProvider {
 }
 
 impl HttpAuth for OtelAuthCredentialProvider {
-    fn apply(&self, builder: RequestBuilder, base_url: &str) -> RequestBuilder {
+    fn request_auth(&self, base_url: &str) -> RequestAuth {
         // The collector is an xAI host, so a session token from another authority must not be sent to it
         if !ActiveAuthBackend::default().is_xai_authority() {
-            return builder;
+            return RequestAuth::none();
         }
         let snapshot = self.snapshot_inner();
-        let creds = GrokAuthCredentials::new(snapshot.token);
-        creds.apply(builder, base_url)
+        let is_api_key = snapshot.api_key_id.is_some();
+        let mut request_auth =
+            GrokAuthCredentials::new(snapshot.token.clone()).request_auth(base_url);
+        if is_api_key && let Some(key) = snapshot.token {
+            request_auth.auth = Auth::ApiKey {
+                key,
+                scheme: KeyScheme::Bearer,
+            };
+        }
+        request_auth
     }
 }
 

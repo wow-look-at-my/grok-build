@@ -8,6 +8,8 @@
 
 #![deny(clippy::indexing_slicing)]
 
+pub mod discover;
+
 /// Past 8 produce workers a status scan gains no speed, only spawn pressure.
 const HARD_CAP: usize = 8;
 /// Reserve for non-gix threads; nproc tests use `used + OUTER_RESERVE - 2`.

@@ -133,7 +133,7 @@ pub(super) fn join(lock_path: &Path) -> Ticket {
     waits.insert(lock_path.to_owned(), Arc::downgrade(&wait));
     let deposit_wait = Arc::clone(&wait);
     let thread_path = lock_path.to_owned();
-    let _detached_from_any_caller = tokio::task::spawn_blocking(move || {
+    let _detached_from_any_caller = xai_spawn::spawn_blocking(move || {
         let mut deposit = DepositOnDrop {
             wait: deposit_wait,
             result: None,

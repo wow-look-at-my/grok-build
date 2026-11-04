@@ -259,7 +259,7 @@ mod linux {
             // Guarded because a cleanup that unwinds leaves the cgroup
             // directory and the children inside it behind, and the caller is in
             // `Drop`. This holds with nothing to hand an error back to.
-            tokio::spawn(crate::util::detached::fire_and_forget(
+            xai_spawn::spawn(crate::util::detached::fire_and_forget(
                 "cgroup cleanup on drop",
                 async move {
                     let kill_path = path.join("cgroup.kill");
@@ -301,9 +301,9 @@ mod linux {
 
             let monitor_fut = Self::monitor_loop(inotify, cgroup_path, memory_high_threshold, tx);
             let handle = if use_spawn_local {
-                tokio::task::spawn_local(monitor_fut)
+                xai_spawn::spawn_local(monitor_fut)
             } else {
-                tokio::spawn(monitor_fut)
+                xai_spawn::spawn(monitor_fut)
             };
 
             Ok(MemoryHighMonitor {

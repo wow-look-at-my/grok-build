@@ -74,7 +74,7 @@ async fn run_wake_turn_to_commit(actor: &std::sync::Arc<SessionActor>, subagent_
     let (ack_tx, ack_rx) = oneshot::channel();
     let actor_for_turn = actor.clone();
     let subagent_id = subagent_id.to_owned();
-    let turn = tokio::task::spawn_local(async move {
+    let turn = xai_spawn::spawn_local(async move {
         run_wake_turn(&actor_for_turn, &subagent_id, Some(ack_tx)).await
     });
     tokio::time::timeout(std::time::Duration::from_secs(5), ack_rx)
@@ -386,7 +386,7 @@ async fn task_completion_wake_is_admitted_without_cancel_barrier() {
                 "queue acceptance alone must not mark the completion reported"
             );
             let actor_for_turn = actor.clone();
-            let turn = tokio::task::spawn_local(async move {
+            let turn = xai_spawn::spawn_local(async move {
                 actor_for_turn
                     .handle_prompt(
                         "task-completed-bg-normal",
@@ -541,7 +541,7 @@ async fn genuine_user_start_consumes_deferred_completions_without_notification_t
                 .expect("task-wake gate")
                 .set(true);
             let actor_for_turn = actor.clone();
-            let turn = tokio::task::spawn_local(async move {
+            let turn = xai_spawn::spawn_local(async move {
                 actor_for_turn
                     .handle_prompt(
                         "user-deferred-completions",
@@ -633,7 +633,7 @@ async fn accepted_reservation_survives_user_start() {
                 .expect("task-wake gate")
                 .set(true);
             let actor_for_turn = actor.clone();
-            let turn = tokio::task::spawn_local(async move {
+            let turn = xai_spawn::spawn_local(async move {
                 actor_for_turn
                     .handle_prompt(
                         "user-accepted-race",
@@ -2086,7 +2086,7 @@ async fn monitor_event_for_idle_session_is_not_parked_while_another_session_runs
                     xai_grok_workspace::file_system::CodebaseIndexManager::new(),
                 ),
             );
-            tokio::task::spawn_local(
+            xai_spawn::spawn_local(
                 super::run_session(
                     actor.clone(),
                     cmd_rx,
@@ -2168,7 +2168,7 @@ async fn monitor_event_during_own_turn_is_buffered_for_the_turn_loop() {
                     xai_grok_workspace::file_system::CodebaseIndexManager::new(),
                 ),
             );
-            tokio::task::spawn_local(
+            xai_spawn::spawn_local(
                 super::run_session(
                     actor.clone(),
                     cmd_rx,

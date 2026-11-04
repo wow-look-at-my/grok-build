@@ -227,6 +227,43 @@ pub(crate) fn extraction_schema() -> serde_json::Value {
 mod tests {
     use super::*;
 
+    /// The expected schema is what the official `@anthropic-ai/sdk` schema transform makes of this
+    /// schema. It differs in places: `enum` stays, and the moved constraint uses this crate's text.
+    #[test]
+    fn extraction_schema_reaches_the_messages_api_in_the_sdk_form() {
+        let mut expected = serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["outcome", "observations"],
+            "properties": {
+                "outcome": { "type": "string", "enum": ["noop", "observations"] },
+                "observations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["type", "topic_hint", "statement", "keywords", "aliases", "body"],
+                        "properties": {
+                            "type": { "type": "string", "enum": ["user", "feedback", "project", "reference"] },
+                            "topic_hint": { "type": ["string", "null"] },
+                            "statement": { "type": "string" },
+                            "keywords": { "type": "array", "items": { "type": "string" } },
+                            "aliases": { "type": "array", "items": { "type": "string" } },
+                            "body": { "type": ["string", "null"] }
+                        }
+                    }
+                }
+            }
+        });
+        expected["properties"]["observations"]["items"]["properties"]["statement"]["description"] =
+            serde_json::json!(format!("Constraint: maxLength: {MAX_STATEMENT_BYTES}"));
+
+        let sent = xai_grok_sampling_types::conversation::structured_output_schema_for_messages_api(
+            &extraction_schema(),
+        );
+        assert_eq!(sent, expected);
+    }
+
     #[test]
     fn missing_ranges_coalesce_without_overlap() {
         assert_eq!(

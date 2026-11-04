@@ -915,6 +915,7 @@ pub(crate) async fn spawn_session_actor(
         )
     });
     let mut memory_storage_for_session = None;
+    let mut memory_unavailable = None;
     match select_memory_storage(configured_memory_storage.as_ref(), memory_config.as_ref()) {
         MemoryStorageSelection::Enabled => {
             memory_storage_for_session = configured_memory_storage.clone();
@@ -927,6 +928,8 @@ pub(crate) async fn spawn_session_actor(
                 "MEMORY_INIT: memory-v2 is disabled for ephemeral (temp-dir) workspaces"
             );
             configured_memory_storage = None;
+            memory_unavailable =
+                Some(crate::extensions::notification::MemoryDisabledReason::EphemeralWorkspace);
         }
     }
     let memory_initial_injection_config = memory_config
@@ -964,6 +967,8 @@ pub(crate) async fn spawn_session_actor(
                     );
                     memory_storage_for_session = None;
                     configured_memory_storage = None;
+                    memory_unavailable =
+                        Some(crate::extensions::notification::MemoryDisabledReason::InitFailed);
                 }
             }
         } else if let Err(error) =
@@ -989,7 +994,7 @@ pub(crate) async fn spawn_session_actor(
             let gc_storage = storage.clone();
             let gc_max_age = memory_config.as_ref().map_or(30, |mc| mc.gc.max_age_days);
             let gc_span = region!(debug, "memory.gc", SpanParent::Root);
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 let _gc_span = gc_span;
                 match gc_storage.gc(gc_max_age) {
                     Ok(removed) if removed > 0 => {
@@ -1525,7 +1530,7 @@ pub(crate) async fn spawn_session_actor(
     if feedback_flags.enabled
         && let Some(user_cfg) = user_cfg
     {
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = crate::util::user_identity::cached_identity(Some(&user_cfg)).await;
         });
     }
@@ -1757,44 +1762,8 @@ pub(crate) async fn spawn_session_actor(
         .value;
     let goal_reverify_after = effective_config.resolve_goal_reverify_after().value;
     let goal_use_current_model_only = effective_config.resolve_goal_use_current_model_only().value;
-    let goal_role_models = {
-        let planner = effective_config
-            .resolve_goal_planner_model(goal_use_current_model_only)
-            .value;
-        let strategist = effective_config
-            .resolve_goal_strategist_model(goal_use_current_model_only)
-            .value;
-        let skeptic_pool = effective_config
-            .resolve_goal_skeptic_models(goal_use_current_model_only)
-            .value
-            .into_iter()
-            .filter_map(|c| match c {
-                crate::agent::config::GoalRoleModelChoice::Explicit(p) => Some(p),
-                // A `[models] goal_skeptic` slot names a model only.
-                crate::agent::config::GoalRoleModelChoice::ModelOnly(model) => {
-                    Some(crate::util::config::GoalRoleModel {
-                        model,
-                        agent_type: String::new(),
-                    })
-                }
-                crate::agent::config::GoalRoleModelChoice::InheritCurrent => None,
-            })
-            .collect();
-        let summarizer = if goal_use_current_model_only {
-            crate::agent::config::GoalRoleModelChoice::InheritCurrent
-        } else {
-            match effective_config.resolve_harness_model("goal_summarizer") {
-                Some(m) => crate::agent::config::GoalRoleModelChoice::ModelOnly(m.value),
-                None => crate::agent::config::GoalRoleModelChoice::InheritCurrent,
-            }
-        };
-        GoalRoleModelConfig {
-            planner,
-            strategist,
-            skeptic_pool,
-            summarizer,
-        }
-    };
+    let goal_role_models =
+        GoalRoleModelConfig::resolve(&effective_config, goal_use_current_model_only);
     let doom_loop_recovery = effective_config.resolve_doom_loop_recovery();
     let output_rate_floor = effective_config.resolve_output_rate_floor(&sampling_config.model);
     let resolved_tool_overrides: std::sync::Arc<
@@ -1909,6 +1878,7 @@ pub(crate) async fn spawn_session_actor(
             config_opt_out: memory_config
                 .as_ref()
                 .is_some_and(|config| !config.enabled && !config.force_disabled),
+            unavailable: memory_unavailable,
             v2_legacy_carryover: memory_v2_legacy_carryover,
             prompt_sync_pending: std::sync::atomic::AtomicBool::new(false),
             flush_config: memory_config.as_ref().map_or_else(
@@ -2032,7 +2002,6 @@ pub(crate) async fn spawn_session_actor(
         goal_tracker,
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-        goal_blocked_streak: std::sync::atomic::AtomicU32::new(0),
         goal_update_rx: std::cell::RefCell::new(Some(goal_update_rx)),
         goal_update_tx,
         workflow_manager: workflow_manager.clone(),
@@ -2051,7 +2020,7 @@ pub(crate) async fn spawn_session_actor(
             .as_ref()
             .and_then(|r| r.length_salvage_budget),
         goal_verifier_skeptic_count: effective_config.resolve_goal_verifier_count().value,
-        goal_role_models,
+        goal_role_models: std::cell::RefCell::new(goal_role_models),
         harness_models: crate::session::harness_models::ResolvedHarnessModels::resolve(
             &effective_config,
         ),
@@ -2115,7 +2084,9 @@ pub(crate) async fn spawn_session_actor(
         title_refresh_task: std::cell::RefCell::new(None),
         title_refresh_generation: std::cell::Cell::new(0),
         next_title_refresh_idx: std::cell::Cell::new(initial_title_refresh_idx),
-        thinking_summaries_enabled: effective_config.ui.thinking_summaries_enabled(),
+        thinking_summaries_enabled: std::cell::Cell::new(
+            effective_config.ui.thinking_summaries_enabled(),
+        ),
         thinking_summary_history:
             crate::session::helpers::thinking_summary::ThinkingSummaryHistory::new(
                 effective_config
@@ -2162,7 +2133,7 @@ pub(crate) async fn spawn_session_actor(
         {
             let drainer_session = session.clone();
             let mut sampler_event_rx = sampler_event_rx;
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(event) = sampler_event_rx.recv().await {
                     drainer_session.handle_sampling_event(event).await;
                 }
@@ -2174,7 +2145,7 @@ pub(crate) async fn spawn_session_actor(
             let Some(mut goal_update_rx) = session.goal_update_rx.borrow_mut().take() else {
                 unreachable!("goal_update_rx must be Some at session spawn");
             };
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 while let Some(envelope) = goal_update_rx.recv().await {
                     let current_tokens =
                         drainer_session.chat_state_handle.get_total_tokens().await as i64;
@@ -2274,7 +2245,7 @@ pub(crate) async fn spawn_session_actor(
         let sampling_api_key = embed_api_key.clone();
         let session_id_for_reindex = session_info.id.to_string();
         let chunks_added_counter = session.memory.chunks_added.clone();
-        let reindex_handle = tokio::task::spawn_local(async move {
+        let reindex_handle = xai_spawn::spawn_local(async move {
             let db_path = storage.workspace_dir().join("index.sqlite");
             if let Ok(mut index) = crate::session::memory::MemoryIndex::open_or_create(
                 &db_path,
@@ -2337,7 +2308,7 @@ pub(crate) async fn spawn_session_actor(
             "Spawning feedback sync loop"
         );
         let fm = feedback_manager.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             fm.run_sync_loop(cancel).await;
         });
     } else {
@@ -2358,7 +2329,7 @@ pub(crate) async fn spawn_session_actor(
         let pending_interactions = session.pending_interactions.clone();
         let session_for_hooks = session.clone();
         let mut user_question_rx = user_question_rx;
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(mut request) = user_question_rx.recv().await {
                 use xai_grok_tools::implementations::grok_build::ask_user_question::AskUserQuestionMode;
                 let mode = match *current_prompt_mode.lock() {
@@ -2455,13 +2426,13 @@ pub(crate) async fn spawn_session_actor(
             })
             .unwrap_or_default();
         let telemetry_enabled = session.telemetry_enabled;
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let ev = metrics.into_event(hooks).await;
             xai_grok_telemetry::session_ctx::log_event_dual(telemetry_enabled, ev);
         });
     }
     let hosting = SESSIONS_ACTIVE.enter();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let _hosting = hosting;
         xai_grok_telemetry::session_ctx::with_session_ctx(
             telemetry_ctx,

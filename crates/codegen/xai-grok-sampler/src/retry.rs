@@ -399,7 +399,7 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
         SamplingError::EndpointNotAllowed(msg) => SamplingError::EndpointNotAllowed(msg.clone()),
         SamplingError::MtlsConfiguration(msg) => SamplingError::MtlsConfiguration(msg.clone()),
         SamplingError::Http(e) => {
-            // reqwest::Error is not Clone; preserve the rendered message as an EventStreamError (the closest retryable transport variant).
+            // The transport error is not Clone; preserve the rendered message as an EventStreamError (the closest retryable transport variant).
             SamplingError::EventStreamError(xai_grok_sampling_types::error::error_chain(e))
         }
         SamplingError::Serialization(e) => {
@@ -467,7 +467,7 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::StatusCode;
+    use xai_grok_net::StatusCode;
     use xai_grok_sampling_types::ApiErrorCode;
 
     fn api_err(status: StatusCode, message: &str) -> SamplingError {
@@ -1031,10 +1031,16 @@ mod tests {
     async fn transport_failure_first_retry_skips_the_server_backoff() {
         const CONNECT_GUARD: Duration = Duration::from_secs(5);
 
-        let send_err = tokio::time::timeout(CONNECT_GUARD, reqwest::get("http://127.0.0.1:0"))
-            .await
-            .expect("port 0 connect fails well within the guard")
-            .expect_err("connecting to port 0 must fail");
+        let send_err = tokio::time::timeout(
+            CONNECT_GUARD,
+            xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default())
+                .expect("a default client builds")
+                .get("http://127.0.0.1:0", xai_grok_net::Auth::None)
+                .send(),
+        )
+        .await
+        .expect("port 0 connect fails well within the guard")
+        .expect_err("connecting to port 0 must fail");
         let err = SamplingError::Http(send_err);
 
         match classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD) {

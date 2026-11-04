@@ -440,6 +440,8 @@ pub enum SessionCommand {
     },
     /// Re-read the output-rate floor from config.toml for the session's current model.
     ReloadOutputRateFloor,
+    /// Re-read `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` from config.toml.
+    ReloadThinkingSummaries,
     /// Signals then report the override model rather than the agent-level default.
     /// `SetSessionModel` does NOT update `primaryModelId` in signals; the resolved model is already tracked via inference responses.
     /// Keeps the existing base_url, api_key, and other config; only the `model` field in the `x-grok-model-override` header changes.
@@ -879,6 +881,13 @@ pub enum SessionCommand {
         /// Images attached to this side question. Empty for the legacy text-only path.
         images: Vec<acp::ImageContent>,
         respond_to: oneshot::Sender<Result<String, SideQuestionError>>,
+    },
+    /// Spawn a background subagent on the newest model of a family (`@sonnet`, `@haiku`, `@opus`).
+    SpawnModelAgent {
+        family: String,
+        effort: Option<String>,
+        prompt: String,
+        respond_to: oneshot::Sender<Result<super::acp_session::ModelMentionSpawn, String>>,
     },
     /// Capture a `/todo` request as items on the session's todo list.
     TodoCapture {

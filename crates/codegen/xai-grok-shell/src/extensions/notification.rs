@@ -593,6 +593,9 @@ pub enum SessionUpdate {
         /// Path to the written memory file (if any)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
+        /// The session started this Dream itself.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        automatic: bool,
     },
     /// Session-end memory save completed
     MemorySessionSaved {
@@ -740,6 +743,14 @@ pub enum SessionUpdate {
         /// `streamStartMs` of the model call whose thinking this summarizes.
         stream_start_ms: i64,
         summary: String,
+    },
+    /// The summary side call for one model call is queued (`failed` is
+    /// `None`) or gave up (`failed` names why).
+    ThinkingSummaryStatus {
+        /// `streamStartMs` of the model call whose thinking is summarized.
+        stream_start_ms: i64,
+        #[serde(default)]
+        failed: Option<String>,
     },
     /// A compaction checkpoint marker written to `updates.jsonl`.
     CompactionCheckpoint(Box<CompactionCheckpointInfo>),
@@ -1365,6 +1376,10 @@ pub enum MemoryDisabledReason {
     RolloutRestricted,
     /// No memory storage is configured for this session.
     NotConfigured,
+    /// The workspace is a temporary directory, which memory v2 does not track.
+    EphemeralWorkspace,
+    /// Memory storage failed to initialize when the session started. The log has the error.
+    InitFailed,
     /// A reason this pager predates. Treated as not re-enableable.
     #[serde(other)]
     Unknown,
@@ -2213,10 +2228,21 @@ mod tests {
         let update = SessionUpdate::MemoryDreamCompleted {
             result: "written (500 chars)".into(),
             path: Some("/home/user/.grok/memory/ws/MEMORY.md".into()),
+            automatic: false,
         };
         let json_str = serde_json::to_string(&update).unwrap();
+        assert!(!json_str.contains("automatic"), "{json_str}");
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
         assert_eq!(update, parsed);
+
+        let automatic = SessionUpdate::MemoryDreamCompleted {
+            result: "failed".into(),
+            path: None,
+            automatic: true,
+        };
+        let json_str = serde_json::to_string(&automatic).unwrap();
+        let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(automatic, parsed);
     }
 
     #[test]

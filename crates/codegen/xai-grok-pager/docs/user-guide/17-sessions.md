@@ -343,12 +343,13 @@ Disk usage for ~/.grok
 
 Worktrees
         SIZE  TYPE                AGE        LABEL  PATH
-    380.0 GB  session             12d ago    my-fix ~/repos/xai/.grok/worktrees/worktree-abc
+    380.0 GB  session             12d ago    my-fix ~/.grok/worktrees/xai/worktree-abc
      32.3 GB  untracked (session) 40d ago           ~/.grok/worktrees/xai/worktree-old
+     12.1 GB  session             3d ago     spike  ~/repos/xai/.grok/worktrees/spike
 
-A worktree made by this release sits inside its own repository, and one made by
-an older release sits under the grok home; both shapes appear here, and each row
-shows where that checkout actually is.
+A worktree made by this release sits under the grok home, in the repository's
+own bucket, and one a release wrote inside the repository appears here too; each
+row shows where that checkout actually is.
 
 To reclaim space, run `grok worktree gc --max-age 7d --dry-run`, then the same command without `--dry-run`. Without `--max-age`, gc expires nothing, and it keeps a worktree whose work it cannot find elsewhere, naming each one.
 Untracked rows are not in the registry, so gc never visits them. Remove one with `grok worktree rm --dry-run <path>`, then without `--dry-run`.

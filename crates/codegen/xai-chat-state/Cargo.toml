@@ -22,6 +22,7 @@ xai-compaction-transcript = { workspace = true }
 xai-grok-compaction = { path = "../../common/xai-grok-compaction" }
 xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
 xai-token-estimation = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }

@@ -8,13 +8,10 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
-use tokio_tungstenite::{
-    connect_async_tls_with_config,
-    tungstenite::{Message, Utf8Bytes, client::IntoClientRequest},
-};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use xai_grok_login::{GrokAuth, GrokComConfig};
+use xai_grok_net::ws::{self, Message, Utf8Bytes};
 const KEEPALIVE_INTERVAL_SECS: u64 = 15;
 /// Read-side liveness deadline. The write half pings every `KEEPALIVE_INTERVAL_SECS`, and a healthy peer answers each ping with a pong. A live connection thus delivers an inbound frame at least that often.
 /// If *nothing* arrives for this long the connection is treated as dead and the session is torn down so the reconnect loop can take over.
@@ -133,7 +130,7 @@ pub(crate) fn spawn_relay_connection_with_callback(
     let cancel = parent_cancel.map_or(CancellationToken::new(), |c| c.child_token());
     let cancel_clone = cancel.clone();
     let (agent_to_ws_tx, agent_to_ws_rx) = mpsc::unbounded_channel::<String>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         run_relay_loop(
             config,
             to_agent_tx,
@@ -148,12 +145,19 @@ pub(crate) fn spawn_relay_connection_with_callback(
 }
 /// Check if a connection error is an HTTP 401 from the WebSocket handshake.
 fn is_handshake_unauthorized(err: &anyhow::Error) -> bool {
-    use tokio_tungstenite::tungstenite::Error as WsError;
-    err.downcast_ref::<WsError>()
-        .map(|ws_err| {
-            matches!(ws_err, WsError::Http(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED)
-        })
-        .unwrap_or(false)
+    use xai_grok_net::ws::{WsConnectError, WsError};
+    let handshake = err.chain().find_map(|cause| {
+        cause
+            .downcast_ref::<WsConnectError>()
+            .and_then(|e| match e {
+                WsConnectError::Handshake(ws_err) => Some(ws_err),
+                WsConnectError::Request(_) => None,
+            })
+            .or_else(|| cause.downcast_ref::<WsError>())
+    });
+    handshake.is_some_and(|ws_err| {
+        matches!(ws_err, WsError::Http(resp) if resp.status() == xai_grok_net::StatusCode::UNAUTHORIZED)
+    })
 }
 /// Attempt auth recovery after a 401.
 /// Returns `true` to reconnect immediately, `false` to exit or fall through to backoff.
@@ -368,34 +372,29 @@ pub(crate) enum SessionEndReason {
     /// Authentication error that may be recoverable with token refresh
     AuthError,
 }
-/// Build an HTTP request with the relay authentication headers.
-fn build_relay_request(config: &RelayConfig) -> anyhow::Result<axum::http::Request<()>> {
-    let mut req = config.ws_url.clone().into_client_request()?;
-    req.headers_mut().insert(
-        "Origin",
-        axum::http::header::HeaderValue::from_str(&config.ws_origin)?,
-    );
-    req.headers_mut().insert(
-        "Authorization",
-        axum::http::header::HeaderValue::from_str(&format!("Bearer {}", config.auth.key))?,
-    );
-    req.headers_mut().insert(
+/// Build the upgrade request: the login token as the credential, plus the relay headers.
+fn build_relay_request(config: &RelayConfig) -> anyhow::Result<ws::WsRequest> {
+    use xai_grok_net::header::{HeaderMap, HeaderValue};
+    let mut headers = HeaderMap::new();
+    headers.insert("Origin", HeaderValue::from_str(&config.ws_origin)?);
+    headers.insert(
         "X-XAI-Token-Auth",
-        axum::http::header::HeaderValue::from_str(&config.token_header)?,
+        HeaderValue::from_str(&config.token_header)?,
     );
-    req.headers_mut().insert(
-        "x-userid",
-        axum::http::header::HeaderValue::from_str(&config.auth.user_id)?,
-    );
-    req.headers_mut().insert(
+    headers.insert("x-userid", HeaderValue::from_str(&config.auth.user_id)?);
+    headers.insert(
         "x-grok-client-version",
-        axum::http::header::HeaderValue::from_static(xai_grok_version::version()),
+        HeaderValue::from_static(xai_grok_version::version()),
     );
-    req.headers_mut().insert(
+    headers.insert(
         crate::http::CLIENT_MODE_HEADER,
-        axum::http::header::HeaderValue::from_static(crate::http::process_client_mode()),
+        HeaderValue::from_static(crate::http::process_client_mode()),
     );
-    Ok(req)
+    Ok(ws::WsRequest::new(
+        &config.ws_url,
+        config.auth.wire_auth(),
+        headers,
+    )?)
 }
 /// Attempt to connect to the relay WebSocket server.
 /// If `proxy_url` is `Some`, the connection is established through an HTTP CONNECT tunnel.
@@ -404,9 +403,7 @@ async fn connect_to_relay(
     config: &RelayConfig,
     proxy_url: Option<&str>,
     cancel: &CancellationToken,
-) -> anyhow::Result<
-    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
-> {
+) -> anyhow::Result<ws::WsStream> {
     let req = build_relay_request(config)?;
     let connect_timeout = Duration::from_secs(CONNECT_TIMEOUT_SECS);
     tokio::select! {
@@ -416,24 +413,20 @@ async fn connect_to_relay(
         result = tokio::time::timeout(connect_timeout, async {
             if let Some(proxy_url) = proxy_url {
                 // Proxy path: open TCP to proxy, send CONNECT, then WS handshake.
-                let target_host = req.uri().host()
+                let (target_host, target_port) = req.host_port()
                     .ok_or_else(|| anyhow::anyhow!("WebSocket URL has no host"))?;
-                let target_port = req.uri().port_u16().unwrap_or(443);
                 let tunneled_stream = proxy::connect_via_proxy(
                     proxy_url,
-                    target_host,
+                    &target_host,
                     target_port,
                 ).await?;
                 // Perform the WebSocket handshake over the tunneled stream.
-                let (ws, resp) = tokio_tungstenite::client_async(req, tunneled_stream)
+                let (ws, resp) = ws::connect_ws_over(req, tunneled_stream)
                     .await
                     .map_err(|e| anyhow::Error::from(e).context("WebSocket handshake via proxy failed"))?;
                 Ok((ws, resp))
             } else {
-                // The default connector never sees the shared trust config.
-                let connector =
-                    tokio_tungstenite::Connector::Rustls(xai_grok_extra_ca::rustls_client_config());
-                connect_async_tls_with_config(req, None, false, Some(connector))
+                ws::connect_ws(req)
                     .await
                     .map_err(|e| anyhow::Error::from(e).context("WebSocket connection failed"))
             }
@@ -453,7 +446,7 @@ async fn connect_to_relay(
 }
 /// Run a single WebSocket session, handling messages until disconnection.
 pub(crate) async fn run_websocket_session<S>(
-    ws: tokio_tungstenite::WebSocketStream<S>,
+    ws: ws::WebSocketStream<S>,
     to_agent_tx: &mpsc::UnboundedSender<String>,
     from_agent_rx: &mut mpsc::UnboundedReceiver<String>,
     cancel: &CancellationToken,
@@ -472,7 +465,7 @@ where
 }
 /// [`run_websocket_session`] with an explicit read-liveness window (separate entry point so tests can use a short deadline).
 pub(crate) async fn run_websocket_session_with_liveness<S>(
-    ws: tokio_tungstenite::WebSocketStream<S>,
+    ws: ws::WebSocketStream<S>,
     to_agent_tx: &mpsc::UnboundedSender<String>,
     from_agent_rx: &mut mpsc::UnboundedReceiver<String>,
     cancel: &CancellationToken,

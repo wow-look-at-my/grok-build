@@ -1,5 +1,7 @@
 //! Branch divergence and uncommitted line counts, shown beside the branch.
 use std::collections::HashMap;
+
+use gix::bstr::ByteSlice;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -43,8 +45,8 @@ fn spawn_refresh(cwd: PathBuf) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         return;
     };
-    handle.spawn_blocking(move || {
-        // libgit2 is C code. A panic in its bindings must not take down the pager.
+    xai_spawn::spawn_blocking_on(&handle, move || {
+        // A panic in the git read must not take down the pager.
         let stats =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compute_branch_stats(&cwd)));
         let stats = match stats {
@@ -79,68 +81,167 @@ fn insert(cache: &mut HashMap<PathBuf, CacheEntry>, key: PathBuf, entry: CacheEn
 
 /// Compute the stats for the repository that contains `cwd`. `Ok(None)` means
 /// `cwd` is not in a repository or HEAD has no commit yet.
-pub fn compute_branch_stats(cwd: &Path) -> Result<Option<BranchStats>, git2::Error> {
-    let Ok(repo) = git2::Repository::discover(cwd) else {
+pub fn compute_branch_stats(cwd: &Path) -> anyhow::Result<Option<BranchStats>> {
+    let Ok(repo) = xai_grok_workspace::git_repo::discover(cwd) else {
         return Ok(None);
     };
     let Ok(head) = repo.head() else {
         return Ok(None);
     };
-    let Ok(head_commit) = head.peel_to_commit() else {
+    let head_ref = head
+        .referent_name()
+        .map(|name| name.as_bstr().to_string())
+        .filter(|name| name.starts_with("refs/heads/"));
+    let Ok(head_commit) = repo.head_commit() else {
         return Ok(None);
     };
 
     let mut stats = BranchStats::default();
-    let head_ref = head.is_branch().then(|| head.name().ok()).flatten();
-    if let Some((base_ref, base_oid)) = resolve_base(&repo, head_ref) {
-        stats.ahead_behind = Some(repo.graph_ahead_behind(head_commit.id(), base_oid)?);
+    if let Some((base_ref, base_oid)) = resolve_base(&repo, head_ref.as_deref()) {
+        stats.ahead_behind = Some(
+            xai_grok_workspace::git_repo::graph_ahead_behind(&repo, head_commit.id, base_oid)
+                .ok_or_else(|| anyhow::anyhow!("cannot walk the commit graph"))?,
+        );
         stats.base = Some(short_ref_name(&base_ref).to_string());
     }
 
     if !repo.is_bare() {
-        let mut opts = git2::DiffOptions::new();
-        opts.include_untracked(true)
-            .recurse_untracked_dirs(true)
-            .show_untracked_content(true);
-        let diff =
-            repo.diff_tree_to_workdir_with_index(Some(&head_commit.tree()?), Some(&mut opts))?;
-        let diff_stats = diff.stats()?;
-        stats.insertions = diff_stats.insertions();
-        stats.deletions = diff_stats.deletions();
+        let (insertions, deletions) = worktree_line_stats(&repo, head_commit.tree_id()?.detach())?;
+        stats.insertions = insertions;
+        stats.deletions = deletions;
     }
     Ok(Some(stats))
 }
 
-/// The branch HEAD was created from, as a full ref name and its tip. The
-/// current branch is never its own base.
-fn resolve_base(repo: &git2::Repository, head_ref: Option<&str>) -> Option<(String, git2::Oid)> {
-    let usable = |name: &str| -> Option<(String, git2::Oid)> {
-        if Some(name) == head_ref {
+/// Lines added and removed between the `head_tree` and the work tree, untracked files included.
+fn worktree_line_stats(
+    repo: &gix::Repository,
+    head_tree: gix::ObjectId,
+) -> anyhow::Result<(usize, usize)> {
+    use gix::diff::blob::ResourceKind;
+    use gix::diff::blob::platform::prepare_diff::Operation;
+    use gix::objs::tree::EntryKind;
+
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| anyhow::anyhow!("bare repository"))?
+        .to_path_buf();
+    let platform = repo
+        .status(gix::progress::Discard)?
+        .index(gix::worktree::IndexPersistedOrInMemory::Persisted(
+            xai_grok_workspace::git_repo::index(repo)?,
+        ))
+        .head_tree(head_tree)
+        .tree_index_track_renames(gix::status::tree_index::TrackRenames::Disabled)
+        .index_worktree_rewrites(None)
+        .untracked_files(gix::status::UntrackedFiles::Files);
+    let platform = xai_gix_status::with_budgeted_thread_limit(platform);
+    let mut paths = std::collections::BTreeSet::new();
+    for item in platform.into_iter(Vec::<gix::bstr::BString>::new())? {
+        let item = item?;
+        if let gix::status::Item::IndexWorktree(gix::status::index_worktree::Item::Modification {
+            status: gix::status::plumbing::index_as_worktree::EntryStatus::NeedsUpdate(_),
+            ..
+        }) = &item
+        {
+            continue;
+        }
+        paths.insert(item.location().to_owned());
+    }
+
+    let tree = repo.find_tree(head_tree)?;
+    let mut cache = repo.diff_resource_cache(
+        gix::diff::blob::pipeline::Mode::ToGit,
+        gix::diff::blob::pipeline::WorktreeRoots {
+            old_root: None,
+            new_root: Some(workdir.clone()),
+        },
+    )?;
+    let null = gix::ObjectId::null(repo.object_hash());
+    let (mut insertions, mut deletions) = (0usize, 0usize);
+    for path in paths {
+        let old = tree
+            .lookup_entry_by_path(gix::path::from_bstr(path.as_bstr()))?
+            .map(|entry| (entry.object_id(), entry.mode().kind()));
+        let (old_id, old_kind) = match old {
+            Some((id, kind @ (EntryKind::Blob | EntryKind::BlobExecutable | EntryKind::Link))) => {
+                (id, kind)
+            }
+            Some(_) => continue,
+            None => (null, EntryKind::Blob),
+        };
+        let new_kind =
+            match std::fs::symlink_metadata(workdir.join(gix::path::from_bstr(path.as_bstr()))) {
+                Ok(meta) if meta.is_dir() => continue,
+                Ok(meta) if meta.file_type().is_symlink() => EntryKind::Link,
+                Ok(meta) if is_executable(&meta) => EntryKind::BlobExecutable,
+                _ => EntryKind::Blob,
+            };
+        cache.set_resource(
+            old_id,
+            old_kind,
+            path.as_ref(),
+            ResourceKind::OldOrSource,
+            &repo.objects,
+        )?;
+        cache.set_resource(
+            null,
+            new_kind,
+            path.as_ref(),
+            ResourceKind::NewOrDestination,
+            &repo.objects,
+        )?;
+        let outcome = cache.prepare_diff()?;
+        if let Operation::InternalDiff { algorithm } = outcome.operation {
+            let diff = gix::diff::blob::Diff::compute(algorithm, &outcome.interned_input());
+            insertions += diff.count_additions() as usize;
+            deletions += diff.count_removals() as usize;
+        }
+    }
+    Ok((insertions, deletions))
+}
+
+#[cfg(unix)]
+fn is_executable(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_meta: &std::fs::Metadata) -> bool {
+    false
+}
+
+/// The base the status bar compares HEAD against. The checked-out branch's
+/// configured upstream, else the branch it was created from, else the
+/// repository's default branch. The current branch is never its own base, and
+/// a detached HEAD has none.
+fn resolve_base(repo: &gix::Repository, head_ref: Option<&str>) -> Option<(String, gix::ObjectId)> {
+    let head_ref = head_ref?;
+    let usable = |name: &str| -> Option<(String, gix::ObjectId)> {
+        if name == head_ref {
             return None;
         }
-        let reference = repo.find_reference(name).ok()?.resolve().ok()?;
-        let full = reference.name().ok()?.to_string();
-        if Some(full.as_str()) == head_ref {
+        let (full, target) = resolve_ref(repo, name)?;
+        if full == head_ref {
             return None;
         }
-        Some((full, reference.target()?))
+        Some((full, target))
     };
 
-    if let Some(head_ref) = head_ref {
-        if let Some(from) = reflog_created_from(repo, head_ref)
-            && let Some(found) = [format!("refs/heads/{from}"), format!("refs/remotes/{from}")]
-                .iter()
-                .find_map(|name| usable(name))
-        {
-            return Some(found);
-        }
-        if let Ok(upstream) = repo.branch_upstream_name(head_ref)
-            && let Ok(upstream) = upstream.as_str()
-            && !upstream_tracks_same_branch(upstream, head_ref)
-            && let Some(found) = usable(upstream)
-        {
-            return Some(found);
-        }
+    if let Ok(head_name) = gix::refs::FullName::try_from(head_ref)
+        && let Some(upstream) =
+            xai_grok_workspace::git_repo::upstream_ref_name(repo, head_name.as_ref())
+        && let Some(found) = usable(&upstream.as_bstr().to_string())
+    {
+        return Some(found);
+    }
+    if let Some(from) = reflog_created_from(repo, head_ref)
+        && let Some(found) = [format!("refs/heads/{from}"), format!("refs/remotes/{from}")]
+            .iter()
+            .find_map(|name| usable(name))
+    {
+        return Some(found);
     }
 
     [
@@ -156,27 +257,29 @@ fn resolve_base(repo: &git2::Repository, head_ref: Option<&str>) -> Option<(Stri
 
 /// The start point that `git branch`, `checkout -b` and `worktree add -b`
 /// record in the oldest reflog entry. `HEAD` names no branch, so it is `None`.
-fn reflog_created_from(repo: &git2::Repository, head_ref: &str) -> Option<String> {
-    let reflog = repo.reflog(head_ref).ok()?;
-    let oldest = reflog.iter().last()?;
-    let message = oldest.message().ok()??;
+fn reflog_created_from(repo: &gix::Repository, head_ref: &str) -> Option<String> {
+    let reference = repo.find_reference(head_ref).ok()?;
+    let mut log = reference.log_iter();
+    let oldest = log.all().ok()??.next()?.ok()?;
+    let message = oldest.message.to_str().ok()?;
     let from = message.strip_prefix("branch: Created from ")?.trim();
     (!from.is_empty() && from != "HEAD").then(|| from.to_string())
 }
 
-/// Whether `upstream` (`refs/remotes/<remote>/<branch>`) is the remote copy of
-/// `head_ref` (`refs/heads/<branch>`). A branch name can contain `/`, so only
-/// the earliest segment after `refs/remotes/` is taken as the remote name.
-fn upstream_tracks_same_branch(upstream: &str, head_ref: &str) -> bool {
-    let Some(branch) = head_ref.strip_prefix("refs/heads/") else {
-        return false;
-    };
-    match upstream.strip_prefix("refs/remotes/") {
-        Some(rest) => rest
-            .split_once('/')
-            .is_some_and(|(_, remote_branch)| remote_branch == branch),
-        None => upstream == head_ref,
+/// Follow `name` through symbolic refs to a ref that names an object.
+/// Returns that ref's full name and the object it names, without peeling a tag.
+fn resolve_ref(repo: &gix::Repository, name: &str) -> Option<(String, gix::ObjectId)> {
+    let mut name = name.to_owned();
+    for _ in 0..5 {
+        let reference = repo.find_reference(name.as_str()).ok()?;
+        match reference.target() {
+            gix::refs::TargetRef::Symbolic(target) => name = target.as_bstr().to_string(),
+            gix::refs::TargetRef::Object(id) => {
+                return Some((reference.name().as_bstr().to_string(), id.to_owned()));
+            }
+        }
     }
+    None
 }
 
 fn short_ref_name(full: &str) -> &str {
@@ -245,6 +348,16 @@ mod tests {
         git(dir, &["commit", "-qm", name]);
     }
 
+    fn add_origin(dir: &Path) {
+        git(dir, &["remote", "add", "origin", "."]);
+    }
+
+    /// Configure `branch` to track the existing remote-tracking ref `upstream`.
+    fn track(dir: &Path, branch: &str, upstream: &str) {
+        let flag = format!("--set-upstream-to={upstream}");
+        git(dir, &["branch", flag.as_str(), branch]);
+    }
+
     fn repo_on_master() -> tempfile::TempDir {
         let tmp = tempfile::tempdir().unwrap();
         git(tmp.path(), &["init", "-q", "-b", "master"]);
@@ -288,6 +401,35 @@ mod tests {
     }
 
     #[test]
+    fn a_detached_worktree_at_a_branch_tip_reports_no_divergence() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        // The default branch a detached HEAD used to be compared against.
+        git(dir, &["update-ref", "refs/remotes/origin/master", "HEAD"]);
+        git(
+            dir,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/master",
+            ],
+        );
+        git(dir, &["switch", "-q", "-c", "feature"]);
+        commit_file(dir, "f.txt", "f\n");
+        // A linked worktree detached at the branch tip is what a new Grok worktree looks like.
+        let outside = tempfile::tempdir().unwrap();
+        let wt = outside.path().join("wt");
+        git(
+            dir,
+            &["worktree", "add", "--detach", wt.to_str().unwrap(), "HEAD"],
+        );
+
+        let stats = compute_branch_stats(&wt).unwrap().unwrap();
+        assert_eq!(stats.base, None);
+        assert_eq!(stats.ahead_behind, None);
+    }
+
+    #[test]
     fn the_default_branch_itself_has_no_base_without_a_remote() {
         let tmp = repo_on_master();
         let stats = compute_branch_stats(tmp.path()).unwrap().unwrap();
@@ -316,15 +458,80 @@ mod tests {
     }
 
     #[test]
-    fn upstream_of_the_same_branch_is_not_a_base() {
-        assert!(upstream_tracks_same_branch(
-            "refs/remotes/origin/claude/x",
-            "refs/heads/claude/x"
-        ));
-        assert!(!upstream_tracks_same_branch(
-            "refs/remotes/origin/master",
-            "refs/heads/claude/x"
-        ));
+    fn a_same_named_upstream_with_no_divergence_shows_no_ahead_behind() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        add_origin(dir);
+        git(dir, &["switch", "-q", "-c", "feature"]);
+        commit_file(dir, "f.txt", "f\n");
+        git(dir, &["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+        track(dir, "feature", "origin/feature");
+
+        let stats = compute_branch_stats(dir).unwrap().unwrap();
+        assert_eq!(stats.base.as_deref(), Some("origin/feature"));
+        assert_eq!(stats.ahead_behind, Some((0, 0)));
+        assert!(
+            format_parts(&stats).is_empty(),
+            "identical tips show no ahead/behind segment"
+        );
+    }
+
+    #[test]
+    fn a_same_named_upstream_with_newer_commits_reports_them_behind() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        add_origin(dir);
+        git(dir, &["switch", "-q", "-c", "feature"]);
+        commit_file(dir, "f.txt", "f\n");
+        git(dir, &["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+        track(dir, "feature", "origin/feature");
+        git(dir, &["switch", "-q", "--detach"]);
+        commit_file(dir, "u1.txt", "u1\n");
+        commit_file(dir, "u2.txt", "u2\n");
+        git(dir, &["update-ref", "refs/remotes/origin/feature", "HEAD"]);
+        git(dir, &["switch", "-q", "feature"]);
+
+        let stats = compute_branch_stats(dir).unwrap().unwrap();
+        assert_eq!(stats.base.as_deref(), Some("origin/feature"));
+        assert_eq!(stats.ahead_behind, Some((0, 2)));
+    }
+
+    #[test]
+    fn the_configured_upstream_wins_over_the_reflog_start_point() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        add_origin(dir);
+        git(dir, &["branch", "develop"]);
+        git(dir, &["switch", "-q", "develop"]);
+        commit_file(dir, "d.txt", "d\n");
+        git(dir, &["switch", "-q", "-c", "feature", "develop"]);
+        commit_file(dir, "f.txt", "f\n");
+        // The upstream is older than the reflog's develop start point, so the
+        // chosen base is visible in the counts.
+        git(
+            dir,
+            &["update-ref", "refs/remotes/origin/feature", "master"],
+        );
+        track(dir, "feature", "origin/feature");
+
+        let stats = compute_branch_stats(dir).unwrap().unwrap();
+        assert_eq!(stats.base.as_deref(), Some("origin/feature"));
+        assert_eq!(stats.ahead_behind, Some((2, 0)));
+    }
+
+    #[test]
+    fn a_tracked_upstream_on_another_branch_is_the_base() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        add_origin(dir);
+        git(dir, &["update-ref", "refs/remotes/origin/main", "master"]);
+        git(dir, &["switch", "-q", "-c", "tracked"]);
+        commit_file(dir, "t.txt", "t\n");
+        track(dir, "tracked", "origin/main");
+
+        let stats = compute_branch_stats(dir).unwrap().unwrap();
+        assert_eq!(stats.base.as_deref(), Some("origin/main"));
+        assert_eq!(stats.ahead_behind, Some((1, 0)));
     }
 
     #[test]

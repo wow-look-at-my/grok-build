@@ -164,7 +164,7 @@ async fn authenticate_with_fs_lock(
         }
     };
 
-    let lock_file = tokio::task::spawn_blocking(move || {
+    let lock_file = xai_spawn::spawn_blocking(move || {
         use std::os::unix::io::AsRawFd;
         let fd = lock_file.as_raw_fd();
         let deadline = std::time::Instant::now() + AUTH_LOCK_WAIT;
@@ -266,7 +266,7 @@ async fn run_browser_auth_flow(
 async fn stored_access_token(server_name: &str, server_url: &str) -> Option<String> {
     let url = url::Url::parse(server_url).ok()?;
     let name = server_name.to_string();
-    tokio::task::spawn_blocking(move || {
+    xai_spawn::spawn_blocking(move || {
         use oauth2::TokenResponse as _;
         let store = crate::credentials::McpCredentialStore::load_default().ok()?;
         store
@@ -631,7 +631,7 @@ fn start_oauth_callback_server(
     // The handle is returned to the caller alongside the receiver, which is where
     // it is aborted when the flow completes or is cancelled.
     #[allow(clippy::disallowed_methods)]
-    let server = tokio::spawn(async move {
+    let server = xai_spawn::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
 
@@ -705,7 +705,7 @@ mod tests {
     }
 
     async fn manager_ready_for_exchange(token_endpoint: String) -> (AuthorizationManager, String) {
-        let mut mgr = AuthorizationManager::new("http://localhost/mcp")
+        let mut mgr = crate::net_http_client::new_authorization_manager("http://localhost/mcp")
             .await
             .unwrap();
         mgr.set_metadata(require_iss_metadata(token_endpoint));
@@ -741,7 +741,7 @@ mod tests {
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
         format!("http://{addr}/token")
@@ -810,13 +810,13 @@ mod tests {
                 axum::http::StatusCode::NOT_FOUND.into_response()
             }
         });
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
 
         let server_url = format!("http://{addr}/mcp");
         let mgr = Arc::new(Mutex::new(
-            AuthorizationManager::new(server_url.as_str())
+            crate::net_http_client::new_authorization_manager(server_url.as_str())
                 .await
                 .unwrap(),
         ));
@@ -854,7 +854,12 @@ mod tests {
             "http://{addr}/callback?code=c1&state=s1&iss={}",
             urlencoding_encode(TEST_ISSUER)
         );
-        let resp = reqwest::get(&url).await.unwrap();
+        let resp = xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default())
+            .unwrap()
+            .get(url.as_str(), xai_grok_net::Auth::None)
+            .send()
+            .await
+            .unwrap();
         assert!(resp.status().is_success());
         let body = resp.text().await.unwrap();
         assert!(body.contains("Authorization Complete"));

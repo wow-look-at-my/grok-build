@@ -1321,7 +1321,7 @@ mod tests {
         let name = format!("grok_com_orphan_{}", uuid::Uuid::new_v4().as_simple());
 
         let orphan = tempfile::tempdir().unwrap();
-        git2::Repository::init(orphan.path()).unwrap();
+        xai_test_utils::git::init_git_repo(orphan.path());
         assert!(
             !mcp_server_is_known(&name, orphan.path()),
             "orphan grok_com_* must not be known by prefix"
@@ -1342,7 +1342,7 @@ url = "https://mcp.example.test/sse"
             ),
         )
         .unwrap();
-        git2::Repository::init(defined.path()).unwrap();
+        xai_test_utils::git::init_git_repo(defined.path());
         assert!(
             mcp_server_is_known(&name, defined.path()),
             "TOML-defined {name} must be known"

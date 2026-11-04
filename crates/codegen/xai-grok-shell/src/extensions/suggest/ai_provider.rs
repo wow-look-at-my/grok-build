@@ -160,7 +160,7 @@ mod tests {
     async fn successful_response() {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             if let Some(SessionCommand::AISuggest { respond_to, .. }) = rx.recv().await {
                 let _ = respond_to.send(Some("git commit --amend".into()));
             }
@@ -178,7 +178,7 @@ mod tests {
     async fn none_response_returns_empty() {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             if let Some(SessionCommand::AISuggest { respond_to, .. }) = rx.recv().await {
                 let _ = respond_to.send(None);
             }
@@ -192,7 +192,7 @@ mod tests {
     async fn slow_responder_times_out() {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             if let Some(SessionCommand::AISuggest { respond_to, .. }) = rx.recv().await {
                 // Respond well after the 2-second timeout.
                 tokio::time::sleep(Duration::from_secs(10)).await;
@@ -208,7 +208,7 @@ mod tests {
     async fn sends_correct_fields_to_session() {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             if let Some(SessionCommand::AISuggest {
                 prefix,
                 cwd,

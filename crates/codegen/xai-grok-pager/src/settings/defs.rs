@@ -490,6 +490,15 @@ const CONTEXTUAL_HINTS_CHILDREN: &[&str] = &[
 
 /// Build the catalog; called once at process start via `SettingsRegistry::defaults()`.
 pub fn default_settings() -> Vec<SettingMeta> {
+    default_settings_with_subagent_rows(crate::settings::subagent_models::rows())
+}
+
+/// The catalog for an explicit subagent type list. `default_settings` passes
+/// the discovered types; tests pass a seeded list so a discovered agent type
+/// is exercised without touching the developer's home directory.
+pub(crate) fn default_settings_with_subagent_rows(
+    subagent_rows: &[crate::settings::subagent_models::SubagentModelRow],
+) -> Vec<SettingMeta> {
     // The shell schema defaults are the registry's source of truth
     let ui_default = UiConfig::default();
 
@@ -1187,8 +1196,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             label: "Summarize thinking",
             description: "Under a collapsed thinking block, show a one-or-two-sentence \
                           summary of what the model worked out. Uses a model call per \
-                          thinking block. Restart required: a session picks the setting up \
-                          when it starts.",
+                          thinking block.",
             keywords: &[
                 "thinking",
                 "reasoning",
@@ -1200,7 +1208,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             kind: SettingKind::Bool {
                 default: ui_default.thinking_summaries_enabled(),
             },
-            restart_required: true,
+            restart_required: false,
         },
         // SHARED: `[ui].thinking_summary_history_window_secs`.
         SettingMeta {
@@ -1211,7 +1219,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             description: "How far back, in seconds, a thinking block's summary may look \
                           for earlier summaries, to keep its direction and avoid \
                           repeating one. A 0 here and a 0 below leave the summary \
-                          stateless. Restart required.",
+                          stateless.",
             keywords: &[
                 "thinking",
                 "reasoning",
@@ -1229,7 +1237,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 min: THINKING_SUMMARY_HISTORY_WINDOW_SECS_MIN,
                 max: THINKING_SUMMARY_HISTORY_WINDOW_SECS_MAX,
             },
-            restart_required: true,
+            restart_required: false,
         },
         // SHARED: `[ui].thinking_summary_history_min_count`.
         SettingMeta {
@@ -1239,7 +1247,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             label: "Thinking-summary minimum",
             description: "Always include this many of the most recent thinking \
                           summaries, even when they are older than the lookback \
-                          window. Restart required.",
+                          window.",
             keywords: &[
                 "thinking",
                 "reasoning",
@@ -1256,7 +1264,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
                 min: THINKING_SUMMARY_HISTORY_MIN_COUNT_MIN,
                 max: THINKING_SUMMARY_HISTORY_MIN_COUNT_MAX,
             },
-            restart_required: true,
+            restart_required: false,
         },
         // SHELL-owned: `[ui.display_refresh].auto_cadence_enabled`. Restart-required (cadence pinned at startup).
         SettingMeta {
@@ -1785,7 +1793,31 @@ pub fn default_settings() -> Vec<SettingMeta> {
     ]
     .into_iter()
     .chain(harness_model_settings())
+    .chain(subagent_model_settings(subagent_rows))
     .collect()
+}
+
+/// One picker per spawnable subagent type. Each row writes
+/// `[subagents.models].<type>`, so a pin applies to that type alone.
+fn subagent_model_settings(
+    rows: &[crate::settings::subagent_models::SubagentModelRow],
+) -> Vec<SettingMeta> {
+    rows.iter()
+        .map(|row| SettingMeta {
+            key: row.setting_key,
+            category: SettingCategory::Models,
+            owner: SettingOwner::Shell,
+            label: row.label,
+            description: row.description,
+            keywords: row.keywords,
+            kind: SettingKind::DynamicEnum {
+                default: "",
+                source: DynamicEnumSource::ActiveModelCatalog,
+                supports_preview: false,
+            },
+            restart_required: false,
+        })
+        .collect()
 }
 
 /// One picker per harness model slot, under Models. The rows are built from
@@ -1793,23 +1825,42 @@ pub fn default_settings() -> Vec<SettingMeta> {
 /// slot added to the harness cannot ship without a settings row. Each row is
 /// SHELL-owned and writes its slot into the `[models]` table. A restart is
 /// required, because a slot is resolved when a session actor is built and a
-/// running session keeps the model it started with.
+/// running session keeps the model it started with. A slot in a model group
+/// has no row. The group's row takes the place of its first member, and it
+/// writes `[model_groups.<id>] model`.
 fn harness_model_settings() -> Vec<SettingMeta> {
+    let row = |key, label, description, keywords| SettingMeta {
+        key,
+        category: SettingCategory::Models,
+        owner: SettingOwner::Shell,
+        label,
+        description,
+        keywords,
+        kind: SettingKind::DynamicEnum {
+            default: "",
+            source: DynamicEnumSource::ActiveModelCatalog,
+            supports_preview: false,
+        },
+        restart_required: false,
+    };
     xai_grok_models::HARNESS_MODEL_SLOTS
         .iter()
-        .map(|slot| SettingMeta {
-            key: slot.setting_key(),
-            category: SettingCategory::Models,
-            owner: SettingOwner::Shell,
-            label: slot.label,
-            description: slot.description,
-            keywords: slot.keywords,
-            kind: SettingKind::DynamicEnum {
-                default: "",
-                source: DynamicEnumSource::ActiveModelCatalog,
-                supports_preview: false,
+        .filter_map(
+            |slot| match crate::settings::model_groups::group_holding_slot(slot.id) {
+                None => Some(row(
+                    slot.setting_key(),
+                    slot.label,
+                    slot.description,
+                    slot.keywords,
+                )),
+                Some(group) if group.members.first() == Some(&slot.id) => Some(row(
+                    group.setting_key,
+                    group.label,
+                    group.description,
+                    group.keywords,
+                )),
+                Some(_) => None,
             },
-            restart_required: true,
-        })
+        )
         .collect()
 }

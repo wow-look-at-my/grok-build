@@ -1,0 +1,147 @@
+<?xml version="1.1" encoding="UTF-8"?>
+<!-- The gh a sandboxed session may run. api-cli serves this file outside the sandbox, where the credentials are. A command or flag this file does not declare does not exist inside. Every command here only reads. -->
+<config name="gh">
+	<command name="run" description="Workflow runs.">
+		<command name="list" description="List recent workflow runs.">
+			<arg name="args" variadic="true"/>
+			<flag name="json" type="string"/>
+			<flag name="jq" type="string"/>
+			<flag name="template" short="t" type="string"/>
+			<flag name="limit" short="L" type="int"/>
+			<flag name="branch" short="b" type="string"/>
+			<flag name="workflow" short="w" type="string"/>
+			<flag name="status" short="s" type="string"/>
+			<flag name="user" short="u" type="string"/>
+			<flag name="event" short="e" type="string"/>
+			<flag name="commit" short="c" type="string"/>
+			<flag name="created" type="string"/>
+			<flag name="repo" short="R" type="string"/>
+			<run><argv>gh</argv><argv>run</argv><argv>list</argv><argv>{{spread .arg.args}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+		<command name="view" description="View a workflow run.">
+			<arg name="args" variadic="true"/>
+			<flag name="json" type="string"/>
+			<flag name="jq" type="string"/>
+			<flag name="template" short="t" type="string"/>
+			<flag name="log" type="bool"/>
+			<flag name="log-failed" type="bool"/>
+			<flag name="job" short="j" type="string"/>
+			<flag name="attempt" short="a" type="int"/>
+			<flag name="exit-status" type="bool"/>
+			<flag name="repo" short="R" type="string"/>
+			<run><argv>gh</argv><argv>run</argv><argv>view</argv><argv>{{spread .arg.args}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+	</command>
+	<command name="pr" description="Pull requests.">
+		<command name="view" description="View a pull request.">
+			<arg name="args" variadic="true"/>
+			<flag name="json" type="string"/>
+			<flag name="jq" type="string"/>
+			<flag name="template" short="t" type="string"/>
+			<flag name="comments" short="c" type="bool"/>
+			<flag name="repo" short="R" type="string"/>
+			<run><argv>gh</argv><argv>pr</argv><argv>view</argv><argv>{{spread .arg.args}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+		<command name="list" description="List pull requests.">
+			<arg name="args" variadic="true"/>
+			<flag name="json" type="string"/>
+			<flag name="jq" type="string"/>
+			<flag name="template" short="t" type="string"/>
+			<flag name="limit" short="L" type="int"/>
+			<flag name="state" short="s" type="string"/>
+			<flag name="base" short="B" type="string"/>
+			<flag name="head" short="H" type="string"/>
+			<flag name="author" short="A" type="string"/>
+			<flag name="label" short="l" type="string-slice"/>
+			<flag name="search" short="S" type="string"/>
+			<flag name="repo" short="R" type="string"/>
+			<run><argv>gh</argv><argv>pr</argv><argv>list</argv><argv>{{spread .arg.args}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+		<command name="checks" description="Show the checks of a pull request.">
+			<arg name="args" variadic="true"/>
+			<flag name="json" type="string"/>
+			<flag name="jq" type="string"/>
+			<flag name="template" short="t" type="string"/>
+			<flag name="required" type="bool"/>
+			<flag name="repo" short="R" type="string"/>
+			<run><argv>gh</argv><argv>pr</argv><argv>checks</argv><argv>{{spread .arg.args}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+		<command name="diff" description="Show the diff of a pull request.">
+			<arg name="args" variadic="true"/>
+			<flag name="name-only" type="bool"/>
+			<flag name="patch" type="bool"/>
+			<flag name="repo" short="R" type="string"/>
+			<run><argv>gh</argv><argv>pr</argv><argv>diff</argv><argv>{{spread .arg.args}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+	</command>
+	<command name="workflow" description="Workflows.">
+		<command name="list" description="List workflows.">
+			<arg name="args" variadic="true"/>
+			<flag name="json" type="string"/>
+			<flag name="jq" type="string"/>
+			<flag name="template" short="t" type="string"/>
+			<flag name="limit" short="L" type="int"/>
+			<flag name="repo" short="R" type="string"/>
+			<run><argv>gh</argv><argv>workflow</argv><argv>list</argv><argv>{{spread .arg.args}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+		<command name="view" description="View a workflow.">
+			<arg name="args" variadic="true"/>
+			<flag name="yaml" type="bool"/>
+			<flag name="ref" short="r" type="string"/>
+			<flag name="repo" short="R" type="string"/>
+			<run><argv>gh</argv><argv>workflow</argv><argv>view</argv><argv>{{spread .arg.args}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+	</command>
+	<command name="repo" description="Repositories.">
+		<command name="view" description="View a repository.">
+			<arg name="args" variadic="true"/>
+			<flag name="json" type="string"/>
+			<flag name="jq" type="string"/>
+			<flag name="template" short="t" type="string"/>
+			<run><argv>gh</argv><argv>repo</argv><argv>view</argv><argv>{{spread .arg.args}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+	</command>
+	<command name="auth" description="Authentication state.">
+		<command name="status" description="Show which accounts gh is logged in to. The token never prints.">
+			<flag name="hostname" type="string"/>
+			<run><argv>gh</argv><argv>auth</argv><argv>status</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+	</command>
+	<!-- gh api sends GET unless a field, an input or a method says otherwise. None of those flags is declared, and neither is a header, which can carry a method override. -->
+	<command name="api" runnable="true" description="A GET request to the GitHub REST API, or a GraphQL query.">
+		<arg name="endpoint" required="true" pattern="^(/?[A-Za-z0-9_.-]+/.+|user|rate_limit|meta|emojis|zen|octocat|events|feeds|gists|notifications)$"/>
+		<flag name="jq" type="string"/>
+		<flag name="template" short="t" type="string"/>
+		<flag name="paginate" type="bool"/>
+		<flag name="slurp" type="bool"/>
+		<flag name="cache" type="string"/>
+		<flag name="hostname" type="string"/>
+		<flag name="include" short="i" type="bool"/>
+		<run><argv>gh</argv><argv>api</argv><argv>--method=GET</argv><argv>{{.arg.endpoint}}</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		<!-- GraphQL is a POST with fields. Only a query document passes, so a mutation never runs. A typed field that starts with @ reads a file on the host, so none may. -->
+		<command name="graphql" description="A GraphQL query. A mutation is refused.">
+			<flag name="raw-field" short="f" type="string-slice"/>
+			<flag name="field" short="F" type="string-slice"/>
+			<flag name="jq" type="string"/>
+			<flag name="template" short="t" type="string"/>
+			<flag name="paginate" type="bool"/>
+			<flag name="slurp" type="bool"/>
+			<flag name="cache" type="string"/>
+			<flag name="hostname" type="string"/>
+			<preconditions>
+				<precondition>{{ range (concat .flag.field (index .flag "raw-field")) }}{{ $kv := splitn "=" 2 . }}{{ if eq $kv._0 "query" }}{{ $doc := trim $kv._1 }}{{ if or (not (or (hasPrefix "query" $doc) (hasPrefix "{" $doc))) (contains "mutation" $doc) (contains "subscription" $doc) }}gh api graphql: only a query document is allowed{{ end }}{{ end }}{{ end }}</precondition>
+				<precondition>{{ range .flag.field }}{{ if contains "=@" . }}gh api graphql: a field may not read a file{{ end }}{{ end }}</precondition>
+			</preconditions>
+			<run><argv>gh</argv><argv>api</argv><argv>graphql</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+	</command>
+	<command name="wait-ci" description="CI state, through the gh-wait-ci extension.">
+		<command name="checks" description="Every check on a commit.">
+			<flag name="repo" short="R" type="string"/>
+			<flag name="sha" short="s" type="string"/>
+			<flag name="json" type="bool"/>
+			<flag name="failed" type="bool"/>
+			<run><argv>gh</argv><argv>wait-ci</argv><argv>checks</argv><argv>{{spread (flagArgs .flag)}}</argv></run>
+		</command>
+	</command>
+</config>

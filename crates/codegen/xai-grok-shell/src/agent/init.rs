@@ -462,8 +462,6 @@ fn init_process(cfg: &AgentConfig, auth_manager: &AuthManager) {
             feedback_url_custom = cfg.endpoints.feedback_base_url.is_some(),
             trace_upload_url = %trace_upload_url,
             trace_upload_url_custom = cfg.endpoints.trace_upload_url.is_some(),
-            trace_upload_bucket = cfg.endpoints.trace_upload_bucket.as_deref().unwrap_or("none"),
-            trace_upload_region = cfg.endpoints.trace_upload_region.as_deref().unwrap_or("none"),
             "data capture config resolved",
         );
         if telemetry_mode.value.is_disabled() && trace_upload.value {
@@ -480,7 +478,7 @@ fn init_process(cfg: &AgentConfig, auth_manager: &AuthManager) {
 /// when telemetry is disabled, so it's safe to call repeatedly.
 pub fn update_telemetry_config(config: &AgentConfig, auth_manager: &AuthManager) {
     let user_agent = crate::http::process_user_agent_string();
-    if reqwest::header::HeaderValue::from_str(&user_agent).is_err() {
+    if xai_grok_net::header::HeaderValue::from_str(&user_agent).is_err() {
         tracing::warn!("telemetry init skipped: GROK_CLIENT_NAME yields an invalid user agent");
         return;
     }

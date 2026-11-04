@@ -20,9 +20,9 @@ isolated checkout — no stepping on each other's changes, no stashing.
 
 ## Where the checkouts live
 
-Each worktree is a directory under the repository it came from: `.grok/worktrees/<name>`, next to the code it is a copy of. Git does not report it. The tracked `.gitignore` is left alone: the exclusion lives in the repository's own `.git/info/exclude`.
+Each worktree is a directory under your grok home: `~/.grok/worktrees/<repo>/<name>`, where `<repo>` is derived from the main checkout's path. The repository itself is untouched, so its git status and tracked `.gitignore` stay as they are.
 
-Checkouts that grok created under an older release live in `~/.grok/worktrees/` instead. They keep working, and nothing moves them.
+Checkouts that a release wrote inside their own repository, at `.grok/worktrees/<name>`, keep working. They stay where they are, and nothing moves them.
 
 ## Why this is great
 

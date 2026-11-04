@@ -75,6 +75,7 @@ impl SlashCommand for UsageCommand {
                 insert_text: "show".into(),
                 description: "View usage".into(),
                 loaded_in_vram: None,
+                favorite: false,
             },
             ArgItem {
                 display: "manage".into(),
@@ -82,6 +83,7 @@ impl SlashCommand for UsageCommand {
                 insert_text: "manage".into(),
                 description: "Manage billing".into(),
                 loaded_in_vram: None,
+                favorite: false,
             },
         ])
     }

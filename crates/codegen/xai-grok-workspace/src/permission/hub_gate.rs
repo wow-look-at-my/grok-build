@@ -157,7 +157,7 @@ impl FolderGrants {
                 // The ambient git scan reads `.git/config` under the cwd; off the runtime thread, and a
                 // scan that did not finish is a prompt
                 let (cmd, state, cwd) = (cmd.clone(), self.state.clone(), self.cwd.clone());
-                let evaluation = tokio::task::spawn_blocking(move || {
+                let evaluation = xai_spawn::spawn_blocking(move || {
                     evaluate_bash_with_ambient(&cmd, &state, cwd.as_path())
                 })
                 .await
@@ -215,7 +215,7 @@ async fn grant_dir_for(cwd: &AbsPathBuf, served_root: &Path) -> AbsPathBuf {
         return cwd.clone();
     };
     let (probe_cwd, probe_root) = (cwd.clone(), root.clone());
-    let under_root_outside_repo = tokio::task::spawn_blocking(move || {
+    let under_root_outside_repo = xai_spawn::spawn_blocking(move || {
         let canonical =
             |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         canonical(probe_cwd.as_path()).starts_with(canonical(probe_root.as_path()))

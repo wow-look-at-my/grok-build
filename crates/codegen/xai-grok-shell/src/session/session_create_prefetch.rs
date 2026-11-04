@@ -194,7 +194,7 @@ async fn refresh_plugins_for_cwd(
         return Some(Arc::new(xai_grok_agent::plugins::PluginRegistry::empty()));
     }
     let disk_cfg = crate::config::resolve_effective_plugins_config(&cwd).to_discovery_config();
-    match tokio::task::spawn_blocking(move || {
+    match xai_spawn::spawn_blocking(move || {
         handle.refresh_and_build_for_cwd(&cwd, &disk_cfg, &session_plugin_dirs, project_trusted)
     })
     .await
@@ -223,7 +223,7 @@ impl<T: Clone + Default + Send + 'static> PrefetchSlot<T> {
 
     fn spawn(fut: impl std::future::Future<Output = T> + Send + 'static) -> Self {
         Self {
-            pending: Some(AbortOnDropHandle::new(tokio::spawn(fut))),
+            pending: Some(AbortOnDropHandle::new(xai_spawn::spawn(fut))),
             ready: None,
         }
     }

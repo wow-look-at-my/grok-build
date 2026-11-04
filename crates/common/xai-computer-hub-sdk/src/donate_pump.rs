@@ -138,7 +138,7 @@ mod tests {
         let pump = {
             let healthy = Arc::clone(&healthy);
             let sent = Arc::clone(&sent);
-            tokio::spawn(run_pump(rx, move |p: String| {
+            xai_spawn::spawn(run_pump(rx, move |p: String| {
                 let healthy = Arc::clone(&healthy);
                 let sent = Arc::clone(&sent);
                 async move {
@@ -173,7 +173,7 @@ mod tests {
         let pump = {
             let healthy = Arc::clone(&healthy);
             let sent = Arc::clone(&sent);
-            tokio::spawn(run_pump(rx, move |p: String| {
+            xai_spawn::spawn(run_pump(rx, move |p: String| {
                 let healthy = Arc::clone(&healthy);
                 let sent = Arc::clone(&sent);
                 async move {

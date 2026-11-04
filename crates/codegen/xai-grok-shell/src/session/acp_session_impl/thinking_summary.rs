@@ -1,6 +1,40 @@
+// Handle [`SessionCommand::ReloadThinkingSummaries`].
+
 use super::*;
 
 impl SessionActor {
+    /// Handle [`SessionCommand::ReloadThinkingSummaries`]. A config that does
+    /// not load keeps the current values.
+    pub(super) fn handle_reload_thinking_summaries(&self) {
+        let ui = match crate::config::load_effective_config()
+            .map_err(|e| e.to_string())
+            .and_then(|raw| crate::agent::config::Config::new_from_toml_cfg(&raw))
+        {
+            Ok(cfg) => cfg.ui,
+            Err(error) => {
+                tracing::error!(
+                    session_id = %self.session_info.id.0,
+                    %error,
+                    "thinking-summary reload skipped: the config did not load"
+                );
+                return;
+            }
+        };
+        let enabled = ui.thinking_summaries_enabled();
+        let window_secs = ui.thinking_summary_history_window_secs_value();
+        let min_count = ui.thinking_summary_history_min_count_value();
+        self.thinking_summaries_enabled.set(enabled);
+        self.thinking_summary_history
+            .set_limits(window_secs, min_count);
+        tracing::info!(
+            session_id = %self.session_info.id.0,
+            enabled,
+            window_secs,
+            min_count,
+            "thinking-summary settings reloaded from config"
+        );
+    }
+
     /// Summarize the thinking in `response`, keyed by its `stream_start_ms`.
     pub(crate) fn spawn_thinking_summary(
         self: &Arc<Self>,
@@ -8,7 +42,7 @@ impl SessionActor {
         stream_start_ms: Option<i64>,
     ) {
         use crate::session::helpers::thinking_summary as helpers;
-        if !self.thinking_summaries_enabled {
+        if !self.thinking_summaries_enabled.get() {
             return;
         }
         let Some(stream_start_ms) = stream_start_ms else {
@@ -22,21 +56,38 @@ impl SessionActor {
         else {
             return;
         };
+        // The client draws a spinner until the summary or a failure arrives.
+        self.send_thinking_summary_status(stream_start_ms, None);
         // One summarization request runs at a time per session.
         let previous = self.thinking_summary_tail.lock().unwrap().take();
         let actor = self.clone();
-        let handle = tokio::task::spawn_local(async move {
+        let handle = xai_spawn::spawn_local(async move {
             if let Some(previous) = previous {
                 let _ = previous.await;
             }
-            actor
+            if let Err(reason) = actor
                 .generate_thinking_summary(thinking, stream_start_ms)
-                .await;
+                .await
+            {
+                actor.send_thinking_summary_status(stream_start_ms, Some(reason));
+            }
         });
         *self.thinking_summary_tail.lock().unwrap() = Some(handle);
     }
 
-    async fn generate_thinking_summary(&self, thinking: String, stream_start_ms: i64) {
+    fn send_thinking_summary_status(&self, stream_start_ms: i64, failed: Option<String>) {
+        self.send_xai_notification_transient(XaiSessionUpdate::ThinkingSummaryStatus {
+            stream_start_ms,
+            failed,
+        });
+    }
+
+    /// The error is the text the client shows in place of the summary.
+    async fn generate_thinking_summary(
+        &self,
+        thinking: String,
+        stream_start_ms: i64,
+    ) -> Result<(), String> {
         use crate::session::helpers::thinking_summary as helpers;
         // Snapshot the session's earlier summaries before this call's own is recorded.
         let prior = self.thinking_summary_history.prior_for(stream_start_ms);
@@ -44,7 +95,7 @@ impl SessionActor {
             Ok(setup) => setup,
             Err(e) => {
                 tracing::warn!(error = %e, "thinking summary: no sampling client");
-                return;
+                return Err(format!("no sampling client: {e}"));
             }
         };
         let session_id = self.session_info.id.to_string();
@@ -76,13 +127,20 @@ impl SessionActor {
             Ok(response) => response,
             Err(e) => {
                 tracing::warn!(error = %e, "thinking summary: model call failed");
-                return;
+                return Err(format!("model call failed: {e}"));
             }
         };
+        if response.stop_reason == Some(xai_grok_sampling_types::StopReason::ContentFilter) {
+            tracing::warn!(model = %setup.model, "thinking summary: the provider refused");
+            return Err(helpers::summary_refusal_text(
+                &setup.model,
+                response.stop_message.as_deref(),
+            ));
+        }
         let summary = helpers::clean_thinking_summary(&response.assistant_text());
         if summary.is_empty() {
             tracing::warn!("thinking summary: the model returned no text");
-            return;
+            return Err("the model returned no text".to_string());
         }
         // Record BEFORE the broadcast: the next call may draw on this.
         self.thinking_summary_history
@@ -92,5 +150,6 @@ impl SessionActor {
             summary,
         })
         .await;
+        Ok(())
     }
 }

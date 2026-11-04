@@ -4,6 +4,7 @@ name = "xai-tool-protocol"
 version = "0.1.0"
 edition.workspace = true
 description = "Wire-protocol types for the xAI Computer Hub"
+autotests = false
 
 [dependencies]
 xai-tool-types = { workspace = true }
@@ -12,6 +13,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 typeshare = "1"
 uuid = { workspace = true, features = ["v7"] }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
 
 [lints]
 workspace = true

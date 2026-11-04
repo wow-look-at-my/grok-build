@@ -218,7 +218,7 @@ fn is_fs_root(path: &Path) -> bool {
 
 pub(crate) async fn write_bytes_atomic_async(path: &Path, bytes: Vec<u8>) -> io::Result<()> {
     let path = path.to_owned();
-    tokio::task::spawn_blocking(move || write_bytes_atomic(&path, &bytes))
+    xai_spawn::spawn_blocking(move || write_bytes_atomic(&path, &bytes))
         .await
         .map_err(io::Error::other)?
 }

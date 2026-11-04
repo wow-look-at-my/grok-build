@@ -188,7 +188,7 @@ impl xai_tool_runtime::Tool for MonitorTool {
         // each event", so a pipeline that dies mid-run is a promise silently
         // broken. The log names the pipeline so the gap is attributable.
         #[allow(clippy::disallowed_methods)]
-        tokio::spawn(crate::util::detached::fire_and_forget(
+        xai_spawn::spawn(crate::util::detached::fire_and_forget(
             "monitor pipeline",
             async move {
                 supervise_monitor_pipeline(
@@ -506,7 +506,7 @@ mod tests {
         let pipeline_terminal = Arc::downgrade(&backend);
         let pipeline_output = output_file.clone();
         let pipeline_task_id = task_id.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             run_monitor_pipeline(
                 &pipeline_task_id,
                 "tick",

@@ -106,7 +106,7 @@ impl ChatStateActor {
             cancellation_token,
         };
 
-        tokio::spawn(actor.run());
+        xai_spawn::spawn(actor.run());
 
         ChatStateHandle::new(cmd_tx)
     }
@@ -231,6 +231,9 @@ impl ChatStateActor {
             ChatStateCommand::RecordTokenUsage { total_tokens } => {
                 self.record_token_usage(total_tokens);
             }
+            ChatStateCommand::RecordPromptMeasurement { usage } => {
+                self.record_prompt_measurement(usage);
+            }
             ChatStateCommand::RecordLastTurnUsage { usage } => {
                 self.record_last_turn_usage(usage);
             }
@@ -307,7 +310,7 @@ impl ChatStateActor {
                     Some((stripped, ack_rx)) => {
                         // Await the disk ack off-actor: the persistence channel already
                         // orders the write, and blocking here would stall reads behind an fsync.
-                        tokio::spawn(async move {
+                        xai_spawn::spawn(async move {
                             let outcome = match ack_rx.await {
                                 Ok(Ok(())) => crate::StripOutcome::Applied { stripped },
                                 Ok(Err(_)) | Err(_) => {
@@ -511,6 +514,12 @@ impl ChatStateActor {
             }
             ChatStateCommand::GetEstimatedMessagesTokens { reply } => {
                 let _ = reply.send(state::estimate_messages_breakdown(&self.state.conversation));
+            }
+            ChatStateCommand::GetContextLedger { reply } => {
+                let _ = reply.send(crate::build_context_ledger(
+                    &self.state.conversation,
+                    &self.state.context_samples,
+                ));
             }
         }
     }

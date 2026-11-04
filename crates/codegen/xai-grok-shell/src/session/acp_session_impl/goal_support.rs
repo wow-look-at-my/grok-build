@@ -669,17 +669,32 @@ pub(super) fn next_step_from_todos<'a>(
     }
 }
 
-pub(super) fn format_blocked_chat_notification(reason: &str, detail: Option<&str>) -> String {
-    let mut out = String::with_capacity(reason.len() + detail.map_or(0, str::len) + 96);
-    out.push_str("Goal paused — verification blocked.\nReason: ");
-    out.push_str(reason);
-    out.push('\n');
-    if let Some(detail) = detail {
-        out.push_str(detail);
-        out.push('\n');
+/// The first line of the bounce the harness sends in place of a validator call.
+pub(super) const UNFINISHED_TODOS_BOUNCE: &str = "You have incomplete todos, complete them \
+     before trying to submit your work to the goal validator.";
+
+/// The bounce for a validator submission while the todo list has open items.
+/// It lists every pending and in-progress item, in list order. `None` when no
+/// item is open. The item text is capped and its reminder-frame tags are broken.
+pub(super) fn unfinished_todos_bounce<'a>(
+    todos: impl IntoIterator<Item = (&'a str, &'a str, crate::tools::todo::TodoStatus)>,
+) -> Option<String> {
+    use crate::session::goal_classifier::{cap_chars, neutralize_reminder_tags};
+    use crate::tools::todo::TodoStatus;
+    let mut out = format!("{UNFINISHED_TODOS_BOUNCE}\nIncomplete todos:");
+    let mut open = 0usize;
+    for (id, content, status) in todos {
+        if !matches!(status, TodoStatus::Pending | TodoStatus::InProgress) {
+            continue;
+        }
+        open += 1;
+        out.push_str(&format!(
+            "\n- {} `{id}`: {}",
+            status.tag(),
+            neutralize_reminder_tags(cap_chars(content, GOAL_NEXT_STEP_MAX_CHARS))
+        ));
     }
-    out.push_str("\nType /goal resume to continue after you've addressed it.");
-    out
+    (open > 0).then_some(out)
 }
 
 /// Child token counters are cumulative across activations. Completed deltas are retained,
@@ -1060,6 +1075,51 @@ pub(crate) struct GoalRoleModelConfig {
     pub(crate) summarizer: crate::agent::config::GoalRoleModelChoice,
 }
 
+impl GoalRoleModelConfig {
+    /// Resolve every `/goal` role from `config`. The actor builder and the
+    /// `[models]` reload both call this.
+    pub(crate) fn resolve(
+        config: &crate::agent::config::Config,
+        use_current_model_only: bool,
+    ) -> Self {
+        use crate::agent::config::GoalRoleModelChoice;
+        let planner = config
+            .resolve_goal_planner_model(use_current_model_only)
+            .value;
+        let strategist = config
+            .resolve_goal_strategist_model(use_current_model_only)
+            .value;
+        let skeptic_pool = config
+            .resolve_goal_skeptic_models(use_current_model_only)
+            .value
+            .into_iter()
+            .filter_map(|c| match c {
+                GoalRoleModelChoice::Explicit(p) => Some(p),
+                // A `[models] goal_skeptic` slot names a model only.
+                GoalRoleModelChoice::ModelOnly(model) => Some(crate::util::config::GoalRoleModel {
+                    model,
+                    agent_type: String::new(),
+                }),
+                GoalRoleModelChoice::InheritCurrent => None,
+            })
+            .collect();
+        let summarizer = if use_current_model_only {
+            GoalRoleModelChoice::InheritCurrent
+        } else {
+            match config.resolve_harness_model("goal_summarizer") {
+                Some(m) => GoalRoleModelChoice::ModelOnly(m.value),
+                None => GoalRoleModelChoice::InheritCurrent,
+            }
+        };
+        Self {
+            planner,
+            strategist,
+            skeptic_pool,
+            summarizer,
+        }
+    }
+}
+
 /// Resume hint shared by the generic planner pause message and the no-`pause_message` fallback.
 pub(super) const GOAL_RESUME_HINT: &str = "Retry with /goal resume.";
 
@@ -1090,6 +1150,13 @@ pub(crate) fn laziness_injection_active(
 }
 
 impl SessionActor {
+    /// A copy of the current `/goal` role models. It is a copy so no borrow
+    /// stays open across an await while a reload replaces the value.
+    pub(super) fn goal_role_models(&self) -> GoalRoleModelConfig {
+        self.refresh_model_slots_if_stale();
+        self.goal_role_models.borrow().clone()
+    }
+
     pub(super) fn goal_harness_enabled(&self) -> bool {
         self.goal_harness_enabled
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -1618,7 +1685,7 @@ impl SessionActor {
         let (role_override, tool_names, inherit_tool_names) = self
             .resolve_goal_single_role_override(
                 "planner",
-                &self.goal_role_models.planner,
+                &self.goal_role_models().planner,
                 goal::RoleCapability::Strategist,
                 &event_tx,
             )
@@ -1727,7 +1794,7 @@ impl SessionActor {
         let (role_override, tool_names, inherit_tool_names) = self
             .resolve_goal_single_role_override(
                 "strategist",
-                &self.goal_role_models.strategist,
+                &self.goal_role_models().strategist,
                 goal::RoleCapability::Strategist,
                 &event_tx,
             )
@@ -1797,7 +1864,9 @@ impl SessionActor {
     /// Goal completion is NEVER blocked, paused, or un-achieved (the goal is already Complete when this runs).
     /// Read-only: the spawn pins a read-only toolset and the prompt forbids edits.
     pub(super) async fn maybe_run_goal_summarizer(&self, attempt: u32) {
-        if !self.goal_summary_enabled {
+        if !self.goal_summary_enabled
+            || self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite
+        {
             return;
         }
         let Some(event_tx) = self.tool_context.subagent_event_tx.clone() else {
@@ -1833,7 +1902,7 @@ impl SessionActor {
             .clone();
         // The summarizer keeps the parent toolset whatever model it runs on.
         let tool_names = self.resolve_inherit_role_tool_names().await;
-        let summarizer_model = match &self.goal_role_models.summarizer {
+        let summarizer_model = match &self.goal_role_models().summarizer {
             crate::agent::config::GoalRoleModelChoice::ModelOnly(m) => {
                 self.resolve_goal_role_model_only("summarizer", None, m)
                     .await

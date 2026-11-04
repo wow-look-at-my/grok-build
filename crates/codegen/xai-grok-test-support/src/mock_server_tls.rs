@@ -47,7 +47,7 @@ pub(crate) async fn serve_tls(
     let server = axum_server::from_tcp_rustls(listener, tls)
         .context("tls server")?
         .handle(handle.clone());
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::select! {
             result = server.serve(app.into_make_service()) => result.expect("mock TLS serve"),
             _ = shutdown_rx => handle.shutdown(),
@@ -76,14 +76,7 @@ fn generate_tls_material() -> anyhow::Result<(rustls::ServerConfig, String)> {
         .signed_by(&leaf_key, &ca_cert, &ca_key)
         .context("leaf cert")?;
 
-    // Both rustls providers are linked, so pick explicitly. Mirror xai-grok-extra-ca:
-    // aws-lc-rs except Windows ARM64, where jitterentropy overflows the stack (GB-5593).
-    // A native harness must not crash in the mock before the child under test is spawned.
-    let provider = if cfg!(all(windows, target_arch = "aarch64")) {
-        rustls::crypto::ring::default_provider()
-    } else {
-        rustls::crypto::aws_lc_rs::default_provider()
-    };
+    let provider = rustls::crypto::ring::default_provider();
     let mut config = rustls::ServerConfig::builder_with_provider(Arc::new(provider))
         .with_safe_default_protocol_versions()
         .context("protocol versions")?

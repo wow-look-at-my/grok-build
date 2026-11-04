@@ -14,6 +14,7 @@
     dead_code
 )]
 #![warn(unreachable_pub)]
+#![recursion_limit = "256"]
 #![deny(clippy::indexing_slicing)]
 #[cfg(all(test, feature = "dhat-heap"))]
 #[global_allocator]
@@ -41,7 +42,6 @@ pub use xai_grok_shell_base::cpu_profile;
 pub use xai_grok_shell_base::env;
 pub mod extensions;
 pub use xai_grok_foreign_sessions as foreign_sessions;
-pub mod heap_profile;
 pub use xai_grok_http as http;
 pub mod inspect;
 pub mod instrumentation;

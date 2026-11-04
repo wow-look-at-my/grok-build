@@ -4,6 +4,7 @@ name = "xai-grok-sandbox"
 version = "0.1.0"
 edition.workspace = true
 description = "OS-level sandboxing for Grok Build using kernel primitives (Landlock/Seatbelt) via nono"
+autotests = false
 
 [dependencies]
 anyhow = { workspace = true }
@@ -55,6 +56,7 @@ enforce = []
 
 [dev-dependencies]
 serial_test = { workspace = true }
+tempfile = { workspace = true }
 # Compiles the hand-rolled macOS deny-glob regex in tests to assert it matches
 # EXACTLY the set globset (the Linux backend) matches — the cross-platform parity
 # guard for the glob dialect.
@@ -67,6 +69,10 @@ regex = { workspace = true }
 name = "sandbox_smoke_test"
 required-features = ["enforce"]
 
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+
 # The profile-sandbox CI hand-off is verified by launching the shipped worker
 # and the shipped confinement for real. That needs the child to re-enter this
 # binary the way the pager's `main` does and dispatch the worker. This holds on
@@ -74,4 +80,14 @@ required-features = ["enforce"]
 # marker and would run the whole suite instead of serving the protocol).
 [[test]]
 name = "profile_ci_host_e2e"
+harness = false
+
+# Same reason: the worker child re-enters this binary on the marker env var.
+[[test]]
+name = "profile_config_write_e2e"
+harness = false
+
+# The child confines itself with the real workspace profile, which no process can undo. It runs as a re-entered binary rather than a libtest case.
+[[test]]
+name = "workspace_gh_slopfix_e2e"
 harness = false

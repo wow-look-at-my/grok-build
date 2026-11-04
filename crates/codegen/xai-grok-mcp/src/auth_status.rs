@@ -45,7 +45,7 @@ pub(crate) async fn decide_http_auth_from_disk(server_name: &str, url: &str) -> 
     };
     let name = server_name.to_string();
     let key_url = parsed_url.clone();
-    let (verdict, stored_token) = tokio::task::spawn_blocking(move || {
+    let (verdict, stored_token) = xai_spawn::spawn_blocking(move || {
         let credentials = McpCredentialStore::load_default().unwrap_or_default();
         let verdict = classify_stored_http_auth(&credentials, &name, &key_url);
         let stored_token = {
@@ -65,7 +65,7 @@ pub(crate) async fn decide_http_auth_from_disk(server_name: &str, url: &str) -> 
 
     match verdict {
         StoredAuthVerdict::StoredCredentials => {
-            match rmcp::transport::auth::AuthorizationManager::new(url).await {
+            match crate::net_http_client::new_authorization_manager(url).await {
                 Ok(mut manager) => {
                     let adapter =
                         McpCredentialStoreAdapter::new(server_name.to_string(), parsed_url);

@@ -287,7 +287,7 @@ async fn strict_switch_append_preserves_prefix_and_deduplicates_generation() {
 async fn strict_switch_append_ack_waits_for_persistence() {
     let mut h = TestHarness::with_manual_persistence_ack(vec![]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack(
                 "moved".into(),
@@ -316,7 +316,7 @@ async fn strict_switch_append_ack_waits_for_persistence() {
 async fn committed_storage_result_converges_actor_memory() {
     let mut h = TestHarness::with_manual_persistence_ack(vec![]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack(
                 "moved".into(),
@@ -358,7 +358,7 @@ async fn already_present_replaces_stale_switch_in_actor_memory() {
             generation.get(),
         )]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack("candidate".into(), generation)
             .await
@@ -393,7 +393,7 @@ async fn committed_already_present_replaces_retry_candidate_in_actor_memory() {
             generation.get(),
         )]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack("another retry".into(), generation)
             .await
@@ -429,7 +429,7 @@ async fn committed_already_present_replaces_retry_candidate_in_actor_memory() {
 async fn dropped_storage_reply_is_indeterminate_and_leaves_memory_unchanged() {
     let mut h = TestHarness::with_manual_persistence_ack(vec![]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack(
                 "moved".into(),
@@ -449,7 +449,7 @@ async fn dropped_storage_reply_is_indeterminate_and_leaves_memory_unchanged() {
 async fn uncommitted_storage_error_leaves_actor_memory_unchanged() {
     let mut h = TestHarness::with_manual_persistence_ack(vec![]);
     let handle = h.handle.clone();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         handle
             .append_working_directory_switch_and_ack(
                 "moved".into(),
@@ -505,6 +505,40 @@ async fn record_token_usage_emits_event() {
 
     let tokens = h.handle.get_total_tokens().await;
     assert_eq!(tokens, 1000);
+}
+
+#[tokio::test]
+async fn prompt_measurements_build_the_context_ledger_until_a_replace() {
+    let input = |n| crate::ProviderUsage {
+        input: n,
+        ..Default::default()
+    };
+    let h = TestHarness::new();
+    h.handle
+        .push_user_message(ConversationItem::user("a".repeat(400)));
+    h.handle.record_prompt_measurement(input(300));
+    // A retry of the same request replaces its sample.
+    h.handle.record_prompt_measurement(input(310));
+    h.handle
+        .push_assistant_response(ConversationItem::assistant("b".repeat(40)));
+    h.handle.push_user_message(ConversationItem::user("c"));
+    h.handle.record_prompt_measurement(input(330));
+    h.handle
+        .push_assistant_response(ConversationItem::assistant("d"));
+
+    let ledger = h.handle.get_context_ledger().await;
+    assert_eq!(ledger.requests.len(), 2);
+    assert_eq!(ledger.requests[0].usage, input(310));
+    assert_eq!(ledger.requests[0].items.len(), 1);
+    assert_eq!(ledger.requests[1].usage, input(330));
+    assert_eq!(ledger.requests[1].items.len(), 2);
+    assert_eq!(ledger.unsent.len(), 1);
+
+    h.handle
+        .replace_conversation(vec![ConversationItem::system("compacted")]);
+    let ledger = h.handle.get_context_ledger().await;
+    assert!(ledger.requests.is_empty(), "a compaction drops the samples");
+    assert_eq!(ledger.unsent.len(), 1);
 }
 
 #[tokio::test]

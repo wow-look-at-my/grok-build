@@ -467,12 +467,12 @@ impl AgentView {
                     }
                     Some(AgentPane::Todo) => {
                         self.set_active_pane(AgentPane::Todo, false);
-                        self.todo.handle_mouse(
-                            mouse.kind,
-                            mouse.column,
-                            mouse.row,
-                            self.pane_areas.todo,
-                        );
+                        if let Some(index) =
+                            self.todo
+                                .handle_click(mouse.column, mouse.row, self.pane_areas.todo)
+                        {
+                            self.open_todo_detail(index);
+                        }
                         InputOutcome::Changed
                     }
                     Some(AgentPane::Queue) => {

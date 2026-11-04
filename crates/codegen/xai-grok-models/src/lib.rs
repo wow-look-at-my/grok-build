@@ -7,8 +7,13 @@
 
 #![deny(clippy::indexing_slicing)]
 
+pub mod groups;
 pub mod slots;
 
+pub use groups::{
+    DEFAULT_MODEL_GROUPS, DefaultModelGroup, ModelGroup, ModelGroupConfig, group_for_slot,
+    group_model_for_slot, resolve_model_groups,
+};
 pub use slots::{HARNESS_MODEL_SLOTS, ModelSlot, SlotFallback, slot_by_id, slot_for_setting_key};
 
 use std::sync::LazyLock;

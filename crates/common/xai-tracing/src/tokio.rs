@@ -20,5 +20,5 @@ where
     F::Output: Send + 'static,
 {
     // This is the instrumenting wrapper itself: it returns the `JoinHandle` to its caller rather than dropping it.
-    tokio::spawn(future.instrument(Span::current()))
+    xai_spawn::spawn(future.instrument(Span::current()))
 }

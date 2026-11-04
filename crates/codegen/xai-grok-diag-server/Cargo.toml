@@ -17,10 +17,11 @@ tokio = { workspace = true, features = ["net", "rt"] }
 tracing = { workspace = true }
 # Build version reported on `/statusz`.
 xai-grok-version = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 # HTTP client for the endpoint contract tests.
-reqwest = { workspace = true }
+request = { workspace = true }
 # JSON assertions on the endpoint response bodies; production code goes through
 # `axum::Json`, which carries its own serde_json.
 serde_json = { workspace = true }

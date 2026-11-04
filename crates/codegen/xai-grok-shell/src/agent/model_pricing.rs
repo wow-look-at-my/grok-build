@@ -273,12 +273,13 @@ pub(crate) fn fetch_pricing_blocking(
         &url,
         xai_grok_extra_ca::endpoint_allowlist::allowed_endpoints(),
     )?;
-    let client = reqwest::blocking::Client::builder()
-        .timeout(FETCH_TIMEOUT)
-        .build()
+    let client = xai_grok_net::BlockingHttpClient::build(Some(FETCH_TIMEOUT), None)
         .map_err(|e| e.to_string())?;
-    let response = client.get(&url).send().map_err(|e| e.to_string())?;
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
+    let response = client
+        .get(&url, xai_grok_net::Auth::None)
+        .send()
+        .map_err(|e| e.to_string())?;
+    if response.status() == xai_grok_net::StatusCode::NOT_FOUND {
         return Ok(None);
     }
     if !response.status().is_success() {

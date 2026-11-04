@@ -56,6 +56,7 @@ pub mod status_line;
 pub mod suggestion_controller;
 pub mod tasks_pane;
 pub mod timeline;
+pub mod todo_detail;
 pub mod todo_pane;
 pub mod turn_status;
 pub mod tutorial;

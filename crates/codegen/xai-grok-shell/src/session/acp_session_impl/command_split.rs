@@ -16,7 +16,7 @@ pub(super) struct ChainMember {
     pub(super) only_if_previous_succeeded: bool,
 }
 
-/// The tool calls one model call was split into, in run order.
+/// The tool calls one model call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SplitChain {
     pub(super) members: Vec<ChainMember>,
@@ -73,10 +73,9 @@ pub(super) struct BashKeys<'a> {
 }
 
 /// Replace each splittable bash call in `items` with one call per command.
-///
 /// The first call keeps the model's id, so it takes over the row the pager
-/// drew while the model wrote it. The provider fields ride on that first
-/// call only, since they belong to the call the model made.
+/// drew while the model wrote it. The provider fields ride on that first call
+/// only, since they belong to the call the model made.
 pub(super) fn split_bash_calls(
     items: &mut [ConversationItem],
     is_bash: impl Fn(&str) -> bool,

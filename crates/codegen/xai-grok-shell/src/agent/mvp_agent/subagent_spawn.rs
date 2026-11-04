@@ -25,11 +25,11 @@ impl MvpAgent {
             crate::upload::turn::SyntheticTurnTraceRequest,
         >();
         self.subagent_presentation.borrow_mut().synthetic_trace_tx = Some(trace_tx);
-        tokio::task::spawn_local({
+        xai_spawn::spawn_local({
             let agent_ref = agent_ref.clone();
             async move {
                 while let Some(request) = trace_rx.recv().await {
-                    tokio::task::spawn_local({
+                    xai_spawn::spawn_local({
                         let agent_ref = agent_ref.clone();
                         async move {
                             handle_synthetic_turn_trace(agent_ref, request).await;
@@ -212,41 +212,19 @@ impl MvpAgent {
             .as_ref()
             .map(|h| h.non_interactive)
             .unwrap_or(false);
+        // The proxy picks the bucket.
         let (gcs_upload_method, gcs_bucket_url) = match self.trace_upload_config_snapshot() {
-            Some(method) => {
-                let bucket = match &method {
-                    UploadMethod::Direct { .. } => self
-                        .cfg
-                        .borrow()
-                        .endpoints
-                        .resolve_trace_bucket_url()
-                        .map(|r| r.value),
-                    UploadMethod::Proxy { .. } => Some("proxy-managed".to_string()),
-                    UploadMethod::S3 { bucket, .. } => Some(format!("s3://{bucket}")),
-                };
-                match bucket {
-                    Some(url) => (Some(method), Some(url)),
-                    None => (None, None),
-                }
-            }
+            Some(method) => (Some(method), Some("proxy-managed".to_string())),
             None => (None, None),
         };
         let project_trusted = crate::agent::folder_trust::project_scope_allowed(&parent_cwd);
-        let (
-            base_roles,
-            base_personas,
-            subagent_model_overrides,
-            subagent_toggle,
-            subagent_default_model,
-        ) = {
+        let (base_roles, base_personas, subagent_model_overrides, subagent_toggle) = {
             let cfg = self.cfg.borrow();
             (
                 cfg.subagent_roles.clone(),
                 cfg.subagent_personas.clone(),
                 cfg.subagent_model_overrides.clone(),
                 cfg.subagent_toggle.clone(),
-                cfg.resolve_harness_model("subagent_default")
-                    .map(|r| r.value),
             )
         };
         let (subagent_roles, subagent_personas) =
@@ -311,10 +289,10 @@ impl MvpAgent {
                 .as_ref()
                 .map(|config| config.mode)
                 .unwrap_or_else(|| {
-                    if self.cfg.borrow().memory_v2.enabled == Some(true) {
-                        crate::config::MemoryMode::V2
-                    } else {
+                    if self.cfg.borrow().memory_v2.enabled == Some(false) {
                         crate::config::MemoryMode::Legacy
+                    } else {
+                        crate::config::MemoryMode::V2
                     }
                 }),
             web_search_sampling_config: self.prepare_web_search_sampling_config(&parent_base_url),
@@ -344,7 +322,6 @@ impl MvpAgent {
             parent_max_turns,
             available_models,
             subagent_model_overrides,
-            subagent_default_model,
             subagent_toggle,
             subagent_roles,
             subagent_personas,

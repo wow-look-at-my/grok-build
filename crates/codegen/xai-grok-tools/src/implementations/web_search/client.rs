@@ -2,7 +2,7 @@ use super::types::WebSearchConfig;
 use crate::attribution::{SharedAttributionCallback, ToolConsumer};
 use crate::types::SharedApiKeyProvider;
 use async_openai::types::responses as rs;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
+use xai_grok_net::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 /// A minimal, purpose-built HTTP client for calling the Responses API
 /// with web search capability.
 /// Which API the configured provider speaks.
@@ -26,7 +26,13 @@ fn allow_endpoint(url: &str) -> Result<(), xai_tool_runtime::ToolError> {
 
 #[derive(Clone)]
 pub struct WebSearchClient {
-    http: reqwest::Client,
+    http: xai_grok_net::HttpClient,
+    /// The configured key. A configured `Authorization` header replaces it.
+    api_key: Option<String>,
+    /// `Bearer` for the Responses API, `Bot` for Kagi.
+    scheme: &'static str,
+    /// Credential headers from `extra_headers`.
+    credential_headers: HeaderMap,
     base_url: String,
     /// Synthesis model. Empty for [`SearchBackend::Kagi`], which has none.
     model: String,
@@ -115,15 +121,12 @@ impl WebSearchClient {
         };
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("{scheme} {api_key}")).map_err(|e| {
-                xai_tool_runtime::ToolError::execution(
-                    xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                    format!("Invalid API key for header: {e}"),
-                )
-            })?,
-        );
+        HeaderValue::from_str(&format!("{scheme} {api_key}")).map_err(|e| {
+            xai_tool_runtime::ToolError::execution(
+                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
+                format!("Invalid API key for header: {e}"),
+            )
+        })?;
         for (key, value) in extra_headers {
             let header_name = HeaderName::from_bytes(key.as_bytes()).map_err(|e| {
                 xai_tool_runtime::ToolError::execution(
@@ -139,11 +142,12 @@ impl WebSearchClient {
             })?;
             headers.insert(header_name, header_value);
         }
+        let credential_headers = crate::util::shared_http::take_credential_headers(&mut headers);
         let key = crate::util::shared_http::cache_key("web_search", &headers);
         let http = crate::util::shared_http::cached_client(key, || {
-            xai_grok_extra_ca::build_reqwest_client(|builder| {
-                builder.default_headers(headers.clone())
-            })
+            xai_grok_net::HttpClient::build(
+                xai_grok_net::ClientOptions::default().default_headers(headers.clone()),
+            )
         })
         .map_err(|e| {
             xai_tool_runtime::ToolError::execution(
@@ -153,6 +157,9 @@ impl WebSearchClient {
         })?;
         Ok(Self {
             http,
+            api_key: Some(api_key.clone()),
+            scheme,
+            credential_headers,
             base_url: base_url.clone(),
             model,
             backend,
@@ -242,6 +249,15 @@ impl WebSearchClient {
         self.attribution_callback = callback;
         self
     }
+    /// The credential for one request. A per-request bearer wins over config.
+    fn request_auth(&self, sent_bearer: Option<&str>) -> xai_grok_net::Auth {
+        let (key, scheme) = match sent_bearer {
+            Some(bearer) => (Some(bearer), "Bearer"),
+            None if self.credential_headers.contains_key(AUTHORIZATION) => (None, self.scheme),
+            None => (self.api_key.as_deref(), self.scheme),
+        };
+        crate::util::shared_http::key_auth(key, scheme, &self.credential_headers)
+    }
     async fn current_bearer(&self) -> Option<String> {
         crate::types::api_key_provider::resolve_bearer(self.api_key_provider.as_ref()).await
     }
@@ -272,10 +288,10 @@ impl WebSearchClient {
         let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
         allow_endpoint(&url)?;
         let sent_bearer = self.current_bearer().await;
-        let mut req = self.http.post(&url).json(&request);
-        if let Some(ref key) = sent_bearer {
-            req = req.header(AUTHORIZATION, format!("Bearer {key}"));
-        }
+        let req = self
+            .http
+            .post(&url, self.request_auth(sent_bearer.as_deref()))
+            .json(&request);
         let response = req.send().await.map_err(|e| {
             xai_tool_runtime::ToolError::execution(
                 xai_tool_protocol::ToolId::new("web_search").expect("valid"),
@@ -283,7 +299,7 @@ impl WebSearchClient {
             )
         })?;
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
+        if status == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(sent_bearer.as_deref());
             let body = response
                 .text()
@@ -341,10 +357,10 @@ impl WebSearchClient {
         let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
         allow_endpoint(&url)?;
         let sent_bearer = self.current_bearer().await;
-        let mut req = self.http.post(&url).json(&request);
-        if let Some(ref key) = sent_bearer {
-            req = req.header(AUTHORIZATION, format!("Bearer {key}"));
-        }
+        let req = self
+            .http
+            .post(&url, self.request_auth(sent_bearer.as_deref()))
+            .json(&request);
         let response = req.send().await.map_err(|e| {
             xai_tool_runtime::ToolError::execution(
                 xai_tool_protocol::ToolId::new("web_search").expect("valid"),
@@ -352,7 +368,7 @@ impl WebSearchClient {
             )
         })?;
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
+        if status == xai_grok_net::StatusCode::UNAUTHORIZED {
             self.record_401_attribution(sent_bearer.as_deref());
             let body = response
                 .text()
@@ -436,7 +452,7 @@ impl WebSearchClient {
         }
         let response = self
             .http
-            .get(&url)
+            .get(&url, self.request_auth(None))
             .query(&params)
             .send()
             .await

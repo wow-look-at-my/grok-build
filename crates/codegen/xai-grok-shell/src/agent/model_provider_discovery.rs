@@ -330,6 +330,7 @@ async fn discover_one_provider(
         url,
         &inference_base,
         api_key.as_deref(),
+        listing_headers(provider),
         window_source,
     )
     .await;
@@ -357,8 +358,14 @@ async fn discover_one_provider(
         let key = discovered_model_key(provider_id, &listed.model);
         let override_for_listed = ConfigModelOverride {
             model: Some(listed.model.clone()),
-            name: listed.name.clone(),
-            description: listed.description.clone(),
+            name: listed.name.as_deref().map(strip_vendor_prefix),
+            // A hosted listing's description is vendor copy that wraps to
+            // several picker lines.
+            description: if dialect.is_local_runtime() {
+                listed.description.clone()
+            } else {
+                None
+            },
             // A value the user wrote on the provider is the value.
             api_backend: provider
                 .api_backend
@@ -515,7 +522,37 @@ fn normalize_url(url: &str) -> String {
     url.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
-/// Fetch and parse a listing off the async path. `reqwest::blocking` builds
+/// The provider's static headers, then each `env_http_headers` header whose variable is set.
+fn listing_headers(provider: &ModelProviderConfig) -> Vec<(String, String)> {
+    let from_env = provider
+        .env_http_headers
+        .iter()
+        .filter_map(|(name, var)| Some((name.clone(), std::env::var(var).ok()?)));
+    provider
+        .extra_headers
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .chain(from_env)
+        .collect()
+}
+
+/// `Anthropic: Claude Fable 5` becomes `Claude Fable 5`. An aggregator puts
+/// the vendor before every model name, and the name already says it.
+fn strip_vendor_prefix(name: &str) -> String {
+    match name.split_once(": ") {
+        Some((vendor, rest))
+            if !vendor.is_empty()
+                && !vendor.contains(':')
+                && vendor.len() <= 32
+                && !rest.trim().is_empty() =>
+        {
+            rest.trim().to_owned()
+        }
+        _ => name.to_owned(),
+    }
+}
+
+/// Fetch and parse a listing off the async path. `request::blocking` builds
 /// its own runtime, which panics when it is constructed inside an async
 /// context, so the request runs on a dedicated OS thread. That is the same
 /// reason `resolve_context_window_from_provider` spawns one.
@@ -524,6 +561,7 @@ async fn fetch_listing(
     url: &str,
     inference_base_url: &str,
     api_key: Option<&str>,
+    headers: Vec<(String, String)>,
     window_source: ContextWindowSource,
 ) -> Result<Vec<config::ModelEntryConfig>, String> {
     let (url, key) = (url.to_owned(), api_key.map(str::to_owned));
@@ -534,7 +572,7 @@ async fn fetch_listing(
             // The OpenAI dialect asks the listing URL as written, which may be
             // a `models_list_url` that lives nowhere near the inference base.
             ModelsListDialect::Openai => {
-                crate::remote::fetch_models_for_list_url_blocking(&url, key.as_deref())
+                crate::remote::fetch_models_for_list_url_blocking(&url, key.as_deref(), &headers)
             }
             local => crate::remote::fetch_local_listing_blocking(
                 local,
@@ -572,7 +610,7 @@ mod tests {
                 "/catalog.json",
                 get(move || async move { axum::Json(for_custom) }),
             );
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (base, handle)
     }
 
@@ -633,7 +671,7 @@ mod tests {
                     }))
                 }),
             );
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (base, handle)
     }
 
@@ -734,7 +772,7 @@ mod tests {
                     }
                 }),
             );
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
         let cfg = config_from(&format!(
             r#"
@@ -878,6 +916,43 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_hosted_listing_loses_its_vendor_prefix_and_its_blurb() {
+        let (base, server) = start_listing_server(serde_json::json!({
+            "data": [{
+                "id": "anthropic/claude-fable-5",
+                "name": "Anthropic: Claude Fable 5",
+                "description": "Claude Fable 5 is a Mythos-class model from Anthropic, built for autonomous knowledge work.\n\nIt supports text, image, and file inputs.",
+                "context_length": 200_000
+            }]
+        }))
+        .await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+            api_key = "sk-provider"
+            "#
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server.abort();
+
+        let fable = discovered
+            .get("gateway/anthropic/claude-fable-5")
+            .expect("the listing names the model");
+        assert_eq!(fable.info.name.as_deref(), Some("Claude Fable 5"));
+        assert_eq!(fable.info.description, None);
+    }
+
+    #[test]
+    fn only_a_short_leading_vendor_is_stripped() {
+        assert_eq!(strip_vendor_prefix("DeepSeek: DeepSeek V3"), "DeepSeek V3");
+        assert_eq!(strip_vendor_prefix("Claude Fable 5"), "Claude Fable 5");
+        assert_eq!(strip_vendor_prefix("Vendor: "), "Vendor: ");
+        assert_eq!(strip_vendor_prefix("a:b: c"), "a:b: c");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_providers_own_window_and_backend_beat_the_listing() {
         // `small-one` names a window, `no-window-one` names none and so carries
         // the client default. The provider states both answers itself.
@@ -933,6 +1008,40 @@ mod tests {
             discovered.is_empty(),
             "a provider that flooded the picker must stay off: {:?}",
             discovered.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_listing_request_carries_the_providers_headers() {
+        use axum::routing::get;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        // The gateway answers the listing only for the route its header names.
+        let app = axum::Router::new().route(
+            "/v1/models",
+            get(|headers: axum::http::HeaderMap| async move {
+                if headers.get("x-route").and_then(|v| v.to_str().ok()) == Some("eu") {
+                    Ok(axum::Json(two_model_listing()))
+                } else {
+                    Err(axum::http::StatusCode::FORBIDDEN)
+                }
+            }),
+        );
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+            extra_headers = {{ "X-Route" = "eu" }}
+            "#
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server.abort();
+
+        assert!(
+            discovered.contains_key("gateway/big-one"),
+            "the provider's extra_headers go on the listing request too"
         );
     }
 

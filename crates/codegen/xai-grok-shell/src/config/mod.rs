@@ -586,9 +586,26 @@ impl ModelOverrideConfig {
         remote: Option<&crate::util::config::RemoteSettings>,
     ) -> Self {
         let models_table = config.get("models");
-        let parsed_models: crate::agent::config::ModelsConfig = models_table
+        let mut parsed_models: crate::agent::config::ModelsConfig = models_table
             .and_then(|v| v.clone().try_into().ok())
             .unwrap_or_default();
+        // A group model wins over the `[models]` entry of a member slot.
+        let groups: std::collections::BTreeMap<String, xai_grok_models::ModelGroupConfig> = config
+            .get("model_groups")
+            .and_then(|v| v.clone().try_into().ok())
+            .unwrap_or_default();
+        let group_model = |slot| xai_grok_models::group_model_for_slot(&groups, slot);
+        for (slot, field) in [
+            ("web_search", &mut parsed_models.web_search),
+            ("session_summary", &mut parsed_models.session_summary),
+            ("image_description", &mut parsed_models.image_description),
+            ("prompt_suggestion", &mut parsed_models.prompt_suggestion),
+        ] {
+            if let Some(m) = group_model(slot) {
+                *field = Some(m);
+            }
+        }
+        let grouped = |slot| group_model(slot).is_some();
         let mut result = Self {
             web_search: parsed_models
                 .web_search
@@ -599,13 +616,16 @@ impl ModelOverrideConfig {
                 .map(PromptSuggestModelPin::Pinned)
                 .unwrap_or_default(),
         };
-        let has_local_ws = models_table.and_then(|m| m.get("web_search")).is_some();
+        let has_local_ws =
+            models_table.and_then(|m| m.get("web_search")).is_some() || grouped("web_search");
         let has_local_ss = models_table
             .and_then(|m| m.get("session_summary"))
-            .is_some();
+            .is_some()
+            || grouped("session_summary");
         let has_local_id = models_table
             .and_then(|m| m.get("image_description"))
-            .is_some();
+            .is_some()
+            || grouped("image_description");
         if let Some(remote) = remote {
             if !has_local_ws && let Some(ref v) = remote.web_search_model {
                 result.web_search = v.clone();
@@ -1401,32 +1421,6 @@ fn apply_requirements_inner(
         config.telemetry.mixpanel_token,
         redacted
     );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_bucket",
-        config.endpoints.trace_upload_bucket
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_region",
-        config.endpoints.trace_upload_region
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_credentials_file",
-        config.endpoints.trace_upload_credentials_file
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_endpoint_url",
-        config.endpoints.trace_upload_endpoint_url
-    );
-    enforce_str!(
-        "endpoints",
-        "trace_upload_credentials",
-        config.endpoints.trace_upload_credentials,
-        redacted
-    );
     if let Some(val) = req.get("features").and_then(|f| f.get("codebase_indexing")) {
         use crate::agent::config::CodebaseIndexingSetting;
         match val {
@@ -1621,6 +1615,9 @@ pub fn apply_sandbox(
                 xai_grok_sandbox::requires_hook_write_deny(&sandbox_profile, &workspace);
             is_custom || needs_hooks
         };
+        // In the process the profile confines, after any bwrap re-exec.
+        #[cfg(unix)]
+        xai_grok_sandbox::jail::redirect_caches_in_place();
         let mut sandbox = xai_grok_sandbox::SandboxManager::new(sandbox_profile, &workspace);
         if let Err(e) = sandbox.apply(&workspace) {
             eprintln!("warning: sandbox could not be applied: {e}");
@@ -1757,7 +1754,7 @@ async fn config_write_blocking<F>(write: F) -> Result<(), String>
 where
     F: FnOnce() -> Result<(), Box<dyn std::error::Error>> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || write().map_err(|e| e.to_string()))
+    xai_spawn::spawn_blocking(move || write().map_err(|e| e.to_string()))
         .await
         .map_err(|e| format!("config write task failed: {e}"))?
 }

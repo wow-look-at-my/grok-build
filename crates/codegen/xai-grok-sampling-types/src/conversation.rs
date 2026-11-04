@@ -8,6 +8,7 @@ mod flatten;
 mod messages;
 mod ollama;
 mod output_budget;
+mod output_schema;
 mod responses;
 mod thinking_replay;
 mod tool_schema;
@@ -20,6 +21,7 @@ pub use flatten::{FlattenReport, flatten_conversation, needs_flattening};
 pub use messages::build_messages_request;
 pub use ollama::{NUM_CTX_OPTION, NUM_PREDICT_OPTION, build_ollama_chat_request};
 pub use output_budget::{OutputBudgetClamp, estimate_item_tokens, estimate_tool_spec_tokens};
+pub use output_schema::for_messages_api as structured_output_schema_for_messages_api;
 pub use responses::{
     extra_tool_entries, patch_reasoning_text_types, response_to_conversation_items,
 };
@@ -809,11 +811,13 @@ impl ConversationRequest {
         &mut self,
         names_model_id: bool,
         names_reasoning_content: bool,
+        names_reasoning: bool,
     ) -> bool {
-        let narrow_to_known = !names_model_id && !names_reasoning_content;
+        let narrow_to_known = !names_model_id && !names_reasoning_content && !names_reasoning;
         self.chat_message_profile.strip_named(
             names_model_id || narrow_to_known,
             names_reasoning_content || narrow_to_known,
+            names_reasoning || narrow_to_known,
         )
     }
 }
@@ -1701,9 +1705,7 @@ pub fn inject_streaming_reasoning_fallback(items: &mut Vec<ConversationItem>, te
         return;
     }
     let any_with_text = items.iter().any(|i| match i {
-        ConversationItem::Reasoning(r) => r.summary.iter().any(|sp| match sp {
-            rs::SummaryPart::SummaryText(t) => !t.text.is_empty(),
-        }),
+        ConversationItem::Reasoning(r) => !reasoning_item_text(r).trim().is_empty(),
         _ => false,
     });
     if any_with_text {
@@ -2788,7 +2790,9 @@ mod tests {
         let output_config = msgs_req.output_config.expect("output_config should be set");
         let fmt = output_config.format.expect("format should be set");
         let crate::messages::OutputFormat::JsonSchema { schema: s } = fmt;
-        assert_eq!(s, schema);
+        let mut expected = schema.clone();
+        expected["additionalProperties"] = serde_json::json!(false);
+        assert_eq!(s, expected, "Messages requires additionalProperties: false");
         assert!(msgs_req.thinking.is_none());
         assert!(output_config.effort.is_none());
     }
@@ -3642,6 +3646,56 @@ mod tests {
             response.fallback_text().as_deref(),
             Some("Summary after reasoning.")
         );
+    }
+
+    /// OpenRouter answers a DeepSeek turn on `/responses` with the thinking in
+    /// `content` and an empty `summary`. The streamed text must not be added a
+    /// second time as a summary, or every replay carries the thinking twice.
+    #[test]
+    fn streaming_fallback_leaves_a_reasoning_item_with_content_text_alone() {
+        let item = rs::ReasoningItem {
+            id: "rs_tmp_1".into(),
+            summary: vec![],
+            content: Some(vec![rs::ReasoningTextContent {
+                text: "I will read the file first.".into(),
+            }]),
+            encrypted_content: None,
+            status: None,
+        };
+        let mut items = vec![
+            ConversationItem::Reasoning(item),
+            ConversationItem::assistant("done"),
+        ];
+        inject_streaming_reasoning_fallback(&mut items, "I will read the file first.".into());
+        let ConversationItem::Reasoning(r) = &items[0] else {
+            panic!("the reasoning item moved: {items:?}");
+        };
+        assert!(
+            r.summary.is_empty(),
+            "the thinking was added again as a summary: {r:?}"
+        );
+        assert_eq!(reasoning_item_text(r), "I will read the file first.");
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn streaming_fallback_fills_a_reasoning_item_with_no_text() {
+        let item = rs::ReasoningItem {
+            id: "rs_1".into(),
+            summary: vec![],
+            content: None,
+            encrypted_content: None,
+            status: None,
+        };
+        let mut items = vec![
+            ConversationItem::Reasoning(item),
+            ConversationItem::assistant("done"),
+        ];
+        inject_streaming_reasoning_fallback(&mut items, "streamed thought".into());
+        let ConversationItem::Reasoning(r) = &items[0] else {
+            panic!("the reasoning item moved: {items:?}");
+        };
+        assert_eq!(reasoning_item_text(r), "streamed thought");
     }
 
     #[test]

@@ -42,7 +42,7 @@ pub struct TelemetryClient {
     client_type: Option<String>,
     client_version: Option<String>,
     subscription_tier: Option<String>,
-    http_client: reqwest::Client,
+    http_client: xai_grok_net::HttpClient,
 }
 impl std::fmt::Debug for TelemetryClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -69,7 +69,7 @@ impl TelemetryClient {
         origin_client: Option<OriginClientInfo>,
         shell_version: String,
         subscription_tier: Option<String>,
-        http_client: reqwest::Client,
+        http_client: xai_grok_net::HttpClient,
     ) -> Self {
         if !xai_grok_version::is_release_stamped()
             && env_bool(ALLOW_DEV_BUILD_ENV) != Some(true)
@@ -326,14 +326,25 @@ pub async fn track(event_name: &str, request_id: &str, ctx: &UserContext, mut me
                 "timestamp": ctx.timestamp,
             }]
         });
-        let _ = client
+        let sent = client
             .http_client
-            .post(url)
-            .header("x-api-key", api_key.as_str())
+            .post(
+                url,
+                xai_grok_net::Auth::ApiKey {
+                    key: api_key.clone(),
+                    scheme: xai_grok_net::KeyScheme::XApiKey,
+                },
+            )
             .timeout(std::time::Duration::from_secs(10))
             .json(&body)
             .send()
             .await;
+        // A transport failure is dropped: the emit is best effort. A refused credential is not.
+        if let Err(e) = sent
+            && let Some(refusal) = e.auth_refusal()
+        {
+            tracing::error!(%refusal, "telemetry event not sent: credential refused");
+        }
     }
     if let Some(ref mixpanel) = client.mixpanel {
         let time_secs = chrono::Utc::now().timestamp();
@@ -386,7 +397,7 @@ pub fn sync_profile() {
     let Some(mixpanel) = client.mixpanel.clone() else {
         return;
     };
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let agent_id = crate::id::agent_id_async().await;
         let user_id = client.user_id.as_deref().unwrap_or(&agent_id).to_owned();
         let mut props = std::collections::HashMap::new();
@@ -419,7 +430,7 @@ pub fn init(
     origin_client: Option<OriginClientInfo>,
     shell_version: String,
     subscription_tier: Option<String>,
-    http_client: reqwest::Client,
+    http_client: xai_grok_net::HttpClient,
 ) {
     let lock = TELEMETRY_CLIENT.get_or_init(|| parking_lot::Mutex::new(None));
     let mut guard = lock.lock();
@@ -450,7 +461,7 @@ pub fn init_if_needed(
     origin_client: Option<OriginClientInfo>,
     shell_version: String,
     subscription_tier: Option<String>,
-    http_client: reqwest::Client,
+    http_client: xai_grok_net::HttpClient,
 ) {
     if mode.is_disabled() {
         return;
@@ -520,7 +531,7 @@ mod tests {
             None,
             "0.0.0-test".into(),
             None,
-            reqwest::Client::new(),
+            xai_grok_net::HttpClient::build(xai_grok_net::ClientOptions::default()).unwrap(),
         );
         sync_profile();
         assert!(

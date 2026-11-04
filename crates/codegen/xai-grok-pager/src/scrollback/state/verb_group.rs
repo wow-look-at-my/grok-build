@@ -58,8 +58,8 @@ pub(crate) fn run_step(entry: &ScrollbackEntry, show_thinking: bool) -> RunStep 
             RunStep::Break
         }
     } else if entry.block.is_thinking() {
-        // A summary is the only part of a collapsed thought the user reads.
-        let summarized = matches!(&entry.block, RenderBlock::Thinking(b) if b.summary().is_some());
+        // A summary, its spinner or its failure is the only part of a collapsed thought the user reads.
+        let summarized = matches!(&entry.block, RenderBlock::Thinking(b) if b.has_summary_row());
         if show_thinking && !entry.is_running && is_claimable_thinking && !summarized {
             RunStep::ThoughtMember
         } else {

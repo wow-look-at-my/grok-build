@@ -225,6 +225,7 @@ pub(super) async fn create_test_actor_with_memory(
             config_opt_out: memory_config
                 .as_ref()
                 .is_some_and(|config| !config.enabled && !config.force_disabled),
+            unavailable: None,
             v2_legacy_carryover: false,
             prompt_sync_pending: std::sync::atomic::AtomicBool::new(false),
             flush_config: memory_config
@@ -336,7 +337,6 @@ pub(super) async fn create_test_actor_with_memory(
         )),
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-        goal_blocked_streak: std::sync::atomic::AtomicU32::new(0),
         goal_update_rx: std::cell::RefCell::new(None),
         goal_update_tx: tokio::sync::mpsc::unbounded_channel().0,
         workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle().0,
@@ -400,7 +400,7 @@ pub(super) async fn create_test_actor_with_memory(
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
         title_refresh_enabled: false,
-        thinking_summaries_enabled: false,
+        thinking_summaries_enabled: std::cell::Cell::new(false),
         thinking_summary_history: Default::default(),
         thinking_summary_tail: Default::default(),
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -670,7 +670,7 @@ async fn v2_session_is_pinned_to_isolated_storage_and_disables_legacy_pipeline()
                 "legacy sentinel"
             );
             let late_sample_cancelled = std::rc::Rc::new(std::cell::Cell::new(None));
-            actor.memory.dream_workers.track(tokio::task::spawn_local({
+            actor.memory.dream_workers.track(xai_spawn::spawn_local({
                 let actor = std::sync::Arc::clone(&actor);
                 let late_sample_cancelled = std::rc::Rc::clone(&late_sample_cancelled);
                 async move {
@@ -1070,7 +1070,7 @@ async fn test_run_session_spawns_launch_dream() {
             let codebase_indexes = std::sync::Arc::new(parking_lot::Mutex::new(
                 xai_grok_workspace::file_system::CodebaseIndexManager::new(),
             ));
-            tokio::task::spawn_local(super::run_session(
+            xai_spawn::spawn_local(super::run_session(
                 actor.clone(),
                 cmd_rx,
                 chat_rx,

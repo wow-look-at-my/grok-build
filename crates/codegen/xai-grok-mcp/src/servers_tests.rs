@@ -357,44 +357,35 @@ fn is_figma_mcp_matches_name_and_host() {
 
 #[test]
 fn ensure_figma_user_agent_sets_grok_cli_when_missing() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     ensure_figma_user_agent(&mut headers, "figma", "https://mcp.figma.com/mcp");
-    assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "grok-cli"
-    );
+    assert_eq!(headers.get(http::header::USER_AGENT).unwrap(), "grok-cli");
 
-    let mut host_only = reqwest::header::HeaderMap::new();
+    let mut host_only = http::header::HeaderMap::new();
     ensure_figma_user_agent(&mut host_only, "other", "https://mcp.figma.com/mcp");
-    assert_eq!(
-        host_only.get(reqwest::header::USER_AGENT).unwrap(),
-        "grok-cli"
-    );
+    assert_eq!(host_only.get(http::header::USER_AGENT).unwrap(), "grok-cli");
 }
 
 #[test]
 fn ensure_figma_user_agent_does_not_overwrite_existing() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     headers.insert(
-        reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("custom-ua"),
+        http::header::USER_AGENT,
+        http::header::HeaderValue::from_static("custom-ua"),
     );
     ensure_figma_user_agent(&mut headers, "figma", "https://mcp.figma.com/mcp");
-    assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "custom-ua"
-    );
+    assert_eq!(headers.get(http::header::USER_AGENT).unwrap(), "custom-ua");
 }
 
 #[test]
 fn ensure_figma_user_agent_skips_non_figma() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     ensure_figma_user_agent(&mut headers, "linear", "https://mcp.linear.app/mcp");
-    assert!(!headers.contains_key(reqwest::header::USER_AGENT));
+    assert!(!headers.contains_key(http::header::USER_AGENT));
 
-    let mut invalid_url = reqwest::header::HeaderMap::new();
+    let mut invalid_url = http::header::HeaderMap::new();
     ensure_figma_user_agent(&mut invalid_url, "linear", "not-a-url");
-    assert!(!invalid_url.contains_key(reqwest::header::USER_AGENT));
+    assert!(!invalid_url.contains_key(http::header::USER_AGENT));
 }
 
 #[test]
@@ -412,37 +403,31 @@ fn parse_config_headers_skips_invalid_and_keeps_last_duplicate() {
 
 #[test]
 fn apply_user_agent_policy_sets_versioned_grok_cli() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     apply_user_agent_policy(&mut headers, "linear", "https://mcp.linear.app/mcp");
     let expected = format!("grok-cli/{}", xai_grok_version::version());
     assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
+        headers.get(http::header::USER_AGENT).unwrap(),
         expected.as_str()
     );
 }
 
 #[test]
 fn apply_user_agent_policy_preserves_configured_user_agent() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     headers.insert(
-        reqwest::header::USER_AGENT,
-        reqwest::header::HeaderValue::from_static("custom-ua"),
+        http::header::USER_AGENT,
+        http::header::HeaderValue::from_static("custom-ua"),
     );
     apply_user_agent_policy(&mut headers, "linear", "https://mcp.linear.app/mcp");
-    assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "custom-ua"
-    );
+    assert_eq!(headers.get(http::header::USER_AGENT).unwrap(), "custom-ua");
 }
 
 #[test]
 fn apply_user_agent_policy_preserves_figma_attribution() {
-    let mut headers = reqwest::header::HeaderMap::new();
+    let mut headers = http::header::HeaderMap::new();
     apply_user_agent_policy(&mut headers, "other", "https://mcp.figma.com/mcp");
-    assert_eq!(
-        headers.get(reqwest::header::USER_AGENT).unwrap(),
-        "grok-cli"
-    );
+    assert_eq!(headers.get(http::header::USER_AGENT).unwrap(), "grok-cli");
 }
 
 #[cfg(unix)]
@@ -2213,7 +2198,7 @@ async fn spawn_test_http_server(app: axum::Router) -> String {
         .await
         .expect("bind test server");
     let addr = listener.local_addr().expect("test server addr");
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
     format!("http://{addr}/mcp")
@@ -2998,7 +2983,7 @@ async fn try_call_tool_mrtr_form_elicitation_round_trip() {
     let inbox = crate::elicitation::ElicitationInbox::new();
     client.set_elicitation_tx(Some(inbox.clone()));
 
-    let answer = tokio::spawn(async move {
+    let answer = xai_spawn::spawn(async move {
         let job = inbox
             .recv()
             .await
@@ -3127,7 +3112,7 @@ async fn try_call_tool_mrtr_round_survives_transport_recovery() {
     let inbox = crate::elicitation::ElicitationInbox::new();
     client.set_elicitation_tx(Some(inbox.clone()));
 
-    let answer = tokio::spawn(async move {
+    let answer = xai_spawn::spawn(async move {
         let job = inbox
             .recv()
             .await
@@ -3201,7 +3186,7 @@ async fn try_call_tool_mrtr_url_elicitation_with_state_only_round() {
     let inbox = crate::elicitation::ElicitationInbox::new();
     client.set_elicitation_tx(Some(inbox.clone()));
 
-    let answer = tokio::spawn(async move {
+    let answer = xai_spawn::spawn(async move {
         let job = inbox
             .recv()
             .await
@@ -3591,7 +3576,7 @@ async fn try_call_tool_reconnects_then_succeeds_after_retriable_transport_error(
     async fn dead_service() -> McpService {
         let (client_read, server_write) = tokio::io::duplex(64 * 1024);
         let (server_read, client_write) = tokio::io::duplex(64 * 1024);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut reader = BufReader::new(server_read);
             let mut writer = server_write;
             let mut line = String::new();
@@ -3713,7 +3698,7 @@ async fn watched_live_client(name: &str) -> Arc<McpClient> {
 
     let (client_read, server_write) = tokio::io::duplex(64 * 1024);
     let (server_read, client_write) = tokio::io::duplex(64 * 1024);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut reader = BufReader::new(server_read);
         let mut writer = server_write;
         let mut line = String::new();
@@ -4148,7 +4133,9 @@ async fn ensure_initialized_concurrent_callers_never_see_legacy_fast_fail() {
     let mut handles = Vec::new();
     for _ in 0..5 {
         let c = Arc::clone(&client);
-        handles.push(tokio::spawn(async move { c.ensure_initialized().await }));
+        handles.push(xai_spawn::spawn(
+            async move { c.ensure_initialized().await },
+        ));
     }
 
     for (idx, handle) in handles.into_iter().enumerate() {
@@ -4190,7 +4177,7 @@ async fn ensure_initialized_parked_caller_retries_after_notify() {
     *client.state.lock().await = ClientState::Initializing;
 
     let parker_client = Arc::clone(&client);
-    let parker = tokio::spawn(async move { parker_client.ensure_initialized().await });
+    let parker = xai_spawn::spawn(async move { parker_client.ensure_initialized().await });
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -4265,7 +4252,7 @@ async fn ensure_initialized_drop_guard_restores_state_after_holder_aborted() {
     ));
 
     let holder_client = Arc::clone(&client);
-    let holder = tokio::spawn(async move { holder_client.ensure_initialized().await });
+    let holder = xai_spawn::spawn(async move { holder_client.ensure_initialized().await });
 
     let started = std::time::Instant::now();
     loop {
@@ -5483,7 +5470,7 @@ async fn recording_service(
     let (client_read, server_write) = tokio::io::duplex(64 * 1024);
     let (server_read, client_write) = tokio::io::duplex(64 * 1024);
     let sink = received.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut reader = BufReader::new(server_read);
         let mut writer = server_write;
         let mut line = String::new();

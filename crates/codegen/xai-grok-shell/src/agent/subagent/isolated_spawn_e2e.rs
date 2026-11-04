@@ -88,7 +88,6 @@ fn spawn_ctx(parent_cwd: PathBuf) -> SubagentSpawnContext {
         parent_chat_state: None,
         available_models: indexmap::IndexMap::new(),
         subagent_model_overrides: HashMap::new(),
-        subagent_default_model: None,
         subagent_toggle: HashMap::new(),
         disable_web_search: false,
         todo_gate: false,
@@ -226,10 +225,10 @@ pub async fn spawn_isolated_subagent_for_e2e(
     ctx.model_id = acp::ModelId::new("test-model");
     let (parent_cmd_tx, parent_cmd_rx) = mpsc::unbounded_channel();
     ctx.parent_cmd_tx = Some(parent_cmd_tx);
-    let usage_ack = tokio::task::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
+    let usage_ack = xai_spawn::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
     let (gateway, _gateway_rx) = test_gateway_with_receiver();
     let (command_tx, command_rx) = SubagentCoordinator::<Runner>::channel();
-    let coordinator = tokio::task::spawn_local(
+    let coordinator = xai_spawn::spawn_local(
         SubagentCoordinator::from_channel(
             command_rx,
             Runner {

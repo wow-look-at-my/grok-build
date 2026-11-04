@@ -481,7 +481,7 @@ async fn replayed_attempt_orphan_heal_closes_record_and_persists_finish() {
             let session_dir = tempfile::TempDir::new().expect("session dir");
             let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
             let backend = ChannelBackend::new(event_tx);
-            let respond = tokio::task::spawn_local(async move {
+            let respond = xai_spawn::spawn_local(async move {
                 let Some(SubagentEvent::Inspect(request)) = event_rx.recv().await else {
                     panic!("expected inspect request");
                 };

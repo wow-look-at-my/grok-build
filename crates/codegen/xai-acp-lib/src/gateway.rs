@@ -34,7 +34,7 @@ impl<S: AcpSide, C> AcpGatewayReceiver<S, C> {
             conn,
             tracing: false,
             spawn_fn: Rc::new(|fut| {
-                tokio::task::spawn_local(fut);
+                xai_spawn::spawn_local(fut);
             }),
             on_meta: None,
         }
@@ -566,7 +566,7 @@ mod tests {
                 let log = Rc::new(RefCell::new(Vec::<String>::new()));
                 let (sender, receiver) =
                     acp_gateway::<acp::AgentSide, _>(OrderTrackingClient { log: log.clone() });
-                tokio::task::spawn_local(receiver.run());
+                xai_spawn::spawn_local(receiver.run());
 
                 const N: usize = 100;
                 let completions: Vec<_> = (0..N)
@@ -601,7 +601,7 @@ mod tests {
                 let log = Rc::new(RefCell::new(Vec::<String>::new()));
                 let (sender, receiver) =
                     acp_gateway::<acp::AgentSide, _>(OrderTrackingClient { log: log.clone() });
-                tokio::task::spawn_local(receiver.run());
+                xai_spawn::spawn_local(receiver.run());
 
                 const DELTA: usize = 50;
                 const LIVE: usize = 20;
@@ -615,7 +615,7 @@ mod tests {
 
                 // Gate-open point; then concurrent producer emits live updates.
                 let live_sender = sender.clone();
-                let producer = tokio::task::spawn_local(async move {
+                let producer = xai_spawn::spawn_local(async move {
                     for i in 0..LIVE {
                         live_sender
                             .forward_fire_and_forget(text_notification(&format!("live-{i}")));

@@ -101,11 +101,7 @@ pub(crate) fn copy_parallel(
         .threads(num_workers) // Limit walker parallelism to avoid FD exhaustion
         .filter_entry(|entry| {
             // Always skip .git directory.
-            if entry.file_name() == ".git" {
-                return false;
-            }
-            // Skip the directory holding this repository's grok-managed checkouts.
-            !crate::managed_root::is_repo_worktrees_root(&entry.path())
+            entry.file_name() != ".git"
         });
 
     let walker = builder.build_parallel();

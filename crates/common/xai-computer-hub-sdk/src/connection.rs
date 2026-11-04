@@ -44,15 +44,13 @@ use serde_json::Value;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant, SystemTime};
-use tokio::net::TcpStream;
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use tokio::time::sleep;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 use url::Url;
+use xai_grok_net::Auth;
+use xai_grok_net::ws::{Message, WsConnectError, WsRequest};
 use xai_tool_protocol::{
     AuthRefreshParams, AuthRefreshResult, ConnectionId, ConnectionKind, JsonRpcError, JsonRpcId,
     JsonRpcRequest, JsonRpcResponse, JsonRpcVersion, Method, PingFrame, PongFrame, ResponseOutcome,
@@ -724,7 +722,7 @@ struct HubConnectionInner {
     health: ConnHealth,
     writer_error: WriteErrorSlot,
 }
-type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type WsStream = xai_grok_net::ws::WsStream;
 impl HubConnection {
     /// Open a brand-new [`HubConnection`] and spawn its actor task.
     ///
@@ -925,7 +923,7 @@ impl HubConnection {
         let (writer_stop_tx, writer_stop_rx) = mpsc::channel::<()>(1);
         let (priority_tx, priority_rx) = mpsc::channel::<String>(PRIORITY_OUTBOUND_CAPACITY);
         let (writer_ready_tx, writer_ready_rx) = oneshot::channel();
-        let writer_handle = tokio::spawn(run_writer(
+        let writer_handle = xai_spawn::spawn(run_writer(
             sink,
             outbound_rx,
             priority_rx,
@@ -940,7 +938,7 @@ impl HubConnection {
             cb();
         }
         let reader_inner = inner.clone();
-        tokio::spawn(run_reader_actor(
+        xai_spawn::spawn(run_reader_actor(
             reader_inner,
             stream,
             presented,
@@ -1351,23 +1349,44 @@ async fn open_socket(
             .query_pairs_mut()
             .append_pair("role", expected_role);
     }
-    let mut request = connect_url
-        .as_str()
-        .into_client_request()
-        .map_err(|e| ClientError::InvalidConfig(format!("invalid ws request: {e}")))?;
-    let headers = request.headers_mut();
-    for (name, value) in credential.upgrade_headers() {
-        let header_name: HeaderName = name;
-        let header_value: HeaderValue = HeaderValue::from_str(&value)
-            .map_err(|e| ClientError::InvalidConfig(format!("invalid auth header value: {e}")))?;
-        headers.insert(header_name, header_value);
-    }
+    let auth = upgrade_auth(credential)?;
     let _ = alpha_test_key;
-    xai_tracing::http_client::attach_trace_to_http_request(headers);
-    let (ws, _resp) = Box::pin(connect_async(request))
+    let mut headers = http::HeaderMap::new();
+    xai_tracing::http_client::attach_trace_to_http_request(&mut headers);
+    let request = WsRequest::new(connect_url.as_str(), auth, headers).map_err(ws_request_error)?;
+    let (ws, _resp) = Box::pin(xai_grok_net::ws::connect_ws(request))
         .await
-        .map_err(ClientError::from_handshake_error)?;
+        .map_err(|e| match e {
+            WsConnectError::Request(e) => ws_request_error(e),
+            WsConnectError::Handshake(e) => ClientError::from_handshake_error(e),
+        })?;
     Ok(ws)
+}
+
+/// The credential the upgrade request carries. The bearer is the xAI OIDC access token.
+fn upgrade_auth(credential: &AuthCredential) -> Result<Auth, ClientError> {
+    match credential {
+        AuthCredential::Bearer { token } => Ok(Auth::XaiSession(token.clone())),
+        AuthCredential::Headers { .. } => {
+            let mut map = http::HeaderMap::new();
+            for (name, value) in credential.upgrade_headers() {
+                let header_name: HeaderName = name;
+                let header_value: HeaderValue = HeaderValue::from_str(&value).map_err(|e| {
+                    ClientError::InvalidConfig(format!("invalid auth header value: {e}"))
+                })?;
+                map.insert(header_name, header_value);
+            }
+            Ok(Auth::Configured(map))
+        }
+    }
+}
+
+/// A refused credential is an auth error, which the connect does not retry.
+fn ws_request_error(e: xai_grok_net::Error) -> ClientError {
+    match e.auth_refusal() {
+        Some(refusal) => ClientError::AuthError(refusal.to_string()),
+        None => ClientError::InvalidConfig(format!("invalid ws request: {e}")),
+    }
 }
 /// Drive the hello / hello_ack exchange and hand back the (sink,
 /// stream) pair for steady-state use.
@@ -1621,8 +1640,8 @@ async fn run_writer<S>(
                         while priority_rx.try_recv().is_ok() {}
                     }
                     WriterControl::Close { code, reason } => {
-                        use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-                        use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+                        use xai_grok_net::ws::protocol::CloseFrame;
+                        use xai_grok_net::ws::protocol::frame::coding::CloseCode;
                         live = false;
                         pending_app_ping = false;
                         while priority_rx.try_recv().is_ok() {}
@@ -1741,8 +1760,8 @@ async fn run_writer<S>(
                     while priority_rx.try_recv().is_ok() {}
                 }
                 WriterControl::Close { code, reason } => {
-                    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-                    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+                    use xai_grok_net::ws::protocol::CloseFrame;
+                    use xai_grok_net::ws::protocol::frame::coding::CloseCode;
                     live = false;
                     pending_app_ping = false;
                     while priority_rx.try_recv().is_ok() {}
@@ -1916,7 +1935,7 @@ async fn run_auth_refresh(
     loop {
         tick.tick().await;
         let provider = Arc::clone(&inner.credential);
-        let current = match tokio::task::spawn_blocking(move || provider.current()).await {
+        let current = match xai_spawn::spawn_blocking(move || provider.current()).await {
             Ok(current) => current,
             Err(err) => {
                 warn!(%err, "credential provider did not return; retrying next tick");
@@ -1948,7 +1967,7 @@ fn spawn_auth_refresh(
 ) -> Option<PhaseTask> {
     let supports = inner.supports(Method::AuthRefresh.as_wire_str());
     AuthRefreshDriver::for_phase(inner.kind, presented, supports).map(|driver| {
-        PhaseTask(tokio::spawn(run_auth_refresh(
+        PhaseTask(xai_spawn::spawn(run_auth_refresh(
             Arc::clone(inner),
             driver,
             inner.auth_refresh_poll,
@@ -2212,7 +2231,7 @@ async fn run_reader_phase<S>(
     pong_tx: &mpsc::Sender<String>,
 ) -> ConnectedExit
 where
-    S: Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+    S: Stream<Item = Result<Message, xai_grok_net::ws::WsError>> + Unpin,
 {
     let mut clock_probe = tokio::time::interval(CLOCK_PROBE_INTERVAL);
     clock_probe.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);

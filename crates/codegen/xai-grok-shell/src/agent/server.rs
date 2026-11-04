@@ -378,7 +378,7 @@ async fn handle_connection(ws: WebSocket, state: Arc<ServerState>, peer_addr: So
         return;
     }
 
-    let read_task = tokio::spawn(async move {
+    let read_task = xai_spawn::spawn(async move {
         while let Some(msg) = ws_read.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
@@ -421,7 +421,7 @@ async fn handle_connection(ws: WebSocket, state: Arc<ServerState>, peer_addr: So
         }
     });
 
-    let write_task = tokio::spawn(async move {
+    let write_task = xai_spawn::spawn(async move {
         let mut keepalive = tokio::time::interval(Duration::from_secs(KEEPALIVE_INTERVAL_SECS));
 
         loop {
@@ -499,7 +499,7 @@ async fn run_persistent_agent(
     let relay_dest: RelayDest = Rc::new(RefCell::new(None));
 
     let relay_dest_for_task = relay_dest.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = gw_rx.recv().await {
             let maybe_tx = relay_dest_for_task.borrow().clone();
             if let Some(tx) = maybe_tx
@@ -544,15 +544,15 @@ fn setup_acp_connection(
     // `Agent` is implemented for `Rc<T: Agent>` so this works.
     let incoming = LineBufferedRead::spawn_local(incoming);
     let (conn, handle_io) = acp::AgentSideConnection::new(agent, outgoing, incoming, |fut| {
-        tokio::task::spawn_local(fut);
+        xai_spawn::spawn_local(fut);
     });
-    tokio::task::spawn_local(
+    xai_spawn::spawn_local(
         GatewayReceiver::new(conn_gw_rx, conn)
             .with_on_meta(xai_grok_otel::span_from_meta_traceparent)
             .run(),
     );
 
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = from_ws_rx.recv().await {
             // Log messages that lack both `id` and `method`
             // The ACP layer only prints "received message with neither id nor method" without the payload, making debugging impossible
@@ -577,7 +577,7 @@ fn setup_acp_connection(
         // But the MvpAgent and session actors stay alive, ready for the next connection
     });
 
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let mut reader = BufReader::new(agent_write_rx);
         let mut line = String::new();
 
@@ -598,7 +598,7 @@ fn setup_acp_connection(
 
     // Run the ACP IO handler fire-and-forget so the connection loop is not blocked
     // It completes when the WS disconnects
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let _ = handle_io.await;
         info!("ACP connection IO handler completed");
     });

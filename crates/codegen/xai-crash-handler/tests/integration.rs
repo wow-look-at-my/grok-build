@@ -66,7 +66,7 @@ fn subprocess_entry() {
                 // Spawn several concurrent tasks to stress the runtime.
                 let mut handles = Vec::new();
                 for i in 0..20 {
-                    handles.push(tokio::spawn(async move {
+                    handles.push(xai_spawn::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
                         i * i
                     }));

@@ -29,6 +29,8 @@ pub mod child_net;
 pub mod ci_host;
 pub mod ci_state;
 mod deny;
+#[cfg(unix)]
+pub mod gh_shim;
 mod hook_write_deny;
 pub mod jail;
 mod logging;
@@ -37,6 +39,7 @@ pub mod package_cache;
 mod paths;
 mod profiles;
 mod read_deny_verify;
+pub mod read_only_child;
 mod runtime_sockets;
 #[cfg(test)]
 mod test_util;

@@ -952,7 +952,7 @@ impl WorkspaceOp for FuzzyChangeReq {
         let ws = ws.clone();
         let search_id = self.search_id.clone();
         let limit = self.limit.unwrap_or(100);
-        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
             "fuzzy search notifications",
             async move {
                 ws.run_fuzzy_notifications(
@@ -1087,7 +1087,7 @@ impl WorkspaceOp for StoreSessionImageReq {
         }
         let content_base64 = self.content_base64.clone();
         let extension = self.extension.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             let content = base64::engine::general_purpose::STANDARD
                 .decode(content_base64)
                 .map_err(|e| {
@@ -1439,7 +1439,7 @@ impl WorkspaceOp for WorktreeGcReq {
     ) -> WorkspaceResult<Self::Response> {
         let (dry_run, max_age_secs, force) = (self.dry_run, self.max_age_secs, self.force);
         let span = tracing::Span::current();
-        let report = tokio::task::spawn_blocking(move || {
+        let report = xai_spawn::spawn_blocking(move || {
             span.in_scope(|| crate::worktree::gc_worktrees_mgmt(dry_run, max_age_secs, force))
         })
         .await
@@ -1457,7 +1457,7 @@ impl WorkspaceOp for WorktreeDetachReq {
     ) -> WorkspaceResult<Self::Response> {
         let id = self.id_or_path.clone();
         let allow_copy = self.allow_copy;
-        let report = tokio::task::spawn_blocking(move || {
+        let report = xai_spawn::spawn_blocking(move || {
             crate::worktree::detach_worktree_mgmt(&id, allow_copy)
         })
         .await
@@ -1476,7 +1476,7 @@ impl WorkspaceOp for WorktreeSalvageReq {
         let id = self.id_or_path.clone();
         let out = self.out.clone();
         let report =
-            tokio::task::spawn_blocking(move || crate::worktree::salvage_worktree_mgmt(&id, &out))
+            xai_spawn::spawn_blocking(move || crate::worktree::salvage_worktree_mgmt(&id, &out))
                 .await
                 .map_err(|e| WorkspaceError::HubError(e.to_string()))?
                 .map_err(|e| WorkspaceError::HubError(e.to_string()))?;
@@ -1491,11 +1491,10 @@ impl WorkspaceOp for WorktreeCleanArtifactsReq {
         _session_id: Option<&str>,
     ) -> WorkspaceResult<Self::Response> {
         let id = self.id_or_path.clone();
-        let report =
-            tokio::task::spawn_blocking(move || crate::worktree::clean_artifacts_mgmt(&id))
-                .await
-                .map_err(|e| WorkspaceError::HubError(e.to_string()))?
-                .map_err(|e| WorkspaceError::HubError(e.to_string()))?;
+        let report = xai_spawn::spawn_blocking(move || crate::worktree::clean_artifacts_mgmt(&id))
+            .await
+            .map_err(|e| WorkspaceError::HubError(e.to_string()))?
+            .map_err(|e| WorkspaceError::HubError(e.to_string()))?;
         serde_json::to_value(report).map_err(|e| WorkspaceError::HubError(e.to_string()))
     }
 }

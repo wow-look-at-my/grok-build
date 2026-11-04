@@ -14,6 +14,16 @@ const INPUT_TAIL_CHARS: usize = 32_000;
 /// Upper bound on the per-session summary history, so a long session cannot grow it without limit.
 pub(crate) const THINKING_SUMMARY_HISTORY_CAPACITY: usize = 64;
 
+/// What the client shows when the provider refused the summary request.
+pub(crate) fn summary_refusal_text(model: &str, explanation: Option<&str>) -> String {
+    let mut text = format!("{model} refused this as a safety violation");
+    if let Some(explanation) = explanation {
+        text.push_str(": ");
+        text.push_str(explanation);
+    }
+    text
+}
+
 /// The words of every reasoning item in the response, in order.
 pub(crate) fn response_thinking_text(response: &ConversationResponse) -> String {
     response
@@ -75,11 +85,24 @@ pub(crate) fn select_prior_summaries(
 /// The thinking summaries one session has produced, oldest first, keyed by
 /// the `stream_start_ms` of the call each describes.
 pub(crate) struct ThinkingSummaryHistory {
+    state: parking_lot::Mutex<HistoryState>,
+}
+
+struct HistoryState {
     window_secs: u32,
     min_count: u32,
-    /// At least [`THINKING_SUMMARY_HISTORY_CAPACITY`].
-    capacity: usize,
-    entries: parking_lot::Mutex<VecDeque<(i64, String)>>,
+    entries: VecDeque<(i64, String)>,
+}
+
+impl HistoryState {
+    /// Drop the oldest entries past the capacity. The capacity is at least
+    /// [`THINKING_SUMMARY_HISTORY_CAPACITY`].
+    fn trim(&mut self) {
+        let capacity = (self.min_count as usize).max(THINKING_SUMMARY_HISTORY_CAPACITY);
+        while self.entries.len() > capacity {
+            self.entries.pop_front();
+        }
+    }
 }
 
 impl Default for ThinkingSummaryHistory {
@@ -94,30 +117,38 @@ impl Default for ThinkingSummaryHistory {
 impl ThinkingSummaryHistory {
     pub(crate) fn new(window_secs: u32, min_count: u32) -> Self {
         Self {
-            window_secs,
-            min_count,
-            capacity: (min_count as usize).max(THINKING_SUMMARY_HISTORY_CAPACITY),
-            entries: parking_lot::Mutex::new(VecDeque::new()),
+            state: parking_lot::Mutex::new(HistoryState {
+                window_secs,
+                min_count,
+                entries: VecDeque::new(),
+            }),
         }
+    }
+
+    /// Apply a new lookback window and minimum count. The next call uses them.
+    pub(crate) fn set_limits(&self, window_secs: u32, min_count: u32) {
+        let mut state = self.state.lock();
+        state.window_secs = window_secs;
+        state.min_count = min_count;
+        state.trim();
     }
 
     /// The summaries the call at `stream_start_ms` should be given, oldest first.
     pub(crate) fn prior_for(&self, stream_start_ms: i64) -> Vec<String> {
+        let state = self.state.lock();
         select_prior_summaries(
-            &self.entries.lock(),
+            &state.entries,
             stream_start_ms,
-            self.window_secs,
-            self.min_count,
+            state.window_secs,
+            state.min_count,
         )
     }
 
     /// Record a produced summary, keeping the buffer bounded.
     pub(crate) fn record(&self, stream_start_ms: i64, summary: String) {
-        let mut entries = self.entries.lock();
-        entries.push_back((stream_start_ms, summary));
-        while entries.len() > self.capacity {
-            entries.pop_front();
-        }
+        let mut state = self.state.lock();
+        state.entries.push_back((stream_start_ms, summary));
+        state.trim();
     }
 }
 
@@ -312,6 +343,23 @@ mod tests {
             "a raised min-count must not be silently trimmed to the default capacity"
         );
         assert_eq!(all.last().unwrap(), &format!("summary {}", requested + 4));
+    }
+
+    #[test]
+    fn set_limits_applies_to_the_next_selection() {
+        let history = ThinkingSummaryHistory::new(0, 0);
+        for i in 0..4 {
+            history.record(1_000 * i, format!("summary {i}"));
+        }
+        assert!(history.prior_for(4_000).is_empty());
+        history.set_limits(0, 2);
+        assert_eq!(
+            history.prior_for(4_000),
+            vec!["summary 2".to_string(), "summary 3".to_string()],
+            "a raised min-count must reach a running session"
+        );
+        history.set_limits(120, 0);
+        assert_eq!(history.prior_for(4_000).len(), 4);
     }
 
     #[test]

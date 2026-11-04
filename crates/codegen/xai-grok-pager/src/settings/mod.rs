@@ -17,7 +17,9 @@
 //! This mirrors the `ActionRegistry` pattern. No `LazyLock`, no global state.
 
 pub mod defs;
+pub mod model_groups;
 pub mod registry;
+pub mod subagent_models;
 
 pub use registry::{
     CodingDataSharingLock, DynamicEnumSource, EnumChoice, FeatureOverrideState, OwnedEnumChoice,

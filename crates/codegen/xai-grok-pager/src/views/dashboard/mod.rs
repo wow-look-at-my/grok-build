@@ -42,27 +42,28 @@ pub use chrome::HeaderUpgradeCta;
 pub(crate) use render::render_dashboard;
 pub use render::{popup_rect, render_popup_overlay};
 pub use row::{
-    DashboardRow, RowBadge, build_rows_with_roster, classify_top_level, roster_activity_to_state,
-    sort_rows,
+    DashboardRow, RowBadge, build_rows_with_roster, build_rows_with_roster_and_inactive,
+    classify_top_level, roster_activity_to_state, sort_rows,
 };
 pub(crate) use row::{WorkspaceRowInputs, build_rows_with_workspace};
 pub(crate) use state::DashboardStopAction;
 pub use state::{
     DashboardDispatchMode, DashboardRowId, DashboardState, Filter, FilterValue, Focusable,
-    Grouping, LocationCandidate, LocationPickerState, PendingDispatchModel, PersistedDashboard,
-    PersistedRowId, RowState, SectionKey, SessionIdResolver, ShortcutsModalState, load_persisted,
-    parse_filter, parse_row_state_token,
+    Grouping, InactiveMoves, LocationCandidate, LocationPickerState, PendingDispatchModel,
+    PersistedDashboard, PersistedRowId, RowState, SectionKey, SessionIdResolver,
+    ShortcutsModalState, load_persisted, parse_filter, parse_row_state_token,
 };
 
 /// Top-level agents visible in the dashboard's row list, in the exact order [`render_dashboard`]
 /// paints them. "Previous" / "next" then follow what the user actually sees instead of the agent
-/// map's insertion order.
+/// map's insertion order. `current` is the attached agent; see [`cycle_ids`].
 pub fn overlay_cycle_order(
     state: &DashboardState,
     agents: &indexmap::IndexMap<crate::app::agent::AgentId, crate::app::agent_view::AgentView>,
+    current: Option<crate::app::agent::AgentId>,
 ) -> Vec<crate::app::agent::AgentId> {
     let home = render::cached_home();
-    let rows = build_rows_with_roster(
+    let rows = build_rows_with_roster_and_inactive(
         agents,
         &state.pinned,
         &state.reorder,
@@ -70,10 +71,24 @@ pub fn overlay_cycle_order(
         &state.filter,
         home,
         &[],
+        &state.inactive_moves,
     );
+    cycle_ids(&rows, current)
+}
+
+/// The top-level agents `‹`/`›` walk. An Inactive row is left out, except
+/// `current`, so the user can still cycle away from it.
+pub(crate) fn cycle_ids(
+    rows: &[DashboardRow],
+    current: Option<crate::app::agent::AgentId>,
+) -> Vec<crate::app::agent::AgentId> {
     rows.iter()
         .filter_map(|r| match &r.id {
-            DashboardRowId::TopLevel(id) => Some(*id),
+            DashboardRowId::TopLevel(id)
+                if r.state != RowState::Inactive || Some(*id) == current =>
+            {
+                Some(*id)
+            }
             _ => None,
         })
         .collect()

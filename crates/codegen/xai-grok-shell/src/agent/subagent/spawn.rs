@@ -212,13 +212,16 @@ impl coordinator::ChildRunner for ShellChildRunner {
                     parent_session_id = %parent_sid,
                     subagent_id = %run.request.id,
                 ));
-                handle.spawn(crate::agent::subagent::run_shell_child(
-                    run,
-                    ctx,
-                    completion_data,
-                    gateway,
-                    root_span,
-                ))
+                xai_spawn::spawn_on(
+                    handle,
+                    crate::agent::subagent::run_shell_child(
+                        run,
+                        ctx,
+                        completion_data,
+                        gateway,
+                        root_span,
+                    ),
+                )
             };
             drop(root_parent);
             join_worker_task(
@@ -304,7 +307,7 @@ impl coordinator::ChildRunner for ShellChildRunner {
         };
         match worker_runtime() {
             Ok(handle) => {
-                let task = handle.spawn(async move { present() });
+                let task = xai_spawn::spawn_on(handle, async move { present() });
                 let mut tasks = self.presentations.borrow_mut();
                 tasks.retain(|t| !t.is_finished());
                 tasks.push(tokio_util::task::AbortOnDropHandle::new(task));
@@ -379,7 +382,7 @@ pub(crate) fn spawn_subagent_coordinator(
         buffered_completion_output_cap: None,
         resource_lock: Default::default(),
     };
-    tokio::task::spawn_local(
+    xai_spawn::spawn_local(
         coordinator::SubagentCoordinator::from_channel(rx, runner, config).run(),
     );
 }

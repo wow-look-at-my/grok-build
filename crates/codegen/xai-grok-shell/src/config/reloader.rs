@@ -36,7 +36,7 @@ pub enum ConfigUpdate {
     /// Updated `[compat]` vendor-compatibility config.
     /// It is applied on the next agent (re)build, which re-resolves `compat_resolved`.
     Compat(Box<xai_grok_tools::types::compat::CompatConfigToml>),
-    /// The `[model.*]` entries in config.toml changed.
+    /// The `[model.*]`, `[models]` or `[model_groups]` tables in config.toml changed.
     /// The agent should re-resolve its model list (BYOK models added/removed, default or surprise changed).
     ModelsChanged,
     /// `~/.grok/models_cache.json` was rewritten on disk (possibly by another grok process sharing the home dir). The agent should consult the cache via `ModelsManager::reload_from_disk_cache`.
@@ -45,6 +45,8 @@ pub enum ConfigUpdate {
     ModelsCacheChanged,
     /// A key the output-rate floor resolves from changed. Every resident session re-reads its floor.
     OutputRateFloorChanged,
+    /// `[ui].thinking_summaries` or a `[ui].thinking_summary_history_*` key changed. Every resident session re-reads them.
+    ThinkingSummariesChanged,
     /// Updated UI settings; the agent broadcasts `x.ai/config_changed` to IPC clients.
     Ui { theme: Option<String>, yolo: bool },
 }
@@ -333,13 +335,7 @@ impl ConfigReloader {
                 .send(ConfigUpdate::Compat(Box::new(new_compat)));
         }
 
-        // Models: compare [model] (BYOK entries) and [models] (default, surprise) tables
-        // Use toml::Value comparison (covers all fields including nested model entries).
-        let old_model_table = self.last_global_config.get("model");
-        let new_model_table = new_global.get("model");
-        let old_models_table = self.last_global_config.get("models");
-        let new_models_table = new_global.get("models");
-        if old_model_table != new_model_table || old_models_table != new_models_table {
+        if model_tables_changed(&self.last_global_config, &new_global) {
             info!("model config change detected");
             let _ = self.config_update_tx.send(ConfigUpdate::ModelsChanged);
         }
@@ -351,6 +347,14 @@ impl ConfigReloader {
             let _ = self
                 .config_update_tx
                 .send(ConfigUpdate::OutputRateFloorChanged);
+        }
+
+        if thinking_summary_inputs(&self.last_global_config) != thinking_summary_inputs(&new_global)
+        {
+            info!("thinking-summary config change detected");
+            let _ = self
+                .config_update_tx
+                .send(ConfigUpdate::ThinkingSummariesChanged);
         }
 
         // UI fields (theme, yolo)
@@ -372,6 +376,14 @@ impl ConfigReloader {
     }
 }
 
+/// True when a table that model resolution reads changed: `[model.*]`,
+/// `[models]`, `[model_groups]` or `[subagents]` (its per-type pins).
+fn model_tables_changed(old: &toml::Value, new: &toml::Value) -> bool {
+    ["model", "models", "model_groups", "subagents"]
+        .iter()
+        .any(|key| old.get(key) != new.get(key))
+}
+
 /// Every config value `Config::resolve_output_rate_floor` reads. A change to
 /// any one of them changes some session's policy.
 fn output_rate_floor_inputs(config: &toml::Value) -> [Option<&toml::Value>; 8] {
@@ -386,6 +398,17 @@ fn output_rate_floor_inputs(config: &toml::Value) -> [Option<&toml::Value>; 8] {
         config.get("output_rate_floor"),
         config.get("model"),
         config.get("model_providers"),
+    ]
+}
+
+/// Every config value a session's thinking summaries read.
+fn thinking_summary_inputs(config: &toml::Value) -> [Option<&toml::Value>; 3] {
+    let ui = config.get("ui");
+    let ui_key = |key: &str| ui.and_then(|ui| ui.get(key));
+    [
+        ui_key("thinking_summaries"),
+        ui_key("thinking_summary_history_window_secs"),
+        ui_key("thinking_summary_history_min_count"),
     ]
 }
 
@@ -665,7 +688,7 @@ mod tests {
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
-        let handle = tokio::spawn(reloader.run(event_rx, cancel.clone()));
+        let handle = xai_spawn::spawn(reloader.run(event_rx, cancel.clone()));
 
         event_tx
             .send(ConfigChangeEvent::ModelsCacheChanged)
@@ -685,7 +708,7 @@ mod tests {
     #[tokio::test]
     async fn reloader_dedupes_unchanged_project_mcp_config() {
         let tmp = tempfile::TempDir::new().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         let cwd = tmp.path().to_path_buf();
         let mcp_json = cwd.join(".mcp.json");
         std::fs::write(&mcp_json, r#"{"mcpServers":{}}"#).unwrap();
@@ -704,7 +727,7 @@ mod tests {
 
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
-        let handle = tokio::spawn(reloader.run(event_rx, cancel.clone()));
+        let handle = xai_spawn::spawn(reloader.run(event_rx, cancel.clone()));
 
         let evt = || ConfigChangeEvent::McpConfigChanged {
             path: mcp_json.clone(),
@@ -753,7 +776,7 @@ mod tests {
     #[test]
     fn hash_project_mcp_config_detects_create_and_change() {
         let tmp = tempfile::TempDir::new().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         let cwd = tmp.path();
 
         let empty = hash_project_mcp_config(cwd).expect("readable");
@@ -772,7 +795,7 @@ mod tests {
     #[test]
     fn hash_project_mcp_config_covers_ancestors() {
         let tmp = tempfile::TempDir::new().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        gix::init(tmp.path()).unwrap();
         let child = tmp.path().join("a").join("b");
         std::fs::create_dir_all(&child).unwrap();
 
@@ -892,6 +915,45 @@ yolo = true
             output_rate_floor_inputs(&base),
             output_rate_floor_inputs(&unrelated)
         );
+    }
+
+    #[test]
+    fn thinking_summary_inputs_see_every_summary_key_and_nothing_else() {
+        let base: toml::Value = toml::from_str("[ui]\ntheme = \"dark\"").unwrap();
+        for changed in [
+            "[ui]\ntheme = \"dark\"\nthinking_summaries = false",
+            "[ui]\ntheme = \"dark\"\nthinking_summary_history_window_secs = 30",
+            "[ui]\ntheme = \"dark\"\nthinking_summary_history_min_count = 2",
+        ] {
+            let other: toml::Value = toml::from_str(changed).unwrap();
+            assert_ne!(
+                thinking_summary_inputs(&base),
+                thinking_summary_inputs(&other),
+                "{changed}"
+            );
+        }
+        let unrelated: toml::Value = toml::from_str("[ui]\ntheme = \"light\"").unwrap();
+        assert_eq!(
+            thinking_summary_inputs(&base),
+            thinking_summary_inputs(&unrelated)
+        );
+    }
+
+    /// A slot row in the settings modal writes `[models]` or
+    /// `[model_groups]`. Either write must reach running sessions.
+    #[test]
+    fn model_tables_changed_sees_every_model_table_and_nothing_else() {
+        let base: toml::Value = toml::from_str("[ui]\ntheme = \"dark\"").unwrap();
+        for changed in [
+            "[ui]\ntheme = \"dark\"\n[models]\ncompaction = \"m\"",
+            "[ui]\ntheme = \"dark\"\n[model_groups.summaries]\nmodel = \"m\"",
+            "[ui]\ntheme = \"dark\"\n[model.local]\nmodel = \"m\"",
+        ] {
+            let other: toml::Value = toml::from_str(changed).unwrap();
+            assert!(model_tables_changed(&base, &other), "{changed}");
+        }
+        let unrelated: toml::Value = toml::from_str("[ui]\ntheme = \"light\"").unwrap();
+        assert!(!model_tables_changed(&base, &unrelated));
     }
 
     #[test]

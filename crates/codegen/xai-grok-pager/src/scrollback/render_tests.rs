@@ -1384,6 +1384,42 @@ fn message_block_content_width_subtracts_timestamp_reservation() {
     );
 }
 
+/// A message with a reported cost reserves the cost token beside the timestamp. The selection model must wrap at that
+/// same narrower width, or a drag selects text wrapped differently from the painted rows.
+#[test]
+fn selection_lines_match_painted_rows_when_message_reports_cost() {
+    let mut entry = make_markdown_entry(
+        "hello world foo bar baz qux quux corge grault garply waldo fred plugh xyzzy thud",
+    );
+    entry.cost_usd_ticks = Some(1_200_000_000);
+    entry.cache_hit_percent = Some(87);
+    let entries = vec![entry];
+    let viewport = Rect::new(0, 0, 40, 20);
+    let (result, buf) = render_with_scratch_and_buffer(&entries, viewport, 0, None);
+
+    let pane_content_width = result.selection_model.content_area.width;
+    let block = at(&result.selection_model.visible_blocks, 0);
+    let cost_reserved = "$0.12".len() as u16 + 1;
+    assert_eq!(
+        block.content_width,
+        pane_content_width.saturating_sub(10 + cost_reserved),
+        "the selection width must hold the timestamp and the cost token"
+    );
+
+    let lines = &at(&result.selection_model.ranges, 0).lines;
+    assert!(lines.len() > 1, "the message must wrap");
+    for line in lines {
+        let row = buffer_row_text(&buf, line.screen_y);
+        let start = usize::from(line.screen_x);
+        let painted = row.get(start..start + line.text.len()).unwrap_or("");
+        assert_eq!(
+            painted, line.text,
+            "row {} paints different text than the selection model holds",
+            line.screen_y
+        );
+    }
+}
+
 // ── map_hyperlinks_to_overlay ──
 
 use crate::scrollback::types::BlockLine;

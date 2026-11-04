@@ -4,7 +4,7 @@
 
 ## Features
 
-- Worktrees grok creates now live inside the repository, under `.grok/worktrees/<name>`, instead of under `~/.grok/worktrees`. Checkouts made by earlier releases stay where they are and keep working
+- Worktrees grok creates live under the grok home again, at `~/.grok/worktrees/<repo>/<name>`. Checkouts a release wrote inside their own repository, at `.grok/worktrees/<name>`, stay where they are and keep working
 
 # 1.0.41 — 2026-09-22
 

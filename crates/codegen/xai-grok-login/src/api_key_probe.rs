@@ -142,8 +142,13 @@ async fn probe_xai_api_key_at_url(key: &str, url: &str, timeout: Duration) -> Ap
         }
 
         let request = client
-            .get(url)
-            .header(reqwest::header::AUTHORIZATION, format!("Bearer {key}"))
+            .get(
+                url,
+                xai_grok_net::Auth::ApiKey {
+                    key: key.to_owned(),
+                    scheme: xai_grok_net::KeyScheme::Bearer,
+                },
+            )
             .timeout(remaining);
 
         let outcome = match request.send().await {
@@ -151,6 +156,11 @@ async fn probe_xai_api_key_at_url(key: &str, url: &str, timeout: Duration) -> Ap
                 let status = resp.status().as_u16();
                 let body = resp.bytes().await.unwrap_or_default();
                 classify_probe_attempt(status, &body)
+            }
+            // A refusal sent nothing, and every retry is refused the same way.
+            Err(e) if e.auth_refusal().is_some() => {
+                tracing::error!(error = %e, "api key probe: request refused");
+                AttemptOutcome::Done(ApiKeyProbeVerdict::Unknown)
             }
             Err(_) => AttemptOutcome::Retry,
         };

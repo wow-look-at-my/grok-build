@@ -4,6 +4,7 @@ edition.workspace = true
 name = "xai-grok-tools"
 version = "0.1.220-alpha.4"
 description = "Grok tools library"
+autotests = false
 
 [dependencies]
 anyhow = { workspace = true }
@@ -19,9 +20,9 @@ xai-tty-utils = { workspace = true }
 xai-grok-auth = { workspace = true }
 xai-grok-config = { path = "../xai-grok-config" }
 xai-grok-extra-ca = { workspace = true }
+xai-grok-net = { workspace = true }
 xai-grok-feedback = { workspace = true }
 xai-grok-tools-api = { path = "../xai-grok-tools-api" }
-xai-grok-workspace-types = { path = "../xai-grok-workspace-types" }
 xai-grok-version = { workspace = true }
 xai-interjection-core = { workspace = true }
 xai-message-delivery-core = { workspace = true }
@@ -35,20 +36,18 @@ ignore = { workspace = true }
 infer = { workspace = true }
 globset = { workspace = true }
 image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico"] }
-kamadak-exif = { workspace = true, optional = true }
-pdf_oxide = { workspace = true }
 # PPTX text extraction (implementations/read_file/pptx.rs). Deliberately NOT
 # `workspace = true`: the workspace `zip` pin has default features on, which
 # drag aes/bzip2/lzma/zstd into the shipped pager binary. PPTX entries are
 # only ever stored or deflated.
-zip = { version = "3", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 quick-xml = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 minijinja = { version = "2", features = ["custom_syntax"] }
 parking_lot = { workspace = true }
 htmd = { workspace = true }
-scraper = { workspace = true }
-reqwest = { workspace = true, features = ["rustls-tls", "json", "gzip", "brotli", "deflate"] }
+html5ever = { workspace = true }
+markup5ever_rcdom = { workspace = true }
 pulldown-cmark = { workspace = true }
 regex = { workspace = true }
 schemars = { workspace = true }
@@ -76,13 +75,11 @@ tokio = { workspace = true, features = [
     "sync",
 ] }
 tokio-util = { workspace = true, features = ["compat"] }
-tonic = { workspace = true }
 tracing = { workspace = true }
 unicode-normalization = { workspace = true, optional = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 wildmatch = { workspace = true }
-xai-grok-env = { workspace = true }
 serde_yaml = { workspace = true }
 shellexpand = "3.1"
 tempfile = { workspace = true }
@@ -95,6 +92,7 @@ xai-file-utils = { path = "../xai-file-utils" }
 xai-grok-otel = { workspace = true }
 dhat = { workspace = true, optional = true }
 zstd = { workspace = true }
+xai-spawn = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 command-fds = { version = "0.3", features = ["tokio"] }
@@ -110,15 +108,26 @@ libc = { workspace = true }
 windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+ctor = { workspace = true }
 pretty_assertions = { workspace = true }
+xai-grok-pdf = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
 wiremock = { workspace = true }
 xai-grok-test-support = { workspace = true }
 xai-test-utils = { workspace = true }
 
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
+
+# Its own binary: under `dhat-heap` it installs a `#[global_allocator]`.
+[[test]]
+name = "test_subagent_soak"
+path = "tests/test_subagent_soak.rs"
+
 [build-dependencies]
-reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
+request = { workspace = true, features = ["blocking", "rustls-tls"] }
 flate2 = { workspace = true }
 sha2 = { workspace = true }
 tar = { workspace = true }

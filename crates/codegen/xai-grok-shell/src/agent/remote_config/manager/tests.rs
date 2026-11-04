@@ -724,7 +724,7 @@ async fn a_session_waits_for_the_provider_listing() {
     let guard = mgr.begin_provider_discovery();
     let waiter = {
         let mgr = mgr.clone();
-        tokio::spawn(async move { mgr.wait_for_provider_discovery().await })
+        xai_spawn::spawn(async move { mgr.wait_for_provider_discovery().await })
     };
     tokio::task::yield_now().await;
     assert!(!waiter.is_finished(), "the wait must hold while listing");
@@ -3117,7 +3117,7 @@ async fn resolve_model_list_backfills_byok_window_from_models_own_provider_base(
             }))
         }),
     );
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
     // A BYOK entry at the DEFAULT sentinel, carrying its own base + API key.
     let mut byok = make_model_entry("deepseek-byok");
@@ -3131,7 +3131,7 @@ async fn resolve_model_list_backfills_byok_window_from_models_own_provider_base(
     prefetched.insert("deepseek-byok".to_owned(), byok);
 
     let cfg = crate::agent::config::Config::default();
-    let resolved = tokio::task::spawn_blocking(move || {
+    let resolved = xai_spawn::spawn_blocking(move || {
         crate::agent::config::resolve_model_list(&cfg, Some(prefetched))
     })
     .await

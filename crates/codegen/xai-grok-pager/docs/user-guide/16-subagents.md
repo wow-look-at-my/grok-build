@@ -305,7 +305,7 @@ plan = false                         # disable the plan subagent
 explore = "grok-4.6"                 # route explore to a specific model
 ```
 
-Per-type model overrides apply for any parent. Without an override, a subagent inherits the parent's model.
+Per-type model overrides apply for any parent. Without an override, a subagent inherits the parent's model. Settings lists one row per spawnable type under Models. Those Settings include the types your workspace defines and those a plugin provides, and each row writes its own `[subagents.models].<type>` entry.
 
 ### Model Selection by the Agent
 

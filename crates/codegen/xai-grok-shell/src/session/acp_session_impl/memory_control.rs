@@ -59,7 +59,7 @@ pub(crate) async fn initialize_v2_memory(
         })?;
     // SQLite migration/reconciliation and root canonicalization: keep them off the actor's LocalSet.
     let blocking_storage = storage.clone();
-    let policy = tokio::task::spawn_blocking(move || {
+    let policy = xai_spawn::spawn_blocking(move || {
         let storage = blocking_storage;
         let clock = xai_grok_memory::system_v2_clock();
         for (scope_dir, scope) in [
@@ -230,6 +230,17 @@ impl SessionActor {
             }
             (Some(MemoryDisabledReason::RolloutRestricted), _) => {
                 return "Memory cannot be enabled because this session's pinned rollout controls disable it."
+                    .to_owned();
+            }
+            (Some(MemoryDisabledReason::EphemeralWorkspace), _) => {
+                return "Memory cannot be enabled: this workspace is a temporary directory, \
+                        which memory does not track. Start Grok Build in a project directory."
+                    .to_owned();
+            }
+            (Some(MemoryDisabledReason::InitFailed), _) => {
+                return "Memory cannot be enabled: its storage failed to initialize when this \
+                        session started. The log has the error (search for MEMORY_INIT). \
+                        Start a new session to retry."
                     .to_owned();
             }
             (

@@ -1,3 +1,5 @@
+// types.rs holds the types code.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::num::NonZeroU64;
@@ -233,6 +235,13 @@ pub struct ChatRequestMessage {
     /// The reasoning/thinking content from the model (for models that support extended thinking)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+    /// The same text as `reasoning_content`, under the name Ollama reads.
+    #[serde(
+        rename = "reasoning",
+        skip_deserializing,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reasoning_alias: Option<String>,
 }
 
 impl ChatRequestMessage {
@@ -245,6 +254,7 @@ impl ChatRequestMessage {
             tool_call_id: None,
             model_id: None,
             reasoning_content: None,
+            reasoning_alias: None,
         }
     }
 
@@ -257,6 +267,7 @@ impl ChatRequestMessage {
             tool_call_id: None,
             model_id: None,
             reasoning_content: None,
+            reasoning_alias: None,
         }
     }
 
@@ -273,6 +284,7 @@ impl ChatRequestMessage {
             tool_call_id: None,
             model_id: Some(model_id.into()),
             reasoning_content,
+            reasoning_alias: None,
         }
     }
 
@@ -285,6 +297,7 @@ impl ChatRequestMessage {
             tool_call_id: None,
             model_id: None,
             reasoning_content: None,
+            reasoning_alias: None,
         }
     }
 
@@ -297,6 +310,7 @@ impl ChatRequestMessage {
             tool_call_id: Some(tool_call_id.into()),
             model_id: None,
             reasoning_content: None,
+            reasoning_alias: None,
         }
     }
 
@@ -478,7 +492,11 @@ pub struct ChatCompletionResponse {
     /// `null` reads as no choices: a gateway written in Go marshals an unset slice as `null`.
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub choices: Vec<ChatChoice>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_reported_usage"
+    )]
     pub usage: Option<Usage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub citations: Option<Vec<String>>,
@@ -498,6 +516,7 @@ pub enum FinishReason {
     Stop,
     Length,
     ToolCalls,
+    #[serde(alias = "refusal", alias = "safety")]
     ContentFilter,
     FunctionCall,
     /// Provider-reported error finish (OpenRouter sends this when the upstream provider fails mid-generation).
@@ -553,6 +572,24 @@ impl ToolCallFunction {
         Self {
             name: name.into(),
             arguments: arguments.to_string(),
+        }
+    }
+}
+
+/// A `usage` object without its token counts is unknown usage. It reads as `None`, so the chunk
+/// that carries it, and that chunk's finish reason, still parse.
+fn deserialize_reported_usage<'de, D>(deserializer: D) -> Result<Option<Usage>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let Some(value) = Option::<serde_json::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match serde_json::from_value(value) {
+        Ok(usage) => Ok(Some(usage)),
+        Err(error) => {
+            tracing::warn!(%error, "response usage has no token counts");
+            Ok(None)
         }
     }
 }
@@ -734,7 +771,11 @@ pub struct ChatCompletionChunk {
     /// `null` reads as no choices.
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub choices: Vec<ChatChunkChoice>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_reported_usage"
+    )]
     pub usage: Option<Usage>,
     #[serde(
         default,
@@ -1437,25 +1478,30 @@ pub struct ChatMessageProfile {
     pub accepts_model_id: bool,
     /// Whether the target accepts `reasoning_content` on replayed messages.
     pub accepts_reasoning_content: bool,
+    /// Whether the target accepts `reasoning` on replayed messages. Ollama reads only that name.
+    #[serde(default)]
+    pub accepts_reasoning: bool,
 }
 
 impl ChatMessageProfile {
-    /// Today's behavior: emit both properties. This is what every provider
-    /// except a strict-schema one expects.
+    /// Emit every property. This is what every provider except a
+    /// strict-schema one expects.
     pub const PERMISSIVE: Self = Self {
         accepts_model_id: true,
         accepts_reasoning_content: true,
+        accepts_reasoning: true,
     };
 
-    /// A target whose schema defines neither property: omit both.
+    /// A target whose schema defines none of the properties: omit them all.
     pub const STRICT: Self = Self {
         accepts_model_id: false,
         accepts_reasoning_content: false,
+        accepts_reasoning: false,
     };
 
-    /// Whether this profile emits both properties (i.e. nothing is suppressed).
+    /// Whether this profile emits every property (i.e. nothing is suppressed).
     pub fn is_permissive(&self) -> bool {
-        self.accepts_model_id && self.accepts_reasoning_content
+        self.accepts_model_id && self.accepts_reasoning_content && self.accepts_reasoning
     }
 
     /// Narrow `self` by `other`: a property rejected by either side is
@@ -1465,19 +1511,28 @@ impl ChatMessageProfile {
             accepts_model_id: self.accepts_model_id && other.accepts_model_id,
             accepts_reasoning_content: self.accepts_reasoning_content
                 && other.accepts_reasoning_content,
+            accepts_reasoning: self.accepts_reasoning && other.accepts_reasoning,
         }
     }
 
     /// Drop the properties named as unsupported by a provider error, if any.
     /// Returns `None` when nothing changed, so a retry loop can tell a
     /// productive strip from a no-op.
-    pub fn strip_named(&mut self, names_model_id: bool, names_reasoning_content: bool) -> bool {
+    pub fn strip_named(
+        &mut self,
+        names_model_id: bool,
+        names_reasoning_content: bool,
+        names_reasoning: bool,
+    ) -> bool {
         let before = *self;
         if names_model_id {
             self.accepts_model_id = false;
         }
         if names_reasoning_content {
             self.accepts_reasoning_content = false;
+        }
+        if names_reasoning {
+            self.accepts_reasoning = false;
         }
         *self != before
     }
@@ -2024,6 +2079,35 @@ mod tests {
         assert!(chunk.choices.is_empty());
         // The usage riding on that chunk is the whole reason to keep it.
         assert_eq!(chunk.usage.map(|u| u.total_tokens), Some(28));
+    }
+
+    /// A refusal's closing chunk can carry a `usage` with no token counts. Its finish reason has
+    /// to survive the parse, or the client reports a parse error in place of the refusal.
+    #[test]
+    fn a_refusal_chunk_with_empty_usage_keeps_its_finish_reason() {
+        for reason in ["content_filter", "refusal", "safety"] {
+            let body = format!(
+                r#"{{
+                    "id": "chatcmpl-1",
+                    "object": "chat.completion.chunk",
+                    "created": 1,
+                    "model": "m",
+                    "choices": [{{"index": 0, "delta": {{}}, "finish_reason": "{reason}"}}],
+                    "usage": {{}}
+                }}"#
+            );
+            let chunk: ChatCompletionChunk =
+                serde_json::from_str(&body).expect("the refusal chunk must parse");
+            assert_eq!(
+                chunk.choices[0].finish_reason,
+                Some(FinishReason::ContentFilter),
+                "{reason}"
+            );
+            assert!(
+                chunk.usage.is_none(),
+                "no counts is unknown usage, not zero"
+            );
+        }
     }
 
     #[test]

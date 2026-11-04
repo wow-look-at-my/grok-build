@@ -51,13 +51,13 @@ fn retry_backoff(attempt: u32) -> std::time::Duration {
 /// Retries transient failures with backoff; auth errors fail immediately.
 async fn fetch_managed_config(
     url: &str,
-    token: &str,
+    auth: &xai_grok_net::Auth,
     max_attempts: u32,
     echo_principal: Option<&str>,
 ) -> Result<ManagedConfigResponse, ManagedConfigError> {
     crate::http::send_with_retry_escaping_pool(
-        move |client: reqwest::Client| async move {
-            fetch_managed_config_once(&client, url, token, echo_principal).await
+        move |client: xai_grok_net::HttpClient| async move {
+            fetch_managed_config_once(&client, url, auth.clone(), echo_principal).await
         },
         max_attempts,
         |e: &ManagedConfigError| e.is_retryable(),
@@ -88,25 +88,24 @@ pub(super) fn map_transport_failure(failure: crate::http::TransportFailure) -> M
     }
 }
 
-fn map_send_error(e: &reqwest::Error) -> ManagedConfigError {
+fn map_send_error(e: &xai_grok_net::Error) -> ManagedConfigError {
     map_transport_failure(crate::http::TransportFailure::classify(e))
 }
 
 async fn fetch_managed_config_once(
-    client: &reqwest::Client,
+    client: &xai_grok_net::HttpClient,
     url: &str,
-    token: &str,
+    auth: xai_grok_net::Auth,
     echo_principal: Option<&str>,
 ) -> Result<ManagedConfigResponse, ManagedConfigError> {
     let mut request = client
-        .get(url)
-        .header("Authorization", format!("Bearer {}", token))
+        .get(url, auth)
         .timeout(std::time::Duration::from_secs(15));
     // Replay-probe echo (telemetry only); fail-open so a corrupt sidecar never bricks the fetch.
     if let Some(nonce) = xai_grok_config::signed_policy::stored_envelope_nonce(
         &crate::util::grok_home::grok_home(),
         echo_principal,
-    ) && let Ok(value) = reqwest::header::HeaderValue::from_str(&nonce)
+    ) && let Ok(value) = xai_grok_net::header::HeaderValue::from_str(&nonce)
     {
         request = request.header(
             xai_grok_config::signed_policy::MANAGED_CONFIG_NONCE_ECHO_HEADER,
@@ -131,7 +130,7 @@ async fn fetch_managed_config_once(
         }
     };
 
-    // reqwest's `json()` tags a mid-body drop and malformed JSON both as `Kind::Decode`;
+    // request's `json()` tags a mid-body drop and malformed JSON both as
     // reading `bytes()` first keeps interruption (retryable) apart from bad JSON (terminal).
     let bytes = match resp.bytes().await {
         Ok(b) => b,
@@ -169,7 +168,7 @@ impl ManagedConfigRefresher {
     ) -> Self {
         let cancel = parent.child_token();
         let stop = cancel.clone();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             tokio::select! {
                 // Biased: an already-cancelled token must not even start the work.
                 biased;
@@ -326,8 +325,13 @@ async fn fetch_for_principal(
         crate::agent::config::EndpointsConfig::from_effective_config().resolve_managed_config_url();
 
     if let Some(auth) = team_override.or_else(store::read_active_team_auth) {
-        let body =
-            fetch_managed_config(&url, &auth.key, max_attempts, auth.team_id.as_deref()).await?;
+        let body = fetch_managed_config(
+            &url,
+            &auth.wire_auth(),
+            max_attempts,
+            auth.team_id.as_deref(),
+        )
+        .await?;
         return Ok(FetchedConfig::Team {
             auth: Box::new(auth),
             body,
@@ -467,7 +471,7 @@ pub async fn ensure_managed_policy_present(
 async fn refreshed_team_principal(
     auth_manager: &std::sync::Arc<xai_grok_login::AuthManager>,
 ) -> Option<GrokAuth> {
-    let refresh = tokio::spawn({
+    let refresh = xai_spawn::spawn({
         let auth_manager = auth_manager.clone();
         async move { auth_manager.auth().await }
     });

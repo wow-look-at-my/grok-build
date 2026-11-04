@@ -164,7 +164,7 @@ pub(crate) async fn sync_bundle_to_root(
     match fetched {
         FetchedBundle::Archive(bytes) => {
             let root_owned = root.to_path_buf();
-            let manifest = tokio::task::spawn_blocking(move || {
+            let manifest = xai_spawn::spawn_blocking(move || {
                 bundle::extract_bundle_archive(&root_owned, &bytes)
             })
             .await
@@ -189,7 +189,7 @@ pub(crate) async fn sync_bundle_to_root(
             let agents_count = legacy_bundle.agents.len();
             let skills_count = legacy_bundle.skills.len();
             let root_owned = root.to_path_buf();
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 bundle::write_bundle_to_cache(&root_owned, &legacy_bundle)
             })
             .await
@@ -458,7 +458,7 @@ mod tests {
                 ),
             )
             .with_state(state);
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (format!("{base}/v1"), seen_headers, handle)
     }
     #[test]
@@ -751,7 +751,7 @@ mod tests {
                 }),
             )
             .with_state(state);
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (format!("{base}/v1"), handle)
     }
     #[tokio::test(flavor = "current_thread")]

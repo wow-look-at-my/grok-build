@@ -23,6 +23,7 @@ uuid = { workspace = true, features = ["v4"] }
 xai-grok-config = { workspace = true }
 xai-grok-telemetry = { workspace = true }
 xai-sqlite-journal = { workspace = true }
+xai-spawn = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

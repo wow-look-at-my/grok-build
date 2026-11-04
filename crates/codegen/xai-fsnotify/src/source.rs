@@ -77,13 +77,10 @@ impl FsEventSource {
         let shutdown = CancellationToken::new();
 
         // Detached: cancellation via `shutdown` (biased-selected in the loop).
-        handle.spawn(event_loop(
-            raw_rx,
-            out_tx.clone(),
-            vcs,
-            cooldown,
-            shutdown.clone(),
-        ));
+        xai_spawn::spawn_on(
+            &handle,
+            event_loop(raw_rx, out_tx.clone(), vcs, cooldown, shutdown.clone()),
+        );
 
         Ok(Self {
             out_tx,
@@ -123,7 +120,7 @@ impl Drop for FsEventSource {
 /// `sapling` gates only suppression, not discovery.
 #[derive(Default)]
 struct VcsDirs {
-    /// `.git` dir from git2 discovery (handles worktrees / gitlinks).
+    /// `.git` dir from gix discovery (handles worktrees / gitlinks).
     git_dir: Option<PathBuf>,
     /// `.sl` working-copy dir (ancestor walk), or `None` if absent.
     sl_dir: Option<PathBuf>,
@@ -133,9 +130,7 @@ struct VcsDirs {
 
 fn discover_vcs(cwd: &Path, sapling: bool) -> VcsDirs {
     VcsDirs {
-        git_dir: git2::Repository::discover(cwd)
-            .ok()
-            .map(|r| r.path().to_path_buf()),
+        git_dir: crate::vcs::discover_repo(cwd).map(|r| r.git_dir().to_path_buf()),
         sl_dir: find_sl_dir(cwd),
         sapling,
     }

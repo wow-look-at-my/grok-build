@@ -73,10 +73,10 @@ mod expand_home_tests {
 }
 /// True when `candidate` is `trusted_base` or a path under it (same scheme, host, and port).
 pub fn matches_trusted_base_url(candidate: &str, trusted_base: &str) -> bool {
-    let Ok(candidate) = reqwest::Url::parse(candidate) else {
+    let Ok(candidate) = xai_grok_net::Url::parse(candidate) else {
         return false;
     };
-    let Ok(trusted) = reqwest::Url::parse(trusted_base) else {
+    let Ok(trusted) = xai_grok_net::Url::parse(trusted_base) else {
         return false;
     };
     let trusted_path = trusted.path();
@@ -111,7 +111,7 @@ pub fn is_cli_chat_proxy_url(url: &str) -> bool {
     if is_trusted_cli_chat_proxy_url(url) {
         return true;
     }
-    if let Ok(u) = reqwest::Url::parse(url)
+    if let Ok(u) = xai_grok_net::Url::parse(url)
         && let Some(h) = u.host_str()
         && (h == "localhost" || h == "127.0.0.1" || h == "::1")
     {
@@ -124,6 +124,11 @@ pub fn is_cli_chat_proxy_url(url: &str) -> bool {
 pub fn is_xai_api_url(url: &str) -> bool {
     is_xai_api_url_impl(url, false)
 }
+/// True when the xAI session token may be attached for `url`: an xAI
+/// endpoint, or a blank URL, which builds no request.
+pub fn may_carry_xai_session(url: &str) -> bool {
+    url.trim().is_empty() || is_xai_api_url(url)
+}
 /// Like [`is_xai_api_url`], but requires `https` on every arm, so a session bearer is never attached to a cleartext endpoint, including loopback.
 /// A co-located process could otherwise read a token sent to `http://localhost`.
 pub fn is_xai_api_bearer_url(url: &str) -> bool {
@@ -134,7 +139,7 @@ pub fn is_xai_api_bearer_url(url: &str) -> bool {
 }
 /// True for trusted first-party xAI HTTPS routes, excluding arbitrary loopback URLs.
 pub fn is_trusted_xai_https_url(url: &str) -> bool {
-    let Ok(parsed) = reqwest::Url::parse(url) else {
+    let Ok(parsed) = xai_grok_net::Url::parse(url) else {
         return false;
     };
     if parsed.scheme() != "https" {
@@ -157,12 +162,12 @@ fn is_xai_api_url_impl(url: &str, require_https: bool) -> bool {
     if is_cli_chat_proxy_url(url) {
         return true;
     }
-    reqwest::Url::parse(url)
+    xai_grok_net::Url::parse(url)
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned))
         .is_some_and(|host| host == "x.ai" || host.ends_with(".x.ai"))
 }
-fn is_loopback_host(parsed: &reqwest::Url) -> bool {
+fn is_loopback_host(parsed: &xai_grok_net::Url) -> bool {
     match parsed.host() {
         Some(url::Host::Domain(host)) => host == "localhost",
         Some(url::Host::Ipv4(ip)) => ip.is_loopback(),

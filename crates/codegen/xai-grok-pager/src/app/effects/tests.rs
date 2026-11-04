@@ -1054,7 +1054,7 @@ fn spawn_fake_acp_agent(
 ) -> Arc<AtomicUsize> {
     let counter = Arc::new(AtomicUsize::new(0));
     let counter_clone = counter.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let xai_acp_lib::AcpAgentMessage::ExtNotification(args) = msg {
                 if args.request.method.as_ref() == "x.ai/yolo_mode_changed" {
@@ -1498,7 +1498,7 @@ async fn check_marketplace_updates_dispatches_update_and_skips_failed_notificati
     let saw_wrong_action_for_task = saw_wrong_action.clone();
     let saw_success_notification_for_task = saw_success_notification.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
                 match args.request.method.as_ref() {
@@ -1714,7 +1714,7 @@ async fn fetch_session_list_pushes_query_and_echoes_seq() {
     let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
     let captured_for_task = captured.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
                 assert_eq!(args.request.method.as_ref(), "x.ai/session/list");
@@ -1882,7 +1882,7 @@ async fn fetch_dashboard_sessions_explicitly_excludes_headless() {
     let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::default();
     let captured_for_task = captured.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
                 assert_eq!(args.request.method.as_ref(), "x.ai/session/list");
@@ -1924,7 +1924,7 @@ async fn fetch_session_list_sends_kind_facet_filter() {
     let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
     let captured_for_task = captured.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
                 let params: serde_json::Value = serde_json::from_str(
@@ -1972,7 +1972,7 @@ async fn fetch_workflows_list_sends_session_id() {
     let captured: Arc<Mutex<Vec<serde_json::Value>>> = Arc::default();
     let captured_for_task = captured.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
                 assert_eq!(args.request.method.as_ref(), "x.ai/workflows/list");
@@ -2061,7 +2061,7 @@ async fn consecutive_mode_changes_reach_the_shell_in_press_order() {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AcpAgentMessage>();
 
     // The shell half of the wire.
-    let peer = tokio::spawn(async move {
+    let peer = xai_spawn::spawn(async move {
         let mut seen: Vec<String> = Vec::new();
         while let Some(msg) = rx.recv().await {
             let AcpAgentMessage::SetSessionMode(args) = msg else {
@@ -2123,7 +2123,7 @@ async fn deep_search_sessions_echoes_routing_and_policy() {
     let captured: Arc<Mutex<Vec<(String, serde_json::Value)>>> = Arc::default();
     let captured_for_task = captured.clone();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let AcpAgentMessage::ExtMethod(args) = msg {
                 let params = serde_json::from_str(args.request.params.get())
@@ -3068,7 +3068,7 @@ async fn hydrate_team_capability_adapter_maps_every_reply_to_the_asking_identity
     for (reply, expected) in replies {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let asked = identity.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let Some(AcpAgentMessage::ExtMethod(args)) = rx.recv().await else {
                 panic!("one ext request")
             };

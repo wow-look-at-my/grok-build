@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use opentelemetry_http::{HttpClient, HttpError};
 #[derive(Debug, Clone)]
-pub struct BlockingOtlpClient(reqwest::blocking::Client);
+pub struct BlockingOtlpClient(xai_grok_net::HttpClient);
 
 #[async_trait]
 impl HttpClient for BlockingOtlpClient {
@@ -65,7 +65,7 @@ pub fn build_blocking_client_with_identity(
     for path in extra_ca_pem_files {
         let pem = std::fs::read(path)
             .map_err(|e| format!("reading OTEL_EXPORTER_OTLP_CERTIFICATE {path:?}: {e}"))?;
-        let certs = reqwest::Certificate::from_pem_bundle(&pem)
+        let certs = xai_grok_net::Certificate::from_pem_bundle(&pem)
             .map_err(|e| format!("parsing OTEL_EXPORTER_OTLP_CERTIFICATE {path:?}: {e}"))?;
 
         if certs.is_empty() {
@@ -110,33 +110,33 @@ pub fn build_blocking_client_with_identity(
         .name("otlp-client-build".into())
         .spawn(move || {
             let identity = match identity_pem {
-                Some(pem) => Some(reqwest::Identity::from_pem(&pem).map_err(|e| {
+                Some(pem) => Some(xai_grok_net::Identity::from_pem(&pem).map_err(|e| {
                     format!("parsing OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE/KEY: {e}")
                 })?),
                 None => None,
             };
 
-            xai_grok_extra_ca::build_blocking_reqwest_client(|builder| {
-                let mut builder = builder.timeout(timeout).connect_timeout(timeout);
-                for cert in &extra_roots {
-                    builder = builder.add_root_certificate(cert.clone());
-                }
-                if let Some(identity) = &identity {
-                    builder = builder.identity(identity.clone());
-                }
-                builder
-            })
-            .map_err(|e| {
-                let mut detail = e.to_string();
-                let mut source = std::error::Error::source(&e);
-                while let Some(s) = source {
-                    detail.push_str(": ");
-                    detail.push_str(&s.to_string());
-                    source = s.source();
-                }
-                format!("building blocking OTLP HTTP client: {detail}")
-            })
-            .map(BlockingOtlpClient)
+            let mut options = xai_grok_net::ClientOptions::default()
+                .timeout(timeout)
+                .connect_timeout(timeout);
+            for cert in extra_roots {
+                options = options.add_root_certificate(cert);
+            }
+            if let Some(identity) = identity {
+                options = options.identity(identity);
+            }
+            xai_grok_net::HttpClient::build(options)
+                .map_err(|e| {
+                    let mut detail = e.to_string();
+                    let mut source = std::error::Error::source(&e);
+                    while let Some(s) = source {
+                        detail.push_str(": ");
+                        detail.push_str(&s.to_string());
+                        source = s.source();
+                    }
+                    format!("building blocking OTLP HTTP client: {detail}")
+                })
+                .map(BlockingOtlpClient)
         })
         .map_err(|e| format!("spawning OTLP client builder thread: {e}"))?
         .join()
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn blocking_otlp_client_builds_with_generated_client_identity() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let _ = rustls::crypto::ring::default_provider().install_default();
 
         use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair};
 

@@ -462,7 +462,7 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
         .json_schema
         .as_ref()
         .map(|schema| crate::messages::OutputFormat::JsonSchema {
-            schema: schema.clone(),
+            schema: super::output_schema::for_messages_api(schema),
         });
 
     let max_tokens = req.max_output_tokens.unwrap_or(0);

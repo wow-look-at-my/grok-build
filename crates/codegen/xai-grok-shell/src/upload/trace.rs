@@ -125,17 +125,13 @@ pub(super) struct UploadFailure<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UploadFailureLogLevel {
     Error,
-    Warn,
     Debug,
 }
-/// ERROR is what logging / alerting treat as a first-party incident, so it is reserved for first-party backends (proxy, cloud storage).
-/// A failing customer-managed S3 bucket is the customer's outage and logs at WARN.
+/// The first failure of an episode logs at ERROR: the proxy is a first-party backend.
 /// Repeats within one failure episode drop to DEBUG.
-fn upload_failure_log_level(method: &UploadMethod, prior_failures: u64) -> UploadFailureLogLevel {
+fn upload_failure_log_level(prior_failures: u64) -> UploadFailureLogLevel {
     if prior_failures > 0 {
         UploadFailureLogLevel::Debug
-    } else if matches!(method, UploadMethod::S3 { .. }) {
-        UploadFailureLogLevel::Warn
     } else {
         UploadFailureLogLevel::Error
     }
@@ -144,9 +140,7 @@ fn upload_failure_log_level(method: &UploadMethod, prior_failures: u64) -> Uploa
 fn upload_method_label(method: &UploadMethod) -> &'static str {
     use super::turn::TraceUploadReason;
     match method {
-        UploadMethod::Direct { .. } => TraceUploadReason::DirectGcs,
         UploadMethod::Proxy { .. } => TraceUploadReason::Proxy,
-        UploadMethod::S3 { .. } => TraceUploadReason::DirectS3,
     }
     .into()
 }
@@ -166,7 +160,7 @@ pub(super) fn record_upload_failure(ctx: &PromptTraceContext, f: UploadFailure<'
         .session_handle
         .upload_failures_since_success
         .fetch_add(1, Relaxed);
-    let level = upload_failure_log_level(&ctx.gcs_config.upload_method, prior_failures);
+    let level = upload_failure_log_level(prior_failures);
     let method = upload_method_label(&ctx.gcs_config.upload_method);
     macro_rules! log_failure {
         ($level:ident) => {
@@ -188,7 +182,6 @@ pub(super) fn record_upload_failure(ctx: &PromptTraceContext, f: UploadFailure<'
     }
     match level {
         UploadFailureLogLevel::Error => log_failure!(error),
-        UploadFailureLogLevel::Warn => log_failure!(warn),
         UploadFailureLogLevel::Debug => log_failure!(debug),
     }
     if prior_failures > 0 {
@@ -206,11 +199,7 @@ pub(super) fn record_upload_failure(ctx: &PromptTraceContext, f: UploadFailure<'
         "bytes": f.bytes,
         "phase": f.phase,
     }));
-    if level == UploadFailureLogLevel::Warn {
-        xai_grok_telemetry::unified_log::warn(&msg, sid, log_ctx);
-    } else {
-        xai_grok_telemetry::unified_log::error(&msg, sid, log_ctx);
-    }
+    xai_grok_telemetry::unified_log::error(&msg, sid, log_ctx);
 }
 /// Increment when making breaking changes to PromptMetadata structure.
 pub(crate) use prod_mc_cli_chat_proxy_types::{
@@ -237,16 +226,14 @@ pub(crate) fn strip_url_credentials(url_str: &str) -> String {
     url_str.to_string()
 }
 /// Best-effort git repo root and remote URL for the session's cwd.
-/// Runs git2 discovery off-thread since it walks parent directories.
+/// Runs repository discovery off-thread since it walks parent directories.
 pub(crate) async fn resolve_git_repo_info(cwd: &str) -> (Option<String>, Option<String>) {
     let cwd = cwd.to_owned();
-    tokio::task::spawn_blocking(move || {
-        let repo = git2::Repository::discover(&cwd).ok()?;
-        let repo_root = repo.workdir().map(|p| p.to_string_lossy().to_string());
-        let remote_url = repo
-            .find_remote("origin")
-            .ok()
-            .and_then(|r| r.url().ok().map(strip_url_credentials));
+    xai_spawn::spawn_blocking(move || {
+        use xai_gix_status::discover;
+        let repo = discover::discover(std::path::Path::new(&cwd))?;
+        let repo_root = discover::workdir(&repo).map(|p| p.to_string_lossy().to_string());
+        let remote_url = discover::origin_url(&repo).map(|url| strip_url_credentials(&url));
         Some((repo_root, remote_url))
     })
     .await
@@ -276,7 +263,7 @@ async fn fill_git_fields(metadata: &mut PromptMetadata, cwd: &str) {
         "git".to_owned()
     } else {
         let cwd = cwd.to_owned();
-        tokio::task::spawn_blocking(move || classify_workspace(&cwd))
+        xai_spawn::spawn_blocking(move || classify_workspace(&cwd))
             .await
             .unwrap_or_else(|_| "non_project".to_owned())
     });
@@ -386,7 +373,6 @@ pub(crate) async fn upload_subagent_metadata(
     let gcs_path = format!("{}/subagent.json", metadata.child_session_id);
     let base_config = crate::session::repo_changes::TraceExportConfig {
         bucket_url: Some(bucket_url.to_owned()),
-        service_account_key: None,
         prefix_dir: None,
         gcs_prefix: None,
         absolute_paths: false,
@@ -837,7 +823,7 @@ pub(crate) async fn upload_session_metadata(
 /// Only entries belonging to the current session (matching `sid`) are included. The snapshot runs on a blocking thread since `snapshot_session_log` reads and parses the on-disk log file.
 pub(crate) async fn upload_unified_log(ctx: &PromptTraceContext, wait: UploadWait) {
     let session_id = ctx.session_info.id.0.to_string();
-    let log_bytes = match tokio::task::spawn_blocking(move || {
+    let log_bytes = match xai_spawn::spawn_blocking(move || {
         xai_grok_telemetry::unified_log::snapshot_session_log(&session_id)
     })
     .await
@@ -875,7 +861,7 @@ pub(crate) async fn upload_unified_log(ctx: &PromptTraceContext, wait: UploadWai
     )
     .await;
     let full_log_bytes =
-        tokio::task::spawn_blocking(xai_grok_telemetry::unified_log::snapshot_log).await;
+        xai_spawn::spawn_blocking(xai_grok_telemetry::unified_log::snapshot_log).await;
     let user_id = ctx
         .auth_manager
         .current_or_expired()
@@ -999,7 +985,7 @@ pub(crate) async fn build_chat_history_session_state(
     messages: &[xai_grok_sampling_types::conversation::ConversationItem],
 ) -> Result<Vec<u8>, SessionStateBuildError> {
     let jsonl = serialize_chat_history_jsonl(messages)?;
-    match tokio::task::spawn_blocking(move || compress_chat_history_archive(jsonl)).await {
+    match xai_spawn::spawn_blocking(move || compress_chat_history_archive(jsonl)).await {
         Ok(result) => result,
         Err(e) => Err(session_state_archive_join_error(e)),
     }
@@ -1036,17 +1022,15 @@ impl DynamicResolver {
 impl TraceExportSource for DynamicResolver {
     fn resolve(&self) -> TraceExportConfig {
         let mut config = self.base_config.clone();
-        if let crate::session::repo_changes::UploadMethod::Proxy {
+        let crate::session::repo_changes::UploadMethod::Proxy {
             ref mut user_token, ..
-        } = config.upload_method
-        {
-            let auth = self.auth_manager.current().or_else(|| {
-                self.auth_manager.force_reload_from_disk();
-                self.auth_manager.current()
-            });
-            if let Some(auth) = auth {
-                *user_token = auth.key;
-            }
+        } = config.upload_method;
+        let auth = self.auth_manager.current().or_else(|| {
+            self.auth_manager.force_reload_from_disk();
+            self.auth_manager.current()
+        });
+        if let Some(auth) = auth {
+            *user_token = auth.key;
         }
         config
     }
@@ -1058,7 +1042,7 @@ impl TraceExportSource for DynamicResolver {
     fn proxy_credentials(&self) -> Option<Arc<dyn xai_grok_auth::AuthCredentialProvider>> {
         xai_file_utils::gcs::StorageConfig::proxy_credentials(&self.with_auth())
     }
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         xai_file_utils::gcs::StorageConfig::proxy_http_client(&self.with_auth())
     }
     fn has_usable_credential(&self) -> bool {
@@ -1090,18 +1074,16 @@ impl TraceExportSource for DynamicResolver {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TraceExportConfig> + Send + '_>> {
         Box::pin(async move {
             let mut config = self.base_config.clone();
-            if let crate::session::repo_changes::UploadMethod::Proxy {
+            let crate::session::repo_changes::UploadMethod::Proxy {
                 ref mut user_token, ..
-            } = config.upload_method
-            {
-                match self.auth_manager.get_valid_token().await {
-                    Ok(key) => *user_token = key,
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            "auth: upload credential resolve failed"
-                        )
-                    }
+            } = config.upload_method;
+            match self.auth_manager.get_valid_token().await {
+                Ok(key) => *user_token = key,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "auth: upload credential resolve failed"
+                    )
                 }
             }
             config
@@ -1143,7 +1125,7 @@ pub(crate) fn spawn_startup_spill_reconcile(
     if !claim_spill_reconcile(&SPILL_RECONCILE_STATE, queue.is_some()) {
         return;
     }
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         match queue {
             Some(queue) => {
                 let report =
@@ -1152,7 +1134,7 @@ pub(crate) fn spawn_startup_spill_reconcile(
                 queue.cleanup_orphans(xai_file_utils::queue::DEFAULT_MAX_AGE);
             }
             None => {
-                let purged = tokio::task::spawn_blocking(move || {
+                let purged = xai_spawn::spawn_blocking(move || {
                     xai_grok_workspace::recovery::purge_spilled_items(&grok_home)
                 })
                 .await;
@@ -1265,7 +1247,7 @@ pub(crate) fn spawn_purge_stale_upload_scratch() {
             }
         };
         if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::task::spawn_blocking(run);
+            xai_spawn::spawn_blocking(run);
         } else {
             std::thread::spawn(run);
         }
@@ -1673,14 +1655,19 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn fill_git_fields_preserves_existing_fields() {
         let tmp = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(tmp.path()).unwrap();
-        repo.remote("origin", "https://github.com/test/repo.git")
-            .unwrap();
-        let expected_remote = repo
-            .find_remote("origin")
-            .unwrap()
-            .url()
-            .map(strip_url_credentials)
+        crate::test_support::git(tmp.path(), &["init", "--quiet"]);
+        crate::test_support::git(
+            tmp.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/test/repo.git",
+            ],
+        );
+        let expected_remote = xai_gix_status::discover::discover(tmp.path())
+            .and_then(|repo| xai_gix_status::discover::origin_url(&repo))
+            .map(|url| strip_url_credentials(&url))
             .expect("origin remote must have a url");
         let mut meta = bare_prompt_metadata();
         meta.repo_root = Some("/custom/root".into());
@@ -1708,14 +1695,19 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn resolve_git_repo_info_populates_from_git_repo() {
         let tmp = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(tmp.path()).unwrap();
-        repo.remote("origin", "https://github.com/test/repo.git")
-            .unwrap();
-        let expected_remote = repo
-            .find_remote("origin")
-            .unwrap()
-            .url()
-            .map(strip_url_credentials)
+        crate::test_support::git(tmp.path(), &["init", "--quiet"]);
+        crate::test_support::git(
+            tmp.path(),
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/test/repo.git",
+            ],
+        );
+        let expected_remote = xai_gix_status::discover::discover(tmp.path())
+            .and_then(|repo| xai_gix_status::discover::origin_url(&repo))
+            .map(|url| strip_url_credentials(&url))
             .expect("origin remote must have a url");
         let (repo_root, remote_url) = resolve_git_repo_info(tmp.path().to_str().unwrap()).await;
         assert!(repo_root.is_some(), "repo_root should be populated");
@@ -1777,7 +1769,6 @@ pub(crate) mod tests {
         ));
         let base_config = TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: Some("session/turn_0".into()),
             absolute_paths: false,
@@ -1819,7 +1810,6 @@ pub(crate) mod tests {
             UploadMethod::Proxy { proxy_base_url, .. } => {
                 assert_eq!(proxy_base_url, "https://proxy.example.com");
             }
-            _ => unreachable!(),
         }
     }
     #[test]
@@ -1849,7 +1839,6 @@ pub(crate) mod tests {
             auth_manager: auth_manager.clone(),
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -1908,7 +1897,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -1925,7 +1913,6 @@ pub(crate) mod tests {
             UploadMethod::Proxy { user_token, .. } => {
                 assert_eq!(user_token, "stale-base-token");
             }
-            other => panic!("expected Proxy, got {:?}", other),
         }
     }
     /// `resolve_async()` picks up a fresh disk token (written by another flow) when the in-memory token is expired.
@@ -1955,7 +1942,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -1975,7 +1961,6 @@ pub(crate) mod tests {
                     "resolve_async should use get_valid_token() to pick up disk token"
                 );
             }
-            other => panic!("expected Proxy, got {:?}", other),
         }
     }
     /// `resolve_async()` drives `refresh_chain` when the in-memory OIDC token is expired and no fresh disk token exists.
@@ -2025,7 +2010,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -2045,7 +2029,6 @@ pub(crate) mod tests {
                     "resolve_async must use token from refresh_chain, not stale base_config"
                 );
             }
-            other => panic!("expected Proxy, got {:?}", other),
         }
     }
     /// Proactive refresh keeps the cache hot so `resolve_async` on the trace upload path is a cache hit.
@@ -2098,7 +2081,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -2118,7 +2100,6 @@ pub(crate) mod tests {
                     "resolve_async must pick up the proactively-refreshed token"
                 );
             }
-            other => panic!("expected Proxy, got {:?}", other),
         }
         assert_eq!(
             call_count.load(std::sync::atomic::Ordering::SeqCst),
@@ -2138,7 +2119,6 @@ pub(crate) mod tests {
         ));
         let base_config = TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: None,
             absolute_paths: false,
@@ -2158,52 +2138,6 @@ pub(crate) mod tests {
             UploadMethod::Proxy { user_token, .. } => {
                 assert_eq!(user_token, "original-token");
             }
-            other => panic!("expected Proxy, got {:?}", other),
-        }
-    }
-    #[test]
-    fn dynamic_resolver_noop_for_direct_mode() {
-        use crate::session::repo_changes::UploadMethod;
-        use std::collections::BTreeMap;
-        use xai_grok_login::GrokAuth;
-        let dir = tempfile::tempdir().unwrap();
-        let grok_com_config = xai_grok_login::GrokComConfig::default();
-        let scope = grok_com_config.auth_scope();
-        let auth = GrokAuth {
-            key: "some-token".into(),
-            ..GrokAuth::test_default()
-        };
-        let mut store = BTreeMap::new();
-        store.insert(scope, auth);
-        let auth_json = serde_json::to_string_pretty(&store).unwrap();
-        std::fs::write(dir.path().join("auth.json"), &auth_json).unwrap();
-        let auth_manager = Arc::new(xai_grok_login::AuthManager::new(
-            dir.path(),
-            grok_com_config,
-        ));
-        let base_config = TraceExportConfig {
-            bucket_url: Some("gs://bucket".into()),
-            service_account_key: Some("sa-key".into()),
-            prefix_dir: None,
-            gcs_prefix: None,
-            absolute_paths: false,
-            archive_name_override: None,
-            upload_method: UploadMethod::Direct {
-                service_account_key: Some("sa-key".into()),
-            },
-        };
-        let resolver = DynamicResolver {
-            auth_manager,
-            base_config,
-        };
-        let config = resolver.resolve();
-        match &config.upload_method {
-            UploadMethod::Direct {
-                service_account_key,
-            } => {
-                assert_eq!(service_account_key.as_deref(), Some("sa-key"));
-            }
-            other => panic!("expected Direct, got {:?}", other),
         }
     }
     /// `DynamicResolver` must supply `proxy_credentials` and `proxy_attribution`.
@@ -2220,7 +2154,6 @@ pub(crate) mod tests {
         ));
         let base_config = TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: None,
             absolute_paths: false,
@@ -2267,7 +2200,6 @@ pub(crate) mod tests {
             auth_manager,
             base_config: TraceExportConfig {
                 bucket_url: None,
-                service_account_key: None,
                 prefix_dir: None,
                 gcs_prefix: None,
                 absolute_paths: false,
@@ -2299,7 +2231,6 @@ pub(crate) mod tests {
         ));
         let gcs_config = TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: None,
             absolute_paths: false,
@@ -2605,47 +2536,18 @@ pub(crate) mod tests {
         }
         tempfile::tempdir_in(home).ok()
     }
-    /// Customer-managed S3 failures stay below the ERROR alerting threshold.
     /// Repeats within an episode drop to debug, and the `method` log field keeps the structured upload-method vocabulary.
     #[test]
-    fn upload_failure_log_level_splits_on_backend_and_repeats() {
+    fn upload_failure_log_level_drops_on_repeats() {
         use crate::session::repo_changes::UploadMethod;
-        let s3 = UploadMethod::S3 {
-            bucket: "bucket".into(),
-            region: "region".into(),
-            credentials_file: None,
-            credentials_content: None,
-            endpoint_url: None,
-        };
         let proxy = UploadMethod::Proxy {
             proxy_base_url: "https://proxy.example/v1".into(),
             user_token: "token".into(),
             alpha_test_key: None,
         };
-        let gcs = UploadMethod::Direct {
-            service_account_key: None,
-        };
-        assert_eq!(
-            upload_failure_log_level(&s3, 0),
-            UploadFailureLogLevel::Warn
-        );
-        assert_eq!(
-            upload_failure_log_level(&proxy, 0),
-            UploadFailureLogLevel::Error
-        );
-        assert_eq!(
-            upload_failure_log_level(&gcs, 0),
-            UploadFailureLogLevel::Error
-        );
-        for method in [&s3, &proxy, &gcs] {
-            assert_eq!(
-                upload_failure_log_level(method, 1),
-                UploadFailureLogLevel::Debug
-            );
-        }
-        assert_eq!(upload_method_label(&s3), "direct_s3");
+        assert_eq!(upload_failure_log_level(0), UploadFailureLogLevel::Error);
+        assert_eq!(upload_failure_log_level(1), UploadFailureLogLevel::Debug);
         assert_eq!(upload_method_label(&proxy), "proxy");
-        assert_eq!(upload_method_label(&gcs), "direct_gcs");
     }
     /// The manifest may claim `enqueued` (queue-owned: flushable and sidecar-recoverable) only for these accept shapes.
     /// An inline fallback or a failed enqueue must take the awaited direct attempt so the recorded status is a real outcome.
@@ -2739,7 +2641,7 @@ pub(crate) mod tests {
         ));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut held = Vec::new();
             while let Ok((stream, _)) = listener.accept().await {
                 held.push(stream);

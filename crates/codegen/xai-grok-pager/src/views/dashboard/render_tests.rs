@@ -767,9 +767,10 @@ fn render_dashboard_shows_roster_when_local_agents_empty() {
     );
 }
 
-/// Hover `[✗]` paints only on settled rows, never on a busy one.
+/// Hover `[✗]` paints on Idle and Inactive rows, never on a busy or Done row.
+/// Done rows expose no permanent-delete control (criterion: delete is Inactive-only).
 #[test]
-fn render_dashboard_hover_shows_delete_x_only_for_settled_rows() {
+fn render_dashboard_hover_shows_delete_x_only_for_idle_and_inactive_rows() {
     use crate::app::roster::{RosterActivity, RosterEntry, RosterOrigin};
 
     let ballot = crate::glyphs::ballot_x_button();
@@ -796,6 +797,12 @@ fn render_dashboard_hover_shows_delete_x_only_for_settled_rows() {
         state.hovered_row = Some(DashboardRowId::Roster {
             session_id: "sess-hover".into(),
         });
+        // The Inactive section starts collapsed; expand it so its rows paint.
+        state
+            .collapsed_sections
+            .remove(&crate::views::dashboard::SectionKey::State(
+                crate::views::dashboard::RowState::Inactive,
+            ));
         let _ = render_dashboard(
             &mut buf,
             area,
@@ -815,12 +822,20 @@ fn render_dashboard_hover_shows_delete_x_only_for_settled_rows() {
     };
 
     assert!(
-        render_with(RosterActivity::Completed).contains(ballot),
-        "hovering a settled (completed) row must show the [✗] delete affordance",
+        render_with(RosterActivity::Idle).contains(ballot),
+        "hovering an inactive (idle roster) row must show the [✗] affordance",
+    );
+    assert!(
+        !render_with(RosterActivity::Completed).contains(ballot),
+        "a Done row must expose no permanent-delete affordance",
+    );
+    assert!(
+        !render_with(RosterActivity::Dead).contains(ballot),
+        "a Failed row must expose no permanent-delete affordance",
     );
     assert!(
         !render_with(RosterActivity::Working).contains(ballot),
-        "hovering a busy (working) row must NOT show the [✗] delete affordance",
+        "hovering a busy (working) row must NOT show the [✗] affordance",
     );
 }
 
@@ -4028,6 +4043,67 @@ fn render_footer_inactive_row_shows_delete() {
     );
     let content3 = buf_to_text(&buf3);
     assert!(content3.contains(":delete"), "{content3:?}");
+}
+
+#[test]
+fn render_footer_armed_inactive_row_confirms_permanent_delete() {
+    let theme = Theme::current();
+    let registry = crate::actions::ActionRegistry::defaults();
+    let row = DashboardRowId::TopLevel(crate::app::agent::AgentId(0));
+    let mut state = DashboardState::new();
+    state.list_focused = true;
+    state.focus_row(row.clone());
+    state.arm_delete(row);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
+    render_footer(
+        &mut buf,
+        Rect::new(0, 0, 200, 1),
+        &theme,
+        &state,
+        &registry,
+        Some(RowState::Inactive),
+        false,
+        None,
+    );
+    let content = buf_to_text(&buf);
+    assert!(
+        content.contains("delete permanently"),
+        "the Inactive-row prompt must name permanent deletion, got: {content:?}",
+    );
+    assert!(
+        content.contains("cancel"),
+        "the Inactive-row prompt must offer a cancel choice, got: {content:?}",
+    );
+    assert!(
+        content.contains(":y") || content.contains("y "),
+        "the Inactive-row prompt must show the confirm key, got: {content:?}",
+    );
+}
+
+#[test]
+fn render_footer_unfocused_inactive_arm_names_permanent_deletion() {
+    let theme = Theme::current();
+    let registry = crate::actions::ActionRegistry::defaults();
+    let row = DashboardRowId::TopLevel(crate::app::agent::AgentId(0));
+    let mut state = DashboardState::new();
+    state.focus_row(row.clone());
+    state.arm_delete(row);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 200, 1));
+    render_footer(
+        &mut buf,
+        Rect::new(0, 0, 200, 1),
+        &theme,
+        &state,
+        &registry,
+        Some(RowState::Inactive),
+        false,
+        None,
+    );
+    let content = buf_to_text(&buf);
+    assert!(
+        content.contains("delete this session permanently"),
+        "the second-press hint must name permanent deletion, got: {content:?}",
+    );
 }
 
 #[test]

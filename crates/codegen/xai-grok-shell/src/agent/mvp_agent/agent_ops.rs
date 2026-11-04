@@ -299,7 +299,7 @@ impl MvpAgent {
         session_txs: Vec<tokio::sync::mpsc::UnboundedSender<SessionCommand>>,
     ) {
         let cache = self.managed_mcp_cache.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             cache.lock().await.disable_gateway_tools();
             for tx in session_txs {
                 let _ = tx.send(SessionCommand::RefreshMcpSearchIndex);
@@ -317,7 +317,7 @@ impl MvpAgent {
         let cache = self.managed_mcp_cache.clone();
         let proxy_url = self.cfg.borrow().endpoints.proxy_url();
         let auth_manager = self.auth_manager.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let auth_key = auth_manager
                 .get_valid_token()
                 .await
@@ -396,8 +396,8 @@ impl MvpAgent {
         let remote_settings = self.cfg.borrow().remote_settings.clone();
         let gateway = self.gateway.clone();
         let agent_mcp_state = self.agent_mcp_state.clone();
-        tokio::task::spawn_local(async move {
-            let local_mcp_servers = match tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_local(async move {
+            let local_mcp_servers = match xai_spawn::spawn_blocking(move || {
                     let local = crate::util::config::load_mcp_servers(&cwd, &compat);
                     folder_trust::resolve_and_record(
                         &cwd,
@@ -491,7 +491,7 @@ impl MvpAgent {
         let launch_cwd = self.launch_cwd.clone();
         let remote_settings = self.cfg.borrow().remote_settings.clone();
         let handle = self.plugin_registry_handle.clone();
-        let built = tokio::task::spawn_blocking(move || {
+        let built = xai_spawn::spawn_blocking(move || {
                 let (trusted, disk_config) = Self::registry_build_inputs(
                     &launch_cwd,
                     remote_settings.as_ref(),
@@ -530,7 +530,7 @@ impl MvpAgent {
         let cwd = cwd.to_path_buf();
         let remote_settings = self.cfg.borrow().remote_settings.clone();
         let handle = self.plugin_registry_handle.clone();
-        match tokio::task::spawn_blocking(move || {
+        match xai_spawn::spawn_blocking(move || {
                 let (trusted, disk_cfg) = Self::registry_build_inputs(
                     &cwd,
                     remote_settings.as_ref(),
@@ -996,7 +996,7 @@ impl MvpAgent {
                 let binary = binary.clone();
                 let cwd = cwd.clone();
                 let agent_ref = agent_ref.clone();
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     if generations.borrow().get(&sid) != Some(&generation) {
                         return;
                     }
@@ -1581,7 +1581,6 @@ impl MvpAgent {
         self.sync_collection_config_gate();
         self.emit_settings_update_notification();
         self.emit_announcements(AnnouncementsPushMode::IfChanged);
-        self.reconfigure_heap_profile_monitor();
     }
     /// Re-evaluates the official-marketplace auto-register gate now that remote settings exist.
     /// `init_process` ran the same gate at boot without them, so a settings-targeted (not env-set) team would otherwise never register.
@@ -1589,7 +1588,7 @@ impl MvpAgent {
     fn reapply_official_marketplace(&self) {
         if self.cfg.borrow().resolve_official_marketplace_auto_register().value {
             let task = tokio_util::task::AbortOnDropHandle::new(
-                tokio::task::spawn_blocking(|| {
+                xai_spawn::spawn_blocking(|| {
                     crate::extensions::marketplace::ensure_official_marketplace_source(
                         &crate::util::grok_home::grok_home(),
                     );
@@ -1685,7 +1684,7 @@ impl MvpAgent {
         let outcome = self.fetch_settings(auth).await;
         if matches!(outcome, crate::remote::SettingsFetch::Rejected) {
             let manager = self.auth_manager.clone();
-            let attempt = tokio::spawn(async move { manager.auth().await });
+            let attempt = xai_spawn::spawn(async move { manager.auth().await });
             if let Ok(Ok(Ok(fresh))) = tokio::time::timeout(
                     crate::http::STARTUP_AUTH_REFRESH_TIMEOUT,
                     attempt,
@@ -1814,7 +1813,6 @@ impl MvpAgent {
         self.sync_collection_config_gate();
         self.emit_settings_update_notification();
         self.emit_announcements(AnnouncementsPushMode::Force);
-        self.reconfigure_heap_profile_monitor();
     }
     /// Spawns a background task coalesced on `in_flight`: a request while one is in flight is dropped.
     /// The task is bounded by `SETTINGS_REAPPLY_TIMEOUT`.
@@ -1828,7 +1826,7 @@ impl MvpAgent {
             return false;
         }
         let in_flight = in_flight.clone();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             struct ClearOnDrop(std::rc::Rc<std::cell::Cell<bool>>);
             impl Drop for ClearOnDrop {
                 fn drop(&mut self) {
@@ -1900,7 +1898,7 @@ impl MvpAgent {
             return;
         }
         let agent_ref = LocalRef::new(self);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let mut interval = tokio::time::interval(announcements_refresh_interval());
             interval.tick().await;
             loop {
@@ -2027,7 +2025,7 @@ impl MvpAgent {
             let cfg = self.cfg.borrow();
             (cfg.endpoints.proxy_url(), cfg.endpoints.alpha_test_key.clone())
         };
-        match tokio::task::spawn_blocking(move || crate::remote::fetch_settings_blocking(
+        match xai_spawn::spawn_blocking(move || crate::remote::fetch_settings_blocking(
                 &base_url,
                 &auth,
                 alpha_test_key.as_deref(),
@@ -2039,6 +2037,92 @@ impl MvpAgent {
                 tracing::warn!(error = %e, "settings fetch task panicked");
                 None
             }
+        }
+    }
+    /// A session takes its model's URL when it is created. When the first catalog fetch
+    /// failed, the session holds a model with no URL, and every turn fails.
+    /// Wait for the catalog retry, bounded, then move the session to the catalog's default.
+    pub(super) async fn move_session_off_model_missing_from_catalog(
+        &self,
+        session_id: &acp::SessionId,
+        session_model: &acp::ModelId,
+        chat_state: &xai_chat_state::ChatStateHandle,
+    ) {
+        let has_url = chat_state
+            .get_sampling_config()
+            .await
+            .is_some_and(|config| !config.base_url.trim().is_empty());
+        // A loaded catalog will not change, so waiting can only help before it loads.
+        let catalog_pending = self
+            .models_manager
+            .task_model_catalog_snapshot(crate::util::config::resolve_remote_fetch_enabled())
+            .authority
+            == crate::agent::remote_config::task_model_policy::CatalogAuthority::Provisional;
+        if has_url || !catalog_pending || !self.models_manager.catalog_fetch_running() {
+            return;
+        }
+        xai_grok_telemetry::unified_log::warn(
+            "prompt: the session model has no URL; waiting for the model catalog",
+            Some(session_id.0.as_ref()),
+            Some(serde_json::json!({ "model": session_model.0.as_ref() })),
+        );
+        const MISSING_MODEL_CATALOG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+        const CATALOG_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+        let deadline = tokio::time::Instant::now() + MISSING_MODEL_CATALOG_WAIT;
+        let reachable_default = || {
+            let default_model = self.models_manager.current_model_id();
+            self.resolve_model_id(&default_model)
+                .is_ok_and(|model| {
+                    !self
+                        .prepare_sampling_config_for_model(&model, None)
+                        .base_url
+                        .trim()
+                        .is_empty()
+                })
+                .then_some(default_model)
+        };
+        let default_model = loop {
+            // Read the fetch state first.
+            let fetching = self.models_manager.catalog_fetch_running();
+            if let Some(default_model) = reachable_default() {
+                break Some(default_model);
+            }
+            if !fetching || tokio::time::Instant::now() >= deadline {
+                break None;
+            }
+            tokio::time::sleep(CATALOG_CHECK_INTERVAL).await;
+        };
+        let Some(default_model) = default_model else {
+            xai_grok_telemetry::unified_log::warn(
+                "prompt: no catalog model with a URL arrived; the turn will fail",
+                Some(session_id.0.as_ref()),
+                Some(serde_json::json!({
+                    "model": session_model.0.as_ref(),
+                    "catalog_default": self.models_manager.current_model_id().0.as_ref(),
+                })),
+            );
+            return;
+        };
+        tracing::info!(
+            session_id = %session_id.0,
+            from = %session_model.0,
+            to = %default_model.0,
+            "prompt: the session model was not in the catalog; moving the session to the catalog default"
+        );
+        if let Err(error) = crate::agent::handlers::model_switch::apply(
+            self,
+            acp::SetSessionModelRequest::new(session_id.clone(), default_model.clone()),
+            crate::agent::handlers::model_switch::SwitchEffort::Preserve,
+            crate::agent::handlers::model_switch::ConfigNotice::Send,
+        )
+        .await
+        {
+            tracing::warn!(
+                session_id = %session_id.0,
+                model_id = %default_model.0,
+                ?error,
+                "prompt: could not move the session to the catalog default"
+            );
         }
     }
     pub(super) async fn send_model_auto_switched(
@@ -2532,10 +2616,7 @@ impl MvpAgent {
             announcements_gen: std::cell::Cell::new(0),
             last_emitted_announcements: RefCell::new(Vec::new()),
             announcements_refresh_started: std::cell::Cell::new(false),
-            heap_profile_monitor: RefCell::new(
-                crate::heap_profile::HeapProfileMonitor::new(),
-            ),
-            heap_profile_started: std::cell::Cell::new(false),
+            resource_reporter_started: std::cell::Cell::new(false),
             #[cfg(test)]
             finalize_spy: RefCell::new(Vec::new()),
             #[cfg(test)]
@@ -3053,7 +3134,7 @@ impl MvpAgent {
     ) {
         use crate::extensions::notification::RelaySyncStatus;
         let session_id = acp::SessionId::new(session_id);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while state_rx.changed().await.is_ok() {
                 let state = *state_rx.borrow_and_update();
                 let status = match state {
@@ -3240,34 +3321,21 @@ impl MvpAgent {
         {
             self.refresh_remote_settings(&auth).await;
         }
-        let (direct_method, endpoints) = {
+        let endpoints = {
             let cfg = self.cfg.borrow();
             if !cfg.is_trace_upload_enabled() {
                 return (None, TraceUploadReason::FeatureOff);
             }
-            (cfg.endpoints.resolve_direct_upload_method(), cfg.endpoints.clone())
+            cfg.endpoints.clone()
         };
-        let service_account_key = crate::util::config::load_gcs_service_account_key_sync();
-        let method = if let Some(method) = direct_method {
-            Some(method)
-        } else {
-            let auth_token = self
-                .auth_manager
-                .auth()
-                .await
-                .ok()
-                .filter(|auth| auth.is_xai_auth())
-                .map(|auth| auth.key);
-            if auth_token.is_some() {
-                endpoints.resolve_upload_method(auth_token)
-            } else if service_account_key.is_some() {
-                Some(crate::session::repo_changes::UploadMethod::Direct {
-                    service_account_key,
-                })
-            } else {
-                None
-            }
-        };
+        let auth_token = self
+            .auth_manager
+            .auth()
+            .await
+            .ok()
+            .filter(|auth| auth.is_xai_auth())
+            .map(|auth| auth.key);
+        let method = endpoints.resolve_upload_method(auth_token);
         let reason = crate::upload::turn::TraceUploadReason::from_upload_method(&method);
         (method, reason)
     }
@@ -3519,29 +3587,9 @@ impl MvpAgent {
         gcs_prefix: String,
     ) -> Option<crate::session::repo_changes::TraceExportConfig> {
         let upload_method = self.trace_upload_config().await?;
-        let bucket_url = {
-            let cfg = self.cfg.borrow();
-            match &upload_method {
-                crate::session::repo_changes::UploadMethod::Direct { .. } => {
-                    match cfg.endpoints.resolve_trace_bucket_url() {
-                        Some(resolved) => Some(resolved.value),
-                        None => {
-                            tracing::debug!(
-                                "no trace bucket configured; skipping direct GCS upload"
-                            );
-                            return None;
-                        }
-                    }
-                }
-                crate::session::repo_changes::UploadMethod::S3 { bucket, .. } => {
-                    Some(format!("s3://{bucket}"))
-                }
-                crate::session::repo_changes::UploadMethod::Proxy { .. } => None,
-            }
-        };
+        // The proxy picks the bucket.
         Some(crate::session::repo_changes::TraceExportConfig {
-            bucket_url,
-            service_account_key: None,
+            bucket_url: None,
             prefix_dir: None,
             gcs_prefix: Some(gcs_prefix),
             absolute_paths: false,
@@ -3617,8 +3665,6 @@ impl MvpAgent {
     }
     fn has_custom_trace_destination(cfg: &crate::agent::config::Config) -> bool {
         cfg.endpoints.trace_upload_url.is_some()
-            || cfg.endpoints.trace_upload_bucket.is_some()
-            || cfg.endpoints.trace_upload_endpoint_url.is_some()
     }
     /// Upload method for a user-consented feedback trace archive. Blocks ZDR and custom destinations. Deliberately ignores the live `trace_upload` flag and the cached coding-data opt-out.
     /// The consent just granted may not have reached either cache yet. Fails closed on unknown privacy state.
@@ -3652,15 +3698,8 @@ impl MvpAgent {
             .map(|auth| auth.key);
         let cfg = self.cfg.borrow();
         let upload_method = cfg.endpoints.resolve_upload_method(auth_token)?;
-        if !matches!(
-            upload_method,
-            crate::session::repo_changes::UploadMethod::Proxy { .. }
-        ) {
-            return None;
-        }
         Some(crate::session::repo_changes::TraceExportConfig {
             bucket_url: None,
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: Some(gcs_prefix),
             absolute_paths: false,
@@ -3833,31 +3872,9 @@ impl MvpAgent {
                 return None;
             }
         };
-        let bucket_url = {
-            let cfg = self.cfg.borrow();
-            match &upload_method {
-                crate::session::repo_changes::UploadMethod::Direct { .. } => {
-                    match cfg.endpoints.resolve_trace_bucket_url() {
-                        Some(resolved) => Some(resolved.value),
-                        None => {
-                            xai_grok_telemetry::session_ctx::log_session_event(crate::agent::session_metrics::TraceUploadSkipped {
-                                session_id: session_info.id.0.to_string(),
-                                turn_number,
-                                reason: "no_trace_bucket_configured".to_owned(),
-                            });
-                            return None;
-                        }
-                    }
-                }
-                crate::session::repo_changes::UploadMethod::S3 { bucket, .. } => {
-                    Some(format!("s3://{bucket}"))
-                }
-                crate::session::repo_changes::UploadMethod::Proxy { .. } => None,
-            }
-        };
+        // The proxy picks the bucket.
         let gcs_config = crate::session::repo_changes::TraceExportConfig {
-            bucket_url,
-            service_account_key: None,
+            bucket_url: None,
             prefix_dir: None,
             gcs_prefix: Some(format!("{}/turn_{}", session_info.id.0, turn_number)),
             absolute_paths: false,
@@ -4335,7 +4352,7 @@ impl MvpAgent {
                     user_id: self.auth_manager.current().map(|a| a.user_id.clone()),
                     aggregate_tx: Some(loc_agg_tx),
                 };
-                tokio::spawn(
+                xai_spawn::spawn(
                     xai_hunk_tracker::run_loc_sink(
                         hunk_event_rx,
                         loc_writer,
@@ -5001,7 +5018,6 @@ impl MvpAgent {
         super::test_hooks::pause_at(super::test_hooks::AttachPause::AfterSpawn).await;
         self.set_session_live_state(&session_info.id, SessionLiveState::IdleResident);
         self.ensure_session_supervisor();
-        self.heap_profile_set_session_id(&session_info.id.0);
         self.push_roster_delta_upserted(&session_info.id);
         if chat_history.is_empty() {
             let _timer = crate::instrumentation_timer!("session.system_prompt_inject");
@@ -5028,7 +5044,7 @@ impl MvpAgent {
             });
         if let Some(mut loc_rx) = loc_aggregate_rx {
             let signals = handle.signals_handle.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 while let Some(agg) = loc_rx.recv().await {
                     match agg {
                         xai_hunk_tracker::LocAggregate::LinesChanged {
@@ -5167,7 +5183,7 @@ impl MvpAgent {
         }
         self.spawn_managed_gateway_tool_catalog_fetch();
         let cwd_for_maintenance = session_info.cwd.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             crate::session::prompt_history::truncate_if_needed_async(cwd_for_maintenance)
                 .await;
         });
@@ -5265,7 +5281,7 @@ impl Drop for LocalWorkspaceReapGuard {
         }
         self.generations.borrow_mut().remove(&self.session_id);
         if let Some(handle) = self.supervisors.borrow_mut().remove(&self.session_id) {
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 handle.shutdown().await;
             });
         }
@@ -5298,7 +5314,7 @@ mod tests {
         });
         let app = axum::Router::new()
             .route("/v1/models", get(move || { let b = body.clone(); async move { axum::Json(b) } }));
-        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
         // Sentinel context window (the DEFAULT_CONTEXT_WINDOW), own api_key, non-xAI base.
         let mut model = ModelEntry::fallback("deepseek/deepseek-v4-pro-0813", &Default::default());
@@ -5315,7 +5331,7 @@ mod tests {
 
         // The fetch runs blocking on a dedicated thread inside the resolver; run
         // it off the async runtime the same way the shipped call sites do.
-        let updated = tokio::task::spawn_blocking(move || {
+        let updated = xai_spawn::spawn_blocking(move || {
             resolve_byok_context_window_on_request_path(&model, &credentials)
                 .into_owned()
         })

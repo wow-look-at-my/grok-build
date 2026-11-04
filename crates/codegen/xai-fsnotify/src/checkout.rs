@@ -42,13 +42,13 @@ fn is_declared_submodule(dir: &Path) -> bool {
     let Some(parent) = dir.parent() else {
         return false;
     };
-    let Ok(superproject) = git2::Repository::discover(parent) else {
+    let Some(superproject) = crate::vcs::discover_repo(parent) else {
         return false;
     };
     let Some(workdir) = superproject.workdir() else {
         return false;
     };
-    // `workdir` arrives canonicalized by git2 while `dir` arrives as the caller or the OS watcher named it.
+    // Compare canonical forms: `dir` arrives as the caller or the OS watcher named it.
     let canonical_dir = canonical(dir);
     let canonical_workdir = canonical(workdir);
     let Ok(relative) = canonical_dir.strip_prefix(&canonical_workdir) else {
@@ -56,7 +56,15 @@ fn is_declared_submodule(dir: &Path) -> bool {
     };
     // `.gitmodules` records paths with forward slashes on every platform.
     let relative = relative.to_string_lossy().replace('\\', "/");
-    superproject.find_submodule(&relative).is_ok()
+    let Ok(Some(mut submodules)) = superproject.submodules() else {
+        return false;
+    };
+    submodules.any(|module| {
+        module.name() == relative.as_str()
+            || module
+                .path()
+                .is_ok_and(|path| path.as_ref() == relative.as_str())
+    })
 }
 
 fn canonical(path: &Path) -> PathBuf {

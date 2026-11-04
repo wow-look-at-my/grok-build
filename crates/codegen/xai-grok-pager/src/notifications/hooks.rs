@@ -17,6 +17,8 @@ fn execute_hook(
         .arg(command)
         .env("GROK_EVENT", event_str)
         .env("GROK_MESSAGE", message)
+        // An outer grok sets this in the environment it spawns children with.
+        .env_remove("GROK_SESSION_ID")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

@@ -28,6 +28,18 @@ fn test_handshake_401_detected_through_anyhow_context() {
         anyhow::Error::from(WsError::Http(Box::new(resp))).context("WebSocket connection failed");
     assert!(is_handshake_unauthorized(&err));
 }
+/// `connect_ws` wraps the handshake error in `WsConnectError`, which is what production sees.
+#[test]
+fn test_handshake_401_detected_through_ws_connect_error() {
+    use xai_grok_net::ws::{WsConnectError, WsError};
+    let resp = axum::http::Response::builder()
+        .status(401)
+        .body(None::<Vec<u8>>)
+        .unwrap();
+    let err = anyhow::Error::from(WsConnectError::Handshake(WsError::Http(Box::new(resp))))
+        .context("WebSocket connection failed");
+    assert!(is_handshake_unauthorized(&err));
+}
 #[test]
 fn test_handshake_non_401_and_non_ws_errors_rejected() {
     use tokio_tungstenite::tungstenite::Error as WsError;
@@ -48,7 +60,7 @@ async fn test_ws_session_auth_error_returns_auth_error() {
     let (to_agent_tx, _to_agent_rx) = mpsc::unbounded_channel::<String>();
     let (_agent_out_tx, mut agent_out_rx) = mpsc::unbounded_channel::<String>();
     let cancel = CancellationToken::new();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let auth_error = json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -106,7 +118,7 @@ async fn test_ws_session_non_auth_error_skipped() {
     let (to_agent_tx, _to_agent_rx) = mpsc::unbounded_channel::<String>();
     let (_agent_out_tx, mut agent_out_rx) = mpsc::unbounded_channel::<String>();
     let cancel = CancellationToken::new();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let other_error = json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -139,7 +151,7 @@ async fn test_ws_session_normal_close_returns_normal() {
     let (to_agent_tx, _to_agent_rx) = mpsc::unbounded_channel::<String>();
     let (_agent_out_tx, mut agent_out_rx) = mpsc::unbounded_channel::<String>();
     let cancel = CancellationToken::new();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = server_tx.send(Message::Close(None)).await;
     });
     let result = tokio::time::timeout(
@@ -190,7 +202,7 @@ async fn test_ws_session_inbound_traffic_resets_liveness_window() {
     let (to_agent_tx, mut to_agent_rx) = mpsc::unbounded_channel::<String>();
     let (_agent_out_tx, mut agent_out_rx) = mpsc::unbounded_channel::<String>();
     let cancel = CancellationToken::new();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         for i in 0..12 {
             let msg = json!({ "jsonrpc": "2.0", "method": "ping", "id": i });
             if server_tx
@@ -243,7 +255,7 @@ async fn test_ws_session_forwards_text_to_agent() {
         "params": {}
     });
     let msg_str = test_msg.to_string();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let _ = server_tx
             .send(Message::Text(Utf8Bytes::from(msg_str)))
             .await;
@@ -273,7 +285,7 @@ async fn test_ws_session_cancel_stops_session() {
     let (_agent_out_tx, mut agent_out_rx) = mpsc::unbounded_channel::<String>();
     let cancel = CancellationToken::new();
     let cancel_clone = cancel.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         tokio::time::sleep(Duration::from_millis(100)).await;
         cancel_clone.cancel();
     });
@@ -453,13 +465,13 @@ async fn test_auth_refresh_via_auth_manager_on_auth_error() {
     let addr = listener.local_addr().unwrap();
     let connection_count = Arc::new(AtomicU32::new(0));
     let count_clone = connection_count.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
                 break;
             };
             let count = count_clone.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let Ok(ws) = tokio_tungstenite::accept_async(stream).await else {
                     return;
                 };
@@ -510,13 +522,13 @@ async fn test_auth_refresh_failure_continues_with_backoff() {
     let addr = listener.local_addr().unwrap();
     let connection_count = Arc::new(AtomicU32::new(0));
     let count_clone = connection_count.clone();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
                 break;
             };
             let count = count_clone.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let Ok(ws) = tokio_tungstenite::accept_async(stream).await else {
                     return;
                 };
@@ -588,7 +600,7 @@ async fn non_sticky_verdict_keeps_reconnecting_with_growing_backoff() {
     {
         let connects = connects.clone();
         let connected = connected.clone();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     break;

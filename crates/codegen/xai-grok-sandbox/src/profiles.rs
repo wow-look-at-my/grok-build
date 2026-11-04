@@ -42,6 +42,40 @@ pub struct SandboxProfile {
     pub restrict_network: bool,
 }
 
+/// gh's config directory. Without a keyring, gh keeps its OAuth token in
+/// `hosts.yml` there, and a sandbox holds no GitHub credential.
+pub(crate) fn gh_config_dir() -> Option<PathBuf> {
+    gh_config_dir_from(
+        std::env::var_os("GH_CONFIG_DIR"),
+        std::env::var_os("XDG_CONFIG_HOME"),
+        xai_dirs::home_dir(),
+    )
+}
+
+/// Add `dir` to `deny` when it exists. A deny on a missing path has nothing to protect.
+fn deny_gh_config_dir(deny: &mut Vec<PathBuf>, dir: Option<PathBuf>) {
+    if let Some(dir) = dir.filter(|dir| dir.exists())
+        && !deny.contains(&dir)
+    {
+        deny.push(dir);
+    }
+}
+
+fn gh_config_dir_from(
+    gh_config_dir: Option<std::ffi::OsString>,
+    xdg_config_home: Option<std::ffi::OsString>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    let non_empty = |value: Option<std::ffi::OsString>| value.filter(|v| !v.is_empty());
+    if let Some(dir) = non_empty(gh_config_dir) {
+        return Some(PathBuf::from(dir));
+    }
+    if let Some(config) = non_empty(xdg_config_home) {
+        return Some(PathBuf::from(config).join("gh"));
+    }
+    home.map(|home| home.join(".config").join("gh"))
+}
+
 fn resolve_write_deny(profile: &ProfileName) -> anyhow::Result<Vec<GlobalHookSource>> {
     profile_hook_write_deny(profile)
 }
@@ -373,6 +407,7 @@ impl ProfileName {
         config: &SandboxConfig,
     ) -> anyhow::Result<(SandboxProfile, Vec<PathBuf>)> {
         let mut profile = self.resolve(workspace, config)?;
+        deny_gh_config_dir(&mut profile.deny, gh_config_dir());
         let mut runtime_socket_denies = Vec::new();
         // Devbox keeps host D-Bus/systemd; container-runtime masks still follow `restrict_network`.
         let skip_dbus = match self {
@@ -581,6 +616,61 @@ impl ProfileName {
 mod tests {
     use super::*;
     use crate::test_util::{network_inheritance_config, skip_if_host_hook_write_deny_unresolvable};
+
+    #[test]
+    fn gh_config_dir_follows_gh_own_lookup_order() {
+        let home = Some(PathBuf::from("/home/u"));
+        assert_eq!(
+            gh_config_dir_from(Some("/x/gh".into()), Some("/cfg".into()), home.clone()),
+            Some(PathBuf::from("/x/gh"))
+        );
+        assert_eq!(
+            gh_config_dir_from(None, Some("/cfg".into()), home.clone()),
+            Some(PathBuf::from("/cfg/gh"))
+        );
+        assert_eq!(
+            gh_config_dir_from(Some("".into()), Some("".into()), home),
+            Some(PathBuf::from("/home/u/.config/gh"))
+        );
+    }
+
+    #[test]
+    fn the_gh_credential_store_is_denied_when_it_exists() {
+        let dir = std::env::temp_dir().join(format!("gh-deny-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut deny = vec![PathBuf::from("/other")];
+        deny_gh_config_dir(&mut deny, Some(dir.clone()));
+        deny_gh_config_dir(&mut deny, Some(dir.clone()));
+        assert_eq!(deny, vec![PathBuf::from("/other"), dir.clone()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let mut deny = Vec::new();
+        deny_gh_config_dir(&mut deny, Some(dir));
+        assert!(deny.is_empty(), "a missing directory needs no deny");
+    }
+
+    #[test]
+    fn every_built_in_profile_denies_the_gh_credential_store() {
+        let Some(dir) = gh_config_dir().filter(|dir| dir.exists()) else {
+            // This host has no gh config. the_gh_credential_store_is_denied_when_it_exists covers the rule.
+            return;
+        };
+        let workspace = std::env::temp_dir();
+        let config = SandboxConfig::default();
+        for profile in [
+            ProfileName::Workspace,
+            ProfileName::ReadOnly,
+            ProfileName::Strict,
+            ProfileName::Devbox,
+        ] {
+            let (resolved, _) = profile
+                .resolve_profile_with_runtime_sockets(&workspace, &config)
+                .unwrap();
+            assert!(
+                resolved.deny.contains(&dir),
+                "{profile:?} must deny {dir:?}, where gh keeps its token"
+            );
+        }
+    }
 
     /// No built-in profile grants a keychain database. This is the condition
     /// nono's macOS generator reads to decide whether to emit its keychain

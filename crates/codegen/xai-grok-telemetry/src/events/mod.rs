@@ -288,7 +288,6 @@ telemetry_event!(
     external = crate::external::schema::map_prompt_latency
 );
 telemetry_event!(CancellationCompleted, "cancellation_completed");
-telemetry_event!(HeapThresholdCrossed, "heap_threshold_crossed");
 telemetry_event!(ProcessResourceUsage, "process_resource_usage");
 telemetry_event!(ProcessResourceLimits, "process_resource_limits");
 telemetry_event!(
@@ -1164,36 +1163,13 @@ mod tests {
     }
 
     #[test]
-    fn process_resource_usage_omits_allocated_bytes_when_unavailable() {
+    fn process_resource_usage_omits_absent_gauges() {
         assert_eq!(
             serde_json::to_value(ProcessResourceUsage {
                 trigger: ResourceReportTrigger::Periodic,
                 rss_bytes: None,
                 peak_rss_bytes: None,
                 footprint_bytes: None,
-                allocated_bytes: Some(4_096),
-                threads: None,
-                open_files: None,
-                resident_sessions: 2,
-                session_threads: 3,
-                idle: false,
-            })
-            .unwrap(),
-            serde_json::json!({
-                "trigger": "periodic",
-                "allocated_bytes": 4_096,
-                "resident_sessions": 2,
-                "session_threads": 3,
-                "idle": false,
-            })
-        );
-        assert_eq!(
-            serde_json::to_value(ProcessResourceUsage {
-                trigger: ResourceReportTrigger::Periodic,
-                rss_bytes: None,
-                peak_rss_bytes: None,
-                footprint_bytes: None,
-                allocated_bytes: None,
                 threads: None,
                 open_files: None,
                 resident_sessions: 2,

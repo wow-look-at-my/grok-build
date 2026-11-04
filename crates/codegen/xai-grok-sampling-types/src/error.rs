@@ -2,10 +2,10 @@
 
 use std::fmt;
 
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use xai_circuit_breaker::RetryPolicy;
+use xai_grok_net::StatusCode;
 
 use crate::provider_error::{parse_provider_error, parse_provider_error_str};
 
@@ -147,7 +147,7 @@ pub enum SamplingError {
     #[error("invalid mTLS client configuration: {0}")]
     MtlsConfiguration(String),
     #[error("request error: {}", error_chain(.0))]
-    Http(reqwest::Error),
+    Http(xai_grok_net::Error),
     #[error("{prefix}{0}", prefix = SERIALIZATION_DISPLAY_PREFIX)]
     Serialization(serde_json::Error),
     #[error("API error (status {status}): {message}")]
@@ -298,12 +298,13 @@ impl SamplingError {
 
     /// Display plus the hidden source() chain.
     ///
-    /// reqwest Error Display hides DNS/connect causes on source().
+    /// request Error Display hides DNS/connect causes on source().
     pub fn detail_with_causes(&self) -> String {
         match self {
             Self::Http(err) => {
                 let mut msg = self.to_string();
-                let mut source = std::error::Error::source(err);
+                // The net error's own source is the transport error it already displays.
+                let mut source = err.as_http().and_then(std::error::Error::source);
                 while let Some(cause) = source {
                     msg.push_str(": ");
                     msg.push_str(&cause.to_string());
@@ -544,6 +545,12 @@ impl SamplingError {
             .is_some_and(|names| names.iter().any(|n| n == "reasoning_content"))
     }
 
+    /// Whether this error names `reasoning` as an unsupported property.
+    pub fn names_unsupported_reasoning(&self) -> bool {
+        self.unsupported_property_names()
+            .is_some_and(|names| names.iter().any(|n| n == "reasoning"))
+    }
+
     /// The distinct property names an unsupported-property error names.
     /// `None` when this is not such an error. The provider packs several
     /// failures into one newline-separated string, e.g.
@@ -583,7 +590,7 @@ impl SamplingError {
     }
 
     /// The response stream died part-way through: the SSE connection dropped,
-    /// or reqwest could not decode the body it was reading ("error decoding
+    /// or request could not decode the body it was reading ("error decoding
     /// response body").
     pub fn is_stream_interrupted(&self) -> bool {
         match self {
@@ -599,7 +606,7 @@ impl SamplingError {
             SamplingError::InvalidConfiguration(_) => false,
             SamplingError::EndpointNotAllowed(_) => false,
             SamplingError::MtlsConfiguration(_) => false,
-            SamplingError::Http(err) => is_retryable_reqwest(err),
+            SamplingError::Http(err) => is_retryable_request(err),
             SamplingError::Serialization(_) => false,
             SamplingError::Api { status, .. } => is_retryable_api_status(*status),
             SamplingError::EventStreamError(_) => true,
@@ -736,8 +743,8 @@ impl SamplingError {
     }
 }
 
-impl From<reqwest::Error> for SamplingError {
-    fn from(value: reqwest::Error) -> Self {
+impl From<xai_grok_net::Error> for SamplingError {
+    fn from(value: xai_grok_net::Error) -> Self {
         Self::Http(value)
     }
 }
@@ -947,7 +954,7 @@ pub fn user_facing_api_error_message(status: StatusCode, bytes: &[u8]) -> String
 /// on. Other statuses are about the request, not the address, and keep their
 /// message.
 pub fn api_error_message_for_endpoint(status: StatusCode, bytes: &[u8], endpoint: &str) -> String {
-    let host = reqwest::Url::parse(endpoint)
+    let host = xai_grok_net::Url::parse(endpoint)
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned));
     let message = match (structured_error_message(bytes), &host) {
@@ -1047,7 +1054,7 @@ pub fn is_retryable_api_status(status: StatusCode) -> bool {
     RetryPolicy::edge_client().should_retry(status.as_u16())
 }
 
-/// Render an error with every cause in its `source()` chain. reqwest prints
+/// Render an error with every cause in its `source()` chain. request prints
 /// only a category, such as "error decoding response body". The real cause (a
 /// reset stream, an early EOF, a timeout) is in the chain.
 pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
@@ -1064,8 +1071,8 @@ pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
     text
 }
 
-/// Decide whether a [`reqwest::Error`] is worth retrying.
-pub fn is_retryable_reqwest(err: &reqwest::Error) -> bool {
+/// Decide whether a transport error is worth retrying. A credential refusal is not.
+pub fn is_retryable_request(err: &xai_grok_net::Error) -> bool {
     if err.is_timeout() || err.is_connect() {
         return true;
     }
@@ -1079,7 +1086,7 @@ pub fn is_retryable_reqwest(err: &reqwest::Error) -> bool {
     }
 
     // A decode failure is a body that stopped arriving mid-read, not a
-    // deterministic fault: reqwest renders it "error decoding response body".
+    // deterministic fault: request renders it "error decoding response body".
     if err.is_decode() {
         return true;
     }
@@ -1449,22 +1456,23 @@ mod tests {
         assert!(err.is_stream_interrupted());
     }
 
-    /// The real thing reqwest produces when a body it is reading does not
+    /// The real thing request produces when a body it is reading does not
     /// decode. Its Display is "error decoding response body".
-    async fn decode_error() -> reqwest::Error {
-        let response = reqwest::Response::from(http::Response::new("this is not json"));
+    async fn decode_error() -> xai_grok_net::Error {
+        let response = xai_grok_net::Response::from(http::Response::new("this is not json"));
         response
             .json::<serde_json::Value>()
             .await
             .expect_err("invalid JSON must fail to decode")
+            .into()
     }
 
     #[tokio::test]
     async fn a_body_decode_failure_is_a_retryable_stream_interruption() {
         let err = decode_error().await;
-        assert!(err.is_decode(), "reqwest classified this as {err:?}");
+        assert!(err.is_decode(), "request classified this as {err:?}");
         assert!(
-            is_retryable_reqwest(&err),
+            is_retryable_request(&err),
             "a body that stopped arriving is transient, not fatal"
         );
         let err = SamplingError::Http(err);
@@ -2498,6 +2506,26 @@ mod tests {
             !err.names_unsupported_model_id(),
             "model_id was not named and must not be claimed"
         );
+        assert!(
+            !err.names_unsupported_reasoning(),
+            "`reasoning` is a different property from `reasoning_content`"
+        );
+    }
+
+    #[test]
+    fn unsupported_property_names_tells_reasoning_from_reasoning_content() {
+        let err = SamplingError::Api {
+            status: StatusCode::BAD_REQUEST,
+            message: "wrong_api_format: messages.1.assistant.reasoning: property \
+                 'messages.1.assistant.reasoning' is unsupported"
+                .into(),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+            error_code: None,
+        };
+        assert!(err.names_unsupported_reasoning());
+        assert!(!err.names_unsupported_reasoning_content());
     }
 
     /// Narrowness: the classifier requires the provider's own code AND the "is

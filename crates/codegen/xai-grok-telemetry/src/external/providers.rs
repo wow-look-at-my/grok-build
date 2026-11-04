@@ -65,7 +65,7 @@ impl DedicatedRuntime {
                 while let Some(future) = rx.recv().await {
                     // This is `opentelemetry_sdk::runtime::Runtime::spawn`: the trait hands over a future whose Output is `()` and gives back no handle to anybody.
                     #[allow(clippy::disallowed_methods)]
-                    tokio::spawn(future);
+                    xai_spawn::spawn(future);
                 }
             });
         };
@@ -274,7 +274,7 @@ fn ders_to_pem_bundle(ders: &[Vec<u8>]) -> Option<String> {
 
 /// `opentelemetry-otlp` 0.32 must be handed an explicit `ClientTlsConfig` for `https://` endpoints. Its own fallback is
 /// `ClientTlsConfig::new()`, whose root store is empty in tonic 0.14 (`Endpoint::from_shared` never auto-enables roots).
-/// This keeps parity with the HTTP transport's embedded-roots reqwest client.
+/// This keeps parity with the HTTP transport client.
 fn grpc_tls_candidates(
     endpoint: &str,
     ca_certificate_path: Option<&str>,
@@ -953,7 +953,8 @@ mod tests {
             .expect("cert");
         let der = cert.der().to_vec();
         let pem = ders_to_pem_bundle(&[der.clone(), der]).expect("bundle");
-        let parsed = reqwest::Certificate::from_pem_bundle(pem.as_bytes()).expect("parse back");
+        let parsed =
+            xai_grok_net::Certificate::from_pem_bundle(pem.as_bytes()).expect("parse back");
         assert_eq!(parsed.len(), 2);
         assert!(pem_contains_certificate(pem.as_bytes()));
     }

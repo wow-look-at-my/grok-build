@@ -41,17 +41,12 @@ impl TraceExportConfigWithAuth {
     }
 }
 impl StorageConfig for TraceExportConfigWithAuth {
-    fn bucket_url(&self) -> &str {
-        self.inner.bucket_url()
-    }
     fn upload_method(&self) -> &UploadMethod {
         self.inner.upload_method()
     }
     fn proxy_credentials(&self) -> Option<Arc<dyn AuthCredentialProvider>> {
         let am = self.auth_manager.as_ref()?;
-        let UploadMethod::Proxy { alpha_test_key, .. } = &self.inner.upload_method else {
-            return None;
-        };
+        let UploadMethod::Proxy { alpha_test_key, .. } = &self.inner.upload_method;
         Some(Arc::new(ShellAuthCredentialProvider::new(
             am.clone(),
             alpha_test_key.clone(),
@@ -59,15 +54,12 @@ impl StorageConfig for TraceExportConfigWithAuth {
     }
     fn proxy_attribution(&self) -> Option<Arc<dyn Auth401AttributionCallback>> {
         let am = self.auth_manager.as_ref()?;
-        if !matches!(self.inner.upload_method, UploadMethod::Proxy { .. }) {
-            return None;
-        }
         Some(Arc::new(StorageClientAttributionBridge::new(
             am.clone(),
             None,
         )))
     }
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         Some(crate::http::shared_upload_client())
     }
 }
@@ -80,9 +72,6 @@ impl WithAuth for TraceExportConfig {
         TraceExportConfigWithAuth::new(self.clone(), auth_manager)
     }
 }
-/// Override at runtime with `GROK_TELEMETRY_GCS_BUCKET`; `None` disables trace uploads until a bucket is configured.
-pub(crate) const SESSION_TRACES_BUCKET: Option<&str> =
-    option_env!("GROK_SESSION_TRACES_BUCKET_DEFAULT");
 /// Upload bytes to the `auth-diagnostics/{version}/{user_id}/{ts}.jsonl` path for easy aggregation across users.
 /// Used by both the auth refresh failure uploader and the 401/404 error trace uploader.
 pub(crate) async fn upload_to_auth_diagnostics(
@@ -102,7 +91,6 @@ pub(crate) async fn upload_to_auth_diagnostics(
     let object_path = format!("auth-diagnostics/{version}/{user_id}/{ts}.jsonl");
     let config = crate::session::repo_changes::TraceExportConfig {
         bucket_url: None,
-        service_account_key: None,
         upload_method: upload_method.clone(),
         prefix_dir: None,
         gcs_prefix: None,

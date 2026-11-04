@@ -85,6 +85,8 @@ pub struct OwnedEnumChoice {
     pub canonical: String,
     pub display: String,
     pub description: String,
+    /// More text the picker search matches, but does not draw. A model choice holds its model id here.
+    pub search_extra: String,
 }
 
 /// Source of runtime choices for a `SettingKind::DynamicEnum`.
@@ -110,16 +112,75 @@ pub fn dynamic_enum_choices(
                 canonical: String::new(),
                 display: "(no override)".to_string(),
                 description: "Inherit the default model (no per-user override).".to_string(),
+                search_extra: String::new(),
             });
-            for (name, _id) in &snapshot.available_models {
-                out.push(OwnedEnumChoice {
-                    canonical: name.clone(),
-                    display: name.clone(),
+            let mut models: Vec<OwnedEnumChoice> = snapshot
+                .available_models
+                .iter()
+                .map(|(name, id)| (model_choice_label(name, id), id.0.to_string()))
+                // A blank label draws an empty row and collides with the "(no override)" sentinel.
+                .filter(|(label, _)| !label.trim().is_empty())
+                .map(|(label, id)| OwnedEnumChoice {
+                    canonical: label.clone(),
+                    display: label,
                     description: String::new(),
-                });
-            }
+                    search_extra: id,
+                })
+                .collect();
+            // The catalog arrives in provider order. Sort it so a reader can scan the list.
+            models.sort_by(|a, b| {
+                natural_cmp_ignore_case(&a.display, &b.display)
+                    .then_with(|| a.display.cmp(&b.display))
+            });
+            models.dedup_by(|a, b| a.canonical == b.canonical);
+            out.extend(models);
             out
         }
+    }
+}
+
+/// Compare labels case-insensitively, with each run of digits compared as a number. So
+/// `glm-4.7` sorts before `glm-10`.
+pub fn natural_cmp_ignore_case(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mut a = a.chars().peekable();
+    let mut b = b.chars().peekable();
+    loop {
+        let (Some(&ca), Some(&cb)) = (a.peek(), b.peek()) else {
+            return a.peek().is_some().cmp(&b.peek().is_some());
+        };
+        if ca.is_ascii_digit() && cb.is_ascii_digit() {
+            let mut da = String::new();
+            while let Some(c) = a.next_if(|c| c.is_ascii_digit()) {
+                da.push(c);
+            }
+            let mut db = String::new();
+            while let Some(c) = b.next_if(|c| c.is_ascii_digit()) {
+                db.push(c);
+            }
+            let ta = da.trim_start_matches('0');
+            let tb = db.trim_start_matches('0');
+            let ord = ta.len().cmp(&tb.len()).then_with(|| ta.cmp(tb));
+            if ord != Ordering::Equal {
+                return ord;
+            }
+            continue;
+        }
+        let ord = ca.to_lowercase().cmp(cb.to_lowercase());
+        if ord != Ordering::Equal {
+            return ord;
+        }
+        a.next();
+        b.next();
+    }
+}
+
+/// The label a model choice shows.
+pub fn model_choice_label(name: &str, id: &acp::ModelId) -> String {
+    if name.trim().is_empty() {
+        id.0.to_string()
+    } else {
+        name.to_owned()
     }
 }
 
@@ -439,13 +500,13 @@ impl PagerLocalSnapshot {
     /// Case-insensitive ASCII match against display names only.
     /// Ids aren't carried in the snapshot's primary key; callers needing id-based resolution should use `ModelState::resolve_by_name_or_id`.
     pub fn resolve_model_name(&self, query: &str) -> Option<acp::ModelId> {
-        self.available_models.iter().find_map(|(name, id)| {
-            if name.eq_ignore_ascii_case(query) {
-                Some(id.clone())
-            } else {
-                None
-            }
-        })
+        self.available_models
+            .iter()
+            .find(|(name, id)| {
+                name.eq_ignore_ascii_case(query)
+                    || (name.trim().is_empty() && id.0.as_ref().eq_ignore_ascii_case(query))
+            })
+            .map(|(_, id)| id.clone())
     }
 }
 
@@ -471,6 +532,16 @@ impl SettingsRegistry {
     pub fn from_entries(entries: Vec<SettingMeta>) -> Self {
         assert_unique_keys(&entries);
         Self { entries }
+    }
+
+    /// Build a registry whose subagent rows come from an explicit type list.
+    /// Exists for tests that seed a discovered agent type; production starts
+    /// from [`Self::defaults`].
+    #[doc(hidden)]
+    pub fn with_subagent_rows(rows: &[crate::settings::subagent_models::SubagentModelRow]) -> Self {
+        Self::from_entries(crate::settings::defs::default_settings_with_subagent_rows(
+            rows,
+        ))
     }
 
     /// All registered settings, in declaration order.
@@ -780,7 +851,35 @@ pub fn current_value_for(
                     .available_models
                     .iter()
                     .find(|(_, mid)| mid.0.as_ref() == id.as_str())
-                    .map(|(name, _)| name.clone())
+                    .map(|(name, mid)| model_choice_label(name, mid))
+                    .unwrap_or_else(|| id.clone()),
+            }))
+        }
+        // Model groups read the same way, from `[model_groups.<id>] model`.
+        key if crate::settings::model_groups::group_for_setting_key(key).is_some() => {
+            let group = crate::settings::model_groups::group_for_setting_key(key)?;
+            Some(SettingValue::String(
+                match ui.model_group_models.get(group.id) {
+                    None => String::new(),
+                    Some(id) => pager
+                        .available_models
+                        .iter()
+                        .find(|(_, mid)| mid.0.as_ref() == id.as_str())
+                        .map(|(name, mid)| model_choice_label(name, mid))
+                        .unwrap_or_else(|| id.clone()),
+                },
+            ))
+        }
+        // A subagent type's pin reads from `[subagents.models].<type>`.
+        key if crate::settings::subagent_models::type_for_setting_key(key).is_some() => {
+            let name = crate::settings::subagent_models::type_for_setting_key(key)?;
+            Some(SettingValue::String(match ui.subagent_models.get(name) {
+                None => String::new(),
+                Some(id) => pager
+                    .available_models
+                    .iter()
+                    .find(|(_, mid)| mid.0.as_ref() == id.as_str())
+                    .map(|(name, mid)| model_choice_label(name, mid))
                     .unwrap_or_else(|| id.clone()),
             }))
         }
@@ -1316,6 +1415,32 @@ mod tests {
                         "UiConfig::default() must pin no harness model slot"
                     );
                 }
+                // A model group lives in `[model_groups]` and reaches the modal through `model_group_models`.
+                (key, SettingKind::DynamicEnum { default, .. })
+                    if crate::settings::model_groups::group_for_setting_key(key).is_some() =>
+                {
+                    assert!(
+                        default.is_empty(),
+                        "`{key}` default must be the empty inherit sentinel"
+                    );
+                    assert!(
+                        ui.model_group_models.is_empty(),
+                        "UiConfig::default() must pin no model group"
+                    );
+                }
+                // A subagent type's pin lives in `[subagents.models]` and reaches the modal through `subagent_models`.
+                (key, SettingKind::DynamicEnum { default, .. })
+                    if crate::settings::subagent_models::row_for_setting_key(key).is_some() =>
+                {
+                    assert!(
+                        default.is_empty(),
+                        "`{key}` default must be the empty inherit sentinel"
+                    );
+                    assert!(
+                        ui.subagent_models.is_empty(),
+                        "UiConfig::default() must pin no subagent model"
+                    );
+                }
                 _ => panic!(
                     "settings::defs::default_settings() contains entry `{}` with no \
                      matching arm in defaults_match_ui_config_default. Add an arm.",
@@ -1587,7 +1712,18 @@ mod tests {
     fn every_harness_model_slot_has_a_settings_row() {
         let reg = SettingsRegistry::defaults();
         for slot in xai_grok_models::HARNESS_MODEL_SLOTS {
-            let key = slot.setting_key();
+            let key = match crate::settings::model_groups::group_holding_slot(slot.id) {
+                Some(group) => {
+                    assert!(
+                        reg.find(slot.setting_key()).is_none(),
+                        "`{}` is in group `{}` and must have no row of its own",
+                        slot.id,
+                        group.id
+                    );
+                    group.setting_key
+                }
+                None => slot.setting_key(),
+            };
             let meta = reg
                 .find(key)
                 .unwrap_or_else(|| panic!("slot `{}` has no settings row at `{key}`", slot.id));
@@ -1613,11 +1749,29 @@ mod tests {
                 "`{key}` must be a model picker whose empty default means inherit"
             );
             assert!(
-                meta.restart_required,
-                "`{key}` must be restart_required — a slot is resolved when a \
-                 session actor is built"
+                !meta.restart_required,
+                "`{key}` must apply live — a `[models]` change re-resolves the \
+                 slot in every running session"
             );
         }
+    }
+
+    /// A group's row reads back `[model_groups.<id>] model`, and the empty
+    /// sentinel when the user set nothing.
+    #[test]
+    fn model_group_row_reads_the_configured_value() {
+        let pager = PagerLocalSnapshot::default();
+        let mut ui = UiConfig::default();
+        assert_eq!(
+            current_value_for("models.group.summarization", &ui, &pager),
+            Some(SettingValue::String(String::new()))
+        );
+        ui.model_group_models
+            .insert("summarization".to_string(), "some-model".to_string());
+        assert_eq!(
+            current_value_for("models.group.summarization", &ui, &pager),
+            Some(SettingValue::String("some-model".to_string()))
+        );
     }
 
     /// A slot's row reads back the model the user set, and reads back the
@@ -1903,5 +2057,164 @@ mod tests {
                 crate::views::settings_modal::MAX_PICKER_CHOICES,
             );
         }
+    }
+
+    /// Every spawnable subagent type gets its own model row, and no shared
+    /// "default" row exists to fall back on.
+    #[test]
+    fn each_subagent_type_has_its_own_model_row() {
+        use crate::settings::subagent_models::{SubagentModelRow, SubagentType, rows_from};
+        let types = vec![
+            SubagentType {
+                name: "general-purpose".into(),
+                description: String::new(),
+            },
+            SubagentType {
+                name: "explore".into(),
+                description: String::new(),
+            },
+            SubagentType {
+                name: "plan".into(),
+                description: String::new(),
+            },
+            SubagentType {
+                name: "seeded-agent".into(),
+                description: String::new(),
+            },
+        ];
+        let seeded: Vec<SubagentModelRow> = rows_from(&types);
+        let reg = SettingsRegistry::with_subagent_rows(&seeded);
+
+        for name in ["general-purpose", "explore", "plan", "seeded-agent"] {
+            let key = format!("subagents.models.{name}");
+            let meta = reg
+                .find(Box::leak(key.clone().into_boxed_str()))
+                .unwrap_or_else(|| panic!("no model row for subagent type {name}"));
+            assert!(matches!(meta.kind, SettingKind::DynamicEnum { .. }));
+            assert!(
+                crate::settings::subagent_models::type_for_setting_key(meta.key)
+                    .is_some_and(|listed| listed == name),
+                "row key {} must name type {name}",
+                meta.key
+            );
+        }
+        assert!(
+            reg.find("models.subagent_default").is_none(),
+            "the shared subagent default row must not exist"
+        );
+        assert!(
+            !reg.all()
+                .iter()
+                .any(|m| m.key.starts_with("subagents.models.default")),
+            "no default subagent model row"
+        );
+
+        let mut ui = UiConfig::default();
+        ui.subagent_models
+            .insert("seeded-agent".to_string(), "seeded-model".to_string());
+        assert_eq!(
+            current_value_for(
+                seeded
+                    .iter()
+                    .find(|row| row.name == "seeded-agent")
+                    .map(|row| row.setting_key)
+                    .expect("seeded row"),
+                &ui,
+                &PagerLocalSnapshot::default(),
+            ),
+            Some(SettingValue::String("seeded-model".to_string())),
+            "a seeded discovered type reads its own [subagents.models] key"
+        );
+    }
+
+    /// A subagent row reads `[subagents.models].<type>` and nothing else.
+    #[test]
+    fn a_subagent_row_reads_its_own_type_pin() {
+        use crate::settings::subagent_models::{SubagentModelRow, SubagentType, rows_from};
+        let rows: Vec<SubagentModelRow> = rows_from(&[
+            SubagentType {
+                name: "explore".into(),
+                description: String::new(),
+            },
+            SubagentType {
+                name: "plan".into(),
+                description: String::new(),
+            },
+        ]);
+        let reg = SettingsRegistry::with_subagent_rows(&rows);
+        let mut ui = UiConfig::default();
+        ui.subagent_models
+            .insert("explore".to_string(), "fast-model".to_string());
+        let pager = PagerLocalSnapshot::default();
+
+        let key = rows
+            .iter()
+            .find(|row| row.name == "explore")
+            .map(|row| row.setting_key)
+            .expect("explore row");
+        assert_eq!(
+            current_value_for(key, &ui, &pager),
+            Some(SettingValue::String("fast-model".to_string())),
+        );
+        let plan_key = rows
+            .iter()
+            .find(|row| row.name == "plan")
+            .map(|row| row.setting_key)
+            .expect("plan row");
+        assert_eq!(
+            current_value_for(plan_key, &ui, &pager),
+            Some(SettingValue::String(String::new())),
+            "another type's pin must not be shown"
+        );
+        assert!(reg.find(key).is_some());
+    }
+
+    /// The model picker keeps "(no override)" first, sorts the rest naturally and
+    /// case-insensitively, and drops a model with neither a name nor an id.
+    #[test]
+    fn model_catalog_choices_are_sorted_and_never_blank() {
+        let model = |name: &str, id: &str| {
+            (
+                name.to_string(),
+                acp::ModelId::new(std::sync::Arc::from(id)),
+            )
+        };
+        let snapshot = PagerLocalSnapshot {
+            available_models: vec![
+                model("zeta", "z"),
+                model("IncoAI/glm-10", "g10"),
+                model("", ""),
+                model("incoai/glm-4.7", "g47"),
+                model("", "alpha-id"),
+                model("   ", "  "),
+                model("Beta", "b"),
+            ],
+            ..PagerLocalSnapshot::default()
+        };
+        let labels: Vec<String> =
+            dynamic_enum_choices(DynamicEnumSource::ActiveModelCatalog, &snapshot)
+                .into_iter()
+                .map(|c| c.display)
+                .collect();
+        assert_eq!(
+            labels,
+            [
+                "(no override)",
+                "alpha-id",
+                "Beta",
+                "incoai/glm-4.7",
+                "IncoAI/glm-10",
+                "zeta",
+            ]
+        );
+    }
+
+    #[test]
+    fn natural_cmp_orders_digit_runs_as_numbers() {
+        use std::cmp::Ordering::*;
+        assert_eq!(natural_cmp_ignore_case("glm-4.7", "glm-10"), Less);
+        assert_eq!(natural_cmp_ignore_case("Qwen 3.8", "qwen 3.8"), Equal);
+        assert_eq!(natural_cmp_ignore_case("k3", "k3:fast"), Less);
+        assert_eq!(natural_cmp_ignore_case("v007", "v7"), Equal);
     }
 }

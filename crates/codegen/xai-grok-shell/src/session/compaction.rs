@@ -586,7 +586,7 @@ impl SessionActor {
             compaction_count,
         ) {
             let snapshot = self.snapshot_memory_flush_state().await;
-            tokio::task::spawn_local({
+            xai_spawn::spawn_local({
                 let session = self.clone();
                 async move {
                     if session.run_memory_flush(trigger, Some(snapshot)).await {
@@ -1230,7 +1230,7 @@ impl SessionActor {
             tool_tokens = compaction_tool_tokens,
             "Running compact with model '{}' (slot pinned: {})",
             &sampling_config.model,
-            self.harness_models.get("compaction").is_some()
+            self.harness_model("compaction").is_some()
         );
         let mut last_error: Option<acp::Error> = None;
         let mut last_failure_outcome = CompactionOutcome::Failed;
@@ -1860,7 +1860,7 @@ impl SessionActor {
         };
         let v2_memory_context = if self.memory.can_expose_v2() {
             if let Some(storage) = self.memory.storage() {
-                match tokio::task::spawn_blocking(move || {
+                match xai_spawn::spawn_blocking(move || {
                     crate::session::helpers::memory_context::format_v2_memory_context(&storage)
                 })
                 .await

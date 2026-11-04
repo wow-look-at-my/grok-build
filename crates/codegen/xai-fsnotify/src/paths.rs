@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::event::GitMetaKind;
 
-/// `git_dir` is from `git2::Repository::discover().path()` (handles worktrees).
+/// `git_dir` is the discovered repository's `git_dir()` (handles worktrees).
 pub(crate) fn classify_git_path(path: &Path, git_dir: &Path) -> Option<GitMetaKind> {
     let rel = path.strip_prefix(git_dir).ok()?.to_str()?;
     match rel {

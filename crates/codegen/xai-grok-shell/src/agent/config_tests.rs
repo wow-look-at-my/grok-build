@@ -1423,6 +1423,19 @@ fn resolve_credentials_empty_api_key_falls_through_to_session() {
     assert_eq!(creds.auth_type, AuthType::SessionToken);
     assert_eq!(creds.api_key.as_deref(), Some("session-jwt"));
 }
+/// A model with no key of its own on a third-party host never gets the session token.
+#[test]
+#[serial]
+fn resolve_credentials_keeps_session_off_third_party_host() {
+    use crate::agent::auth_method::{LEGACY_XAI_API_KEY_ENV_VAR, XAI_API_KEY_ENV_VAR};
+    use xai_grok_test_support::EnvGuard;
+    let _global = EnvGuard::unset(XAI_API_KEY_ENV_VAR);
+    let _legacy = EnvGuard::unset(LEGACY_XAI_API_KEY_ENV_VAR);
+    let model = test_model_entry("m", "https://gateway.example/v1", None, None, None);
+    assert!(!model.has_own_credentials());
+    let creds = resolve_credentials(&model, Some("session-jwt"));
+    assert_ne!(creds.api_key.as_deref(), Some("session-jwt"));
+}
 #[test]
 #[serial]
 fn config_toml_env_key_array_parses() {
@@ -1621,6 +1634,26 @@ fn x_api_key_auth_scheme_flows_from_config_to_sampler() {
     assert_eq!(info.auth_type, "x-api-key");
 }
 #[test]
+fn replayed_reasoning_rides_both_names_except_on_xai() {
+    for (url, expected) in [
+        ("https://ollama.com/v1", true),
+        ("http://localhost:11434/v1", true),
+        ("https://api.x.ai/v1", false),
+    ] {
+        let model = test_model_entry("m", url, Some("sk-test"), None, None);
+        let config =
+            sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
+        assert_eq!(
+            config.chat_message_profile.accepts_reasoning, expected,
+            "`reasoning` for {url}"
+        );
+        assert!(
+            config.chat_message_profile.accepts_reasoning_content,
+            "`reasoning_content` for {url}"
+        );
+    }
+}
+#[test]
 fn auth_scheme_defaults_to_bearer_when_not_set_in_config() {
     let model = test_model_entry(
         "grok-4.5",
@@ -1700,10 +1733,130 @@ fn byok_from_lookup_classifies_all_states() {
         "no-auth models must keep the session-token resolver disabled",
     );
 }
+/// A model only a provider's listing supplies is in no config-only catalog, so its
+/// credentials come from `[model_providers.<id>]`. A turn reaches it by the
+/// catalog key discovery gives it and by the routing slug the sampler sends. Both
+/// must read as BYOK, or the session bearer goes to that provider's endpoint.
+#[test]
+#[serial]
+fn provider_listed_model_resolves_to_its_provider_credentials() {
+    use crate::agent::auth_method::{ModelByok, session_token_auth_gate};
+    let qualified = "gateway/openrouter/anthropic/claude-sonnet-5.5";
+    let routing = "openrouter/anthropic/claude-sonnet-5.5";
+    let gateway = "https://gateway.example/v1";
+    let single = tempfile::tempdir().expect("temp grok home");
+    std::fs::write(
+        single.path().join("config.toml"),
+        r#"
+[model_providers.gateway]
+base_url = "https://gateway.example/v1"
+api_key = "sk-gateway"
+"#,
+    )
+    .expect("write config");
+    {
+        let _home = EnvGuard::set("GROK_HOME", single.path());
+        for (model_id, endpoint) in [
+            (qualified, None),
+            (qualified, Some(gateway)),
+            (routing, Some(gateway)),
+        ] {
+            let facts = resolve_model_auth_facts_and_provider(model_id, endpoint).0;
+            assert_eq!(facts.byok, ModelByok::Byok, "{model_id} at {endpoint:?}");
+            assert!(
+                !session_token_auth_gate(true, facts.byok, false),
+                "{model_id}: a provider-listed model must not receive the session bearer",
+            );
+        }
+        // A slug aimed at some other endpoint belongs to no listing here, so
+        // the provider is not guessed at from its presence alone.
+        let elsewhere =
+            resolve_model_auth_facts_and_provider(routing, Some("https://other.example/v1")).0;
+        assert_eq!(elsewhere.byok, ModelByok::NotByok);
+    }
+    // Listings: the request's endpoint still names its provider.
+    let multi = tempfile::tempdir().expect("temp grok home");
+    std::fs::write(
+        multi.path().join("config.toml"),
+        r#"
+[model_providers.gateway]
+base_url = "https://gateway.example/v1"
+api_key = "sk-gateway"
+
+[model_providers.other]
+base_url = "https://other.example/v1"
+api_key = "sk-other"
+"#,
+    )
+    .expect("write config");
+    let _home = EnvGuard::set("GROK_HOME", multi.path());
+    let facts = resolve_model_auth_facts_and_provider(routing, Some(gateway)).0;
+    assert_eq!(facts.byok, ModelByok::Byok, "{routing} at {gateway}");
+    let ambiguous = resolve_model_auth_facts_and_provider(routing, None).0;
+    assert_eq!(ambiguous.byok, ModelByok::NotByok, "{routing} is ambiguous");
+}
+/// A gateway provider with a `[model.<id>]` block that routes to it, a
+/// `[models]` default and local blocks beside it. Every pazer-listed id is BYOK.
+#[test]
+#[serial]
+fn gateway_listed_models_are_byok_beside_other_model_blocks() {
+    use crate::agent::auth_method::ModelByok;
+    let home = tempfile::tempdir().expect("temp grok home");
+    std::fs::write(
+        home.path().join("config.toml"),
+        r#"
+[models]
+default = "pazer/openrouter/anthropic/claude-haiku-5.5:batch"
+default_reasoning_effort = "high"
+web_search = "pazer/Synthetic/syn:small:text"
+
+[model_providers.pazer]
+base_url = "https://gateway.pazer.ai/v1"
+api_backend = "chat_completions"
+api_key = "sk-pazer"
+models_autodetect = true
+
+[model.qwen-local]
+model = "qwen3.8-27b"
+base_url = "http://192.168.1.84:30000/v1"
+api_backend = "chat_completions"
+auth_scheme = "none"
+
+[model.qwen-gateway]
+model = "sgl/RadixArk/Qwen3.8-Flash-Next-NVFP4"
+model_provider = "pazer"
+
+[model.qwen-hf]
+model = "Qwen/Qwen3.8-Flash-Next-FP8"
+base_url = "https://example.endpoints.huggingface.cloud/v1"
+api_backend = "chat_completions"
+api_key = "sk-hf"
+"#,
+    )
+    .expect("write config");
+    let _home = EnvGuard::set("GROK_HOME", home.path());
+    let gateway = "https://gateway.pazer.ai/v1";
+    for (model_id, endpoint) in [
+        ("pazer/openrouter/anthropic/claude-haiku-5.5:batch", None),
+        (
+            "pazer/openrouter/anthropic/claude-haiku-5.5:batch",
+            Some(gateway),
+        ),
+        ("openrouter/anthropic/claude-haiku-5.5:batch", Some(gateway)),
+        ("openrouter/anthropic/claude-opus-5-5", Some(gateway)),
+        (
+            "openrouter/deepseek/deepseek-v4.1-flash-1017",
+            Some(gateway),
+        ),
+    ] {
+        let facts = resolve_model_auth_facts_and_provider(model_id, endpoint).0;
+        assert_eq!(facts.byok, ModelByok::Byok, "{model_id} at {endpoint:?}");
+    }
+}
 #[test]
 fn resolve_model_auth_facts_empty_model_id_is_unknown() {
     assert_eq!(
-        resolve_model_auth_facts_and_provider("").0.byok,
+        resolve_model_auth_facts_and_provider("", None).0.byok,
         ModelByok::Unknown
     );
 }
@@ -3503,13 +3656,8 @@ fn e2e_credential_priority_model_key_beats_session_beats_env() {
         sampling.base_url, "https://custom.api/v1",
         "model's own base_url must be used"
     );
-    let model_no_key = test_model_entry(
-        "test",
-        "https://proxy.api/v1",
-        None,
-        None,
-        Some("https://api.x.ai/v1"),
-    );
+    let proxy = xai_grok_env::PROD_CLI_CHAT_PROXY_BASE_URL;
+    let model_no_key = test_model_entry("test", proxy, None, None, Some("https://api.x.ai/v1"));
     let sampling = resolve_sampling(&model_no_key, Some("session-key"));
     assert_eq!(
         sampling.api_key.as_deref(),
@@ -3517,8 +3665,21 @@ fn e2e_credential_priority_model_key_beats_session_beats_env() {
         "session token should beat env key when model has no own credentials"
     );
     assert_eq!(
-        sampling.base_url, "https://proxy.api/v1",
+        sampling.base_url, proxy,
         "session auth should use base_url, not api_base_url"
+    );
+    let third_party = test_model_entry(
+        "test",
+        "https://gateway.example/v1",
+        None,
+        None,
+        Some("https://api.x.ai/v1"),
+    );
+    let sampling = resolve_sampling(&third_party, Some("session-key"));
+    assert_ne!(
+        sampling.api_key.as_deref(),
+        Some("session-key"),
+        "a host xAI does not operate never gets the session token"
     );
     let sampling = resolve_sampling(&model_no_key, None);
     assert_eq!(
@@ -5857,6 +6018,94 @@ fn an_unset_harness_model_slot_falls_back_as_its_table_says() {
     }
 }
 
+/// A group model reaches every member and wins over a member's own
+/// `[models]` entry. A slot outside the group keeps its own entry.
+#[test]
+fn a_model_group_sets_every_member() {
+    let raw: toml::Value = toml::from_str(
+        "[models]\nrecap = \"own\"\ngoal_planner = \"planner\"\n\
+         [model_groups.summarization]\nmodel = \"group-model\"\n",
+    )
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+    for slot in [
+        "session_summary",
+        "prompt_suggestion",
+        "recap",
+        "turn_summary",
+        "thinking_summary",
+        "goal_summarizer",
+    ] {
+        let r = cfg
+            .resolve_harness_model(slot)
+            .expect("grouped slot resolves");
+        assert_eq!(r.value, "group-model", "for {slot}");
+        assert_eq!(r.source, ConfigSource::Config, "for {slot}");
+    }
+    assert_eq!(
+        cfg.resolve_harness_model("goal_planner").map(|r| r.value),
+        Some("planner".to_owned())
+    );
+    assert!(cfg.resolve_harness_model("side_note").is_none());
+}
+
+/// `members = []` unrolls a compiled group, and its slots read their own
+/// `[models]` entries again. A user group takes a slot and sets its model.
+#[test]
+fn a_model_group_can_be_unrolled_or_replaced_from_config() {
+    let raw: toml::Value = toml::from_str(
+        "[models]\nside_note = \"own\"\n\
+         [model_groups.query]\nmembers = []\nmodel = \"ignored\"\n\
+         [model_groups.fast]\nmembers = [\"compaction\"]\nmodel = \"fast-model\"\n\
+         [model_groups.dense_summarization]\nmodel = \"dense\"\n",
+    )
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw).unwrap();
+    assert_eq!(
+        cfg.resolve_harness_model("side_note").map(|r| r.value),
+        Some("own".to_owned())
+    );
+    assert!(cfg.resolve_harness_model("todo_capture").is_none());
+    assert_eq!(
+        cfg.resolve_harness_model("compaction").map(|r| r.value),
+        Some("fast-model".to_owned())
+    );
+    assert_eq!(
+        cfg.resolve_harness_model("web_search").map(|r| r.value),
+        Some("dense".to_owned())
+    );
+}
+
+/// The slots that resolve through `ModelOverrideConfig` take the group model too.
+#[test]
+fn a_model_group_reaches_the_model_override_slots() {
+    let raw: toml::Value = toml::from_str(
+        "[models]\nweb_search = \"own\"\n\
+         [model_groups.dense_summarization]\nmodel = \"dense\"\n\
+         [model_groups.summarization]\nmodel = \"short\"\n",
+    )
+    .unwrap();
+    let resolved = crate::config::ModelOverrideConfig::resolve(None, None, &raw, None);
+    assert_eq!(resolved.web_search, "dense");
+    assert_eq!(resolved.image_description.as_deref(), Some("dense"));
+    assert_eq!(resolved.session_summary.as_deref(), Some("short"));
+    assert_eq!(
+        resolved.prompt_suggestion,
+        crate::config::PromptSuggestModelPin::Pinned("short".to_owned())
+    );
+}
+
+/// A slot in user groups stops the load with an error that names it.
+#[test]
+fn an_invalid_model_group_fails_the_config_load() {
+    let raw: toml::Value = toml::from_str(
+        "[model_groups.a]\nmembers = [\"recap\"]\n[model_groups.b]\nmembers = [\"recap\"]\n",
+    )
+    .unwrap();
+    let err = Config::new_from_toml_cfg(&raw).unwrap_err();
+    assert!(err.contains("'recap'"), "{err}");
+}
+
 /// A whitespace-only slot value reads as unset, the way every other
 /// model override in this file does.
 #[test]
@@ -6206,7 +6455,6 @@ fn config_accepts_all_known_sections() {
             feedback = true
             [endpoints]
             management_api_key = "mgmt-key"
-            gcs_service_account_key = "gcs-key"
             [models]
             default = "grok-3"
             [ui]

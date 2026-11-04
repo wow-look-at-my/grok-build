@@ -13,6 +13,9 @@ const MIN_REPORT_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// A quiet process still reports this often, so a flat line is evidence rather than absence.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
+/// How often the report loop checks whether a report is due.
+const REPORT_POLL_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Fraction of the last reading that counts as movement worth an event.
 const MATERIAL_CHANGE_DIVISOR: u64 = 10;
 
@@ -69,7 +72,6 @@ impl MvpAgent {
                 rss_bytes: usage.rss_bytes,
                 peak_rss_bytes: usage.peak_rss_bytes,
                 footprint_bytes: usage.footprint_bytes,
-                allocated_bytes: crate::heap_profile::stats().map(|stats| stats.allocated),
                 threads: usage.threads,
                 open_files: usage.open_files,
                 resident_sessions: self.session_registry.resident_count(),
@@ -79,7 +81,26 @@ impl MvpAgent {
         );
     }
 
-    /// Called from the heap monitor's poll loop, which runs whether or not profiling is on, so a session that never closes still reports.
+    /// Starts the loop that calls [`Self::report_resource_usage_if_due`], so a session that never closes still reports.
+    /// Only agent entrypoints call this. It runs once per agent, and never under `cfg!(test)`.
+    pub(super) fn spawn_resource_usage_reporter(&self) {
+        if cfg!(test) || self.resource_reporter_started.replace(true) {
+            return;
+        }
+        let agent_ref = LocalRef::new(self);
+        xai_spawn::spawn_local(async move {
+            loop {
+                tokio::time::sleep(REPORT_POLL_INTERVAL).await;
+                let reported = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    agent_ref.get().report_resource_usage_if_due();
+                }));
+                if reported.is_err() {
+                    tracing::error!("resource telemetry: report tick panicked; continuing");
+                }
+            }
+        });
+    }
+
     /// Every tick pays one memory read (`/proc/self/status` on Linux, one `proc_pidinfo` on macOS), which also carries the thread count.
     /// Only a tick that reports pays for the descriptor scan.
     pub(super) fn report_resource_usage_if_due(&self) {

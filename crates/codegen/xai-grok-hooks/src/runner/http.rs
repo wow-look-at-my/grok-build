@@ -2,6 +2,7 @@ use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 use url::Url;
+use xai_grok_net::{Auth, ClientOptions, HttpClient, Response, StatusCode};
 
 use crate::config::HookSpec;
 use crate::event::HookEventEnvelope;
@@ -16,10 +17,10 @@ use super::{
 
 const RESPONSE_PREVIEW_MAX: usize = 200;
 
-async fn read_body_capped(mut response: reqwest::Response) -> reqwest::Result<String> {
+async fn read_body_capped(mut response: Response) -> Result<String, xai_grok_net::Error> {
     let mut buf: Vec<u8> = Vec::new();
     while buf.len() < MAX_OUTPUT_BYTES {
-        let Some(chunk) = response.chunk().await? else {
+        let Some(chunk) = response.chunk().await.map_err(xai_grok_net::Error::from)? else {
             break;
         };
         let take = chunk.len().min(MAX_OUTPUT_BYTES - buf.len());
@@ -127,14 +128,22 @@ async fn validate_hook_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn build_hook_client(timeout_ms: u64) -> reqwest::Client {
-    xai_grok_extra_ca::build_reqwest_client(|builder| {
-        builder
+fn build_hook_client(timeout_ms: u64) -> HttpClient {
+    HttpClient::build(
+        ClientOptions::default()
             .timeout(Duration::from_millis(timeout_ms))
             // SECURITY: only the initial URL is SSRF-validated; do not follow redirects.
-            .redirect(reqwest::redirect::Policy::none())
-    })
+            .no_redirects(),
+    )
     .expect("hook HTTP client config is valid")
+}
+
+/// The error text without the URL. SECURITY: the expanded URL can carry a secret.
+fn error_without_url(e: xai_grok_net::Error) -> String {
+    match e {
+        xai_grok_net::Error::Http(e) => e.without_url().to_string(),
+        refused @ xai_grok_net::Error::Auth(_) => refused.to_string(),
+    }
 }
 
 pub async fn run_http_hook(
@@ -218,7 +227,8 @@ pub async fn run_http_hook(
     let client = build_hook_client(spec.timeout_ms);
 
     let response = match client
-        .post(url)
+        // A hook spec carries no credential.
+        .post(url, Auth::None)
         .header("Content-Type", "application/json")
         .body(body)
         .send()
@@ -230,8 +240,11 @@ pub async fn run_http_hook(
             let error = if e.is_timeout() {
                 format!("timed out after {}ms", spec.timeout_ms)
             } else {
-                // SECURITY: without_url() strips the secret-bearing expanded URL from the error.
-                format!("HTTP request failed for {}: {}", log_url, e.without_url())
+                format!(
+                    "HTTP request failed for {}: {}",
+                    log_url,
+                    error_without_url(e)
+                )
             };
             return (
                 HookRunnerResult::Failed(error),
@@ -261,7 +274,7 @@ pub async fn run_http_hook(
                 HookRunnerResult::Failed(format!(
                     "failed to read response body for {}: {}",
                     log_url,
-                    e.without_url()
+                    error_without_url(e)
                 )),
                 elapsed,
                 Some(make_info(Some(status_code), None)),
@@ -292,7 +305,7 @@ pub async fn run_http_hook(
 
 fn parse_http_stop_result(
     response_text: &str,
-    status: reqwest::StatusCode,
+    status: StatusCode,
     hook_name: &str,
 ) -> HookRunnerResult {
     if !status.is_success() {
@@ -320,7 +333,7 @@ fn parse_http_stop_result(
 
 fn parse_http_post_tool_use_result(
     response_text: &str,
-    status: reqwest::StatusCode,
+    status: StatusCode,
     hook_name: &str,
 ) -> HookRunnerResult {
     if !status.is_success() {
@@ -355,7 +368,7 @@ fn parse_http_post_tool_use_result(
 
 fn parse_http_prompt_result(
     response_text: &str,
-    status: reqwest::StatusCode,
+    status: StatusCode,
     hook_name: &str,
 ) -> HookRunnerResult {
     if !status.is_success() {
@@ -387,7 +400,7 @@ fn parse_http_prompt_result(
 
 fn parse_http_blocking_result(
     response_text: &str,
-    status: reqwest::StatusCode,
+    status: StatusCode,
     hook_name: &str,
 ) -> HookRunnerResult {
     if response_text.trim().is_empty() {
@@ -475,7 +488,6 @@ fn truncate_preview(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reqwest::StatusCode;
 
     #[test]
     fn http_updated_input_applies() {
@@ -1059,7 +1071,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_http_hook_scrubs_url_from_reqwest_error() {
+    async fn run_http_hook_scrubs_url_from_request_error() {
         let secret = "ghp_VERY_REAL_SECRET_TOKEN_42";
         let mut extra_env = std::collections::HashMap::new();
         extra_env.insert("RUNTIME_HOST".to_string(), "192.0.2.1".to_string());
@@ -1108,7 +1120,7 @@ mod tests {
         let requests = Arc::new(AtomicUsize::new(0));
         let server_requests = Arc::clone(&requests);
 
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else {
                     return;
@@ -1126,7 +1138,7 @@ mod tests {
 
         let client = build_hook_client(5000);
         let resp = client
-            .post(format!("http://{addr}/hook"))
+            .post(format!("http://{addr}/hook"), Auth::None)
             .body("{}")
             .send()
             .await

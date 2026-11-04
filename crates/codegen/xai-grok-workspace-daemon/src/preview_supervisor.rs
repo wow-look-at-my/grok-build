@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 use prometheus::{IntCounterVec, register_int_counter_vec};
 use tokio::sync::watch;
+use xai_grok_net::{Auth, ClientOptions, HttpClient};
 
 /// Absolute path of the preview-proxy binary the supervisor execs.
 pub const PREVIEW_PROXY_BIN_PATH: &str = "/usr/local/bin/xai-grok-preview-proxy";
@@ -463,8 +464,14 @@ fn preview_activity_advanced(last_seen: u64, current: u64) -> bool {
 
 /// One scrape, classified so failure is quiet: a connect or timeout failure (proxy absent or still starting) is `Absent`.
 /// That is kept distinct from a genuine error response so neither is ever read as activity.
-async fn scrape_activity(client: &reqwest::Client, url: &str) -> ScrapeOutcome {
-    match client.get(url).send().await {
+/// The client for the loopback control endpoint. That endpoint never redirects, so a 3xx
+/// is not followed and classifies as `BadResponse`.
+fn scrape_http_client(timeout: Duration) -> Result<HttpClient, xai_grok_net::Error> {
+    HttpClient::build(ClientOptions::default().timeout(timeout).no_redirects())
+}
+
+async fn scrape_activity(client: &HttpClient, url: &str) -> ScrapeOutcome {
+    match client.get(url, Auth::None).send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
             match resp.text().await {
@@ -519,12 +526,7 @@ async fn scrape_activity_loop(
     }
     let url = activity_url(control_port);
     // A fixed loopback control endpoint never redirects, so a 3xx is anomalous: don't follow it; it classifies as `BadResponse`
-    #[allow(clippy::disallowed_methods)] // localhost preview server; TLS policy N/A
-    let client = match reqwest::Client::builder()
-        .timeout(PREVIEW_ACTIVITY_SCRAPE_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
+    let client = match scrape_http_client(PREVIEW_ACTIVITY_SCRAPE_TIMEOUT) {
         Ok(client) => client,
         Err(e) => {
             tracing::warn!(error = %e, "preview-activity scraper: HTTP client build failed; disabled");
@@ -620,12 +622,7 @@ async fn scrape_metrics_loop(
         return;
     }
     let url = metrics_url(control_port);
-    #[allow(clippy::disallowed_methods)] // localhost preview server; TLS policy N/A
-    let client = match reqwest::Client::builder()
-        .timeout(PREVIEW_ACTIVITY_SCRAPE_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-    {
+    let client = match scrape_http_client(PREVIEW_ACTIVITY_SCRAPE_TIMEOUT) {
         Ok(client) => client,
         Err(e) => {
             tracing::warn!(error = %e, "preview-metrics scraper: HTTP client build failed; disabled");
@@ -636,7 +633,7 @@ async fn scrape_metrics_loop(
 
     // Scrape-first: a short-lived sandbox must not exit with zero samples.
     loop {
-        match client.get(&url).send().await {
+        match client.get(&url, Auth::None).send().await {
             Ok(resp) if resp.status().is_success() => match resp.text().await {
                 Ok(body) => donate(&body),
                 Err(e) => {
@@ -998,7 +995,7 @@ mod tests {
         let donated = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let (tx, rx) = watch::channel(false);
         let sink = Arc::clone(&donated);
-        let handle = tokio::spawn(scrape_metrics_loop(
+        let handle = xai_spawn::spawn(scrape_metrics_loop(
             port,
             // 1h interval: only the immediate first scrape can donate.
             Duration::from_secs(3600),
@@ -1031,7 +1028,7 @@ mod tests {
         let donated = Arc::new(AtomicUsize::new(0));
         let (tx, rx) = watch::channel(false);
         let counter = Arc::clone(&donated);
-        let handle = tokio::spawn(scrape_metrics_loop(
+        let handle = xai_spawn::spawn(scrape_metrics_loop(
             port,
             Duration::from_millis(5),
             rx,
@@ -1051,7 +1048,7 @@ mod tests {
         let (tx, rx) = watch::channel(false);
         let counter = Arc::clone(&donated);
         let closed = ReservedRefusedPort::open();
-        let handle = tokio::spawn(scrape_metrics_loop(
+        let handle = xai_spawn::spawn(scrape_metrics_loop(
             closed.port,
             Duration::from_millis(5),
             rx,
@@ -1129,7 +1126,7 @@ mod tests {
         // Nothing is listening on this port, so every scrape classifies Absent.
         let closed = ReservedRefusedPort::open();
         let (tx, rx) = watch::channel(false);
-        let loop_handle = tokio::spawn(scrape_activity_loop(
+        let loop_handle = xai_spawn::spawn(scrape_activity_loop(
             closed.port,
             sink_of(&tracker),
             Duration::from_millis(10),
@@ -1158,7 +1155,7 @@ mod tests {
         // The server answers every time, always with a 500, so every scrape classifies as BadResponse, never Absent
         let port = serve_canned("HTTP/1.1 500 Internal Server Error", "boom", true).await;
         let (tx, rx) = watch::channel(false);
-        let loop_handle = tokio::spawn(scrape_activity_loop(
+        let loop_handle = xai_spawn::spawn(scrape_activity_loop(
             port,
             sink_of(&tracker),
             Duration::from_millis(10),
@@ -1186,7 +1183,7 @@ mod tests {
 
         let closed = ReservedRefusedPort::open();
         let (tx, rx) = watch::channel(false);
-        let loop_handle = tokio::spawn(scrape_activity_loop(
+        let loop_handle = xai_spawn::spawn(scrape_activity_loop(
             closed.port,
             sink_of(&tracker),
             Duration::from_millis(10),
@@ -1252,13 +1249,8 @@ mod tests {
         assert!(!preview_activity_advanced(5, 4));
     }
 
-    fn scrape_client() -> reqwest::Client {
-        #[allow(clippy::disallowed_methods)] // localhost preview server; TLS policy N/A
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(2))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("build client")
+    fn scrape_client() -> HttpClient {
+        scrape_http_client(Duration::from_secs(2)).expect("build client")
     }
 
     /// Bind an ephemeral loopback port without `listen`, so connects are refused and no sibling test can steal it.
@@ -1288,7 +1280,7 @@ mod tests {
             .await
             .expect("bind ephemeral loopback");
         let port = listener.local_addr().expect("addr").port();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 let Ok((mut sock, _)) = listener.accept().await else {
                     return;
@@ -1316,7 +1308,7 @@ mod tests {
             .await
             .expect("bind ephemeral loopback");
         let port = listener.local_addr().expect("addr").port();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let counter = AtomicU64::new(1);
             while let Ok((mut sock, _)) = listener.accept().await {
                 let mut buf = [0u8; 1024];
@@ -1339,7 +1331,7 @@ mod tests {
             .await
             .expect("bind ephemeral loopback");
         let port = listener.local_addr().expect("addr").port();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             if let Ok((_sock, _)) = listener.accept().await {
                 tokio::time::sleep(Duration::from_secs(3600)).await;
             }
@@ -1378,12 +1370,7 @@ mod tests {
     #[tokio::test]
     async fn scrape_activity_treats_a_hung_endpoint_as_absent() {
         let port = serve_accept_then_hang().await;
-        #[allow(clippy::disallowed_methods)] // localhost preview server; TLS policy N/A
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(150))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("build client");
+        let client = scrape_http_client(Duration::from_millis(150)).expect("build client");
         assert_eq!(
             scrape_activity(&client, &activity_url(port)).await,
             ScrapeOutcome::Absent,
@@ -1398,7 +1385,7 @@ mod tests {
         assert_eq!(tracker.activity_notes(), 0);
 
         let (tx, rx) = watch::channel(false);
-        let handle = tokio::spawn(scrape_activity_loop(
+        let handle = xai_spawn::spawn(scrape_activity_loop(
             port,
             sink_of(&tracker),
             Duration::from_millis(5),
@@ -1426,7 +1413,7 @@ mod tests {
         let port = serve_canned("HTTP/1.1 500 Internal Server Error", "boom", true).await;
         let tracker = TestSink::new();
         let (tx, rx) = watch::channel(false);
-        let handle = tokio::spawn(scrape_activity_loop(
+        let handle = xai_spawn::spawn(scrape_activity_loop(
             port,
             sink_of(&tracker),
             Duration::from_millis(5),
@@ -1452,7 +1439,7 @@ mod tests {
         let port = serve_canned("HTTP/1.1 200 OK", r#"{"last_activity_ms":777}"#, true).await;
         let tracker = TestSink::new();
         let (tx, rx) = watch::channel(false);
-        let handle = tokio::spawn(scrape_activity_loop(
+        let handle = xai_spawn::spawn(scrape_activity_loop(
             port,
             sink_of(&tracker),
             Duration::from_millis(5),
@@ -1561,7 +1548,7 @@ mod tests {
             }
         };
         // healthy_run is far above the child's lifetime, so every exit is unhealthy
-        let handle = tokio::spawn(supervise_loop(
+        let handle = xai_spawn::spawn(supervise_loop(
             factory,
             fast_policy(),
             Duration::from_secs(3600),
@@ -1600,7 +1587,7 @@ mod tests {
                 Ok(fake_pid_recording_command(&pid_path))
             }
         };
-        let handle = tokio::spawn(supervise_loop(
+        let handle = xai_spawn::spawn(supervise_loop(
             factory,
             fast_policy(),
             Duration::from_secs(1),
@@ -1645,7 +1632,7 @@ mod tests {
                 Err(io::Error::new(io::ErrorKind::NotFound, "no such binary"))
             }
         };
-        let handle = tokio::spawn(supervise_loop(
+        let handle = xai_spawn::spawn(supervise_loop(
             factory,
             fast_policy(),
             Duration::from_secs(3600),

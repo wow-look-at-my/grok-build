@@ -1,4 +1,5 @@
 #![allow(clippy::cast_lossless)]
+// lib.rs holds the lib code.
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::cast_possible_wrap)]
 #![allow(clippy::cast_precision_loss)]
@@ -40,7 +41,6 @@ pub mod inline_media_ffmpeg;
 pub mod input_log;
 pub mod mcp_cmd;
 pub mod memory_cmd;
-pub mod memory_release;
 pub mod memory_trace;
 pub mod models;
 pub mod notifications;

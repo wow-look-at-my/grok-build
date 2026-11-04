@@ -1,4 +1,5 @@
 #![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+// lib.rs holds the lib code.
 #![allow(clippy::cast_possible_wrap)] // Hits predate the gate
 #![allow(clippy::cast_precision_loss)] // Hits predate the gate
 #![allow(clippy::cast_sign_loss)] // Hits predate the gate
@@ -101,6 +102,8 @@ pub struct PtyHarness {
     /// When true, [`update`](Self::update) forwards terminal-generated replies (cursor-position reports, device attributes, …) back to the child.
     /// Off by default; see [`Self::set_respond_to_queries`].
     respond_to_queries: bool,
+    /// The child's `GROK_HOME` for a sandbox launch. A timeout prints the child's log errors from it.
+    child_grok_home: Option<std::path::PathBuf>,
 }
 
 impl PtyHarness {
@@ -160,7 +163,9 @@ impl PtyHarness {
         };
         let pty = PtyController::spawn_in_sandbox(binary, size, args, sandbox, operations, cwd)
             .context("failed to spawn pager in PTY")?;
-        Ok(Self::from_pty(pty, rows, cols))
+        let mut harness = Self::from_pty(pty, rows, cols);
+        harness.child_grok_home = Some(sandbox.grok_home().to_path_buf());
+        Ok(harness)
     }
 
     fn from_pty(pty: PtyController, rows: u16, cols: u16) -> Self {
@@ -173,7 +178,40 @@ impl PtyHarness {
             cast_events: Vec::new(),
             cast_size: (cols, rows),
             respond_to_queries: false,
+            child_grok_home: None,
         }
+    }
+
+    /// The warning and error lines of the child's unified log, for a timeout diagnostic.
+    /// The screen shows a short error headline. The log has its cause.
+    fn child_log_problems(&self) -> String {
+        const MAX_LINES: usize = 40;
+        let Some(grok_home) = &self.child_grok_home else {
+            return "(no sandbox log for this launch)".to_owned();
+        };
+        let path = grok_home.join("logs").join("unified.jsonl");
+        let Ok(log) = std::fs::read_to_string(&path) else {
+            return format!("(no log at {})", path.display());
+        };
+        let problems: Vec<&str> = log
+            .lines()
+            .filter(|line| line.contains("\"lvl\":\"warn\"") || line.contains("\"lvl\":\"error\""))
+            .collect();
+        if problems.is_empty() {
+            return format!("(no warning or error lines in {})", path.display());
+        }
+        let skipped = problems.len().saturating_sub(MAX_LINES);
+        let mut text = format!(
+            "{} warning/error lines in {}, last {}:\n",
+            problems.len(),
+            path.display(),
+            problems.len() - skipped
+        );
+        for line in &problems[skipped..] {
+            text.push_str(line);
+            text.push('\n');
+        }
+        text
     }
 
     /// Off by default so probe tests can script replies. Inline-viewport tests need it or the startup `ESC[6n` times out.
@@ -383,10 +421,11 @@ impl PtyHarness {
             if remaining.is_zero() {
                 anyhow::bail!(
                     "timed out after {timeout:?} waiting for {description}\n\
-                     process running: {}\nprocess tree: {}\nscreen contents:\n{}",
+                     process running: {}\nprocess tree: {}\nscreen contents:\n{}\nchild log:\n{}",
                     self.pty.is_running()?,
                     self.pty.process_tree_diagnostics(),
-                    self.screen.contents()
+                    self.screen.contents(),
+                    self.child_log_problems()
                 );
             }
             match self.pump_one(Duration::from_millis(50).min(remaining)) {

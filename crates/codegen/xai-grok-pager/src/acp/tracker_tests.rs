@@ -6005,3 +6005,40 @@ fn text_around_a_backend_web_search_reaches_the_screen_in_order() {
         );
     }
 }
+
+/// A burst and a collapse each replace the number in place. Neither may clear
+/// the reading. The row hides `tok/s` when there is no stream, so a rate that
+/// vanished mid-call would read as the measurement having failed.
+#[test]
+fn a_rate_that_jumps_or_collapses_keeps_being_reported() {
+    let mut tracker = AcpUpdateTracker::new();
+    assert_eq!(tracker.output_rate(), None);
+    let mut previous = None;
+    for tokens_per_sec in [3.5, 350.0, 0.4, 0.0] {
+        let rate = OutputRate {
+            tokens_per_sec,
+            window_secs: 10,
+            floor_tokens_per_sec: None,
+            slow_for: None,
+        };
+        assert!(
+            tracker.set_output_rate(rate),
+            "{tokens_per_sec} is a new reading"
+        );
+        assert_eq!(
+            tracker.output_rate().map(|rate| rate.tokens_per_sec),
+            Some(tokens_per_sec),
+            "the reading stays for {tokens_per_sec} tok/s"
+        );
+        previous = Some(rate);
+    }
+    assert!(
+        !tracker.set_output_rate(previous.expect("a reading was set")),
+        "an unchanged reading needs no repaint"
+    );
+    assert!(
+        tracker.clear_output_rate(),
+        "the call ending drops the reading"
+    );
+    assert_eq!(tracker.output_rate(), None);
+}

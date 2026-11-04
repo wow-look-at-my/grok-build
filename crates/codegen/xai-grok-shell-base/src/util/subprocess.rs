@@ -184,7 +184,7 @@ where
     R: AsyncRead + Unpin + Send + 'static,
 {
     let (tx, rx) = mpsc::unbounded_channel();
-    let reader = tokio::spawn(async move {
+    let reader = xai_spawn::spawn(async move {
         let mut sent = 0usize;
         let mut chunk = [0u8; READ_CHUNK_SIZE];
         loop {
@@ -207,7 +207,7 @@ where
         }
     });
     // A panicked reader truncates the capture in silence, so the watcher logs it.
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         if let Err(e) = reader.await
             && e.is_panic()
         {

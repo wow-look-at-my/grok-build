@@ -112,13 +112,13 @@ async fn run_headless_with_cmd_and_sandbox(
     });
 
     let mut stdout = process.take_stdout().expect("child stdout missing");
-    let stdout_handle = tokio::spawn(async move {
+    let stdout_handle = xai_spawn::spawn(async move {
         let mut bytes = Vec::new();
         stdout.read_to_end(&mut bytes).await?;
         Ok::<Vec<u8>, std::io::Error>(bytes)
     });
     let mut stderr = process.take_stderr().expect("child stderr missing");
-    let stderr_handle = tokio::spawn(async move {
+    let stderr_handle = xai_spawn::spawn(async move {
         let mut bytes = Vec::new();
         stderr.read_to_end(&mut bytes).await?;
         Ok::<Vec<u8>, std::io::Error>(bytes)
@@ -298,7 +298,7 @@ mod tests {
     #[tokio::test]
     async fn output_drain_timeout_returns_partial_capture() {
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let _keep_open = tx;
             let _ = rx.await;
             Ok::<Vec<u8>, std::io::Error>(b"complete".to_vec())

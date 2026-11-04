@@ -482,9 +482,9 @@ impl SessionActor {
         let provider: Arc<dyn xai_grok_auth::AuthCredentialProvider> = Arc::new(
             xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(am.clone(), None),
         );
-        let middleware_client =
-            crate::http::with_auth_retry(crate::http::shared_client(), provider);
         let url = format!("{}/models-v2", base_url);
+        // `X-XAI-Token-Auth` is set below, so the provider's plain headers are not added.
+        let request_auth = crate::http::auth_retry(provider, &url);
         let parse_models_response =
             |json: serde_json::Value| -> Option<(std::num::NonZeroU64, Option<u32>)> {
                 let data = json.get("data")?.as_array()?;
@@ -497,8 +497,8 @@ impl SessionActor {
                 None
             };
         #[allow(unused_mut)]
-        let mut request = middleware_client
-            .get(&url)
+        let mut request = crate::http::shared_client()
+            .get(&url, request_auth.auth)
             .header("X-XAI-Token-Auth", "xai-grok-cli")
             .header("x-grok-client-version", xai_grok_version::version())
             .header(
@@ -506,22 +506,15 @@ impl SessionActor {
                 crate::http::process_client_mode(),
             )
             .timeout(std::time::Duration::from_secs(5));
-        let built = match request.build() {
+        let response = match request.send().await {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!(error = %e, "Failed to build idle-refresh models request");
+                tracing::warn!(error = %e, "Failed to fetch models for idle refresh");
                 return;
             }
         };
-        let (response, stamp) =
-            match xai_grok_auth::execute_with_stamp(&middleware_client, built).await {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to fetch models for idle refresh");
-                    return;
-                }
-            };
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let stamp = xai_grok_auth::sent_bearer_suffix(&response);
+        if response.status() == xai_grok_net::StatusCode::UNAUTHORIZED {
             xai_grok_login::attribution::record_consumer_401(
                 am,
                 None,
@@ -693,6 +686,7 @@ impl SessionActor {
         let message_count = self.chat_state_handle.get_conversation_len().await;
         let message_breakdown = self.chat_state_handle.get_messages_breakdown().await;
         let message_tokens = message_breakdown.total();
+        let request_ledger = self.chat_state_handle.get_context_ledger().await;
         let usage_categories = self.usage_categories().await;
         let free_tokens = xai_token_estimation::free_tokens(context_window, total_tokens);
         let usage_pct = xai_token_estimation::usage_percentage_u8(total_tokens, context_window);
@@ -726,6 +720,13 @@ impl SessionActor {
                 usage_pct,
                 auto_compact_threshold_percent: self.compaction.threshold_percent.get(),
                 usage_categories,
+                request_ledger,
+                transcript_path: Some(
+                    crate::session::persistence::session_dir(&self.session_info)
+                        .join("chat_history.jsonl")
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
             },
         }
     }

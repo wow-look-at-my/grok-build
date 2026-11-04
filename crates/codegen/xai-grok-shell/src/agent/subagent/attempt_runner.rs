@@ -126,7 +126,6 @@ pub(super) async fn run_one_turn_attempt(
                 .map(|method| crate::upload::manifest::ArtifactUploadContext {
                     gcs_config: crate::session::repo_changes::TraceExportConfig {
                         bucket_url: input.gcs_bucket_url.map(str::to_owned),
-                        service_account_key: None,
                         prefix_dir: None,
                         gcs_prefix: Some(subagent_trace_prefix(
                             &input.request.id,

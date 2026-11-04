@@ -80,12 +80,141 @@ fn resolve_appearance_chain(
 
 /// Desktop APIs only. `grok wrap` stamps the local OS theme before SSH; env hints may be a previous hop's snapshot.
 #[must_use]
+#[cfg(any(target_os = "macos", windows))]
 pub fn detect_desktop() -> Option<SystemAppearance> {
     match dark_light::detect() {
         Ok(dark_light::Mode::Dark) => Some(SystemAppearance::Dark),
         Ok(dark_light::Mode::Light) => Some(SystemAppearance::Light),
         // Mode::Unspecified or Err: no system preference detected
         _ => None,
+    }
+}
+
+/// Desktop APIs only. `grok wrap` stamps the local OS theme before SSH; env hints may be a previous hop's snapshot.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+#[must_use]
+pub fn detect_desktop() -> Option<SystemAppearance> {
+    xdg_portal::detect()
+}
+
+/// Desktop APIs only. This platform has none that the pager reads.
+#[cfg(not(any(
+    target_os = "macos",
+    windows,
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd"
+)))]
+#[must_use]
+pub fn detect_desktop() -> Option<SystemAppearance> {
+    None
+}
+
+/// Reads `org.freedesktop.appearance` `color-scheme` from the XDG desktop portal.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+mod xdg_portal {
+    use super::SystemAppearance;
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// The budget dark-light gave the same portal read.
+    const TIMEOUT: Duration = Duration::from_millis(25);
+
+    /// True while a probe thread runs. A portal that never answers then holds one thread, not one thread per call.
+    static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+
+    pub(super) fn detect() -> Option<SystemAppearance> {
+        if IN_FLIGHT.swap(true, Ordering::AcqRel) {
+            return None;
+        }
+        let (tx, rx) = mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("xdg-appearance".into())
+            .spawn(move || {
+                let _ = tx.send(read_color_scheme());
+                IN_FLIGHT.store(false, Ordering::Release);
+            });
+        if spawned.is_err() {
+            IN_FLIGHT.store(false, Ordering::Release);
+            return None;
+        }
+        rx.recv_timeout(TIMEOUT).ok().flatten()
+    }
+
+    fn read_color_scheme() -> Option<SystemAppearance> {
+        static CONN: OnceLock<Option<zbus::blocking::Connection>> = OnceLock::new();
+        let conn = CONN
+            .get_or_init(|| {
+                zbus::blocking::connection::Builder::session()
+                    .ok()?
+                    .method_timeout(TIMEOUT)
+                    .build()
+                    .ok()
+            })
+            .as_ref()?;
+        let reply = conn
+            .call_method(
+                Some("org.freedesktop.portal.Desktop"),
+                "/org/freedesktop/portal/desktop",
+                Some("org.freedesktop.portal.Settings"),
+                "Read",
+                &("org.freedesktop.appearance", "color-scheme"),
+            )
+            .ok()?;
+        let value: zbus::zvariant::OwnedValue = reply.body().deserialize().ok()?;
+        from_portal_value(&value)
+    }
+
+    /// `Read` wraps the value in one more variant on some portal versions.
+    fn from_portal_value(value: &zbus::zvariant::Value<'_>) -> Option<SystemAppearance> {
+        if let zbus::zvariant::Value::Value(inner) = value {
+            return from_portal_value(inner);
+        }
+        match u32::try_from(value).ok()? {
+            1 => Some(SystemAppearance::Dark),
+            2 => Some(SystemAppearance::Light),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use zbus::zvariant::Value;
+
+        #[test]
+        fn portal_value_maps_like_the_spec() {
+            assert_eq!(
+                from_portal_value(&Value::U32(1)),
+                Some(SystemAppearance::Dark)
+            );
+            assert_eq!(
+                from_portal_value(&Value::U32(2)),
+                Some(SystemAppearance::Light)
+            );
+            assert_eq!(from_portal_value(&Value::U32(0)), None);
+            assert_eq!(
+                from_portal_value(&Value::Value(Box::new(Value::U32(1)))),
+                Some(SystemAppearance::Dark)
+            );
+            assert_eq!(from_portal_value(&Value::Str("dark".into())), None);
+        }
     }
 }
 
@@ -145,7 +274,7 @@ impl SystemAppearanceWatcher {
         // The handle is not dropped: it is held as `_handle` and aborted in the
         // watcher's `Drop`. The poll loop's lifetime is owned by the watcher.
         #[allow(clippy::disallowed_methods)]
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let mut current = initial;
             loop {
                 tokio::time::sleep(interval).await;

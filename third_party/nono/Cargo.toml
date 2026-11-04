@@ -1,0 +1,26 @@
+# VENDORING NOTES
+# Upstream: nono 0.53.0 (https://github.com/always-further/nono), Apache-2.0.
+# Local modifications: only capability.rs, error.rs and sandbox/ remain, without
+# their test modules. xai-grok-sandbox uses nothing else, and the rest pulled in
+# sigstore, typify and the keystore stack.
+[package]
+name = "nono"
+version = "0.53.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Capability-based sandboxing library using Landlock (Linux) and Seatbelt (macOS)"
+autotests = false
+
+[lib]
+path = "src/lib.rs"
+test = false
+doctest = false
+
+[dependencies]
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"

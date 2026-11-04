@@ -179,7 +179,7 @@ pub(super) async fn clipboard_probe_stage(
         image: None,
         message: None,
     };
-    match tokio::time::timeout(deadline, tokio::task::spawn_blocking(work)).await {
+    match tokio::time::timeout(deadline, xai_spawn::spawn_blocking(work)).await {
         Ok(Ok(stage)) => stage,
         Ok(Err(join_error)) => {
             tracing::warn!(error = %join_error, "clipboard attachment probe task failed");
@@ -1341,7 +1341,7 @@ pub(crate) async fn persist_setting(
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("respect_manual_folds", "Bool", &value));
             };
-            tokio::task::spawn_blocking(move || crate::appearance::persist_respect_manual_folds(
+            xai_spawn::spawn_blocking(move || crate::appearance::persist_respect_manual_folds(
                     b,
                 ))
                 .await
@@ -1477,6 +1477,26 @@ pub(crate) async fn persist_setting(
                 return Err(kind_mismatch(key, "String", &value));
             };
             xai_grok_shell::util::config::set_harness_model(slot.id, s)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        key if crate::settings::model_groups::group_for_setting_key(key).is_some() => {
+            let group = crate::settings::model_groups::group_for_setting_key(key)
+                .expect("guard above matched this key");
+            let SettingValue::String(s) = value else {
+                return Err(kind_mismatch(key, "String", &value));
+            };
+            xai_grok_shell::util::config::set_model_group_model(group.id, s)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        key if crate::settings::subagent_models::type_for_setting_key(key).is_some() => {
+            let agent_type = crate::settings::subagent_models::type_for_setting_key(key)
+                .expect("guard above matched this key");
+            let SettingValue::String(s) = value else {
+                return Err(kind_mismatch(key, "String", &value));
+            };
+            xai_grok_shell::util::config::set_subagent_model(agent_type, s)
                 .await
                 .map_err(|e| e.to_string())
         }
@@ -1638,7 +1658,7 @@ pub(super) fn persist_hint(
 ) {
     tasks
         .spawn(async move {
-            match tokio::task::spawn_blocking(move || crate::config_toml_edit::set_hint(
+            match xai_spawn::spawn_blocking(move || crate::config_toml_edit::set_hint(
                     key,
                     value,
                 ))

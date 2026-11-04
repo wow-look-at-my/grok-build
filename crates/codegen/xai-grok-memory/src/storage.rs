@@ -526,6 +526,9 @@ impl MemoryStorage {
     /// Deletes MEMORY.md, sessions/, index.sqlite, and any other workspace files.
     /// The directory will be recreated on next session start via `ensure_initialized()`.
     pub fn clear_workspace(&self) -> std::io::Result<bool> {
+        if self.mode.is_v2() {
+            return crate::v2_carryover::clear_scope_keeping_carryover_record(&self.workspace_dir);
+        }
         match std::fs::remove_dir_all(&self.workspace_dir) {
             Ok(()) => {
                 tracing::info!(path = %self.workspace_dir.display(), "cleared workspace memory");
@@ -541,11 +544,7 @@ impl MemoryStorage {
     /// The file will be recreated on next session start via `ensure_initialized()`.
     pub fn clear_global(&self) -> std::io::Result<bool> {
         if self.mode.is_v2() {
-            return match std::fs::remove_dir_all(&self.global_dir) {
-                Ok(()) => Ok(true),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-                Err(error) => Err(error),
-            };
+            return crate::v2_carryover::clear_scope_keeping_carryover_record(&self.global_dir);
         }
         let path = self.global_memory_file();
         match std::fs::remove_file(&path) {
@@ -749,13 +748,12 @@ fn compute_workspace_hash(cwd: &Path) -> String {
 }
 
 /// Extract a normalized `org/repo` identifier from the git remote URL.
-/// Uses `git2` to discover the repository from `cwd` and read the `origin` remote URL.
+/// Discovers the repository from `cwd` and reads the `origin` remote URL.
 /// Returns `None` if not a git repo, no `origin` remote, or the URL can't be normalized.
 pub(crate) fn extract_repo_identity(cwd: &Path) -> Option<String> {
-    let repo = git2::Repository::discover(cwd).ok()?;
-    let remote = repo.find_remote("origin").ok()?;
-    let url = remote.url().ok()?;
-    normalize_remote_url(url)
+    let repo = xai_gix_status::discover::discover(cwd)?;
+    let url = xai_gix_status::discover::origin_url(&repo)?;
+    normalize_remote_url(&url)
 }
 
 /// Normalize a git remote URL to `org/repo` form.
@@ -826,7 +824,7 @@ mod tests {
     use tempfile::TempDir;
 
     /// Prepend the hermetic git binary (via `GIT_BIN_PATH`) to `PATH`.
-    /// `Command::new("git")` and `git2`'s discovery then resolve to the hermetic static binary instead of system-installed git.
+    /// `Command::new("git")` then resolves to the hermetic static binary instead of system-installed git.
     /// Safe to call multiple times; only the first call mutates `PATH`.
     fn ensure_hermetic_git_on_path() {
         use std::path::PathBuf;
@@ -848,6 +846,28 @@ mod tests {
                 }
             }
         });
+    }
+
+    /// A git repository at `dir` whose `origin` remote is `url`.
+    fn init_repo_with_origin(dir: &Path, url: &str) {
+        ensure_hermetic_git_on_path();
+        for args in [
+            &["init", "--quiet"][..],
+            &["remote", "add", "origin", url][..],
+        ] {
+            let output = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 
     #[test]
@@ -1490,9 +1510,7 @@ mod tests {
     fn test_extract_repo_identity_from_current_repo() {
         ensure_hermetic_git_on_path();
         let tmp = TempDir::new().unwrap();
-        let repo = git2::Repository::init(tmp.path()).unwrap();
-        repo.remote("origin", "git@github.com:example/demo.git")
-            .unwrap();
+        init_repo_with_origin(tmp.path(), "git@github.com:example/demo.git");
 
         let identity = extract_repo_identity(tmp.path());
         assert!(
@@ -1515,9 +1533,7 @@ mod tests {
         // Two different paths in the same repo should produce the same hash.
         ensure_hermetic_git_on_path();
         let tmp = TempDir::new().unwrap();
-        let repo = git2::Repository::init(tmp.path()).unwrap();
-        repo.remote("origin", "git@github.com:example/demo.git")
-            .unwrap();
+        init_repo_with_origin(tmp.path(), "git@github.com:example/demo.git");
 
         let subdir = tmp.path().join("subdir");
         std::fs::create_dir(&subdir).unwrap();

@@ -172,15 +172,10 @@ impl AgentView {
                     .any(|p| p.is_steering_text()))
     }
 
-    /// The turn is parked in a wait the shell aborts as soon as the user sends anything, and the goal loop is inactive.
-    /// The goal check matters because the shell suppresses the abort during goal runs, so treating the wait as user-interruptible would lie there.
+    /// The turn is parked in a wait the shell aborts as soon as the user
     /// Gates Enter interjecting instead of queueing, and the parked queue drain.
     pub(crate) fn is_parked_on_sendable_wait(&self) -> bool {
         crate::views::turn_status::is_sendable_wait(&self.resolve_turn_activity_unenriched())
-            && !self
-                .goal_state
-                .as_ref()
-                .is_some_and(|g| matches!(g.status, crate::app::agent::GoalDisplayStatus::Active))
     }
 
     /// Whether an explicit send-now dispatched right now will actually cancel the running turn shell-side.
@@ -238,7 +233,6 @@ impl AgentView {
 
     /// Visible held rows for the "N queued" hint. 0 outside sendable waits.
     pub(crate) fn held_queue_count(&self) -> usize {
-        // Goal-gated via `is_parked_on_sendable_wait` (0 during a goal; the shell exempts goal turns)
         if !self.is_parked_on_sendable_wait() {
             return 0;
         }

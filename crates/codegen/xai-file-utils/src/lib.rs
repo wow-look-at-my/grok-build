@@ -1,4 +1,5 @@
 #![allow(clippy::cast_lossless)] // Hits predate the gate
+// lib.rs holds the lib code.
 #![allow(clippy::cast_possible_truncation)] // Hits predate the gate
 #![allow(clippy::cast_possible_wrap)] // Hits predate the gate
 #![allow(clippy::cast_precision_loss)] // Hits predate the gate
@@ -11,21 +12,22 @@
     unreachable_code,
     dead_code
 )]
-//! Local data collection: upload queueing and S3-compatible blob storage.
+//! Local data collection: upload queueing and blob storage through the xAI proxy.
 #![deny(clippy::indexing_slicing)]
 pub(crate) mod circuit_breaker_observer;
-/// Wrap a raw client with [`xai_grok_auth::AuthRetryMiddleware`] for automatic 401 retry.
-pub fn with_auth_retry(
-    client: reqwest::Client,
+pub fn auth_retry(
     credentials: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider>,
-) -> reqwest_middleware::ClientWithMiddleware {
-    reqwest_middleware::ClientBuilder::new(client)
-        .with(xai_grok_auth::AuthRetryMiddleware::new(credentials, 1))
-        .build()
+) -> xai_grok_net::Auth {
+    xai_grok_net::Auth::Source {
+        source: xai_grok_auth::credential_source(credentials),
+        retries_on_401: 1,
+    }
 }
 pub mod gcs;
 pub mod queue;
 pub mod s3;
+pub(crate) mod s3_http;
+pub(crate) mod s3_sigv4;
 pub mod storage_client;
 pub mod upload_config;
 pub mod workspace_classifier;

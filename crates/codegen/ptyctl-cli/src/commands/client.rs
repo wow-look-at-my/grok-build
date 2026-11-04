@@ -1,23 +1,11 @@
 //! Client commands — send/screen/status/cursor/resize/stop via HTTP.
 
 use anyhow::{Context, Result};
-use reqwest::Client;
+use xai_grok_net::{Auth, ClientOptions, HttpClient};
 
-/// Roots are skipped for plain HTTP targets: reqwest loads the OS store at
-/// build time regardless of scheme, and a broken store must not fail the CLI.
-fn builder_for(url: &str) -> reqwest::ClientBuilder {
-    if url.starts_with("https://") {
-        Client::builder()
-    } else {
-        Client::builder().tls_built_in_root_certs(false)
-    }
-}
-
-#[allow(clippy::disallowed_methods)] // scheme-aware builder above; loopback skips roots by construction
-fn client_for(url: &str) -> Result<Client> {
-    builder_for(url)
-        .build()
-        .context("failed to build HTTP client")
+/// The ptyctl server takes no credential, so every request names `Auth::None`.
+fn client_with(options: ClientOptions) -> Result<HttpClient> {
+    HttpClient::build(options).context("failed to build HTTP client")
 }
 
 /// Send keystrokes to a session.
@@ -27,9 +15,9 @@ pub async fn send(url: &str, keys: &str, enter: bool) -> Result<()> {
         keys.push_str("<CR>");
     }
 
-    let client = client_for(url)?;
+    let client = client_with(ClientOptions::default())?;
     let resp = client
-        .post(format!("{url}/control/send"))
+        .post(format!("{url}/control/send"), Auth::None)
         .json(&serde_json::json!({"keys": keys}))
         .send()
         .await
@@ -52,8 +40,8 @@ pub async fn screen(
     full: bool,
     line_numbers: bool,
 ) -> Result<()> {
-    let client = client_for(url)?;
-    let mut req = client.get(format!("{url}/query/screen"));
+    let client = client_with(ClientOptions::default())?;
+    let mut req = client.get(format!("{url}/query/screen"), Auth::None);
 
     if let Some(r) = rows {
         req = req.query(&[("rows", r)]);
@@ -100,9 +88,9 @@ pub async fn screen(
 
 /// Query cursor position.
 pub async fn cursor(url: &str) -> Result<()> {
-    let client = client_for(url)?;
+    let client = client_with(ClientOptions::default())?;
     let resp = client
-        .get(format!("{url}/query/cursor"))
+        .get(format!("{url}/query/cursor"), Auth::None)
         .send()
         .await
         .context("failed to query cursor")?;
@@ -113,9 +101,9 @@ pub async fn cursor(url: &str) -> Result<()> {
 
 /// Query session status.
 pub async fn status(url: &str) -> Result<()> {
-    let client = client_for(url)?;
+    let client = client_with(ClientOptions::default())?;
     let resp = client
-        .get(format!("{url}/query/status"))
+        .get(format!("{url}/query/status"), Auth::None)
         .send()
         .await
         .context("failed to query status")?;
@@ -132,9 +120,9 @@ pub async fn resize(url: &str, size: &str) -> Result<()> {
     let cols: u16 = cols.parse().context("invalid cols")?;
     let rows: u16 = rows.parse().context("invalid rows")?;
 
-    let client = client_for(url)?;
+    let client = client_with(ClientOptions::default())?;
     let resp = client
-        .post(format!("{url}/control/resize"))
+        .post(format!("{url}/control/resize"), Auth::None)
         .json(&serde_json::json!({"cols": cols, "rows": rows}))
         .send()
         .await
@@ -158,17 +146,14 @@ pub async fn wait(
     timeout_secs: u64,
 ) -> Result<bool> {
     // The HTTP timeout outlasts the wait so the server, not the client, decides the outcome.
-    #[allow(clippy::disallowed_methods)]
-    // scheme-aware builder above; loopback skips roots by construction
-    let client = builder_for(url)
-        .timeout(std::time::Duration::from_secs(
+    let client = client_with(
+        ClientOptions::default().timeout(std::time::Duration::from_secs(
             timeout_secs.saturating_add(5),
-        ))
-        .build()
-        .context("failed to build HTTP client")?;
+        )),
+    )?;
 
     let mut req = client
-        .get(format!("{url}/wait"))
+        .get(format!("{url}/wait"), Auth::None)
         .query(&[("timeout_ms", timeout_secs.saturating_mul(1000).to_string())]);
     if let Some(t) = text {
         req = req.query(&[("text", t)]);
@@ -199,9 +184,9 @@ pub async fn wait(
 
 /// Stop a session.
 pub async fn stop(url: &str) -> Result<()> {
-    let client = client_for(url)?;
+    let client = client_with(ClientOptions::default())?;
     let resp = client
-        .post(format!("{url}/control/stop"))
+        .post(format!("{url}/control/stop"), Auth::None)
         .send()
         .await
         .context("failed to stop session")?;

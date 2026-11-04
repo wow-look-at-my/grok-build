@@ -95,12 +95,12 @@ pub(super) fn transient_retry_eligible(error: &xai_grok_sampler::SamplingErrorIn
         return false;
     }
     match error.kind {
-        // `clone_error` erases reqwest retryability, so all Http kinds retry here (bounded)
+        // `clone_error` erases request retryability, so all Http kinds retry here (bounded)
         SamplingErrorKind::IdleTimeout | SamplingErrorKind::Http => true,
         // The canonical retryable-status rule; 429 is excluded explicitly because it classifies as `RateLimited`
         SamplingErrorKind::Api => error.status_code.is_some_and(|status| {
             status != 429
-                && reqwest::StatusCode::from_u16(status)
+                && xai_grok_net::StatusCode::from_u16(status)
                     .is_ok_and(xai_grok_sampling_types::is_retryable_api_status)
         }),
         SamplingErrorKind::Auth
@@ -198,7 +198,7 @@ impl SessionTokenAuthGate {
             is_session_based: auth_method_id
                 .is_some_and(crate::agent::auth_method::is_session_based_method),
             model_byok,
-            endpoint_is_first_party: crate::util::is_xai_api_url(base_url),
+            endpoint_is_first_party: crate::util::may_carry_xai_session(base_url),
         }
     }
 
@@ -454,15 +454,20 @@ impl SessionActor {
             })
     }
 
-    pub(super) fn model_auth_facts(&self, model_id: &str) -> crate::agent::config::ModelAuthFacts {
-        self.model_auth_state(model_id).0
+    pub(super) fn model_auth_facts(
+        &self,
+        model_id: &str,
+        endpoint: Option<&str>,
+    ) -> crate::agent::config::ModelAuthFacts {
+        self.model_auth_state(model_id, endpoint).0
     }
 
     pub(super) fn model_auth_provider(
         &self,
         model_id: &str,
+        endpoint: Option<&str>,
     ) -> Option<xai_grok_login::AuthProviderRef> {
-        self.model_auth_state(model_id).1
+        self.model_auth_state(model_id, endpoint).1
     }
 
     /// Drop the memoized per-model auth state; see [`Self::model_auth_memo`] for why each model/credential chokepoint must call this.
@@ -471,9 +476,11 @@ impl SessionActor {
     }
 
     /// Reads and populates [`Self::model_auth_memo`]; a fresh `Unknown` falls back to the last definite entry (see the field's contract).
+    /// `endpoint` only routes the fresh lookup: the memo stays keyed by model id, so a seeded entry serves every call for that model.
     fn model_auth_state(
         &self,
         model_id: &str,
+        endpoint: Option<&str>,
     ) -> (
         crate::agent::config::ModelAuthFacts,
         Option<xai_grok_login::AuthProviderRef>,
@@ -487,7 +494,7 @@ impl SessionActor {
             return (memo.facts, memo.provider.clone());
         }
         let (fresh, provider) =
-            crate::agent::config::resolve_model_auth_facts_and_provider(model_id);
+            crate::agent::config::resolve_model_auth_facts_and_provider(model_id, endpoint);
         if fresh.byok == ModelByok::Unknown {
             if let Some(memo) = self.model_auth_memo.borrow().as_ref()
                 && memo.model_id == model_id
@@ -593,7 +600,7 @@ impl SessionActor {
     /// See [`crate::agent::auth_method::session_token_auth_gate`] for the rationale.
     /// `base_url` keeps an `Unknown` BYOK status refreshable only against first-party xAI hosts.
     fn auth_gate(&self, model_id: &str, base_url: &str) -> SessionTokenAuthGate {
-        let byok = self.model_auth_facts(model_id).byok;
+        let byok = self.model_auth_facts(model_id, Some(base_url)).byok;
         let auth_method = self.auth_method_id.load();
         SessionTokenAuthGate::new(auth_method.as_deref(), byok, base_url)
     }
@@ -638,9 +645,9 @@ impl SessionActor {
         #[derive(Debug)]
         struct TraceContextInjector;
         impl xai_grok_sampler::HeaderInjector for TraceContextInjector {
-            fn inject(&self, headers: &mut reqwest::header::HeaderMap) {
+            fn inject(&self, headers: &mut xai_grok_net::header::HeaderMap) {
                 if let Some(tp) = xai_grok_otel::current_traceparent()
-                    && let Ok(v) = reqwest::header::HeaderValue::from_str(&tp)
+                    && let Ok(v) = xai_grok_net::header::HeaderValue::from_str(&tp)
                 {
                     headers.insert("traceparent", v);
                 }
@@ -683,7 +690,7 @@ impl SessionActor {
                 extra_body: Default::default(),
             });
         let creds = self.chat_state_handle.get_credentials().await;
-        let model_facts = self.model_auth_facts(cfg.model.as_str());
+        let model_facts = self.model_auth_facts(cfg.model.as_str(), Some(cfg.base_url.as_str()));
         // Gate on the stable session classifier, not `creds.auth_type`; see `crate::agent::auth_method::session_token_auth_gate`
         // `cfg.base_url` keeps an `Unknown` BYOK status refreshable against first-party xAI hosts
         // That avoids leaking the session token to a third-party endpoint
@@ -832,11 +839,10 @@ impl SessionActor {
             .unwrap_or_default();
         // `[auto_mode] classifier_model` is the older, narrower spelling and
         // stays ahead of the `[models] permission_classifier` slot.
-        let classifier_slug = auto_cfg.classifier_model.clone().or_else(|| {
-            self.harness_models
-                .get("permission_classifier")
-                .map(str::to_owned)
-        });
+        let classifier_slug = auto_cfg
+            .classifier_model
+            .clone()
+            .or_else(|| self.harness_model("permission_classifier"));
         let aux_classifier_sampler = match classifier_slug.as_deref() {
             Some(slug) => self.resolve_auto_classifier_sampler(slug).await,
             None => None,
@@ -863,7 +869,7 @@ impl SessionActor {
         )>();
         let session = Arc::clone(self);
         // One shared worker serializes parent and subagent classifier requests.
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some((messages, respond_to)) = rx.recv().await {
                 let request_span = region!("permission.classifier_request", Parent::Root);
                 let result = async {
@@ -999,7 +1005,7 @@ impl SessionActor {
         xai_grok_sampler::SamplingClient,
         xai_grok_sampler::SamplerConfig,
     )> {
-        let slug = self.harness_models.get(slot)?.to_string();
+        let slug = self.harness_model(slot)?;
         self.resolve_sampler_for_model(slot, &slug).await
     }
     /// [`Self::resolve_slot_sampler`] for a model named by something other
@@ -1472,7 +1478,7 @@ impl SessionActor {
         // The provider is resolved before the eligibility check so its warnings stay quiet for a 401 that 4c handles
         let auth_provider =
             if matches!(error.kind, SamplingErrorKind::Auth) || error.status_code == Some(401) {
-                self.model_auth_provider(&failed_model_id)
+                self.model_auth_provider(&failed_model_id, Some(&failed_base_url))
             } else {
                 None
             };
@@ -2283,15 +2289,16 @@ impl SessionActor {
 
         let creds = self.chat_state_handle.get_credentials().await;
         let current_key = creds.api_key;
-        let current_model_id = self
+        let (current_model_id, current_base_url) = self
             .chat_state_handle
             .get_sampling_config()
             .await
-            .map(|c| c.model)
+            .map(|c| (c.model, c.base_url))
             .unwrap_or_default();
 
         // Provider-backed models mint and refresh here so `resolve_credentials` stays cache-only
-        if let Some(provider) = self.model_auth_provider(&current_model_id) {
+        if let Some(provider) = self.model_auth_provider(&current_model_id, Some(&current_base_url))
+        {
             self.refresh_provider_token_pre_turn(
                 &provider,
                 current_key.as_deref(),
@@ -2414,6 +2421,8 @@ impl SessionActor {
                 .record_task_model_output(u64::from(u.completion_tokens));
             self.chat_state_handle
                 .record_token_usage(u64::from(u.total_tokens));
+            self.chat_state_handle
+                .record_prompt_measurement(xai_chat_state::ProviderUsage::from_token_usage(u));
             self.chat_state_handle.record_last_turn_usage(u.clone());
             // Cost priority. Server-reported ticks → server-reported USD float
             // (both already resolved by the sampler into `cost_usd_ticks`) →

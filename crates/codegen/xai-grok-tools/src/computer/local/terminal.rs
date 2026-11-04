@@ -146,7 +146,7 @@ impl ChildExitWake {
     #[cfg(not(unix))]
     fn watch(&self, pid: u32) {
         let notify = std::sync::Arc::clone(&self.notify);
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             use windows::Win32::Foundation::CloseHandle;
             use windows::Win32::System::Threading::{
                 INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
@@ -786,7 +786,7 @@ impl LocalTerminalActor {
         // later fd either way and the caller cannot tell a slow write from a
         // dead task.
         #[allow(clippy::disallowed_methods)]
-        tokio::spawn(crate::util::detached::fire_and_forget(
+        xai_spawn::spawn(crate::util::detached::fire_and_forget(
             "static shell snapshot writer",
             async move {
                 if let Err(e) =
@@ -914,7 +914,7 @@ impl LocalTerminalActor {
         // `fire_and_forget` logs a panic under the task's own name, so the
         // dropped handle has nothing left to lose.
         #[allow(clippy::disallowed_methods)]
-        tokio::spawn(crate::util::detached::fire_and_forget(
+        xai_spawn::spawn(crate::util::detached::fire_and_forget(
             "persistent shell snapshot writer",
             async move {
                 if let Err(e) =
@@ -926,7 +926,7 @@ impl LocalTerminalActor {
         ));
 
         let dump_handle =
-            tokio::spawn(
+            xai_spawn::spawn(
                 async move { shell_state::read_dump_from_pipe(prep.state_out_read).await },
             );
 
@@ -2306,7 +2306,7 @@ impl LocalTerminalActor {
                     // never comes. The log names the pipeline so the gap is
                     // attributable without a backtrace.
                     #[allow(clippy::disallowed_methods)]
-                    tokio::spawn(crate::util::detached::fire_and_forget(
+                    xai_spawn::spawn(crate::util::detached::fire_and_forget(
                         "reparented monitor pipeline",
                         async move {
                             crate::implementations::grok_build::monitor::tool::supervise_monitor_pipeline(
@@ -2541,11 +2541,11 @@ impl LocalTerminalBackend {
         let actor_fut = crate::util::detached::fire_and_forget("local terminal actor", actor_fut);
 
         if use_spawn_local {
-            tokio::task::spawn_local(actor_fut);
+            xai_spawn::spawn_local(actor_fut);
         } else {
             // `actor_fut` is already wrapped in `fire_and_forget`, which logs the panic under the actor's own name.
             #[allow(clippy::disallowed_methods)]
-            tokio::spawn(actor_fut);
+            xai_spawn::spawn(actor_fut);
         }
 
         Self {
@@ -2866,7 +2866,7 @@ fn spawn_detached_drain(
     stderr: Option<tokio::process::ChildStderr>,
     status: ExitStatus,
 ) {
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut output = Vec::new();
         let _ = tokio::time::timeout(DRAIN_TIMEOUT, async {
             if let Some(mut stdout) = stdout {
@@ -3727,7 +3727,7 @@ mod tests {
         };
 
         let run_backend = backend.clone();
-        let run = tokio::spawn(async move { run_backend.run(request).await });
+        let run = xai_spawn::spawn(async move { run_backend.run(request).await });
 
         tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -4507,7 +4507,7 @@ mod tests {
         let backend = std::sync::Arc::new(LocalTerminalBackend::new_with_tick_interval(
             Duration::from_millis(20),
         ));
-        let run = tokio::spawn({
+        let run = xai_spawn::spawn({
             let backend = backend.clone();
             async move { backend.run(make_request("sleep 5 &\necho done")).await }
         });
@@ -5378,7 +5378,7 @@ mod tests {
 
             let waiter_backend = backend.clone();
             let task_id = bg.task_id.clone();
-            let wait = tokio::spawn(async move {
+            let wait = xai_spawn::spawn(async move {
                 waiter_backend
                     .wait_for_completion(&task_id, Some(Duration::from_secs(30)))
                     .await

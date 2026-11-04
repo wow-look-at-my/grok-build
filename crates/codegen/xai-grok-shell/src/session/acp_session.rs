@@ -262,6 +262,9 @@ mod side_call;
 #[path = "acp_session_impl/todo_capture.rs"]
 mod todo_capture;
 pub use todo_capture::{TodoCaptureError, TodoCaptureOutcome};
+#[path = "acp_session_impl/model_mention.rs"]
+mod model_mention;
+pub use model_mention::{MODEL_MENTION_FAMILIES, ModelMentionSpawn};
 #[path = "acp_session_impl/status_line.rs"]
 pub(crate) mod status_line;
 #[path = "acp_session_impl/thinking_summary.rs"]
@@ -524,9 +527,9 @@ fn managed_gateway_error_to_tool_error(
     match error {
         crate::session::managed_mcp::ManagedMcpFetchError::Status { status, message } => {
             let detail = format!("Managed MCP gateway tool call failed: {message}");
-            let mut err = if status == reqwest::StatusCode::UNAUTHORIZED {
+            let mut err = if status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 xai_tool_runtime::ToolError::unauthorized(detail)
-            } else if status == reqwest::StatusCode::FORBIDDEN {
+            } else if status == xai_grok_net::StatusCode::FORBIDDEN {
                 xai_tool_runtime::ToolError::permission_denied(detail)
             } else {
                 let tool_id = xai_tool_protocol::ToolId::new(caller)
@@ -549,9 +552,12 @@ fn managed_gateway_error_to_tool_error(
             err
         }
         crate::session::managed_mcp::ManagedMcpFetchError::Transport(e) => {
+            let detail = match e {
+                xai_grok_net::Error::Http(h) => h.without_url().to_string(),
+                other => other.to_string(),
+            };
             xai_tool_runtime::ToolError::network_error(format!(
-                "Managed MCP gateway tool call failed: {}",
-                e.without_url()
+                "Managed MCP gateway tool call failed: {detail}"
             ))
         }
         crate::session::managed_mcp::ManagedMcpFetchError::NoAuth => {
@@ -565,7 +571,7 @@ mod managed_gateway_error_tests {
     use super::*;
     fn status_error(code: u16, message: &str) -> crate::session::managed_mcp::ManagedMcpFetchError {
         crate::session::managed_mcp::ManagedMcpFetchError::Status {
-            status: reqwest::StatusCode::from_u16(code).unwrap(),
+            status: xai_grok_net::StatusCode::from_u16(code).unwrap(),
             message: message.to_string(),
         }
     }
@@ -621,13 +627,15 @@ mod managed_gateway_error_tests {
     }
     #[tokio::test]
     async fn transport_error_maps_to_network_error_without_url() {
-        let transport = reqwest::Client::new()
+        let transport = request::Client::new()
             .post("http://127.0.0.1:1/mcp/tools/call")
             .send()
             .await
             .expect_err("connection to a dead port should fail");
         let err = managed_gateway_error_to_tool_error(
-            crate::session::managed_mcp::ManagedMcpFetchError::Transport(transport),
+            crate::session::managed_mcp::ManagedMcpFetchError::Transport(
+                xai_grok_net::Error::from(transport),
+            ),
             "use_tool",
         );
         assert_eq!(err.kind, xai_tool_runtime::ToolErrorKind::NetworkError);
@@ -977,7 +985,6 @@ pub(crate) struct SessionActor {
     /// Auto-pauses the goal with `GoalPauseReason::BackOff` once the counter reaches [`GOAL_CONTINUATION_BACKOFF_THRESHOLD`].
     /// In-memory only; session restart is itself a reset.
     pub(crate) goal_continuation_streak: std::sync::atomic::AtomicU32,
-    pub(crate) goal_blocked_streak: std::sync::atomic::AtomicU32,
     pub(crate) goal_update_rx: std::cell::RefCell<
         Option<
             tokio::sync::mpsc::UnboundedReceiver<
@@ -1008,9 +1015,9 @@ pub(crate) struct SessionActor {
     pub(crate) goal_verifier_skeptic_count: u32,
     /// Resolved per-role `/goal` model selection (planner / strategist single pairs and the ordered skeptic pool).
     /// The kill-switch is already applied.
-    /// Cached at actor construction from remote settings; `Default` (all `InheritCurrent`, empty pool) reproduces today's behavior.
-    pub(crate) goal_role_models: GoalRoleModelConfig,
-    /// Every harness model slot, resolved when this actor was built.
+    /// Resolved at actor construction and again on a `[models]` reload. Read it through `goal_role_models()`; `Default` (all `InheritCurrent`, empty pool) inherits the session model.
+    pub(crate) goal_role_models: std::cell::RefCell<GoalRoleModelConfig>,
+    /// Every harness model slot, resolved when this actor was built and again on a `[models]` reload.
     pub(crate) harness_models: crate::session::harness_models::ResolvedHarnessModels,
     /// Kill-switch (`GROK_GOAL_USE_CURRENT_MODEL_ONLY` / `[features] goal_use_current_model_only`) resolved at actor build.
     /// When `true`, every `/goal` role inherits the current model.
@@ -1148,10 +1155,10 @@ pub(crate) struct SessionActor {
     /// Advanced when an attempt completes (success *or* failure, with catch-up past skipped checkpoints), and persisted to the watermark.
     /// Once it reaches the end the title is frozen.
     pub(crate) next_title_refresh_idx: std::cell::Cell<usize>,
-    /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`), resolved a single time at spawn.
-    pub(crate) thinking_summaries_enabled: bool,
-    /// The thinking summaries THIS session has produced, plus how far back the next summary call may look
-    /// (`[ui].thinking_summary_history_*`, resolved once at spawn).
+    /// `[ui].thinking_summaries` (`UiConfig::thinking_summaries_enabled`).
+    pub(crate) thinking_summaries_enabled: std::cell::Cell<bool>,
+    /// The thinking summaries THIS session has produced, plus how far back
+    /// the next summary call may look (`[ui].thinking_summary_history_*`).
     pub(crate) thinking_summary_history:
         crate::session::helpers::thinking_summary::ThinkingSummaryHistory,
     /// The summarization task this session queued most recently, in flight or not.
@@ -1929,7 +1936,7 @@ mod tool_meta_stamp_tests {
                 let captured: Arc<tokio::sync::Mutex<Option<acp::ToolCallUpdate>>> =
                     Arc::new(tokio::sync::Mutex::new(None));
                 let captured_in_task = captured.clone();
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     while let Some(cmd) = perm_rx.recv().await {
                         if let PermissionCommand::Request {
                             request:
@@ -2037,6 +2044,9 @@ mod disk_full_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/feedback_turn_lookup_tests.rs"]
 mod feedback_turn_lookup_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/foreground_call_queued_message_tests.rs"]
+mod foreground_call_queued_message_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/foreground_task_queued_message_tests.rs"]
 mod foreground_task_queued_message_tests;
@@ -2354,6 +2364,9 @@ mod harness_slot_side_call_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/interjection_tests.rs"]
 mod interjection_tests;
+#[cfg(test)]
+#[path = "acp_session_tests/model_mention_spawn_tests.rs"]
+mod model_mention_spawn_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/recap_display_only_tests.rs"]
 mod recap_display_only_tests;

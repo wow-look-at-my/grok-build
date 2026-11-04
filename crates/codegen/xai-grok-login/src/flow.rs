@@ -197,7 +197,7 @@ pub async fn run_external_auth_provider(
         .map_err(|e| anyhow::anyhow!("failed to start auth provider `{command}`: {e}"))?;
     let stderr_task = if let Some(cb) = on_stderr {
         let stderr = child.stderr.take().expect("stderr was set to piped");
-        Some(tokio::task::spawn_local(async move {
+        Some(xai_spawn::spawn_local(async move {
             let mut reader = tokio::io::BufReader::new(stderr);
             let mut line = String::new();
             loop {
@@ -419,18 +419,15 @@ async fn run_auth_flow_inner(
 /// `None` when nothing in the chain failed over HTTP (the user backed out, the loopback listener couldn't bind, the id_token didn't validate).
 /// Returning `None` beats inventing a transport verdict for those.
 fn login_failure_event(err: &anyhow::Error) -> Option<LoginFailed> {
-    let source = err
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<reqwest::Error>())?;
+    let root: &(dyn std::error::Error + 'static) = err.as_ref();
+    let flags = xai_grok_http::transport_flags(root)?;
+    let failure = xai_grok_http::TransportFailure::from_chain(root)?;
     Some(LoginFailed {
-        error_kind: failure_kind(
-            xai_grok_http::TransportFailure::classify(source).kind,
-            source.is_decode(),
-        ),
-        os_error: xai_grok_http::find_os_error_code(source),
+        error_kind: failure_kind(failure.kind, flags.is_decode),
+        os_error: xai_grok_http::find_os_error_code(root),
     })
 }
-/// A body that won't parse is a decode failure, not a transport one, even though `reqwest` also reports it as a body-phase error.
+/// A body that won't parse is a decode failure, not a transport one, even though the transport also reports it as a body-phase error.
 fn failure_kind(transport: TransportFailureKind, is_decode: bool) -> LoginFailureKind {
     if is_decode {
         return LoginFailureKind::Decode;
@@ -957,13 +954,13 @@ struct LoginConfigResponse {
 /// Best-effort: any error or unset flag returns `None` so the caller keeps the loopback default.
 /// Caps at 1.5s with no retries since it's on the login path.
 async fn fetch_login_device_flow(cli_chat_proxy_base_url: &str) -> Option<bool> {
-    let agent_id = tokio::task::spawn_blocking(xai_grok_telemetry::id::agent_id)
+    let agent_id = xai_spawn::spawn_blocking(xai_grok_telemetry::id::agent_id)
         .await
         .ok()?;
     let client = xai_grok_http::shared_client();
     let url = format!("{}/login-config", cli_chat_proxy_base_url);
     let response = client
-        .get(&url)
+        .get(&url, xai_grok_net::Auth::None)
         .timeout(std::time::Duration::from_millis(1500))
         .header("x-grok-agent-id", agent_id)
         .header("x-grok-client-version", xai_grok_version::version())
@@ -1007,7 +1004,7 @@ mod tests {
     use chrono::Utc;
     use std::path::Path;
     use xai_grok_shell_base::env::EnvVarGuard;
-    /// `os_error` and the reqwest classification are covered in `xai-grok-http`.
+    /// `os_error` and the transport classification are covered in `xai-grok-http`.
     /// What's local is which `LoginFailureKind` each maps to, and that a decode failure never reads as a transport one.
     #[test]
     fn failure_kinds_map_one_to_one() {
@@ -1037,7 +1034,7 @@ mod tests {
         );
     }
     /// A login that never reached the network is not a transport failure.
-    /// The positive path needs a real `reqwest::Error`, but building a client here flips `jsonwebtoken` into its "no CryptoProvider" panic.
+    /// The positive path needs a real transport error, but building a client here flips `jsonwebtoken` into its "no CryptoProvider" panic.
     /// That breaks unrelated auth tests, so classification is covered in `xai-grok-http`.
     #[test]
     fn non_http_login_failures_are_not_reported() {
@@ -1237,7 +1234,7 @@ mod tests {
                 }))
             }),
         );
-        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let dir = tempfile::tempdir().unwrap();
         let mgr = Arc::new(
             AuthManager::new(dir.path(), GrokComConfig::default())
@@ -1882,7 +1879,7 @@ mod tests {
                     axum::Json(serde_json::json!({}))
                 }),
             );
-        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
         (base, handle)
     }
     fn expired_oidc_manager(dir: &Path, issuer: &str) -> Arc<AuthManager> {
@@ -2051,7 +2048,7 @@ mod tests {
                     }),
                 )
                 .with_state(state);
-            let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
             (format!("{base}/v1"), seen, handle)
         }
         #[tokio::test]

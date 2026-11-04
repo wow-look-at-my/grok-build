@@ -226,6 +226,10 @@ pub struct TodoPane {
     pub overlay: OverlayState,
     /// Last theme kind seen; used to detect theme switches and restyle.
     last_theme: ThemeKind,
+    /// The todo index and time of the last row click, to pair a double-click.
+    last_click: Option<(usize, std::time::Instant)>,
+    /// The list body rect of the last render, below the header row. `None` until a list renders.
+    body: Option<Rect>,
 }
 
 impl Default for TodoPane {
@@ -257,7 +261,52 @@ impl TodoPane {
             show_done: true,
             overlay: OverlayState::hidden(),
             last_theme: crate::theme::Theme::current_kind(),
+            last_click: None,
+            body: None,
         }
+    }
+
+    /// Indices into `todos()` of the items that pass the `show_done` filter, in list order.
+    pub fn visible_indices(&self) -> Vec<usize> {
+        self.todos
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                self.show_done || !matches!(t.status, TodoStatus::Completed | TodoStatus::Cancelled)
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// The todo index of the selected row, when that row is still in the list.
+    pub fn selected_todo(&self) -> Option<usize> {
+        let id = self.list_state.selected_id()? as usize;
+        (id < self.todos.len()).then_some(id)
+    }
+
+    /// A left press on the pane: selects the row under it like `handle_mouse`. Returns the todo
+    /// index when this press is the second click on the same row within the double-click window.
+    pub fn handle_click(&mut self, col: u16, row: u16, area: Rect) -> Option<usize> {
+        use crossterm::event::MouseButton;
+        self.handle_mouse(MouseEventKind::Down(MouseButton::Left), col, row, area);
+        let body = self.body.unwrap_or(area);
+        // NoWrap gives every entry exactly one row, so the row under the press names the entry.
+        let hit = (!self.list_state.is_scrollbar_dragging() && row >= body.y)
+            .then(|| self.list_state.scroll_offset() + usize::from(row - body.y))
+            .and_then(|i| self.entries.get(i))
+            .map(|e| e.id as usize);
+        let Some(hit) = hit else {
+            self.last_click = None;
+            return None;
+        };
+        let now = std::time::Instant::now();
+        let double = self.last_click.is_some_and(|(idx, at)| {
+            idx == hit
+                && now.duration_since(at).as_millis()
+                    < crate::app::agent_view::MULTI_CLICK_TIMEOUT_MS
+        });
+        self.last_click = if double { None } else { Some((hit, now)) };
+        double.then_some(hit)
     }
 
     pub fn todos(&self) -> &[TodoItem] {
@@ -395,9 +444,12 @@ impl TodoPane {
     /// Handle a mouse click or drag event over the todo pane area.
     ///
     /// Returns `true` if the event was consumed.
+    /// `area` is the whole pane. Rows map against the list body the last render drew, below the
+    /// header and inside the padding.
     pub fn handle_mouse(&mut self, kind: MouseEventKind, col: u16, row: u16, area: Rect) -> bool {
+        let body = self.body.unwrap_or(area);
         self.list_state
-            .handle_mouse_event(kind, col, row, area, &self.entries)
+            .handle_mouse_event(kind, col, row, body, &self.entries)
     }
 
     /// Compute the inner content area with horizontal padding matching the scrollback's `HorizontalLayout`.
@@ -457,6 +509,7 @@ impl TodoPane {
         self.rebuild_entries();
         let inner = Self::content_area(area, layout_cfg);
         if self.entries.is_empty() {
+            self.body = None;
             if inner.height > 0 && inner.width > 0 {
                 let msg = empty_placeholder_message(self.todos.is_empty(), self.counts());
                 let theme = crate::theme::Theme::current();
@@ -474,6 +527,7 @@ impl TodoPane {
             use crate::render::SafeBuf;
             buf.set_line_safe(header_row.x, header_row.y, &line, header_row.width);
         }
+        self.body = Some(body);
         self.list_state
             .prepare_layout(&self.entries, body.width, body.height);
         ListPane::new(&self.entries)
@@ -688,6 +742,48 @@ mod tests {
             1,
             "the refused item must not count as done"
         );
+    }
+
+    /// A second click on the same drawn row opens that row's todo. The header row above the list
+    /// does not shift the hit by one.
+    #[test]
+    fn double_click_names_the_todo_drawn_under_the_pointer() {
+        let mut pane = TodoPane::new();
+        pane.update_todos(vec![
+            item("alpha", TodoStatus::Completed),
+            item("beta", TodoStatus::Pending),
+            item("gamma", TodoStatus::Pending),
+        ]);
+        let lines = render_pane(&mut pane, 60, 8);
+        let row = lines.iter().position(|l| l.contains("beta")).unwrap() as u16;
+        let area = Rect::new(0, 0, 60, 8);
+
+        assert_eq!(pane.handle_click(10, row, area), None, "one click selects");
+        assert_eq!(pane.selected_todo(), Some(1), "the click selects beta");
+        assert_eq!(
+            pane.handle_click(10, row, area),
+            Some(1),
+            "two clicks open beta"
+        );
+        assert_eq!(
+            pane.handle_click(10, row, area),
+            None,
+            "a third click starts a new pair"
+        );
+    }
+
+    /// Clicks on different rows are not a double-click.
+    #[test]
+    fn clicks_on_two_rows_do_not_open_a_todo() {
+        let mut pane = TodoPane::new();
+        pane.update_todos(vec![
+            item("alpha", TodoStatus::Pending),
+            item("beta", TodoStatus::Pending),
+        ]);
+        render_pane(&mut pane, 60, 8);
+        let area = Rect::new(0, 0, 60, 8);
+        assert_eq!(pane.handle_click(10, 1, area), None);
+        assert_eq!(pane.handle_click(10, 2, area), None);
     }
 
     /// The header line is part of what the pane asks the layout for.

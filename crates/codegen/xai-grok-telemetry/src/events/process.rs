@@ -30,17 +30,6 @@ pub struct ProcessResourceLimits {
     pub cgroup_memory_max: Option<String>,
 }
 
-/// Emitted when the jemalloc heap monitor crosses a configured threshold.
-/// The acute signal that a build is growing without bound.
-#[derive(Serialize)]
-pub struct HeapThresholdCrossed {
-    pub threshold_bytes: u64,
-    pub resident_bytes: u64,
-    pub allocated_bytes: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rss_peak_bytes: Option<u64>,
-}
-
 /// What this process still holds just after a session was removed.
 /// Aggregated per release, a rising tail is a leak.
 /// `resident_sessions` separates leader mode, where one process serves many sessions and a leak compounds.
@@ -53,8 +42,6 @@ pub struct ProcessResourceUsage {
     pub peak_rss_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub footprint_bytes: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allocated_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threads: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

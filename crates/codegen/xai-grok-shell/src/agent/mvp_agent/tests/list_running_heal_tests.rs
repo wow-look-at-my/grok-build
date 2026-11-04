@@ -108,7 +108,7 @@ fn spawn_inspect_stub(
     inspect: Option<SubagentInspection>,
 ) {
     let mut event_rx = event_rx.into_event_receiver();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(event) = event_rx.recv().await {
             if let SubagentEvent::Inspect(request) = event {
                 let value = inspect

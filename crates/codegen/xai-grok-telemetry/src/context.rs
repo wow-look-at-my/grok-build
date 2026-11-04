@@ -3,10 +3,7 @@ pub struct GitContext {
 }
 
 pub fn collect_git_context(cwd: &str) -> GitContext {
-    use git2::Repository;
-    use std::path::Path;
-
     GitContext {
-        is_git_repo: Repository::discover(Path::new(cwd)).is_ok(),
+        is_git_repo: xai_gix_status::discover::discover(std::path::Path::new(cwd)).is_some(),
     }
 }

@@ -456,12 +456,8 @@ fn scan_mcp_json_servers(cwd: &Path, plan: &mut ImportPlan) {
 // Repo Root Discovery
 
 /// Find the git repo root for project config writes.
-/// Uses `git2::Repository::discover` (matching `config/mod.rs:find_project_configs`) to find the repo root. Falls back to `cwd` if no git repo is found.
 pub fn find_project_root(cwd: &Path) -> PathBuf {
-    git2::Repository::discover(cwd)
-        .ok()
-        .and_then(|repo| repo.workdir().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| cwd.to_path_buf())
+    xai_gix_status::discover::discover_workdir(cwd).unwrap_or_else(|| cwd.to_path_buf())
 }
 
 // Import Marker (Read Side) The marker `[claude_compat] imported = true` in `~/.grok/config.toml` is the signal that runtime fallback paths should stop reading `.claude/`.
@@ -593,7 +589,7 @@ pub fn mark_claude_imported() -> anyhow::Result<()> {
 
 /// Apply an import plan by writing TOML patches to the appropriate config files. This is additive-only: existing entries are never removed.
 /// New permission rules are appended; new env vars and MCP servers are added without overwriting existing keys or names.
-/// Project items are written to `<repo_root>/.grok/config.toml` (discovered via `git2::Repository::discover`), not `cwd/.grok/config.toml`. This avoids creating config files in unexpected subdirectories.
+/// Project items are written to `<repo_root>/.grok/config.toml` (found by repository discovery), not `cwd/.grok/config.toml`. This avoids creating config files in unexpected subdirectories.
 pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> anyhow::Result<ImportResult> {
     let mut result = ImportResult::default();
 

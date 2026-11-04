@@ -322,7 +322,7 @@ fn spawn_turn_delta_worker(
     client: FeedbackClient,
 ) -> mpsc::Sender<TurnDeltaJob> {
     let (tx, mut rx) = mpsc::channel(TURN_DELTA_QUEUE_CAPACITY);
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(job) = rx.recv().await {
             match job {
                 TurnDeltaJob::Post(delta) => {
@@ -373,7 +373,7 @@ impl FeedbackManager {
 
         // The signals actor answers every handle method on this manager, so its
         // death is reported with its name rather than as a closed channel.
-        tokio::spawn(xai_grok_tools::util::detached::fire_and_forget(
+        xai_spawn::spawn(xai_grok_tools::util::detached::fire_and_forget(
             "feedback manager signals actor",
             actor.run(),
         ));
@@ -1245,7 +1245,7 @@ mod tests {
     fn test_is_auth_error_detects_401() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::UNAUTHORIZED,
+            status: xai_grok_net::StatusCode::UNAUTHORIZED,
             context: "Signals update",
             body: "Invalid or expired credentials".to_string(),
         }
@@ -1257,7 +1257,7 @@ mod tests {
     fn test_is_auth_error_ignores_other_statuses() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err_500: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            status: xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR,
             context: "Signals update",
             body: "oops".to_string(),
         }
@@ -1265,7 +1265,7 @@ mod tests {
         assert!(!is_auth_error(&err_500));
 
         let err_403: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::FORBIDDEN,
+            status: xai_grok_net::StatusCode::FORBIDDEN,
             context: "Signals update",
             body: "ZDR team".to_string(),
         }
@@ -1283,7 +1283,7 @@ mod tests {
     fn test_is_forbidden_error_detects_403() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::FORBIDDEN,
+            status: xai_grok_net::StatusCode::FORBIDDEN,
             context: "Signals update",
             body: "Access denied: session does not belong to this user".to_string(),
         }
@@ -1295,7 +1295,7 @@ mod tests {
     fn test_is_forbidden_error_ignores_other_statuses() {
         use crate::agent::feedback_client::FeedbackApiError;
         let err_401: anyhow::Error = FeedbackApiError {
-            status: reqwest::StatusCode::UNAUTHORIZED,
+            status: xai_grok_net::StatusCode::UNAUTHORIZED,
             context: "Signals update",
             body: "Invalid credentials".to_string(),
         }
@@ -1309,7 +1309,7 @@ mod tests {
         use crate::agent::feedback_client::FeedbackApiError;
         // Verify the FeedbackApiError survives anyhow::Error round-trip (this is the actual path: send_json returns FeedbackApiError.into())
         let api_err = FeedbackApiError {
-            status: reqwest::StatusCode::UNAUTHORIZED,
+            status: xai_grok_net::StatusCode::UNAUTHORIZED,
             context: "Signals update",
             body: "token expired".to_string(),
         };
@@ -1360,9 +1360,10 @@ mod tests {
             fn resolve(&self) -> TraceExportConfig {
                 TraceExportConfig {
                     bucket_url: Some("gs://test-bucket".to_string()),
-                    service_account_key: None,
-                    upload_method: UploadMethod::Direct {
-                        service_account_key: None,
+                    upload_method: UploadMethod::Proxy {
+                        proxy_base_url: "http://127.0.0.1:1".to_string(),
+                        user_token: "test-token".to_string(),
+                        alpha_test_key: None,
                     },
                     prefix_dir: None,
                     gcs_prefix: None,
@@ -1450,11 +1451,12 @@ mod tests {
         use std::sync::Arc;
         use std::time::Instant;
 
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_millis(200))
-            .connect_timeout(Duration::from_millis(100))
-            .build()
-            .unwrap();
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_millis(200))
+                .connect_timeout(Duration::from_millis(100)),
+        )
+        .unwrap();
         // Nothing listening, so the first periodic sync errors quickly
         let client = FeedbackClient::with_client(http, "http://127.0.0.1:1", None);
         let config = FeedbackManagerConfig {
@@ -1468,7 +1470,7 @@ mod tests {
             config,
         ));
         let cancel = tokio_util::sync::CancellationToken::new();
-        let loop_handle = tokio::spawn(manager.clone().run_sync_loop(cancel.clone()));
+        let loop_handle = xai_spawn::spawn(manager.clone().run_sync_loop(cancel.clone()));
         // First tick and failed sync, then idle waiting on the long interval
         tokio::time::sleep(Duration::from_millis(400)).await;
         let started = Instant::now();
@@ -1487,12 +1489,12 @@ mod tests {
             .await
             .expect("bind blackhole listener");
         let addr = listener.local_addr().expect("local addr");
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 let Ok((stream, _)) = listener.accept().await else {
                     break;
                 };
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(120)).await;
                     drop(stream);
                 });
@@ -1508,11 +1510,12 @@ mod tests {
         use std::time::Instant;
 
         let base = blackhole_http_addr().await;
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .expect("reqwest client");
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client");
         let client = FeedbackClient::with_client(http, base, None);
         let config = FeedbackManagerConfig {
             telemetry_enabled: true,
@@ -1537,11 +1540,12 @@ mod tests {
         use std::time::Instant;
 
         let base = blackhole_http_addr().await;
-        let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .expect("reqwest client");
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client");
         let client = FeedbackClient::with_client(http, base, None);
         let config = FeedbackManagerConfig {
             telemetry_enabled: false,
@@ -1571,12 +1575,13 @@ mod tests {
         use std::time::Instant;
 
         let base = blackhole_http_addr().await;
-        let http = reqwest::Client::builder()
-            // Deliberately longer than the shutdown budget so the outer timeout is what fires, not the client's
-            .timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .build()
-            .expect("reqwest client");
+        // Deliberately longer than the shutdown budget so the outer timeout is what fires, not the client's
+        let http = xai_grok_net::HttpClient::build(
+            xai_grok_net::ClientOptions::default()
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client");
         let client = FeedbackClient::with_client(http, base, None);
         let config = FeedbackManagerConfig {
             telemetry_enabled: true,
@@ -1607,9 +1612,10 @@ mod tests {
             fn resolve(&self) -> TraceExportConfig {
                 TraceExportConfig {
                     bucket_url: Some("gs://test-bucket".to_string()),
-                    service_account_key: None,
-                    upload_method: UploadMethod::Direct {
-                        service_account_key: None,
+                    upload_method: UploadMethod::Proxy {
+                        proxy_base_url: "http://127.0.0.1:1".to_string(),
+                        user_token: "test-token".to_string(),
+                        alpha_test_key: None,
                     },
                     prefix_dir: None,
                     gcs_prefix: None,
@@ -1654,7 +1660,7 @@ mod tests {
         let app = Router::new().route("/v1/storage", post(slow_handler));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             axum::serve(listener, app).await.ok();
         });
 
@@ -1665,7 +1671,6 @@ mod tests {
             fn resolve(&self) -> TraceExportConfig {
                 TraceExportConfig {
                     bucket_url: Some("gs://test-bucket".to_string()),
-                    service_account_key: None,
                     upload_method: UploadMethod::Proxy {
                         proxy_base_url: self.base.clone(),
                         user_token: "test-token".to_string(),

@@ -45,12 +45,12 @@ pub(crate) fn spawn_fs_change_producer(
     root: PathBuf,
     events_tx: broadcast::Sender<WorkspaceEvent>,
 ) -> AbortOnDropHandle<()> {
-    AbortOnDropHandle::new(tokio::spawn(async move {
+    AbortOnDropHandle::new(xai_spawn::spawn(async move {
         // OS-watcher init walks the tree and blocks until every watch is armed. The watcher
         // reports paths under the canonical root (`shared` canonicalizes what it watches), so
         // that, not `root` as given, is what the paths are made relative to.
         let init_root = root.clone();
-        let init = tokio::task::spawn_blocking(move || {
+        let init = xai_spawn::spawn_blocking(move || {
             let source = xai_fsnotify::shared(init_root.clone(), FsConfig::default())?;
             Ok::<_, xai_fsnotify::FsNotifyError>((
                 source,

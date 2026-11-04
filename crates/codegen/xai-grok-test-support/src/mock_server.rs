@@ -158,6 +158,8 @@ struct RouterState {
     telemetry: Arc<TelemetryEventsState>,
     startup_fetch_stall: Arc<std::sync::RwLock<StartupFetchStall>>,
     startup_stalls_served: Arc<AtomicU32>,
+    /// A delay on the next `GET /v1/models` answers, and how many answers it still applies to.
+    models_delay: Arc<std::sync::RwLock<Option<(Duration, u32)>>>,
     user_tier: Arc<std::sync::RwLock<Option<String>>>,
     user_team: Arc<std::sync::RwLock<Option<MockUserTeam>>>,
     user_can_administer_team: Arc<std::sync::RwLock<MockCanAdministerTeam>>,
@@ -272,6 +274,7 @@ impl MockInferenceServer {
             telemetry: Arc::new(TelemetryEventsState::default()),
             startup_fetch_stall: Arc::new(std::sync::RwLock::new(StartupFetchStall::None)),
             startup_stalls_served: Arc::new(AtomicU32::new(0)),
+            models_delay: Arc::new(std::sync::RwLock::new(None)),
             user_tier: Arc::new(std::sync::RwLock::new(None)),
             user_team: Arc::new(std::sync::RwLock::new(None)),
             user_can_administer_team: Arc::new(std::sync::RwLock::new(
@@ -290,7 +293,7 @@ impl MockInferenceServer {
                     .await
                     .context("bind mock inference server")?;
                 let addr = listener.local_addr().context("local_addr")?;
-                tokio::spawn(async move {
+                xai_spawn::spawn(async move {
                     axum::serve(listener, app)
                         .with_graceful_shutdown(async {
                             let _ = shutdown_rx.await;
@@ -460,6 +463,12 @@ impl MockInferenceServer {
 
     pub fn set_startup_fetch_delay(&self, delay: Duration) {
         *self.state.startup_fetch_stall.write().unwrap() = StartupFetchStall::Delay(delay);
+    }
+
+    /// Delay the next `answers` `GET /v1/models` answers by `delay`. Later answers and
+    /// `/v1/settings` are not delayed.
+    pub fn set_models_delay(&self, delay: Duration, answers: u32) {
+        *self.state.models_delay.write().unwrap() = (answers > 0).then_some((delay, answers));
     }
 
     pub fn clear_startup_fetch_stall(&self) {
@@ -670,6 +679,17 @@ impl MockInferenceServer {
                         async move {
                             state.log.record_get("/v1/models");
                             state.stall_startup_fetch().await;
+                            let models_delay = {
+                                let mut slot = state.models_delay.write().unwrap();
+                                let delay = slot.map(|(delay, _)| delay);
+                                *slot = slot.and_then(|(delay, left)| {
+                                    (left > 1).then_some((delay, left - 1))
+                                });
+                                delay
+                            };
+                            if let Some(delay) = models_delay {
+                                tokio::time::sleep(delay).await;
+                            }
                             let models_json = state.models.read().unwrap().clone();
                             Json(json!({
                                 "object": "list",

@@ -190,7 +190,7 @@ async fn assert_wake_setup_failure_preserves_prior_durable_state(
     ctx.parent_cmd_tx = Some(parent_cmd_tx);
     let (gateway, mut gateway_rx) = test_gateway_with_receiver();
     let (command_tx, command_rx) = SubagentCoordinator::<RunShellChildTestRunner>::channel();
-    let coordinator = tokio::task::spawn_local(
+    let coordinator = xai_spawn::spawn_local(
         SubagentCoordinator::from_channel(
             command_rx,
             RunShellChildTestRunner::new([ctx], true, gateway),
@@ -385,11 +385,11 @@ async fn unpublished_wake_completion_preserves_prior_durable_state_and_worktree(
             ctx.agent_config = Some(config);
             let (parent_cmd_tx, parent_cmd_rx) = mpsc::unbounded_channel();
             ctx.parent_cmd_tx = Some(parent_cmd_tx);
-            let usage_ack = tokio::task::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
+            let usage_ack = xai_spawn::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
             let (gateway, mut gateway_rx) = test_gateway_with_receiver();
             let (command_tx, command_rx) =
                 SubagentCoordinator::<RunShellChildTestRunner>::channel();
-            let coordinator = tokio::task::spawn_local(
+            let coordinator = xai_spawn::spawn_local(
                 SubagentCoordinator::from_channel(
                     command_rx,
                     RunShellChildTestRunner::new([ctx], true, gateway),
@@ -494,11 +494,11 @@ async fn ordinary_spawn_with_failed_metadata_write_persists_output_and_disposes_
             ctx.agent_config = Some(config);
             let (parent_cmd_tx, parent_cmd_rx) = mpsc::unbounded_channel();
             ctx.parent_cmd_tx = Some(parent_cmd_tx);
-            let usage_ack = tokio::task::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
+            let usage_ack = xai_spawn::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
             let (gateway, _gateway_rx) = test_gateway_with_receiver();
             let (command_tx, command_rx) =
                 SubagentCoordinator::<RunShellChildTestRunner>::channel();
-            let coordinator = tokio::task::spawn_local(
+            let coordinator = xai_spawn::spawn_local(
                 SubagentCoordinator::from_channel(
                     command_rx,
                     RunShellChildTestRunner::new([ctx], false, gateway),
@@ -568,11 +568,11 @@ async fn ordinary_spawn_disposes_worktree_when_only_remote_settings_enable_snaps
             });
             let (parent_cmd_tx, parent_cmd_rx) = mpsc::unbounded_channel();
             ctx.parent_cmd_tx = Some(parent_cmd_tx);
-            let usage_ack = tokio::task::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
+            let usage_ack = xai_spawn::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
             let (gateway, _gateway_rx) = test_gateway_with_receiver();
             let (command_tx, command_rx) =
                 SubagentCoordinator::<RunShellChildTestRunner>::channel();
-            let coordinator = tokio::task::spawn_local(
+            let coordinator = xai_spawn::spawn_local(
                 SubagentCoordinator::from_channel(
                     command_rx,
                     RunShellChildTestRunner::new([ctx], false, gateway),
@@ -638,11 +638,11 @@ async fn ordinary_spawn_binds_the_child_workspace_session_before_its_first_turn(
             let workspace_ops = ctx.workspace_ops.clone();
             let (parent_cmd_tx, parent_cmd_rx) = mpsc::unbounded_channel();
             ctx.parent_cmd_tx = Some(parent_cmd_tx);
-            let usage_ack = tokio::task::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
+            let usage_ack = xai_spawn::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
             let (gateway, _gateway_rx) = test_gateway_with_receiver();
             let (command_tx, command_rx) =
                 SubagentCoordinator::<RunShellChildTestRunner>::channel();
-            let coordinator = tokio::task::spawn_local(
+            let coordinator = xai_spawn::spawn_local(
                 SubagentCoordinator::from_channel(
                     command_rx,
                     RunShellChildTestRunner::new([ctx], false, gateway),
@@ -652,8 +652,7 @@ async fn ordinary_spawn_binds_the_child_workspace_session_before_its_first_turn(
             );
             let backend = ChannelBackend::for_coordinator_session(command_tx, "setup-parent");
             let request = auto_wake_test_request(&id);
-            let spawned =
-                tokio::task::spawn_local(async move { backend.spawn(request, None).await });
+            let spawned = xai_spawn::spawn_local(async move { backend.spawn(request, None).await });
             let first_turn_at_model = async {
                 while server.request_count() == 0 {
                     tokio::task::yield_now().await;
@@ -712,7 +711,7 @@ async fn unacked_wake_start_and_abort_fail_closed_without_parking_runner() {
             );
             let (parent_cmd_tx, parent_cmd_rx) = mpsc::unbounded_channel();
             ordinary_ctx.parent_cmd_tx = Some(parent_cmd_tx.clone());
-            let usage_ack = tokio::task::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
+            let usage_ack = xai_spawn::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
             let mut wake_ctx = ctx_with_toggle(HashMap::new());
             configure_completion_harness(
                 &mut wake_ctx,
@@ -728,7 +727,7 @@ async fn unacked_wake_start_and_abort_fail_closed_without_parking_runner() {
             let (gateway, mut gateway_rx) = test_gateway_with_receiver();
             let (command_tx, command_rx) =
                 SubagentCoordinator::<RunShellChildTestRunner>::channel();
-            let coordinator = tokio::task::spawn_local(
+            let coordinator = xai_spawn::spawn_local(
                 SubagentCoordinator::from_channel(
                     command_rx,
                     RunShellChildTestRunner::new([ordinary_ctx, wake_ctx], false, gateway),
@@ -841,7 +840,7 @@ async fn rejected_deferred_start_restores_prior_without_publication() {
             );
             let (parent_cmd_tx, parent_cmd_rx) = mpsc::unbounded_channel();
             ordinary_ctx.parent_cmd_tx = Some(parent_cmd_tx.clone());
-            let usage_ack = tokio::task::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
+            let usage_ack = xai_spawn::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
             let child_cwd = ordinary_ctx.parent_cwd.to_string_lossy().into_owned();
             let mut wake_ctx = ctx_with_toggle(HashMap::new());
             configure_completion_harness(
@@ -857,7 +856,7 @@ async fn rejected_deferred_start_restores_prior_without_publication() {
             let (gateway, mut gateway_rx) = test_gateway_with_receiver();
             let (command_tx, command_rx) =
                 SubagentCoordinator::<RunShellChildTestRunner>::channel();
-            let coordinator = tokio::task::spawn_local(
+            let coordinator = xai_spawn::spawn_local(
                 SubagentCoordinator::from_channel(
                     command_rx,
                     RunShellChildTestRunner::new([ordinary_ctx, wake_ctx], false, gateway),
@@ -966,7 +965,7 @@ async fn started_wake_with_failed_metadata_write_preserves_prior_durable_artifac
             );
             let (parent_cmd_tx, parent_cmd_rx) = mpsc::unbounded_channel();
             ordinary_ctx.parent_cmd_tx = Some(parent_cmd_tx.clone());
-            let usage_ack = tokio::task::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
+            let usage_ack = xai_spawn::spawn_local(acknowledge_parent_usage(parent_cmd_rx));
             let mut wake_ctx = ctx_with_toggle(HashMap::new());
             configure_completion_harness(
                 &mut wake_ctx,
@@ -982,7 +981,7 @@ async fn started_wake_with_failed_metadata_write_preserves_prior_durable_artifac
             let (gateway, mut gateway_rx) = test_gateway_with_receiver();
             let (command_tx, command_rx) =
                 SubagentCoordinator::<RunShellChildTestRunner>::channel();
-            let coordinator = tokio::task::spawn_local(
+            let coordinator = xai_spawn::spawn_local(
                 SubagentCoordinator::from_channel(
                     command_rx,
                     RunShellChildTestRunner::new([ordinary_ctx, wake_ctx], false, gateway),

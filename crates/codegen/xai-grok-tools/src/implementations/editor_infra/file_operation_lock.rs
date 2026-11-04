@@ -225,7 +225,7 @@ mod tests {
         let guard1 = mgr.wait_for_lock("a.ts").await;
         let order2 = order.clone();
         let mgr2 = mgr.clone();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             order2.lock().await.push("2-waiting");
             let _guard2 = mgr2.wait_for_lock("a.ts").await;
             order2.lock().await.push("2-acquired");
@@ -248,7 +248,7 @@ mod tests {
 
         // Different path should acquire immediately.
         let mgr2 = mgr.clone();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let _guard_b = mgr2.wait_for_lock("b.ts").await;
             true
         });
@@ -268,7 +268,7 @@ mod tests {
 
         let mgr2 = mgr.clone();
         let acquired2 = acquired.clone();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let _guard = mgr2.wait_for_lock("a.ts").await;
             *acquired2.lock().await = true;
         });
@@ -294,7 +294,7 @@ mod tests {
 
         let second = {
             let mgr = mgr.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 let _guard = mgr.wait_for_lock("a.ts").await;
             })
         };

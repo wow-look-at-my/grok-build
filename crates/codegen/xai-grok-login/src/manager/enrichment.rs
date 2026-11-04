@@ -35,7 +35,7 @@ impl Drop for EnrichmentExitGuard {
     }
 }
 pub(super) fn spawn(manager: Arc<AuthManager>, auth: GrokAuth) {
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         let mut exit_guard = EnrichmentExitGuard {
             started: std::time::Instant::now(),
             armed: true,
@@ -53,7 +53,7 @@ tokio::task_local! {
 async fn log_offloaded(lvl: LogLevel, msg: String, ctx: serde_json::Value) {
     #[cfg(test)]
     let hook = TEST_LOG_HOOK.try_with(Arc::clone).ok();
-    let write = tokio::task::spawn_blocking(move || {
+    let write = xai_spawn::spawn_blocking(move || {
         #[cfg(test)]
         if let Some(hook) = hook {
             hook();
@@ -64,15 +64,18 @@ async fn log_offloaded(lvl: LogLevel, msg: String, ctx: serde_json::Value) {
         tracing::warn!(error = %e, "unified_log write task failed");
     }
 }
-async fn fetch_user_info(manager: &AuthManager, key: &str, log_label: &str) -> Option<UserInfo> {
+async fn fetch_user_info(
+    manager: &AuthManager,
+    auth: &GrokAuth,
+    log_label: &str,
+) -> Option<UserInfo> {
     let user_url = format!("{}/user", manager.proxy_base_url);
     let token_header = &manager.grok_com_config.token_header;
     let started = std::time::Instant::now();
     let http_client = xai_grok_http::shared_client();
     let response = http_client
-        .get(&user_url)
+        .get(&user_url, auth.wire_auth())
         .timeout(USER_FETCH_TIMEOUT)
-        .header("Authorization", format!("Bearer {}", key))
         .header("X-XAI-Token-Auth", token_header.as_str())
         .header("x-grok-client-version", xai_grok_version::version())
         .header(
@@ -128,7 +131,13 @@ async fn fetch_user_info(manager: &AuthManager, key: &str, log_label: &str) -> O
                 LogLevel::Warn,
                 format!("{log_label} failed"),
                 serde_json::json!({
-                    "reason": if e.is_timeout() { "timeout" } else { "transport" },
+                    "reason": if e.auth_refusal().is_some() {
+                        "auth_refused"
+                    } else if e.is_timeout() {
+                        "timeout"
+                    } else {
+                        "transport"
+                    },
                     "error": e.to_string(),
                     "elapsed_ms": started.elapsed().as_millis() as u64,
                 }),
@@ -140,15 +149,14 @@ async fn fetch_user_info(manager: &AuthManager, key: &str, log_label: &str) -> O
 }
 /// Blocking enrichment at login: merges `/user` fields into `auth` before the first save.
 pub(super) async fn enrich_inline(manager: &AuthManager, auth: &mut GrokAuth) {
-    let Some(ui) = fetch_user_info(manager, &auth.key, "auth login enrichment").await else {
+    let Some(ui) = fetch_user_info(manager, auth, "auth login enrichment").await else {
         return;
     };
     apply_user_info_enrichment(auth, ui);
 }
 async fn run_user_info_enrichment(manager: &AuthManager, auth: GrokAuth) {
     let started = std::time::Instant::now();
-    let Some(user_info) = fetch_user_info(manager, &auth.key, "auth update enrichment").await
-    else {
+    let Some(user_info) = fetch_user_info(manager, &auth, "auth update enrichment").await else {
         return;
     };
     let user_elapsed_ms = started.elapsed().as_millis() as u64;
@@ -230,7 +238,7 @@ pub(super) async fn hydrate_can_administer_team(
     manager: &AuthManager,
     auth: &GrokAuth,
 ) -> Option<bool> {
-    let user_info = fetch_user_info(manager, &auth.key, "auth capability hydration").await?;
+    let user_info = fetch_user_info(manager, auth, "auth capability hydration").await?;
     let value = user_info.can_administer_team;
     let same_account = |live: &GrokAuth| {
         auth.email.is_some()

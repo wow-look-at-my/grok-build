@@ -374,6 +374,9 @@ impl TrustStore {
 
         let body = toml::to_string_pretty(doc)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        if let Some(result) = xai_grok_config::host_write::try_write(path, &body, Some(0o600)) {
+            return result;
+        }
 
         // Unique temp in the same directory (atomic rename requires same FS).
         let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
@@ -404,23 +407,23 @@ fn git_derived_workspace_key(cwd: &Path) -> PathBuf {
         // Key on the source repo's git ROOT so every worktree of one repo shares ONE key regardless of the subdir grok -w was launched from
         // This matches the git-topology branch below
         // Fall back to the recorded path when the source repo is gone (a standalone worktree whose source was deleted still works)
-        let root = git2::Repository::discover(&source_repo)
+        let root = crate::git_repo::discover(&source_repo)
             .ok()
-            .and_then(|r| r.workdir().map(canonicalize_or_owned));
+            .and_then(|r| crate::git_repo::workdir(&r));
         return root.unwrap_or_else(|| canonicalize_or_owned(&source_repo));
     }
-    if let Ok(repo) = git2::Repository::discover(cwd) {
+    if let Ok(repo) = crate::git_repo::discover(cwd) {
         // Share one trust key across a repo's worktrees instead of re-prompting per worktree.
-        if repo.is_worktree()
-            && let Ok(main) = git2::Repository::open(repo.commondir())
-            && let Some(main_workdir) = main.workdir()
-            && canonicalize_or_owned(&main_workdir.join(".git"))
-                == canonicalize_or_owned(repo.commondir())
+        let common_dir = crate::git_repo::common_dir(&repo);
+        if crate::git_repo::is_linked_worktree(&repo)
+            && let Ok(main) = crate::git_repo::open(&common_dir)
+            && let Some(main_workdir) = crate::git_repo::workdir(&main)
+            && canonicalize_or_owned(&main_workdir.join(".git")) == common_dir
         {
-            return canonicalize_or_owned(main_workdir);
+            return main_workdir;
         }
-        if let Some(workdir) = repo.workdir() {
-            return canonicalize_or_owned(workdir);
+        if let Some(workdir) = crate::git_repo::workdir(&repo) {
+            return workdir;
         }
     }
     canonicalize_or_owned(cwd)
@@ -440,7 +443,7 @@ pub fn is_unsafe_trust_root(key: &Path) -> bool {
     !key.is_absolute() || key.parent().is_none() || is_home_dir(key)
 }
 
-/// `workspace_key` of the nearest existing ancestor (git2 discover fails on a missing path).
+/// `workspace_key` of the nearest existing ancestor (git discovery fails on a missing path).
 fn workspace_id(path: &Path) -> PathBuf {
     workspace_key(path.ancestors().find(|p| p.exists()).unwrap_or(path))
 }
@@ -902,7 +905,7 @@ mod tests {
         let repo = tmp.path().join("repo");
         let child = repo.join("crates").join("inner");
         std::fs::create_dir_all(&child).unwrap();
-        git2::Repository::init(&repo).unwrap();
+        crate::test_git::init(&repo);
         let repo_key = canonicalize_or_owned(&repo);
         let child_key = canonicalize_or_owned(&child);
 
@@ -927,7 +930,7 @@ mod tests {
         let parent = tmp.path().join("work");
         let nested = parent.join("evil");
         std::fs::create_dir_all(&nested).unwrap();
-        git2::Repository::init(&nested).unwrap();
+        crate::test_git::init(&nested);
         let parent_key = canonicalize_or_owned(&parent);
         let nested_key = canonicalize_or_owned(&nested);
 
@@ -952,8 +955,8 @@ mod tests {
         let sibling = parent.join("src");
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::create_dir_all(&sibling).unwrap();
-        git2::Repository::init(&parent).unwrap();
-        git2::Repository::init(&nested).unwrap();
+        crate::test_git::init(&parent);
+        crate::test_git::init(&nested);
         let parent_key = canonicalize_or_owned(&parent);
         let nested_key = canonicalize_or_owned(&nested);
         let sibling_key = canonicalize_or_owned(&sibling);
@@ -988,7 +991,7 @@ mod tests {
         let parent_key = canonicalize_or_owned(&parent);
         let child_key = canonicalize_or_owned(&child);
 
-        // Plant a dummy .git because libgit2 discover ignores GIT_CEILING_DIRECTORIES.
+        // Plant a dummy .git because discovery ignores GIT_CEILING_DIRECTORIES.
         std::fs::write(tmp.path().join(".git"), "gitdir: /nonexistent\n").unwrap();
 
         let mut store = TrustStore::load_from(tmp.path().join(TRUST_FILE_NAME));
@@ -1014,7 +1017,7 @@ mod tests {
         let other = parent.join("other");
         std::fs::create_dir_all(&child).unwrap();
         std::fs::create_dir_all(&other).unwrap();
-        git2::Repository::init(&parent).unwrap();
+        crate::test_git::init(&parent);
         let parent_key = canonicalize_or_owned(&parent);
         let child_key = canonicalize_or_owned(&child);
         let other_key = canonicalize_or_owned(&other);
@@ -1051,7 +1054,7 @@ mod tests {
         let parent = tmp.path().join("parent");
         let child = parent.join("child");
         std::fs::create_dir_all(&child).unwrap();
-        git2::Repository::init(&parent).unwrap();
+        crate::test_git::init(&parent);
         let parent_key = canonicalize_or_owned(&parent);
         let child_key = canonicalize_or_owned(&child);
 
@@ -1127,7 +1130,7 @@ mod tests {
         let key = workspace_key(&sub);
         assert!(key.is_absolute());
         // Only pin the fallback when the temp dir is outside any git repo (a dev/CI checkout may place $TMPDIR inside the source repository)
-        if git2::Repository::discover(&sub).is_err() {
+        if crate::git_repo::discover(&sub).is_err() {
             assert_eq!(key, canonicalize_or_owned(&sub));
         }
     }
@@ -1142,7 +1145,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _home_guard = crate::TestEnvGuard::set("HOME", home.path());
         let _userprofile_guard = crate::TestEnvGuard::set("USERPROFILE", home.path());
-        git2::Repository::init(home.path()).unwrap();
+        crate::test_git::init(home.path());
         let civ = home.path().join("Documents").join("civ");
         std::fs::create_dir_all(&civ).unwrap();
 
@@ -1507,23 +1510,14 @@ trusted = true
         let dir = tempfile::tempdir().unwrap();
         let main = dir.path().join("main");
         std::fs::create_dir_all(&main).unwrap();
-        let repo = git2::Repository::init(&main).unwrap();
-
         // Worktree creation requires a valid HEAD, so make an initial commit.
-        let sig = git2::Signature::now("t", "t@t").unwrap();
-        let tree = {
-            let mut idx = repo.index().unwrap();
-            let oid = idx.write_tree().unwrap();
-            repo.find_tree(oid).unwrap()
-        };
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        crate::test_git::init_with_commit(&main);
 
-        // Linked worktrees OUTSIDE the main dir (git2 creates the paths).
+        // Linked worktrees OUTSIDE the main dir (git creates the paths).
         let wt1 = dir.path().join("wt1");
         let wt2 = dir.path().join("wt2");
-        repo.worktree("wt1", &wt1, None).unwrap();
-        repo.worktree("wt2", &wt2, None).unwrap();
+        crate::test_git::worktree_add(&main, &wt1);
+        crate::test_git::worktree_add(&main, &wt2);
 
         let main_key = workspace_key(&main);
         // Parity: the main checkout keys off its own workdir.
@@ -1547,17 +1541,13 @@ trusted = true
         // The key must instead fall back to the worktree's OWN dir (narrow, never widened)
         let dir = tempfile::tempdir().unwrap();
         let bare = dir.path().join("repo.git");
-        let repo = git2::Repository::init_bare(&bare).unwrap();
+        crate::test_git::init_bare(&bare);
 
-        // Worktree creation needs a valid HEAD; build an empty commit (bare repo has no index, so use a treebuilder for the empty tree)
-        let sig = git2::Signature::now("t", "t@t").unwrap();
-        let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();
-        let tree = repo.find_tree(tree_oid).unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        // Worktree creation needs a valid HEAD; build an empty-tree commit (a bare repo has no index)
+        crate::test_git::commit_empty_bare(&bare);
 
         let wt = dir.path().join("wt");
-        repo.worktree("wt", &wt, None).unwrap();
+        crate::test_git::worktree_add(&bare, &wt);
 
         let key = workspace_key(&wt);
         assert_ne!(
@@ -1612,10 +1602,10 @@ trusted = true
         }
 
         // Only assert once the worktree is a linked worktree whose common gitdir is the relocated separate gitdir (the layout this test targets)
-        let Ok(repo) = git2::Repository::discover(&wt) else {
+        let Ok(repo) = crate::git_repo::discover(&wt) else {
             return;
         };
-        if !repo.is_worktree() {
+        if !crate::git_repo::is_linked_worktree(&repo) {
             return;
         }
 
@@ -1688,7 +1678,7 @@ trusted = true
         let root = dunce::canonicalize(temp.path()).unwrap();
         let source_repo = root.join("source-repo");
         std::fs::create_dir_all(&source_repo).unwrap();
-        git2::Repository::init(&source_repo).unwrap();
+        crate::test_git::init(&source_repo);
 
         let (_env, wt) = register_grok_worktree(&temp, "wt", &source_repo, "standalone");
 
@@ -1717,7 +1707,7 @@ trusted = true
         let root = dunce::canonicalize(temp.path()).unwrap();
         let repo = root.join("realrepo");
         std::fs::create_dir_all(&repo).unwrap();
-        git2::Repository::init(&repo).unwrap();
+        crate::test_git::init(&repo);
         let subdir = repo.join("crates").join("sub");
         std::fs::create_dir_all(&subdir).unwrap();
 
@@ -1736,7 +1726,7 @@ trusted = true
         let root = dunce::canonicalize(temp.path()).unwrap();
         let main_repo = root.join("thing");
         std::fs::create_dir_all(&main_repo).unwrap();
-        git2::Repository::init(&main_repo).unwrap();
+        crate::test_git::init(&main_repo);
 
         let wt = main_repo.join(".grok").join("worktrees").join("label");
         std::fs::create_dir_all(&wt).unwrap();
@@ -1786,10 +1776,10 @@ trusted = true
         let root = dunce::canonicalize(temp.path()).unwrap();
         let main_repo = root.join("thing");
         std::fs::create_dir_all(&main_repo).unwrap();
-        git2::Repository::init(&main_repo).unwrap();
+        crate::test_git::init(&main_repo);
         let other_source = root.join("other-source");
         std::fs::create_dir_all(&other_source).unwrap();
-        git2::Repository::init(&other_source).unwrap();
+        crate::test_git::init(&other_source);
 
         std::fs::create_dir_all(main_repo.join(".grok").join("worktrees").join("label")).unwrap();
         let home = root.join("grok-home");
@@ -1833,14 +1823,14 @@ trusted = true
         let root = dunce::canonicalize(temp.path()).unwrap();
         let source_repo = root.join("source-repo");
         std::fs::create_dir_all(&source_repo).unwrap();
-        git2::Repository::init(&source_repo).unwrap();
+        crate::test_git::init(&source_repo);
 
         let (_env, _wt) = register_grok_worktree(&temp, "wt", &source_repo, "standalone");
 
         // Under grok HOME but NOT under `<home>/worktrees`, and its own git repo.
         let outside = root.join("grok-home").join("not-worktrees").join("proj");
         std::fs::create_dir_all(&outside).unwrap();
-        git2::Repository::init(&outside).unwrap();
+        crate::test_git::init(&outside);
 
         let key = workspace_key(&outside);
         assert_eq!(

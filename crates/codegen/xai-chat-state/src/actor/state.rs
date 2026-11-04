@@ -167,6 +167,8 @@ pub(crate) struct ChatState {
     /// `None` means no model turn has completed (or a restore that did not persist it).
     /// Always overwritten by the most recent turn — historical turns are not retained here.
     pub last_turn_usage: Option<TokenUsage>,
+    /// One sample per measured main-loop request since the last load, compaction or rewind.
+    pub context_samples: Vec<crate::ContextSample>,
     /// Billing for the open prompt (cleared on next prompt; not persisted).
     pub prompt_usage: Option<UsageLedger>,
     /// Lifetime session billing (not persisted).
@@ -236,6 +238,7 @@ impl ChatState {
             estimated_tokens_since_model: 0,
             estimate_at_last_response: initial_tokens,
             last_turn_usage: None,
+            context_samples: Vec::new(),
             prompt_usage: None,
             session_usage: UsageLedger::default(),
             turn_capture: None,

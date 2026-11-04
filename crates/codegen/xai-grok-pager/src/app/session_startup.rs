@@ -1400,7 +1400,7 @@ mod tests {
         .unwrap();
         assert!(repo_path.join(".git").is_file());
         assert!(
-            git2::Repository::discover(&repo_path).is_ok(),
+            xai_grok_workspace::git_repo::discover(&repo_path).is_ok(),
             "relocated gitdir must still discover"
         );
         assert!(!parent_session_is_worktree("any-sid", &repo_path));
@@ -1420,7 +1420,7 @@ mod tests {
         let dir = tmp.path().join("broken");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(".git"), "not-a-gitdir\n").unwrap();
-        assert!(git2::Repository::discover(&dir).is_err());
+        assert!(xai_grok_workspace::git_repo::discover(&dir).is_err());
         assert!(parent_session_is_worktree("any-sid", &dir));
     }
     #[serial_test::serial(GROK_HOME)]

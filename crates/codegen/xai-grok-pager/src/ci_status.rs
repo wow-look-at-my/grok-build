@@ -310,7 +310,7 @@ fn spawn_ci_refresh(key: CiCacheKey, previous: Option<CiStatus>) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         return;
     };
-    handle.spawn_blocking(move || {
+    xai_spawn::spawn_blocking_on(&handle, move || {
         let (_, status) = gh_ci_status(&key.repo_root, &key.branch);
         if let Ok(mut cache) = CI_CACHE.lock() {
             cache.insert(key, (Some(status), Instant::now()));

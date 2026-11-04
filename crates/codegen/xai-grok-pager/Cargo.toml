@@ -4,6 +4,7 @@ version = "1.0.41"
 edition.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
+autotests = false
 
 [dependencies]
 # TTY safety — detach subprocesses from the controlling terminal
@@ -80,7 +81,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 # Binary hardening: compile-time string obfuscation.
-# (cryptify / rustls / semver / tikv-jemallocator moved to the composition-root
+# (cryptify / rustls / semver moved to the composition-root
 # binary `xai-grok-pager-bin` with `main.rs`; this lib no longer references them.)
 obfstr = { workspace = true }
 
@@ -149,11 +150,10 @@ uuid = { workspace = true, features = ["v4", "v7"] }
 # Path computation (plan file, etc.)
 shellexpand = "3.1"
 
-# libgit2 for the startup git-info populator (no fork/exec, runs once on launch
+# In-process git reads for the git-info populator and branch stats (no fork/exec,
 # in spawn_blocking; the render path never touches git directly).
-git2 = { version = "0.21", default-features = false, features = [
-    "vendored-libgit2",
-] }
+gix = { workspace = true, features = ["status", "blob-diff"] }
+xai-gix-status = { workspace = true }
 urlencoding = { workspace = true }
 
 # Parsing (web_search)
@@ -168,6 +168,7 @@ parking_lot.workspace = true
 # nix: signal handling in notifications/.
 # signal-hook: SIGWINCH handler for the `grok wrap` PTY wrapper (pty_wrap.rs).
 # libc: poll/read for non-blocking terminal reads in theme/osc11.rs.
+xai-spawn = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["signal"] }
 signal-hook = { workspace = true }
@@ -178,6 +179,7 @@ libc = { workspace = true }
 core-foundation = { workspace = true }
 
 [dev-dependencies]
+xai-test-utils = { path = "../../common/xai-test-utils" }
 tokio = { workspace = true, features = ["test-util"] }
 xai-interjection-core = { workspace = true }
 # The fixture that builds a `[ui.status_line]` section field by field.
@@ -188,7 +190,6 @@ xai-grok-gboom = { path = "../xai-grok-gboom", features = ["test-support"] }
 xai-grok-login = { workspace = true, features = ["test-support"] }
 xai-grok-shell = { workspace = true, features = ["test-support"] }
 pretty_assertions = { workspace = true }
-wiremock = { workspace = true }
 insta = { workspace = true }
 criterion = { workspace = true }
 tempfile = { workspace = true }
@@ -216,12 +217,21 @@ harness = false
 name = "resize"
 harness = false
 
-# Settings modal regression tests — keyboard/mouse dispatch + registry
-# contracts. Not gated by `--ignored`; runs on every `cargo test`.
-# Spawn-only pager tests live in `xai-grok-pager-pty-harness`.
+# Every integration test links into this one binary. Each former test file is a
+# module of it. Spawn-only pager tests live in `xai-grok-pager-pty-harness`.
 [[test]]
-name = "settings_e2e"
-path = "tests/settings_e2e.rs"
+name = "it"
+path = "tests/it/main.rs"
+
+# Each of these sets `GROK_HOME`, and `grok_home()` reads it once per process.
+# So each needs a process of its own under `cargo test`.
+[[test]]
+name = "plugin_marketplace_remove_locked"
+path = "tests/plugin_marketplace_remove_locked.rs"
+
+[[test]]
+name = "plugin_marketplace_remove_official"
+path = "tests/plugin_marketplace_remove_official.rs"
 
 # Opt into [workspace.lints.clippy] (too_many_arguments etc.). Without this,
 # `cargo clippy --workspace -- -D warnings` on this package is stricter than
@@ -230,20 +240,13 @@ path = "tests/settings_e2e.rs"
 workspace = true
 
 [features]
-default = ["jemalloc", "sandbox-enforce"]
+default = ["sandbox-enforce"]
 default-bazel = [
-    "jemalloc",
     "sandbox-enforce",
     "test-support",
     "local-workspace",
     ]
 local-workspace = ["xai-grok-shell/local-workspace"]
-# No-op on this crate: the actual `#[global_allocator]` (and the
-# `tikv-jemallocator` dep) live on the composition-root binary
-# `xai-grok-pager-bin`, which owns `main.rs`. Kept as an empty feature so the
-# workspace-uniform `[jemalloc, sandbox-enforce]` default set resolves
-# here too and the generated `crate_features` stay valid.
-jemalloc = []
 sandbox-enforce = ["xai-grok-sandbox/enforce"]
 release-dist = []
 # Exposes test-only view-model constructors/setters (e.g. `test_agent_view`,

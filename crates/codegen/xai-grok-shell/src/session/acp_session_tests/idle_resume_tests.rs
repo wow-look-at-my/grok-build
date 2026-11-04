@@ -64,7 +64,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let addr = listener.local_addr().unwrap();
             let mock_url = format!("http://{}/v1", addr);
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 axum::serve(listener, app).await.unwrap();
             });
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -216,6 +216,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                     configured_storage: None,
                     process_disabled: false,
                     config_opt_out: false,
+                    unavailable: None,
                     v2_legacy_carryover: false,
                     prompt_sync_pending: std::sync::atomic::AtomicBool::new(false),
                     flush_config: crate::config::MemoryFlushConfig::default(),
@@ -295,7 +296,6 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 )),
                 goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
                 goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-                goal_blocked_streak: std::sync::atomic::AtomicU32::new(0),
                 goal_update_rx: std::cell::RefCell::new(None),
                 goal_update_tx: tokio::sync::mpsc::unbounded_channel().0,
                 workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle()
@@ -363,7 +363,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 next_title_refresh_idx: std::cell::Cell::new(0),
                 turn_summary_enabled: false,
                 title_refresh_enabled: false,
-                thinking_summaries_enabled: false,
+                thinking_summaries_enabled: std::cell::Cell::new(false),
                 thinking_summary_history: Default::default(),
                 thinking_summary_tail: Default::default(),
                 session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

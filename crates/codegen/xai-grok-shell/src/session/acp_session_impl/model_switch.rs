@@ -21,6 +21,43 @@ impl SessionActor {
         self.output_rate_floor.set(policy);
     }
 
+    /// The model for one harness slot, or `None` when it inherits the session
+    /// model.
+    pub(crate) fn harness_model(&self, slot_id: &str) -> Option<String> {
+        self.refresh_model_slots_if_stale();
+        self.harness_models.get(slot_id)
+    }
+
+    /// Resolve the slots and the `/goal` role models again when a `[models]`
+    /// reload happened since this actor last resolved them.
+    pub(super) fn refresh_model_slots_if_stale(&self) {
+        if self.harness_models.take_stale() {
+            self.reload_model_slots();
+        }
+    }
+
+    /// The config is read the way the spawn reads it. A config that does not
+    /// load keeps the map.
+    fn reload_model_slots(&self) {
+        let config = match crate::config::load_effective_config()
+            .map_err(|e| e.to_string())
+            .and_then(|raw| crate::agent::config::Config::new_from_toml_cfg(&raw))
+        {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::error!(
+                    session_id = %self.session_info.id.0,
+                    %error,
+                    "harness model slot reload skipped: the config did not load"
+                );
+                return;
+            }
+        };
+        self.harness_models.reload(&config);
+        *self.goal_role_models.borrow_mut() =
+            GoalRoleModelConfig::resolve(&config, self.goal_use_current_model_only);
+    }
+
     pub(super) async fn handle_set_session_model(
         self: &std::sync::Arc<Self>,
         switch: crate::session::SessionModelSwitch,

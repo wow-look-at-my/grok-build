@@ -127,7 +127,7 @@ impl MvpAgent {
             "folder_trust reverse-request must carry a non-empty sessionId (design §5.4)"
         );
 
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let request = FolderTrustRequest {
                 session_id,
                 cwd: cwd.to_string_lossy().into_owned(),

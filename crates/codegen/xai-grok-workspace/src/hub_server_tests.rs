@@ -555,7 +555,7 @@ async fn tasks_snapshot_excludes_foreground_and_completed_processes() {
     }
     let backend = session.terminal_backend().clone();
     let fg_req = terminal_run_request("sleep 30", out_dir.path(), "snap-fg-task");
-    let fg_join = tokio::spawn(async move { backend.run(fg_req).await });
+    let fg_join = xai_spawn::spawn(async move { backend.run(fg_req).await });
     let poll_deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let listed = session.terminal_backend().list_tasks().await;

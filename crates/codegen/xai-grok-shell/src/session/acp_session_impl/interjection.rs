@@ -89,12 +89,10 @@ impl SessionActor {
     /// finished. The turn loop calls this immediately before
     /// `drain_pending_interjections`, which is immediately before each model
     /// request. The earliest point the model can see the text without
-    /// cancelling anything. Rows listed in
-    /// [`SessionActor::queued_at_turn_start`] were next in line before this
-    /// turn existed — each is its own task, not a note about this turn's
-    /// work. So the turn loop's own harvest (`include_queued_at_turn_start =
-    /// false`) leaves them to run as their own turns. The explicit "deliver
-    /// the queue now" gesture passes `true`. Returns whether anything moved.
+    /// cancelling anything. Every gap passes `include_queued_at_turn_start =
+    /// true`, so a row listed in [`SessionActor::queued_at_turn_start`] goes
+    /// in as well: a message waits for no tokens it does not need to. `false`
+    /// leaves those rows to run as their own turns. Returns whether anything moved.
     pub(super) async fn harvest_queued_prompts_into_interjections(
         &self,
         include_queued_at_turn_start: bool,

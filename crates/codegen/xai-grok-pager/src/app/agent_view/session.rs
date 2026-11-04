@@ -236,6 +236,8 @@ impl AgentView {
             workflows_view: crate::views::workflows::WorkflowsViewState::default(),
             last_cleared_goal_id: None,
             show_goal_detail: false,
+            todo_detail: None,
+            hit_todo_detail_close: Default::default(),
             turn_start_ms: None,
             turn_start_ms_prompt: None,
             turn_started_at: None,
@@ -680,9 +682,7 @@ impl AgentView {
                 prev_generation = prev.generation,
                 "session reload superseded without finalize; restoring previous stash first"
             );
-            if self.apply_reload_outcome(prev, false) {
-                crate::memory_release::release_retained_memory("reload-supersede");
-            }
+            self.apply_reload_outcome(prev, false);
         }
         while self.scrollback.in_batch() {
             self.scrollback.end_batch();
@@ -790,10 +790,8 @@ impl AgentView {
     /// An open window would corrupt the incoming load's batch/replay bookkeeping and defer its results.
     /// The window's pending re-init completion later no-ops (generation gone).
     pub(crate) fn abort_session_reload(&mut self) {
-        if let Some(reload) = self.session_reload.take()
-            && self.apply_reload_outcome(reload, false)
-        {
-            crate::memory_release::release_retained_memory("reload-abort");
+        if let Some(reload) = self.session_reload.take() {
+            self.apply_reload_outcome(reload, false);
         }
     }
     /// Finalize the reload window opened for `generation`.
@@ -802,9 +800,7 @@ impl AgentView {
     pub(crate) fn finish_session_reload(&mut self, generation: u64, success: bool) -> bool {
         match self.session_reload.take() {
             Some(reload) if reload.generation == generation => {
-                if self.apply_reload_outcome(reload, success) {
-                    crate::memory_release::release_retained_memory("reload-finalize");
-                }
+                self.apply_reload_outcome(reload, success);
                 true
             }
             Some(other) => {
@@ -948,17 +944,13 @@ impl AgentView {
         finalized
     }
     /// Resolve a closed window per the three [`SessionReload`] outcomes.
-    /// The success-with-cursor branch *reuses* the stash and moves the tail entries into it: nothing multi-MB drops, so callers must NOT purge.
-    /// (A full-arena purge there would madvise away warm pages on the most common reconnect outcome, once per open tab.)
-    #[must_use = "purge retained memory iff a heavy transient dropped"]
-    fn apply_reload_outcome(&mut self, reload: SessionReload, success: bool) -> bool {
+    /// branch *reuses* the stash and moves the tail entries into it.
+    fn apply_reload_outcome(&mut self, reload: SessionReload, success: bool) {
         if let Some(pid) = self.loading_placeholder_id.take() {
             self.scrollback.remove_entry(pid);
         }
-        let dropped_heavy;
         if success && reload.saw_replay {
             self.scrollback.end_batch();
-            dropped_heavy = true;
         } else if success {
             let stash = reload.stash;
             let mut tail = std::mem::replace(&mut self.scrollback, stash.scrollback);
@@ -1027,7 +1019,6 @@ impl AgentView {
             if !reload.saw_todo_update {
                 self.todo = stash.todo;
             }
-            dropped_heavy = false;
         } else {
             self.restore_replay_rebuilt_state(reload.stash);
             self.last_seen_event_id = reload.last_seen_event_id;
@@ -1035,7 +1026,6 @@ impl AgentView {
             self.last_applied_event_seq = reload.last_applied_event_seq;
             self.last_applied_xai_event_seq = reload.last_applied_xai_event_seq;
             self.applied_text_seqs = reload.applied_text_seqs;
-            dropped_heavy = true;
         }
         self.session.loading_replay = false;
         if success {
@@ -1060,7 +1050,6 @@ impl AgentView {
         self.activity_started_at = None;
         self.last_activity = None;
         self.reset_follow_ups_for_reload();
-        dropped_heavy
     }
     /// Effective turn elapsed time, excluding time spent in question views (accumulated pauses plus the currently open one, on both clocks).
     pub fn turn_elapsed(&self) -> Option<std::time::Duration> {

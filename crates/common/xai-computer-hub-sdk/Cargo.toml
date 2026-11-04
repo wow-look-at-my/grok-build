@@ -10,7 +10,6 @@ metrics = ["dep:prometheus", "dep:prometheus-parse"]
 
 [dependencies]
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 tokio-util = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
@@ -27,7 +26,7 @@ uuid = { workspace = true }
 http = { workspace = true }
 prometheus = { workspace = true, optional = true }
 prometheus-parse = { version = "0.2.5", optional = true }
-reqwest = { workspace = true }
+xai-grok-net = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
 
@@ -48,12 +47,17 @@ xai-computer-hub-core = { workspace = true }
 xai-tracing = { workspace = true }
 
 # Integration tests that need heavier backend deps live in a separate sibling crate to keep this dev-dep set minimal.
+xai-spawn = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 axum = { workspace = true, features = ["ws", "macros"] }
 chrono = { workspace = true }
 base64 = { workspace = true }
 schemars = { workspace = true }
+# The mock hub servers in the connection tests accept the upgrade with it.
+tokio-tungstenite = { workspace = true }
+# The mock hubs listen on loopback, and the bearer is the xAI session.
+xai-grok-net = { workspace = true, features = ["test-loopback-session"] }
 
 [lints]
 workspace = true

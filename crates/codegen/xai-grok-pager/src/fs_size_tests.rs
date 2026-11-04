@@ -91,12 +91,19 @@ fn a_root_off_the_anchor_is_measured_by_nobody() {
     std::fs::write(worktree.join(".git"), "gitdir: /repo/.git/worktrees/wt-a\n").unwrap();
     std::fs::write(worktree.join("payload.bin"), vec![b'x'; 65536]).unwrap();
     let elsewhere = Volume::of(tmp.path()).other_device_for_test();
+    let git_bytes = physical_file_size(&std::fs::metadata(worktree.join(".git")).unwrap());
+    let payload_bytes =
+        physical_file_size(&std::fs::metadata(worktree.join("payload.bin")).unwrap());
+    let expected = git_bytes + payload_bytes;
     let home = physical_buckets(&root, Volume::of(&root));
-    assert!(home.total.bytes().is_some_and(|bytes| bytes >= 65536));
-    assert!(
-        home.buckets
-            .get(&worktree)
-            .is_some_and(|m| m.bytes().is_some_and(|b| b >= 65536)),
+    assert_eq!(
+        Some(expected),
+        home.total.bytes(),
+        "the total is the worktree files' physical size"
+    );
+    assert_eq!(
+        Some(expected),
+        home.buckets.get(&worktree).and_then(|m| m.bytes()),
         "on its own volume the worktree is a counted bucket"
     );
     let foreign = physical_buckets(&root, elsewhere);
@@ -232,7 +239,7 @@ fn volume_bytes_reports_a_real_volume() {
 /// One bucket per checkout, at either depth the location has been written in,
 /// and none for anything else under the root.
 #[test]
-fn buckets_open_for_a_checkout_at_either_depth_of_the_old_location() {
+fn buckets_open_for_a_checkout_at_either_depth_of_the_home_root() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().join("worktrees");
     let checkout = |dir: &Path, bytes: usize| {

@@ -324,6 +324,9 @@ impl AgentView {
         if let Some(outcome) = self.handle_workflows_overlay_input(ev) {
             return outcome;
         }
+        if let Some(outcome) = self.handle_todo_detail_input(ev) {
+            return outcome;
+        }
         if self.show_goal_detail && self.goal_state.is_some() {
             if let Event::Key(key) = ev
                 && key.kind != KeyEventKind::Release

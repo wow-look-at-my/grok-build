@@ -48,7 +48,7 @@ fn test_actor_inner(
     if mark_summary_done {
         summary.mark_done();
     }
-    let task = tokio::spawn(
+    let task = xai_spawn::spawn(
         SessionPersistence {
             info,
             storage,

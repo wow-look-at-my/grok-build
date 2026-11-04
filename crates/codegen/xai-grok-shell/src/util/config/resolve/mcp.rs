@@ -318,7 +318,7 @@ mod max_mcp_output_bytes_tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         // Make it a git repo so the chain walks from the subdir to the root
-        git2::Repository::init(root).unwrap();
+        gix::init(root).unwrap();
         let sub = root.join("crates").join("thing");
         std::fs::create_dir_all(sub.join(".grok")).unwrap();
         std::fs::create_dir_all(root.join(".grok")).unwrap();

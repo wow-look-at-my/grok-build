@@ -13,13 +13,12 @@ pub fn share_url(permission_id: &str) -> String {
     format!("{}/build/share/{}", web_url, permission_id)
 }
 fn add_cli_chat_proxy_headers_blocking(
-    builder: reqwest::blocking::RequestBuilder,
+    builder: xai_grok_net::BlockingRequest,
     auth: &GrokAuth,
     alpha_test_key: Option<&str>,
     url: &str,
-) -> reqwest::blocking::RequestBuilder {
+) -> xai_grok_net::BlockingRequest {
     let mut builder = builder
-        .header("Authorization", format!("Bearer {}", &auth.key))
         .header("X-XAI-Token-Auth", GrokComConfig::default().token_header)
         .header("x-userid", &auth.user_id)
         .header("x-grok-client-version", xai_grok_version::version());
@@ -38,17 +37,18 @@ fn add_cli_chat_proxy_headers_blocking(
         )
 }
 async fn parse_json_response<T: serde::de::DeserializeOwned>(
-    response: reqwest::Response,
+    response: xai_grok_net::Response,
 ) -> Result<T, BackendError> {
     let bytes = response.bytes().await?;
     serde_json::from_slice(&bytes).map_err(BackendError::from)
 }
-async fn add_bundle_fetch_headers(
-    builder: reqwest::RequestBuilder,
+/// A GET to `url` with the login token and the bundle-fetch headers.
+async fn bundle_fetch_request(
+    client: &xai_grok_net::HttpClient,
     auth_manager: Option<&std::sync::Arc<xai_grok_login::AuthManager>>,
     alpha_test_key: Option<&str>,
     url: &str,
-) -> reqwest::RequestBuilder {
+) -> xai_grok_net::Request {
     let resolved_auth = match auth_manager {
         Some(am) if ActiveAuthBackend::default().is_xai_authority() => am.auth().await.ok(),
         _ => None,
@@ -57,8 +57,12 @@ async fn add_bundle_fetch_headers(
         resolved_auth.as_ref().map(|auth| auth.key.clone()),
     );
     credentials.alpha_test_key = alpha_test_key.map(str::to_owned);
-    let mut builder = credentials
-        .apply(builder, url)
+    let mut request_auth = credentials.request_auth(url);
+    if let Some(auth) = &resolved_auth {
+        request_auth.auth = auth.wire_auth();
+    }
+    let mut builder = request_auth
+        .headers_on(client.get(url, request_auth.auth.clone()))
         .header("x-grok-client-version", xai_grok_version::version());
     if let Some(auth) = &resolved_auth {
         builder = builder.header("x-userid", &auth.user_id);
@@ -86,15 +90,14 @@ pub async fn fetch_subagent_bundle(
     alpha_test_key: Option<&str>,
 ) -> Result<SubagentBundle, BackendError> {
     let url = format!("{}/subagents/bundle", cli_chat_proxy_base_url);
-    let response = add_bundle_fetch_headers(
-        crate::http::shared_client()
-            .get(&url)
-            .timeout(std::time::Duration::from_secs(10)),
+    let response = bundle_fetch_request(
+        &crate::http::shared_client(),
         auth_manager,
         alpha_test_key,
         &url,
     )
     .await
+    .timeout(std::time::Duration::from_secs(10))
     .send()
     .await?;
     if !response.status().is_success() {
@@ -132,8 +135,8 @@ async fn fetch_bundle_inner(
     alpha_test_key: Option<&str>,
 ) -> Result<FetchedBundle, BackendError> {
     let archive_url = format!("{}/bundle/archive", cli_chat_proxy_base_url);
-    let raw_client = crate::http::shared_client();
-    let client: reqwest_middleware::ClientWithMiddleware = if let Some(am) = auth_manager {
+    let client = crate::http::shared_client();
+    let request_auth = if let Some(am) = auth_manager {
         let provider: std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider> =
             std::sync::Arc::new(
                 xai_grok_login::credential_provider::ShellAuthCredentialProvider::new(
@@ -141,12 +144,12 @@ async fn fetch_bundle_inner(
                     alpha_test_key.map(str::to_owned),
                 ),
             );
-        crate::http::with_auth_retry(raw_client, provider)
+        crate::http::auth_retry(provider, &archive_url)
     } else {
-        reqwest_middleware::ClientBuilder::new(raw_client).build()
+        xai_grok_auth::RequestAuth::none()
     };
-    let mut request = client
-        .get(&archive_url)
+    let mut request = request_auth
+        .headers_on(client.get(&archive_url, request_auth.auth.clone()))
         .timeout(std::time::Duration::from_secs(30))
         .header("x-grok-client-version", xai_grok_version::version())
         .header(
@@ -161,15 +164,12 @@ async fn fetch_bundle_inner(
             request = request.header("x-email", email);
         }
     }
-    let archive_response = request.send().await.map_err(|e| match e {
-        reqwest_middleware::Error::Reqwest(e) => BackendError::Network(e),
-        reqwest_middleware::Error::Middleware(e) => BackendError::Auth(e.to_string()),
-    })?;
+    let archive_response = request.send().await?;
     if archive_response.status().is_success() {
         let bytes = archive_response.bytes().await?;
         return Ok(FetchedBundle::Archive(bytes.to_vec()));
     }
-    if archive_response.status() == reqwest::StatusCode::UNAUTHORIZED {
+    if archive_response.status() == xai_grok_net::StatusCode::UNAUTHORIZED {
         let body = archive_response.text().await.unwrap_or_default();
         return Err(BackendError::RequestFailed { status: 401, body });
     }
@@ -236,7 +236,7 @@ pub struct SessionUpdate {
 #[derive(Debug, thiserror::Error)]
 pub enum BackendError {
     #[error("Network error: {0}")]
-    Network(#[from] reqwest::Error),
+    Network(xai_grok_net::Error),
     #[error("Request failed: {status} - {body}")]
     RequestFailed { status: u16, body: String },
     #[error("Serialization error: {0}")]
@@ -253,14 +253,28 @@ pub enum BackendError {
     #[error("{0}")]
     EndpointNotAllowed(String),
 }
+impl From<xai_grok_net::Error> for BackendError {
+    fn from(e: xai_grok_net::Error) -> Self {
+        match e {
+            xai_grok_net::Error::Auth(refusal) => Self::Auth(refusal.to_string()),
+            other => Self::Network(other),
+        }
+    }
+}
+impl From<xai_grok_net::TransportError> for BackendError {
+    fn from(e: xai_grok_net::TransportError) -> Self {
+        Self::Network(e.into())
+    }
+}
 /// Refuse a model request to an endpoint missing from `[endpoints] allowed_endpoints`.
 pub(crate) fn allow_endpoint(url: &str) -> Result<(), BackendError> {
     xai_grok_extra_ca::endpoint_allowlist::check(url)
         .map_err(|refusal| BackendError::EndpointNotAllowed(refusal.to_string()))
 }
 pub struct BackendClient {
-    reqwest_client: reqwest::Client,
-    client: reqwest_middleware::ClientWithMiddleware,
+    client: xai_grok_net::HttpClient,
+    /// The login credential each request carries.
+    credential: Option<std::sync::Arc<dyn xai_grok_auth::AuthCredentialProvider>>,
     base_url: String,
     pub(crate) auth_manager: Option<std::sync::Arc<xai_grok_login::AuthManager>>,
 }
@@ -270,29 +284,29 @@ impl Default for BackendClient {
     }
 }
 impl BackendClient {
-    fn build_default_client() -> reqwest::Client {
-        xai_grok_extra_ca::build_reqwest_client(|builder| {
-                builder.connect_timeout(Duration::from_secs(10)).timeout(DEFAULT_TIMEOUT)
-            })
+    fn build_default_client() -> xai_grok_net::HttpClient {
+        xai_grok_net::HttpClient::build(
+                xai_grok_net::ClientOptions::default()
+                    .connect_timeout(Duration::from_secs(10))
+                    .timeout(DEFAULT_TIMEOUT),
+            )
             .unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to build backend HTTP client; falling back to shared client");
                 crate::http::shared_client()
             })
     }
     pub fn new() -> Self {
-        let reqwest_client = Self::build_default_client();
         Self {
-            client: reqwest_middleware::ClientBuilder::new(reqwest_client.clone()).build(),
-            reqwest_client,
+            client: Self::build_default_client(),
+            credential: None,
             base_url: std::env::var("GROK_CODE_BACKEND_URL").unwrap_or_default(),
             auth_manager: None,
         }
     }
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
-        let reqwest_client = Self::build_default_client();
         Self {
-            client: reqwest_middleware::ClientBuilder::new(reqwest_client.clone()).build(),
-            reqwest_client,
+            client: Self::build_default_client(),
+            credential: None,
             base_url: base_url.into(),
             auth_manager: None,
         }
@@ -309,7 +323,7 @@ impl BackendClient {
                     None,
                 ),
             );
-        self.client = crate::http::with_auth_retry(self.reqwest_client.clone(), credentials);
+        self.credential = Some(credentials);
         self.auth_manager = Some(manager);
         self
     }
@@ -359,8 +373,8 @@ impl BackendClient {
     }
     /// Must include X-XAI-Token-Auth so nginx auth subrequest routes to OAuth.
     /// See: crates/codegen/xai-grok-shell/src/agent/app.rs:run_headless
-    async fn auth_header_map(&self) -> Result<reqwest::header::HeaderMap, BackendError> {
-        use reqwest::header::{HeaderMap, HeaderValue};
+    async fn auth_header_map(&self) -> Result<xai_grok_net::header::HeaderMap, BackendError> {
+        use xai_grok_net::header::{HeaderMap, HeaderValue};
         let auth = self.resolve_auth().await?;
         let mut headers = HeaderMap::new();
         let required = |value: &str, name: &str| -> Result<HeaderValue, BackendError> {
@@ -390,19 +404,23 @@ impl BackendClient {
         );
         Ok(headers)
     }
+    /// A request to `url` that carries the login credential.
+    fn authed(&self, method: xai_grok_net::Method, url: &str) -> xai_grok_net::Request {
+        let request_auth = match &self.credential {
+            Some(provider) => crate::http::auth_retry(provider.clone(), url),
+            None => xai_grok_auth::RequestAuth::none(),
+        };
+        request_auth.headers_on(self.client.request(method, url, request_auth.auth.clone()))
+    }
     async fn send_with_auth(
         &self,
-        builder: reqwest::RequestBuilder,
-    ) -> Result<reqwest::Response, BackendError> {
+        builder: xai_grok_net::Request,
+    ) -> Result<xai_grok_net::Response, BackendError> {
         let headers = self.auth_header_map().await?;
         let builder = xai_grok_otel::inject_trace_context_into_request(
             builder.timeout(DEFAULT_TIMEOUT).headers(headers),
         );
-        let request = builder.build()?;
-        self.client.execute(request).await.map_err(|e| match e {
-            reqwest_middleware::Error::Reqwest(e) => BackendError::Network(e),
-            reqwest_middleware::Error::Middleware(e) => BackendError::Auth(e.to_string()),
-        })
+        Ok(builder.send().await?)
     }
     pub async fn upsert_session(
         &self,
@@ -421,7 +439,7 @@ impl BackendClient {
             agent_id: agent_id.to_string(),
         };
         let response = self
-            .send_with_auth(self.reqwest_client.put(&url).json(&request))
+            .send_with_auth(self.authed(xai_grok_net::Method::PUT, &url).json(&request))
             .await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -442,7 +460,7 @@ impl BackendClient {
             metadata: metadata.and_then(|m| serde_json::to_value(m).ok()),
         };
         let response = self
-            .send_with_auth(self.reqwest_client.post(&url).json(&request))
+            .send_with_auth(self.authed(xai_grok_net::Method::POST, &url).json(&request))
             .await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -453,7 +471,9 @@ impl BackendClient {
     }
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>, BackendError> {
         let url = format!("{}/sessions", self.base_url);
-        let response = self.send_with_auth(self.reqwest_client.get(&url)).await?;
+        let response = self
+            .send_with_auth(self.authed(xai_grok_net::Method::GET, &url))
+            .await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let body = response.text().await.unwrap_or_default();
@@ -471,7 +491,9 @@ impl BackendClient {
         session_id: &str,
     ) -> Result<LoadDataResponse, BackendError> {
         let url = format!("{}/sessions/{}/data", self.base_url, session_id);
-        let response = self.send_with_auth(self.reqwest_client.get(&url)).await?;
+        let response = self
+            .send_with_auth(self.authed(xai_grok_net::Method::GET, &url))
+            .await?;
         if response.status().as_u16() == 404 {
             return Err(BackendError::SessionNotFound {
                 session_id: session_id.to_string(),
@@ -490,7 +512,9 @@ impl BackendClient {
         session_id: &str,
     ) -> Result<ShareResponse, BackendError> {
         let url = format!("{}/sessions/{}/share", self.base_url, session_id);
-        let response = self.send_with_auth(self.reqwest_client.post(&url)).await?;
+        let response = self
+            .send_with_auth(self.authed(xai_grok_net::Method::POST, &url))
+            .await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let body = response.text().await.unwrap_or_default();
@@ -502,7 +526,7 @@ impl BackendClient {
     pub(crate) async fn delete_session_data(&self, session_id: &str) -> Result<(), BackendError> {
         let url = format!("{}/sessions/{}/data", self.base_url, session_id);
         let response = self
-            .send_with_auth(self.reqwest_client.delete(&url))
+            .send_with_auth(self.authed(xai_grok_net::Method::DELETE, &url))
             .await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -562,8 +586,12 @@ fn fetch_settings_blocking_with_attempts(
         if attempt > 0 {
             std::thread::sleep(crate::http::SETTINGS_RETRY_BACKOFF_STEP * attempt);
         }
-        let request =
-            add_cli_chat_proxy_headers_blocking(client.get(&url), auth, alpha_test_key, &url);
+        let request = add_cli_chat_proxy_headers_blocking(
+            client.get(&url, auth.wire_auth()),
+            auth,
+            alpha_test_key,
+            &url,
+        );
         match request.send() {
             Ok(resp) if resp.status().is_success() => match resp.json() {
                 Ok(settings) => {
@@ -583,7 +611,7 @@ fn fetch_settings_blocking_with_attempts(
                 );
                 continue;
             }
-            Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
+            Ok(resp) if resp.status() == xai_grok_net::StatusCode::UNAUTHORIZED => {
                 tracing::warn!(
                     status = resp.status().as_u16(),
                     "Settings fetch rejected (401)"
@@ -621,6 +649,50 @@ pub(crate) fn models_list_url_for_base(base: &str) -> String {
     }
 }
 
+/// The credential and the plain headers for a request to a provider.
+/// A credential header the user wrote for the provider goes as `Auth::Configured`,
+/// with the key beside it as `Authorization: Bearer`. Otherwise the key goes as `Auth::ApiKey`.
+pub(crate) fn provider_request_auth(
+    api_key: Option<&str>,
+    headers: &[(String, String)],
+) -> (xai_grok_net::Auth, xai_grok_net::header::HeaderMap) {
+    use xai_grok_net::header::{HeaderMap, HeaderName, HeaderValue};
+    let mut plain = HeaderMap::new();
+    let mut configured = HeaderMap::new();
+    for (name, value) in headers {
+        let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(value),
+        ) else {
+            tracing::warn!(header = %name, "skipping a provider header that is not valid HTTP");
+            continue;
+        };
+        if xai_grok_net::is_credential_header(&name) {
+            configured.append(name, value);
+        } else {
+            plain.append(name, value);
+        }
+    }
+    let key = api_key.filter(|k| !k.is_empty());
+    let auth = if configured.is_empty() {
+        match key {
+            Some(key) => xai_grok_net::Auth::ApiKey {
+                key: key.to_owned(),
+                scheme: xai_grok_net::KeyScheme::Bearer,
+            },
+            None => xai_grok_net::Auth::None,
+        }
+    } else {
+        if let Some(key) = key
+            && let Ok(value) = HeaderValue::from_str(&format!("Bearer {key}"))
+        {
+            configured.insert(xai_grok_net::header::AUTHORIZATION, value);
+        }
+        xai_grok_net::Auth::Configured(configured)
+    };
+    (auth, plain)
+}
+
 /// Fetch result: model entries + optional etag from response.
 pub struct FetchModelsResult {
     pub models: Vec<crate::agent::config::ModelEntryConfig>,
@@ -634,7 +706,7 @@ pub(crate) fn fetch_models_for_api_base_blocking(
     api_key: Option<&str>,
 ) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
     let url = models_list_url_for_base(base_url.trim_end_matches('/'));
-    fetch_models_for_list_url_blocking(&url, api_key)
+    fetch_models_for_list_url_blocking(&url, api_key, &[])
 }
 
 /// Fetch and parse a listing from an exact URL.
@@ -642,20 +714,22 @@ pub(crate) fn fetch_models_for_api_base_blocking(
 /// base. A provider that serves its listing somewhere else
 /// (`[model_providers.<id>].models_list_url`) names the URL itself, and
 /// deriving one from it would append a second `/models`.
+/// `headers` are the provider's own request headers. A gateway that routes or
+/// authenticates by header answers the listing only with them.
 pub(crate) fn fetch_models_for_list_url_blocking(
     url: &str,
     api_key: Option<&str>,
+    headers: &[(String, String)],
 ) -> Result<Vec<crate::agent::config::ModelEntryConfig>, BackendError> {
     let client = crate::http::shared_startup_blocking_client();
     // The listing carries no base of its own, so an entry that names none falls back to this.
     let base_url = url.trim_end_matches("/models").trim_end_matches('/');
     allow_endpoint(url)?;
     tracing::debug!(models_url = %url, "Fetching models for BYOK/custom API base");
-    let mut request = client.get(url);
-    if let Some(key) = api_key
-        && !key.is_empty()
-    {
-        request = request.header("Authorization", format!("Bearer {key}"));
+    let (auth, plain) = provider_request_auth(api_key, headers);
+    let mut request = client.get(url, auth);
+    for (name, value) in &plain {
+        request = request.header(name.clone(), value.clone());
     }
     let response = request.send()?;
     if !response.status().is_success() {
@@ -748,6 +822,11 @@ pub(crate) fn parse_remote_model_value(
                 .and_then(|v| v.as_object())
                 .and_then(parse_capabilities_reasoning_efforts)
         })
+        .or_else(|| {
+            obj.get("reasoning")
+                .and_then(|v| v.as_object())
+                .and_then(parse_reasoning_object_efforts)
+        })
         .unwrap_or_default();
     Some(crate::agent::config::ModelEntryConfig {
         id,
@@ -759,6 +838,8 @@ pub(crate) fn parse_remote_model_value(
         max_completion_tokens: get_u64(obj, "maxCompletionTokens")
             .or_else(|| get_u64(obj, "max_completion_tokens"))
             .or_else(|| capabilities.and_then(|c| get_u64(c, "max_output_tokens")))
+            .or_else(|| get_u64(obj, "max_output_tokens"))
+            .or_else(|| top_provider.and_then(|tp| get_u64(tp, "max_completion_tokens")))
             .and_then(|v| u32::try_from(v).ok()),
         temperature: get_f64(obj, "temperature").map(|v| v as f32),
         top_p: get_f64(obj, "topP").or_else(|| get_f64(obj, "top_p")).map(|v| v as f32),
@@ -817,7 +898,13 @@ pub(crate) fn parse_remote_model_value(
             .or_else(|| obj.get("supports_reasoning_effort"))
             .or_else(|| meta.and_then(|m| m.get("supportsReasoningEffort")))
             .and_then(|v| v.as_bool())
-            .unwrap_or(false),
+            .unwrap_or_else(|| {
+                obj.get("supported_parameters")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|params| {
+                        params.iter().any(|p| p.as_str() == Some("reasoning_effort"))
+                    })
+            }),
         reasoning_efforts,
         reasoning_effort_server_default,
         variants: obj
@@ -1003,6 +1090,35 @@ fn parse_capabilities_reasoning_efforts(
             tracing::warn!(
                 value = %default,
                 "capabilities.default_reasoning_effort is not a listed level; leaving the server default"
+            );
+        }
+    }
+    Some((options, !marked))
+}
+/// Effort menu from the `reasoning` object OpenRouter and Bifrost listings carry: `supported_efforts` is a bare-string list, `default_effort` names the marked entry.
+/// The second value is true when no entry got marked, so the request omits the effort and the server applies its own.
+fn parse_reasoning_object_efforts(
+    reasoning: &serde_json::Map<String, serde_json::Value>,
+) -> Option<(Vec<xai_grok_sampling_types::ReasoningEffortOption>, bool)> {
+    let arr = reasoning.get("supported_efforts")?.as_array()?;
+    let mut options =
+        xai_grok_sampling_types::parse_reasoning_effort_options(arr, "reasoning.supported_efforts");
+    if options.is_empty() {
+        return None;
+    }
+    let mut marked = false;
+    if let Some(default) = reasoning.get("default_effort").filter(|v| !v.is_null()) {
+        let level = default
+            .as_str()
+            .and_then(|s| s.parse::<xai_grok_sampling_types::ReasoningEffort>().ok());
+        for option in &mut options {
+            option.default = level == Some(option.value);
+            marked |= option.default;
+        }
+        if !marked {
+            tracing::warn!(
+                value = %default,
+                "reasoning.default_effort is not a listed level; leaving the server default"
             );
         }
     }

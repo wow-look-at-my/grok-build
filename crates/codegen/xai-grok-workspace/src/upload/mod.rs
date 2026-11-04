@@ -116,7 +116,7 @@ pub(crate) fn spawn_queue_stats_sampler(
 ) -> QueueStatsSamplerGuard {
     let stats = queue.stats_arc();
     let sample_period_secs = interval.as_secs();
-    let task = tokio::spawn(async move {
+    let task = xai_spawn::spawn(async move {
         let mut tick = tokio::time::interval(interval);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -145,19 +145,38 @@ struct HubAuthCredentialProvider {
     identity: WorkspaceIdentity,
 }
 impl xai_grok_auth::visibility::HttpAuth for HubAuthCredentialProvider {
-    fn apply(&self, builder: reqwest::RequestBuilder, _base_url: &str) -> reqwest::RequestBuilder {
-        let cred = self.auth.current();
-        match &cred {
-            AuthCredential::Bearer { token, .. } => {
-                builder.header("Authorization", format!("Bearer {token}"))
-            }
-            AuthCredential::Headers { headers, .. } => {
-                let mut b = builder;
-                for (name, value) in headers {
-                    b = b.header(name.as_str(), value.as_str());
+    fn request_auth(&self, _base_url: &str) -> xai_grok_auth::visibility::RequestAuth {
+        xai_grok_auth::visibility::RequestAuth {
+            auth: hub_auth(&self.auth.current()),
+            headers: xai_grok_net::header::HeaderMap::new(),
+        }
+    }
+}
+/// The hub credential as a net credential. The bearer is a key the hub issued for the
+/// proxy endpoint. A header bundle is sent as written.
+fn hub_auth(cred: &AuthCredential) -> xai_grok_net::Auth {
+    match cred {
+        AuthCredential::Bearer { token } => xai_grok_net::Auth::ApiKey {
+            key: token.clone(),
+            scheme: xai_grok_net::KeyScheme::Bearer,
+        },
+        AuthCredential::Headers { headers } => {
+            let mut map = xai_grok_net::header::HeaderMap::new();
+            for (name, value) in headers {
+                match (
+                    xai_grok_net::header::HeaderName::from_bytes(name.as_bytes()),
+                    xai_grok_net::header::HeaderValue::from_str(value),
+                ) {
+                    (Ok(name), Ok(value)) => {
+                        map.insert(name, value);
+                    }
+                    _ => tracing::error!(
+                        header = %name,
+                        "hub credential header is not a valid HTTP header; it is not sent"
+                    ),
                 }
-                b
             }
+            xai_grok_net::Auth::Configured(map)
         }
     }
 }
@@ -183,6 +202,9 @@ impl AuthCredentialProvider for HubAuthCredentialProvider {
     }
     async fn refresh_after_unauthorized(&self) -> bool {
         false
+    }
+    fn current_auth(&self) -> xai_grok_net::Auth {
+        hub_auth(&self.auth.current())
     }
 }
 /// [`StorageConfig`] implementation that proxies uploads through the configured proxy endpoint using the connection's auth credentials.
@@ -210,9 +232,6 @@ impl ProxyStorageConfig {
     }
 }
 impl StorageConfig for ProxyStorageConfig {
-    fn bucket_url(&self) -> &str {
-        "gs://placeholder"
-    }
     fn upload_method(&self) -> &UploadMethod {
         &self.method
     }
@@ -235,8 +254,7 @@ impl WorkspaceTraceExportSource {
 impl TraceExportSource for WorkspaceTraceExportSource {
     fn resolve(&self) -> TraceExportConfig {
         TraceExportConfig {
-            bucket_url: Some(self.proxy_storage_config.bucket_url().to_string()),
-            service_account_key: None,
+            bucket_url: None,
             upload_method: self.proxy_storage_config.upload_method().clone(),
             prefix_dir: None,
             gcs_prefix: None,
@@ -250,7 +268,7 @@ impl TraceExportSource for WorkspaceTraceExportSource {
     fn proxy_credentials(&self) -> Option<Arc<dyn AuthCredentialProvider>> {
         self.proxy_storage_config.proxy_credentials()
     }
-    fn proxy_http_client(&self) -> Option<reqwest::Client> {
+    fn proxy_http_client(&self) -> Option<xai_grok_net::HttpClient> {
         self.proxy_storage_config.proxy_http_client()
     }
 }
@@ -405,7 +423,7 @@ mod tests {
     async fn workspace_trace_export_source_delegates_all_methods() {
         let source = WorkspaceTraceExportSource::new(proxy_config());
         let cfg = source.resolve();
-        assert_eq!(cfg.bucket_url.as_deref(), Some("gs://placeholder"));
+        assert_eq!(cfg.bucket_url, None, "the proxy owns the bucket");
         assert!(
             matches!(
                 &cfg.upload_method,
@@ -414,7 +432,7 @@ mod tests {
             "resolve() must carry the proxy upload method + base url"
         );
         let cfg_async = source.resolve_async().await;
-        assert_eq!(cfg_async.bucket_url.as_deref(), Some("gs://placeholder"));
+        assert_eq!(cfg_async.bucket_url, None, "the proxy owns the bucket");
         assert!(
             source.proxy_credentials().is_some(),
             "proxy_credentials() must delegate the server credential provider"

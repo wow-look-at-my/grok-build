@@ -74,7 +74,7 @@ async fn grace_body() {
 
     let restarted = pending_linear_actor(McpInitStrategy::Blocking).await;
     let state = Arc::clone(&restarted.mcp_state);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         tokio::time::sleep(MCP_STARTUP_GRACE / 2).await;
         assert!(
             state
@@ -172,7 +172,7 @@ async fn progressive_body() {
     *a.delivery_tools.borrow_mut() = vec!["linear__post".to_string()];
 
     let state = Arc::clone(&a.mcp_state);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         tokio::time::sleep(ms(300)).await;
         state.lock().await.complete_init();
     });
@@ -195,7 +195,7 @@ async fn progressive_body() {
         claim
     };
     let state = Arc::clone(&a.mcp_state);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         tokio::time::sleep(ms(300)).await;
         let mut st = state.lock().await;
         st.finish_init();
@@ -217,7 +217,7 @@ async fn progressive_body() {
     let bg = Arc::clone(&wedged);
     let full_wait = wedged.requires_full_mcp_wait();
     wedged.deferred_prefix.arm(
-        tokio::task::spawn_local(async move { bg.build_prefix_after_mcp_wait(full_wait).await }),
+        xai_spawn::spawn_local(async move { bg.build_prefix_after_mcp_wait(full_wait).await }),
         full_wait,
     );
     let (_, deferred_wait) = timed(wedged.ensure_prefix_ready()).await;
@@ -250,7 +250,7 @@ async fn delivery_policy_applied_after_the_deferred_build_started_still_waits_fu
             a.mcp_strategy.set(McpInitStrategy::Progressive);
             let bg = Arc::clone(&a);
             a.deferred_prefix.arm(
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     bg.build_prefix_after_mcp_wait(/*full_wait*/ false).await
                 }),
                 false,

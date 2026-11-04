@@ -207,7 +207,7 @@ impl RelaySync {
         let cancel_task = cancel.clone();
         let pending_count_task = pending_count.clone();
 
-        tokio::spawn(relay_sync_task(
+        xai_spawn::spawn(relay_sync_task(
             RelaySyncTaskConfig {
                 session_id: session_id_task,
                 config,

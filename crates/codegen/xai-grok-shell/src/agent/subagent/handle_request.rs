@@ -717,7 +717,7 @@ pub(crate) async fn run_shell_child(
             Parent::Explicit(spawn_prepare_span.span())
         );
         let create_span = worktree_create_span.span().clone();
-        let created = match tokio::task::spawn_blocking(move || {
+        let created = match xai_spawn::spawn_blocking(move || {
             create_span.in_scope(|| {
                 let mut builder = xai_fast_worktree::WorktreeBuilder::new(&source_clone, &dest)
                     .working_tree_mode(xai_fast_worktree::WorkingTreeMode::PreserveWorkingTree)
@@ -1342,6 +1342,14 @@ pub(crate) async fn run_shell_child(
     let attribution_callback: Option<xai_grok_sampler::SharedAttributionCallback> =
         effective_sampling_config.attribution_callback.clone();
     let agent_memory_scope = agent_memory_scope_for_mode(definition.memory, ctx.memory_mode);
+    if definition.memory.is_some() && agent_memory_scope.is_none() {
+        tracing::warn!(
+            agent = %definition.name,
+            "agent `memory:` scope is a legacy-memory feature; memory v2 is active, so this \
+             agent uses the session's shared v2 memory instead. Set `[memory_v2] enabled = false` \
+             to keep a per-agent scope"
+        );
+    }
     let agent_name_for_memory = definition.name.clone();
     let is_plugin_agent = definition.plugin_name.is_some();
     let yolo_policy_block = xai_grok_workspace::permission::resolution::yolo_disabled_by_policy();
@@ -2114,7 +2122,6 @@ pub(crate) async fn run_shell_child(
     if let Some(trace_gcs_config) = gcs_upload_ctx.upload_method.as_ref().map(|method| {
         crate::session::repo_changes::TraceExportConfig {
             bucket_url: gcs_upload_ctx.bucket_url.clone(),
-            service_account_key: None,
             prefix_dir: None,
             gcs_prefix: Some(super::attempt_runner::subagent_trace_prefix(
                 child_session_id.0.as_ref(),
@@ -2534,7 +2541,7 @@ pub(crate) async fn dispose_worktree_after_completion(
     let checked_source_repo = source_repo.to_path_buf();
     let checked_snapshot = snapshot_ref.clone();
     let reclaim_span = region!("worktree.reclaim_check", Parent::Inherit);
-    let reclaim = tokio::task::spawn_blocking(move || {
+    let reclaim = xai_spawn::spawn_blocking(move || {
         xai_fast_worktree::reclaimable_after_snapshot(
             &checked_path,
             Some(&checked_source_repo),

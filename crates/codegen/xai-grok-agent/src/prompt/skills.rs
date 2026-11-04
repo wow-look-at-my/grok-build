@@ -1237,9 +1237,9 @@ mod tests {
 
     // ── Feature 1: Workspace user skills via list_skills ─────────────
 
-    /// Helper: initialize a bare git repo at `path` so git2::Repository::discover works.
+    /// Helper: initialize a git repo at `path` so repository discovery finds it.
     fn init_git_repo(path: &Path) {
-        git2::Repository::init(path).unwrap();
+        gix::init(path).unwrap();
     }
 
     #[tokio::test]

@@ -264,7 +264,7 @@ fn warm_and_subscribe(query: &SettingsQuery) -> Option<watch::Receiver<Option<Se
     let (tx, rx) = watch::channel(None);
     let task_tx = tx.clone();
     let task_query = query.clone();
-    let task = runtime.spawn(async move {
+    let task = xai_spawn::spawn_on(&runtime, async move {
         let outcome = load_settings(task_query).await;
         // send_replace stores the value with no live receiver, so it is never lost.
         task_tx.send_replace(Some(outcome));
@@ -318,7 +318,7 @@ pub(crate) async fn fetch_settings_live(query: SettingsQuery) -> crate::remote::
     let origin = query.origin.clone();
     let alpha = query.alpha_test_key.clone();
     let auth_config = query.auth_config.clone();
-    let loaded = tokio::task::spawn_blocking(move || {
+    let loaded = xai_spawn::spawn_blocking(move || {
         let fetched_at = chrono::Utc::now();
         let fetch = crate::remote::fetch_settings_blocking(&origin, &auth, alpha.as_deref());
         if let crate::remote::SettingsFetch::Fetched(settings) = &fetch {
@@ -496,7 +496,7 @@ async fn wait_for_published(rx: &mut watch::Receiver<Option<SettingsOutcome>>) -
 }
 
 async fn load_settings(query: SettingsQuery) -> SettingsOutcome {
-    let loaded = tokio::task::spawn_blocking(move || load_settings_blocking(query)).await;
+    let loaded = xai_spawn::spawn_blocking(move || load_settings_blocking(query)).await;
     match loaded {
         Ok(outcome) => outcome,
         Err(err) => {
@@ -614,7 +614,7 @@ mod tests {
         let flag = published.clone();
         let task_tx = tx.clone();
         // The owner stays private to this test: a global install could be aborted by any concurrent eligible warm.
-        let owner = tokio::spawn(async move {
+        let owner = xai_spawn::spawn(async move {
             tokio::time::sleep(Duration::from_millis(80)).await;
             flag.store(true, Ordering::SeqCst);
             task_tx.send_replace(Some(SettingsOutcome {
@@ -661,7 +661,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let cancel_for_wait = cancel.clone();
         let rx = tx.subscribe();
-        let wait = tokio::spawn(async move {
+        let wait = xai_spawn::spawn(async move {
             super::observe(rx, Some(Duration::from_secs(30)), &cancel_for_wait).await
         });
         cancel.cancel();

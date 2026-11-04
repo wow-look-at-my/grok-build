@@ -71,7 +71,7 @@ fn drain_gateway(
 ) -> XaiUpdates {
     let captured = XaiUpdates::default();
     let sink = captured.clone();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::SessionNotification(args) => {
@@ -154,7 +154,7 @@ fn assert_retrying(
 }
 
 fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Ok(()));
@@ -266,7 +266,7 @@ async fn session_token_actor(
     {
         let drainer = actor.clone();
         let mut sampler_event_rx = sampler_event_rx;
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             while let Some(event) = sampler_event_rx.recv().await {
                 drainer.handle_sampling_event(event).await;
             }
@@ -589,7 +589,7 @@ async fn deferred_recovery_credential_less_401_parks_and_survives() {
 
             // Out-of-band driver: 30 virtual seconds in, a token lands and the notify fires.
             let waker = actor.auth_manager.clone().expect("actor has auth manager");
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 waker.hot_swap(GrokAuth {
                     key: FRESH_TOKEN.to_string(),
@@ -750,7 +750,7 @@ async fn api_5xx_during_park_does_not_unpark_or_redispatch() {
             let (actor, updates) = session_token_actor(&server, am, ActorShape::default()).await;
 
             let waker = actor.auth_manager.clone().expect("actor has auth manager");
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 waker.hot_swap(GrokAuth {
                     key: FRESH_TOKEN.to_string(),
@@ -902,7 +902,7 @@ async fn parked_turn_does_not_respawn_two_pass_prefire() {
             actor.chat_state_handle.record_token_usage(77_000);
 
             let waker = actor.auth_manager.clone().expect("actor has auth manager");
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 waker.hot_swap(GrokAuth {
                     key: FRESH_TOKEN.to_string(),
@@ -973,14 +973,14 @@ async fn parked_turn_past_compact_threshold_does_not_auto_compact() {
 
             // Usage crosses the threshold only after the first iteration's compact check (which runs un-parked at t=0): the first parked resubmit is paced ≥1s out, so a 500ms seed lands between the park and every parked.
             let usage_seeder = actor.chat_state_handle.clone();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 usage_seeder.record_token_usage(90_000);
             });
 
             // Out-of-band recovery, 30 virtual seconds in.
             let waker = actor.auth_manager.clone().expect("actor has auth manager");
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 waker.hot_swap(GrokAuth {
                     key: FRESH_TOKEN.to_string(),
@@ -1073,7 +1073,7 @@ async fn parked_turn_authenticated_rejection_dispatches_and_exhausts_charged() {
 
             // 30 virtual seconds in, a wire-valid token lands — the server keeps rejecting.
             let waker = actor.auth_manager.clone().expect("actor has auth manager");
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 recovers.store(true, Ordering::SeqCst);
                 waker.hot_swap(GrokAuth {

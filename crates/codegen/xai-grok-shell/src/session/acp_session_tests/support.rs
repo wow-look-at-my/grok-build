@@ -421,6 +421,7 @@ async fn create_test_actor_inner(
             configured_storage: None,
             process_disabled: false,
             config_opt_out: false,
+            unavailable: None,
             v2_legacy_carryover: false,
             prompt_sync_pending: std::sync::atomic::AtomicBool::new(false),
             flush_config: crate::config::MemoryFlushConfig::default(),
@@ -501,7 +502,6 @@ async fn create_test_actor_inner(
         )),
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-        goal_blocked_streak: std::sync::atomic::AtomicU32::new(0),
         goal_update_rx: std::cell::RefCell::new(None),
         goal_update_tx: tokio::sync::mpsc::unbounded_channel().0,
         workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle().0,
@@ -565,7 +565,7 @@ async fn create_test_actor_inner(
         next_title_refresh_idx: std::cell::Cell::new(0),
         turn_summary_enabled: false,
         title_refresh_enabled: false,
-        thinking_summaries_enabled: false,
+        thinking_summaries_enabled: std::cell::Cell::new(false),
         thinking_summary_history: Default::default(),
         thinking_summary_tail: Default::default(),
         session_turn_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -724,7 +724,7 @@ pub(crate) fn queue_input_request(
 pub(crate) fn running_task_stub(prompt_id: &str) -> AgentTask {
     AgentTask::new(
         prompt_id,
-        tokio::task::spawn_local(async {
+        xai_spawn::spawn_local(async {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         })
         .abort_handle(),
@@ -739,7 +739,7 @@ pub(crate) async fn build_actor() -> (
         tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
     let (persistence_tx, mut persistence_rx) =
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-    tokio::spawn(async move {
+    xai_spawn::spawn(async move {
         while let Some(message) = persistence_rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = message {
                 let _ = respond_to.send(Ok(()));
@@ -964,12 +964,12 @@ pub(crate) fn spawn_gateway_loop_counting_prompt_hooks(
     let updates: Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Arc::default();
     let captured = updates.clone();
     let mut gateway_rx = gateway_rx;
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::RequestPermission(args) => {
                     let hooks = permission_prompt_hooks.clone();
-                    tokio::task::spawn_local(async move {
+                    xai_spawn::spawn_local(async move {
                         if park_until_hook {
                             let start = std::time::Instant::now();
                             while hooks.load(Ordering::SeqCst) == 0 {
@@ -1027,7 +1027,7 @@ pub(crate) fn spawn_gateway_loop_counting_prompt_hooks(
 pub(crate) fn drain_gateway(
     mut rx: tokio::sync::mpsc::UnboundedReceiver<xai_acp_lib::AcpClientMessage>,
 ) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let xai_acp_lib::AcpClientMessage::SessionNotification(args) = msg {
                 let _ = args.response_tx.send(Ok(()));
@@ -1038,7 +1038,7 @@ pub(crate) fn drain_gateway(
 /// Answer every `FlushAndAck` persistence barrier with `Ok` so a driven turn's `persist_ack` resolves.
 /// Spawned on the current `LocalSet`.
 pub(crate) fn drain_persistence(mut rx: tokio::sync::mpsc::UnboundedReceiver<PersistenceMsg>) {
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Ok(()));
@@ -1053,7 +1053,7 @@ pub(crate) async fn disk_full_actor() -> SessionActor {
     drain_gateway(gateway_rx);
     let (persistence_tx, mut persistence_rx) =
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = persistence_rx.recv().await {
             if let PersistenceMsg::ProbeWritable { respond_to } = msg {
                 let _ = respond_to.send(Err(std::io::Error::from(std::io::ErrorKind::StorageFull)));
@@ -1119,7 +1119,7 @@ pub(crate) fn spawn_fake_coordinator(
     let suppress_seen = Arc::clone(&fake.suppress_seen);
     let returned = Arc::clone(&fake.returned);
     let peeks = Arc::clone(&fake.peeks);
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         let mut buffer = buffer;
         while let Some(ev) = rx.recv().await {
             match ev {
@@ -1160,7 +1160,7 @@ pub(crate) fn spawn_capturing_gateway_loop(
     let acp_captured = acp_updates.clone();
     let xai_captured = xai_updates.clone();
     let mut gateway_rx = gateway_rx;
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = gateway_rx.recv().await {
             match msg {
                 xai_acp_lib::AcpClientMessage::SessionNotification(args) => {
@@ -1197,10 +1197,10 @@ pub(crate) async fn actor_with_persistence_drain_and_sampler(
 ) -> std::sync::Arc<SessionActor> {
     let (gateway_tx, mut gateway_rx) =
         tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
-    tokio::task::spawn_local(async move { while gateway_rx.recv().await.is_some() {} });
+    xai_spawn::spawn_local(async move { while gateway_rx.recv().await.is_some() {} });
     let (persistence_tx, mut persistence_rx) =
         tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
-    tokio::task::spawn_local(async move {
+    xai_spawn::spawn_local(async move {
         while let Some(msg) = persistence_rx.recv().await {
             if let PersistenceMsg::FlushAndAck { respond_to } = msg {
                 let _ = respond_to.send(Ok(()));

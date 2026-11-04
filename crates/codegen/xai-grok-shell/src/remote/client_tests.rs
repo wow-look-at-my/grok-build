@@ -35,7 +35,7 @@ async fn start_settings_server(
             async move { (status, body) }
         }),
     );
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, handle)
 }
 /// `fetch_settings_blocking` maps each HTTP outcome to the [`SettingsFetch`] variant the external-OTEL gate relies on.
@@ -54,7 +54,7 @@ async fn settings_fetch_maps_status_to_outcome() {
     for (status, body, expected) in cases {
         let (base, server) = start_settings_server(status, body.to_string()).await;
         let a = auth.clone();
-        let outcome = tokio::task::spawn_blocking(move || {
+        let outcome = xai_spawn::spawn_blocking(move || {
             fetch_settings_blocking_with_attempts(&base, &a, None, 1)
         })
         .await
@@ -171,7 +171,7 @@ async fn start_bundle_server(
             ),
         )
         .with_state(state);
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (format!("{base}/v1"), seen_headers, handle)
 }
 fn test_auth() -> GrokAuth {
@@ -890,7 +890,7 @@ async fn start_dual_bundle_server(
             }),
         )
         .with_state(state);
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (format!("{base}/v1"), handle)
 }
 #[tokio::test(flavor = "current_thread")]
@@ -981,7 +981,7 @@ async fn backend_client_resolves_auth_from_auth_manager() {
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let server = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     let am = test_auth_manager();
     let client = BackendClient::with_base_url(format!("http://{addr}")).with_auth_manager(am);
     client
@@ -1015,7 +1015,7 @@ async fn fetch_bundle_propagates_legacy_error_after_fallback() {
     ));
     server.abort();
 }
-/// Regression: reqwest .header() appends, so duplicate or overlapping headers cause Cloudflare to reject the request.
+/// Regression: request .header() appends, so duplicate or overlapping headers cause Cloudflare to reject the request.
 #[tokio::test(flavor = "current_thread")]
 #[allow(clippy::disallowed_methods)]
 async fn auth_headers_do_not_collide_with_json() {
@@ -1026,7 +1026,7 @@ async fn auth_headers_do_not_collide_with_json() {
         !auth_headers.contains_key("content-type"),
         "content-type in auth map would overwrite .json()"
     );
-    let request = reqwest::Client::new()
+    let request = request::Client::new()
         .put("http://localhost/sessions/test")
         .json(&serde_json::json!({"test": true}))
         .headers(auth_headers)
@@ -1203,6 +1203,105 @@ fn parse_openrouter_pricing_is_per_token() {
     assert!((result.pricing.input_per_token_usd - 2e-6).abs() < 1e-15);
     assert!((result.pricing.output_per_token_usd - 1e-5).abs() < 1e-15);
 }
+/// The row a Bifrost gateway serves for an OpenRouter model, from its live `/v1/models`.
+fn bifrost_openrouter_row() -> serde_json::Value {
+    serde_json::json!({
+        "id": "openrouter/deepseek/deepseek-v4.1-flash-1017",
+        "canonical_slug": "deepseek/deepseek-v4.1-flash-20261017",
+        "name": "DeepSeek: DeepSeek V4.1 Flash 1017",
+        "created": 1792225624,
+        "context_length": 1_048_576,
+        "max_input_tokens": 1_048_576,
+        "max_output_tokens": 393_216,
+        "architecture": {
+            "modality": "text+image->text",
+            "tokenizer": "DeepSeek",
+            "input_modalities": ["text", "image"],
+            "output_modalities": ["text"]
+        },
+        "pricing": { "prompt": "0.00000002", "completion": "0.000001", "input_cache_read": "0.000000015" },
+        "top_provider": { "is_moderated": false, "context_length": 1_048_576, "max_completion_tokens": 943_718 },
+        "supported_parameters": ["include_reasoning", "max_tokens", "reasoning", "reasoning_effort", "tools"],
+        "default_parameters": {},
+        "reasoning": {
+            "mandatory": false,
+            "default_enabled": true,
+            "supported_efforts": ["max", "high", "low", "none"],
+            "default_effort": "high"
+        }
+    })
+}
+#[test]
+fn parse_bifrost_listing_reads_the_reasoning_effort_menu_and_default() {
+    let result =
+        parse_remote_model_value(&bifrost_openrouter_row(), "https://gateway.example/v1").unwrap();
+    let values: Vec<xai_grok_sampling_types::ReasoningEffort> =
+        result.reasoning_efforts.iter().map(|o| o.value).collect();
+    assert_eq!(
+        values,
+        vec![
+            xai_grok_sampling_types::ReasoningEffort::Max,
+            xai_grok_sampling_types::ReasoningEffort::High,
+            xai_grok_sampling_types::ReasoningEffort::Low,
+            xai_grok_sampling_types::ReasoningEffort::None,
+        ]
+    );
+    let defaults: Vec<_> = result
+        .reasoning_efforts
+        .iter()
+        .filter(|o| o.default)
+        .map(|o| o.value)
+        .collect();
+    assert_eq!(
+        defaults,
+        vec![xai_grok_sampling_types::ReasoningEffort::High]
+    );
+    assert!(!result.reasoning_effort_server_default);
+    assert!(result.supports_reasoning_effort);
+    assert_eq!(result.context_window.get(), 1_048_576);
+    assert_eq!(result.max_completion_tokens, Some(393_216));
+    assert!((result.pricing.input_per_token_usd - 2e-8).abs() < 1e-18);
+}
+#[test]
+fn parse_openrouter_listing_reads_the_cap_under_top_provider() {
+    let mut value = bifrost_openrouter_row();
+    value.as_object_mut().unwrap().remove("max_output_tokens");
+    let result = parse_remote_model_value(&value, "https://openrouter.ai/api/v1").unwrap();
+    assert_eq!(result.max_completion_tokens, Some(943_718));
+}
+#[test]
+fn parse_supported_parameters_alone_turns_effort_support_on() {
+    let mut value = bifrost_openrouter_row();
+    value.as_object_mut().unwrap().remove("reasoning");
+    let result = parse_remote_model_value(&value, "https://gateway.example/v1").unwrap();
+    assert!(result.supports_reasoning_effort);
+    assert!(result.reasoning_efforts.is_empty());
+}
+#[test]
+fn parse_reasoning_default_outside_the_menu_leaves_the_server_default() {
+    let mut value = bifrost_openrouter_row();
+    value["reasoning"]["default_effort"] = serde_json::json!("medium");
+    let result = parse_remote_model_value(&value, "https://gateway.example/v1").unwrap();
+    assert!(result.reasoning_efforts.iter().all(|o| !o.default));
+    assert!(result.reasoning_effort_server_default);
+}
+#[test]
+fn parse_sglang_listing_reads_its_window_and_claims_no_effort() {
+    let value = serde_json::json!({
+        "id": "qwen3.8-27b",
+        "object": "model",
+        "created": 1792000000,
+        "owned_by": "sglang",
+        "root": "qwen3.8-27b",
+        "parent": null,
+        "max_model_len": 204_800
+    });
+    let result = parse_remote_model_value(&value, "http://127.0.0.1:30000/v1").unwrap();
+    assert_eq!(result.context_window.get(), 204_800);
+    assert_eq!(result.max_completion_tokens, None);
+    assert!(!result.supports_reasoning_effort);
+    assert!(result.reasoning_efforts.is_empty());
+}
 #[test]
 fn parse_cost_in_an_unknown_unit_is_not_a_price() {
     let value = serde_json::json!({
@@ -1275,7 +1374,7 @@ async fn start_models_listing_server(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
     let app = axum::Router::new().route("/v1/models", get(move || async move { axum::Json(body) }));
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, handle)
 }
 /// The blocking /v1/models fetch parses per-model `context_window` and the
@@ -1297,7 +1396,7 @@ async fn fetch_models_for_api_base_blocking_parses_per_model_windows() {
     .await;
     let mock_url = format!("{base}/v1");
 
-    let entries = tokio::task::spawn_blocking(move || {
+    let entries = xai_spawn::spawn_blocking(move || {
         fetch_models_for_api_base_blocking(&mock_url, Some("test-key"))
             .expect("mock /v1/models should be reachable")
     })
@@ -1355,11 +1454,11 @@ async fn resolve_context_window_from_provider_reads_openrouter_context_length() 
     let api_base = format!("{base}/v1");
 
     // Run the shipped resolver exactly as the request path does. It spawns a
-    // dedicated OS thread and does a blocking reqwest fetch against the model's
+    // dedicated OS thread and does a blocking request fetch against the model's
     // own base, then matches the requested slug.
     let resolved = {
         let api_base = api_base.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             crate::agent::remote_config::resolve_context_window_from_provider(
                 "deepseek/deepseek-v4-pro-0813",
                 &api_base,
@@ -1391,7 +1490,7 @@ async fn resolve_context_window_from_provider_absent_slug_returns_none() {
     let api_base = format!("{base}/v1");
     let resolved = {
         let api_base = api_base.clone();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             crate::agent::remote_config::resolve_context_window_from_provider(
                 "deepseek/deepseek-v4-pro-0813",
                 &api_base,
@@ -1433,7 +1532,7 @@ async fn start_counting_listing_server(
             }
         }),
     );
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let handle = xai_spawn::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (base, hits, handle)
 }
 
@@ -1443,7 +1542,7 @@ async fn resolve_all(api_base: &str, models: &[&str]) -> Vec<Option<std::num::No
     for model in models {
         let (api_base, model) = (api_base.to_owned(), (*model).to_owned());
         out.push(
-            tokio::task::spawn_blocking(move || {
+            xai_spawn::spawn_blocking(move || {
                 crate::agent::remote_config::resolve_context_window_from_provider(
                     &model,
                     &api_base,

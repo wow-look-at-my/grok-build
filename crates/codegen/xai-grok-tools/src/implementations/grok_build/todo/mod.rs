@@ -1795,7 +1795,7 @@ mod tests {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&requests);
         let reply: Arc<dyn Fn(&SubagentRequest) -> SubagentResult + Send + Sync> = Arc::new(reply);
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             while let Some(event) = raw_rx.recv().await {
                 match event {
                     SubagentEvent::ValidateType(req) => {
@@ -1993,7 +1993,7 @@ mod tests {
             Arc::new(ChannelBackend::new(raw_tx)),
         );
         let (spawned_tx, mut spawned_rx) = mpsc::unbounded_channel::<()>();
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             let mut held = Vec::new();
             while let Some(event) = raw_rx.recv().await {
                 match event {

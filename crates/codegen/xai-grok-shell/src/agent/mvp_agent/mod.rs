@@ -851,10 +851,8 @@ pub struct MvpAgent {
     /// Idempotency guard: the periodic announcements refresh task is spawned at most once (on the first `initialize`).
     /// See `spawn_announcements_refresh`.
     announcements_refresh_started: std::cell::Cell<bool>,
-    /// Threshold jemalloc heap-profile monitor (agent process only).
-    heap_profile_monitor: RefCell<crate::heap_profile::HeapProfileMonitor>,
-    /// Idempotency guard for the heap-profile poll / kill-switch loop.
-    heap_profile_started: std::cell::Cell<bool>,
+    /// Idempotency guard for the periodic resource-usage report loop.
+    resource_reporter_started: std::cell::Cell<bool>,
     /// Test-only spy recording every session id whose cloud replica was finalized via `finalize_session_replica`.
     /// Lets the no-evict tests assert that `finalize()` does NOT fire on a mere client disconnect (only on a terminal/explicit close).
     #[cfg(test)]
@@ -1215,7 +1213,6 @@ mod agent_directory;
 mod agent_runtime;
 mod code_nav;
 mod folder_trust_prompt;
-mod heap_profile;
 mod resource_telemetry;
 mod session_registry;
 mod session_lifecycle;
@@ -1646,7 +1643,7 @@ impl MvpAgent {
                 let user_id_log = user_id.clone();
                 let new_tier = unblocked.new_tier.clone();
                 let jwt_claim_log = jwt_claim.clone();
-                tokio::task::spawn(async move {
+                xai_spawn::spawn(async move {
                     xai_grok_telemetry::unified_log::info(
                         "model catalog: post_subscription_unblock refresh",
                         None,
@@ -1825,7 +1822,7 @@ impl MvpAgent {
         #[cfg(test)] self.auto_gc_spawn_count.set(self.auto_gc_spawn_count.get() + 1);
         let auto_gc_policy = self.cfg.borrow().resolve_worktree_auto_gc();
         let grok_home = xai_fast_worktree::resolve_grok_home();
-        tokio::task::spawn_blocking(move || Self::reclaim_worktrees(
+        xai_spawn::spawn_blocking(move || Self::reclaim_worktrees(
             grok_home,
             auto_gc_policy,
         ));
@@ -1980,7 +1977,7 @@ impl MvpAgent {
     /// No outer timeout: every await inside is bounded (HTTP, bounded refresh), and a drop-at-deadline would abandon an in-flight IdP exchange. So this spawn, the awaited authenticate-path checks, and the pager's poll can never run the re-check concurrently. That is because `tier_allowed` is set only after that refresh returns and is identity-revalidated.
     pub(super) fn spawn_tier_recheck(&self) {
         let agent_ref = LocalRef::new(self);
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let Some(auth) = agent_ref.get().auth_manager.current() else {
                 return;
             };
@@ -2016,7 +2013,7 @@ impl MvpAgent {
         let proxy_base_url = self.cli_chat_proxy_base_url();
         let alpha_test_key = self.alpha_test_key();
         let senders = self.resident_cmd_txs();
-        tokio::task::spawn_local(async move {
+        xai_spawn::spawn_local(async move {
             let result = maybe_sync_bundle_to_root(
                     &root,
                     &proxy_base_url,
@@ -2339,7 +2336,7 @@ fn spawn_post_unblock_jwt_and_catalog_retry(
         );
         return;
     }
-    tokio::task::spawn(async move {
+    xai_spawn::spawn(async move {
         let _in_flight_guard = PostUnblockJwtRetryInFlightGuard {
             flag: in_flight,
         };

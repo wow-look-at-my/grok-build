@@ -1,4 +1,5 @@
 #![allow(clippy::cast_lossless)]
+// lib.rs holds the lib code.
 #![allow(
     unused_imports,
     unused_variables,
@@ -959,17 +960,6 @@ pub struct RemoteSettings {
     /// Set it remotely to stage a new default to a segment, cut everyone over, or revert it for a customer.
     #[serde(default)]
     pub keep_text_selection_default: Option<String>,
-    /// Master switch for jemalloc heap sampling and threshold dumps.
-    /// `Some(true)` enables, `Some(false)` is a kill-switch, `None` uses the client default (off).
-    #[serde(default)]
-    pub jemalloc_heap_profile_enabled: Option<bool>,
-    /// Resident-byte thresholds (e.g. 2G/5G/10G as byte counts).
-    /// `None` and `[]` are distinct on the wire.
-    #[serde(default)]
-    pub jemalloc_heap_profile_thresholds_bytes: Option<Vec<u64>>,
-    /// Stats poll interval in seconds when set.
-    #[serde(default)]
-    pub jemalloc_heap_profile_poll_interval_secs: Option<u64>,
 }
 /// A request body encoding advertised in [`RemoteSettings::accept_request_encodings`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
@@ -1776,80 +1766,18 @@ mod tests {
         let absent: RemoteSettings = serde_json::from_str("{}").unwrap();
         assert!(absent.accept_request_encodings.is_empty());
     }
-    type JemallocFields<'a> = (Option<bool>, Option<&'a [u64]>, Option<u64>);
-    fn jemalloc_fields(s: &RemoteSettings) -> JemallocFields<'_> {
-        (
-            s.jemalloc_heap_profile_enabled,
-            s.jemalloc_heap_profile_thresholds_bytes.as_deref(),
-            s.jemalloc_heap_profile_poll_interval_secs,
-        )
-    }
-    fn parse_remote(json: &str) -> RemoteSettings {
-        serde_json::from_str(json).unwrap_or_else(|e| panic!("parse failed for {json}: {e}"))
-    }
-    fn round_trip_remote(s: &RemoteSettings) -> RemoteSettings {
-        let out = serde_json::to_string(s).unwrap();
-        parse_remote(&out)
-    }
-    fn assert_jemalloc_round_trip(json: &str, expected: JemallocFields<'_>) {
-        let s = parse_remote(json);
-        assert_eq!(jemalloc_fields(&s), expected);
-        assert_eq!(jemalloc_fields(&round_trip_remote(&s)), expected);
-    }
-    fn assert_remote_parse_err(json: &str) {
-        assert!(
-            serde_json::from_str::<RemoteSettings>(json).is_err(),
-            "expected parse error for {json}"
-        );
-    }
+    /// A server can still send the removed heap-profile keys. They must not stop the other settings from loading.
     #[test]
-    fn remote_settings_jemalloc_heap_profile_thresholds_populated_and_empty_round_trip() {
-        assert_jemalloc_round_trip(
-            r#"{
-                "jemalloc_heap_profile_thresholds_bytes": [2147483648, 5368709120, 10737418240]
-            }"#,
-            (
-                None,
-                Some(&[2_147_483_648, 5_368_709_120, 10_737_418_240]),
-                None,
-            ),
-        );
-        assert_jemalloc_round_trip(
-            r#"{"jemalloc_heap_profile_thresholds_bytes": []}"#,
-            (None, Some(&[]), None),
-        );
-        assert_jemalloc_round_trip(
+    fn remote_settings_ignore_removed_heap_profile_keys() {
+        let s: RemoteSettings = serde_json::from_str(
             r#"{
                 "jemalloc_heap_profile_enabled": true,
-                "jemalloc_heap_profile_thresholds_bytes": []
-            }"#,
-            (Some(true), Some(&[]), None),
-        );
-    }
-    #[test]
-    fn remote_settings_jemalloc_heap_profile_malformed_fails_whole_parse() {
-        for json in [
-            r#"{"jemalloc_heap_profile_enabled": "yes"}"#,
-            r#"{"jemalloc_heap_profile_enabled": 1}"#,
-            r#"{"jemalloc_heap_profile_enabled": []}"#,
-            r#"{"jemalloc_heap_profile_enabled": {}}"#,
-            r#"{"jemalloc_heap_profile_thresholds_bytes": "2G"}"#,
-            r#"{"jemalloc_heap_profile_thresholds_bytes": {"bytes": 1}}"#,
-            r#"{"jemalloc_heap_profile_thresholds_bytes": [true]}"#,
-            r#"{"jemalloc_heap_profile_thresholds_bytes": ["2G"]}"#,
-            r#"{"jemalloc_heap_profile_thresholds_bytes": [-1]}"#,
-            r#"{"jemalloc_heap_profile_thresholds_bytes": [null]}"#,
-            r#"{"jemalloc_heap_profile_thresholds_bytes": [1, null, 2]}"#,
-            r#"{"jemalloc_heap_profile_poll_interval_secs": "30"}"#,
-            r#"{"jemalloc_heap_profile_poll_interval_secs": true}"#,
-            r#"{"jemalloc_heap_profile_poll_interval_secs": -1}"#,
-            r#"{
-                "jemalloc_heap_profile_enabled": true,
-                "jemalloc_heap_profile_thresholds_bytes": "bad",
+                "jemalloc_heap_profile_thresholds_bytes": [2147483648],
+                "jemalloc_heap_profile_poll_interval_secs": 30,
                 "workspace_command_enabled": true
             }"#,
-        ] {
-            assert_remote_parse_err(json);
-        }
+        )
+        .expect("old remote settings still parse");
+        assert_eq!(s.workspace_command_enabled, Some(true));
     }
 }

@@ -134,7 +134,7 @@ impl acp::Agent for MvpAgent {
             );
         }
         let grok_home = xai_fast_worktree::resolve_grok_home();
-        tokio::task::spawn_blocking(move || {
+        xai_spawn::spawn_blocking(move || {
             crate::session::worktree_pool::cleanup_stale_pool_worktrees(None);
             if !remote_settled {
                 return;
@@ -148,7 +148,7 @@ impl acp::Agent for MvpAgent {
         static CLEANUP_PERMISSIONS_ONCE: std::sync::Once = std::sync::Once::new();
         CLEANUP_PERMISSIONS_ONCE
             .call_once(|| {
-                tokio::task::spawn(
+                xai_spawn::spawn(
                     xai_grok_workspace::permission::cleanup_stale_permission_state(
                         std::time::Duration::from_secs(
                             PERMISSION_CLEANUP_TTL_DAYS * 24 * 60 * 60,
@@ -326,7 +326,7 @@ impl acp::Agent for MvpAgent {
             let models_manager = self.models_manager.clone();
             // Set before the spawn: a session that starts first waits for it.
             let discovery_guard = self.models_manager.begin_provider_discovery();
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 use crate::agent::model_provider_discovery as discovery;
                 let discovered = discovery::discover_provider_models(&cfg).await;
                 if !discovered.is_empty() {
@@ -547,13 +547,13 @@ impl acp::Agent for MvpAgent {
         self.spawn_managed_gateway_tool_catalog_fetch();
         {
             let agent_ref = LocalRef::new(self);
-            tokio::task::spawn_local(async move {
+            xai_spawn::spawn_local(async move {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 agent_ref.get().emit_announcements(AnnouncementsPushMode::SeedNewClient);
             });
         }
         self.spawn_announcements_refresh();
-        self.spawn_heap_profile_monitor();
+        self.spawn_resource_usage_reporter();
         let init_model_state = {
             let _t = xai_grok_telemetry::instrumentation::timer(
                 "startup.acp_initialize.model_state",
@@ -966,7 +966,7 @@ impl acp::Agent for MvpAgent {
                 self.auth_manager.hot_swap(auth.clone());
                 self.enforce_grok_code_access(&auth).await;
                 self.maybe_sync_bundle_in_background(false);
-                tokio::task::spawn_local(
+                xai_spawn::spawn_local(
                     crate::managed_config::post_login_sync(Some(auth.clone())),
                 );
                 self.set_auth_method(arguments.method_id.clone());
@@ -1076,7 +1076,11 @@ impl acp::Agent for MvpAgent {
             .session_handle_waiting_for_load(&arguments.session_id)
             .await
             .ok_or_else(|| acp::Error::invalid_params().data("unknown session id"))?;
-        if self.models_manager.allowlist_excludes_all() {
+        // A `!` command runs in the local shell and calls no model, so no model gate applies to it.
+        let needs_model =
+            crate::extensions::prompt_meta::PromptBlockMeta::command_in(&arguments.prompt)
+                .is_none();
+        if needs_model && self.models_manager.allowlist_excludes_all() {
             let deny = crate::agent::remote_config::allowlist_excludes_all_message(
                 &self.cfg.borrow(),
             );
@@ -1091,7 +1095,9 @@ impl acp::Agent for MvpAgent {
         }
         let latched_model = self
             .session_registry
-            .unavailable_model(&arguments.session_id);
+            .unavailable_model(&arguments.session_id)
+            .filter(|_| needs_model);
+        let had_latched_model = latched_model.is_some();
         if let Some(unavailable_model) = latched_model {
             let models = self.models_manager.models();
             let available = self.models_manager.available();
@@ -1163,6 +1169,14 @@ impl acp::Agent for MvpAgent {
                     .await;
                 return Ok(acp::PromptResponse::new(acp::StopReason::EndTurn));
             }
+        }
+        if needs_model && !had_latched_model {
+            self.move_session_off_model_missing_from_catalog(
+                &arguments.session_id,
+                &handle.model_id,
+                &handle.chat_state_handle,
+            )
+            .await;
         }
         let dispatch_lock = self.dispatch_lock(&arguments.session_id);
         let dispatch_guard = dispatch_lock.lock().await;
@@ -2094,6 +2108,9 @@ impl acp::Agent for MvpAgent {
             | "x.ai/btw" => crate::extensions::feedback::handle(self, &args).await,
             "x.ai/recap" => crate::extensions::recap::handle(self, &args).await,
             "x.ai/todo" => crate::extensions::todo::handle(self, &args).await,
+            crate::extensions::model_agent::MODEL_AGENT_METHOD => {
+                crate::extensions::model_agent::handle(self, &args).await
+            }
             "x.ai/cloud/terminate" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,

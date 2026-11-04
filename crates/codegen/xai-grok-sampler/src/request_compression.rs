@@ -24,7 +24,7 @@ pub(crate) fn should_compress(config: RequestCompression, body_len: usize) -> bo
 pub(crate) async fn compress_body(json: &[u8]) -> Option<Vec<u8>> {
     let result = if json.len() >= OFFLOAD_COMPRESS_BYTES {
         let owned = json.to_vec();
-        match tokio::task::spawn_blocking(move || zstd_compress(&owned)).await {
+        match xai_spawn::spawn_blocking(move || zstd_compress(&owned)).await {
             Ok(result) => result,
             Err(join) => Err(std::io::Error::other(join)),
         }

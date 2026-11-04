@@ -346,7 +346,7 @@ async fn logs(State(ctx): State<DiagContext>, Query(query): Query<LogsQuery>) ->
         .tail_bytes
         .unwrap_or(DEFAULT_LOG_TAIL_BYTES)
         .min(MAX_LOG_TAIL_BYTES);
-    match tokio::task::spawn_blocking(move || tail_file(&path, tail)).await {
+    match xai_spawn::spawn_blocking(move || tail_file(&path, tail)).await {
         Ok(Ok(bytes)) => (
             [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
             String::from_utf8_lossy(&bytes).into_owned(),
@@ -426,7 +426,7 @@ pub async fn serve(
                     "failed to restrict diagnostics socket permissions"
                 );
             }
-            let task = tokio::spawn(async move {
+            let task = xai_spawn::spawn(async move {
                 if let Err(e) = axum::serve(listener, router(ctx)).await {
                     tracing::warn!(error = %e, "diagnostics server exited");
                 }
@@ -442,7 +442,7 @@ pub async fn serve(
                 .await
                 .map_err(|e| anyhow!("bind 127.0.0.1:{port}: {e}"))?;
             let local = listener.local_addr()?;
-            let task = tokio::spawn(async move {
+            let task = xai_spawn::spawn(async move {
                 if let Err(e) = axum::serve(listener, router(ctx)).await {
                     tracing::warn!(error = %e, "diagnostics server exited");
                 }
@@ -473,7 +473,7 @@ mod tests {
     use super::*;
 
     async fn get_json(port: u16, path: &str) -> (u16, Value) {
-        let response = reqwest::get(format!("http://127.0.0.1:{port}{path}"))
+        let response = request::get(format!("http://127.0.0.1:{port}{path}"))
             .await
             .expect("request");
         let status = response.status().as_u16();
@@ -949,13 +949,13 @@ mod tests {
     }
 
     async fn get_text(port: u16, path: &str) -> (u16, Option<String>, String) {
-        let response = reqwest::get(format!("http://127.0.0.1:{port}{path}"))
+        let response = request::get(format!("http://127.0.0.1:{port}{path}"))
             .await
             .expect("request");
         let status = response.status().as_u16();
         let content_type = response
             .headers()
-            .get(reqwest::header::CONTENT_TYPE)
+            .get(request::header::CONTENT_TYPE)
             .map(|v| v.to_str().expect("content-type").to_owned());
         (status, content_type, response.text().await.expect("body"))
     }

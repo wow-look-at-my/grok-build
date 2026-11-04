@@ -159,21 +159,6 @@ pub struct EndpointsConfig {
     /// Env: `GROK_TRACE_UPLOAD_URL`. Where trace uploads go.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_upload_url: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_BUCKET`. Direct bucket (`gs://` or `s3://`), bypasses proxy.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_bucket: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_REGION`. AWS region (S3 only).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_region: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_CREDENTIALS_FILE`. Path to GCS SA key or AWS credentials file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_credentials_file: Option<String>,
-    /// Inline credentials (JSON/INI). Takes precedence over `credentials_file`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_credentials: Option<String>,
-    /// Env: `GROK_TRACE_UPLOAD_ENDPOINT_URL`. Custom S3-compatible endpoint.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_upload_endpoint_url: Option<String>,
     /// Env: `GROK_MANAGED_CONFIG_URL`. Override the managed config endpoint.
     /// Defaults to `{proxy_url()}/deployment/config`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -220,9 +205,51 @@ pub struct EndpointsConfig {
     /// Read by `load_management_api_key_sync()`. Declared for `serde_ignored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub management_api_key: Option<String>,
-    /// Read by `load_gcs_service_account_key_sync()`. Declared for `serde_ignored`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gcs_service_account_key: Option<String>,
+}
+
+/// `[endpoints]` keys of the removed direct S3 and direct GCS upload modes.
+/// A config that names one fails to load. Trace uploads go through the proxy only.
+pub const REMOVED_DIRECT_UPLOAD_KEYS: &[&str] = &[
+    "trace_upload_bucket",
+    "trace_upload_region",
+    "trace_upload_credentials_file",
+    "trace_upload_credentials",
+    "trace_upload_endpoint_url",
+    "gcs_service_account_key",
+];
+
+/// Env vars of the removed direct S3 and direct GCS upload modes.
+pub const REMOVED_DIRECT_UPLOAD_ENV_VARS: &[&str] = &[
+    "GROK_TRACE_UPLOAD_BUCKET",
+    "GROK_TRACE_UPLOAD_REGION",
+    "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
+    "GROK_TRACE_UPLOAD_ENDPOINT_URL",
+    "GROK_TELEMETRY_GCS_BUCKET",
+];
+
+/// The message for a setting of a removed upload mode.
+pub fn removed_direct_upload_message(setting: &str) -> String {
+    format!(
+        "`{setting}` selects a direct S3 or direct GCS trace upload, and those upload modes \
+         were removed. Trace uploads go through the proxy only. Remove `{setting}`."
+    )
+}
+
+/// The first removed direct-upload env var that is set, as an error message.
+pub fn removed_direct_upload_env_error() -> Option<String> {
+    REMOVED_DIRECT_UPLOAD_ENV_VARS
+        .iter()
+        .find(|name| std::env::var_os(name).is_some())
+        .map(|name| removed_direct_upload_message(name))
+}
+
+/// Why an `[endpoints]` table did not load.
+#[derive(Debug, thiserror::Error)]
+pub enum EndpointsConfigError {
+    #[error(transparent)]
+    Alias(#[from] xai_tool_types::AliasConflict),
+    #[error("{}", removed_direct_upload_message(&format!("endpoints.{}", .0)))]
+    RemovedUploadMode(&'static str),
 }
 impl EndpointsConfig {
     /// The keys [`models_list_url`](Self::models_list_url) is read under.
@@ -249,11 +276,13 @@ struct EndpointsConfigWire {
     models_endpoint: Option<String>,
     feedback_base_url: Option<String>,
     trace_upload_url: Option<String>,
-    trace_upload_bucket: Option<String>,
-    trace_upload_region: Option<String>,
-    trace_upload_credentials_file: Option<String>,
-    trace_upload_credentials: Option<String>,
-    trace_upload_endpoint_url: Option<String>,
+    // Removed direct-upload keys: read only to refuse them.
+    trace_upload_bucket: Option<serde::de::IgnoredAny>,
+    trace_upload_region: Option<serde::de::IgnoredAny>,
+    trace_upload_credentials_file: Option<serde::de::IgnoredAny>,
+    trace_upload_credentials: Option<serde::de::IgnoredAny>,
+    trace_upload_endpoint_url: Option<serde::de::IgnoredAny>,
+    gcs_service_account_key: Option<serde::de::IgnoredAny>,
     managed_config_url: Option<String>,
     otel_exporter_otlp_endpoint: Option<String>,
     otel_exporter_otlp_traces_endpoint: Option<String>,
@@ -264,13 +293,27 @@ struct EndpointsConfigWire {
     otel_traces_export_interval: Option<u64>,
     otel_exporter_otlp_timeout: Option<u64>,
     management_api_key: Option<String>,
-    gcs_service_account_key: Option<String>,
 }
 
 impl TryFrom<EndpointsConfigWire> for EndpointsConfig {
-    type Error = xai_tool_types::AliasConflict;
+    type Error = EndpointsConfigError;
 
     fn try_from(wire: EndpointsConfigWire) -> Result<Self, Self::Error> {
+        let removed = [
+            wire.trace_upload_bucket.is_some(),
+            wire.trace_upload_region.is_some(),
+            wire.trace_upload_credentials_file.is_some(),
+            wire.trace_upload_credentials.is_some(),
+            wire.trace_upload_endpoint_url.is_some(),
+            wire.gcs_service_account_key.is_some(),
+        ];
+        if let Some((key, _)) = REMOVED_DIRECT_UPLOAD_KEYS
+            .iter()
+            .zip(removed)
+            .find(|(_, set)| *set)
+        {
+            return Err(EndpointsConfigError::RemovedUploadMode(key));
+        }
         Ok(Self {
             cli_chat_proxy_base_url: wire.cli_chat_proxy_base_url,
             xai_api_base_url: wire.xai_api_base_url,
@@ -281,11 +324,6 @@ impl TryFrom<EndpointsConfigWire> for EndpointsConfig {
                 .fold(vec![wire.models_list_url, wire.models_endpoint])?,
             feedback_base_url: wire.feedback_base_url,
             trace_upload_url: wire.trace_upload_url,
-            trace_upload_bucket: wire.trace_upload_bucket,
-            trace_upload_region: wire.trace_upload_region,
-            trace_upload_credentials_file: wire.trace_upload_credentials_file,
-            trace_upload_credentials: wire.trace_upload_credentials,
-            trace_upload_endpoint_url: wire.trace_upload_endpoint_url,
             managed_config_url: wire.managed_config_url,
             otel_exporter_otlp_endpoint: wire.otel_exporter_otlp_endpoint,
             otel_exporter_otlp_traces_endpoint: wire.otel_exporter_otlp_traces_endpoint,
@@ -297,7 +335,6 @@ impl TryFrom<EndpointsConfigWire> for EndpointsConfig {
             otel_traces_export_interval: wire.otel_traces_export_interval,
             otel_exporter_otlp_timeout: wire.otel_exporter_otlp_timeout,
             management_api_key: wire.management_api_key,
-            gcs_service_account_key: wire.gcs_service_account_key,
         })
     }
 }
@@ -391,11 +428,6 @@ mod endpoints_wire_alias_tests {
         cfg.models_list_url = Some("https://list.test".to_owned());
         cfg.feedback_base_url = Some("https://feedback.test".to_owned());
         cfg.trace_upload_url = Some("https://upload.test".to_owned());
-        cfg.trace_upload_bucket = Some("bucket".to_owned());
-        cfg.trace_upload_region = Some("region".to_owned());
-        cfg.trace_upload_credentials_file = Some("/dev/null".to_owned());
-        cfg.trace_upload_credentials = Some("{\"type\":\"service_account\"}".to_owned());
-        cfg.trace_upload_endpoint_url = Some("https://s3.test".to_owned());
         cfg.managed_config_url = Some("https://managed.test".to_owned());
         cfg.otel_exporter_otlp_endpoint = Some("https://otlp.test".to_owned());
         cfg.otel_exporter_otlp_traces_endpoint = Some("https://traces.test".to_owned());
@@ -406,12 +438,11 @@ mod endpoints_wire_alias_tests {
         cfg.otel_traces_export_interval = Some(1_234);
         cfg.otel_exporter_otlp_timeout = Some(5_678);
         cfg.management_api_key = Some("mgmt".to_owned());
-        cfg.gcs_service_account_key = Some("gcs".to_owned());
 
         let written = serde_json::to_value(&cfg).unwrap();
         let keys = written.as_object().expect("a table").len();
         assert!(
-            keys >= 24,
+            keys >= 18,
             "the fixture must exercise every field the shadow reads, got {keys}: {written}"
         );
         let read_back: EndpointsConfig =
@@ -421,6 +452,19 @@ mod endpoints_wire_alias_tests {
             written,
             "a key the shadow does not read comes back as its default"
         );
+    }
+
+    #[test]
+    fn a_removed_direct_upload_key_fails_the_load_and_says_it_was_removed() {
+        for key in super::REMOVED_DIRECT_UPLOAD_KEYS {
+            let err = parse(&format!("\"{key}\": \"gs://bucket\""))
+                .expect_err("a removed upload key must not load");
+            let message = err.to_string();
+            assert!(
+                message.contains(&format!("endpoints.{key}")) && message.contains("removed"),
+                "{key}: {message}"
+            );
+        }
     }
 }
 
@@ -581,103 +625,18 @@ impl EndpointsConfig {
         self.otel_exporter_otlp_timeout
             .map(std::time::Duration::from_millis)
     }
-    /// Resolve trace upload credentials: inline > file > `None` (ambient).
-    pub(crate) fn resolve_trace_credentials(&self) -> Option<String> {
-        if let Some(ref inline) = self.trace_upload_credentials {
-            let trimmed = inline.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_owned());
-            }
-        }
-        self.trace_upload_credentials_file
-            .as_deref()
-            .and_then(|path| {
-                std::fs::read_to_string(path)
-                    .inspect_err(|e| {
-                        tracing::warn!(
-                            path = %path,
-                            error = %e,
-                            "Failed to read trace upload credentials file"
-                        );
-                    })
-                    .ok()
-            })
-    }
-    /// Resolve direct-to-bucket upload method from `trace_upload_bucket`.
-    /// Returns `None` if no bucket is configured or scheme is unrecognized.
-    pub fn resolve_direct_upload_method(
-        &self,
-    ) -> Option<crate::session::repo_changes::UploadMethod> {
-        let bucket_url = self.trace_upload_bucket.as_deref()?.trim();
-        if bucket_url.is_empty() {
-            return None;
-        }
-        if let Some(bucket_name) = bucket_url
-            .strip_prefix("s3://")
-            .map(|s| s.trim_end_matches('/'))
-        {
-            let region = self
-                .trace_upload_region
-                .clone()
-                .unwrap_or_else(|| "us-east-1".to_owned());
-            return Some(crate::session::repo_changes::UploadMethod::S3 {
-                bucket: bucket_name.to_owned(),
-                region,
-                credentials_file: None,
-                credentials_content: self.resolve_trace_credentials(),
-                endpoint_url: self.trace_upload_endpoint_url.clone(),
-            });
-        }
-        if bucket_url.starts_with("gs://") {
-            return Some(crate::session::repo_changes::UploadMethod::Direct {
-                service_account_key: self.resolve_trace_credentials(),
-            });
-        }
-        tracing::warn!(
-            bucket = %bucket_url,
-            "trace_upload_bucket has unrecognized scheme (expected gs:// or s3://), ignoring"
-        );
-        None
-    }
-    pub fn has_noninteractive_upload_auth(&self) -> bool {
-        self.resolve_direct_upload_method().is_some()
-    }
-    /// Tries the direct bucket, then the proxy (if `auth_token`), then ambient GCS, else `None`.
+    /// The proxy upload method for `auth_token`. Without a token there is no upload method.
     pub fn resolve_upload_method(
         &self,
         auth_token: Option<String>,
     ) -> Option<crate::session::repo_changes::UploadMethod> {
-        if let Some(method) = self.resolve_direct_upload_method() {
-            return Some(method);
-        }
-        if let Some(user_token) = auth_token {
-            return Some(crate::session::repo_changes::UploadMethod::Proxy {
+        auth_token.map(
+            |user_token| crate::session::repo_changes::UploadMethod::Proxy {
                 proxy_base_url: self.resolve_trace_upload_url(),
                 user_token,
                 alpha_test_key: self.alpha_test_key.clone(),
-            });
-        }
-        let service_account_key = crate::util::config::load_gcs_service_account_key_sync();
-        if service_account_key.is_some() {
-            return Some(crate::session::repo_changes::UploadMethod::Direct {
-                service_account_key,
-            });
-        }
-        None
-    }
-    /// Resolve trace bucket URL: env > config > compiled-in default.
-    /// `None` disables direct GCS trace uploads.
-    pub fn resolve_trace_bucket_url(&self) -> Option<Resolved<String>> {
-        resolve_string_flag(
-            None,
-            "GROK_TELEMETRY_GCS_BUCKET",
-            self.trace_upload_bucket.as_deref(),
-            None,
+            },
         )
-        .or_else(|| {
-            crate::upload::gcs::SESSION_TRACES_BUCKET
-                .map(|b| Resolved::new(format!("gs://{b}"), ConfigSource::Default))
-        })
     }
     /// `models_list_url` > `{models_base_url}/models` > `{proxy_base_url}/models`.
     pub(crate) fn resolve_models_list_url(&self) -> String {
@@ -705,11 +664,6 @@ impl Default for EndpointsConfig {
             models_list_url: env_string("GROK_MODELS_LIST_URL"),
             feedback_base_url: env_string("GROK_FEEDBACK_BASE_URL"),
             trace_upload_url: env_string("GROK_TRACE_UPLOAD_URL"),
-            trace_upload_bucket: env_string("GROK_TRACE_UPLOAD_BUCKET"),
-            trace_upload_region: env_string("GROK_TRACE_UPLOAD_REGION"),
-            trace_upload_credentials_file: env_string("GROK_TRACE_UPLOAD_CREDENTIALS_FILE"),
-            trace_upload_credentials: None,
-            trace_upload_endpoint_url: env_string("GROK_TRACE_UPLOAD_ENDPOINT_URL"),
             managed_config_url: env_string("GROK_MANAGED_CONFIG_URL"),
             otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
             otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
@@ -724,7 +678,6 @@ impl Default for EndpointsConfig {
             otel_exporter_otlp_timeout: env_string("OTEL_EXPORTER_OTLP_TIMEOUT")
                 .and_then(|s| s.parse().ok()),
             management_api_key: None,
-            gcs_service_account_key: None,
         }
     }
 }
@@ -1233,9 +1186,6 @@ pub struct ModelsConfig {
     /// `/goal` closing summary role.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal_summarizer: Option<String>,
-    /// Model every subagent runs on unless `[subagents.models].<name>` or the agent definition pins one.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subagent_default: Option<String>,
     /// Restricts which models are user-selectable for normal chat (picker, `/model`, `-m`).
     /// Non-matching models stay in the catalog but are never shown, defaulted to, or selectable.
     /// Special/internal models (web_search, image_description, subagents) are exempt. User-config globs (`*`, `?`, `[...]`) match the catalog key or model id, case-sensitive. Empty = no restriction; an excluded explicit `default`/`-m` is rejected once the model catalog is fetched. Fleet pins live on [`Requirements::allowed_models`] and replace this list.
@@ -1528,6 +1478,9 @@ pub struct Config {
     pub cli: CliConfig,
     #[serde(default, skip_serializing)]
     pub models: ModelsConfig,
+    /// `[model_groups.<id>]`: slots that share one model. See `xai_grok_models::groups`.
+    #[serde(default, skip_serializing)]
+    pub model_groups: std::collections::BTreeMap<String, xai_grok_models::ModelGroupConfig>,
     #[serde(default, skip_serializing)]
     pub harness: HarnessConfig,
     #[serde(default, skip_serializing)]
@@ -1892,6 +1845,7 @@ impl Default for Config {
             paths: PathsConfig::default(),
             cli: CliConfig::default(),
             models: ModelsConfig::default(),
+            model_groups: Default::default(),
             harness: HarnessConfig::default(),
             relay: RelayConfig::default(),
             hub: HubConfig::default(),
@@ -2144,6 +2098,9 @@ impl Config {
         Ok((config, unrecognized_keys))
     }
     pub fn new_from_toml_cfg(raw_config: &toml::Value) -> Result<Self, String> {
+        if let Some(removed) = removed_direct_upload_env_error() {
+            return Err(removed);
+        }
         let raw_config = &Self::expand_auth_alias(raw_config);
         let super::config_model_override_parse::ParsedModelOverrides {
             models: config_models,
@@ -2231,6 +2188,7 @@ impl Config {
         }
         let (mut config, mut unrecognized_keys) =
             Self::deserialize_collecting_unrecognized(base, &raw_without_model_sections)?;
+        xai_grok_models::resolve_model_groups(&config.model_groups)?;
         config.harness.merge_deprecated_keys();
         config.mcp_servers = parsed_mcp_servers.into_iter().collect();
         config.config_models = config_models;
@@ -2678,38 +2636,6 @@ impl Config {
             .feature_flag(ff)
             .default(mode.value.is_enabled())
             .resolve()
-    }
-    /// Resolve jemalloc heap-profile config from stored remote settings and the current gates.
-    pub fn resolve_jemalloc_heap_profile(
-        &self,
-        data_collection_disabled: bool,
-    ) -> crate::heap_profile::JemallocHeapProfileConfig {
-        let rs = self.remote_settings.as_ref();
-        crate::heap_profile::resolve_jemalloc_heap_profile(
-            rs.and_then(|s| s.jemalloc_heap_profile_enabled),
-            rs.and_then(|s| s.jemalloc_heap_profile_thresholds_bytes.as_deref()),
-            rs.and_then(|s| s.jemalloc_heap_profile_poll_interval_secs),
-            data_collection_disabled,
-            self.resolve_trace_upload().value,
-            crate::heap_profile::prof_available(),
-        )
-    }
-    /// Scoped resolve: fresh jemalloc fields and current gates, with no remote-settings rewrite.
-    pub(crate) fn resolve_jemalloc_heap_profile_from_partial(
-        &self,
-        jemalloc_enabled: Option<bool>,
-        jemalloc_thresholds: Option<&[u64]>,
-        jemalloc_poll_interval_secs: Option<u64>,
-        data_collection_disabled: bool,
-    ) -> crate::heap_profile::JemallocHeapProfileConfig {
-        crate::heap_profile::resolve_jemalloc_heap_profile(
-            jemalloc_enabled,
-            jemalloc_thresholds,
-            jemalloc_poll_interval_secs,
-            data_collection_disabled,
-            self.resolve_trace_upload().value,
-            crate::heap_profile::prof_available(),
-        )
     }
     pub(crate) fn trace_upload_decision_debug(&self) -> serde_json::Value {
         let telemetry = self.resolve_telemetry_mode();
@@ -3234,17 +3160,27 @@ impl Config {
     }
     /// The model for one harness model slot, or `None` when the slot inherits
     /// the session model. Precedence is the slot's environment variable, then
-    /// `[models] <slot>` in `config.toml`, then the slot's compiled default.
-    /// A slot whose `fallback` is `SessionModel` and which nothing sets
-    /// answers `None`, and the caller keeps the session model. The slot id
-    /// must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists. An unknown
-    /// id is a programming error and answers `None`.
+    /// the `model` of the `[model_groups]` group. That group holds the slot,
+    /// then `[models] <slot>` in `config.toml`, then the slot's compiled
+    /// default. A slot whose `fallback` is `SessionModel` and which nothing
+    /// sets answers `None`, and the caller keeps the session model. The slot
+    /// id must be one [`xai_grok_models::HARNESS_MODEL_SLOTS`] lists. An
+    /// unknown id is a programming error and answers `None`.
     pub(crate) fn resolve_harness_model(&self, slot_id: &str) -> Option<Resolved<String>> {
         let slot = xai_grok_models::slot_by_id(slot_id)?;
         if let Ok(v) = std::env::var(slot.env)
             && !v.trim().is_empty()
         {
             return Some(Resolved::new(v.trim().to_owned(), ConfigSource::Env));
+        }
+        if let Some(v) = xai_grok_models::group_model_for_slot(&self.model_groups, slot_id) {
+            if self.harness_model_from_config(slot_id).is_some() {
+                tracing::warn!(
+                    slot = slot_id,
+                    "[models] {slot_id} is ignored: the slot's model group sets the model"
+                );
+            }
+            return Some(Resolved::new(v, ConfigSource::Config));
         }
         if let Some(v) = self.harness_model_from_config(slot_id)
             && !v.trim().is_empty()
@@ -3277,7 +3213,6 @@ impl Config {
             "goal_strategist" => m.goal_strategist.clone(),
             "goal_skeptic" => m.goal_skeptic.clone(),
             "goal_summarizer" => m.goal_summarizer.clone(),
-            "subagent_default" => m.subagent_default.clone(),
             _ => None,
         }
     }
@@ -5507,6 +5442,7 @@ pub(crate) fn resolve_credentials(
             xai_chat_state::AuthType::ApiKey,
         )
     } else if let Some(key) = session_key
+        && crate::util::may_carry_xai_session(&info.base_url)
         && xai_grok_login::backend::AuthBackend::may_receive_session(
             &xai_grok_login::backend::ActiveAuthBackend::default(),
             &info.base_url,
@@ -5618,10 +5554,12 @@ pub(crate) struct ModelAuthFacts {
     pub auth_scheme: AuthScheme,
 }
 /// Resolve `model_id` to its auth facts and auth-provider reference from one effective-config load. Both ride the same memo (see `SessionActor::model_auth_memo`).
-/// A load/parse failure yields `byok = Unknown`; a model absent from the catalog yields `NotByok`.
+/// A load/parse failure yields `byok = Unknown`; a model that no configured provider listing owns yields `NotByok`.
+/// A model a listing supplies has no entry in the config-only catalog, so one is synthesized from its `[model_providers.<id>]` block. `endpoint` names that provider when the id is a bare routing slug.
 /// An empty `model_id` (no sampling config yet) yields `Unknown`, not `NotByok`, so the gate isn't activated for an unidentified model.
 pub(crate) fn resolve_model_auth_facts_and_provider(
     model_id: &str,
+    endpoint: Option<&str>,
 ) -> (ModelAuthFacts, Option<xai_grok_login::AuthProviderRef>) {
     if model_id.is_empty() {
         return (
@@ -5632,7 +5570,7 @@ pub(crate) fn resolve_model_auth_facts_and_provider(
             None,
         );
     }
-    with_resolved_model(model_id, |lookup| {
+    with_resolved_model(model_id, endpoint, |lookup| {
         let facts = ModelAuthFacts {
             byok: byok_from_lookup(&lookup),
             auth_scheme: match lookup {
@@ -5718,7 +5656,12 @@ enum ModelLookup<'a> {
 }
 /// Load and parse the effective config and hand the `model_id` lookup to `f`.
 /// Keeps "config unavailable" distinct from "model absent" so callers can stay conservative on a transient config failure.
-fn with_resolved_model<T>(model_id: &str, f: impl FnOnce(ModelLookup) -> T) -> T {
+/// A model the config-only catalog does not hold is resolved through the provider whose listing supplies it.
+fn with_resolved_model<T>(
+    model_id: &str,
+    endpoint: Option<&str>,
+    f: impl FnOnce(ModelLookup) -> T,
+) -> T {
     let Some(raw) = crate::config::load_effective_config()
         .map_err(|e| tracing::warn!(error = %e, "config load failed for model auth lookup"))
         .ok()
@@ -5732,7 +5675,82 @@ fn with_resolved_model<T>(model_id: &str, f: impl FnOnce(ModelLookup) -> T) -> T
         return f(ModelLookup::ConfigUnavailable);
     };
     let models = resolve_model_list(&cfg, None);
-    f(ModelLookup::Loaded(find_model_by_id(&models, model_id)))
+    let listed;
+    let entry = match find_model_by_id(&models, model_id) {
+        Some(entry) => Some(entry),
+        None => {
+            listed = provider_listed_entry(&cfg, model_id, endpoint);
+            listed.as_ref()
+        }
+    };
+    f(ModelLookup::Loaded(entry))
+}
+
+/// The entry a provider's listing supplies for `model_id`, built from its
+/// `[model_providers.<id>]` block. Discovery puts those models in the catalog
+/// under `<provider>/<slug>`; a turn sends the routing `<slug>`. Neither shape
+/// is in the config-only catalog, so the provider has to be named here.
+fn provider_listed_entry(
+    cfg: &Config,
+    model_id: &str,
+    endpoint: Option<&str>,
+) -> Option<ModelEntry> {
+    let (provider_id, slug) = listing_owner(cfg, model_id, endpoint)?;
+    let provider = cfg.model_providers.get(provider_id)?;
+    let listed = ConfigModelOverride {
+        model: Some(slug.to_owned()),
+        ..Default::default()
+    };
+    Some(entry_for_provider_model(
+        cfg,
+        model_id,
+        provider_id,
+        provider,
+        &listed,
+    ))
+}
+
+/// Which provider's listing holds `model_id`, and the slug to send it. A
+/// provider-qualified id names its own provider. A bare routing slug names
+/// none, so it belongs to the one listing whose base URL is the endpoint the
+/// call is going to.
+fn listing_owner<'a>(
+    cfg: &'a Config,
+    model_id: &'a str,
+    endpoint: Option<&str>,
+) -> Option<(&'a str, &'a str)> {
+    if let Some((first, slug)) = model_id.split_once('/')
+        && cfg.model_providers.contains_key(first)
+    {
+        return Some((first, slug));
+    }
+    let endpoint = endpoint?;
+    let mut owners = cfg
+        .model_providers
+        .iter()
+        .filter(|(_, provider)| provider.autodetect_enabled())
+        .filter(|(_, provider)| {
+            provider_base_url(provider).is_some_and(|url| same_endpoint(url, endpoint))
+        })
+        .map(|(id, _)| id.as_str());
+    let first = owners.next()?;
+    if owners.next().is_some() {
+        return None;
+    }
+    Some((first, model_id))
+}
+
+fn provider_base_url(
+    provider: &crate::agent::model_providers::ModelProviderConfig,
+) -> Option<&str> {
+    provider
+        .base_url
+        .as_deref()
+        .or(provider.api_base_url.as_deref())
+}
+
+fn same_endpoint(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
 }
 /// Resolve a standalone `SamplerConfig` for an auxiliary model slug (image description, session summary, ...).
 /// Resolved through the catalog so a `[model.*]` override redirects it to its own endpoint, credentials, and routing `model`.
@@ -5937,6 +5955,8 @@ pub(crate) fn sampling_config_for_model(
     );
     let request_compression =
         crate::util::config::request_compression_for_url(&credentials.base_url);
+    // xAI reads `reasoning_content` only; Ollama reads `reasoning` only.
+    let accepts_reasoning = !crate::util::is_trusted_xai_https_url(&credentials.base_url);
     SamplerConfig {
         api_key: credentials.api_key,
         model: model_name,
@@ -5963,7 +5983,10 @@ pub(crate) fn sampling_config_for_model(
         chat_message_profile: if info.strict_message_schema {
             xai_grok_sampling_types::ChatMessageProfile::STRICT
         } else {
-            xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE
+            xai_grok_sampling_types::ChatMessageProfile {
+                accepts_reasoning,
+                ..xai_grok_sampling_types::ChatMessageProfile::PERMISSIVE
+            }
         },
         reasoning_summary: info.reasoning_summary,
         force_http1: false,

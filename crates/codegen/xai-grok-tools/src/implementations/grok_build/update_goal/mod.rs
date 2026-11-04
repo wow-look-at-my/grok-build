@@ -33,7 +33,7 @@ pub struct UpdateGoalInput {
 
     #[serde(default)]
     #[schemars(
-        description = "Set only when truly stuck after 3+ consecutive failed attempts at the same problem. If set, the goal is paused as blocked. This is a FAILURE signal — never put success text here. For success, use `completed: true` with `message`."
+        description = "Claim that you cannot finish the goal without the user. State what you tried, why each attempt failed, and the exact thing only the user can supply. When the turn ends a strict reviewer checks the claim against your transcript. It pauses the goal for the user only when you proved there is no step left you can take. Otherwise it sends you back with the concrete steps you have not tried. This is a FAILURE signal — never put success text here. For success, use `completed: true` with `message`."
     )]
     pub blocked_reason: Option<String>,
 }
@@ -129,6 +129,8 @@ pub enum RejectReason {
     InFlightOrchestrationVanished,
     /// A lite goal's completion check judged the goal not met, or could not reach a verdict.
     LiteCheckNotMet,
+    /// The todo list still had a pending or in-progress item, so no validator ran.
+    UnfinishedTodos,
 }
 
 impl RejectReason {
@@ -146,6 +148,7 @@ impl RejectReason {
             Self::StatusChangedDuringClassifier => "goal_update_status_changed",
             Self::InFlightOrchestrationVanished => "goal_update_in_flight_orchestration_vanished",
             Self::LiteCheckNotMet => "goal_update_lite_check_not_met",
+            Self::UnfinishedTodos => "goal_update_unfinished_todos",
         }
     }
 }

@@ -112,6 +112,8 @@ pub struct SuggestionRow {
     pub provenance: Option<CommandProvenance>,
     /// Whether this model is resident in VRAM, for a provider that reports it (Ollama, LM Studio).
     pub loaded_in_vram: Option<bool>,
+    /// Whether the config marks the model this row names as a favorite.
+    pub favorite: bool,
 }
 
 impl SuggestionRow {
@@ -132,6 +134,7 @@ impl SuggestionRow {
             tag: None,
             provenance: collides_with_builtin_or_skill.then(|| trigger.provenance.clone()),
             loaded_in_vram: None,
+            favorite: false,
         }
     }
 
@@ -144,6 +147,7 @@ impl SuggestionRow {
             tag: None,
             provenance: None,
             loaded_in_vram: item.loaded_in_vram,
+            favorite: item.favorite,
         }
     }
 
@@ -1252,13 +1256,16 @@ impl SlashController {
                 .iter()
                 .zip(fallbacks.iter().map(String::as_str))
                 .collect();
-            let hits = self.matcher.rank_either(
+            let mut hits = self.matcher.rank_either(
                 cands.as_slice(),
                 trimmed,
                 cands.len(),
                 |cand| cand.0.match_text.as_str(),
                 |cand| cand.1,
             );
+            if command.keeps_arg_order_on_ties() {
+                hits.sort_by_key(|&(idx, score)| (std::cmp::Reverse(score), idx));
+            }
             hits.into_iter()
                 .filter_map(|(idx, _)| {
                     let mut row = SuggestionRow::from_arg(items.get(idx)?);
@@ -2507,6 +2514,7 @@ mod tests {
             tag: None,
             provenance: None,
             loaded_in_vram: None,
+            favorite: false,
         };
         // Without smart-case, starts_with("p") fails on "Privacy" and the ghost disappears
         // The dropdown would still highlight the row via CaseMatching::Smart
@@ -3490,6 +3498,7 @@ mod tests {
                 insert_text: insert.into(),
                 description: String::new(),
                 loaded_in_vram: None,
+                favorite: false,
             };
             if let Some(rest) = args_query.strip_prefix("first")
                 && rest.starts_with(char::is_whitespace)

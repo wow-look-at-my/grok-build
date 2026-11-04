@@ -1679,7 +1679,7 @@ pub(crate) async fn run(
                 let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(32);
                 let (event_tx, event_rx) = tokio::sync::mpsc::channel(128);
                 let voice_config = app.voice_config.clone();
-                tokio::spawn(xai_grok_voice::run_voice_pipeline(
+                xai_spawn::spawn(xai_grok_voice::run_voice_pipeline(
                     voice_config,
                     voice_auth.clone(),
                     cmd_rx,
@@ -2441,7 +2441,7 @@ pub(crate) async fn run(
                         });
 
                         let acp_tx = app.acp_tx.clone();
-                        let join_handle = tokio::spawn(async move {
+                        let join_handle = xai_spawn::spawn(async move {
                             // 30 s for initialize/authenticate plus a budget per session/load
                             // Each load replays history and may respawn MCP servers on the new leader
                             let timeout = Duration::from_secs(
@@ -2731,6 +2731,17 @@ pub(crate) fn load_initial_ui_config() -> xai_grok_shell::agent::config::UiConfi
                     }
                 }
             }
+            if let Some(groups) = root.get("model_groups").and_then(|v| v.as_table()) {
+                for (id, group) in groups {
+                    if let Some(value) = group.get("model").and_then(|v| v.as_str())
+                        && !value.trim().is_empty()
+                    {
+                        ui.model_group_models
+                            .insert(id.clone(), value.trim().to_string());
+                    }
+                }
+            }
+            ui.subagent_models = crate::settings::subagent_models::pinned_models(&root);
             ui
         })
         .clone()

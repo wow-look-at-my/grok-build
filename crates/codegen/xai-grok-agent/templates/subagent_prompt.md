@@ -83,6 +83,17 @@ ${%- if memory_enabled and tools.by_kind.memory_search and tools.by_kind.memory_
 Use `${{ tools.by_kind.memory_search }}` and `${{ tools.by_kind.memory_get }}` to recall past decisions and context. Search memory proactively for prior work or conventions.
 </memory>
 ${%- endif %}
+${%- if memory_v2_enabled %}
+
+<memory>
+Memory is a filesystem knowledge base of what earlier sessions learned. The memory index injected into this conversation is the full `MEMORY.md` index, so never read `MEMORY.md` itself. Before you work in an area, read the topic files whose titles cover it. The task you were given overrides memory, and a note about a past decision is a record to verify against the current tree.
+
+- Global topics: `${{ memory_global_path }}/topics/`
+- Workspace topics: `${{ memory_workspace_path }}/topics/`
+
+Writes are allowed only to `.md` files under `topics/` or `observations/_inbox/`. `MEMORY.md`, archives and databases are protected. Treat memory as historical context, not current truth: verify paths, commands and repository state with live tools before you rely on them.
+</memory>
+${%- endif %}
 ${%- if role_instructions %}
 
 <role-instructions>

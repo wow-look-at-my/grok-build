@@ -298,8 +298,6 @@ pub(crate) struct SubagentSpawnContext {
     pub available_models: indexmap::IndexMap<String, crate::agent::config::ModelEntry>,
     /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
     pub subagent_model_overrides: std::collections::HashMap<String, String>,
-    /// `[models] subagent_default`.
-    pub subagent_default_model: Option<String>,
     /// Per-subagent enable/disable toggles from config.toml `[subagents.toggle]`.
     /// Omitted agents default to enabled (`true`).
     pub subagent_toggle: std::collections::HashMap<String, bool>,
@@ -624,7 +622,7 @@ impl SubagentPresentation {
         Arc::clone(&self.is_turn_active)
     }
 }
-/// Resolve the sampling config and model ID for a subagent. Precedence: `[subagents.models].{agent_name}` config override > explicit `AgentDefinition` model > the `[models] subagent_default` slot > the parent session's live sampling config.
+/// Resolve the sampling config and model ID for a subagent. Precedence: `[subagents.models].{agent_name}` config override > explicit `AgentDefinition` model > the parent session's live sampling config.
 /// Unknown pins warn and fall through. The caller applies runtime model overrides before this runs.
 #[tracing::instrument(level = "debug", skip_all)]
 async fn resolve_subagent_sampling_config(
@@ -665,15 +663,6 @@ async fn resolve_subagent_sampling_config(
             model_id,
             "agent_definition",
             "Agent definition model references unknown model, falling through to inherit",
-        )
-    {
-        return resolved;
-    }
-    if let Some(model_id) = ctx.subagent_default_model.as_deref()
-        && let Some(resolved) = try_pin(
-            model_id,
-            "subagent_default_slot",
-            "[models] subagent_default references unknown model, falling through to inherit",
         )
     {
         return resolved;
@@ -755,7 +744,7 @@ fn session_bearer_resolver(
     auth_method::session_token_auth_gate(
         auth_method::is_session_based_method(&ctx.auth_method_id),
         byok,
-        crate::util::is_xai_api_url(base_url),
+        crate::util::may_carry_xai_session(base_url),
     )
     .then(|| {
         xai_grok_login::credential_provider::WireValidBearerResolver::shared(
@@ -769,7 +758,7 @@ fn inherited_bearer_resolver(
     model: &str,
     base_url: &str,
 ) -> Option<xai_grok_sampler::SharedBearerResolver> {
-    let byok = crate::agent::config::resolve_model_auth_facts_and_provider(model)
+    let byok = crate::agent::config::resolve_model_auth_facts_and_provider(model, Some(base_url))
         .0
         .byok;
     session_bearer_resolver(ctx, byok, base_url)
@@ -2038,7 +2027,7 @@ pub(crate) fn spawn_progress_publisher(
     cancel_token: tokio_util::sync::CancellationToken,
     parent_cmd_tx: Option<mpsc::UnboundedSender<SessionCommand>>,
 ) -> tokio_util::task::AbortOnDropHandle<()> {
-    tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+    tokio_util::task::AbortOnDropHandle::new(xai_spawn::spawn(async move {
         let mut interval = tokio::time::interval(PROGRESS_PUBLISH_INTERVAL);
         interval.tick().await;
         let mut last_signature: ProgressSignature = (0, 0, 0, 0, 0);
@@ -2418,7 +2407,7 @@ fn persist_subagent_completion(dir: &Path, result: &SubagentResult, gcs_ctx: &Gc
             let bucket = bucket.clone();
             let method = method.clone();
             let auth_for_spawn = gcs_ctx.auth_manager.clone();
-            tokio::spawn(async move {
+            xai_spawn::spawn(async move {
                 upload_subagent_metadata(&gcs_meta, &bucket, method, auth_for_spawn).await;
             });
         }

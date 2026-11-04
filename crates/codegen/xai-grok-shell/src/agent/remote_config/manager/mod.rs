@@ -459,6 +459,12 @@ impl ModelsManager {
         }
     }
 
+    /// Whether a catalog fetch or a catalog retry sequence runs now.
+    pub(crate) fn catalog_fetch_running(&self) -> bool {
+        self.inner.fetches_in_flight.load(Ordering::Acquire) > 0
+            || self.inner.retry_in_flight.load(Ordering::Acquire)
+    }
+
     pub fn current_model_id(&self) -> acp::ModelId {
         self.inner.current_model_id.read().clone()
     }
@@ -915,7 +921,7 @@ impl ModelsManager {
         // The whole retry sequence is one attempt to waiters.
         let attempt = FetchAttemptGuard::begin(&self.inner);
         let mgr = self.clone();
-        tokio::task::spawn(async move {
+        xai_spawn::spawn(async move {
             let _attempt = attempt;
             let _retry_guard = RetryInFlightGuard(mgr.inner.clone());
             let result = crate::tools::retry::execute_with_backoff(
@@ -998,7 +1004,7 @@ impl ModelsManager {
                 "model_count": self.available().len(),
             })),
         );
-        tokio::spawn(async move {
+        xai_spawn::spawn(async move {
             loop {
                 notify.notified().await;
                 if !crate::util::config::resolve_remote_fetch_enabled() {
@@ -1168,7 +1174,7 @@ impl ModelsManager {
         let endpoint = self.inner.endpoint.clone();
         let mgr = self.clone();
 
-        tokio::task::spawn(async move {
+        xai_spawn::spawn(async move {
             let _attempt = attempt;
             let _refresh_guard = RefreshInFlightGuard(mgr.inner.clone());
             let auth = Self::bounded_startup_auth(&auth_manager).await;

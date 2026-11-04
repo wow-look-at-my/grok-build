@@ -1,4 +1,5 @@
 #![allow(clippy::cast_possible_truncation)] // Hits predate the gate
+// lib.rs holds the lib code.
 #![allow(clippy::cast_precision_loss)] // Hits predate the gate
 #![allow(clippy::cast_sign_loss)]
 #![allow(clippy::expect_used)]
@@ -36,6 +37,7 @@ pub mod commands;
 pub mod compaction_image_context;
 pub mod compaction_mode;
 pub mod compaction_utils;
+pub mod context_ledger;
 pub mod conversation_util;
 pub mod events;
 pub mod handle;
@@ -53,6 +55,10 @@ pub use actor::state::{
 };
 pub use commands::{ModelMetadata, StrictAppendAck, StrictAppendError};
 pub use compaction_mode::CompactionMode;
+pub use context_ledger::{
+    ContextLedger, ContextSample, LedgerItem, LedgerRequest, ProviderUsage, build_context_ledger,
+    item_kind, item_preview,
+};
 pub use events::ChatStateEvent;
 pub use handle::{ChatStateHandle, ChatStateMailboxClosed};
 pub use persistence::{

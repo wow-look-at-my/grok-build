@@ -191,6 +191,8 @@ Each setting also has an environment-variable override, applied on first load on
 
 Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate. When a model call stays too slow, Grok starts a backup of that call and keeps the slow one streaming. Whichever gets ahead is the answer, and a slow call that speeds back up cancels its backup. Tune it in `/settings` → **Slow output**, or in `[ui]`. A change applies to the next model call of every running session.
 
+The `N tok/s` counter beside the timers appears as soon as the measured rate settled, usually a few hundred milliseconds into the response. It shows that same rate the floor judges. And a stall brings it down rather than clearing it. This happens once it appears it stays for the rest of the model call: a speed-up or a slow-down changes the number. While the row waits for the model, after the call ends, and during a retry, there is no stream. The counter is hidden.
+
 | Key | Values (default) | Behavior |
 |-----|------------------|----------|
 | `min_output_tokens_per_sec` | `0`–`500` (`15`) | The floor. `0` turns detection off. `[model.<id>].min_output_tokens_per_sec` overrides it for one model. |
@@ -262,7 +264,7 @@ client_id = "0oa1b2c3d4e5f6g7h8i9"
 
 The harness sends requests to a model for many jobs beside your own turns. Each job is a slot in `[models]`. Set a slot and that job runs on the model you name. Leave it alone and the job inherits your session model, so it follows `/model`.
 
-Every slot also has a picker in the settings modal, under **Models**. A slot is read when a session starts. So a change applies to the next session.
+Every slot also has a picker in the settings modal, under **Models**, or shares its group's picker (see [Model groups](#model-groups)). A slot is read when a session starts. So a change applies to the next session.
 
 ```toml
 [models]
@@ -282,6 +284,7 @@ permission_classifier = "grok-4.5-fast"
 | `compaction` | Summarizing when the window fills | Session model |
 | `recap` | The "where was I" recap | Session model |
 | `turn_summary` | The one-line summary per turn | Session model |
+| `thinking_summary` | The short summary under a thinking block | Session model |
 | `side_note` | `/btw` | Session model |
 | `todo_capture` | `/todo` | Session model |
 | `memory_flush` | Writing long-term memory | Session model |
@@ -289,13 +292,43 @@ permission_classifier = "grok-4.5-fast"
 | `goal_strategist` | A new angle on a stalled goal | Session model |
 | `goal_skeptic` | Every skeptic in the verification panel | Session model |
 | `goal_summarizer` | The closing summary of a goal | Session model |
-| `subagent_default` | Any subagent with no pin of its own | Session model |
 
 Each slot takes an environment variable too, which wins over the config file. The name is the slot in upper case under `GROK_MODEL_`, so `goal_skeptic` reads `GROK_MODEL_GOAL_SKEPTIC`. The exception is `prompt_suggestion`, whose variable keeps its older name `GROK_PROMPT_SUGGESTIONS_MODEL`.
 
-Two older, narrower keys still win over their slot where you set them: `[auto_mode] classifier_model` over `permission_classifier`, and `[memory] flush_model` over `memory_flush`. A `[subagents.models]` entry and an agent definition's own `model` both win over `subagent_default`.
+Two older, narrower keys still win over their slot where you set them: `[auto_mode] classifier_model` over `permission_classifier`, and `[memory] flush_model` over `memory_flush`.
 
 A slot naming a model your account cannot reach logs a warning and falls back to the session model, rather than failing the call.
+
+### Model groups
+
+A model group is a set of slots that share one model and one settings row. A slot in a group has no row of its own. The settings modal shows the group's row in its place. A group with no slots does not show. A slot is in one group at most.
+
+Groups ship by default:
+
+| Group | Label | Slots |
+| --- | --- | --- |
+| `summarization` | Summarization model | `session_summary`, `prompt_suggestion`, `recap`, `turn_summary`, `thinking_summary`, `goal_summarizer` |
+| `dense_summarization` | Dense summarization model | `web_search`, `compaction`, `image_description` |
+| `query` | Query model | `side_note`, `todo_capture` |
+
+Change, unroll or add groups under `[model_groups.<id>]`. Each key is optional. On a default group, a key you leave out keeps its default value.
+
+```toml
+[model_groups.summarization]
+model = "grok-4.5-fast"                # every slot in the group runs on this model
+
+[model_groups.query]
+members = []                           # unroll: side_note and todo_capture get their own rows again
+
+[model_groups.planning]                # a new group
+label = "Planning model"
+description = "Model for the goal planner and strategist."
+members = ["goal_planner", "goal_strategist"]
+```
+
+A slot that your own group lists leaves the default group it was in. So `planning` above can take `recap` without an edit to `summarization`. Two of your groups that list the same slot, an unknown slot, or a group id with characters other than `a-z`, `0-9`. `_` and `-` stop the start with an error that names the problem.
+
+A slot reads its model in this order: the slot's environment variable, then its group's `model`, then its own `[models]` entry, then its default. A group with no `model` changes nothing, so each slot keeps its own entry and default. A pick on a group's settings row writes `[model_groups.<id>] model` and removes the `[models]` entry of each slot in the group.
 
 ### Custom models
 
@@ -372,7 +405,7 @@ Priority for `[mcp_servers]` and `[plugins]`: `.grok/config.toml` (current dir) 
 
 ### Memory
 
-Persist knowledge across sessions. Enable it with `[memory] enabled = true` or `GROK_MEMORY=1`. An explicit `[memory] enabled = false` turns it off even when a managed remote setting enables it. Notes recorded by earlier versions are carried over automatically. See [13-memory.md](13-memory.md).
+Persist knowledge across sessions. Memory is on by default and uses the v2 pipeline. An explicit `[memory] enabled = false` turns it off even when a managed remote setting enables it. Notes recorded by earlier versions are carried over automatically. See [13-memory.md](13-memory.md).
 
 ```toml
 [memory]
@@ -413,7 +446,7 @@ plan = false
 explore = "grok-4.6"               # route to different models
 ```
 
-To pin the model a subagent uses, set its entry under `[subagents.models]`. `usage_frequency` does not gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating. See [Subagents and Personas](16-subagents.md#usage-frequency).
+To pin the model a subagent uses, set its entry under `[subagents.models]`. Settings has one row per spawnable type, including workspace and plugin agents, and each row writes that type's entry. `usage_frequency` does not gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating. See [Subagents and Personas](16-subagents.md#usage-frequency).
 
 ### Goal mode and background workflows
 

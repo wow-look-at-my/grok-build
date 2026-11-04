@@ -15,7 +15,8 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 fs2 = { workspace = true }
 parking_lot = { workspace = true }
-git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
+gix = { workspace = true, features = ["revision", "index", "status"] }
+xai-gix-status = { workspace = true }
 ignore = { workspace = true }
 regex = { workspace = true }
 rand = { workspace = true }
@@ -41,9 +42,6 @@ xai-grok-tools-api = { path = "../xai-grok-tools-api" }
 # `DiagHandle`, held by the hub config and threaded through `connect_hub`.
 xai-grok-diag-server = { workspace = true }
 xai-grok-workspace-client = { path = "../xai-grok-workspace-client" }
-# Daemon/process-lifecycle machinery for `bin/workspace_server.rs` only; the
-# library never references it.
-xai-grok-workspace-daemon = { path = "../xai-grok-workspace-daemon" }
 xai-grok-workspace-types = { path = "../xai-grok-workspace-types" }
 xai-grok-config = { workspace = true }
 xai-dirs = { workspace = true }
@@ -70,8 +68,6 @@ chrono = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-bash = "0.25"
 url = { workspace = true }
-xai-grok-env = { workspace = true }
-humantime-serde = { workspace = true }
 prometheus = { workspace = true }
 glob = "0.3"
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
@@ -87,15 +83,12 @@ xai-grok-session-events = { workspace = true }
 xai-grok-auth = { path = "../xai-grok-auth" }
 xai-grok-telemetry = { workspace = true }
 xai-tty-utils = { workspace = true }
-reqwest = { workspace = true }
 xai-tool-protocol = { workspace = true }
 xai-tool-runtime = { workspace = true }
 xai-tool-types = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 urlencoding = "2"
 xai-fast-worktree = { path = "../xai-fast-worktree", features = ["metadata"] }
-# tonic: Status/Code mapping for deploy errors in workspace_ops.
-tonic = { workspace = true }
 sha1 = { workspace = true, optional = true }
 zip = { workspace = true, optional = true }
 
@@ -106,22 +99,19 @@ tracing-subscriber = { workspace = true }
 fastrace = { workspace = true, features = ["enable"] }
 xai-tracing = { workspace = true }
 xai-grok-extra-ca = { workspace = true }
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
+xai-grok-net = { workspace = true }
 tempfile = { workspace = true }
 zstd = { workspace = true }
 wait-timeout = { workspace = true }
 
 # Raw fd/dirent/poll calls in foreign-session capability probes, the fuzzy
 # walker's rlimit guard, and the envrc reader.
+xai-spawn = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["signal", "process"] }
-
-[[bin]]
-name = "xai-workspace-server"
-path = "src/bin/workspace_server.rs"
 
 [[bin]]
 name = "workspace-server-probe"
@@ -142,12 +132,8 @@ tempfile = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 xai-test-utils = { path = "../../common/xai-test-utils" }
-# Decode tar.gz archives produced by workspace upload helpers in tests.
-flate2 = { workspace = true }
-tar = { workspace = true }
-
-[package.metadata.cargo-shear]
-ignored = ["tokio-tungstenite"]
+# The binary tests read the diag server over plain HTTP.
+request = { workspace = true }
 
 [lints]
 workspace = true

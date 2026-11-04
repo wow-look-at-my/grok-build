@@ -727,7 +727,7 @@ pub(crate) async fn wait_any_event_driven(
         // The handle lives in `waits`, which `AbortWaitsOnDrop` tears down on
         // every exit path, and the body reports its own panic through `guarded`.
         #[allow(clippy::disallowed_methods)]
-        let wait = tokio::spawn(async move {
+        let wait = xai_spawn::spawn(async move {
             // Guarded, because `done` is the only thing this caller can be
             // woken by: a round that died mid-flight will leave.
             let round = crate::util::detached::guarded(
@@ -750,7 +750,7 @@ pub(crate) async fn wait_any_event_driven(
             // As above: `waits` owns the handle and `AbortWaitsOnDrop` drains
             // it; the body answers its own failure through `guarded`.
             #[allow(clippy::disallowed_methods)]
-            let wait = tokio::spawn(async move {
+            let wait = xai_spawn::spawn(async move {
                 let round = crate::util::detached::guarded(
                     "task output subagent wait",
                     be.backend().query(&id, true, Some(timeout_ms)),
@@ -797,7 +797,7 @@ pub(crate) async fn wait_all_event_driven(
         // `join_all` below awaits this handle, and `AbortWaitsOnDrop` aborts it
         // if this future is cancelled first.
         #[allow(clippy::disallowed_methods)]
-        let wait = tokio::spawn(async move {
+        let wait = xai_spawn::spawn(async move {
             terminal.wait_for_completion(&id, Some(timeout)).await;
         });
         handles.push((label, wait));
@@ -812,7 +812,7 @@ pub(crate) async fn wait_all_event_driven(
             // Awaited by the `join_all` below and aborted by
             // `AbortWaitsOnDrop` on the cancellation path.
             #[allow(clippy::disallowed_methods)]
-            let wait = tokio::spawn(async move {
+            let wait = xai_spawn::spawn(async move {
                 let _ = be.backend().query(&id, true, Some(timeout_ms)).await;
             });
             handles.push((label, wait));
@@ -2862,7 +2862,7 @@ mod tests {
         let (resources, mut query_rx) = resources_with_backend_query();
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let req = unwrap_query(query_rx.recv().await.unwrap());
             assert_eq!(req.subagent_id, "sub-done");
             req.respond_to
@@ -2912,7 +2912,7 @@ mod tests {
         let (resources, mut query_rx) = resources_with_backend_query();
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let req = unwrap_query(query_rx.recv().await.unwrap());
             req.respond_to
                 .send(Some(SubagentSnapshot {
@@ -2964,7 +2964,7 @@ mod tests {
         let (resources, mut query_rx) = resources_with_backend_query();
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let req = unwrap_query(query_rx.recv().await.unwrap());
             req.respond_to.send(None).unwrap();
         });
@@ -3013,7 +3013,7 @@ mod tests {
         let (resources, mut query_rx) = resources_with_backend_query();
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let req = unwrap_query(query_rx.recv().await.unwrap());
             assert!(
                 req.block,
@@ -3054,7 +3054,7 @@ mod tests {
         let (resources, mut query_rx) = resources_with_backend_query();
         let shared = resources.into_shared();
 
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let req = unwrap_query(query_rx.recv().await.unwrap());
             assert!(req.block);
             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -3166,7 +3166,7 @@ mod tests {
         ] {
             let (resources, mut query_rx) = resources_with_backend_query();
             let shared = resources.into_shared();
-            let handle = tokio::spawn(async move {
+            let handle = xai_spawn::spawn(async move {
                 let req = unwrap_query(query_rx.recv().await.unwrap());
                 assert!(req.block);
                 req.respond_to.send(Some(snapshot)).unwrap();
@@ -3200,7 +3200,7 @@ mod tests {
     async fn wait_all_on_completed_subagent_does_not_block() {
         let (resources, mut query_rx) = resources_with_backend_query();
         let shared = resources.into_shared();
-        let handle = tokio::spawn(async move {
+        let handle = xai_spawn::spawn(async move {
             let req = unwrap_query(query_rx.recv().await.unwrap());
             assert!(
                 !req.block,

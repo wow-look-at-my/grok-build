@@ -1,6 +1,6 @@
 //! HTTP client for the xAI sampling APIs.
 //!
-//! Owns the `reqwest::Client`, default request headers, and per-method defaults.
+//! Owns the `HttpClient`, default request headers, the credential, and per-method defaults.
 //! Talks to three backend shapes:
 //!
 //! * Chat Completions (`/chat/completions`)
@@ -17,12 +17,13 @@ use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use futures_util::stream::{BoxStream, Stream};
 use indexmap::IndexMap;
-use reqwest::header::{
+use serde::Serialize;
+use tracing::Instrument;
+use xai_grok_net::header::{
     ACCEPT, AUTHORIZATION, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue,
     USER_AGENT,
 };
-use serde::Serialize;
-use tracing::Instrument;
+use xai_grok_net::{Auth, HttpClient, KeyScheme, SentBearerSuffix, is_credential_header};
 
 use xai_grok_sampling_types::error::{
     api_error_message_for_endpoint, error_chain, name_tool_indices, parse_error_code,
@@ -54,6 +55,72 @@ use xai_grok_auth::bearer_suffix;
 
 pub use xai_grok_sampling_types::ApiBackend;
 
+const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
+
+/// A request this client is about to send. The credential stays an [`Auth`]
+/// until `xai-grok-net` writes it, so `headers` never holds one.
+struct HttpRequest {
+    url: String,
+    auth: Auth,
+    headers: HeaderMap,
+    body: Option<Vec<u8>>,
+    /// The first header that did not parse. `send` fails with it.
+    invalid_header: Option<&'static str>,
+}
+
+impl HttpRequest {
+    /// Append a header, as `RequestBuilder::header` does.
+    fn header<K, V>(mut self, name: K, value: V) -> Self
+    where
+        K: TryInto<HeaderName>,
+        V: TryInto<HeaderValue>,
+    {
+        match (name.try_into(), value.try_into()) {
+            (Ok(name), Ok(value)) => {
+                self.headers.append(name, value);
+            }
+            _ => {
+                self.invalid_header.get_or_insert("Invalid request header");
+            }
+        }
+        self
+    }
+
+    fn headers(&self) -> &HeaderMap {
+        &self.headers
+    }
+
+    fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// Every sampling request is a POST.
+    fn method(&self) -> &'static str {
+        "POST"
+    }
+
+    /// Serialize `payload` as the body. A caller-set `Content-Type` wins.
+    fn json<T: Serialize + ?Sized>(mut self, payload: &T) -> Result<Self> {
+        let json = serde_json::to_vec(payload).map_err(SamplingError::Serialization)?;
+        if !self.headers.contains_key(CONTENT_TYPE) {
+            self.headers
+                .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        }
+        self.body = Some(json);
+        Ok(self)
+    }
+}
+
+/// The tail of the credential that produced `response`. `xai-grok-net` records it for a key
+/// or a session. A configured header has no record, so the capture from [`SamplingClient::post`] stays.
+fn wire_fragment(response: &xai_grok_net::Response, captured: Option<String>) -> Option<String> {
+    response
+        .extensions()
+        .get::<SentBearerSuffix>()
+        .map(|sent| sent.0.clone())
+        .or(captured)
+}
+
 /// Process-level fallback for the `x-grok-client-identifier` header.
 const DEFAULT_CLIENT_IDENTIFIER: &str = "grok-shell";
 
@@ -76,7 +143,7 @@ struct GrokRequestHeaders<'a> {
 }
 
 impl GrokRequestHeaders<'_> {
-    fn apply(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    fn apply(&self, builder: HttpRequest) -> HttpRequest {
         let mut b = builder
             .header("x-grok-conv-id", self.conv_id)
             .header("x-grok-req-id", self.req_id)
@@ -523,9 +590,9 @@ fn splice_extra_tool_entries(
 }
 
 /// Parse `Retry-After` as integer seconds, capped at 120; HTTP-dates yield `None`.
-fn extract_retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+fn extract_retry_after(headers: &xai_grok_net::header::HeaderMap) -> Option<u64> {
     let retry_after = headers
-        .get(reqwest::header::RETRY_AFTER)
+        .get(xai_grok_net::header::RETRY_AFTER)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<u64>().ok());
 
@@ -575,7 +642,7 @@ fn parse_reset_seconds(raw: &str) -> Option<u64> {
     Some(seconds)
 }
 
-fn extract_should_retry(headers: &reqwest::header::HeaderMap) -> Option<bool> {
+fn extract_should_retry(headers: &xai_grok_net::header::HeaderMap) -> Option<bool> {
     headers
         .get("x-should-retry")
         .and_then(|v| v.to_str().ok())
@@ -590,7 +657,9 @@ fn extract_should_retry(headers: &reqwest::header::HeaderMap) -> Option<bool> {
         })
 }
 
-fn extract_model_metadata(headers: &reqwest::header::HeaderMap) -> Option<ResponseModelMetadata> {
+fn extract_model_metadata(
+    headers: &xai_grok_net::header::HeaderMap,
+) -> Option<ResponseModelMetadata> {
     let context_window = headers
         .get("x-grok-context-window")
         .and_then(|v| v.to_str().ok())
@@ -685,11 +754,16 @@ fn apply_env_http_headers(
 }
 
 /// HTTP client for sampling. Cheap to clone.
-/// Carries an `Arc`-backed `reqwest::Client` and the default headers/request-defaults computed from a [`SamplerConfig`] at construction time.
+/// Carries an `Arc`-backed `HttpClient` and the default headers/request-defaults computed from a [`SamplerConfig`] at construction time.
 #[derive(Clone)]
 pub struct SamplingClient {
-    http: reqwest::Client,
+    http: HttpClient,
+    /// Headers sent on every request. No credential header is here.
     default_headers: HeaderMap,
+    /// The configured key, sent as `Auth::ApiKey` when no `bearer_resolver` is set.
+    api_key: Option<String>,
+    /// Credential-named headers from `extra_headers` and `env_http_headers`, sent as `Auth::Configured`.
+    configured_credentials: HeaderMap,
     base_url: String,
     /// Extra top-level body fields merged into every request this client sends; see [`SamplerConfig::extra_body`].
     extra_body: serde_json::Map<String, serde_json::Value>,
@@ -763,7 +837,7 @@ impl EndpointTemplate {
         if query_params.is_empty() && !base.contains('?') {
             return Self::Plain(base);
         }
-        let mut url = match reqwest::Url::parse(&base) {
+        let mut url = match xai_grok_net::Url::parse(&base) {
             Ok(url) => url,
             Err(error) => {
                 tracing::warn!(
@@ -879,8 +953,8 @@ pub fn user_agent_string_for(origin: &OriginClientInfo) -> String {
 /// The wire default (`SentCredential::Unknown`, which charges the retry budget) stays the fail-closed one.
 /// Only an explicit `sent_bearer: None` (a send the builder provably stamped no credential onto) reaches the uncharged lane via [`auth_rejected`].
 struct SentRequest {
-    builder: reqwest::RequestBuilder,
-    /// Tail fragment of the credential in the built headers (`None` means no credential header).
+    builder: HttpRequest,
+    /// Tail fragment of the credential the request carries (`None` means no credential).
     sent_bearer: Option<String>,
 }
 
@@ -914,10 +988,11 @@ impl SamplingClient {
             .map_err(|refusal| SamplingError::EndpointNotAllowed(refusal.to_string()))?;
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        // The key is sent as an `Auth`; check here that it is a valid header value.
         if let Some(ref api_key) = config.api_key {
             match config.auth_scheme {
                 AuthScheme::XApiKey => {
-                    let header_value = HeaderValue::from_str(api_key).map_err(|_| {
+                    HeaderValue::from_str(api_key).map_err(|_| {
                         tracing::debug!(
                             "Invalid api_key: cannot be converted to a valid HTTP header"
                         );
@@ -925,11 +1000,9 @@ impl SamplingClient {
                             "Invalid api_key: cannot be converted to a valid HTTP header",
                         )
                     })?;
-                    headers.insert(HeaderName::from_static("x-api-key"), header_value);
                 }
                 AuthScheme::Bearer => {
-                    let bearer = format!("Bearer {}", api_key);
-                    let header_value = HeaderValue::from_str(&bearer).map_err(|_| {
+                    HeaderValue::from_str(&format!("Bearer {api_key}")).map_err(|_| {
                         tracing::debug!(
                             "Invalid api_key: cannot be converted to a valid HTTP Authorization header"
                         );
@@ -937,7 +1010,6 @@ impl SamplingClient {
                             "Invalid api_key: cannot be converted to a valid HTTP Authorization header",
                         )
                     })?;
-                    headers.insert(AUTHORIZATION, header_value);
                 }
                 AuthScheme::None => {}
             }
@@ -959,6 +1031,20 @@ impl SamplingClient {
             |var| std::env::var(var).ok(),
             &mut headers,
         );
+
+        // A credential the user wrote in a header goes out as `Auth::Configured`.
+        let mut configured_credentials = HeaderMap::new();
+        let credential_names: Vec<HeaderName> = headers
+            .keys()
+            .filter(|name| is_credential_header(name))
+            .cloned()
+            .collect();
+        for name in credential_names {
+            for value in headers.get_all(&name) {
+                configured_credentials.append(name.clone(), value.clone());
+            }
+            headers.remove(&name);
+        }
 
         // Add x-grok-client-version header for version gating at the proxy.
         if let Some(client_version) = config.client_version.as_ref()
@@ -1044,8 +1130,7 @@ impl SamplingClient {
             reasoning_effort = config.reasoning_effort.map_or("unset", |e| e.into()),
             has_api_key = config.api_key.is_some(),
             has_bearer_resolver = config.bearer_resolver.is_some(),
-            has_authorization_header = headers.get(AUTHORIZATION).is_some(),
-            has_x_api_key_header = headers.get(HeaderName::from_static("x-api-key")).is_some(),
+            has_configured_credential_header = !configured_credentials.is_empty(),
         );
 
         let defaults = ClientDefaults {
@@ -1076,6 +1161,8 @@ impl SamplingClient {
         Ok(Self {
             http,
             default_headers: headers,
+            api_key: config.api_key,
+            configured_credentials,
             base_url: config.base_url,
             extra_body: config.extra_body,
             defaults,
@@ -1101,36 +1188,16 @@ impl SamplingClient {
 
     /// The credential tail is captured at build time — see [`SentRequest`] for
     /// why a record-time re-read would race the recovery a 401 triggers.
-    fn post(&self, url: impl reqwest::IntoUrl) -> SentRequest {
+    fn post(&self, url: impl Into<String>) -> SentRequest {
         if !self.first_use_noted.load(Ordering::Relaxed)
             && !self.first_use_noted.swap(true, Ordering::Relaxed)
         {
             crate::prewarm::note_first_sampling_use(&self.base_url);
         }
         let mut headers = self.default_headers.clone();
-        if let Some(resolver) = &self.bearer_resolver {
-            // Sole auth source: without a live bearer, send no credential rather than a stale seed key.
-            headers.remove(AUTHORIZATION);
-            headers.remove(HeaderName::from_static("x-api-key"));
-            if let Some(fresh) = resolver.current_bearer() {
-                match self.defaults.auth_scheme {
-                    AuthScheme::XApiKey => {
-                        if let Ok(v) = HeaderValue::from_str(&fresh) {
-                            headers.insert(HeaderName::from_static("x-api-key"), v);
-                        }
-                    }
-                    AuthScheme::Bearer => {
-                        if let Ok(v) = HeaderValue::from_str(&format!("Bearer {fresh}")) {
-                            headers.insert(AUTHORIZATION, v);
-                        }
-                    }
-                    // Already stripped above; a fresh bearer never gets attached.
-                    AuthScheme::None => {}
-                }
-            }
-        }
+        let auth = self.request_auth();
         // Presence only: this fork never logs a credential, not even a
-        // prefix of one.
+        // prefix of one. `Auth`'s Debug prints only its kind.
         tracing::info!(
             target: crate::sampling_log::TARGET,
             event = "client_post",
@@ -1139,16 +1206,59 @@ impl SamplingClient {
             api_backend = ?self.defaults.api_backend,
             auth_scheme = ?self.defaults.auth_scheme,
             has_bearer_resolver = self.bearer_resolver.is_some(),
-            has_authorization_header = headers.get(AUTHORIZATION).is_some(),
-            has_x_api_key_header = headers.get(HeaderName::from_static("x-api-key")).is_some(),
+            credential = ?auth,
         );
-        let sent_bearer = Self::sent_fragment_from_headers(&headers, &self.defaults.auth_scheme);
+        let sent_bearer = Self::sent_fragment(&auth, &self.defaults.auth_scheme);
         if let Some(injector) = &self.header_injector {
             injector.inject(&mut headers);
         }
         SentRequest {
-            builder: self.http.post(url).headers(headers),
+            builder: HttpRequest {
+                url: url.into(),
+                auth,
+                headers,
+                body: None,
+                invalid_header: None,
+            },
             sent_bearer,
+        }
+    }
+
+    /// The credential the next request carries, read at send time. With a
+    /// `bearer_resolver`, the live xAI session is the only credential.
+    fn request_auth(&self) -> Auth {
+        if self.bearer_resolver.is_some() || self.configured_credentials.is_empty() {
+            return self.key_auth();
+        }
+        Auth::Configured(self.configured_credentials.clone())
+    }
+
+    /// The key credential, without configured headers.
+    fn key_auth(&self) -> Auth {
+        let scheme = match self.defaults.auth_scheme {
+            AuthScheme::None => return Auth::None,
+            AuthScheme::Bearer => KeyScheme::Bearer,
+            AuthScheme::XApiKey => KeyScheme::XApiKey,
+        };
+        if let Some(resolver) = &self.bearer_resolver {
+            // Sole auth source: without a live bearer, send no credential rather than a stale seed key.
+            return resolver
+                .current_bearer()
+                .map_or(Auth::None, Auth::XaiSession);
+        }
+        self.api_key
+            .clone()
+            .map_or(Auth::None, |key| Auth::ApiKey { key, scheme })
+    }
+
+    /// Tail fragment of the credential `auth` sends.
+    fn sent_fragment(auth: &Auth, scheme: &AuthScheme) -> Option<String> {
+        match auth {
+            Auth::XaiSession(token) | Auth::ApiKey { key: token, .. } => {
+                Some(bearer_suffix(token).to_string())
+            }
+            Auth::Configured(headers) => Self::sent_fragment_from_headers(headers, scheme),
+            Auth::None | Auth::Source { .. } => None,
         }
     }
 
@@ -1166,9 +1276,7 @@ impl SamplingClient {
     /// The fragment length is [`crate::attribution::BEARER_SUFFIX_LEN`].
     fn sent_fragment_from_headers(headers: &HeaderMap, scheme: &AuthScheme) -> Option<String> {
         let raw = match scheme {
-            AuthScheme::XApiKey => headers
-                .get(HeaderName::from_static("x-api-key"))
-                .and_then(|v| v.to_str().ok()),
+            AuthScheme::XApiKey => headers.get(X_API_KEY).and_then(|v| v.to_str().ok()),
             AuthScheme::Bearer => headers
                 .get(AUTHORIZATION)
                 .and_then(|v| v.to_str().ok())
@@ -1187,14 +1295,7 @@ impl SamplingClient {
         if self.defaults.auth_scheme == AuthScheme::None {
             return None;
         }
-        if self.bearer_resolver.is_some() {
-            return self
-                .bearer_resolver
-                .as_ref()
-                .and_then(|r| r.current_bearer())
-                .map(|s| bearer_suffix(&s).to_string());
-        }
-        Self::sent_fragment_from_headers(&self.default_headers, &self.defaults.auth_scheme)
+        Self::sent_fragment(&self.request_auth(), &self.defaults.auth_scheme)
     }
 
     /// Invoke the optional 401 attribution callback for one logical 401 response.
@@ -1239,7 +1340,7 @@ impl SamplingClient {
     }
 
     /// Log all headers from a request at debug level (redacting sensitive values).
-    fn log_request_headers(request: &reqwest::Request, endpoint_name: &str) {
+    fn log_request_headers(request: &HttpRequest, endpoint_name: &str) {
         for (name, value) in request.headers().iter() {
             let value_str = if Self::is_sensitive_header(name.as_str()) {
                 "[REDACTED]"
@@ -1282,7 +1383,7 @@ impl SamplingClient {
     /// `sent_bearer` is the fragment [`Self::post`] captured for the request that produced `response` (401 attribution).
     async fn handle_response(
         &self,
-        response: reqwest::Response,
+        response: xai_grok_net::Response,
         sent_bearer: Option<&str>,
     ) -> Result<ChatCompletionResponse> {
         let status = response.status();
@@ -1293,7 +1394,7 @@ impl SamplingClient {
         let bytes = read_body(response, status).await?;
 
         if !status.is_success() {
-            if status == reqwest::StatusCode::UNAUTHORIZED {
+            if status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 self.record_401_attribution(
                     crate::attribution::SamplingConsumer::ChatCompletions,
                     sent_bearer,
@@ -1374,6 +1475,7 @@ impl SamplingClient {
             .build_json_request(grok_headers.apply(builder), &payload)
             .await?;
         let response = self.send(built_request).await?;
+        let sent_bearer = wire_fragment(&response, sent_bearer);
 
         let status = response.status();
         request_region
@@ -1389,42 +1491,50 @@ impl SamplingClient {
     /// the shell marked this endpoint as accepting it.
     async fn build_json_request<T: Serialize + ?Sized>(
         &self,
-        builder: reqwest::RequestBuilder,
+        builder: HttpRequest,
         payload: &T,
-    ) -> Result<reqwest::Request> {
-        let json = serde_json::to_vec(payload).map_err(|e| {
+    ) -> Result<HttpRequest> {
+        let mut request = builder.json(payload).inspect_err(|e| {
             tracing::error!("Failed to serialize request body: {}", e);
-            SamplingError::Serialization(e)
         })?;
-        let mut request = builder.build().map_err(|e| {
-            tracing::error!("Failed to build HTTP request: {}", e);
-            SamplingError::Http(e)
-        })?;
-        if !request.headers().contains_key(CONTENT_TYPE) {
-            request
-                .headers_mut()
-                .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        }
-        let body = if should_compress(self.defaults.request_compression, json.len()) {
-            match compress_body(&json).await {
-                Some(compressed) => {
-                    request
-                        .headers_mut()
-                        .insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
-                    compressed
+        if let Some(json) = request.body.take() {
+            let body = if should_compress(self.defaults.request_compression, json.len()) {
+                match compress_body(&json).await {
+                    Some(compressed) => {
+                        request
+                            .headers
+                            .insert(CONTENT_ENCODING, HeaderValue::from_static("zstd"));
+                        compressed
+                    }
+                    None => json,
                 }
-                None => json,
-            }
-        } else {
-            json
-        };
-        *request.body_mut() = Some(reqwest::Body::from(body));
+            } else {
+                json
+            };
+            request.body = Some(body);
+        }
         Ok(request)
     }
 
-    async fn send(&self, request: reqwest::Request) -> Result<reqwest::Response> {
-        self.http
-            .execute(request)
+    /// Hand `request` to `xai-grok-net`, which writes its credential.
+    fn net_request(&self, request: HttpRequest) -> Result<xai_grok_net::Request> {
+        if let Some(problem) = request.invalid_header {
+            tracing::error!("Failed to build HTTP request: {problem}");
+            return Err(SamplingError::InvalidConfiguration(problem));
+        }
+        let mut net = self
+            .http
+            .post(request.url, request.auth)
+            .headers(request.headers);
+        if let Some(body) = request.body {
+            net = net.body(body);
+        }
+        Ok(net)
+    }
+
+    async fn send(&self, request: HttpRequest) -> Result<xai_grok_net::Response> {
+        self.net_request(request)?
+            .send()
             .await
             .inspect_err(|e| tracing::debug!("HTTP request failed: {}", e))
             .map_err(Into::into)
@@ -1432,11 +1542,11 @@ impl SamplingClient {
 
     async fn execute_stream_request(
         &self,
-        built_request: reqwest::Request,
+        built_request: HttpRequest,
         span_timing: &mut StreamSpanTiming,
-    ) -> Result<reqwest::Response> {
+    ) -> Result<xai_grok_net::Response> {
         span_timing.record_request_build();
-        let response = self.http.execute(built_request).await.map_err(|e| {
+        let response = self.net_request(built_request)?.send().await.map_err(|e| {
             tracing::debug!("HTTP request failed: {}", e);
             span_timing.record_transport_failure(&e.to_string());
             e
@@ -1535,6 +1645,7 @@ impl SamplingClient {
         let response = self
             .execute_stream_request(built_request, &mut span_timing)
             .await?;
+        let sent_bearer = wire_fragment(&response, sent_bearer);
 
         let status = response.status();
         let request_url = response.url().to_string();
@@ -1546,7 +1657,7 @@ impl SamplingClient {
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
         if !status.is_success() {
-            if status == reqwest::StatusCode::UNAUTHORIZED {
+            if status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 span_timing.span().record(ERROR, "unauthorized (401)");
                 self.record_401_attribution(
                     crate::attribution::SamplingConsumer::ChatCompletionsStream,
@@ -1760,6 +1871,7 @@ impl SamplingClient {
             .build_json_request(grok_headers.apply(builder), &request_body)
             .await?;
         let response = self.send(built_request).await?;
+        let sent_bearer = wire_fragment(&response, sent_bearer);
 
         let status = response.status();
         let request_url = response.url().to_string();
@@ -1773,7 +1885,7 @@ impl SamplingClient {
         let bytes = read_body(response, status).await?;
 
         if !status.is_success() {
-            if status == reqwest::StatusCode::UNAUTHORIZED {
+            if status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 self.record_401_attribution(
                     crate::attribution::SamplingConsumer::Responses,
                     sent_bearer.as_deref(),
@@ -1931,6 +2043,7 @@ impl SamplingClient {
         let response = self
             .execute_stream_request(built_request, &mut span_timing)
             .await?;
+        let sent_bearer = wire_fragment(&response, sent_bearer);
 
         let status = response.status();
         let request_url = response.url().to_string();
@@ -1939,7 +2052,7 @@ impl SamplingClient {
             .record(STATUS_CODE, status.as_u16() as i64);
         span_timing.span().record(SUCCESS, status.is_success());
         if !status.is_success() {
-            if status == reqwest::StatusCode::UNAUTHORIZED {
+            if status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 span_timing.span().record(ERROR, "unauthorized (401)");
                 self.record_401_attribution(
                     crate::attribution::SamplingConsumer::ResponsesStream,
@@ -2124,6 +2237,7 @@ impl SamplingClient {
             .build_json_request(grok_headers.apply(builder), &request.inner)
             .await?;
         let response = self.send(built_request).await?;
+        let sent_bearer = wire_fragment(&response, sent_bearer);
 
         let status = response.status();
         let request_url = response.url().to_string();
@@ -2137,7 +2251,7 @@ impl SamplingClient {
         let bytes = read_body(response, status).await?;
 
         if !status.is_success() {
-            if status == reqwest::StatusCode::UNAUTHORIZED {
+            if status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 self.record_401_attribution(
                     crate::attribution::SamplingConsumer::Messages,
                     sent_bearer.as_deref(),
@@ -2279,6 +2393,7 @@ impl SamplingClient {
         let response = self
             .execute_stream_request(built_request, &mut span_timing)
             .await?;
+        let sent_bearer = wire_fragment(&response, sent_bearer);
 
         let status = response.status();
         let request_url = response.url().to_string();
@@ -2287,7 +2402,7 @@ impl SamplingClient {
             .record(STATUS_CODE, status.as_u16() as i64);
         span_timing.span().record(SUCCESS, status.is_success());
         if !status.is_success() {
-            if status == reqwest::StatusCode::UNAUTHORIZED {
+            if status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 span_timing.span().record(ERROR, "unauthorized (401)");
                 self.record_401_attribution(
                     crate::attribution::SamplingConsumer::MessagesStream,
@@ -2636,19 +2751,16 @@ impl SamplingClient {
         let built_request = builder
             .header(ACCEPT, HeaderValue::from_static("application/x-ndjson"))
             .json(&body)
-            .build()
-            .map_err(|e| {
-                tracing::error!("Failed to build HTTP request: {}", e);
-                SamplingError::Http(e)
-            })?;
+            .inspect_err(|e| tracing::error!("Failed to build HTTP request: {}", e))?;
         Self::log_request_headers(&built_request, "ollama");
 
         let response = self.send(built_request).await?;
+        let sent_bearer = wire_fragment(&response, sent_bearer);
 
         let status = response.status();
         let request_url = response.url().to_string();
         if !status.is_success() {
-            if status == reqwest::StatusCode::UNAUTHORIZED {
+            if status == xai_grok_net::StatusCode::UNAUTHORIZED {
                 self.record_401_attribution(
                     crate::attribution::SamplingConsumer::ChatCompletionsStream,
                     sent_bearer.as_deref(),
@@ -2807,7 +2919,9 @@ fn native_host_root(base_url: &str) -> String {
 }
 
 /// The text of an SSE stream failure, with the transport's full cause chain.
-fn sse_error_text(error: &eventsource_stream::EventStreamError<reqwest::Error>) -> String {
+fn sse_error_text<E: std::error::Error + 'static>(
+    error: &eventsource_stream::EventStreamError<E>,
+) -> String {
     match error {
         eventsource_stream::EventStreamError::Transport(inner) => error_chain(inner),
         other => other.to_string(),
@@ -2819,9 +2933,10 @@ fn sse_error_text(error: &eventsource_stream::EventStreamError<reqwest::Error>) 
 /// straddle some of them and the tail has to be carried across. The final
 /// line often arrives without a trailing newline, so what is left in the
 /// buffer at end of stream is a line too.
-fn ndjson_chunk_stream<S, B, T>(byte_stream: S) -> impl Stream<Item = Result<T>> + Send
+fn ndjson_chunk_stream<S, B, E, T>(byte_stream: S) -> impl Stream<Item = Result<T>> + Send
 where
-    S: Stream<Item = std::result::Result<B, reqwest::Error>> + Send + 'static,
+    S: Stream<Item = std::result::Result<B, E>> + Send + 'static,
+    E: std::error::Error + Send + 'static,
     B: AsRef<[u8]> + Send + 'static,
     T: serde::de::DeserializeOwned + Send + 'static,
 {
@@ -2884,12 +2999,12 @@ fn parse_ndjson_line<T: serde::de::DeserializeOwned>(line: &[u8]) -> Option<Resu
     }
 }
 
-/// Read a whole response body. The error that reqwest gives for a body that
+/// Read a whole response body. The error that request gives for a body that
 /// stops mid-read carries no status, so this logs the status that the
 /// headers already gave.
 async fn read_body(
-    response: reqwest::Response,
-    status: reqwest::StatusCode,
+    response: xai_grok_net::Response,
+    status: xai_grok_net::StatusCode,
 ) -> Result<bytes::Bytes> {
     let url = response.url().to_string();
     response.bytes().await.map_err(|error| {
@@ -2899,7 +3014,7 @@ async fn read_body(
             %error,
             "the response body could not be read"
         );
-        SamplingError::Http(error)
+        SamplingError::Http(error.into())
     })
 }
 
@@ -2943,8 +3058,8 @@ fn stream_collect_error(info: SamplingErrorInfo) -> SamplingError {
     SamplingError::Api {
         status: info
             .status_code
-            .and_then(|c| reqwest::StatusCode::from_u16(c).ok())
-            .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
+            .and_then(|c| xai_grok_net::StatusCode::from_u16(c).ok())
+            .unwrap_or(xai_grok_net::StatusCode::INTERNAL_SERVER_ERROR),
         message: info.message,
         model_metadata: info.model_metadata,
         retry_after_secs: info.retry_after_secs,
@@ -2997,21 +3112,21 @@ mod tests {
     /// standing; with no usable header at all the client states no wait.
     #[test]
     fn an_unusable_reset_header_does_not_replace_retry_after() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = xai_grok_net::header::HeaderMap::new();
         headers.insert(
-            reqwest::header::RETRY_AFTER,
-            reqwest::header::HeaderValue::from_static("60"),
+            xai_grok_net::header::RETRY_AFTER,
+            xai_grok_net::header::HeaderValue::from_static("60"),
         );
         headers.insert(
-            reqwest::header::HeaderName::from_static("x-ratelimit-reset-tokens"),
-            reqwest::header::HeaderValue::from_static("1e300"),
+            xai_grok_net::header::HeaderName::from_static("x-ratelimit-reset-tokens"),
+            xai_grok_net::header::HeaderValue::from_static("1e300"),
         );
         assert_eq!(extract_retry_after(&headers), Some(60));
 
-        let mut only_reset = reqwest::header::HeaderMap::new();
+        let mut only_reset = xai_grok_net::header::HeaderMap::new();
         only_reset.insert(
-            reqwest::header::HeaderName::from_static("x-ratelimit-reset-tokens"),
-            reqwest::header::HeaderValue::from_static("1e300"),
+            xai_grok_net::header::HeaderName::from_static("x-ratelimit-reset-tokens"),
+            xai_grok_net::header::HeaderValue::from_static("1e300"),
         );
         assert_eq!(extract_retry_after(&only_reset), None);
     }
@@ -3449,7 +3564,7 @@ mod tests {
             output_rate: None,
             credential: xai_grok_sampling_types::SentCredential::Unknown,
         };
-        // SamplingError is not PartialEq (it carries reqwest/serde errors), so destructure once and compare all fields in a single assert
+        // SamplingError is not PartialEq (it carries request/serde errors), so destructure once and compare all fields in a single assert
         let SamplingError::Api {
             status,
             message,
@@ -3592,7 +3707,7 @@ mod tests {
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
+        let server = xai_spawn::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
         let client = SamplingClient::new(SamplerConfig {
@@ -3698,7 +3813,7 @@ mod tests {
             .route("/v1/messages", handler);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
+        let server = xai_spawn::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
         let client = SamplingClient::new(SamplerConfig {
@@ -3877,30 +3992,30 @@ mod tests {
 
     #[test]
     fn extract_retry_after_parses_seconds() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::RETRY_AFTER, "30".parse().unwrap());
+        let mut headers = xai_grok_net::header::HeaderMap::new();
+        headers.insert(xai_grok_net::header::RETRY_AFTER, "30".parse().unwrap());
         assert_eq!(extract_retry_after(&headers), Some(30));
     }
 
     #[test]
     fn extract_retry_after_caps_at_120() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::RETRY_AFTER, "3600".parse().unwrap());
+        let mut headers = xai_grok_net::header::HeaderMap::new();
+        headers.insert(xai_grok_net::header::RETRY_AFTER, "3600".parse().unwrap());
         assert_eq!(extract_retry_after(&headers), Some(120));
     }
 
     #[test]
     fn extract_retry_after_zero_is_valid() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::RETRY_AFTER, "0".parse().unwrap());
+        let mut headers = xai_grok_net::header::HeaderMap::new();
+        headers.insert(xai_grok_net::header::RETRY_AFTER, "0".parse().unwrap());
         assert_eq!(extract_retry_after(&headers), Some(0));
     }
 
     #[test]
     fn extract_retry_after_ignores_http_date() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = xai_grok_net::header::HeaderMap::new();
         headers.insert(
-            reqwest::header::RETRY_AFTER,
+            xai_grok_net::header::RETRY_AFTER,
             "Fri, 31 Dec 2025 23:59:59 GMT".parse().unwrap(),
         );
         assert_eq!(extract_retry_after(&headers), None);
@@ -3908,7 +4023,7 @@ mod tests {
 
     #[test]
     fn extract_retry_after_none_when_missing() {
-        let headers = reqwest::header::HeaderMap::new();
+        let headers = xai_grok_net::header::HeaderMap::new();
         assert_eq!(extract_retry_after(&headers), None);
     }
 
@@ -3916,8 +4031,8 @@ mod tests {
     /// reset says when the tokens come back. The sooner one is the wait.
     #[test]
     fn a_token_bucket_reset_beats_the_whole_window() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::RETRY_AFTER, "60".parse().unwrap());
+        let mut headers = xai_grok_net::header::HeaderMap::new();
+        headers.insert(xai_grok_net::header::RETRY_AFTER, "60".parse().unwrap());
         headers.insert("x-ratelimit-reset-tokens-minute", "12.4".parse().unwrap());
         assert_eq!(
             extract_retry_after(&headers),
@@ -3930,7 +4045,7 @@ mod tests {
     /// not one of them and must not shorten a token wait.
     #[test]
     fn the_soonest_token_bucket_wins_and_requests_are_ignored() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = xai_grok_net::header::HeaderMap::new();
         headers.insert(
             "x-ratelimit-reset-uncached-tokens-minute",
             "18s".parse().unwrap(),
@@ -3942,50 +4057,50 @@ mod tests {
 
     #[test]
     fn a_token_reset_alone_is_the_wait() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = xai_grok_net::header::HeaderMap::new();
         headers.insert("x-ratelimit-reset-tokens-minute", "7".parse().unwrap());
         assert_eq!(extract_retry_after(&headers), Some(7));
     }
 
     #[test]
     fn an_unparseable_token_reset_leaves_retry_after_alone() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(reqwest::header::RETRY_AFTER, "45".parse().unwrap());
+        let mut headers = xai_grok_net::header::HeaderMap::new();
+        headers.insert(xai_grok_net::header::RETRY_AFTER, "45".parse().unwrap());
         headers.insert("x-ratelimit-reset-tokens-minute", "soon".parse().unwrap());
         assert_eq!(extract_retry_after(&headers), Some(45));
     }
 
     #[test]
     fn extract_should_retry_true() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = xai_grok_net::header::HeaderMap::new();
         headers.insert("x-should-retry", "true".parse().unwrap());
         assert_eq!(extract_should_retry(&headers), Some(true));
     }
 
     #[test]
     fn extract_should_retry_true_case_insensitive() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = xai_grok_net::header::HeaderMap::new();
         headers.insert("x-should-retry", "TRUE".parse().unwrap());
         assert_eq!(extract_should_retry(&headers), Some(true));
     }
 
     #[test]
     fn extract_should_retry_false() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = xai_grok_net::header::HeaderMap::new();
         headers.insert("x-should-retry", "false".parse().unwrap());
         assert_eq!(extract_should_retry(&headers), Some(false));
     }
 
     #[test]
     fn extract_should_retry_unknown_value_is_none() {
-        let mut headers = reqwest::header::HeaderMap::new();
+        let mut headers = xai_grok_net::header::HeaderMap::new();
         headers.insert("x-should-retry", "banana".parse().unwrap());
         assert_eq!(extract_should_retry(&headers), None);
     }
 
     #[test]
     fn extract_should_retry_absent_is_none() {
-        let headers = reqwest::header::HeaderMap::new();
+        let headers = xai_grok_net::header::HeaderMap::new();
         assert_eq!(extract_should_retry(&headers), None);
     }
 
@@ -4080,8 +4195,34 @@ mod tests {
         assert!(!url.contains("x/responses"), "url: {url}");
     }
 
-    #[test]
-    fn messages_plus_anthropic_api_key_uses_x_api_key_and_not_authorization() {
+    /// The headers a `post()` request carries on the wire, read by a loopback mock.
+    async fn wire_headers(client: &SamplingClient) -> axum::http::HeaderMap {
+        let (tx, rx) = oneshot::channel();
+        let tx = Arc::new(std::sync::Mutex::new(Some(tx)));
+        let app = Router::new().route(
+            "/v1/probe",
+            post(move |headers: axum::http::HeaderMap| {
+                let tx = tx.clone();
+                async move {
+                    let _ = tx.lock().unwrap().take().unwrap().send(headers);
+                    ""
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = xai_spawn::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        let SentRequest { builder, .. } = client.post(format!("http://{addr}/v1/probe"));
+        client.send(builder).await.expect("the mock answers");
+        let headers = rx.await.unwrap();
+        server.abort();
+        headers
+    }
+
+    #[tokio::test]
+    async fn messages_plus_anthropic_api_key_uses_x_api_key_and_not_authorization() {
         let cfg = SamplerConfig {
             api_key: Some("anthropic-key-abc123".to_string()),
             api_backend: ApiBackend::Messages,
@@ -4089,17 +4230,13 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        assert!(
-            client
-                .default_headers
-                .get(HeaderName::from_static("x-api-key"))
-                .is_some()
-        );
-        assert!(client.default_headers.get(AUTHORIZATION).is_none());
+        let headers = wire_headers(&client).await;
+        assert_eq!(header(&headers, X_API_KEY), Some("anthropic-key-abc123"));
+        assert!(headers.get(AUTHORIZATION).is_none());
     }
 
-    #[test]
-    fn messages_plus_bearer_uses_authorization_and_not_x_api_key() {
+    #[tokio::test]
+    async fn messages_plus_bearer_uses_authorization_and_not_x_api_key() {
         let cfg = SamplerConfig {
             api_key: Some("bearer-key-abc123".to_string()),
             api_backend: ApiBackend::Messages,
@@ -4107,17 +4244,44 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        assert!(client.default_headers.get(AUTHORIZATION).is_some());
+        let headers = wire_headers(&client).await;
+        assert_eq!(
+            header(&headers, AUTHORIZATION),
+            Some("Bearer bearer-key-abc123")
+        );
+        assert!(headers.get(X_API_KEY).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_configured_credential_header_is_sent_as_written_and_not_as_a_plain_header() {
+        let mut extra_headers = IndexMap::new();
+        extra_headers.insert(
+            "Authorization".to_string(),
+            "Basic dXNlcjpwdw==".to_string(),
+        );
+        extra_headers.insert("X-Corp".to_string(), "corp".to_string());
+        let cfg = SamplerConfig {
+            api_key: Some("overwritten-key".to_string()),
+            extra_headers,
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+        assert!(client.default_headers.get(AUTHORIZATION).is_none());
+        assert!(matches!(client.request_auth(), Auth::Configured(_)));
+        let headers = wire_headers(&client).await;
+        assert_eq!(header(&headers, AUTHORIZATION), Some("Basic dXNlcjpwdw=="));
+        assert_eq!(
+            header(&headers, HeaderName::from_static("x-corp")),
+            Some("corp")
+        );
         assert!(
-            client
-                .default_headers
-                .get(HeaderName::from_static("x-api-key"))
-                .is_none()
+            headers.get("x-bf-vk").is_none(),
+            "the overwritten key is not sent"
         );
     }
 
-    #[test]
-    fn no_auth_ignores_configured_key_and_live_bearer() {
+    #[tokio::test]
+    async fn no_auth_ignores_configured_key_and_live_bearer() {
         let cfg = SamplerConfig {
             api_key: Some("must-not-be-sent".to_string()),
             auth_scheme: AuthScheme::None,
@@ -4127,13 +4291,48 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let SentRequest { builder, .. } = client.post("https://example.test/v1/chat/completions");
-        let request = builder.build().expect("request should build");
+        let headers = wire_headers(&client).await;
 
-        assert!(request.headers().get(AUTHORIZATION).is_none());
-        assert!(request.headers().get("x-api-key").is_none());
+        assert!(headers.get(AUTHORIZATION).is_none());
+        assert!(headers.get("x-api-key").is_none());
+        assert!(headers.get("x-bf-vk").is_none());
         assert_eq!(client.auth_info().auth_type, "none");
         assert!(client.auth_info().auth_prefix.is_none());
+    }
+
+    #[tokio::test]
+    async fn api_key_is_copied_into_the_virtual_key_header() {
+        for scheme in [AuthScheme::Bearer, AuthScheme::XApiKey] {
+            let cfg = SamplerConfig {
+                api_key: Some("sk-gateway".to_string()),
+                auth_scheme: scheme,
+                ..minimal_config()
+            };
+            let client = SamplingClient::new(cfg).expect("client should build");
+            let headers = wire_headers(&client).await;
+            assert_eq!(
+                header(&headers, HeaderName::from_static("x-bf-vk")),
+                Some("sk-gateway"),
+                "{scheme:?}",
+            );
+        }
+    }
+
+    /// The live bearer is the xAI session. It replaces the stale seed, and it never
+    /// rides the virtual-key header, which a gateway reads.
+    #[tokio::test]
+    async fn live_bearer_replaces_the_virtual_key_header() {
+        let cfg = SamplerConfig {
+            api_key: Some("stale-seed".to_string()),
+            auth_scheme: AuthScheme::Bearer,
+            bearer_resolver: Some(std::sync::Arc::new(StaticBearerResolver("fresh-bearer"))),
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+        let headers = wire_headers(&client).await;
+        let values: Vec<_> = headers.get_all("x-bf-vk").iter().collect();
+        assert!(values.is_empty(), "{values:?}");
+        assert_eq!(header(&headers, AUTHORIZATION), Some("Bearer fresh-bearer"));
     }
 
     // Regression: a past change dropped User-Agent from sampling requests.
@@ -4160,8 +4359,7 @@ mod tests {
         let mut config = minimal_config();
         config.header_injector = Some(std::sync::Arc::new(TestInjector));
         let client = SamplingClient::new(config).expect("build");
-        let SentRequest { builder, .. } = client.post("http://localhost/test");
-        let req = builder.build().expect("build request");
+        let SentRequest { builder: req, .. } = client.post("http://localhost/test");
         assert!(
             req.headers().contains_key("traceparent"),
             "HeaderInjector should inject traceparent into post() requests"
@@ -4388,8 +4586,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn live_bearer_resolver_uses_authorization_for_messages_plus_bearer() {
+    #[tokio::test]
+    async fn live_bearer_resolver_uses_authorization_for_messages_plus_bearer() {
         let cfg = SamplerConfig {
             api_key: Some("stale-bearer".to_string()),
             api_backend: ApiBackend::Messages,
@@ -4398,21 +4596,16 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let SentRequest { builder, .. } = client.post("https://example.test/v1/messages");
-        let request = builder.build().expect("request should build");
-        let auth = request
-            .headers()
-            .get(AUTHORIZATION)
-            .and_then(|v| v.to_str().ok());
-        assert_eq!(auth, Some("Bearer fresh-bearer"));
-        assert!(request.headers().get("x-api-key").is_none());
+        let headers = wire_headers(&client).await;
+        assert_eq!(header(&headers, AUTHORIZATION), Some("Bearer fresh-bearer"));
+        assert!(headers.get("x-api-key").is_none());
     }
 
     /// Regression: `api_key` seeds `default_headers` with `Authorization: Bearer ...`.
     /// With a `bearer_resolver` also set, `post()` must produce exactly one `Authorization` header on the wire.
     /// `RequestBuilder::header(AUTHORIZATION, ...)` appends rather than replaces, causing two identical headers and a 400 from cli-chat-proxy.
-    #[test]
-    fn post_emits_single_authorization_with_api_key_and_bearer_resolver() {
+    #[tokio::test]
+    async fn post_emits_single_authorization_with_api_key_and_bearer_resolver() {
         let cfg = SamplerConfig {
             api_key: Some("stale-bearer".to_string()),
             api_backend: ApiBackend::Responses,
@@ -4421,24 +4614,19 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let SentRequest { builder, .. } = client.post("https://example.test/v1/responses");
-        let request = builder.build().expect("request should build");
-        let auth_count = request.headers().get_all(AUTHORIZATION).iter().count();
+        let headers = wire_headers(&client).await;
+        let auth_count = headers.get_all(AUTHORIZATION).iter().count();
         assert_eq!(
             auth_count, 1,
             "expected exactly one Authorization header, got {auth_count}"
         );
-        assert_eq!(
-            request
-                .headers()
-                .get(AUTHORIZATION)
-                .and_then(|v| v.to_str().ok()),
-            Some("Bearer fresh-bearer"),
-        );
+        assert_eq!(header(&headers, AUTHORIZATION), Some("Bearer fresh-bearer"));
     }
 
-    #[test]
-    fn live_bearer_resolver_uses_x_api_key_for_messages_plus_anthropic_api_key() {
+    /// The live bearer is the xAI session, and `xai-grok-net` sends it only as
+    /// `Authorization: Bearer`, whatever the key scheme. The stale key is not sent.
+    #[tokio::test]
+    async fn live_bearer_resolver_sends_the_session_for_messages_plus_anthropic_api_key() {
         let cfg = SamplerConfig {
             api_key: Some("stale-anthropic".to_string()),
             api_backend: ApiBackend::Messages,
@@ -4447,14 +4635,29 @@ mod tests {
             ..minimal_config()
         };
         let client = SamplingClient::new(cfg).expect("client should build");
-        let SentRequest { builder, .. } = client.post("https://example.test/v1/messages");
-        let request = builder.build().expect("request should build");
-        let api_key = request
-            .headers()
-            .get("x-api-key")
-            .and_then(|v| v.to_str().ok());
-        assert_eq!(api_key, Some("fresh-anthropic"));
-        assert!(request.headers().get(AUTHORIZATION).is_none());
+        let headers = wire_headers(&client).await;
+        assert_eq!(
+            header(&headers, AUTHORIZATION),
+            Some("Bearer fresh-anthropic")
+        );
+        assert!(headers.get("x-api-key").is_none());
+        assert!(headers.get("x-bf-vk").is_none());
+    }
+
+    /// The xAI session goes only to an xAI host. Nothing is sent to any other.
+    #[tokio::test]
+    async fn live_bearer_is_refused_for_a_host_xai_does_not_operate() {
+        let cfg = SamplerConfig {
+            bearer_resolver: Some(std::sync::Arc::new(StaticBearerResolver("session-x"))),
+            ..minimal_config()
+        };
+        let client = SamplingClient::new(cfg).expect("client should build");
+        let SentRequest { builder, .. } = client.post("https://example.test/v1/responses");
+        let err = client.send(builder).await.expect_err("must be refused");
+        match err {
+            SamplingError::Http(e) => assert!(e.auth_refusal().is_some(), "{e}"),
+            other => panic!("expected a refusal, got {other}"),
+        }
     }
 
     /// The callback receives the `post()`-captured fragment only; the full bearer never crosses the crate boundary.
@@ -4516,8 +4719,8 @@ mod tests {
 
     /// A wired bearer_resolver that returns `None` means a hard-expired session with no live access token.
     /// Default Authorization / x-api-key must be stripped so a stale seed key cannot ride the wire.
-    #[test]
-    fn bearer_resolver_none_strips_default_authorization() {
+    #[tokio::test]
+    async fn bearer_resolver_none_strips_default_authorization() {
         #[derive(Debug)]
         struct EmptyResolver;
         impl crate::config::BearerResolver for EmptyResolver {
@@ -4534,15 +4737,15 @@ mod tests {
         };
         let client = SamplingClient::new(cfg).expect("client should build");
         let SentRequest {
-            builder,
-            sent_bearer: sent,
+            sent_bearer: sent, ..
         } = client.post("https://example.test/v1/responses");
-        let request = builder.body("").build().expect("request should build");
         assert_eq!(sent, None, "capture must agree: nothing was sent");
+        let headers = wire_headers(&client).await;
         assert!(
-            request.headers().get(AUTHORIZATION).is_none(),
+            headers.get(AUTHORIZATION).is_none(),
             "stale default Authorization must not be sent when resolver is empty"
         );
+        assert!(headers.get("x-bf-vk").is_none());
     }
 
     /// `response.completed` carrying `usage.context_details.{input_tokens, output_tokens}` rewrites `usage.total_tokens` in place.

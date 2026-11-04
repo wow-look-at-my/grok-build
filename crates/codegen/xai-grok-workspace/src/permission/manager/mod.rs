@@ -478,7 +478,7 @@ pub fn spawn_permission_manager_with_pin(
     let user_prompt_notify = Arc::new(Mutex::new(None::<mpsc::UnboundedSender<()>>));
     let user_prompt_notify_actor = user_prompt_notify.clone();
 
-    let _task = tokio::task::spawn_local(async move {
+    let _task = xai_spawn::spawn_local(async move {
         let client_id_ref = client_identifier.as_deref();
         let (mut store, mut state) =
             crate::permission::state::CachedStateStore::resolve_and_load(&cwd, client_id_ref).await;
@@ -704,7 +704,7 @@ pub fn spawn_permission_manager_with_pin(
                                 let ambient_risk = match plan {
                                     AmbientScanPlan::FailClosed => true,
                                     plan @ AmbientScanPlan::CheckDirs(_) => {
-                                        tokio::task::spawn_blocking(move || {
+                                        xai_spawn::spawn_blocking(move || {
                                             ambient_exec_risk_from_plan(&plan)
                                         })
                                         .await
@@ -2581,7 +2581,7 @@ mod tests {
         remember_tool_approvals: bool,
     ) -> (PermissionHandle, mpsc::UnboundedReceiver<PermissionEvent>) {
         let (gateway, receiver) = xai_acp_lib::acp_gateway::<acp::AgentSide, _>(client);
-        tokio::task::spawn_local(receiver.run());
+        xai_spawn::spawn_local(receiver.run());
         spawn_permission_manager_with_pin(
             acp::SessionId::new(Arc::from("test-session")),
             gateway,
@@ -2644,7 +2644,7 @@ mod tests {
         local
             .run_until(async {
                 let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<PermissionCommand>();
-                tokio::task::spawn_local(async move {
+                xai_spawn::spawn_local(async move {
                     while let Some(cmd) = cmd_rx.recv().await {
                         if let PermissionCommand::Request { respond_to, .. } = cmd {
                             drop(respond_to);
@@ -3496,7 +3496,7 @@ mod tests {
             web_fetch_allowed_domains: Vec<String>,
         ) -> (PermissionHandle, mpsc::UnboundedReceiver<PermissionEvent>) {
             let (gateway, receiver) = xai_acp_lib::acp_gateway::<acp::AgentSide, _>(client);
-            tokio::task::spawn_local(receiver.run());
+            xai_spawn::spawn_local(receiver.run());
             spawn_permission_manager_with_pin(
                 acp::SessionId::new(Arc::from("test-session")),
                 gateway,
@@ -5364,7 +5364,7 @@ mod tests {
                     prompts: prompts.clone(),
                 };
                 let (gateway, receiver) = xai_acp_lib::acp_gateway::<acp::AgentSide, _>(client);
-                tokio::task::spawn_local(receiver.run());
+                xai_spawn::spawn_local(receiver.run());
                 let (mgr, _events) = spawn_permission_manager_with_pin(
                     acp::SessionId::new(Arc::from("test-session")),
                     gateway,
@@ -5532,7 +5532,7 @@ mod tests {
                     gate: gate.clone(),
                 };
                 let (gateway, receiver) = xai_acp_lib::acp_gateway::<acp::AgentSide, _>(client);
-                tokio::task::spawn_local(receiver.run());
+                xai_spawn::spawn_local(receiver.run());
                 let (mgr, mut events) = spawn_permission_manager_with_pin(
                     acp::SessionId::new(Arc::from("test-session")),
                     gateway,
@@ -5549,7 +5549,7 @@ mod tests {
                 );
 
                 let mgr_a = mgr.clone();
-                let a = tokio::task::spawn_local(async move {
+                let a = xai_spawn::spawn_local(async move {
                     decide(
                         &mgr_a,
                         AccessKind::Bash("curl http://a.example.com".into()),
@@ -5572,7 +5572,7 @@ mod tests {
                     "exactly one prompt must be in flight before B is sent"
                 );
                 let mgr_b = mgr.clone();
-                let b = tokio::task::spawn_local(async move {
+                let b = xai_spawn::spawn_local(async move {
                     decide(
                         &mgr_b,
                         AccessKind::Bash("curl http://b.example.com".into()),
@@ -5864,7 +5864,7 @@ mod tests {
 
     fn evil_repo() -> (tempfile::TempDir, AbsPathBuf) {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         std::fs::write(
             tmp.path().join(".git/config"),
             "[core]\nfsmonitor = /tmp/pwn\n",
@@ -5876,7 +5876,7 @@ mod tests {
 
     fn clean_repo() -> (tempfile::TempDir, AbsPathBuf) {
         let tmp = tempfile::tempdir().unwrap();
-        git2::Repository::init(tmp.path()).unwrap();
+        crate::test_git::init(tmp.path());
         std::fs::write(
             tmp.path().join(".git/config"),
             "[core]\n\trepositoryformatversion = 0\n\tfsmonitor = true\n",

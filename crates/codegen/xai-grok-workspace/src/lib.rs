@@ -1,4 +1,5 @@
 #![allow(clippy::cast_lossless)] // Hits predate the gate
+// lib.rs holds the lib code.
 #![allow(clippy::cast_possible_truncation)] // Hits predate the gate
 #![allow(clippy::cast_possible_wrap)] // Hits predate the gate
 #![allow(clippy::cast_precision_loss)]
@@ -28,6 +29,7 @@ pub mod folder_trust;
 pub mod fs_notify;
 pub(crate) mod git_content_filters;
 pub(crate) mod git_odb;
+pub mod git_repo;
 pub mod handle;
 pub mod host_kind;
 pub mod hub;
@@ -51,6 +53,8 @@ pub mod rpc_envelope;
 pub mod session;
 pub mod status_config;
 pub(crate) mod telemetry;
+#[cfg(test)]
+pub(crate) mod test_git;
 pub use status_config::{ProactiveRefreshConfig, StatusConfig};
 pub mod trust;
 pub(crate) mod upload;
