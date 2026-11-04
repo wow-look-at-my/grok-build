@@ -154,6 +154,8 @@ shellexpand = "3.1"
 # in spawn_blocking; the render path never touches git directly).
 gix = { workspace = true, features = ["status", "blob-diff"] }
 xai-gix-status = { workspace = true }
+# Branch stats rescan the work tree only after the watcher reports a change.
+xai-fsnotify = { workspace = true }
 urlencoding = { workspace = true }
 
 # Parsing (web_search)

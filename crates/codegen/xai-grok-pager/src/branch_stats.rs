@@ -3,7 +3,8 @@ use std::collections::HashMap;
 
 use gix::bstr::ByteSlice;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -47,8 +48,9 @@ fn spawn_refresh(cwd: PathBuf) {
     };
     xai_spawn::spawn_blocking_on(&handle, move || {
         // A panic in the git read must not take down the pager.
-        let stats =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compute_branch_stats(&cwd)));
+        let stats = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            compute(&cwd, LineStats::Cached)
+        }));
         let stats = match stats {
             Ok(Ok(stats)) => stats,
             Ok(Err(e)) => {
@@ -82,6 +84,19 @@ fn insert(cache: &mut HashMap<PathBuf, CacheEntry>, key: PathBuf, entry: CacheEn
 /// Compute the stats for the repository that contains `cwd`. `Ok(None)` means
 /// `cwd` is not in a repository or HEAD has no commit yet.
 pub fn compute_branch_stats(cwd: &Path) -> anyhow::Result<Option<BranchStats>> {
+    compute(cwd, LineStats::Fresh)
+}
+
+/// How [`compute`] gets the line counts.
+#[derive(Clone, Copy)]
+enum LineStats {
+    /// Scan the work tree now.
+    Fresh,
+    /// Reuse the last scan until the work tree changes.
+    Cached,
+}
+
+fn compute(cwd: &Path, line_stats: LineStats) -> anyhow::Result<Option<BranchStats>> {
     let Ok(repo) = xai_grok_workspace::git_repo::discover(cwd) else {
         return Ok(None);
     };
@@ -106,7 +121,11 @@ pub fn compute_branch_stats(cwd: &Path) -> anyhow::Result<Option<BranchStats>> {
     }
 
     if !repo.is_bare() {
-        let (insertions, deletions) = worktree_line_stats(&repo, head_commit.tree_id()?.detach())?;
+        let head_tree = head_commit.tree_id()?.detach();
+        let (insertions, deletions) = match line_stats {
+            LineStats::Fresh => worktree_line_stats(&repo, head_tree)?,
+            LineStats::Cached => cached_line_stats(&repo, head_tree)?,
+        };
         stats.insertions = insertions;
         stats.deletions = deletions;
     }
@@ -199,6 +218,153 @@ fn worktree_line_stats(
         }
     }
     Ok((insertions, deletions))
+}
+
+/// A line count is a full work-tree scan, the same work as `git status`. The scan uses several cores.
+const UNWATCHED_SCAN_INTERVAL: Duration = Duration::from_secs(60);
+
+/// The last line count for one work tree.
+struct WorktreeScan {
+    head_tree: gix::ObjectId,
+    counts: (usize, usize),
+    at: Instant,
+    scans: u64,
+    watch: Option<WorktreeWatch>,
+}
+
+impl WorktreeScan {
+    fn is_current(&self, head_tree: gix::ObjectId) -> bool {
+        if self.head_tree != head_tree {
+            return false;
+        }
+        match &self.watch {
+            Some(watch) if watch.live.load(Ordering::Acquire) => {
+                !watch.stale.load(Ordering::Acquire)
+            }
+            _ => self.at.elapsed() < UNWATCHED_SCAN_INTERVAL,
+        }
+    }
+}
+
+/// Sets `stale` on each file or git-metadata event in the work tree. The watcher
+/// skips ignored paths, so a build output does not cause a scan.
+struct WorktreeWatch {
+    stale: Arc<AtomicBool>,
+    /// False after the event stream closes. The scan then falls back to the interval.
+    live: Arc<AtomicBool>,
+    task: tokio::task::AbortHandle,
+}
+
+impl Drop for WorktreeWatch {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+impl WorktreeWatch {
+    /// The source is the process-wide shared watcher, so a session that already
+    /// watches this directory adds no OS watches.
+    fn start(workdir: &Path) -> anyhow::Result<Self> {
+        let handle = tokio::runtime::Handle::try_current()?;
+        let source =
+            xai_fsnotify::shared(workdir.to_path_buf(), xai_fsnotify::FsConfig::default())?;
+        let mut events = source.subscribe();
+        let stale = Arc::new(AtomicBool::new(false));
+        let live = Arc::new(AtomicBool::new(true));
+        let (task_stale, task_live) = (stale.clone(), live.clone());
+        let task = xai_spawn::spawn_on(&handle, async move {
+            let _source = source;
+            loop {
+                match events.recv().await {
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        task_stale.store(true, Ordering::Release);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        task_live.store(false, Ordering::Release);
+                        return;
+                    }
+                }
+            }
+        });
+        Ok(Self {
+            stale,
+            live,
+            task: task.abort_handle(),
+        })
+    }
+}
+
+static SCANS: LazyLock<Mutex<HashMap<PathBuf, WorktreeScan>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// [`worktree_line_stats`], reused until the watcher reports a change or HEAD moves.
+/// The status bar asks every [`REFRESH_TTL`], so a scan on each request keeps
+/// cores busy on an idle session.
+fn cached_line_stats(
+    repo: &gix::Repository,
+    head_tree: gix::ObjectId,
+) -> anyhow::Result<(usize, usize)> {
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| anyhow::anyhow!("bare repository"))?
+        .to_path_buf();
+    let (watch, scans) = {
+        let mut map = SCANS
+            .lock()
+            .map_err(|_| anyhow::anyhow!("scan cache poisoned"))?;
+        match map.get(&workdir) {
+            Some(scan) if scan.is_current(head_tree) => return Ok(scan.counts),
+            _ => {}
+        }
+        let previous = map.remove(&workdir);
+        let scans = previous.as_ref().map_or(0, |scan| scan.scans);
+        let watch = previous
+            .and_then(|mut scan| scan.watch.take())
+            .filter(|watch| watch.live.load(Ordering::Acquire));
+        (watch, scans)
+    };
+    let watch = match watch {
+        Some(watch) => Some(watch),
+        None => match WorktreeWatch::start(&workdir) {
+            Ok(watch) => Some(watch),
+            Err(e) => {
+                tracing::warn!(
+                    workdir = %workdir.display(),
+                    error = %e,
+                    "no file watcher for the status-bar line counts; they refresh every {}s",
+                    UNWATCHED_SCAN_INTERVAL.as_secs()
+                );
+                None
+            }
+        },
+    };
+    // Clear the flag before the scan, so an edit during the scan causes the next one.
+    if let Some(watch) = &watch {
+        watch.stale.store(false, Ordering::Release);
+    }
+    let counts = worktree_line_stats(repo, head_tree)?;
+    let mut map = SCANS
+        .lock()
+        .map_err(|_| anyhow::anyhow!("scan cache poisoned"))?;
+    if map.len() >= CACHE_CAP
+        && let Some(oldest) = map
+            .iter()
+            .min_by_key(|(_, scan)| scan.at)
+            .map(|(k, _)| k.clone())
+    {
+        map.remove(&oldest);
+    }
+    map.insert(
+        workdir,
+        WorktreeScan {
+            head_tree,
+            counts,
+            at: Instant::now(),
+            scans: scans + 1,
+            watch,
+        },
+    );
+    Ok(counts)
 }
 
 #[cfg(unix)]
@@ -363,6 +529,70 @@ mod tests {
         git(tmp.path(), &["init", "-q", "-b", "master"]);
         commit_file(tmp.path(), "a.txt", "one\n");
         tmp
+    }
+
+    async fn cached(dir: &Path) -> (BranchStats, u64) {
+        let dir = dir.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let stats = compute(&dir, LineStats::Cached).unwrap().unwrap();
+            let repo = xai_grok_workspace::git_repo::discover(&dir).unwrap();
+            let workdir = repo.workdir().unwrap().to_path_buf();
+            let scans = SCANS.lock().unwrap().get(&workdir).map_or(0, |s| s.scans);
+            (stats, scans)
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_unchanged_work_tree_is_not_scanned_again() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+
+        let (stats, scans) = cached(dir).await;
+        assert_eq!((stats.insertions, scans), (0, 1));
+        for _ in 0..5 {
+            let (_, scans) = cached(dir).await;
+            assert_eq!(
+                scans, 1,
+                "a refresh with no change must reuse the last scan"
+            );
+        }
+
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let (stats, _) = cached(dir).await;
+            if stats.insertions == 1 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the watcher never reported the edit"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        // The events of one write can arrive in more than one batch. Let them settle.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let (_, settled) = cached(dir).await;
+        for _ in 0..5 {
+            let (_, scans) = cached(dir).await;
+            assert_eq!(scans, settled, "a quiet work tree is not scanned again");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_commit_rescans_the_work_tree() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        let (stats, _) = cached(dir).await;
+        assert_eq!(stats.insertions, 1);
+
+        git(dir, &["commit", "-qam", "two"]);
+        let (stats, _) = cached(dir).await;
+        assert_eq!(stats.insertions, 0, "a new HEAD tree forces a scan");
     }
 
     #[test]
