@@ -56,37 +56,26 @@ async fn a_watched_root_with_no_change_is_not_walked_again() {
     };
 
     gate.run(&root, status_op(), walk.clone()).await.unwrap();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    while super::current_root_changes(&root).is_none() {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the watcher never started"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    tokio::time::sleep(ttl * 2).await;
-    gate.run(&root, status_op(), walk.clone()).await.unwrap();
-    assert_eq!(
-        walks.load(Ordering::SeqCst),
-        2,
-        "the first snapshot had no watcher count"
+    assert!(
+        super::current_root_changes(&root).is_some(),
+        "the first walk waits for the watcher"
     );
-
     for _ in 0..5 {
         tokio::time::sleep(ttl * 2).await;
         gate.run(&root, status_op(), walk.clone()).await.unwrap();
     }
     assert_eq!(
         walks.load(Ordering::SeqCst),
-        2,
-        "a poll past the TTL of an unchanged root reuses the snapshot"
+        1,
+        "a poll past the TTL of an unchanged root reuses the first walk"
     );
 
     std::fs::write(repo.path().join("README"), "changed\n").unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
     loop {
         tokio::time::sleep(ttl).await;
         gate.run(&root, status_op(), walk.clone()).await.unwrap();
-        if walks.load(Ordering::SeqCst) == 3 {
+        if walks.load(Ordering::SeqCst) == 2 {
             break;
         }
         assert!(

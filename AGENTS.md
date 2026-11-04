@@ -55,7 +55,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## Git status reuse in `git_gate`
 
 - `git_gate` joins same status and diff walks and keeps the result for `SNAPSHOT_TTL`. A client that polls `x.ai/git/status` slower than that walked the whole tree, and ran `git branch`, `rev-parse` and `remote get-url`, on every poll.
-- Each snapshot records the root's `xai_fsnotify::ChangeCounter` count from before its walk. While the count is unchanged, the snapshot serves requests up to `WATCHED_SNAPSHOT_MAX_AGE`. The watcher starts off-thread on the first walk of a root. `with_config` turns the reuse off, so the older gate tests keep their TTL semantics.
+- Each snapshot records the root's `xai_fsnotify::ChangeCounter` count from before its walk. While the count is unchanged, the snapshot serves requests up to `WATCHED_SNAPSHOT_MAX_AGE`. The first walk of a root waits for its watcher to start, so a poll right after it reuses that walk. `with_config` turns the reuse off, so the older gate tests keep their TTL semantics.
 
 ## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
 

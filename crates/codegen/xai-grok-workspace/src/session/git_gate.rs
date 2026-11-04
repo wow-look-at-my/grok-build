@@ -100,9 +100,10 @@ enum RootWatch {
 static ROOT_WATCHES: LazyLock<Mutex<HashMap<PathBuf, RootWatch>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// The watcher count for `root`. Starts the watcher off-thread on first use,
-/// so the first walks of a root get `None` and keep only the short TTL.
-fn root_changes(root: &Path) -> Option<u64> {
+/// The watcher count for `root`. The first walk of a root waits for its
+/// watcher to start, so a poll right after it can reuse that walk. A walk
+/// that runs while another starts the watcher gets `None`.
+async fn root_changes(root: &Path) -> Option<u64> {
     let mut watches = ROOT_WATCHES.lock();
     match watches.get(root) {
         Some(RootWatch::Live(counter)) => {
@@ -127,7 +128,7 @@ fn root_changes(root: &Path) -> Option<u64> {
     watches.insert(root.to_path_buf(), RootWatch::Starting);
     drop(watches);
     let root = root.to_path_buf();
-    xai_spawn::spawn_blocking_on(&handle, move || {
+    let started = xai_spawn::spawn_blocking_on(&handle, move || {
         let watch = match xai_fsnotify::ChangeCounter::start(&root) {
             Ok(counter) => RootWatch::Live(counter),
             Err(error) => {
@@ -140,9 +141,14 @@ fn root_changes(root: &Path) -> Option<u64> {
                 RootWatch::Failed(Instant::now())
             }
         };
+        let count = match &watch {
+            RootWatch::Live(counter) => counter.current(),
+            _ => None,
+        };
         ROOT_WATCHES.lock().insert(root, watch);
+        count
     });
-    None
+    started.await.ok().flatten()
 }
 
 /// The current count, without a start of a watcher.
@@ -539,18 +545,19 @@ impl GitGate {
         // Status and diff walks are not cooperative; aborting this task would drop the ODB permit while spawn_blocking still preads packs
         // Waiters time out locally; the walk stays attached to the slot until it ends
         let this = self.clone();
-        // Read the count before the walk, so an edit during the walk makes the snapshot stale.
-        let changes = (self.inner.watched_max_age > Duration::ZERO)
-            .then(|| root_changes(&key.root))
-            .flatten();
+        let watched = self.inner.watched_max_age > Duration::ZERO;
         xai_spawn::spawn(async move {
             let mut publisher = InflightPublisher {
                 gate: this.clone(),
                 key,
                 tx: Some(tx),
                 epoch,
-                changes,
+                changes: None,
             };
+            // Read the count before the walk, so an edit during the walk makes the snapshot stale.
+            if watched {
+                publisher.changes = root_changes(&publisher.key.root).await;
+            }
             let outcome = this.execute_walk(walk.as_ref()).await;
             publisher.complete(outcome);
         });
