@@ -43,7 +43,7 @@ fn scanner_strips_escapes_and_records_link_columns() {
             "an st-terminated link whose colour paints no columns",
             "\x1b]8;;https://example.invalid\x1b\\\x1b[32mexample.invalid\x1b[0m\x1b]8;;\x1b\\",
             "\x1b[32mexample.invalid\x1b[0m",
-            &[(0, 4, "https://example.invalid")],
+            &[(0, 15, "https://example.invalid")],
         ),
         (
             "two links on one line",
@@ -103,7 +103,7 @@ fn link_on_the_second_line_is_measured_from_that_line() {
     // Column 4 of the second line, not column 10 of the whole text.
     assert_eq!(
         (link.line, link.col_start, link.col_end, &*link.url),
-        (1, 4, 8, "https://example.invalid")
+        (1, 4, 19, "https://example.invalid")
     );
 }
 

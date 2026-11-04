@@ -1307,7 +1307,7 @@ mod tests {
 
         assert_eq!(overlay.links().len(), 1);
         assert_eq!(nth_link(&overlay, 0).col_start, 10);
-        assert_eq!(nth_link(&overlay, 0).col_end, 10 + 12);
+        assert_eq!(nth_link(&overlay, 0).col_end, 10 + 23);
     }
 
     // ── File path detection ──

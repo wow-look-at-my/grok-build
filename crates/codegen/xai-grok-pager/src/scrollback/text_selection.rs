@@ -2981,7 +2981,7 @@ mod tests {
             semantic(&urls, 0, 6),
             SemanticSelection {
                 anchor: ep(0, 4),
-                head: ep(0, 15),
+                head: ep(0, 26),
                 text: "https://example.invalid".to_string(),
             }
         );
