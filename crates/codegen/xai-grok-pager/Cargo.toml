@@ -155,7 +155,7 @@ shellexpand = "3.1"
 gix = { workspace = true, features = ["status", "blob-diff"] }
 xai-gix-status = { workspace = true }
 # Branch stats rescan the work tree only after the watcher reports a change.
-xai-fsnotify = { workspace = true }
+xai-fsnotify = { path = "../xai-fsnotify" }
 urlencoding = { workspace = true }
 
 # Parsing (web_search)
