@@ -82,6 +82,75 @@ struct Snapshot {
     value: Arc<dyn Any + Send + Sync>,
     taken_at: Instant,
     epoch: u64,
+    /// The root's watcher count before the walk. See [`WATCHED_SNAPSHOT_MAX_AGE`].
+    changes: Option<u64>,
+}
+
+pub const WATCHED_SNAPSHOT_MAX_AGE: Duration = Duration::from_secs(30);
+
+/// After a watcher fails to start, the gate tries again at this interval.
+const WATCH_RETRY: Duration = Duration::from_secs(60);
+
+enum RootWatch {
+    Starting,
+    Live(xai_fsnotify::ChangeCounter),
+    Failed(Instant),
+}
+
+static ROOT_WATCHES: LazyLock<Mutex<HashMap<PathBuf, RootWatch>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The watcher count for `root`. Starts the watcher off-thread on first use,
+/// so the first walks of a root get `None` and keep only the short TTL.
+fn root_changes(root: &Path) -> Option<u64> {
+    let mut watches = ROOT_WATCHES.lock();
+    match watches.get(root) {
+        Some(RootWatch::Live(counter)) => {
+            if let Some(count) = counter.current() {
+                return Some(count);
+            }
+            tracing::warn!(root = %root.display(), "git_gate: the file watcher stopped; restarting it");
+        }
+        Some(RootWatch::Starting) => return None,
+        Some(RootWatch::Failed(at)) if at.elapsed() < WATCH_RETRY => return None,
+        _ => {}
+    }
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return None;
+    };
+    if watches.len() >= MAX_SLOTS && !watches.contains_key(root) {
+        watches.retain(|_, watch| !matches!(watch, RootWatch::Failed(_)));
+        if watches.len() >= MAX_SLOTS {
+            return None;
+        }
+    }
+    watches.insert(root.to_path_buf(), RootWatch::Starting);
+    drop(watches);
+    let root = root.to_path_buf();
+    xai_spawn::spawn_blocking_on(&handle, move || {
+        let watch = match xai_fsnotify::ChangeCounter::start(&root) {
+            Ok(counter) => RootWatch::Live(counter),
+            Err(error) => {
+                tracing::warn!(
+                    root = %root.display(),
+                    %error,
+                    "git_gate: no file watcher; status snapshots expire after {}s",
+                    SNAPSHOT_TTL.as_secs()
+                );
+                RootWatch::Failed(Instant::now())
+            }
+        };
+        ROOT_WATCHES.lock().insert(root, watch);
+    });
+    None
+}
+
+/// The current count, without a start of a watcher.
+fn current_root_changes(root: &Path) -> Option<u64> {
+    match ROOT_WATCHES.lock().get(root) {
+        Some(RootWatch::Live(counter)) => counter.current(),
+        _ => None,
+    }
 }
 
 struct Inflight {
@@ -114,6 +183,8 @@ struct GateState {
 struct GitGateInner {
     odb: OdbLimiter,
     snapshot_ttl: Duration,
+    /// [`Duration::ZERO`] turns off the watcher-backed reuse.
+    watched_max_age: Duration,
     walk_timeout: Duration,
     state: Mutex<GateState>,
 }
@@ -150,12 +221,14 @@ struct InflightPublisher {
     key: FlightKey,
     tx: Option<watch::Sender<Option<WalkOutcome>>>,
     epoch: u64,
+    changes: Option<u64>,
 }
 
 impl InflightPublisher {
     fn complete(&mut self, outcome: WalkOutcome) {
         if let Some(tx) = self.tx.take() {
-            self.gate.publish(&self.key, tx, self.epoch, outcome);
+            self.gate
+                .publish(&self.key, tx, self.epoch, self.changes, outcome);
         }
     }
 }
@@ -167,6 +240,7 @@ impl Drop for InflightPublisher {
                 &self.key,
                 tx,
                 self.epoch,
+                self.changes,
                 Err(Arc::from("git walk cancelled")),
             );
         }
@@ -194,6 +268,7 @@ impl GitGate {
             inner: Arc::new(GitGateInner {
                 odb: git_odb::shared().clone(),
                 snapshot_ttl: SNAPSHOT_TTL,
+                watched_max_age: WATCHED_SNAPSHOT_MAX_AGE,
                 walk_timeout: WALK_TIMEOUT,
                 state: Mutex::new(GateState::default()),
             }),
@@ -211,10 +286,37 @@ impl GitGate {
             inner: Arc::new(GitGateInner {
                 odb: OdbLimiter::new(odb_permits, odb_acquire_wait),
                 snapshot_ttl,
+                watched_max_age: Duration::ZERO,
                 walk_timeout,
                 state: Mutex::new(GateState::default()),
             }),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_watched_max_age(self, watched_max_age: Duration) -> Self {
+        let inner = Arc::into_inner(self.inner).expect("gate not yet shared");
+        Self {
+            inner: Arc::new(GitGateInner {
+                watched_max_age,
+                ..inner
+            }),
+        }
+    }
+
+    /// A snapshot serves a request when its epoch is current and it is younger than the TTL.
+    /// An older one serves when the root's watcher counted no event since its walk began.
+    fn is_fresh(&self, root: &Path, snapshot: &Snapshot, epoch: u64) -> bool {
+        if snapshot.epoch != epoch {
+            return false;
+        }
+        let age = snapshot.taken_at.elapsed();
+        if age < self.inner.snapshot_ttl {
+            return true;
+        }
+        age < self.inner.watched_max_age
+            && snapshot.changes.is_some()
+            && current_root_changes(root) == snapshot.changes
     }
 
     pub async fn acquire_odb(&self) -> Result<OdbPermit> {
@@ -305,13 +407,11 @@ impl GitGate {
         let mut state = self.inner.state.lock();
         evict_slots(&mut state, self.inner.snapshot_ttl, Some(key));
         let epoch = state.epochs.get(&key.root).copied().unwrap_or(0);
-        let ttl = self.inner.snapshot_ttl;
         let slot = state.slots.entry(key.clone()).or_default();
         slot.last_used = Instant::now();
 
         if let Some(snapshot) = &slot.snapshot
-            && snapshot.epoch == epoch
-            && snapshot.taken_at.elapsed() < ttl
+            && self.is_fresh(&key.root, snapshot, epoch)
         {
             return Decision::Snapshot(Arc::clone(&snapshot.value));
         }
@@ -352,9 +452,8 @@ impl GitGate {
     fn live_snapshot(&self, key: &FlightKey) -> Option<Arc<dyn Any + Send + Sync>> {
         let state = self.inner.state.lock();
         let epoch = state.epochs.get(&key.root).copied().unwrap_or(0);
-        let ttl = self.inner.snapshot_ttl;
         let snapshot = state.slots.get(key)?.snapshot.as_ref()?;
-        if snapshot.epoch == epoch && snapshot.taken_at.elapsed() < ttl {
+        if self.is_fresh(&key.root, snapshot, epoch) {
             Some(Arc::clone(&snapshot.value))
         } else {
             None
@@ -396,6 +495,7 @@ impl GitGate {
         key: &FlightKey,
         tx: watch::Sender<Option<WalkOutcome>>,
         epoch: u64,
+        changes: Option<u64>,
         outcome: WalkOutcome,
     ) {
         let mut state = self.inner.state.lock();
@@ -411,6 +511,7 @@ impl GitGate {
                 value: Arc::clone(value),
                 taken_at: Instant::now(),
                 epoch,
+                changes,
             });
         }
 
@@ -438,12 +539,17 @@ impl GitGate {
         // Status and diff walks are not cooperative; aborting this task would drop the ODB permit while spawn_blocking still preads packs
         // Waiters time out locally; the walk stays attached to the slot until it ends
         let this = self.clone();
+        // Read the count before the walk, so an edit during the walk makes the snapshot stale.
+        let changes = (self.inner.watched_max_age > Duration::ZERO)
+            .then(|| root_changes(&key.root))
+            .flatten();
         xai_spawn::spawn(async move {
             let mut publisher = InflightPublisher {
                 gate: this.clone(),
                 key,
                 tx: Some(tx),
                 epoch,
+                changes,
             };
             let outcome = this.execute_walk(walk.as_ref()).await;
             publisher.complete(outcome);

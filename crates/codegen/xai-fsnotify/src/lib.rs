@@ -7,6 +7,7 @@
 
 #![deny(clippy::indexing_slicing)]
 
+mod change_counter;
 mod checkout;
 mod error;
 mod event;
@@ -21,6 +22,7 @@ mod state;
 mod vcs;
 mod watcher;
 
+pub use change_counter::ChangeCounter;
 pub use checkout::watch_root_covers;
 pub use error::FsNotifyError;
 pub use event::{FsEvent, FsEventKind, GitMetaKind};

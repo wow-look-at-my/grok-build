@@ -50,7 +50,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - Ahead/behind is against the branch the checkout tracks. The order is: the checked-out branch's configured upstream, including the same-named remote-tracking branch, the reflog's `branch: Created from X`, `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. The current branch's local ref is never its own base, so a branch tracking `origin/<name>` compares against that remote copy.
 - The +/- counts are the working tree against HEAD: staged, unstaged, and untracked files git does not ignore.
 - The diff reads the working tree. It runs off-thread behind a 5 s throttle in its own cache, not on the render path.
-- The +/- counts are a full work-tree scan, as costly as `git status`. A refresh reuses the last scan until the shared `xai_fsnotify` watcher reports an event or the HEAD tree changes (`cached_line_stats`). With no watcher, the scan runs at most once each `UNWATCHED_SCAN_INTERVAL`, and a warning names the cause. Never scan on each refresh: every idle pager then keeps several cores busy.
+- The +/- counts are a full work-tree scan, as costly as `git status`. A refresh reuses the last scan until the shared watcher's `ChangeCounter` moves or the HEAD tree changes (`cached_line_stats`). With no watcher, the scan runs at most once each `UNWATCHED_SCAN_INTERVAL`, and a warning names the cause. Never scan on each refresh: every idle pager then keeps several cores busy.
+
+## Git status reuse in `git_gate`
+
+- `git_gate` joins same status and diff walks and keeps the result for `SNAPSHOT_TTL`. A client that polls `x.ai/git/status` slower than that walked the whole tree, and ran `git branch`, `rev-parse` and `remote get-url`, on every poll.
+- Each snapshot records the root's `xai_fsnotify::ChangeCounter` count from before its walk. While the count is unchanged, the snapshot serves requests up to `WATCHED_SNAPSHOT_MAX_AGE`. The watcher starts off-thread on the first walk of a root. `with_config` turns the reuse off, so the older gate tests keep their TTL semantics.
 
 ## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
 

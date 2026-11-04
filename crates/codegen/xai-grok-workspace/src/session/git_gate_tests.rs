@@ -40,6 +40,62 @@ fn test_gate(snapshot_ttl: Duration, walk_timeout: Duration) -> GitGate {
     GitGate::with_config(snapshot_ttl, walk_timeout, 1, Duration::from_secs(2))
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_watched_root_with_no_change_is_not_walked_again() {
+    let repo = init_temp_repo();
+    let root = dunce::canonicalize(repo.path()).unwrap();
+    let ttl = Duration::from_millis(50);
+    let gate = test_gate(ttl, Duration::from_secs(5)).with_watched_max_age(Duration::from_secs(30));
+    let walks = Arc::new(AtomicUsize::new(0));
+    let walk = {
+        let walks = Arc::clone(&walks);
+        move || {
+            let walks = Arc::clone(&walks);
+            async move { Ok(walks.fetch_add(1, Ordering::SeqCst) as u32) }
+        }
+    };
+
+    gate.run(&root, status_op(), walk.clone()).await.unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while super::current_root_changes(&root).is_none() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the watcher never started"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(ttl * 2).await;
+    gate.run(&root, status_op(), walk.clone()).await.unwrap();
+    assert_eq!(
+        walks.load(Ordering::SeqCst),
+        2,
+        "the first snapshot had no watcher count"
+    );
+
+    for _ in 0..5 {
+        tokio::time::sleep(ttl * 2).await;
+        gate.run(&root, status_op(), walk.clone()).await.unwrap();
+    }
+    assert_eq!(
+        walks.load(Ordering::SeqCst),
+        2,
+        "a poll past the TTL of an unchanged root reuses the snapshot"
+    );
+
+    std::fs::write(repo.path().join("README"), "changed\n").unwrap();
+    loop {
+        tokio::time::sleep(ttl).await;
+        gate.run(&root, status_op(), walk.clone()).await.unwrap();
+        if walks.load(Ordering::SeqCst) == 3 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "an edit never caused a walk"
+        );
+    }
+}
+
 async fn wait_for_count(counter: &AtomicUsize, expected: usize) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {

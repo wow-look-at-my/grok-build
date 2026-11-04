@@ -3,8 +3,7 @@ use std::collections::HashMap;
 
 use gix::bstr::ByteSlice;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -220,7 +219,7 @@ fn worktree_line_stats(
     Ok((insertions, deletions))
 }
 
-/// A line count is a full work-tree scan, the same work as `git status`. The scan uses several cores.
+/// A line count is a full work-tree scan, the same work as `git status`, on several cores.
 const UNWATCHED_SCAN_INTERVAL: Duration = Duration::from_secs(60);
 
 /// The last line count for one work tree.
@@ -229,7 +228,10 @@ struct WorktreeScan {
     counts: (usize, usize),
     at: Instant,
     scans: u64,
-    watch: Option<WorktreeWatch>,
+    /// The watcher skips ignored paths, so a build output does not cause a scan.
+    watch: Option<xai_fsnotify::ChangeCounter>,
+    /// The watcher count before the scan.
+    changes: Option<u64>,
 }
 
 impl WorktreeScan {
@@ -237,60 +239,11 @@ impl WorktreeScan {
         if self.head_tree != head_tree {
             return false;
         }
-        match &self.watch {
-            Some(watch) if watch.live.load(Ordering::Acquire) => {
-                !watch.stale.load(Ordering::Acquire)
-            }
+        let now = self.watch.as_ref().and_then(|watch| watch.current());
+        match (now, self.changes) {
+            (Some(now), Some(then)) => now == then,
             _ => self.at.elapsed() < UNWATCHED_SCAN_INTERVAL,
         }
-    }
-}
-
-/// Sets `stale` on each file or git-metadata event in the work tree. The watcher
-/// skips ignored paths, so a build output does not cause a scan.
-struct WorktreeWatch {
-    stale: Arc<AtomicBool>,
-    /// False after the event stream closes. The scan then falls back to the interval.
-    live: Arc<AtomicBool>,
-    task: tokio::task::AbortHandle,
-}
-
-impl Drop for WorktreeWatch {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-impl WorktreeWatch {
-    /// The source is the process-wide shared watcher, so a session that already
-    /// watches this directory adds no OS watches.
-    fn start(workdir: &Path) -> anyhow::Result<Self> {
-        let handle = tokio::runtime::Handle::try_current()?;
-        let source =
-            xai_fsnotify::shared(workdir.to_path_buf(), xai_fsnotify::FsConfig::default())?;
-        let mut events = source.subscribe();
-        let stale = Arc::new(AtomicBool::new(false));
-        let live = Arc::new(AtomicBool::new(true));
-        let (task_stale, task_live) = (stale.clone(), live.clone());
-        let task = xai_spawn::spawn_on(&handle, async move {
-            let _source = source;
-            loop {
-                match events.recv().await {
-                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        task_stale.store(true, Ordering::Release);
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        task_live.store(false, Ordering::Release);
-                        return;
-                    }
-                }
-            }
-        });
-        Ok(Self {
-            stale,
-            live,
-            task: task.abort_handle(),
-        })
     }
 }
 
@@ -320,12 +273,12 @@ fn cached_line_stats(
         let scans = previous.as_ref().map_or(0, |scan| scan.scans);
         let watch = previous
             .and_then(|mut scan| scan.watch.take())
-            .filter(|watch| watch.live.load(Ordering::Acquire));
+            .filter(|watch| watch.current().is_some());
         (watch, scans)
     };
     let watch = match watch {
         Some(watch) => Some(watch),
-        None => match WorktreeWatch::start(&workdir) {
+        None => match xai_fsnotify::ChangeCounter::start(&workdir) {
             Ok(watch) => Some(watch),
             Err(e) => {
                 tracing::warn!(
@@ -338,10 +291,8 @@ fn cached_line_stats(
             }
         },
     };
-    // Clear the flag before the scan, so an edit during the scan causes the next one.
-    if let Some(watch) = &watch {
-        watch.stale.store(false, Ordering::Release);
-    }
+    // Read the count before the scan, so an edit during the scan causes the next one.
+    let changes = watch.as_ref().and_then(|watch| watch.current());
     let counts = worktree_line_stats(repo, head_tree)?;
     let mut map = SCANS
         .lock()
@@ -362,6 +313,7 @@ fn cached_line_stats(
             at: Instant::now(),
             scans: scans + 1,
             watch,
+            changes,
         },
     );
     Ok(counts)
