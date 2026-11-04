@@ -62,7 +62,7 @@ fn scanner_strips_escapes_and_records_link_columns() {
             "a charset escape is swallowed and takes no columns",
             "\x1b(B\x1b]8;;https://example.invalid\x07example.invalid\x1b]8;;\x07",
             "example.invalid",
-            &[(0, 4, "https://example.invalid")],
+            &[(0, 15, "https://example.invalid")],
         ),
         (
             "an erase csi never reaches the parser, the colour does",

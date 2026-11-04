@@ -4449,7 +4449,8 @@ mod tests {
             "long URL row must span the full terminal width:\n{text}"
         );
         assert!(
-            url.get(40..).is_some_and(|rest| second.starts_with(rest)),
+            url.get(40..)
+                .is_some_and(|rest| second.starts_with(rest.get(..40).unwrap_or(rest))),
             "wrapped remainder must start at column 0:\n{text}"
         );
     }
