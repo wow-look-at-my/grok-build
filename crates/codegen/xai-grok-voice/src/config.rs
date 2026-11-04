@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn a_host_nobody_allowed_is_refused() {
         let cfg = VoiceConfig {
-            api_base: "https://api.example.invalid".into(),
+            api_base: "https://api.example.alt".into(),
             ..VoiceConfig::default()
         };
         assert!(matches!(

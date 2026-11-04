@@ -4130,7 +4130,7 @@ mod tests {
     fn an_endpoint_nobody_allowed_is_refused_before_any_request() {
         for url in [
             "https://cli-chat-proxy.grok.com/v1",
-            "https://api.example.invalid/v1",
+            "https://api.example.alt/v1",
             "https://api.anthropic.com/v1",
         ] {
             let mut cfg = minimal_config();
