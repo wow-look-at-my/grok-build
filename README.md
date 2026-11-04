@@ -48,8 +48,7 @@ irm https://example.invalid/cli/install.ps1 | iex          # Windows PowerShell
 grok --version
 ```
 
-See the [changelog](https://example.invalid/build/changelog) for the latest fixes,
-features, and improvements in each release.
+See the [changelog](https://example.invalid/build/changelog) for the latest fixes, features, and improvements in each release.
 
 ## Building from source
 
@@ -84,8 +83,7 @@ The binary artifact is named `xai-grok-pager`; official installs ship it as
 
 ## Documentation
 
-Full online documentation is available at
-[docs.example.invalid/build/overview](https://docs.example.invalid/build/overview).
+Full online documentation is available at [docs.example.invalid/build/overview](https://docs.example.invalid/build/overview).
 
 The user guide ships with the pager crate:
 [`crates/codegen/xai-grok-pager/docs/user-guide/`](crates/codegen/xai-grok-pager/docs/user-guide/)

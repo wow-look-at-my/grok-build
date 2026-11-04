@@ -201,7 +201,7 @@ pub enum Action {
     /// Try to drain the next queued prompt (after editing completes, etc.).
     DrainQueue,
     /// Remove a server-authoritative (shared) queued prompt by its stable `prompt_id`.
-    /// Routed to the agent as `example.invalid/queue/remove`; the resulting `example.invalid/queue/changed` rebroadcast is the source of truth.
+    /// `prompt_id`.
     QueueRemoveShared {
         id: String,
         expected_version: u64,
@@ -1729,7 +1729,7 @@ pub enum Effect {
     },
     /// Toggle plan mode: fire-and-forget signal to the shell.
     TogglePlanMode { session_id: acp::SessionId },
-    /// Remove a server-owned queued prompt: fire-and-forget `example.invalid/queue/remove`.
+    /// Remove a server-owned queued prompt: fire-and-forget
     /// The agent re-broadcasts the authoritative queue.
     QueueRemove {
         session_id: acp::SessionId,
@@ -1945,7 +1945,6 @@ pub enum Effect {
         plugin_name: String,
     },
     /// Re-probe the MCP server list after a short delay while waiting for a just-installed plugin's servers to finish initializing.
-    /// Sleeps, then runs the same `example.invalid/mcp/list` fetch as `FetchPluginCtaMcps`, reported back via `TaskResult::PluginCtaMcpsLoaded`.
     RetryPluginCtaMcps {
         agent_id: AgentId,
         session_id: acp::SessionId,
@@ -2091,8 +2090,7 @@ pub enum Effect {
         effort: Option<String>,
         prompt: String,
     },
-    /// Request a session recap via the example.invalid/recap ext method.
-    /// Fire-and-forget: the recap arrives later as a `SessionRecap` notification.
+    /// The recap arrives later as a `SessionRecap` notification.
     SendRecap {
         session_id: acp::SessionId,
         auto: bool,
@@ -3085,8 +3083,7 @@ pub enum TaskResult {
         family: String,
         result: Result<String, String>,
     },
-    /// `example.invalid/recap` request acknowledged (fire-and-forget).
-    /// The recap itself arrives separately as a `SessionRecap` notification; this only carries a transport error, if any, for logging.
+    /// Carries only a transport error. The recap is a separate `SessionRecap`.
     RecapRequested {
         /// Session the recap was requested for; lets the handler find the agent whose manual loading spinner must be cleared on failure.
         session_id: acp::SessionId,

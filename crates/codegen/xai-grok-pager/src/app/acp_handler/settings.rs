@@ -548,7 +548,7 @@ pub(super) struct PagerSettingsUpdate {
     #[serde(default, deserialize_with = "deserialize_settings_update_tags")]
     slash_command_tags: Option<Option<std::collections::BTreeMap<String, String>>>,
     // `announcements` is deliberately NOT consumed here
-    // Every shell writer of remote_settings also emits gen-ordered `example.invalid/announcements/update` (emit_announcements_if_changed)
+    // Every shell writer of remote_settings also emits gen-ordered `example.invalid/announcements/update`
     // `None`/omitted (settings-less push, older shell) must leave this process's campaign cache untouched.
     #[serde(default)]
     campaigns: Option<Vec<xai_grok_shell::util::config::CampaignOverride>>,
