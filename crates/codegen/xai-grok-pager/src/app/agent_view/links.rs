@@ -809,7 +809,7 @@ mod link_click_tests {
             message: Some("ZZPROMO".into()),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Go".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://example.invalid/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -1001,7 +1001,7 @@ mod link_click_tests {
             dismissible: Some(false),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Upgrade Account".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://example.invalid/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -1114,7 +1114,7 @@ mod link_click_tests {
             message: Some("ZZPROMO".into()),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Go".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://example.invalid/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -1142,7 +1142,7 @@ mod link_click_tests {
         let cta = || {
             Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Upgrade Account".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://example.invalid/promo".into()),
                 caption: None,
             })
         };
@@ -1245,7 +1245,7 @@ mod link_click_tests {
             message: Some("ZZPROMO".into()),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Upgrade Account".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://example.invalid/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -1277,7 +1277,7 @@ mod link_click_tests {
             dismissible: Some(false),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Go".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://example.invalid/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -1306,7 +1306,7 @@ mod link_click_tests {
             message: Some("ZZPROMO".into()),
             cta: Some(xai_grok_announcements::AnnouncementCta {
                 label: Some("Go".into()),
-                url: Some("https://x.ai/promo".into()),
+                url: Some("https://example.invalid/promo".into()),
                 caption: None,
             }),
             ..Default::default()
@@ -1356,7 +1356,7 @@ mod link_click_tests {
         );
         assert_eq!(
             &*spans.first().unwrap_or_else(|| panic!("missing index")).url,
-            "https://x.ai/promo"
+            "https://example.invalid/promo"
         );
         let outcome = agent.handle_input(&Event::Mouse(mouse_down(cta.x + 1, cta.y)), &reg);
         assert!(

@@ -17,7 +17,10 @@ pub(crate) use version_mismatch::{is_version_mismatch_banner, version_mismatch_b
 /// TUI dispatch, headless dispatch, and the session-load ACP barrier all share this list.
 /// A new method thus cannot be handled in one path and classified `Unrelated` in another.
 pub(crate) fn is_session_update_ext_method(method: &str) -> bool {
-    matches!(method, "x.ai/session_notification" | "x.ai/session/update")
+    matches!(
+        method,
+        "example.invalid/session_notification" | "example.invalid/session/update"
+    )
 }
 use crate::client_identity::{HEADLESS_CLIENT_TYPE, PAGER_CLIENT_TYPE, pager_client_version};
 use agent_client_protocol as acp;
@@ -116,7 +119,7 @@ pub struct AcpConnection {
     /// Whether cancel-rewind is enabled (resolved by shell from config layers).
     pub cancel_rewind_enabled: bool,
     /// Whether the session-recap feature is rolled out for this connection. The client gates its automatic away-recap
-    /// poll and the manual `/recap` on this so a disabled feature produces zero `x.ai/recap` traffic.
+    /// poll and the manual `/recap` on this so a disabled feature produces zero `example.invalid/recap` traffic.
     pub session_recap_available: bool,
     /// Shell-side feedback trace-offer eligibility (see `feedbackTraceOffer`).
     pub feedback_trace_offer: bool,
@@ -142,7 +145,7 @@ pub struct ConnectFlags {
     pub laziness_debug_log: Option<std::path::PathBuf>,
     /// Storage mode override.
     pub storage_mode: Option<String>,
-    /// Whether this client will draw a status row, advertised as `x.ai/statusLine` so the agent can skip an unpainted payload.
+    /// Whether this client will draw a status row, advertised as `example.invalid/statusLine` so the agent can skip an unpainted payload.
     pub status_line: bool,
     /// Client identifier for ACP Initialize metadata.
     pub client_identifier: Option<String>,
@@ -446,10 +449,10 @@ fn client_capabilities_meta(flags: &ConnectFlags) -> serde_json::Value {
     let hunk_mode =
         crate::settings::canonical_hunk_tracker_mode(flags.hunk_tracker_mode.as_deref());
     let mut meta = serde_json::json!({
-        "x.ai/incrementalBashOutput": true,
-        "x.ai/hunkTracker": { "mode": hunk_mode },
-        "x.ai/bashOutputNoColor": true,
-        "x.ai/gitHeadChanged": true,
+        "example.invalid/incrementalBashOutput": true,
+        "example.invalid/hunkTracker": { "mode": hunk_mode },
+        "example.invalid/bashOutputNoColor": true,
+        "example.invalid/gitHeadChanged": true,
     });
     if let Some(obj) = meta.as_object_mut() {
         obj.insert(
@@ -757,9 +760,15 @@ mod tests {
     use super::*;
     #[test]
     fn is_session_update_ext_method_covers_both_carriers() {
-        assert!(is_session_update_ext_method("x.ai/session_notification"));
-        assert!(is_session_update_ext_method("x.ai/session/update"));
-        assert!(!is_session_update_ext_method("x.ai/task_completed"));
+        assert!(is_session_update_ext_method(
+            "example.invalid/session_notification"
+        ));
+        assert!(is_session_update_ext_method(
+            "example.invalid/session/update"
+        ));
+        assert!(!is_session_update_ext_method(
+            "example.invalid/task_completed"
+        ));
         assert!(!is_session_update_ext_method("session/update"));
     }
     #[test]
@@ -1018,7 +1027,7 @@ mod tests {
         let absent = client_capabilities_meta(&ConnectFlags::default());
         assert_eq!(
             absent
-                .get("x.ai/hunkTracker")
+                .get("example.invalid/hunkTracker")
                 .and_then(|v| v.get("mode"))
                 .and_then(|v| v.as_str()),
             Some("off")
@@ -1029,7 +1038,7 @@ mod tests {
         });
         assert_eq!(
             blank
-                .get("x.ai/hunkTracker")
+                .get("example.invalid/hunkTracker")
                 .and_then(|v| v.get("mode"))
                 .and_then(|v| v.as_str()),
             Some("off")
@@ -1068,7 +1077,7 @@ mod tests {
                 ..Default::default()
             });
             assert_eq!(
-                meta.get("x.ai/hunkTracker")
+                meta.get("example.invalid/hunkTracker")
                     .and_then(|v| v.get("mode"))
                     .and_then(|v| v.as_str()),
                 Some("off"),

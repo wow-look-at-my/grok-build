@@ -1,4 +1,4 @@
-//! `x.ai/model_agent` extension handler: spawn a background subagent on a model family.
+//! `example.invalid/model_agent` extension handler: spawn a background subagent on a model family.
 
 use agent_client_protocol as acp;
 use tokio::sync::oneshot;
@@ -7,7 +7,7 @@ use super::{ExtResult, parse_params};
 use crate::agent::MvpAgent;
 use crate::session::SessionCommand;
 
-pub const MODEL_AGENT_METHOD: &str = "x.ai/model_agent";
+pub const MODEL_AGENT_METHOD: &str = "example.invalid/model_agent";
 
 #[tracing::instrument(skip_all)]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {

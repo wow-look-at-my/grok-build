@@ -41,7 +41,7 @@ pub(super) fn handle_mcp_init_progress(notif: &acp::ExtNotification, app: &mut A
 pub(super) fn handle_mcp_tools_changed(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let method = notif.method.as_ref();
 
-    // Both `x.ai/mcp_initialized` and (newer shell) `x.ai/mcp/tools_changed` carry `sessionId`
+    // Both `example.invalid/mcp_initialized` and (newer shell) `example.invalid/mcp/tools_changed` carry `sessionId`
     // Route by it so a background agent's notification updates *its* state, not whichever agent is foregrounded
     // Unknown and subagent (child) sessions are dropped; a missing sessionId falls back to the active agent (legacy shells)
     #[derive(serde::Deserialize)]
@@ -78,7 +78,7 @@ pub(super) fn handle_mcp_tools_changed(notif: &acp::ExtNotification, app: &mut A
     let mut redraw = false;
 
     // `mcp_initialized` clears the matched agent's connecting indicator.
-    if method == "x.ai/mcp_initialized"
+    if method == "example.invalid/mcp_initialized"
         && let Some(agent) = app.agents.get_mut(&id)
         && agent.mcp_init_progress.take().is_some()
     {
@@ -132,7 +132,7 @@ pub(super) fn handle_mcp_server_status(notif: &acp::ExtNotification, app: &mut A
         #[allow(clippy::string_slice)] // floor_char_boundary's own output
         let preview = &notif.params.get()
             [..crate::render::line_utils::floor_char_boundary(notif.params.get(), 100)];
-        tracing::warn!("Failed to parse x.ai/mcp/server_status: {preview}");
+        tracing::warn!("Failed to parse example.invalid/mcp/server_status: {preview}");
         return false;
     };
 
@@ -180,7 +180,7 @@ pub(super) fn handle_mcp_server_status(notif: &acp::ExtNotification, app: &mut A
                 tracing::warn!(
                     server = %payload.name,
                     error = %e,
-                    "x.ai/mcp/server_status: tools field present but not Vec<McpToolEntry>; status still applied"
+                    "example.invalid/mcp/server_status: tools field present but not Vec<McpToolEntry>; status still applied"
                 );
                 None
             }
@@ -190,7 +190,7 @@ pub(super) fn handle_mcp_server_status(notif: &acp::ExtNotification, app: &mut A
     mutated && is_active
 }
 
-/// Handle `x.ai/mcp/elicit_complete`: dismiss the matched agent's URL-mode elicitation card that is still waiting on this `elicitation_id`.
+/// Handle `example.invalid/mcp/elicit_complete`: dismiss the matched agent's URL-mode elicitation card that is still waiting on this `elicitation_id`.
 pub(super) fn handle_mcp_elicit_complete(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let Ok(payload) = serde_json::from_str::<
         xai_grok_tools::mcp_elicitation::McpElicitCompletePayload,
@@ -208,7 +208,7 @@ pub(super) fn handle_mcp_elicit_complete(notif: &acp::ExtNotification, app: &mut
     agent.dismiss_waiting_elicitation(&payload.elicitation_id, payload.server_name.as_deref())
 }
 
-/// Handle `x.ai/mcp/servers_updated`.
+/// Handle `example.invalid/mcp/servers_updated`.
 /// An attempt to route by `sessionId` therefore always fell back to `app.active_view` and re-created the multi-agent bug.
 /// Agents without an open modal drop the push (cheap path).
 pub(super) fn handle_mcp_servers_updated(_notif: &acp::ExtNotification, app: &mut AppView) -> bool {

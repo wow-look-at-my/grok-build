@@ -1,4 +1,4 @@
-//! `x.ai/plugins/*` extension handlers, backing the pager's hooks/plugins modal.
+//! `example.invalid/plugins/*` extension handlers, backing the pager's hooks/plugins modal.
 
 use agent_client_protocol as acp;
 use serde::Deserialize;
@@ -126,7 +126,7 @@ fn marketplace_source_label(origin: &PluginOrigin) -> Option<String> {
 
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/plugins/list" => {
+        "example.invalid/plugins/list" => {
             let req: ListRequest = super::parse_params(args)?;
 
             // A known session answers from its own registry, which includes `_meta.pluginDirs` plugins
@@ -156,7 +156,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             };
             super::to_ext_response(Ok::<_, anyhow::Error>(response))
         }
-        "x.ai/plugins/action" => {
+        "example.invalid/plugins/action" => {
             let req: xai_hooks_plugins_types::PluginsActionRequest = super::parse_params(args)?;
             let sid = acp::SessionId::new(req.session_id);
 
@@ -166,7 +166,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .ok_or_else(|| anyhow::anyhow!("session not found"));
             super::to_ext_response(result)
         }
-        "x.ai/plugins/notify-updates" => {
+        "example.invalid/plugins/notify-updates" => {
             // Broadcast a PluginUpdatesInstalled notification to the session.
             #[derive(serde::Deserialize)]
             #[serde(rename_all = "camelCase")]

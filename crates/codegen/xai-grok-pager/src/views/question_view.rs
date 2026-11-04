@@ -123,7 +123,7 @@ pub enum LocalQuestionKind {
     DeleteCurrentSession,
 }
 
-/// Complete state for the question view overlay. Created when an `x.ai/ask_user_question`
+/// Complete state for the question view overlay. Created when an `example.invalid/ask_user_question`
 /// ext-method request arrives; destroyed on submit, skip, or cancel. Not `Clone` because it owns a
 /// `oneshot::Sender` for the ACP response.
 #[derive(Debug)]
@@ -172,7 +172,7 @@ pub struct QuestionViewState {
     /// `None` means the options list has focus; `Some(0)` is Chat about this and `Some(1)` is Skip interview.
     pub bottom_panel_index: Option<usize>,
     /// `Some` when this question was opened locally (e.g. by `/fork`) instead of by an ACP
-    /// `x.ai/ask_user_question` request. `None` for ACP questions. Mutually exclusive with
+    /// `example.invalid/ask_user_question` request. `None` for ACP questions. Mutually exclusive with
     /// `response_tx`: a local question never has an ACP sender.
     pub local_kind: Option<LocalQuestionKind>,
     /// When this question view was created. Used to pause the turn timer while the user is answering questions.
@@ -205,7 +205,7 @@ impl QuestionViewState {
 
     /// Create a new question view state with an ACP response sender.
     ///
-    /// Called by the `ExtMethod` handler when a blocking `x.ai/ask_user_question` request arrives from the shell coordinator.
+    /// Called by the `ExtMethod` handler when a blocking `example.invalid/ask_user_question` request arrives from the shell coordinator.
     pub fn with_response_tx(
         tool_call_id: String,
         questions: Vec<Question>,

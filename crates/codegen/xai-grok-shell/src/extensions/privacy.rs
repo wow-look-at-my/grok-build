@@ -1,4 +1,4 @@
-//! `x.ai/privacy/setCodingDataRetention` extension handler.
+//! `example.invalid/privacy/setCodingDataRetention` extension handler.
 //!
 //! Coding-data retention is fixed to opt out in this build.
 
@@ -9,7 +9,7 @@ use agent_client_protocol as acp;
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/privacy/setCodingDataRetention" => handle_set(agent, args).await,
+        "example.invalid/privacy/setCodingDataRetention" => handle_set(agent, args).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }

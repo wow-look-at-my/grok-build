@@ -78,7 +78,7 @@ fn internal_reload_request_line(
 ) -> String {
     crate::leader::protocol::internal_request_line(id, method, params)
 }
-/// Start a skills file watcher and wire it to inject `x.ai/internal/reload_skills` messages into the shared ACP incoming stream.
+/// Start a skills file watcher and wire it to inject `example.invalid/internal/reload_skills` messages into the shared ACP incoming stream.
 /// The messages fire when SKILL.md files change on disk.
 /// Returns the watcher task, or `None` if no directories could be watched.
 fn spawn_skills_file_watcher<W>(
@@ -547,7 +547,7 @@ struct DeferredRelayArm {
 impl DeferredRelayArm {
     /// Arm the relay for a hot-reloaded session if it is relay-eligible. Consumes the parts and returns `None` when the relay was armed.
     /// Returns `Some(self)` when the session is not relay-eligible, so a later eligible token can still arm.
-    /// Ineligible means BYOK / non-x.ai issuer; see [`RelayConfig::for_session`](crate::agent::relay::RelayConfig::for_session). Must be called within a `LocalSet` (delegates to [`spawn_leader_relay`]).
+    /// Ineligible means BYOK / non-example.invalid issuer; see [`RelayConfig::for_session`](crate::agent::relay::RelayConfig::for_session). Must be called within a `LocalSet` (delegates to [`spawn_leader_relay`]).
     fn arm_if_eligible(self, session: &GrokAuth, auth_manager: &Arc<AuthManager>) -> Option<Self> {
         let Some(relay_config) = crate::agent::relay::RelayConfig::for_session(
             session,
@@ -1145,7 +1145,7 @@ pub async fn run_leader(
                             info!("UI config change detected by watcher");
                             let notification = serde_json::json!({
                                 "jsonrpc": "2.0",
-                                "method": "x.ai/config_changed",
+                                "method": "example.invalid/config_changed",
                                 "params": {
                                     "section": "ui",
                                     "changes": {
@@ -1248,7 +1248,7 @@ mod tests {
         });
         (addr, count)
     }
-    /// A `RelayConfig` built via the production constructor (`for_session`) with a relay-eligible x.ai OIDC session.
+    /// A `RelayConfig` built via the production constructor (`for_session`) with a relay-eligible example.invalid OIDC session.
     fn test_relay_config(addr: std::net::SocketAddr) -> crate::agent::relay::RelayConfig {
         let auth = GrokAuth {
             auth_mode: AuthMode::Oidc,
@@ -1261,7 +1261,7 @@ mod tests {
             ..Default::default()
         };
         crate::agent::relay::RelayConfig::for_session(&auth, &cfg, None, None)
-            .expect("x.ai OIDC session must be relay-eligible")
+            .expect("example.invalid OIDC session must be relay-eligible")
     }
     /// The embedded startup gate (every pager `--no-leader` / fallback path) must be fail-closed by construction.
     /// A session user stays closed until the agent resolves settings, even when an env API key is also present.
@@ -1566,7 +1566,7 @@ mod tests {
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(
             msg.get("method").and_then(|v| v.as_str()),
-            Some("_x.ai/internal/reload_models"),
+            Some("_example.invalid/internal/reload_models"),
             "wire method must carry the `_` ext prefix or the ACP decoder \
              rejects it with method_not_found"
         );
@@ -1595,7 +1595,7 @@ mod tests {
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(
             msg.get("method").and_then(|v| v.as_str()),
-            Some("_x.ai/internal/auth_cleared")
+            Some("_example.invalid/internal/auth_cleared")
         );
     }
 }

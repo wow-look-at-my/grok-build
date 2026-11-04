@@ -175,7 +175,7 @@ fn synthesize_replay_turn_marker(
         })
     })
 }
-/// Handle `x.ai/session_notification` and replay-path `x.ai/session/update`.
+/// Handle `example.invalid/session_notification` and replay-path `example.invalid/session/update`.
 /// Routes by `session_id` so events for an inactive agent still mutate that agent's state.
 /// The redraw decision is gated on whether the matched agent is the currently visible one.
 pub(super) fn handle_session_notification(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
@@ -212,7 +212,7 @@ pub(super) fn handle_session_notification_with_origin(
             tracing::debug!(
                 session_id = session_notif.session_id.0.as_ref(),
                 method = notif.method.as_ref(),
-                "load-race: x.ai/session_notification DROPPED — no agent matches session_id"
+                "load-race: example.invalid/session_notification DROPPED — no agent matches session_id"
             );
             return false;
         }
@@ -239,7 +239,7 @@ pub(super) fn handle_session_notification_with_origin(
         agent,
         &meta,
         session_notif.session_id.0.as_ref(),
-        "x.ai/session/update",
+        "example.invalid/session/update",
     ) {
         return false;
     }
@@ -282,7 +282,7 @@ pub(super) fn handle_session_notification_with_origin(
             session_id = session_notif.session_id.0.as_ref(),
             event_seq = meta.event_seq,
             last_applied = agent.last_applied_xai_event_seq,
-            "x.ai/session update DROPPED by dedup highwater (event_seq <= last_applied)"
+            "example.invalid/session update DROPPED by dedup highwater (event_seq <= last_applied)"
         );
         return false;
     }
@@ -1566,7 +1566,7 @@ pub(super) fn handle_session_notification_with_origin(
     if let Some((payload, origin)) = pending_finish_for_spawn
         && let Ok(params) = serde_json::value::to_raw_value(&payload)
     {
-        let deferred = acp::ExtNotification::new("x.ai/session/update", params.into());
+        let deferred = acp::ExtNotification::new("example.invalid/session/update", params.into());
         let _ = handle_session_notification_with_origin(&deferred, app, origin);
     }
     if queue_wake_turn_complete {

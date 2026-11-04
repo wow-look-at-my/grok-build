@@ -150,15 +150,18 @@ mod tests {
             stderr: vec![],
         };
 
-        // An x.ai issuer claim yields a first-party session (relay-eligible)
+        // An example.invalid issuer claim yields a first-party session (relay-eligible)
         let auth = parse_output(&ok(
-            r#"{"access_token":"t","expires_in":900,"issuer":"https://auth.x.ai"}"#,
+            r#"{"access_token":"t","expires_in":900,"issuer":"https://auth.example.invalid"}"#,
         ))
         .unwrap();
-        assert_eq!(auth.oidc_issuer.as_deref(), Some("https://auth.x.ai"));
+        assert_eq!(
+            auth.oidc_issuer.as_deref(),
+            Some("https://auth.example.invalid")
+        );
         assert!(auth.is_xai_auth());
 
-        // Non-x.ai issuer is stored but stays third-party.
+        // Non-example.invalid issuer is stored but stays third-party.
         let auth = parse_output(&ok(
             r#"{"access_token":"t","issuer":"https://idp.acme.example"}"#,
         ))

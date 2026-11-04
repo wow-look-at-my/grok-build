@@ -547,12 +547,15 @@ mod web_search_domains_tests {
     #[test]
     fn allowlist_parsed() {
         let got = web_search_options_from_section(&section(
-            r#"allowed_domains = ["docs.x.ai", "arxiv.org"]"#,
+            r#"allowed_domains = ["docs.example.invalid", "arxiv.org"]"#,
         ))
         .unwrap();
         assert_eq!(
             got.allowed_domains,
-            Some(vec!["docs.x.ai".to_string(), "arxiv.org".to_string()])
+            Some(vec![
+                "docs.example.invalid".to_string(),
+                "arxiv.org".to_string()
+            ])
         );
         assert!(got.excluded_domains.is_none());
     }
@@ -582,10 +585,13 @@ mod web_search_domains_tests {
     fn both_set_degrades_to_allowlist() {
         // Normalization prevents this across layers; this is the in-one-layer defensive path.
         let got = web_search_options_from_section(&section(
-            "allowed_domains = [\"docs.x.ai\"]\nexcluded_domains = [\"reddit.com\"]",
+            "allowed_domains = [\"docs.example.invalid\"]\nexcluded_domains = [\"reddit.com\"]",
         ))
         .unwrap();
-        assert_eq!(got.allowed_domains, Some(vec!["docs.x.ai".to_string()]));
+        assert_eq!(
+            got.allowed_domains,
+            Some(vec!["docs.example.invalid".to_string()])
+        );
         assert!(got.excluded_domains.is_none());
     }
 }

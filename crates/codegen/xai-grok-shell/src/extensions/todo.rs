@@ -1,4 +1,4 @@
-//! `x.ai/todo` extension handler.
+//! `example.invalid/todo` extension handler.
 
 use agent_client_protocol as acp;
 use tokio::sync::oneshot;

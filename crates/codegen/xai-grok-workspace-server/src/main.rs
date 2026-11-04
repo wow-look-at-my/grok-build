@@ -117,7 +117,7 @@ struct Args {
         action = clap::ArgAction::Set,
     )]
     project_lsp_trusted: bool,
-    /// Confine `x.ai/fs/*` resolution to the workspace root (reject `..`, absolute-outside-root, symlink escapes).
+    /// Confine `example.invalid/fs/*` resolution to the workspace root (reject `..`, absolute-outside-root, symlink escapes).
     #[arg(
         long,
         env = "GROK_WORKSPACE_CONFINE_FS_TO_ROOT",

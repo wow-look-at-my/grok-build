@@ -129,7 +129,7 @@ fn pump_until(
 }
 
 /// The qualifying-tier JWT refresh then hits `localhost:22255`: instant connection-refused instead
-/// of a real network call to auth.x.ai.
+/// of a real network call to auth.example.invalid.
 fn seed_fake_oauth_local_issuer(content: &ContentController, user: &str) {
     let grok_home = content.home().join(".grok");
     std::fs::create_dir_all(&grok_home).expect("create temp .grok");

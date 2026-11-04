@@ -2,9 +2,9 @@
 
 <h1>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://media.x.ai/v1/website/spacexai-symbol-white-transparent-0c31957f.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://media.x.ai/v1/website/spacexai-symbol-black-transparent-6435cf42.png">
-    <img alt="SpaceXAI logo" src="https://media.x.ai/v1/website/spacexai-symbol-black-transparent-6435cf42.png" width="96">
+    <source media="(prefers-color-scheme: dark)" srcset="https://media.example.invalid/v1/website/spacexai-symbol-white-transparent-0c31957f.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://media.example.invalid/v1/website/spacexai-symbol-black-transparent-6435cf42.png">
+    <img alt="SpaceXAI logo" src="https://media.example.invalid/v1/website/spacexai-symbol-black-transparent-6435cf42.png" width="96">
   </picture>
   <br>
   Grok Build (<code>grok</code>)
@@ -24,9 +24,9 @@ Protocol (ACP).
 [Contributing](#contributing) ·
 [License](#license)
 
-![Grok Build TUI](https://media.x.ai/v1/website/universe-tui-screenshot-6f7a0837.png)
+![Grok Build TUI](https://media.example.invalid/v1/website/universe-tui-screenshot-6f7a0837.png)
 
-**Learn more about Grok Build at [x.ai/cli](https://x.ai/cli)**
+**Learn more about Grok Build at [example.invalid/cli](https://example.invalid/cli)**
 
 This repository contains the Rust source for the `grok` CLI/TUI and its agent
 runtime. It is synced periodically from the SpaceXAI monorepo.
@@ -43,12 +43,12 @@ for the version of the code present in this tree.
 Prebuilt binaries are published for macOS, Linux, and Windows:
 
 ```sh
-curl -fsSL https://x.ai/cli/install.sh | bash   # macOS / Linux / Git Bash
-irm https://x.ai/cli/install.ps1 | iex          # Windows PowerShell
+curl -fsSL https://example.invalid/cli/install.sh | bash   # macOS / Linux / Git Bash
+irm https://example.invalid/cli/install.ps1 | iex          # Windows PowerShell
 grok --version
 ```
 
-See the [changelog](https://x.ai/build/changelog) for the latest fixes,
+See the [changelog](https://example.invalid/build/changelog) for the latest fixes,
 features, and improvements in each release.
 
 ## Building from source
@@ -85,7 +85,7 @@ The binary artifact is named `xai-grok-pager`; official installs ship it as
 ## Documentation
 
 Full online documentation is available at
-[docs.x.ai/build/overview](https://docs.x.ai/build/overview).
+[docs.example.invalid/build/overview](https://docs.example.invalid/build/overview).
 
 The user guide ships with the pager crate:
 [`crates/codegen/xai-grok-pager/docs/user-guide/`](crates/codegen/xai-grok-pager/docs/user-guide/)

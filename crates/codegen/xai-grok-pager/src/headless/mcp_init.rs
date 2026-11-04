@@ -1,4 +1,4 @@
-//! One bounded `x.ai/mcp/list` snapshot for Messages `init.mcp_servers`.
+//! One bounded `example.invalid/mcp/list` snapshot for Messages `init.mcp_servers`.
 //! The shell's Blocking startup grace runs later on the prompt; this must not add a second wait.
 
 use std::path::Path;
@@ -13,7 +13,7 @@ use crate::views::mcps_modal::{
     McpServerDisplayStatus, McpServerInfo, McpsListResponse, convert_list_response,
 };
 
-/// Bound on the single `x.ai/mcp/list` RPC so a hung handler cannot stall `init`.
+/// Bound on the single `example.invalid/mcp/list` RPC so a hung handler cannot stall `init`.
 const MCP_LIST_RPC_TIMEOUT: Duration = Duration::from_secs(1);
 
 pub(crate) async fn resolve_mcp_servers_for_init(
@@ -104,7 +104,7 @@ async fn fetch_mcp_list(
         "cache": true,
     }))
     .ok()?;
-    let req = acp::ExtRequest::new("x.ai/mcp/list", params.into());
+    let req = acp::ExtRequest::new("example.invalid/mcp/list", params.into());
     match acp_send(req, acp_tx).await {
         Ok(resp) => decode_mcp_list(resp.0.get()),
         Err(e) => {

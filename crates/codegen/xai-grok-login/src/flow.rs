@@ -132,7 +132,7 @@ async fn should_use_device_flow(
     );
     resolved.value
 }
-/// How login presents itself; sent to the TUI via `x.ai/auth/get_url`.
+/// How login presents itself; sent to the TUI via `example.invalid/auth/get_url`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthUrlMode {
     /// Loopback-callback flow: the TUI shows a copyable URL and a paste box.
@@ -143,7 +143,7 @@ pub enum AuthUrlMode {
     Device,
 }
 impl AuthUrlMode {
-    /// Wire string for the `x.ai/auth/get_url` ACP response.
+    /// Wire string for the `example.invalid/auth/get_url` ACP response.
     pub fn as_wire_str(self) -> &'static str {
         match self {
             Self::Loopback => "loopback",

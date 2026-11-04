@@ -19,8 +19,8 @@ fn load_filtered_marketplace_sources() -> Vec<xai_grok_plugin_marketplace::Marke
 
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/marketplace/list" => handle_list().await,
-        "x.ai/marketplace/action" => handle_action(agent, args).await,
+        "example.invalid/marketplace/list" => handle_list().await,
+        "example.invalid/marketplace/action" => handle_action(agent, args).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }

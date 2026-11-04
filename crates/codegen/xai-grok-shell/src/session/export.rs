@@ -21,7 +21,7 @@ struct XaiJsonRpcNotification<'a> {
 }
 
 const ACP_SESSION_UPDATE_METHOD: &str = "session/update";
-const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";
+const XAI_SESSION_UPDATE_METHOD: &str = "_example.invalid/session/update";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportedMessage {

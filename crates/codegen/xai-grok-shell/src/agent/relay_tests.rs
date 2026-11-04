@@ -413,7 +413,7 @@ async fn auth_recovery_refreshes_and_heals_missing_auth_json() {
         calls: calls.clone(),
     }));
     let mut config = RelayConfig::for_session(&expired_session, &cfg, None, Some(am.clone()))
-        .expect("x.ai OIDC session is relay-eligible");
+        .expect("example.invalid OIDC session is relay-eligible");
     let cancel = CancellationToken::new();
     let recovered = attempt_auth_recovery(&mut config, &cancel, "test 401").await;
     assert!(recovered, "recovery must succeed via the shared refresher");
@@ -452,7 +452,7 @@ async fn attempt_auth_recovery_same_key_backs_off_without_cancel() {
     am.hot_swap(fresh_session.clone());
     am.set_refresher(Arc::new(PanicRefresher));
     let mut config = RelayConfig::for_session(&fresh_session, &cfg, None, Some(am.clone()))
-        .expect("x.ai OIDC session is relay-eligible");
+        .expect("example.invalid OIDC session is relay-eligible");
     let cancel = CancellationToken::new();
     let recovered = attempt_auth_recovery(&mut config, &cancel, "test 401").await;
     assert!(!recovered, "same-key recovery must take the backoff path");
@@ -711,7 +711,7 @@ fn relay_initialize_gains_user_message_echo_capability() {
         "jsonrpc": "2.0", "id": 7, "method": "initialize",
         "params": {
             "protocolVersion": 1,
-            "clientCapabilities": { "_meta": { "x.ai/fs_notify": true } }
+            "clientCapabilities": { "_meta": { "example.invalid/fs_notify": true } }
         }
     });
     assert!(declare_relay_client_capabilities(&mut frame));
@@ -719,10 +719,13 @@ fn relay_initialize_gains_user_message_echo_capability() {
         .pointer("/params/clientCapabilities/_meta")
         .expect("_meta present");
     assert_eq!(
-        meta.get("x.ai/userMessageEcho"),
+        meta.get("example.invalid/userMessageEcho"),
         Some(&serde_json::json!(true))
     );
-    assert_eq!(meta.get("x.ai/fs_notify"), Some(&serde_json::json!(true)));
+    assert_eq!(
+        meta.get("example.invalid/fs_notify"),
+        Some(&serde_json::json!(true))
+    );
     assert_eq!(frame.get("id"), Some(&serde_json::json!(7)));
 }
 #[test]
@@ -733,7 +736,7 @@ fn relay_initialize_without_capabilities_block_gets_one() {
     });
     assert!(declare_relay_client_capabilities(&mut frame));
     assert_eq!(
-        frame.pointer("/params/clientCapabilities/_meta/x.ai~1userMessageEcho"),
+        frame.pointer("/params/clientCapabilities/_meta/example.invalid~1userMessageEcho"),
         Some(&serde_json::json!(true))
     );
 }
@@ -741,11 +744,11 @@ fn relay_initialize_without_capabilities_block_gets_one() {
 fn relay_explicit_user_message_echo_is_respected() {
     let mut frame = serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": { "clientCapabilities": { "_meta": { "x.ai/userMessageEcho": false } } }
+        "params": { "clientCapabilities": { "_meta": { "example.invalid/userMessageEcho": false } } }
     });
     assert!(!declare_relay_client_capabilities(&mut frame));
     assert_eq!(
-        frame.pointer("/params/clientCapabilities/_meta/x.ai~1userMessageEcho"),
+        frame.pointer("/params/clientCapabilities/_meta/example.invalid~1userMessageEcho"),
         Some(&serde_json::json!(false))
     );
 }

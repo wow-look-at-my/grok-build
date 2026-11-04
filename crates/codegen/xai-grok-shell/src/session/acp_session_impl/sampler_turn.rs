@@ -182,7 +182,7 @@ struct SessionTokenAuthGate {
     is_session_based: bool,
     model_byok: crate::agent::auth_method::ModelByok,
     /// Whether the request targets a first-party host.
-    /// Lets an `Unknown` BYOK status still refresh against cli-chat-proxy / `*.x.ai` without risking a session-token leak to a third-party BYOK endpoint.
+    /// Lets an `Unknown` BYOK status still refresh against cli-chat-proxy / `*.example.invalid` without risking a session-token leak to a third-party BYOK endpoint.
     endpoint_is_first_party: bool,
 }
 

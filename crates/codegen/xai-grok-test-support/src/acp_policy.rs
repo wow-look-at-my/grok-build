@@ -1,6 +1,6 @@
 //! Scripted answers for the requests the agent sends to the client, declared as data before a turn runs.
 //! The connection side of [`GrokStdioClient`](crate::GrokStdioClient) applies a [`ClientPolicy`] to every
-//! `session/request_permission` and `x.ai/ask_user_question` request, so no test blocks on a prompt or answers
+//! `session/request_permission` and `example.invalid/ask_user_question` request, so no test blocks on a prompt or answers
 //! one in test code.
 
 use std::collections::BTreeMap;
@@ -26,7 +26,7 @@ pub enum PermissionDecision {
     HoldUntilCancel,
 }
 
-/// How the client answers one `x.ai/ask_user_question`.
+/// How the client answers one `example.invalid/ask_user_question`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuestionDecision {
     /// Accept, selecting the first option of every question; a question without options stays unanswered.
@@ -37,8 +37,8 @@ pub enum QuestionDecision {
     HoldUntilCancel,
 }
 
-/// How the client answers one `x.ai/folder_trust/request`.
-/// The agent sends this prompt only to a client that advertised `x.ai/folderTrust.interactive`.
+/// How the client answers one `example.invalid/folder_trust/request`.
+/// The agent sends this prompt only to a client that advertised `example.invalid/folderTrust.interactive`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustDecision {
     /// Answer `trust`, granting folder trust for the workspace.
@@ -47,7 +47,7 @@ pub enum TrustDecision {
     Deny,
 }
 
-/// How the client answers one `x.ai/mcp/elicit` reverse request (an MCP server's `elicitation/create`
+/// How the client answers one `example.invalid/mcp/elicit` reverse request (an MCP server's `elicitation/create`
 /// forwarded by the agent). `Accept` returns `fields` as the form content; `Decline` and `Cancel`
 /// return those outcomes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +79,7 @@ impl ElicitationDecision {
 /// advertises `nonInteractive: true`, so the agent auto-cancels reverse interactions such as MCP
 /// elicitation without prompting; every existing case keeps this behavior. [`Interactivity::Interactive`]
 /// opts in, advertising `nonInteractive: false` and scripting the one answer the client returns for an
-/// `x.ai/mcp/elicit` reverse request.
+/// `example.invalid/mcp/elicit` reverse request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Interactivity {
     Headless,
@@ -126,7 +126,7 @@ impl<D: Clone> RequestPolicy<D> {
 pub struct ClientPolicy {
     pub permissions: RequestPolicy<PermissionDecision>,
     pub questions: RequestPolicy<QuestionDecision>,
-    /// Absent leaves the client without the `x.ai/folderTrust.interactive` capability, so the agent
+    /// Absent leaves the client without the `example.invalid/folderTrust.interactive` capability, so the agent
     /// never sends a folder-trust prompt; `Some` advertises the capability and answers every prompt.
     pub trust: Option<TrustDecision>,
     pub interactivity: Interactivity,

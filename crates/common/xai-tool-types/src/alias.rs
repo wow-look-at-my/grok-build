@@ -423,7 +423,7 @@ pub const LOCAL: &[LocalAlias] = &[
         canonical: "destination_cwd",
         aliases: &["cwd"],
         why: "a session summary this shell writes and re-reads; \
-              `x.ai/session/list` only ever serializes it",
+              `example.invalid/session/list` only ever serializes it",
     },
     LocalAlias {
         file: "crates/codegen/xai-grok-sampling-types/src/conversation.rs",

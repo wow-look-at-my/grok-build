@@ -553,12 +553,12 @@ fn overdue_cancel_for_agent(agent: &mut AgentView) -> Option<Effect> {
     })
 }
 
-/// Grace window between a driver-side `x.ai/session/prompt_complete` broadcast and that turn's `session/prompt` RPC response.
+/// Grace window between a driver-side `example.invalid/session/prompt_complete` broadcast and that turn's `session/prompt` RPC response.
 /// Past it, [`reconcile_overdue_turn_ends`] finishes the turn from the broadcast.
 /// The healthy-path gap is milliseconds (the shell emits the broadcast just before writing the RPC response).
 pub(crate) const TURN_END_RECONCILE_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Finish turns whose end was announced by `x.ai/session/prompt_complete` but whose `session/prompt` RPC response never arrived.
+/// Finish turns whose end was announced by `example.invalid/session/prompt_complete` but whose `session/prompt` RPC response never arrived.
 /// The RPC response is the driver's only turn-state exit, and it can be lost in leader response routing / reconnect races.
 /// The loss left the TUI latched in `TurnCancelling` until a restart (Esc dead, prompts piling into a queue that never drains).
 pub(crate) fn reconcile_overdue_turn_ends(app: &mut AppView) -> Option<Vec<Effect>> {

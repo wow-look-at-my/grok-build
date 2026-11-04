@@ -1,4 +1,4 @@
-//! The shell's `x.ai/ask_user_question` extension request as the client reads and answers it. The typed request
+//! The shell's `example.invalid/ask_user_question` extension request as the client reads and answers it. The typed request
 //! (`AskUserQuestionExtRequest`) lives in `xai-grok-tools`, which this crate does not depend on, so its wire
 //! shape is mirrored here; a shell wire change touches only this module.
 
@@ -6,7 +6,7 @@ use agent_client_protocol as acp;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-pub(crate) const ASK_USER_QUESTION_METHOD: &str = "x.ai/ask_user_question";
+pub(crate) const ASK_USER_QUESTION_METHOD: &str = "example.invalid/ask_user_question";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

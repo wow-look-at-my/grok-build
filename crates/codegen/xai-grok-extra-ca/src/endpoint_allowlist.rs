@@ -154,7 +154,7 @@ mod tests {
     fn nothing_is_allowed_by_an_empty_list() {
         for url in [
             "https://cli-chat-proxy.grok.com/v1",
-            "https://api.x.ai/v1",
+            "https://api.example.invalid/v1",
             "http://localhost:11434/v1",
             "http://127.0.0.1:8080",
         ] {
@@ -233,9 +233,9 @@ mod tests {
 
     #[test]
     fn the_refusal_names_the_entry_to_add() {
-        let err = check_against("https://api.x.ai/v1/responses", &[]).unwrap_err();
+        let err = check_against("https://api.example.invalid/v1/responses", &[]).unwrap_err();
         let text = err.to_string();
-        assert!(text.contains("\"https://api.x.ai\""), "{text}");
+        assert!(text.contains("\"https://api.example.invalid\""), "{text}");
         assert!(text.contains("allowed_endpoints"), "{text}");
     }
 }

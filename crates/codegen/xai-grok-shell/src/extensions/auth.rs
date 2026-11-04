@@ -1,4 +1,4 @@
-//! `x.ai/auth/*` and legacy `x.ai/{get,set}ApiKey` extension handlers.
+//! `example.invalid/auth/*` and legacy `example.invalid/{get,set}ApiKey` extension handlers.
 //!
 //! These methods let the client read/write the API key via the agent and drive the OAuth login flow.
 //! The agent is the single source of truth for `auth.json`.
@@ -13,16 +13,18 @@ use crate::session::ExtMethodResult;
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/auth/getBearerToken" => handle_get_bearer_token(agent).await,
-        "x.ai/getApiKey" => handle_get_api_key(),
-        "x.ai/setApiKey" => handle_set_api_key(args),
-        "x.ai/auth/submit_code" => handle_submit_code(agent, args),
-        "x.ai/auth/get_url" => handle_get_url(agent).await,
-        "x.ai/auth/cancel" => handle_cancel(agent, args),
-        "x.ai/auth/logout" => handle_logout(agent, args).await,
-        "x.ai/auth/info" => handle_info(agent),
-        "x.ai/auth/check_subscription" => handle_check_subscription(agent).await,
-        "x.ai/auth/hydrate_team_capability" => handle_hydrate_team_capability(agent, args).await,
+        "example.invalid/auth/getBearerToken" => handle_get_bearer_token(agent).await,
+        "example.invalid/getApiKey" => handle_get_api_key(),
+        "example.invalid/setApiKey" => handle_set_api_key(args),
+        "example.invalid/auth/submit_code" => handle_submit_code(agent, args),
+        "example.invalid/auth/get_url" => handle_get_url(agent).await,
+        "example.invalid/auth/cancel" => handle_cancel(agent, args),
+        "example.invalid/auth/logout" => handle_logout(agent, args).await,
+        "example.invalid/auth/info" => handle_info(agent),
+        "example.invalid/auth/check_subscription" => handle_check_subscription(agent).await,
+        "example.invalid/auth/hydrate_team_capability" => {
+            handle_hydrate_team_capability(agent, args).await
+        }
         _ => Err(acp::Error::method_not_found()),
     }
 }

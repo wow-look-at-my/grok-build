@@ -4,7 +4,7 @@
 
 use crate::session::SessionCommand;
 
-/// Parse the params of a `x.ai/queue/{remove,reorder,clear,edit,interject,deliver_now,hold_edit,release_edit}` ext-notification. `owner` is the resolved attribution (params `owner`/`clientIdentifier`).
+/// Parse the params of a `example.invalid/queue/{remove,reorder,clear,edit,interject,deliver_now,hold_edit,release_edit}` ext-notification. `owner` is the resolved attribution (params `owner`/`clientIdentifier`).
 /// It scopes remove/clear to the requesting client's own items, and is recorded as `last_editor` for in-place text edits.
 /// Returns `None` for unrecognized methods, for `edit` when `newText` is missing, or when a required `id` is missing.
 pub(super) fn parse_queue_edit_command(
@@ -13,7 +13,7 @@ pub(super) fn parse_queue_edit_command(
     owner: Option<String>,
 ) -> Option<SessionCommand> {
     match method {
-        "x.ai/queue/remove" => {
+        "example.invalid/queue/remove" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             // The client supplies the version it last saw; the handler removes only on an exact match
             // A stale version is a benign no-op plus a rebroadcast
@@ -28,7 +28,7 @@ pub(super) fn parse_queue_edit_command(
                 owner,
             })
         }
-        "x.ai/queue/reorder" => {
+        "example.invalid/queue/reorder" => {
             let ordered_ids = params
                 .get("orderedIds")
                 .and_then(|v| v.as_array())
@@ -40,8 +40,8 @@ pub(super) fn parse_queue_edit_command(
                 .unwrap_or_default();
             Some(SessionCommand::ReorderQueue { ordered_ids })
         }
-        "x.ai/queue/clear" => Some(SessionCommand::ClearQueue { owner }),
-        "x.ai/queue/interject" => {
+        "example.invalid/queue/clear" => Some(SessionCommand::ClearQueue { owner }),
+        "example.invalid/queue/interject" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             // The client supplies the version it last saw; the handler acts only on an exact match
             // A stale version is a benign no-op plus a rebroadcast
@@ -63,8 +63,8 @@ pub(super) fn parse_queue_edit_command(
                 new_text,
             })
         }
-        "x.ai/queue/deliver_now" => Some(SessionCommand::DeliverQueuedPromptsNow),
-        "x.ai/queue/edit" => {
+        "example.invalid/queue/deliver_now" => Some(SessionCommand::DeliverQueuedPromptsNow),
+        "example.invalid/queue/edit" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             let new_text = params.get("newText").and_then(|v| v.as_str())?.to_string();
             // `owner` is the resolved attribution
@@ -75,11 +75,11 @@ pub(super) fn parse_queue_edit_command(
                 editor: owner,
             })
         }
-        "x.ai/queue/hold_edit" => {
+        "example.invalid/queue/hold_edit" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             Some(SessionCommand::HoldEdit { id })
         }
-        "x.ai/queue/release_edit" => {
+        "example.invalid/queue/release_edit" => {
             let id = params.get("id").and_then(|v| v.as_str())?.to_string();
             Some(SessionCommand::ReleaseEdit { id })
         }
@@ -91,14 +91,15 @@ pub(super) fn parse_queue_edit_command(
 mod tests {
     use super::*;
 
-    /// Each `x.ai/queue/*` ext-notification maps to the correct versioned/idempotent `SessionCommand`.
+    /// Each `example.invalid/queue/*` ext-notification maps to the correct versioned/idempotent `SessionCommand`.
     #[test]
     fn parse_queue_edit_command_maps_each_method() {
         // remove: id + expectedVersion + owner.
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p7", "expectedVersion": 3
         });
-        match parse_queue_edit_command("x.ai/queue/remove", &p, Some("grok-tui".into())) {
+        match parse_queue_edit_command("example.invalid/queue/remove", &p, Some("grok-tui".into()))
+        {
             Some(SessionCommand::RemoveQueuedPrompt {
                 id,
                 expected_version,
@@ -113,7 +114,7 @@ mod tests {
 
         // remove without expectedVersion defaults to 0.
         let p = serde_json::json!({ "sessionId": "s1", "id": "p8" });
-        match parse_queue_edit_command("x.ai/queue/remove", &p, None) {
+        match parse_queue_edit_command("example.invalid/queue/remove", &p, None) {
             Some(SessionCommand::RemoveQueuedPrompt {
                 expected_version, ..
             }) => assert_eq!(expected_version, 0),
@@ -122,7 +123,7 @@ mod tests {
 
         // reorder: orderedIds array.
         let p = serde_json::json!({ "sessionId": "s1", "orderedIds": ["a", "b", "c"] });
-        match parse_queue_edit_command("x.ai/queue/reorder", &p, None) {
+        match parse_queue_edit_command("example.invalid/queue/reorder", &p, None) {
             Some(SessionCommand::ReorderQueue { ordered_ids }) => {
                 assert_eq!(ordered_ids, vec!["a", "b", "c"]);
             }
@@ -131,7 +132,7 @@ mod tests {
 
         // clear: owner-scoped.
         match parse_queue_edit_command(
-            "x.ai/queue/clear",
+            "example.invalid/queue/clear",
             &serde_json::json!({ "sessionId": "s1" }),
             Some("grok-tui".into()),
         ) {
@@ -145,7 +146,8 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p9", "newText": "replacement text"
         });
-        match parse_queue_edit_command("x.ai/queue/edit", &p, Some("grok-vscode".into())) {
+        match parse_queue_edit_command("example.invalid/queue/edit", &p, Some("grok-vscode".into()))
+        {
             Some(SessionCommand::EditQueuedPrompt {
                 id,
                 new_text,
@@ -160,7 +162,7 @@ mod tests {
 
         // edit without editor (no owner/clientIdentifier) yields editor: None
         match parse_queue_edit_command(
-            "x.ai/queue/edit",
+            "example.invalid/queue/edit",
             &serde_json::json!({ "sessionId": "s1", "id": "p9", "newText": "x" }),
             None,
         ) {
@@ -173,7 +175,7 @@ mod tests {
         // edit without newText yields None (can't replace text we don't have)
         assert!(
             parse_queue_edit_command(
-                "x.ai/queue/edit",
+                "example.invalid/queue/edit",
                 &serde_json::json!({ "sessionId": "s1", "id": "p9" }),
                 None,
             )
@@ -183,7 +185,7 @@ mod tests {
         // edit without id yields None (can't target an entry)
         assert!(
             parse_queue_edit_command(
-                "x.ai/queue/edit",
+                "example.invalid/queue/edit",
                 &serde_json::json!({ "sessionId": "s1", "newText": "x" }),
                 None,
             )
@@ -194,7 +196,11 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p10", "expectedVersion": 2
         });
-        match parse_queue_edit_command("x.ai/queue/interject", &p, Some("grok-tui".into())) {
+        match parse_queue_edit_command(
+            "example.invalid/queue/interject",
+            &p,
+            Some("grok-tui".into()),
+        ) {
             Some(SessionCommand::InterjectQueuedPrompt {
                 id,
                 expected_version,
@@ -213,7 +219,7 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p10", "expectedVersion": 2, "newText": "edited"
         });
-        match parse_queue_edit_command("x.ai/queue/interject", &p, None) {
+        match parse_queue_edit_command("example.invalid/queue/interject", &p, None) {
             Some(SessionCommand::InterjectQueuedPrompt { new_text, .. }) => {
                 assert_eq!(new_text.as_deref(), Some("edited"));
             }
@@ -224,7 +230,7 @@ mod tests {
         let p = serde_json::json!({
             "sessionId": "s1", "id": "p10", "expectedVersion": 2, "newText": "   "
         });
-        match parse_queue_edit_command("x.ai/queue/interject", &p, None) {
+        match parse_queue_edit_command("example.invalid/queue/interject", &p, None) {
             Some(SessionCommand::InterjectQueuedPrompt { new_text, .. }) => {
                 assert_eq!(new_text, None, "blank override must be dropped");
             }
@@ -233,7 +239,7 @@ mod tests {
 
         // interject without expectedVersion defaults to 0.
         match parse_queue_edit_command(
-            "x.ai/queue/interject",
+            "example.invalid/queue/interject",
             &serde_json::json!({ "sessionId": "s1", "id": "p11" }),
             None,
         ) {
@@ -245,39 +251,52 @@ mod tests {
 
         // interject without id yields None (can't target an entry)
         assert!(
-            parse_queue_edit_command("x.ai/queue/interject", &serde_json::json!({}), None)
-                .is_none()
+            parse_queue_edit_command(
+                "example.invalid/queue/interject",
+                &serde_json::json!({}),
+                None
+            )
+            .is_none()
         );
 
         // hold_edit / release_edit: id only (combine-hold while the client edits).
         let p = serde_json::json!({ "sessionId": "s1", "id": "p12" });
-        match parse_queue_edit_command("x.ai/queue/hold_edit", &p, None) {
+        match parse_queue_edit_command("example.invalid/queue/hold_edit", &p, None) {
             Some(SessionCommand::HoldEdit { id }) => assert_eq!(id, "p12"),
             _ => panic!("expected HoldEdit"),
         }
-        match parse_queue_edit_command("x.ai/queue/release_edit", &p, None) {
+        match parse_queue_edit_command("example.invalid/queue/release_edit", &p, None) {
             Some(SessionCommand::ReleaseEdit { id }) => assert_eq!(id, "p12"),
             _ => panic!("expected ReleaseEdit"),
         }
 
         // hold_edit / release_edit without id yields None (can't target an entry)
         assert!(
-            parse_queue_edit_command("x.ai/queue/hold_edit", &serde_json::json!({}), None)
-                .is_none()
-        );
-        assert!(
-            parse_queue_edit_command("x.ai/queue/release_edit", &serde_json::json!({}), None)
-                .is_none()
-        );
-
-        // An unknown method yields None
-        // Outbound `changed` is the other production `x.ai/queue/*` method and must not parse as an edit command
-        assert!(
-            parse_queue_edit_command("x.ai/queue/bogus", &serde_json::json!({}), None).is_none()
+            parse_queue_edit_command(
+                "example.invalid/queue/hold_edit",
+                &serde_json::json!({}),
+                None
+            )
+            .is_none()
         );
         assert!(
             parse_queue_edit_command(
-                "x.ai/queue/changed",
+                "example.invalid/queue/release_edit",
+                &serde_json::json!({}),
+                None
+            )
+            .is_none()
+        );
+
+        // An unknown method yields None
+        // Outbound `changed` is the other production `example.invalid/queue/*` method and must not parse as an edit command
+        assert!(
+            parse_queue_edit_command("example.invalid/queue/bogus", &serde_json::json!({}), None)
+                .is_none()
+        );
+        assert!(
+            parse_queue_edit_command(
+                "example.invalid/queue/changed",
                 &serde_json::json!({
                     "sessionId": "s1",
                     "entries": [{
@@ -294,7 +313,8 @@ mod tests {
         );
         // remove without id yields None (can't target an entry)
         assert!(
-            parse_queue_edit_command("x.ai/queue/remove", &serde_json::json!({}), None).is_none()
+            parse_queue_edit_command("example.invalid/queue/remove", &serde_json::json!({}), None)
+                .is_none()
         );
     }
 }

@@ -11,25 +11,25 @@ You can use it interactively as a full-screen TUI, run it headlessly for scripti
 Install the latest stable release (macOS, Linux, or Windows via Git Bash):
 
 ```bash
-curl -fsSL https://x.ai/cli/install.sh | bash
+curl -fsSL https://example.invalid/cli/install.sh | bash
 ```
 
 Install a specific version:
 
 ```bash
-curl -fsSL https://x.ai/cli/install.sh | bash -s 0.1.42
+curl -fsSL https://example.invalid/cli/install.sh | bash -s 0.1.42
 ```
 
 On **Windows (PowerShell)**, use the native PowerShell installer:
 
 ```powershell
-irm https://x.ai/cli/install.ps1 | iex
+irm https://example.invalid/cli/install.ps1 | iex
 ```
 
 Install a specific version:
 
 ```powershell
-$env:GROK_VERSION="0.1.42"; irm https://x.ai/cli/install.ps1 | iex
+$env:GROK_VERSION="0.1.42"; irm https://example.invalid/cli/install.ps1 | iex
 ```
 
 The PowerShell installer automatically adds `%USERPROFILE%\.grok\bin` to your User PATH. Alternatively, install via [Git for Windows](https://gitforwindows.org/) (Git Bash) or MSYS2 using the bash script above. WSL users get the Linux binary automatically.

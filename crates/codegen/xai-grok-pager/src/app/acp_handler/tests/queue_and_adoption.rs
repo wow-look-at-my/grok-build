@@ -1,7 +1,7 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
     use super::*;
 
-    /// The pager reconciles the authoritative shared prompt queue from the `x.ai/queue/changed` broadcast, and an empty broadcast clears it.
+    /// The pager reconciles the authoritative shared prompt queue from the `example.invalid/queue/changed` broadcast, and an empty broadcast clears it.
     #[test]
     fn queue_changed_reconciles_shared_queue() {
         let mut app = make_app_with_agent("sess-1");
@@ -225,7 +225,7 @@
             json_set(&mut params, "runningPromptId", serde_json::json!(r));
         }
         acp::ExtNotification::new(
-            "x.ai/queue/changed",
+            "example.invalid/queue/changed",
             std::sync::Arc::from(serde_json::value::to_raw_value(&params).unwrap()),
         )
     }
@@ -413,7 +413,7 @@
             serde_json::from_str(&json_str).unwrap();
         assert_eq!(mirror.running_prompt_id.as_deref(), Some("prompt-running"));
 
-        let notif = acp::ExtNotification::new("x.ai/queue/changed", raw.into());
+        let notif = acp::ExtNotification::new("example.invalid/queue/changed", raw.into());
 
         // Case 1: current_prompt_id is None, so adopt it
         let mut app = make_app_with_agent("sess-1");
@@ -1802,7 +1802,7 @@
             "promptId": "p1",
         });
         let notif = acp::ExtNotification::new(
-            "x.ai/session/prompt_complete",
+            "example.invalid/session/prompt_complete",
             serde_json::value::to_raw_value(&params).unwrap().into(),
         );
         handle_prompt_complete(&notif, &mut app);
@@ -2231,7 +2231,7 @@
     #[test]
     fn viewer_enters_turn_running_for_scheduler_fired_cron_turn() {
         // A `/loop` (scheduled-task) turn has a synthetic `scheduler-fired-…` prompt id
-        // UNLIKE auto-wake turns it is client-driven via `MvpAgent::prompt()` and DOES emit `x.ai/session/prompt_complete`
+        // UNLIKE auto-wake turns it is client-driven via `MvpAgent::prompt()` and DOES emit `example.invalid/session/prompt_complete`
         // So a viewer MUST enter TurnRunning for it; otherwise the dashboard's locally-tracked row for a running `/loop` session never shows Working
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
@@ -2272,7 +2272,7 @@
 
     #[test]
     fn viewer_prompt_complete_finishes_turn() {
-        // A viewer in TurnRunning receives x.ai/session/prompt_complete for its session and runs finish_turn: state Idle, current_prompt_id cleared
+        // A viewer in TurnRunning receives example.invalid/session/prompt_complete for its session and runs finish_turn: state Idle, current_prompt_id cleared
         let mut app = make_app_with_agent("sess-view");
         app.agents.get_mut(&AgentId(0)).unwrap().attached_as_viewer = true;
         let _ = handle(
@@ -2647,7 +2647,7 @@
             .insert(child_sid.into(), Box::new(child));
     }
 
-    /// A `x.ai/queue/changed` naming the awaited prompt (queued or running) disarms the watch; one that does not proves nothing.
+    /// A `example.invalid/queue/changed` naming the awaited prompt (queued or running) disarms the watch; one that does not proves nothing.
     #[test]
     fn queue_changed_naming_the_awaited_prompt_disarms_the_watch() {
         let mut app = make_app_with_agent("sess-1");
@@ -2710,7 +2710,7 @@
         );
     }
 
-    /// A `x.ai/queue/changed` on the child session naming the child's awaited prompt disarms the child's watch.
+    /// A `example.invalid/queue/changed` on the child session naming the child's awaited prompt disarms the child's watch.
     #[test]
     fn queue_changed_on_the_child_session_disarms_the_child_watch() {
         let mut app = make_app_with_agent("sess-1");
@@ -2749,7 +2749,7 @@
         let changed = handle(
             make_ext_session_notification_with_method(
                 "sess-owner",
-                "x.ai/session/update",
+                "example.invalid/session/update",
                 XaiSessionUpdate::ImageCompressed {
                     images: vec![compressed_entry(0)],
                     message: "resized".into(),

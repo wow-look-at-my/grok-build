@@ -185,7 +185,7 @@ fn inject_url_derived_headers_adds_proxy_headers_for_cli_chat_proxy_url() {
 #[test]
 fn inject_url_derived_headers_skips_proxy_headers_for_external_url() {
     let mut headers = IndexMap::new();
-    inject_url_derived_headers(&mut headers, None, "https://api.x.ai/v1");
+    inject_url_derived_headers(&mut headers, None, "https://api.example.invalid/v1");
     assert!(headers.get("X-XAI-Token-Auth").is_none());
     assert!(headers.get("x-authenticateresponse").is_none());
     assert_eq!(
@@ -824,7 +824,7 @@ fn web_search_disable_api_key_auth_swaps_first_party_key_for_session() {
         "ws-model".to_string(),
         test_model_entry(
             "ws-model",
-            "https://api.x.ai/v1",
+            "https://api.example.invalid/v1",
             Some("first-party-key"),
             None,
             None,
@@ -1192,12 +1192,22 @@ fn sampling_config_scopes_no_inline_citations_include() {
             crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
             true,
         ),
-        (true, ApiBackend::Responses, "https://api.x.ai/v1", true),
-        (false, ApiBackend::Responses, "https://api.x.ai/v1", false),
+        (
+            true,
+            ApiBackend::Responses,
+            "https://api.example.invalid/v1",
+            true,
+        ),
+        (
+            false,
+            ApiBackend::Responses,
+            "https://api.example.invalid/v1",
+            false,
+        ),
         (
             true,
             ApiBackend::ChatCompletions,
-            "https://api.x.ai/v1",
+            "https://api.example.invalid/v1",
             false,
         ),
         (
@@ -1250,7 +1260,7 @@ fn default_models_dual_endpoint_routing() {
         };
         assert_eq!(
             api_key_creds.base_url, endpoints.xai_api_base_url,
-            "{model_id}: ExternalApiKey must route to api.x.ai"
+            "{model_id}: ExternalApiKey must route to api.example.invalid"
         );
     }
 }
@@ -1387,7 +1397,7 @@ fn resolve_credentials_empty_env_key_falls_through_to_session() {
     let alias = "GROK_TEST_EMPTY_ENV_LC_ALIAS";
     let _primary = EnvGuard::set(primary, "");
     let _alias = EnvGuard::set(alias, "");
-    let mut model = test_model_entry("m", "https://api.x.ai/v1", None, None, None);
+    let mut model = test_model_entry("m", "https://api.example.invalid/v1", None, None, None);
     model.env_key = Some(EnvKeys::new([primary, alias]));
     assert!(!model.has_own_credentials());
     let creds = resolve_credentials(&model, Some("session-jwt"));
@@ -1417,7 +1427,7 @@ fn resolve_credentials_empty_env_key_falls_through_to_global_key() {
 #[test]
 fn resolve_credentials_empty_api_key_falls_through_to_session() {
     use xai_chat_state::AuthType;
-    let model = test_model_entry("m", "https://api.x.ai/v1", Some(""), None, None);
+    let model = test_model_entry("m", "https://api.example.invalid/v1", Some(""), None, None);
     assert!(!model.has_own_credentials());
     let creds = resolve_credentials(&model, Some("session-jwt"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
@@ -1460,7 +1470,7 @@ fn config_toml_env_key_array_parses() {
 #[test]
 fn resolve_credentials_sets_auth_type() {
     use xai_chat_state::AuthType;
-    let model = test_model_entry("m", "https://api.x.ai/v1", None, None, None);
+    let model = test_model_entry("m", "https://api.example.invalid/v1", None, None, None);
     let creds = resolve_credentials(&model, Some("tok"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
     let byok = test_model_entry("m", "https://example.com/v1", Some("key"), None, None);
@@ -1549,15 +1559,15 @@ fn api_key_creds(base_url: &str) -> ResolvedCredentials {
 #[test]
 fn enforce_disable_api_key_auth_blocks_first_party_only() {
     use xai_chat_state::AuthType;
-    let mut creds = api_key_creds("https://api.x.ai/v1");
+    let mut creds = api_key_creds("https://api.example.invalid/v1");
     enforce_disable_api_key_auth(&mut creds, false, Some("session-jwt"));
     assert_eq!(creds.auth_type, AuthType::ApiKey);
     assert_eq!(creds.api_key.as_deref(), Some("xai-secret"));
-    let mut creds = api_key_creds("https://api.x.ai/v1");
+    let mut creds = api_key_creds("https://api.example.invalid/v1");
     enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
     assert_eq!(creds.api_key.as_deref(), Some("session-jwt"));
-    let mut creds = api_key_creds("https://api.x.ai/v1");
+    let mut creds = api_key_creds("https://api.example.invalid/v1");
     enforce_disable_api_key_auth(&mut creds, true, None);
     assert_eq!(creds.auth_type, AuthType::SessionToken);
     assert_eq!(creds.api_key, None);
@@ -1567,20 +1577,20 @@ fn enforce_disable_api_key_auth_blocks_first_party_only() {
     assert_eq!(creds.api_key.as_deref(), Some("xai-secret"));
     let mut creds = ResolvedCredentials {
         auth_type: AuthType::SessionToken,
-        ..api_key_creds("https://api.x.ai/v1")
+        ..api_key_creds("https://api.example.invalid/v1")
     };
     enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
 }
 /// Regression for the OVERRIDE_MODEL kill-switch bypass. A first-party model with its own api_key resolves to `ApiKey` (priority 1, beating the session).
-/// The kill switch, now applied inside `try_resolve_model_credentials`, swaps it for the session token. BYOK (non-x.ai) own keys are preserved.
+/// The kill switch, now applied inside `try_resolve_model_credentials`, swaps it for the session token. BYOK (non-example.invalid) own keys are preserved.
 /// (`try_resolve_model_credentials` loads global config, so this exercises its resolve and enforce core.)
 #[test]
 fn try_resolve_model_credentials_swaps_first_party_own_key_under_kill_switch() {
     use xai_chat_state::AuthType;
     let entry = test_model_entry(
         "m",
-        "https://api.x.ai/v1",
+        "https://api.example.invalid/v1",
         Some("xai-model-key"),
         None,
         None,
@@ -1638,7 +1648,7 @@ fn replayed_reasoning_rides_both_names_except_on_xai() {
     for (url, expected) in [
         ("https://ollama.com/v1", true),
         ("http://localhost:11434/v1", true),
-        ("https://api.x.ai/v1", false),
+        ("https://api.example.invalid/v1", false),
     ] {
         let model = test_model_entry("m", url, Some("sk-test"), None, None);
         let config =
@@ -1720,7 +1730,7 @@ fn byok_from_lookup_classifies_all_states() {
         byok_from_lookup(&ModelLookup::Loaded(Some(&byok))),
         ModelByok::Byok,
     );
-    let session = test_model_entry("m", "https://api.x.ai/v1", None, None, None);
+    let session = test_model_entry("m", "https://api.example.invalid/v1", None, None, None);
     assert_eq!(
         byok_from_lookup(&ModelLookup::Loaded(Some(&session))),
         ModelByok::NotByok,
@@ -2114,11 +2124,23 @@ fn parses_model_context_window() {
 }
 #[test]
 fn sampling_config_context_window_from_entry_or_default() {
-    let model = test_model_entry("any-model", "https://api.x.ai/v1", None, None, None);
+    let model = test_model_entry(
+        "any-model",
+        "https://api.example.invalid/v1",
+        None,
+        None,
+        None,
+    );
     let config =
         sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
     assert_eq!(config.context_window, 200_000);
-    let mut model = test_model_entry("any-model", "https://api.x.ai/v1", None, None, None);
+    let mut model = test_model_entry(
+        "any-model",
+        "https://api.example.invalid/v1",
+        None,
+        None,
+        None,
+    );
     model.info.context_window = NonZeroU64::new(256_000).unwrap();
     let config =
         sampling_config_for_model(&model, resolve_credentials(&model, None), None, None, None);
@@ -2744,12 +2766,12 @@ fn hidden_model_excluded_from_acp_but_kept_in_catalog() {
         r#"
             [model.visible-model]
             model = "visible-model"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 200000
 
             [model.hidden-model]
             model = "hidden-model"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 200000
             hidden = true
             "#,
@@ -2784,7 +2806,7 @@ fn disabled_models_removed_from_catalog() {
             disabled_models = ["to-disable"]
             [model.to-disable]
             model = "to-disable"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 200000
             "#,
     )
@@ -2801,7 +2823,7 @@ fn hidden_models_kept_in_catalog_but_not_in_acp() {
             hidden_models = ["to-hide"]
             [model.to-hide]
             model = "to-hide"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 200000
             "#,
     )
@@ -2821,15 +2843,15 @@ fn force_reasoning_effort_models_flags_a_model_the_catalog_left_unflagged() {
         force_reasoning_effort_models = ["forced-*", "by-model-id"]
         [model.forced-one]
         model = "forced-one"
-        base_url = "https://api.x.ai/v1"
+        base_url = "https://api.example.invalid/v1"
         context_window = 200000
         [model.some-key]
         model = "by-model-id"
-        base_url = "https://api.x.ai/v1"
+        base_url = "https://api.example.invalid/v1"
         context_window = 200000
         [model.untouched]
         model = "untouched"
-        base_url = "https://api.x.ai/v1"
+        base_url = "https://api.example.invalid/v1"
         context_window = 200000
         "#,
     )
@@ -2851,7 +2873,7 @@ fn forced_reasoning_effort_reaches_the_acp_meta_gate() {
         force_reasoning_effort_models = ["forced-one"]
         [model.forced-one]
         model = "forced-one"
-        base_url = "https://api.x.ai/v1"
+        base_url = "https://api.example.invalid/v1"
         context_window = 200000
         "#,
     )
@@ -2893,15 +2915,15 @@ fn allowed_models_marks_selectable_by_wildcard_key_or_model() {
             allowed_models = ["keep-*", "explicit-key", "explicit-model-id"]
             [model.to-drop]
             model = "to-drop"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.keep-one]
             model = "keep-one"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.explicit-key]
             model = "explicit-model-id"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
     )
@@ -2935,7 +2957,7 @@ fn allowed_models_empty_is_unrestricted() {
             allowed_models = []
             [model.foo]
             model = "foo"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
     )
@@ -2973,13 +2995,13 @@ fn supported_in_api_false_hides_from_api_key_users() {
         r#"
             [model.oauth-only-model]
             model = "oauth-only-model"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 200000
             supported_in_api = false
 
             [model.public-model]
             model = "public-model"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 200000
             "#,
     )
@@ -3005,7 +3027,7 @@ fn inference_idle_timeout_secs_round_trip() {
         r#"
             [model.slow-model]
             model = "grok-4.5"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 200000
             inference_idle_timeout_secs = 600
             "#,
@@ -3022,7 +3044,7 @@ fn inference_idle_timeout_secs_absent_defaults_to_none() {
         r#"
             [model.default-model]
             model = "grok-fast"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 200000
             "#,
     )
@@ -3445,7 +3467,7 @@ fn e2e_user_overrides_default_model_key_with_custom_endpoint() {
     );
     assert_eq!(
         sampling.base_url, "https://inference.example.com/v1",
-        "should route to the user's custom endpoint, not api.x.ai"
+        "should route to the user's custom endpoint, not api.example.invalid"
     );
     unsafe { std::env::remove_var("ENTERPRISE_AUTH_TOKEN") };
 }
@@ -3657,7 +3679,13 @@ fn e2e_credential_priority_model_key_beats_session_beats_env() {
         "model's own base_url must be used"
     );
     let proxy = xai_grok_env::PROD_CLI_CHAT_PROXY_BASE_URL;
-    let model_no_key = test_model_entry("test", proxy, None, None, Some("https://api.x.ai/v1"));
+    let model_no_key = test_model_entry(
+        "test",
+        proxy,
+        None,
+        None,
+        Some("https://api.example.invalid/v1"),
+    );
     let sampling = resolve_sampling(&model_no_key, Some("session-key"));
     assert_eq!(
         sampling.api_key.as_deref(),
@@ -3673,7 +3701,7 @@ fn e2e_credential_priority_model_key_beats_session_beats_env() {
         "https://gateway.example/v1",
         None,
         None,
-        Some("https://api.x.ai/v1"),
+        Some("https://api.example.invalid/v1"),
     );
     let sampling = resolve_sampling(&third_party, Some("session-key"));
     assert_ne!(
@@ -3688,7 +3716,7 @@ fn e2e_credential_priority_model_key_beats_session_beats_env() {
         "env key should be used when no session and no model credentials"
     );
     assert_eq!(
-        sampling.base_url, "https://api.x.ai/v1",
+        sampling.base_url, "https://api.example.invalid/v1",
         "env key should route to api_base_url"
     );
     unsafe { std::env::remove_var("XAI_API_KEY") };
@@ -3779,7 +3807,7 @@ fn e2e_acp_model_info_no_dedup_on_model_field() {
             "https://cli-chat-proxy.grok.com/v1",
             None,
             None,
-            Some("https://api.x.ai/v1"),
+            Some("https://api.example.invalid/v1"),
         ),
     );
     models.insert(
@@ -6404,7 +6432,7 @@ fn web_search_domain_keys_are_not_reported_unused() {
         let unused = unused_keys_from_toml(&format!(
             r#"
                 [toolset.web_search]
-                {key} = ["docs.x.ai"]
+                {key} = ["docs.example.invalid"]
                 not_a_real_key = true
             "#
         ));

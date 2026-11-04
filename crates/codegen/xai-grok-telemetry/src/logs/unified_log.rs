@@ -1,5 +1,5 @@
 //! Shell writes directly via [`emit()`].
-//! Pager and desktop forward entries over ACP (`x.ai/log` notifications).
+//! Pager and desktop forward entries over ACP (`example.invalid/log` notifications).
 //! Shell receives them in [`ingest_client_entries()`] and writes on their behalf.
 
 use std::fs::{self, File, OpenOptions};
@@ -28,7 +28,7 @@ const LOG_FILE: &str = "unified.jsonl";
 pub const MAX_SIZE: u64 = 5 * 1024 * 1024;
 
 /// ACP method name for unified log notifications.
-pub const LOG_METHOD: &str = "x.ai/log";
+pub const LOG_METHOD: &str = "example.invalid/log";
 
 // ---------------------------------------------------------------------------
 // Log entry types
@@ -83,7 +83,7 @@ pub struct LogEntry {
     pub ctx: Option<serde_json::Value>,
 }
 
-/// Wire format for the `x.ai/log` ACP notification params.
+/// Wire format for the `example.invalid/log` ACP notification params.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogNotificationParams {
     pub src: LogSource,
@@ -370,7 +370,7 @@ pub fn emit(lvl: LogLevel, msg: &str, sid: Option<&str>, ctx: Option<serde_json:
     write_entry(&entry);
 }
 
-/// Ingest a batch of log entries from a client (pager or desktop). Called by the `x.ai/log` notification handler. Entries
+/// Ingest a batch of log entries from a client (pager or desktop). Called by the `example.invalid/log` notification handler. Entries
 /// from [`LogSource::Shell`] are rejected to prevent spoofing.
 pub fn ingest_client_entries(src: LogSource, entries: &[ClientLogEntry]) {
     if matches!(src, LogSource::Shell) || entries.is_empty() {

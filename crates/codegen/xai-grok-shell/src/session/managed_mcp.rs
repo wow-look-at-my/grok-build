@@ -332,7 +332,7 @@ fn apply_mcp_server_policy(
         .collect()
 }
 
-/// Policy gate for the session-less MCP pool (without it `x.ai/mcp/call` spawns blocked servers);
+/// Policy gate for the session-less MCP pool (without it `example.invalid/mcp/call` spawns blocked servers);
 /// native tier needs the payload to EQUAL the on-disk TOML definition, as in the session merge.
 /// Also drops `enabled = false` / `disabled_mcp_servers` names — the same kill switch as
 /// [`merge_managed_mcp_servers`] / [`apply_mcp_server_policy`].

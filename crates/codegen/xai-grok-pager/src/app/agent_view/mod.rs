@@ -147,7 +147,7 @@ pub(super) fn active_contexts_for_pane(pane: ActivePane) -> Vec<crate::actions::
 }
 /// Pane focus within the agent view. This will grow as we add more panes (tasks, review files, etc.).
 pub type AgentPane = ActivePane;
-/// MCP server initialization progress, received from the shell (`x.ai/mcp/init_progress`).
+/// MCP server initialization progress, received from the shell (`example.invalid/mcp/init_progress`).
 #[derive(Debug, Clone)]
 pub struct McpInitProgress {
     pub total: u32,
@@ -609,7 +609,7 @@ pub struct PluginCtaState {
     pub dismissed: std::collections::HashSet<String>,
 }
 /// Follow-up suggestion chips for the latest assistant response
-/// (`x.ai/follow_ups`).
+/// (`example.invalid/follow_ups`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FollowUps {
     /// `params.response_id` these chips belong to (the newest-wins key).
@@ -1079,7 +1079,7 @@ pub struct AgentView {
     pub(crate) mcp_init_progress: Option<McpInitProgress>,
     /// Set when a session create or fork is dispatched. Cleared when the id binds or the create fails.
     pub(crate) session_starting_since: Option<Instant>,
-    /// Latest `session/new` setup step from `x.ai/session/setup`; names the stuck step on a timeout. Cleared on bind/fail.
+    /// Latest `session/new` setup step from `example.invalid/session/setup`; names the stuck step on a timeout. Cleared on bind/fail.
     pub(crate) session_new_phase: Option<xai_grok_shell::agent::SessionSetupPhase>,
     /// The create's `_meta.sessionId`, held until `SessionCreated` binds it, so setup phases route here. Cleared on bind/fail.
     pub(crate) pending_session_id: Option<agent_client_protocol::SessionId>,
@@ -1135,7 +1135,7 @@ pub struct AgentView {
     pub(crate) timeline_hover: Option<crate::views::timeline::TimelineHit>,
     /// Cached tick-hover preview `(turn_idx, text)`.
     pub(crate) timeline_hover_preview: Option<(usize, String)>,
-    /// Running agent definition for this session (`x.ai/session/info` `agentName`).
+    /// Running agent definition for this session (`example.invalid/session/info` `agentName`).
     pub session_agent_name: Option<String>,
     /// Index into `BuiltinAgentName::shift_tab_variants()` for the Shift+Tab.
     pub shift_tab_ring_agent_index: Option<u8>,
@@ -1213,7 +1213,7 @@ pub struct AgentView {
     pub(crate) send_now_echo_pending: std::collections::HashMap<String, String>,
     /// Cached official-marketplace candidates for the plugin CTA, populated on session start independently of the Extensions modal.
     pub plugin_cta: PluginCtaState,
-    /// Follow-up suggestion chips for the latest assistant response (`x.ai/follow_ups`).
+    /// Follow-up suggestion chips for the latest assistant response (`example.invalid/follow_ups`).
     pub(crate) follow_ups: Option<FollowUps>,
     /// `promptId` (turn identity) of the currently-shown `follow_ups`, when the delivery.
     pub(crate) follow_up_shown_prompt_id: Option<String>,
@@ -1225,7 +1225,7 @@ pub struct AgentView {
     pub(crate) follow_up_seen: HashMap<String, u64>,
     /// Monotonic generation assigned to the next newly-accepted `response_id`.
     pub(crate) follow_up_next_gen: u64,
-    /// Stamped `x.ai/follow_ups` that arrived for a turn that is NOT yet the currently-adopted one.
+    /// Stamped `example.invalid/follow_ups` that arrived for a turn that is NOT yet the currently-adopted one.
     pub(crate) follow_up_pending: HashMap<String, FollowUps>,
     /// Insertion order of `follow_up_pending` keys.
     pub(crate) follow_up_pending_order: VecDeque<String>,
@@ -2628,7 +2628,7 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().suggestions, vec!["a"]);
     }
-    /// After adopting a NEW turn, a buffer-replayed `x.ai/follow_ups`
+    /// After adopting a NEW turn, a buffer-replayed `example.invalid/follow_ups`
     /// for a PRIOR turn's response_id must NOT revive stale chips: its
     /// `promptId` is not the active turn and it is already in the seen ring.
     #[test]
@@ -2649,7 +2649,7 @@ pub(crate) mod test_fixtures {
         assert!(agent.apply_follow_ups_with_prompt("resp-2".into(), Some("p2"), vec!["b".into()]));
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-2");
     }
-    /// Stamped path: a LATE FIRST-TIME (never-seen) `x.ai/follow_ups` for a PRIOR turn, arriving while a newer turn is active, must NOT render. Before the fix it slipped through the "strictly newer" branch
+    /// Stamped path: a LATE FIRST-TIME (never-seen) `example.invalid/follow_ups` for a PRIOR turn, arriving while a newer turn is active, must NOT render. Before the fix it slipped through the "strictly newer" branch
     /// (never recorded in `follow_up_seen`, so the seen-reject didn't catch it).
     #[test]
     fn apply_follow_ups_late_prior_turn_first_time_rejected() {
@@ -2698,7 +2698,7 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-1");
     }
-    /// None-fallback (older shells / no promptId): with no turn identity on the notification AND a newer turn active, a late first-time arrival cannot be distinguished from the new turn's first follow_ups, so it follows the legacy newest-wins (renders). This path is not reachable for current shells (which always stamp `promptId`) or for buffer-replays (suppressed upstream by the `_meta["x.ai/replayed"]` gate); it is pinned here so the stamped-path fix above is understood to be the deterministic guard.
+    /// None-fallback (older shells / no promptId): with no turn identity on the notification AND a newer turn active, a late first-time arrival cannot be distinguished from the new turn's first follow_ups, so it follows the legacy newest-wins (renders). This path is not reachable for current shells (which always stamp `promptId`) or for buffer-replays (suppressed upstream by the `_meta["example.invalid/replayed"]` gate); it is pinned here so the stamped-path fix above is understood to be the deterministic guard.
     #[test]
     fn apply_follow_ups_none_prompt_first_time_follows_legacy_newest_wins() {
         let mut agent = make_agent();
@@ -2709,7 +2709,7 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-x");
     }
-    /// Buffer-before-adoption: a stamped `x.ai/follow_ups` for a turn that is NOT yet current (its `session/update` adoption raced behind the ext channel) must be BUFFERED, not dropped, and then RENDER when that turn becomes current and is flushed.
+    /// Buffer-before-adoption: a stamped `example.invalid/follow_ups` for a turn that is NOT yet current (its `session/update` adoption raced behind the ext channel) must be BUFFERED, not dropped, and then RENDER when that turn becomes current and is flushed.
     #[test]
     fn apply_follow_ups_buffered_before_adoption_flushes_on_adoption() {
         let mut agent = make_agent();

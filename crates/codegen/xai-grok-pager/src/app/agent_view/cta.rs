@@ -371,7 +371,7 @@ impl AgentView {
         true
     }
 
-    /// Buffer a stamped `x.ai/follow_ups` for a turn that is not yet current, keyed by its `promptId`.
+    /// Buffer a stamped `example.invalid/follow_ups` for a turn that is not yet current, keyed by its `promptId`.
     /// A newer delivery for the same `promptId` overwrites the earlier one (keep the latest).
     /// The FIFO order list bounds the map to [`MAX_PENDING_FOLLOW_UPS`], evicting only the oldest entry.
     fn buffer_pending_follow_ups(
@@ -400,7 +400,7 @@ impl AgentView {
         }
     }
 
-    /// Flush a buffered `x.ai/follow_ups` for `prompt_id` (a turn that has just become current).
+    /// Flush a buffered `example.invalid/follow_ups` for `prompt_id` (a turn that has just become current).
     /// Renders the chips through [`apply_follow_ups_with_prompt`].
     /// Returns whether chips were rendered; a no-op when nothing is buffered for `prompt_id`.
     pub(crate) fn flush_pending_follow_ups(&mut self, prompt_id: &str) -> bool {

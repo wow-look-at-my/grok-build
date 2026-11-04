@@ -324,7 +324,7 @@ fn promo_announcement(id: &str) -> xai_grok_announcements::RemoteAnnouncement {
         severity: Some("promo".into()),
         cta: Some(xai_grok_announcements::AnnouncementCta {
             label: Some("Go".into()),
-            url: Some(format!("https://x.ai/{id}")),
+            url: Some(format!("https://example.invalid/{id}")),
             caption: None,
         }),
         ..Default::default()
@@ -362,7 +362,9 @@ fn announcements_open_cta_opens_promo_and_noops_under_critical() {
         let effects = dispatch(Action::AnnouncementsOpenCta(surface), &mut app);
         assert!(effects.is_empty(), "open is a side effect, not an Effect");
         assert!(
-            opened().lines().any(|l| l == "https://x.ai/promo-open"),
+            opened()
+                .lines()
+                .any(|l| l == "https://example.invalid/promo-open"),
             "surface {surface:?} must open the promo url; got {:?}",
             opened()
         );

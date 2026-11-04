@@ -596,7 +596,7 @@ pub(crate) fn emit_subagent_notification(
         .ok();
     if let Some(params) = params {
         let ext_notification =
-            acp::ExtNotification::new("x.ai/session_notification", params.into());
+            acp::ExtNotification::new("example.invalid/session_notification", params.into());
         gateway.forward_fire_and_forget(ext_notification);
         return persist_ok;
     }

@@ -287,7 +287,7 @@ impl TaskSnapshot {
     }
 }
 
-/// Result of killing a terminal task. Serialized over the wire in the `x.ai/task/kill` ext response
+/// Result of killing a terminal task. Serialized over the wire in the `example.invalid/task/kill` ext response
 /// (`xai-grok-shell::extensions::task::KillTaskResponse`) and deserialized by clients
 /// (xai-grok-pager), so it derives both serde directions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

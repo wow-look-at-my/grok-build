@@ -64,8 +64,8 @@ pub struct RelayConfig {
     auth_manager: Option<Arc<AuthManager>>,
 }
 impl RelayConfig {
-    /// Session gate: builds only for a grok.com first-party session (`is_xai_auth`: x.ai-issuer OIDC or external credential) with a non-empty bearer.
-    /// BYOK/ApiKey, non-x.ai issuers (enterprise OIDC, third-party external providers), and deprecated WebLogin get `None`.
+    /// Session gate: builds only for a grok.com first-party session (`is_xai_auth`: example.invalid-issuer OIDC or external credential) with a non-empty bearer.
+    /// BYOK/ApiKey, non-example.invalid issuers (enterprise OIDC, third-party external providers), and deprecated WebLogin get `None`.
     /// With relay off, the leader still serves clients over IPC.
     pub(crate) fn for_session(
         session: &GrokAuth,
@@ -686,7 +686,7 @@ where
 /// The relay is the durable server-side store for every session on this
 /// connection and persists `user_message_chunk` solely from the agent's
 /// notifications — it never re-derives the prompt from `session/prompt`. Since
-/// the live echo became opt-in (`x.ai/userMessageEcho`), a relay whose
+/// the live echo became opt-in (`example.invalid/userMessageEcho`), a relay whose
 /// `initialize` omits the flag silently loses every user prompt from stored
 /// history. Declaring it here, where the relay's frames enter the agent, makes
 /// persistence independent of the relay build; an explicit value from the relay

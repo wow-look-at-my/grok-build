@@ -68,7 +68,7 @@ impl VoiceConfig {
             .and_then(|t| toml::Value::Table(t.clone()).try_into().ok())
             .unwrap_or_default();
 
-        // Read `[voice].api_base` from the raw table, not `cfg`: serde default makes "unset" and an explicit `https://api.x.ai` indistinguishable
+        // Read `[voice].api_base` from the raw table, not `cfg`: serde default makes "unset" and an explicit `https://api.example.invalid` indistinguishable
         cfg.api_base = non_empty_str(
             voice_table
                 .and_then(|t| t.get("api_base"))
@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn a_host_nobody_allowed_is_refused() {
         let cfg = VoiceConfig {
-            api_base: "https://api.x.ai".into(),
+            api_base: "https://api.example.invalid".into(),
             ..VoiceConfig::default()
         };
         assert!(matches!(

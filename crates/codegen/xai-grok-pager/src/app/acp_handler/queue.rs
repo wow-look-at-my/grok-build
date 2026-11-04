@@ -17,7 +17,7 @@ pub(crate) struct PendingRunningAdoption {
     pub turn_ended: bool,
 }
 
-/// Wire payload of `x.ai/session/prompt_complete`, emitted by `MvpAgent::prompt()` on the shell after every turn.
+/// Wire payload of `example.invalid/session/prompt_complete`, emitted by `MvpAgent::prompt()` on the shell after every turn.
 /// `Serialize` is derived so tests construct payloads through the same type they are parsed into (shape drift fails at compile time, not at runtime).
 /// Every field except `sessionId` is optional for wire compatibility with older shells; `promptId` only exists on shells with the lost-response fix.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -100,7 +100,7 @@ pub(super) fn handle_queue_changed(notif: &acp::ExtNotification, app: &mut AppVi
     let Ok(changed) =
         serde_json::from_str::<crate::app::prompt_queue::QueueChanged>(notif.params.get())
     else {
-        tracing::warn!("Failed to parse x.ai/queue/changed");
+        tracing::warn!("Failed to parse example.invalid/queue/changed");
         return false;
     };
 
@@ -197,7 +197,7 @@ pub(super) fn handle_queue_changed(notif: &acp::ExtNotification, app: &mut AppVi
         local_current_prompt_id = %local_current_prompt_id,
         entry_count = changed.entries.len(),
         entries = ?recv_entry_ids,
-        "received x.ai/queue/changed broadcast",
+        "received example.invalid/queue/changed broadcast",
     );
 
     let acks_watch = broadcast_acks_watch(agent_id.and_then(|aid| app.agents.get(&aid)), &changed);
@@ -472,7 +472,7 @@ pub(super) fn handle_queue_changed(notif: &acp::ExtNotification, app: &mut AppVi
 /// TODO: prompt_complete-deprecation — the durable turn_completed is already consumed via finalize_turn_from_terminal.
 pub(super) fn handle_prompt_complete(notif: &acp::ExtNotification, app: &mut AppView) -> bool {
     let Ok(payload) = serde_json::from_str::<PromptCompletePayload>(notif.params.get()) else {
-        tracing::warn!("Failed to parse x.ai/session/prompt_complete");
+        tracing::warn!("Failed to parse example.invalid/session/prompt_complete");
         return false;
     };
     let session_id = payload.session_id.as_str();

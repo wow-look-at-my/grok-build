@@ -1,4 +1,4 @@
-//! `x.ai/feedback/upload-trace` extension handler: gate, archive, and one-shot upload of the session trace.
+//! `example.invalid/feedback/upload-trace` extension handler: gate, archive, and one-shot upload of the session trace.
 use super::{ExtResult, parse_params};
 use crate::agent::MvpAgent;
 use crate::session::FeedbackTraceUploadIntent;

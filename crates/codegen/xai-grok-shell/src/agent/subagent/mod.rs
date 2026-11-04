@@ -2082,8 +2082,10 @@ pub(crate) fn spawn_progress_publisher(
                 let _ = cmd_tx.send(SessionCommand::XaiSessionNotification { notification });
             }
             if let Some(params) = params {
-                let ext_notification =
-                    acp::ExtNotification::new("x.ai/session_notification", params.into());
+                let ext_notification = acp::ExtNotification::new(
+                    "example.invalid/session_notification",
+                    params.into(),
+                );
                 gateway.forward_fire_and_forget(ext_notification);
             }
         }

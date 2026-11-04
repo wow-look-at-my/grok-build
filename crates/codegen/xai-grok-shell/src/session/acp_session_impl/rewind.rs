@@ -491,7 +491,7 @@ impl SessionActor {
             .send(PersistenceMsg::MergeRewindPointsFrom { target_index });
     }
 
-    /// Out-of-band history repair (`x.ai/session/repair`) for a resident session.
+    /// Out-of-band history repair (`example.invalid/session/repair`) for a resident session.
     /// Runs `xai_chat_state::compaction_utils::repair_history` inside the chat-state actor, then flushes persistence.
     /// The flush means `chat_history.jsonl` is rewritten on disk before the caller sees success.
     pub(super) async fn handle_repair_history(

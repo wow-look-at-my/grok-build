@@ -766,7 +766,7 @@ mod tests {
                 ..Default::default()
             },
             ann(Some("critical"), None), // no message, so not visible
-            promo("promo-1", "upsell", Some(("Go", "https://x.ai"))),
+            promo("promo-1", "upsell", Some(("Go", "https://example.invalid"))),
             expired_promo,
         ];
         let now = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
@@ -986,7 +986,7 @@ mod tests {
         let list = vec![
             ann(Some("info"), Some("info only")),
             ann(Some("promo"), None), // no message, so not visible
-            promo("p-a", "A promo", Some(("Go", "https://x.ai"))),
+            promo("p-a", "A promo", Some(("Go", "https://example.invalid"))),
             promo("p-b", "B promo", None),
         ];
         assert_eq!(
@@ -1043,7 +1043,7 @@ mod tests {
     #[test]
     fn first_session_announcement_prefers_critical_over_promo() {
         let list = vec![
-            promo("p", "upsell", Some(("Go", "https://x.ai"))),
+            promo("p", "upsell", Some(("Go", "https://example.invalid"))),
             RemoteAnnouncement {
                 id: Some("c".into()),
                 severity: Some("critical".into()),
@@ -1134,7 +1134,11 @@ mod tests {
     /// No configured caption means a bare button. The hit-rect stays the button only (the caption is not clickable).
     #[test]
     fn render_promo_row_non_dismissible_shows_configured_caption() {
-        let mut ann = promo("p", &"M".repeat(60), Some(("Go", "https://x.ai")));
+        let mut ann = promo(
+            "p",
+            &"M".repeat(60),
+            Some(("Go", "https://example.invalid")),
+        );
         ann.dismissible = Some(false);
         ann.cta.as_mut().unwrap().caption = Some("or use Ctrl+O".into());
         let anns = [ann];
@@ -1170,7 +1174,11 @@ mod tests {
         );
 
         // No caption configured: the pinned row stays a bare button even with `caption_allowed` (nothing hardcoded fills in)
-        let mut bare = promo("p", &"M".repeat(60), Some(("Go", "https://x.ai")));
+        let mut bare = promo(
+            "p",
+            &"M".repeat(60),
+            Some(("Go", "https://example.invalid")),
+        );
         bare.dismissible = Some(false);
         let mut buf = Buffer::empty(area);
         let hits = render_banner(area, &mut buf, &[bare], &no_hidden(), false, false, true);
@@ -1185,10 +1193,14 @@ mod tests {
     /// `promo_cta_target` requires BOTH trimmed-non-empty label and url; a partial CTA never produces an openable target (or a painted button).
     #[test]
     fn promo_cta_target_requires_usable_pair() {
-        let full = vec![promo("p", "msg", Some(("Go", " https://x.ai/promo ")))];
+        let full = vec![promo(
+            "p",
+            "msg",
+            Some(("Go", " https://example.invalid/promo ")),
+        )];
         let (a, url) = promo_cta_target(&full, &no_hidden()).expect("usable target");
         assert_eq!(a.id.as_deref(), Some("p"));
-        assert_eq!(url, "https://x.ai/promo");
+        assert_eq!(url, "https://example.invalid/promo");
 
         let mut label_only = promo("p", "msg", None);
         label_only.cta = Some(xai_grok_announcements::AnnouncementCta {
@@ -1213,7 +1225,7 @@ mod tests {
     /// But an unusable CTA paints no button, so its caption can never show on the promo row either.
     #[test]
     fn usable_cta_caption_trims_and_never_resurrects_unusable_cta() {
-        let mut p = promo("p", "msg", Some(("Go", "https://x.ai")));
+        let mut p = promo("p", "msg", Some(("Go", "https://example.invalid")));
         assert_eq!(usable_cta_caption(&p), None, "absent caption");
         p.cta.as_mut().unwrap().caption = Some("  or use Ctrl+O  ".into());
         assert_eq!(usable_cta_caption(&p), Some("or use Ctrl+O"), "trimmed");
@@ -1255,18 +1267,22 @@ mod tests {
     /// `is_dismissible(owner)` distinguishes the pinned (Ctrl+O) promo from a dismissible one.
     #[test]
     fn promo_cta_returns_label_and_pinned_flag() {
-        let mut pinned = promo("p", "msg", Some(("Upgrade Account", "https://x.ai/promo")));
+        let mut pinned = promo(
+            "p",
+            "msg",
+            Some(("Upgrade Account", "https://example.invalid/promo")),
+        );
         pinned.dismissible = Some(false);
         let pinned = [pinned];
         let (owner, label, url) = promo_cta(&pinned, &no_hidden()).expect("usable cta");
         assert_eq!(label, "Upgrade Account");
-        assert_eq!(url, "https://x.ai/promo");
+        assert_eq!(url, "https://example.invalid/promo");
         assert!(
             !is_dismissible(owner),
             "pinned promo drives the Ctrl+O override"
         );
 
-        let dismissible = [promo("d", "msg", Some(("Go", "https://x.ai")))];
+        let dismissible = [promo("d", "msg", Some(("Go", "https://example.invalid")))];
         let (owner, label, _) = promo_cta(&dismissible, &no_hidden()).expect("usable cta");
         assert_eq!(label, "Go");
         assert!(
@@ -1340,7 +1356,7 @@ mod tests {
     /// The promo resolves again once the critical is hidden or expired.
     #[test]
     fn promo_cta_target_yields_to_critical_slot_owner() {
-        let promo_ann = promo("p", "upsell", Some(("Go", "https://x.ai/promo")));
+        let promo_ann = promo("p", "upsell", Some(("Go", "https://example.invalid/promo")));
         let crit = RemoteAnnouncement {
             id: Some("c".into()),
             severity: Some("critical".into()),
@@ -1358,7 +1374,7 @@ mod tests {
         let hide_crit: BTreeSet<String> = ["c".to_string()].into_iter().collect();
         assert_eq!(
             promo_cta_target(&both, &hide_crit).map(|(a, url)| (a.id.as_deref(), url)),
-            Some((Some("p"), "https://x.ai/promo"))
+            Some((Some("p"), "https://example.invalid/promo"))
         );
 
         // So does the critical expiring (same draw/dispatch-time expiry gate).
@@ -1385,7 +1401,10 @@ mod tests {
             assert!(usable_cta(&a).is_none(), "scheme must be rejected: {bad}");
             assert!(promo_cta_target(&[a], &no_hidden()).is_none());
         }
-        for good in ["https://x.ai/promo", "http://x.ai/promo"] {
+        for good in [
+            "https://example.invalid/promo",
+            "http://example.invalid/promo",
+        ] {
             let a = promo("p", "msg", Some(("Go", good)));
             assert!(usable_cta(&a).is_some(), "scheme must be allowed: {good}");
         }
@@ -1410,7 +1429,7 @@ mod tests {
         let mut ann = promo(
             "p",
             "New promo",
-            Some(("Get SuperGrok", "https://x.ai/grok")),
+            Some(("Get SuperGrok", "https://example.invalid/grok")),
         );
         ann.cta.as_mut().unwrap().caption = Some("or use Ctrl+O".into());
         let anns = [ann];
@@ -1448,7 +1467,7 @@ mod tests {
 
     #[test]
     fn render_promo_row_hover_styles() {
-        let anns = [promo("p", "msg", Some(("Go", "https://x.ai")))];
+        let anns = [promo("p", "msg", Some(("Go", "https://example.invalid")))];
         let area = Rect::new(0, 0, 80, 1);
         let theme = Theme::current();
 
@@ -1476,7 +1495,7 @@ mod tests {
             "msg",
             Some((
                 "Upgrade to SuperGrok Heavy for the exclusive preview",
-                "https://x.ai",
+                "https://example.invalid",
             )),
         )];
         let area = Rect::new(0, 0, 50, 1);
@@ -1512,7 +1531,11 @@ mod tests {
     /// Degenerate width: the hide CTA text is skipped whole (redundant with [hide]) instead of painting a clipped fragment; nothing panics.
     #[test]
     fn render_promo_row_narrow_width_drops_hide_cta_text() {
-        let anns = [promo("p", "msg body", Some(("Go", "https://x.ai")))];
+        let anns = [promo(
+            "p",
+            "msg body",
+            Some(("Go", "https://example.invalid")),
+        )];
         let area = Rect::new(0, 0, 20, 1);
         let mut buf = Buffer::empty(area);
         let hits = render_banner(area, &mut buf, &anns, &no_hidden(), false, false, true);

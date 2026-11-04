@@ -280,7 +280,7 @@ pub async fn run_device_code_login_channels(
     };
 
     // TUI: push the URL through the channel BEFORE opening the browser
-    // That way `x.ai/auth/get_url` isn't blocked on a slow or hanging browser launch (e.g. SSH/headless).
+    // That way `example.invalid/auth/get_url` isn't blocked on a slow or hanging browser launch (e.g. SSH/headless).
     // When the issuer omits `verification_uri_complete`, embed the code so the welcome screen can still show it (anti-phishing)
     let display_uri = match device_code.verification_uri_complete.as_deref() {
         Some(uri) => uri.to_owned(),
@@ -563,7 +563,7 @@ pub mod tests {
         let header = jsonwebtoken::Header::new(jsonwebtoken::Algorithm::HS256);
         let claims = serde_json::json!({
             "sub": "user-42",
-            "iss": "https://auth.x.ai",
+            "iss": "https://auth.example.invalid",
             "aud": "client-id",
             "exp": 9999999999u64,
             "iat": 1000000000u64,

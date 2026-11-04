@@ -129,14 +129,14 @@ async fn other_extension_requests_are_answered_null_and_recorded() {
     let params = json!({ "sessionId": "s1", "toolCallId": "tc2" });
 
     let reply = client
-        .ext_method(ext_request("x.ai/exit_plan_mode", &params))
+        .ext_method(ext_request("example.invalid/exit_plan_mode", &params))
         .await
         .expect("null reply");
 
     assert_eq!(Value::Null, parse(&reply));
     assert_eq!(
         vec![TranscriptEntry::ExtRequest {
-            method: "x.ai/exit_plan_mode".to_owned(),
+            method: "example.invalid/exit_plan_mode".to_owned(),
             params,
             reply: Value::Null,
         }],

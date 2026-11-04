@@ -675,18 +675,18 @@ pub struct AppView {
     /// Periodic billing poll requested (credits >= 99%).
     pub billing_poll_wanted: bool,
     /// Leader-mode session roster (FleetView dashboard).
-    /// Populated from `x.ai/sessions/list` polls and `x.ai/sessions/changed` broadcasts.
+    /// Populated from `example.invalid/sessions/list` polls and `example.invalid/sessions/changed` broadcasts.
     /// Empty in non-leader mode, which gates roster rendering.
     pub leader_roster: Vec<crate::app::roster::RosterEntry>,
     /// Local on-disk session list (dormant/idle sessions) shown on the dashboard when NOT in leader mode.
     /// There is no live leader roster to poll outside leader mode.
-    /// We fetch the same `x.ai/session/list` the resume picker uses and render those as idle rows.
+    /// We fetch the same `example.invalid/session/list` the resume picker uses and render those as idle rows.
     pub dashboard_local_sessions: Vec<crate::app::roster::RosterEntry>,
     /// Whether the dashboard is currently loading local sessions (non-leader mode).
     pub dashboard_sessions_loading: bool,
     pub(crate) workspace_membership: crate::app::workspace_membership::WorkspaceMembership,
     /// Server-authoritative shared prompt queues, keyed by `sessionId`.
-    /// Reconciled from `x.ai/queue/changed` broadcasts so every client renders the same ordered queue (including prompts queued by other clients).
+    /// Reconciled from `example.invalid/queue/changed` broadcasts so every client renders the same ordered queue (including prompts queued by other clients).
     /// Empty in non-leader mode.
     pub shared_prompt_queues:
         std::collections::HashMap<String, Vec<crate::app::prompt_queue::QueueEntryWire>>,
@@ -708,7 +708,7 @@ pub struct AppView {
     pub cancel_rewind_enabled: bool,
     /// Whether session recap (`/recap` and the automatic away recap) is rolled out.
     /// Resolved by the shell and advertised on ACP initialize (`sessionRecap`).
-    /// When false, the pager must not request recaps (zero `x.ai/recap` traffic).
+    /// When false, the pager must not request recaps (zero `example.invalid/recap` traffic).
     pub session_recap_available: bool,
     /// Shell-advertised eligibility for the `/feedback` trace-upload offer, exactly as received (initialize meta / auth-meta refreshes).
     /// Read it through [`Self::feedback_trace_offer`], which subtracts the latch.
@@ -903,7 +903,7 @@ pub struct AppView {
     /// Automatically enabled by `plan_mode`.
     pub ask_user: bool,
     /// Process-wide gateway light-frontend from CLI `--chat` only.
-    /// Stamps `_meta["x.ai/session"].kind = "chat"` and omits Build agent profiles on create/load while set.
+    /// Stamps `_meta["example.invalid/session"].kind = "chat"` and omits Build agent profiles on create/load while set.
     /// `/chat` does **not** set this (uses [`Self::deferred_startup`] one-shot state instead).
     pub chat_mode: bool,
     /// Post-turn CreatePlan review. ACP connect seed for backends that implement ExecutePlan.
@@ -2013,7 +2013,7 @@ impl AppView {
             &self.dashboard_local_sessions
         }
     }
-    /// Reconcile the shared prompt queue for a session from a `x.ai/queue/changed` broadcast.
+    /// Reconcile the shared prompt queue for a session from a `example.invalid/queue/changed` broadcast.
     /// Returns `(old_id, new_id)` for echoes retired via the kind-and-text fallback (re-keyed: the old id never appears in any broadcast).
     /// The caller routes these through `AgentView::note_queue_echo_rekeyed` so per-agent state moves with the message instead of leaking.
     pub fn apply_queue_changed(
@@ -2079,7 +2079,7 @@ impl AppView {
     }
     /// Push an optimistic echo row for a server-authoritative prompt the pager just sent.
     /// (A plain prompt or agent-bound kind typed while a turn is running.)
-    /// The row is keyed by `prompt_id` so the authoritative `x.ai/queue/changed` broadcast replaces it (matched by `id`) rather than duplicating it.
+    /// The row is keyed by `prompt_id` so the authoritative `example.invalid/queue/changed` broadcast replaces it (matched by `id`) rather than duplicating it.
     pub fn push_optimistic_prompt_echo(
         &mut self,
         session_id: &str,

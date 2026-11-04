@@ -2,7 +2,7 @@
 
 //! Shared DTO types for hooks/plugins ACP extensions.
 //!
-//! This crate defines the wire format for `x.ai/hooks/*` and `x.ai/plugins/*`
+//! This crate defines the wire format for `example.invalid/hooks/*` and `example.invalid/plugins/*`
 //! ACP extension methods. It is dependency-free (only `serde`) so both
 //! `xai-grok-shell` and `xai-grok-pager` can depend on it without pulling
 //! in domain logic.
@@ -252,7 +252,7 @@ pub struct HookInfo {
     pub removable: bool,
 }
 
-/// Response for `x.ai/hooks/list`.
+/// Response for `example.invalid/hooks/list`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HooksListResponse {
@@ -319,7 +319,7 @@ pub struct PluginInfo {
     pub conflict: Option<String>,
 }
 
-/// Response for `x.ai/plugins/list`.
+/// Response for `example.invalid/plugins/list`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginsListResponse {
@@ -377,7 +377,7 @@ pub struct McpServerInfo {
     pub config_source: Option<String>,
 }
 
-/// Response for `x.ai/mcp/list` as consumed by the pager.
+/// Response for `example.invalid/mcp/list` as consumed by the pager.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServersListResponse {
@@ -555,7 +555,7 @@ impl PluginComponents {
 // Action types
 // ---------------------------------------------------------------------------
 
-/// Request wrapper for `x.ai/hooks/action`.
+/// Request wrapper for `example.invalid/hooks/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HooksActionRequest {
@@ -594,7 +594,7 @@ pub enum HooksAction {
     },
 }
 
-/// Request wrapper for `x.ai/plugins/action`.
+/// Request wrapper for `example.invalid/plugins/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginsActionRequest {
@@ -635,7 +635,7 @@ pub enum PluginsAction {
     },
 }
 
-/// Shared action response for both `x.ai/hooks/action` and `x.ai/plugins/action`.
+/// Shared action response for both `example.invalid/hooks/action` and `example.invalid/plugins/action`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActionOutcome {
@@ -1086,10 +1086,10 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
-// Marketplace types (wire format for x.ai/marketplace/* ACP endpoints)
+// Marketplace types (wire format for example.invalid/marketplace/* ACP endpoints)
 // ---------------------------------------------------------------------------
 
-/// Response for `x.ai/marketplace/list`.
+/// Response for `example.invalid/marketplace/list`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceListResponse {
@@ -1162,7 +1162,7 @@ pub struct MarketplacePluginEntry {
     pub remote_subdir: Option<String>,
 }
 
-/// Request wrapper for `x.ai/marketplace/action`.
+/// Request wrapper for `example.invalid/marketplace/action`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarketplaceActionRequest {

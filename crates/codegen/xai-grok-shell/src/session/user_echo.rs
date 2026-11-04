@@ -1,4 +1,4 @@
-//! Live `user_message_chunk` during a prompt is gated by `x.ai/userMessageEcho`.
+//! Live `user_message_chunk` during a prompt is gated by `example.invalid/userMessageEcho`.
 //!
 //! ACP v1 documents `user_message_chunk` as the `session/load` replay shape, not as an
 //! echo of `session/prompt`. The agent always persists the chunk so replay stays
@@ -7,7 +7,7 @@
 
 /// Advertised in `initialize`'s `clientCapabilities._meta`.
 /// Absent means persist-only. `true` is live echo.
-pub const USER_MESSAGE_ECHO_CAPABILITY: &str = "x.ai/userMessageEcho";
+pub const USER_MESSAGE_ECHO_CAPABILITY: &str = "example.invalid/userMessageEcho";
 
 /// Per-session spelling injected by a leader into `session/new`, `session/load`, and
 /// `session/resume` `_meta`. A leader multiplexes clients, so the answer travels with

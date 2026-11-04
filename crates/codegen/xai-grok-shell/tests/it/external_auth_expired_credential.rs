@@ -26,7 +26,7 @@ const FRESH_TOKEN: &str = "fresh-token-the-provider-cannot-mint";
 const STALE_TOKEN: &str = "stale-external-token";
 const PROVIDER_LABEL: &str = "Acme SSO";
 
-/// Records `x.ai/session/update` payloads so a phase can read the terminal `retryState`.
+/// Records `example.invalid/session/update` payloads so a phase can read the terminal `retryState`.
 #[derive(Clone, Default)]
 struct Capture {
     updates: std::rc::Rc<std::cell::RefCell<Vec<serde_json::Value>>>,
@@ -109,7 +109,7 @@ impl acp::Client for QuietClient {
 /// configured scope.
 fn seed_credential(grok_home: &Path, expires_at: chrono::DateTime<chrono::Utc>) {
     let auth = json!({
-        "https://accounts.x.ai/sign-in": {
+        "https://accounts.example.invalid/sign-in": {
             "key": STALE_TOKEN,
             "auth_mode": "external",
             "create_time": (chrono::Utc::now() - chrono::Duration::hours(9)).to_rfc3339(),

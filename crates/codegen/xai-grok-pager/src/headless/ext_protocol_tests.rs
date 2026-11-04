@@ -71,7 +71,7 @@ fn make_raw_ext_notif(
 #[test]
 fn headless_task_backgrounded_parses_task_id() {
     let notif = make_ext_notif(
-        "x.ai/task_backgrounded",
+        "example.invalid/task_backgrounded",
         serde_json::json!({
             "sessionUpdate": "task_backgrounded",
             "task_id": "task-abc",
@@ -86,7 +86,7 @@ fn headless_task_backgrounded_parses_task_id() {
 #[test]
 fn headless_task_backgrounded_numeric_task_id_is_coerced() {
     let notif = make_ext_notif(
-        "x.ai/task_backgrounded",
+        "example.invalid/task_backgrounded",
         serde_json::json!({
             "sessionUpdate": "task_backgrounded",
             "task_id": 4242,
@@ -101,7 +101,7 @@ fn headless_task_backgrounded_numeric_task_id_is_coerced() {
 #[test]
 fn headless_task_completed_numeric_task_id_is_coerced() {
     let notif = make_ext_notif(
-        "x.ai/task_completed",
+        "example.invalid/task_completed",
         serde_json::json!({
             "sessionUpdate": "task_completed",
             "task_snapshot": { "task_id": 4242 }
@@ -116,7 +116,7 @@ fn headless_task_completed_numeric_task_id_is_coerced() {
 #[test]
 fn headless_task_backgrounded_with_monitor_description_is_monitor() {
     let notif = make_ext_notif(
-        "x.ai/task_backgrounded",
+        "example.invalid/task_backgrounded",
         serde_json::json!({
             "sessionUpdate": "task_backgrounded",
             "task_id": "mon-1",
@@ -132,7 +132,7 @@ fn headless_task_backgrounded_with_monitor_description_is_monitor() {
 #[test]
 fn headless_task_completed_parses_task_id() {
     let notif = make_ext_notif(
-        "x.ai/task_completed",
+        "example.invalid/task_completed",
         serde_json::json!({
             "sessionUpdate": "task_completed",
             "task_snapshot": { "task_id": "task-abc" }
@@ -147,7 +147,7 @@ fn headless_task_completed_parses_task_id() {
 #[test]
 fn headless_subagent_spawn_and_finish_decode_lifecycle_identity() {
     let spawned = make_ext_notif(
-        "x.ai/session_notification",
+        "example.invalid/session_notification",
         serde_json::json!({
             "sessionUpdate": "subagent_spawned",
             "subagent_id": "sub-1",
@@ -162,7 +162,7 @@ fn headless_subagent_spawn_and_finish_decode_lifecycle_identity() {
         ExtEvent::SubagentSpawned { subagent_id, attempt_id: None, event_seq: None } if subagent_id == "sub-1"
     ));
     let finished = make_ext_notif(
-        "x.ai/session_notification",
+        "example.invalid/session_notification",
         serde_json::json!({
             "sessionUpdate": "subagent_finished",
             "subagent_id": "sub-1",
@@ -179,7 +179,7 @@ fn headless_subagent_spawn_and_finish_decode_lifecycle_identity() {
     ));
 
     let sequenced = make_raw_ext_notif(
-        "x.ai/session_notification",
+        "example.invalid/session_notification",
         serde_json::json!({
             "sessionId": "sess-1",
             "update": {
@@ -203,7 +203,7 @@ fn headless_subagent_spawn_and_finish_decode_lifecycle_identity() {
 #[test]
 fn headless_subagent_progress_decodes_lifecycle_identity() {
     let progress = make_raw_ext_notif(
-        "x.ai/session_notification",
+        "example.invalid/session_notification",
         serde_json::json!({
             "sessionId": "sess-1",
             "update": {
@@ -227,7 +227,7 @@ fn headless_subagent_progress_decodes_lifecycle_identity() {
 #[test]
 fn headless_response_completed_parses_per_response_fields() {
     let notif = make_ext_notif(
-        "x.ai/session_notification",
+        "example.invalid/session_notification",
         serde_json::json!({
             "sessionUpdate": "response_completed",
             "message_id": "msg_01",
@@ -267,7 +267,7 @@ fn headless_response_completed_parses_per_response_fields() {
 #[test]
 fn headless_response_started_parses_per_response_fields() {
     let notif = make_ext_notif(
-        "x.ai/session_notification",
+        "example.invalid/session_notification",
         serde_json::json!({
             "sessionUpdate": "response_started",
             "message_id": "msg_01",
@@ -300,7 +300,7 @@ fn headless_response_started_parses_per_response_fields() {
 #[test]
 fn headless_reasoning_completed_parses_signature() {
     let notif = make_ext_notif(
-        "x.ai/session_notification",
+        "example.invalid/session_notification",
         serde_json::json!({
             "sessionUpdate": "reasoning_completed",
             "signature": "sig-xyz",
@@ -325,7 +325,7 @@ fn headless_thinking_summary_decodes() {
         },
     )
     .unwrap();
-    let notif = make_ext_notif("x.ai/session_notification", update);
+    let notif = make_ext_notif("example.invalid/session_notification", update);
     let ExtEvent::Stream(event) = handle_ext_notification(&notif) else {
         panic!("expected Stream event");
     };
@@ -343,7 +343,7 @@ fn headless_thinking_summary_decodes() {
 #[test]
 fn headless_undecodable_known_background_task_errors_not_silent() {
     let notif = make_ext_notif(
-        "x.ai/task_backgrounded",
+        "example.invalid/task_backgrounded",
         serde_json::json!({
             "sessionUpdate": "task_backgrounded",
             "task_id": { "nested": "object" },
@@ -364,7 +364,7 @@ fn headless_undecodable_known_background_task_errors_not_silent() {
 #[test]
 fn headless_task_backgrounded_mismatched_tag_errors_not_silent() {
     let notif = make_ext_notif(
-        "x.ai/task_backgrounded",
+        "example.invalid/task_backgrounded",
         serde_json::json!({
             "sessionUpdate": "task_completed",
             "task_id": "task-abc",
@@ -385,7 +385,7 @@ fn headless_task_backgrounded_mismatched_tag_errors_not_silent() {
 #[test]
 fn headless_task_completed_mismatched_tag_errors_not_silent() {
     let notif = make_ext_notif(
-        "x.ai/task_completed",
+        "example.invalid/task_completed",
         serde_json::json!({
             "sessionUpdate": "task_backgrounded",
             "task_snapshot": { "task_id": "task-abc" },
@@ -406,7 +406,7 @@ fn headless_task_completed_mismatched_tag_errors_not_silent() {
 #[test]
 fn headless_malformed_known_response_boundary_warns_not_silent() {
     let notif = make_ext_notif(
-        "x.ai/session_notification",
+        "example.invalid/session_notification",
         serde_json::json!({
             "sessionUpdate": "response_completed",
             "usage": "not-an-object",
@@ -436,7 +436,7 @@ fn headless_session_update_unknown_method_is_none() {
     let raw = serde_json::value::to_raw_value(&payload).unwrap();
     let (tx, _rx) = tokio::sync::oneshot::channel();
     let notif = xai_acp_lib::AcpArgs {
-        request: acp::ExtNotification::new("x.ai/other", raw.into()),
+        request: acp::ExtNotification::new("example.invalid/other", raw.into()),
         response_tx: tx,
     }
     .boxed();
@@ -447,7 +447,7 @@ fn headless_session_update_unknown_method_is_none() {
 fn headless_session_notification_task_tag_errors_not_silent() {
     for tag in ["task_backgrounded", "task_completed"] {
         let notif = make_ext_notif(
-            "x.ai/session_notification",
+            "example.invalid/session_notification",
             serde_json::json!({
                 "sessionUpdate": tag,
                 "task_id": "task-abc",
@@ -469,7 +469,7 @@ fn headless_session_notification_task_tag_errors_not_silent() {
 #[test]
 fn headless_version_mismatch_logs_warn_with_both_versions() {
     let notif = make_raw_ext_notif(
-        "x.ai/leader/version_mismatch",
+        "example.invalid/leader/version_mismatch",
         serde_json::json!({
             "clientVersion": "0.1.157",
             "leaderVersion": "0.1.150",
@@ -498,7 +498,7 @@ fn headless_version_mismatch_logs_warn_with_both_versions() {
 #[test]
 fn headless_version_mismatch_without_message_still_warns() {
     let notif = make_raw_ext_notif(
-        "x.ai/leader/version_mismatch",
+        "example.invalid/leader/version_mismatch",
         serde_json::json!({
             "clientVersion": "0.1.157",
             "leaderVersion": "0.1.150",
@@ -527,7 +527,7 @@ fn headless_version_mismatch_malformed_warns_distinctly() {
         serde_json::Value::String("not-an-object".into()),
     ] {
         let desc = params.to_string();
-        let notif = make_raw_ext_notif("x.ai/leader/version_mismatch", params);
+        let notif = make_raw_ext_notif("example.invalid/leader/version_mismatch", params);
         let logs = capture_logs(|| {
             assert!(
                 matches!(handle_ext_notification(&notif), ExtEvent::None),
@@ -549,7 +549,7 @@ fn headless_version_mismatch_malformed_warns_distinctly() {
 #[test]
 fn headless_unknown_leader_method_is_silent_none() {
     let notif = make_raw_ext_notif(
-        "x.ai/leader/not_a_method",
+        "example.invalid/leader/not_a_method",
         serde_json::json!({
             "clientVersion": "0.1.157",
             "leaderVersion": "0.1.150",
@@ -569,7 +569,7 @@ fn headless_unknown_leader_method_is_silent_none() {
 #[test]
 fn headless_session_notification_unknown_tag_is_clean_ignore() {
     let notif = make_ext_notif(
-        "x.ai/session_notification",
+        "example.invalid/session_notification",
         serde_json::json!({ "sessionUpdate": "totally_unknown_display_tag" }),
     );
     let mut is_none = false;
@@ -601,12 +601,12 @@ fn ext_method_reply(
         .expect("ext_method must be answered, never dropped")
 }
 
-/// `x.ai/ask_user_question` gets a typed `cancelled` reply on the wire;
+/// `example.invalid/ask_user_question` gets a typed `cancelled` reply on the wire;
 /// malformed params are still answered (known methods do not parse params).
 #[test]
 fn mcp_elicit_replies_cancelled() {
     use xai_grok_tools::mcp_elicitation::McpElicitExtResponse;
-    let raw = ext_method_reply("x.ai/mcp/elicit", serde_json::json!({}))
+    let raw = ext_method_reply("example.invalid/mcp/elicit", serde_json::json!({}))
         .expect("policy reply, not an error");
     let typed: McpElicitExtResponse = serde_json::from_str(raw.0.get()).expect("typed cancel");
     assert!(matches!(typed, McpElicitExtResponse::Cancel));
@@ -621,20 +621,20 @@ fn ask_user_question_replies_cancelled() {
         }),
         serde_json::json!("not-an-object"),
     ] {
-        let resp =
-            ext_method_reply("x.ai/ask_user_question", params).expect("policy reply, not an error");
+        let resp = ext_method_reply("example.invalid/ask_user_question", params)
+            .expect("policy reply, not an error");
         let parsed: AskUserQuestionExtResponse = serde_json::from_str(resp.0.get())
             .expect("wire reply must deserialize as the typed response");
         assert!(matches!(parsed, AskUserQuestionExtResponse::Cancelled));
     }
 }
 
-/// `x.ai/exit_plan_mode` is approved (no feedback) so the shell executes the exit and the model proceeds to implement.
+/// `example.invalid/exit_plan_mode` is approved (no feedback) so the shell executes the exit and the model proceeds to implement.
 #[test]
 fn exit_plan_mode_replies_approved() {
     use xai_grok_tools::implementations::grok_build::exit_plan_mode::ExitPlanModeExtResponse;
     let resp = ext_method_reply(
-        "x.ai/exit_plan_mode",
+        "example.invalid/exit_plan_mode",
         serde_json::json!({"sessionId": "s", "toolCallId": "t"}),
     )
     .expect("policy reply, not an error");
@@ -648,9 +648,9 @@ fn exit_plan_mode_replies_approved() {
 #[test]
 fn unknown_ext_method_replies_method_not_found() {
     for method in [
-        "x.ai/some_future_method",
-        "x.ai/ask_user_questions",
-        "x.ai/exit_plan_mode2",
+        "example.invalid/some_future_method",
+        "example.invalid/ask_user_questions",
+        "example.invalid/exit_plan_mode2",
         "ask_user_question",
     ] {
         let err = ext_method_reply(method, serde_json::json!({}))
@@ -672,7 +672,7 @@ fn dropped_receiver_does_not_panic() {
     drop(rx);
     reply_headless_ext_method(
         xai_acp_lib::AcpArgs {
-            request: acp::ExtRequest::new("x.ai/ask_user_question", raw.into()),
+            request: acp::ExtRequest::new("example.invalid/ask_user_question", raw.into()),
             response_tx: tx,
         }
         .boxed(),
@@ -684,7 +684,7 @@ fn headless_memory_flush_notifications_decode() {
     use crate::headless::reducer::Lifecycle;
 
     let started = make_ext_notif(
-        "x.ai/session/update",
+        "example.invalid/session/update",
         serde_json::json!({ "sessionUpdate": "memory_flush_started" }),
     );
     assert!(matches!(
@@ -693,7 +693,7 @@ fn headless_memory_flush_notifications_decode() {
     ));
 
     let completed = make_ext_notif(
-        "x.ai/session/update",
+        "example.invalid/session/update",
         serde_json::json!({
             "sessionUpdate": "memory_flush_completed",
             "result": "written",
@@ -714,7 +714,7 @@ fn headless_memory_capture_activity_decodes_without_content() {
     use crate::headless::reducer::Lifecycle;
 
     let notification = make_ext_notif(
-        "x.ai/session/update",
+        "example.invalid/session/update",
         serde_json::json!({
             "sessionUpdate": "memory_capture_activity",
             "activity": "running",

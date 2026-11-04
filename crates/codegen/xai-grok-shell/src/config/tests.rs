@@ -3690,11 +3690,11 @@ fn apply_requirements_allowed_models_clamps_catalog_and_names_source() {
             allowed_models = ["*"]
             [model.grok-3]
             model = "grok-3"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
         )
@@ -3738,7 +3738,7 @@ fn apply_requirements_allowed_models_ignores_user_catalog_key() {
             allowed_models = ["*"]
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.grok-4-anything]
             model = "other-model"
@@ -3746,7 +3746,7 @@ fn apply_requirements_allowed_models_ignores_user_catalog_key() {
             context_window = 256000
             [model.my-alias]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
         )
@@ -3783,7 +3783,7 @@ fn apply_requirements_malformed_allowed_models_fail_closes() {
             allowed_models = ["*"]
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
         )
@@ -3824,11 +3824,11 @@ fn apply_requirements_allowed_models_empty_array_is_unrestricted() {
             allowed_models = ["grok-4"]
             [model.grok-3]
             model = "grok-3"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
         )
@@ -3868,11 +3868,11 @@ fn apply_requirements_allowed_models_replaces_user_list() {
             allowed_models = ["*"]
             [model.grok-3]
             model = "grok-3"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
         )
@@ -3901,11 +3901,11 @@ fn validate_selectable_rejects_dash_m_outside_fleet_pin() {
             default = "grok-4"
             [model.grok-3]
             model = "grok-3"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
         )

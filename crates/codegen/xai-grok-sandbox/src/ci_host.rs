@@ -361,7 +361,7 @@ fn serve<R: std::io::Read, W: Write>(input: R, output: W) {
 
 /// Serve one request line, writing the single-line answer to `out`. Pure and
 /// testable: drives the fixed `gh` queries (`gh-status <branch>` for the CI
-/// dot, `gh-pr <branch>` for the shell's `x.ai/pr/status`), runs an
+/// dot, `gh-pr <branch>` for the shell's `example.invalid/pr/status`), runs an
 /// allowlisted `gh <json argv>`, writes one grok config file (`config-write
 /// <json>`). It answers the `.` nothing-usable sentinel for anything else
 /// (confinement).
@@ -698,7 +698,7 @@ pub fn query_ci_host(fd: i32, branch: &str) -> Option<Vec<u8>> {
     query_ci_host_shape(fd, "gh-status", branch)
 }
 
-/// Jailed-side read for the shell's `x.ai/pr/status`: ask the host worker for
+/// Jailed-side read for the shell's `example.invalid/pr/status`: ask the host worker for
 /// `branch`'s pull-request state and check runs (`gh-pr`).
 #[cfg(unix)]
 pub fn query_ci_host_pr(fd: i32, branch: &str) -> Option<Vec<u8>> {

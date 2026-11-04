@@ -400,7 +400,7 @@ pub fn convert_list_response(resp: McpsListResponse) -> Vec<McpServerInfo> {
     servers
 }
 
-/// Patch a single server row in-place from an `x.ai/mcp/server_status` push. When duplicate names
+/// Patch a single server row in-place from an `example.invalid/mcp/server_status` push. When duplicate names
 /// exist, only the first occurrence is mutated.
 pub fn patch_server_row(
     servers: &mut [McpServerInfo],

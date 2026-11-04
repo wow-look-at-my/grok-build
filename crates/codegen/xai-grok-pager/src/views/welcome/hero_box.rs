@@ -918,7 +918,7 @@ managed devices and accounts. Report security incidents";
         pinned.dismissible = Some(false);
         pinned.cta = Some(xai_grok_announcements::AnnouncementCta {
             label: Some("Upgrade Account".into()),
-            url: Some("https://x.ai/grok".into()),
+            url: Some("https://example.invalid/grok".into()),
             caption: Some("or use Ctrl+O".into()),
         });
         let mut buf = Buffer::empty(area);
@@ -968,7 +968,7 @@ managed devices and accounts. Report security incidents";
         let mut dismissible = ann(None, Some("Grok 4.5 is here. Upgrade now."));
         dismissible.cta = Some(xai_grok_announcements::AnnouncementCta {
             label: Some("Upgrade Account".into()),
-            url: Some("https://x.ai/grok".into()),
+            url: Some("https://example.invalid/grok".into()),
             caption: Some("or use Ctrl+O".into()),
         });
         let mut buf = Buffer::empty(area);

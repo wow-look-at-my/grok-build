@@ -213,7 +213,7 @@ fn session_notification_frame_len(update: &SessionUpdate) -> usize {
         meta: meta(),
     };
     let params = serde_json::to_vec(&notification).expect("serialize");
-    jsonrpc_line_len("x.ai/session_notification", params.len())
+    jsonrpc_line_len("example.invalid/session_notification", params.len())
 }
 
 #[test]

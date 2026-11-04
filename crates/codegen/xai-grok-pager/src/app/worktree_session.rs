@@ -15,8 +15,8 @@ use super::effects::{
 use super::session_startup::worktree_session_cwd;
 use super::session_title_resolve::worktree_resume_failure_message;
 
-pub(crate) const CREATE_METHOD: &str = "x.ai/git/worktree/create_from_worktree_sync";
-pub(crate) const RESUME_METHOD: &str = "x.ai/git/worktree/resume_session";
+pub(crate) const CREATE_METHOD: &str = "example.invalid/git/worktree/create_from_worktree_sync";
+pub(crate) const RESUME_METHOD: &str = "example.invalid/git/worktree/resume_session";
 
 /// How the new worktree's working tree is seeded from the source checkout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -148,7 +148,7 @@ pub(crate) fn resume_worktree_params(
     params
 }
 
-/// Unwrap an `x.ai/*` extension envelope: an `error` member is a failure, `result` (or the
+/// Unwrap an `example.invalid/*` extension envelope: an `error` member is a failure, `result` (or the
 /// bare object) is the payload.
 fn ext_result(raw: &str) -> Result<serde_json::Value, String> {
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;

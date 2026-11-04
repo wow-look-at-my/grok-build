@@ -1,5 +1,5 @@
 //! File I/O methods: the service-level `workspace.put_files` / `workspace.get_files` pair and the `workspace.fs_*` extension ops.
-//! The `workspace.fs_*` ops back the shell's `x.ai/fs/*` ACP methods.
+//! The `workspace.fs_*` ops back the shell's `example.invalid/fs/*` ACP methods.
 
 use std::path::PathBuf;
 
@@ -314,7 +314,7 @@ pub const MAX_CLIENT_FS_WRITE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 /// Per-file cap on a staged [`ClientFsWriteFileReq`] upload.
 pub const MAX_CLIENT_FS_WRITE_FILE_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Filesystem node kind. Wire values match the shell's `x.ai/fs/list` node `type` strings.
+/// Filesystem node kind. Wire values match the shell's `example.invalid/fs/list` node `type` strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FsNodeType {
@@ -353,7 +353,7 @@ fn default_max_bytes() -> u64 {
     1_048_576
 }
 
-/// ACP-compatible list request (camelCase wire format, mirrors `x.ai/fs/list` plus `offset` pagination).
+/// ACP-compatible list request (camelCase wire format, mirrors `example.invalid/fs/list` plus `offset` pagination).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientFsListReq {

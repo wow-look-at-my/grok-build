@@ -1,10 +1,10 @@
 //! Grok Speech-to-Text language codes.
 //!
 //! Source of truth for the `language` query/form parameter on
-//! `https://api.x.ai/v1/stt` and `wss://api.x.ai/v1/stt`.
+//! `https://api.example.invalid/v1/stt` and `wss://api.example.invalid/v1/stt`.
 //!
 //! Official catalog (25 languages):
-//! <https://docs.x.ai/developers/model-capabilities/audio/speech-to-text#supported-languages>
+//! <https://docs.example.invalid/developers/model-capabilities/audio/speech-to-text#supported-languages>
 //!
 //! Per the docs, the model can transcribe these languages regardless of the parameter.
 //! Setting `language` enables Inverse Text Normalization for that language: numbers, currencies, and units come out in written form.
@@ -27,7 +27,7 @@ pub const STT_LANGUAGE_AUTO: &str = "auto";
 /// Default STT language when unset or unrecognized.
 pub const STT_LANGUAGE_DEFAULT: &str = "en";
 
-/// Official Grok STT languages (docs.x.ai), sorted by English name. Keep this list in lockstep with the public docs.
+/// Official Grok STT languages (docs.example.invalid), sorted by English name. Keep this list in lockstep with the public docs.
 /// Adding a code that the API does not list will not break transcription, but ITN formatting may not apply.
 pub const STT_LANGUAGES: &[SttLanguage] = &[
     SttLanguage {
@@ -226,7 +226,7 @@ mod tests {
         let docs: HashSet<&str> = DOCS_CODES.iter().copied().collect();
         assert_eq!(
             ours, docs,
-            "STT_LANGUAGES drifted from docs.x.ai supported languages"
+            "STT_LANGUAGES drifted from docs.example.invalid supported languages"
         );
     }
 

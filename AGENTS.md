@@ -54,7 +54,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Git status reuse in `git_gate`
 
-- `git_gate` joins same status and diff walks and keeps the result for `SNAPSHOT_TTL`. A client that polls `x.ai/git/status` slower than that walked the whole tree, and ran `git branch`, `rev-parse` and `remote get-url`, on every poll.
+- `git_gate` joins same status and diff walks and keeps the result for `SNAPSHOT_TTL`. A client that polls `example.invalid/git/status` slower than that walked the whole tree, and ran `git branch`, `rev-parse` and `remote get-url`, on every poll.
 - Each snapshot records the root's `xai_fsnotify::ChangeCounter` count from before its walk. While the count is unchanged, the snapshot serves requests up to `WATCHED_SNAPSHOT_MAX_AGE`. The first walk of a root waits for its watcher to start, so a poll right after it reuses that walk. `with_config` turns the reuse off, so the older gate tests keep their TTL semantics.
 
 ## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
@@ -145,7 +145,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## `@sonnet` / `@haiku` / `@opus` subagents
 
 - A prompt that starts with `@sonnet [level] <task>` runs as `/sonnet` (`rewrite_model_mention` in `slash/commands/model_agent.rs`). The same goes for `@haiku` and `@opus`. The level is an optional `ReasoningEffort` word. Like `/btw`, it skips the queue and works mid-turn.
-- The pager sends `x.ai/model_agent`. The shell picks the newest eligible catalog model whose id names the family (`resolve_family_model` in `acp_session_impl/model_mention.rs`). It spawns a background `general-purpose` child with that model and effort and no owning prompt. A Stop does not cancel it. Its completion reaches the main agent like a background `task` child's.
+- The pager sends `example.invalid/model_agent`. The shell picks the newest eligible catalog model whose id names the family (`resolve_family_model` in `acp_session_impl/model_mention.rs`). It spawns a background `general-purpose` child with that model and effort and no owning prompt. A Stop does not cancel it. Its completion reaches the main agent like a background `task` child's.
 - No model of the family in the catalog is an error that lists the available ids. It never falls back to the parent model.
 
 ## `/todo` capture feature notes
@@ -305,7 +305,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 - The copy drops the records of every subagent that is still RUNNING at the fork point (`CopySessionOptions::carry_running_subagents`, default off). A subagent that already finished is history the conversation refers to. Its spawn and finish pair is copied either way. This is the same boundary the copy draws for workflow and goal projections.
 - Running is decided over the lines the copy KEEPS. It is not decided over the whole source file. A `target_prompt_index` that cuts a finish away leaves a spawn the child reads as live. That spawn is dropped too.
 - `/fork --agents` opts back in. The records are copied. The child's load then reconciles them the way a resumed session's are (`reconcile_orphaned_subagents_with_backend`). An agent this process still has running keeps its row. One that is gone is finished as cancelled. The child still cannot receive that run's output, because the run answers to the parent.
-- The flag rides `ForkSessionRequest::include_agents` on `x.ai/session/fork` and `ResumeSessionInWorktreeRequest::include_agents` on the worktree fork. So `/fork --worktree --agents` behaves the same.
+- The flag rides `ForkSessionRequest::include_agents` on `example.invalid/session/fork` and `ResumeSessionInWorktreeRequest::include_agents` on the worktree fork. So `/fork --worktree --agents` behaves the same.
 
 ## Reasoning-effort support gate notes
 

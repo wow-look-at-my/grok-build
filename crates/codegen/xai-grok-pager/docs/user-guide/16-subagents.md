@@ -286,7 +286,7 @@ For tasks that modify files, run a subagent in an isolated git worktree with `is
 - Its changes stay isolated from the parent until you merge them.
 - The subagent's result includes the worktree path.
 
-Grok Build manages worktrees through the `x.ai/git/worktree/*` extension methods, including an apply operation that merges changes back into the main working directory.
+Grok Build manages worktrees through the `example.invalid/git/worktree/*` extension methods, including an apply operation that merges changes back into the main working directory.
 
 ---
 

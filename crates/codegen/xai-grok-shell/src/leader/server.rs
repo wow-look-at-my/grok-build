@@ -425,19 +425,19 @@ fn is_session_attach_request(json: &serde_json::Value) -> bool {
         .and_then(|m| m.as_str())
         .is_some_and(|m| m == "session/load" || m == "session/resume")
 }
-/// Extract the leader unicast target `ClientId` from a notification's `params._meta["x.ai/leaderClientId"]`.
+/// Extract the leader unicast target `ClientId` from a notification's `params._meta["example.invalid/leaderClientId"]`.
 /// The agent stamps this onto every `session/load` replay notification, echoing the id the leader injected into the load request.
 /// The replay then routes back to ONLY the loading client instead of broadcasting to all subscribers. Live (non-replay) turn deltas are never tagged, so they keep broadcasting.
 fn extract_target_client_id(json: &serde_json::Value) -> Option<ClientId> {
     let params = json.get("params")?;
     params
         .get("_meta")
-        .and_then(|m| m.get("x.ai/leaderClientId"))
+        .and_then(|m| m.get("example.invalid/leaderClientId"))
         .or_else(|| {
             params
                 .get("params")
                 .and_then(|inner| inner.get("_meta"))
-                .and_then(|m| m.get("x.ai/leaderClientId"))
+                .and_then(|m| m.get("example.invalid/leaderClientId"))
         })
         .and_then(|v| v.as_u64())
         .map(ClientId)
@@ -460,20 +460,20 @@ fn event_seq_of(json: &serde_json::Value) -> Option<u64> {
     event_id.rsplit_once('-')?.1.parse::<u64>().ok()
 }
 /// Whether a payload is a machine-wide notification (no `sessionId`) that must be **broadcast to every client**.
-/// These never fall through to the last-active-client fallback: `x.ai/sessions/changed`: the session roster changed; every open dashboard must stay in sync.
-/// Every connected client's model picker must refresh, not just the most recently active one. `x.ai/mcp/servers_updated`: the MCP catalog resolved or changed (managed connectors fetched in the background after `initialize`). The push fires seconds after `initialize` returns. Broadcast is safe: the pager handler only debounce-refetches `mcp/list` for agents with an open extensions modal.
+/// These never fall through to the last-active-client fallback: `example.invalid/sessions/changed`: the session roster changed; every open dashboard must stay in sync.
+/// Every connected client's model picker must refresh, not just the most recently active one. `example.invalid/mcp/servers_updated`: the MCP catalog resolved or changed (managed connectors fetched in the background after `initialize`). The push fires seconds after `initialize` returns. Broadcast is safe: the pager handler only debounce-refetches `mcp/list` for agents with an open extensions modal.
 fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
     matches!(
         method_of(json),
         Some(
-            "x.ai/sessions/changed"
-                | "x.ai/models/update"
-                | "x.ai/mcp/servers_updated"
-                | "x.ai/announcements/update"
+            "example.invalid/sessions/changed"
+                | "example.invalid/models/update"
+                | "example.invalid/mcp/servers_updated"
+                | "example.invalid/announcements/update"
         )
     )
 }
-/// The namespaced method a leader payload carries, normalizing the two ext wire forms the gateway produces: direct: `{"method":"x.ai/foo", ...}` -> `x.ai/foo` wrapped: `{"method":"_x.ai/foo","params":{"method":"x.ai/foo",...}}` -> `x.ai/foo`
+/// The namespaced method a leader payload carries, normalizing the two ext wire forms the gateway produces: direct: `{"method":"example.invalid/foo", ...}` -> `example.invalid/foo` wrapped: `{"method":"_example.invalid/foo","params":{"method":"example.invalid/foo",...}}` -> `example.invalid/foo`
 /// Gateway-forwarded ext methods/notifications (`ext_method` / `ext_notification`) arrive WRAPPED. Examples: `ask_user_question`, `exit_plan_mode`, `session_notification`.
 /// A wrapped payload has a top-level `_`-prefixed method with the real method and params nested one level under `params`. Anything that classifies a payload by method name MUST use this: matching the raw top-level `method` misses the wrapped form.
 pub(super) fn method_of(json: &serde_json::Value) -> Option<&str> {
@@ -508,9 +508,9 @@ fn is_interaction_request(json: &serde_json::Value) -> bool {
         method_of(json),
         Some(
             "session/request_permission"
-                | "x.ai/ask_user_question"
-                | "x.ai/exit_plan_mode"
-                | "x.ai/mcp/elicit",
+                | "example.invalid/ask_user_question"
+                | "example.invalid/exit_plan_mode"
+                | "example.invalid/mcp/elicit",
         )
     )
 }
@@ -533,10 +533,10 @@ fn extract_interaction_tool_call_id(json: &serde_json::Value) -> Option<String> 
         .and_then(|v| v.as_str())
         .map(String::from)
 }
-/// If a payload is the `InteractionResolved` broadcast, return its `tool_call_id`. That broadcast is an `x.ai/session_notification` whose `update.sessionUpdate == "interaction_resolved"`.
+/// If a payload is the `InteractionResolved` broadcast, return its `tool_call_id`. That broadcast is an `example.invalid/session_notification` whose `update.sessionUpdate == "interaction_resolved"`.
 /// The leader evicts the cached interaction request with it (first-answer-wins). Tolerant of the gateway wrapper and camel/snake spelling for the inner field.
 fn extract_interaction_resolved_tool_call_id(json: &serde_json::Value) -> Option<String> {
-    if method_of(json) != Some("x.ai/session_notification") {
+    if method_of(json) != Some("example.invalid/session_notification") {
         return None;
     }
     let update = interaction_inner_params(json)?.get("update")?;
@@ -552,7 +552,7 @@ fn extract_interaction_resolved_tool_call_id(json: &serde_json::Value) -> Option
 /// Extract session_id from a prompt-complete notification.
 fn extract_session_id_from_prompt_complete(json: &serde_json::Value) -> Option<String> {
     let method = json.get("method")?.as_str()?;
-    if method != "x.ai/session/prompt_complete" {
+    if method != "example.invalid/session/prompt_complete" {
         return None;
     }
     json.get("params")?
@@ -718,9 +718,9 @@ fn inject_session_request_context(
                     serde_json::json!(client_type),
                 );
             }
-            if !meta_obj.contains_key("x.ai/leaderClientId") {
+            if !meta_obj.contains_key("example.invalid/leaderClientId") {
                 meta_obj.insert(
-                    "x.ai/leaderClientId".to_string(),
+                    "example.invalid/leaderClientId".to_string(),
                     serde_json::json!(client_id.0),
                 );
             }
@@ -796,20 +796,20 @@ fn inject_client_identity_into_initialize(
     }
     (mutated, true)
 }
-/// Extract yolo_mode change from x.ai/yolo_mode_changed notification.
+/// Extract yolo_mode change from example.invalid/yolo_mode_changed notification.
 fn extract_yolo_mode_change(json: &serde_json::Value) -> Option<bool> {
     let method = json.get("method")?.as_str()?;
-    if method != "x.ai/yolo_mode_changed" {
+    if method != "example.invalid/yolo_mode_changed" {
         return None;
     }
     let params = json.get("params")?;
     params.get("yolo_mode").and_then(|v| v.as_bool())
 }
-/// Extract the auto-mode intent from an `x.ai/yolo_mode_changed` notification. The leader keeps `ClientCapabilities.auto_mode` fresh the same way it tracks `yolo_mode`.
+/// Extract the auto-mode intent from an `example.invalid/yolo_mode_changed` notification. The leader keeps `ClientCapabilities.auto_mode` fresh the same way it tracks `yolo_mode`.
 /// Without this, a stale connect-time `auto_mode` capability would be injected into later `session/new` requests. That would re-enable Auto after the user opted out.
 fn extract_auto_mode_change(json: &serde_json::Value) -> Option<bool> {
     let method = json.get("method")?.as_str()?;
-    if method != "x.ai/yolo_mode_changed" {
+    if method != "example.invalid/yolo_mode_changed" {
         return None;
     }
     let params = json.get("params")?;
@@ -835,7 +835,7 @@ fn inject_client_identity_into_yolo_notification(
     let is_yolo = json
         .get("method")
         .and_then(|m| m.as_str())
-        .is_some_and(|m| m == "x.ai/yolo_mode_changed");
+        .is_some_and(|m| m == "example.invalid/yolo_mode_changed");
     if !is_yolo {
         return false;
     }
@@ -1403,7 +1403,7 @@ fn make_version_mismatch_notification(
     Some(
         serde_json::json!({
             "jsonrpc": "2.0",
-            "method": "x.ai/leader/version_mismatch",
+            "method": "example.invalid/leader/version_mismatch",
             "params": {
                 "clientVersion": client_version,
                 "leaderVersion": leader_version,

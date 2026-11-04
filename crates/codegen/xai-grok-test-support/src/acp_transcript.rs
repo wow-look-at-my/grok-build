@@ -10,14 +10,14 @@ use tokio::sync::watch;
 pub enum TranscriptEntry {
     /// A `session/update` notification.
     SessionUpdate(acp::SessionNotification),
-    /// An extension notification such as `x.ai/session_notification`.
+    /// An extension notification such as `example.invalid/session_notification`.
     ExtNotification { method: String, params: Value },
     /// A `session/request_permission` round trip.
     PermissionRequest {
         request: acp::RequestPermissionRequest,
         outcome: acp::RequestPermissionOutcome,
     },
-    /// An extension request round trip such as `x.ai/ask_user_question`.
+    /// An extension request round trip such as `example.invalid/ask_user_question`.
     ExtRequest {
         method: String,
         params: Value,

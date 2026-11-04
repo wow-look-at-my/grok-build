@@ -329,7 +329,7 @@ pub async fn handle(
     compat: CompatConfig,
 ) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/skills/add" => {
+        "example.invalid/skills/add" => {
             let req: SkillsAddRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 
@@ -390,7 +390,7 @@ pub async fn handle(
             }))
         }
 
-        "x.ai/skills/remove" => {
+        "example.invalid/skills/remove" => {
             let req: SkillsRemoveRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 
@@ -433,7 +433,7 @@ pub async fn handle(
             }))
         }
 
-        "x.ai/skills/reset" => {
+        "example.invalid/skills/reset" => {
             let params: CwdParams =
                 serde_json::from_str(args.params.get()).unwrap_or(CwdParams { cwd: None });
             let cwd = params.cwd.as_deref().unwrap_or(".");
@@ -454,7 +454,7 @@ pub async fn handle(
             super::to_ext_response(Ok(SkillsResetResponse { skills, message }))
         }
 
-        "x.ai/skills/list" => {
+        "example.invalid/skills/list" => {
             let req: SkillsListRequest = serde_json::from_str(args.params.get())?;
             let skills = reload_skills(&req.cwd, plugin_registry, compat).await;
             // Sessions otherwise learn about disk changes only from inotify,
@@ -463,7 +463,7 @@ pub async fn handle(
             super::to_ext_response(Ok(SkillsListResponse { skills }))
         }
 
-        "x.ai/workflows/list" => {
+        "example.invalid/workflows/list" => {
             let req: WorkflowsListRequest = serde_json::from_str(args.params.get())?;
             let Some(handle) = agent.session_handle_waiting_for_load(&req.session_id).await else {
                 return super::to_ext_response(Err::<serde_json::Value, _>(anyhow::anyhow!(
@@ -482,7 +482,7 @@ pub async fn handle(
             super::to_ext_response(Ok(serde_json::json!({ "workflows": workflows })))
         }
 
-        "x.ai/skills/config" => {
+        "example.invalid/skills/config" => {
             let params: CwdParams =
                 serde_json::from_str(args.params.get()).unwrap_or(CwdParams { cwd: None });
             let cwd = params.cwd.as_deref().unwrap_or(".");
@@ -545,7 +545,7 @@ pub async fn handle(
             }))
         }
 
-        "x.ai/skills/toggle" => {
+        "example.invalid/skills/toggle" => {
             let req: SkillsToggleRequest = serde_json::from_str(args.params.get())?;
             let cwd = req.cwd.as_deref().unwrap_or(".");
 
@@ -600,7 +600,7 @@ mod tests {
     fn request_cwd_reads_the_field_from_any_request_shape() {
         let req = |json: &str| {
             acp::ExtRequest::new(
-                "x.ai/skills/list",
+                "example.invalid/skills/list",
                 serde_json::value::to_raw_value(
                     &serde_json::from_str::<serde_json::Value>(json).unwrap(),
                 )

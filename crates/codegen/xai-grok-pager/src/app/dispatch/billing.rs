@@ -383,7 +383,7 @@ fn apply_recheck_meta(app: &mut AppView, mut meta: xai_grok_login::AuthMeta) {
     app.apply_auth_meta(&meta);
 }
 
-/// `x.ai/auth/check_subscription` completed.
+/// `example.invalid/auth/check_subscription` completed.
 /// A failed check only promotes the deferred gate it was verifying (the `verify` generation).
 /// Generic watch, focus, and paywall-chain failures never touch it.
 pub(super) fn handle_check_subscription_complete(
@@ -549,7 +549,7 @@ pub(super) fn dispatch_open_supergrok_url(app: &mut AppView) -> Vec<Effect> {
         .as_ref()
         .and_then(|g| g.url.as_deref())
         .unwrap_or("https://grok.com/supergrok?referrer=grok-build");
-    // Funnel attribution: tag SuperGrok upsell clicks from the CLI with `referrer=grok-build`, matching the OAuth consent flow and x.ai/cli links
+    // Funnel attribution: tag SuperGrok upsell clicks from the CLI with `referrer=grok-build`, matching the OAuth consent flow and example.invalid/cli links
     // It applies even when the URL came from remote settings's `gate_url`, so nothing depends on the remote flag being configured correctly
     // If the URL already specifies a referrer it's left alone
     let url = crate::app::link_opener::ensure_query_param(url, "referrer", "grok-build");

@@ -15,7 +15,7 @@ use xai_grok_net::{Auth, KeyScheme};
 #[cfg(feature = "audio")]
 use crate::error::VoiceError;
 
-/// Why there is no bearer for `wss://api.x.ai/v1/stt`; neither variant is a cue to try another credential.
+/// Why there is no bearer for `wss://api.example.invalid/v1/stt`; neither variant is a cue to try another credential.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VoiceAuthError {
     #[error(

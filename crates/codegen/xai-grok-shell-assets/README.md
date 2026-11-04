@@ -8,7 +8,7 @@ Use it interactively as a TUI. Otherwise, integrate it into your own apps via he
 
 ```bash
 # Install
-curl -fsSL https://x.ai/cli/install.sh | bash
+curl -fsSL https://example.invalid/cli/install.sh | bash
 
 # Interactive TUI
 grok
@@ -59,10 +59,10 @@ grok agent stdio
 
 ```bash
 # Install latest stable
-curl -fsSL https://x.ai/cli/install.sh | bash
+curl -fsSL https://example.invalid/cli/install.sh | bash
 
 # Install a specific version
-curl -fsSL https://x.ai/cli/install.sh | bash -s 0.1.42
+curl -fsSL https://example.invalid/cli/install.sh | bash -s 0.1.42
 ```
 
 Verify installation:
@@ -97,7 +97,7 @@ grok login
 
 ### API Key
 
-For CI/CD, automation, or environments without browser access, use an API key from [console.x.ai](https://console.x.ai):
+For CI/CD, automation, or environments without browser access, use an API key from [console.example.invalid](https://console.example.invalid):
 
 ```bash
 export XAI_API_KEY="xai-..."
@@ -108,7 +108,7 @@ The API key takes precedence over browser credentials.
 
 ### OIDC (Customer SSO)
 
-Authenticate developers via your own Identity Provider (Okta, Azure AD, Auth0) instead of `accounts.x.ai`.
+Authenticate developers via your own Identity Provider (Okta, Azure AD, Auth0) instead of `accounts.example.invalid`.
 
 **1. Register a public client in your IdP:**
 - Grant type: Authorization Code with PKCE
@@ -394,7 +394,7 @@ If you authenticated with `grok login`, you can use the stored credentials to ca
 ```bash
 curl -s -N -X POST "https://cli-chat-proxy.grok.com/v1/chat/completions" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $(jq -r '."https://accounts.x.ai/sign-in".key' ~/.grok/auth.json)" \
+  -H "Authorization: Bearer $(jq -r '."https://accounts.example.invalid/sign-in".key' ~/.grok/auth.json)" \
   -H "X-XAI-Token-Auth: xai-grok-cli" \
   -H "x-grok-model-override: grok-build" \
   -d '{
@@ -1358,7 +1358,7 @@ output_byte_limit = 65536              # max output size (64KB)
 
 [toolset.web_fetch]
 proxy_endpoint = "https://proxy.example.com"   # egress proxy URL (all requests routed through it)
-allowed_domains = ["docs.rs", "x.ai"]           # override the built-in ~84-domain allowlist
+allowed_domains = ["docs.rs", "example.invalid"]           # override the built-in ~84-domain allowlist
 ```
 
 ### Telemetry
@@ -2349,7 +2349,7 @@ disallowedTools:
 
 Fetch a specific URL and return its content as markdown. **Disabled by default** — enable with `GROK_WEB_FETCH=1`.
 
-When no custom `allowed_domains` is set, the tool permits a default allowlist of useful documentation sites (SpaceXAI, language docs, frameworks, cloud providers, databases, etc.). Domains not on the allowlist prompt the user for approval. `--always-approve` auto-approves all. Domain matching is case-insensitive, strips `www.` prefixes, and supports path-scoped entries (e.g. `x.ai/company`).
+When no custom `allowed_domains` is set, the tool permits a default allowlist of useful documentation sites (SpaceXAI, language docs, frameworks, cloud providers, databases, etc.). Domains not on the allowlist prompt the user for approval. `--always-approve` auto-approves all. Domain matching is case-insensitive, strips `www.` prefixes, and supports path-scoped entries (e.g. `example.invalid/company`).
 
 ---
 
@@ -2462,7 +2462,7 @@ The agent persists all session updates automatically. Clients can reconnect and 
 
 | Variable                         | Description                                                                                              |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `XAI_API_KEY`         | API key from [console.x.ai](https://console.x.ai). Used for custom endpoint auth and API key login      |
+| `XAI_API_KEY`         | API key from [console.example.invalid](https://console.example.invalid). Used for custom endpoint auth and API key login      |
 | `GROK_CLI_CHAT_PROXY_BASE_URL`  | The cli-chat-proxy URL. No default: unset, nothing is sent to a proxy |
 | `GROK_MODELS_BASE_URL`          | Custom base URL for inference. Model list auto-fetched from `{base_url}/models` (see [Custom Models Endpoint](#custom-models-endpoint)) |
 | `GROK_MODELS_LIST_URL`          | Override the model list URL if it differs from `{GROK_MODELS_BASE_URL}/models`                                              |

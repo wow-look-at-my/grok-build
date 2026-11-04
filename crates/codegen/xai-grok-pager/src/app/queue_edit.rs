@@ -37,7 +37,7 @@ pub enum PromptMode {
         original: String,
         /// When `Some`, this is a server-authoritative shared-queue row and `server_id` is the agent's stable `prompt_id`.
         /// Save routes through `Action::QueueEditShared` instead of mutating the local `pending_prompts` mirror.
-        /// The `x.ai/queue/changed` rebroadcast paints the result.
+        /// The `example.invalid/queue/changed` rebroadcast paints the result.
         server_id: Option<String>,
         /// Kind snapshot for the interject guard's vanished-row fallback.
         kind: crate::app::agent::QueueEntryKind,
@@ -218,7 +218,7 @@ impl AgentView {
     pub(super) fn enter_queue_edit(&mut self, id: u64, is_server: bool, row: Option<QueueRowRef>) {
         use crate::app::agent::QueueEntryKind;
         // Optimistic echo whose enqueue RPC has not confirmed: the shell has no row to hold yet
-        // Toast instead of silently dropping the keypress, and wait for the confirming `x.ai/queue/changed` before allowing the edit
+        // Toast instead of silently dropping the keypress, and wait for the confirming `example.invalid/queue/changed` before allowing the edit
         // Both gates enforce the same unconfirmed-row rule, so a change to one likely applies to the other
         if let Some(sid) = row.as_ref().and_then(|r| r.server_id.as_deref())
             && self.optimistic_queue_ids.contains(sid)
@@ -498,7 +498,7 @@ impl AgentView {
         }
         match server_id {
             Some(server_id) => {
-                // Server rows: the queue wire (`x.ai/queue/interject` newText) is text-only, so composer images can't ride along
+                // Server rows: the queue wire (`example.invalid/queue/interject` newText) is text-only, so composer images can't ride along
                 // Drop them with an accurate toast
                 if !self.prompt.images.is_empty() {
                     self.prompt.images.clear();
