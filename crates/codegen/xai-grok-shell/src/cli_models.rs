@@ -104,7 +104,7 @@ mod tests {
     use serial_test::serial;
     use xai_grok_login::{AuthMode, GrokAuth};
     use xai_grok_test_support::EnvGuard;
-    const EXPECTED_LOGIN_HOST: &str = "grok.com";
+    const EXPECTED_LOGIN_HOST: &str = "grok.invalid";
     /// A session the compiled-in backend recognises as its own, which `AuthBackend::owns` requires.
     fn session_credential() -> GrokAuth {
         GrokAuth {

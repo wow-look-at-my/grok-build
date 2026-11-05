@@ -296,7 +296,7 @@ fn expired_external_credential_routes_to_the_provider_login_flow() {
         let methods = advertised(&init);
         assert_eq!(
             methods.first().map(|(id, _)| id.as_str()),
-            Some("grok.com"),
+            Some("grok.invalid"),
             "an expired credential the provider cannot renew must advertise the \
              login method first, not `cached_token`; got {methods:?}"
         );

@@ -6,7 +6,7 @@ Grok supports several authentication methods, including interactive browser logi
 
 ## Browser Login (Default)
 
-On first launch, Grok opens your browser to authenticate with grok.com:
+On first launch, Grok opens your browser to authenticate with grok.invalid:
 
 ```bash
 grok
@@ -56,7 +56,7 @@ Grok uses the API key as a fallback when no session token is active. If you have
 
 ## OIDC (Customer SSO)
 
-Authenticate developers through your own Identity Provider (IdP) -- such as Okta, Azure AD, or Auth0 -- instead of grok.com.
+Authenticate developers through your own Identity Provider (IdP) -- such as Okta, Azure AD, or Auth0 -- instead of grok.invalid.
 
 ### 1. Register a public client in your IdP
 

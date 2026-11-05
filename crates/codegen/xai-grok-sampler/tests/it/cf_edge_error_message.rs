@@ -11,7 +11,7 @@ use xai_grok_test_support::{MockInferenceServer, ScriptedResponse};
 
 const CF_524_HTML: &str = r#"<!DOCTYPE html>
 <html lang="en-US">
-<head><title>grok.com | 524: A timeout occurred</title></head>
+<head><title>grok.invalid | 524: A timeout occurred</title></head>
 <body>
   <h1>A timeout occurred <span>Error code 524</span></h1>
   <div>Visit cloudflare.com for more information.</div>
@@ -20,7 +20,7 @@ const CF_524_HTML: &str = r#"<!DOCTYPE html>
 
 const CF_522_HTML: &str = r#"<!DOCTYPE html>
 <html lang="en-US">
-<head><title>grok.com | 522: Connection timed out</title></head>
+<head><title>grok.invalid | 522: Connection timed out</title></head>
 <body>
   <h1>Connection timed out <span>Error code 522</span></h1>
   <div>Visit cloudflare.com for more information.</div>

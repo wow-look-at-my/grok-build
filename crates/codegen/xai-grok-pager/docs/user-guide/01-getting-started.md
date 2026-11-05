@@ -56,7 +56,7 @@ To fetch a repository through Grove (NFS on macOS, FUSE on Linux), enable `grok 
 grok clone <url> [dir]
 ```
 
-The default is a depth-1 checkout of the selected branch. Pass `--full-history` for a complete clone. Clone enablement is independent of session / `-w` Grove worktrees (the convenience above turns both on. The specific knobs still win). the grok.com sign-in below — see [grok clone](27-grok-clone.md#authentication) and [Configuration reference](26-config-reference.md).
+The default is a depth-1 checkout of the selected branch. Pass `--full-history` for a complete clone. Clone enablement is independent of session / `-w` Grove worktrees (the convenience above turns both on. The specific knobs still win). the grok.invalid sign-in below — see [grok clone](27-grok-clone.md#authentication) and [Configuration reference](26-config-reference.md).
 
 ---
 
@@ -68,7 +68,7 @@ Start Grok by running:
 grok
 ```
 
-On first launch, Grok opens your browser to authenticate with grok.com. After you sign in, Grok stores your credentials in `~/.grok/auth.json`, where they persist across sessions. Grok refreshes your credentials automatically and prompts you to sign in again when they can no longer be renewed.
+On first launch, Grok opens your browser to authenticate with grok.invalid. After you sign in, Grok stores your credentials in `~/.grok/auth.json`, where they persist across sessions. Grok refreshes your credentials automatically and prompts you to sign in again when they can no longer be renewed.
 
 If you prefer API key authentication (e.g., for CI/CD or environments without a browser), set the `XAI_API_KEY` environment variable instead:
 

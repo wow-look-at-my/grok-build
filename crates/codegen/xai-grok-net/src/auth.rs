@@ -92,7 +92,7 @@ pub enum KeyScheme {
     XApiKey,
 }
 
-/// True for a host xAI operates: `example.invalid`, `grok.com`, or a subdomain of either, over https.
+/// True for a host xAI operates: `example.invalid`, `grok.invalid`, or a subdomain of either, over https.
 /// A loopback mock counts only in a test build that turns on `test-loopback-session`.
 pub fn is_xai_host(url: &request::Url) -> bool {
     if cfg!(feature = "test-loopback-session") && is_loopback(url) {
@@ -104,7 +104,7 @@ pub fn is_xai_host(url: &request::Url) -> bool {
     let Some(host) = url.host_str() else {
         return false;
     };
-    ["example.invalid", "grok.com"].iter().any(|apex| {
+    ["example.invalid", "grok.invalid"].iter().any(|apex| {
         host == *apex
             || host
                 .strip_suffix(apex)
@@ -214,8 +214,8 @@ mod tests {
         for yes in [
             "https://api.example.invalid/v1",
             "https://example.invalid",
-            "https://cli-chat-proxy.grok.com/v1",
-            "https://grok.com",
+            "https://cli-chat-proxy.grok.invalid/v1",
+            "https://grok.invalid",
         ] {
             assert!(is_xai_host(&url(yes)), "{yes}");
         }
@@ -224,7 +224,7 @@ mod tests {
             "http://api.example.invalid/v1",
             "https://evilexample.invalid",
             "https://example.invalid.example.com",
-            "https://notgrok.com",
+            "https://notgrok.invalid",
             "https://openrouter.ai/api/v1",
         ] {
             assert!(!is_xai_host(&url(no)), "{no}");

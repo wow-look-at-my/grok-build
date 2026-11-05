@@ -79,7 +79,7 @@ To update, run the installer again. Grok does not update itself.
 
 ### Browser Login (Default)
 
-On first launch, Grok opens your browser to authenticate with grok.com:
+On first launch, Grok opens your browser to authenticate with grok.invalid:
 
 ```bash
 grok
@@ -232,7 +232,7 @@ The command runs through the platform shell — `sh -c` on macOS/Linux, `cmd /C`
 
 > **Windows:** write the path as a TOML *literal* string (single quotes) so backslashes survive: `auth_provider_command = 'C:\corp\grok-auth.exe'`. Inside a double-quoted TOML string `\t`, `\n`, `\r`, `\b` and `\f` are escape sequences, so `"C:\temp\auth.exe"` parses into a path containing a tab character and the provider fails to start — after which Grok falls back to browser login as if the setting were ignored.
 
-When `auth_provider_label` is set, the TUI welcome screen shows **"Login with Acme Corp"** instead of "Login with grok.com". In headless mode (`grok -p`), the label has no effect — stderr from your binary is printed directly to the terminal.
+When `auth_provider_label` is set, the TUI welcome screen shows **"Login with Acme Corp"** instead of "Login with grok.invalid". In headless mode (`grok -p`), the label has no effect — stderr from your binary is printed directly to the terminal.
 
 > **Enterprise setup:** For a complete enterprise `config.toml` combining external auth, corporate proxy, and telemetry settings, see [Enterprise Deployment](#enterprise-deployment) in the Configuration section.
 
@@ -392,7 +392,7 @@ The command inherits Grok's environment (so it sees `PATH`, `HOME`, and any othe
 If you authenticated with `grok login`, you can use the stored credentials to call the CLI chat proxy directly via curl. The proxy requires specific headers that mirror what the grok CLI sends internally:
 
 ```bash
-curl -s -N -X POST "https://cli-chat-proxy.grok.com/v1/chat/completions" \
+curl -s -N -X POST "https://cli-chat-proxy.grok.invalid/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $(jq -r '."https://accounts.example.invalid/sign-in".key' ~/.grok/auth.json)" \
   -H "X-XAI-Token-Auth: xai-grok-cli" \

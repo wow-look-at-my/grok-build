@@ -349,7 +349,7 @@ fn stale_auth_copy_timeout_does_not_clear_newer_feedback() {
     app.auth_state = AuthState::Authenticating {
         request_seq: 1,
         handle: None,
-        auth_url: Some("https://grok.com/auth".to_owned()),
+        auth_url: Some("https://grok.invalid/auth".to_owned()),
         mode: AuthMode::Command,
     };
 
@@ -2497,7 +2497,7 @@ fn gate_refreshed_emits_check_subscription_on_gate_lift() {
     // User starts gated (no subscription).
     app.gate = Some(xai_grok_login::GateInfo {
         message: "SuperGrok subscription required".into(),
-        url: Some("https://grok.com/supergrok".into()),
+        url: Some("https://grok.invalid/supergrok".into()),
         label: Some("Subscribe".into()),
     });
     assert!(!app.has_access());

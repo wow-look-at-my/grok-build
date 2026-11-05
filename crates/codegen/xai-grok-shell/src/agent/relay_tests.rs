@@ -1,4 +1,4 @@
-//! Tests for [`super`] (the grok.com relay connection loop).
+//! Tests for [`super`] (the grok.invalid relay connection loop).
 //! Extracted from `relay.rs` so the implementation reads top-to-bottom; wired in via `#[path = "relay_tests.rs"] mod tests;`.
 use super::*;
 use serde_json::json;

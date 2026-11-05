@@ -298,7 +298,7 @@ impl WorkspaceRpc for FsDeleteFileReq {
 }
 
 // Client-facing `workspace.client_fs_*`: root-relative paths, `mtimeMs`, post-sort pagination, binary-safe base64. Not the shell `workspace.fs_*` schema.
-// camelCase, fixed-width integers only. Server and grok.com backend share these structs; a field rename breaks both.
+// camelCase, fixed-width integers only. Server and grok.invalid backend share these structs; a field rename breaks both.
 
 /// Wire method name for [`ClientFsListReq`].
 pub const CLIENT_FS_LIST_METHOD: &str = "workspace.client_fs_list";

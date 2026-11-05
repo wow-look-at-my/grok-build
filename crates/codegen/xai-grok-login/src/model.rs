@@ -186,7 +186,7 @@ impl GrokAuth {
         }
     }
 
-    /// `true` when this auth can access grok.com managed MCP connectors.
+    /// `true` when this auth can access grok.invalid managed MCP connectors.
     pub fn is_managed_mcp_eligible(&self) -> bool {
         self.is_xai_auth() || self.auth_mode == AuthMode::WebLogin
     }

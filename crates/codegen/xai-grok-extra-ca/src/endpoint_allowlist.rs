@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn nothing_is_allowed_by_an_empty_list() {
         for url in [
-            "https://cli-chat-proxy.grok.com/v1",
+            "https://cli-chat-proxy.grok.invalid/v1",
             "https://api.example.invalid/v1",
             "http://localhost:11434/v1",
             "http://127.0.0.1:8080",

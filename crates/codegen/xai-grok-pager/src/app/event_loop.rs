@@ -1011,7 +1011,7 @@ pub(crate) async fn run(
             let grok_com = connection
                 .auth_methods
                 .iter()
-                .find(|m| m.id().0.as_ref() == "grok.com");
+                .find(|m| m.id().0.as_ref() == "grok.invalid");
             if let Some(method) = grok_com {
                 app.login_label = Some(method.name().to_string());
                 app.login_method_id = Some(method.id().clone());

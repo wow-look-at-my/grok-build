@@ -834,7 +834,7 @@ pub fn render_welcome(
 
     let mut result = match params.auth_state {
         AuthState::Pending { error } => {
-            let label = params.login_label.unwrap_or("grok.com");
+            let label = params.login_label.unwrap_or("grok.invalid");
             let login_text = format!("Login with {}", label);
             let menu = [("l", login_text.as_str()), ("q", "Quit")];
             let msg = error.as_deref().map(|e| (e, theme.accent_error));
@@ -2141,7 +2141,7 @@ fn render_welcome_done(
             let gate_link = p
                 .gate
                 .and_then(|g| g.url.as_deref())
-                .unwrap_or("https://grok.com/supergrok?referrer=grok-build");
+                .unwrap_or("https://grok.invalid/supergrok?referrer=grok-build");
             let url = Line::from(Span::styled(
                 gate_link,
                 Style::default()

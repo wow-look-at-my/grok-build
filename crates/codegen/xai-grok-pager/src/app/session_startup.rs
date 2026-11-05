@@ -730,7 +730,7 @@ pub struct MaterializeCtx {
     pub has_worktree: bool,
     /// When true, attempt remote restore if the session is not on disk.
     pub allow_remote_restore: bool,
-    /// Process-wide flag: resume targets are grok.com conversations, not the local disk store.
+    /// Process-wide flag: resume targets are grok.invalid conversations, not the local disk store.
     /// Always `false` without the optional feature; setting it anyway errors rather than silently falling back to disk.
     pub chat_mode: bool,
     /// See [`TitleResolution`]; carried from the pre-sandbox pin outcome.
@@ -812,7 +812,7 @@ async fn most_recent_session_id(
         })?;
     Ok((first.info.id.to_string(), first.display_title_opt()))
 }
-/// `AuthManager` for direct grok.com calls made outside the agent (pre-ACP `--continue` conversation listing, the GCS restore effect).
+/// `AuthManager` for direct grok.invalid calls made outside the agent (pre-ACP `--continue` conversation listing, the GCS restore effect).
 /// Wires the auth-provider refresher before the first `auth()`.
 /// Without it, environments that mint credentials via `auth_provider_command` report `NoOauth`.
 pub(crate) fn pre_acp_auth_manager(

@@ -3616,7 +3616,7 @@ async fn cached_token_fallthrough_prefers_api_key() {
          through to xai.api_key on a dead cached_token -- not interactive login",
     );
 }
-/// Forced-IdP deployment: even with `XAI_API_KEY` present, the admin kill switch keeps the fallthrough on interactive `grok.com`.
+/// Forced-IdP deployment: even with `XAI_API_KEY` present, the admin kill switch keeps the fallthrough on interactive `grok.invalid`.
 /// Api-key auth is neither advertised nor an eligible fallthrough.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
@@ -3633,11 +3633,11 @@ async fn cached_token_fallthrough_respects_kill_switch() {
             .map(|id| id.0.as_ref()),
         Some(GROK_COM_METHOD_ID),
         "disable_api_key_auth must keep the cached_token fallthrough on \
-         interactive grok.com so XAI_API_KEY can't bypass forced IdP login",
+         interactive grok.invalid so XAI_API_KEY can't bypass forced IdP login",
     );
 }
 /// No advertiseable credentials at all (no env key, no kill switch): the user genuinely needs to log in.
-/// The fallthrough is interactive `grok.com`.
+/// The fallthrough is interactive `grok.invalid`.
 #[tokio::test(flavor = "current_thread")]
 #[serial_test::serial]
 async fn cached_token_fallthrough_falls_to_grok_com_without_credentials() {
@@ -3655,7 +3655,7 @@ async fn cached_token_fallthrough_falls_to_grok_com_without_credentials() {
             .as_ref()
             .map(|id| id.0.as_ref()),
         Some(GROK_COM_METHOD_ID),
-        "no API-key creds and no kill switch -> interactive grok.com login",
+        "no API-key creds and no kill switch -> interactive grok.invalid login",
     );
 }
 /// Verifies the 4-state matrix of `(disable_zdr_incompatible_tools, zdr_video_output_s3)`: | ZDR flag | S3 config | Result | |----------|-----------|---------------------------------------------| | false | None | Enabled, no S3 (normal non-ZDR mode) | | true | None | Disabled (ZDR with no escape hatch) | | false | Some | Enabled, S3 **not** threaded (non-ZDR) | | true | Some | Enabled, S3 threaded (ZDR with upload path) |

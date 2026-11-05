@@ -64,6 +64,6 @@ mod tests {
     fn host_of_drops_the_scheme_and_leaves_the_rest_alone() {
         assert_eq!(host_of("https://example.test"), "example.test");
         assert_eq!(host_of("http://localhost:8080"), "localhost:8080");
-        assert_eq!(host_of("grok.com"), "grok.com");
+        assert_eq!(host_of("grok.invalid"), "grok.invalid");
     }
 }

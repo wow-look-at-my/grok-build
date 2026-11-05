@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn test_is_cli_chat_proxy_url_accepts_proxy_subpath() {
         assert!(is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+            "https://cli-chat-proxy.grok.invalid/v1/chat/completions"
         ));
     }
     #[test]
@@ -400,13 +400,13 @@ mod tests {
     #[test]
     fn test_is_cli_chat_proxy_url_rejects_spoofed_hostname() {
         assert!(!is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com.evil.example/v1"
+            "https://cli-chat-proxy.grok.invalid.evil.example/v1"
         ));
     }
     #[test]
     fn test_is_cli_chat_proxy_url_rejects_v11_prefix_confusion() {
         assert!(!is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com/v11/chat/completions"
+            "https://cli-chat-proxy.grok.invalid/v11/chat/completions"
         ));
     }
     #[test]
@@ -417,7 +417,7 @@ mod tests {
         ));
         assert!(is_xai_api_url("https://example.invalid"));
         assert!(is_xai_api_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+            "https://cli-chat-proxy.grok.invalid/v1/chat/completions"
         ));
         assert!(!is_xai_api_url("https://api.openai.com/v1"));
         assert!(!is_xai_api_url("https://api.anthropic.com/v1"));

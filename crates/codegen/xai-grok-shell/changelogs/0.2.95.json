@@ -71,7 +71,7 @@
   },
   {
     "category": "fixes",
-    "description": "**Terminal command cards** on grok.com now correctly settle after foreground bash tasks.",
+    "description": "**Terminal command cards** on grok.invalid now correctly settle after foreground bash tasks.",
     "breaking_change": false
   },
   {

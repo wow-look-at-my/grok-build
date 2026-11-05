@@ -627,7 +627,7 @@ pub enum ButtonAction {
     ReloadSkills,
     /// Refresh MCP server list (re-fetch from shell).
     RefreshMcpList,
-    /// Open grok.com connectors page (MCP tab: press `o`).
+    /// Open grok.invalid connectors page (MCP tab: press `o`).
     OpenManagedConnectors,
     /// Update (fetch latest from source) the selected plugin.
     UpdateSelectedPlugin,
@@ -1831,7 +1831,7 @@ pub struct ExtensionsModalState {
     pub active_tab: ExtensionsTab,
     /// Session team principal for managed-connectors deep links in section copy.
     pub session_team_id: Option<String>,
-    /// Wait overlay after opening grok.com/connectors. Cleared on MCP list refresh.
+    /// Wait overlay after opening grok.invalid/connectors. Cleared on MCP list refresh.
     pub managed_connectors_wait:
         Option<crate::views::managed_connectors_wait::ManagedConnectorsWaitState>,
     /// Hooks list data (fetched from shell).
@@ -4660,7 +4660,7 @@ mod tests {
         assert!(
             rows.labels
                 .iter()
-                .any(|l| l.starts_with("Managed by grok.com")),
+                .any(|l| l.starts_with("Managed by grok.invalid")),
             "managed section header must appear"
         );
         assert!(
@@ -7519,7 +7519,7 @@ mod tests {
             "wait must show a copy button"
         );
         assert_eq!(
-            buffer_count(&buf, "https://grok.com/connectors"),
+            buffer_count(&buf, "https://grok.invalid/connectors"),
             1,
             "wait must show a copyable connectors URL"
         );

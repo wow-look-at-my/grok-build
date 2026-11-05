@@ -7,7 +7,7 @@
 //! fan-out. [`run_changed_notifier`] turns each roster generation into an
 //! `example.invalid/sessions/changed` broadcast on the same fan-out. Pending ids are
 //! compared as JSON values because IPC ids are namespaced strings while relay
-//! ids are whatever grok.com sent, and they expire after
+//! ids are whatever grok.invalid sent, and they expire after
 //! [`PENDING_LIST_TTL`] so an unanswered request cannot leak. Compiled in
 //! every build: without the worker door the roster is simply empty and
 //! every line passes through untouched.

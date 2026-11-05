@@ -635,7 +635,7 @@ fn a_provider_model_never_keeps_the_proxy_url() {
     let cfg = config_from_toml(
         r#"
             [endpoints]
-            cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.com/v1"
+            cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.invalid/v1"
             models_base_url = "http://localhost:18080/v1"
             [model_providers.messages]
             models_autodetect = false

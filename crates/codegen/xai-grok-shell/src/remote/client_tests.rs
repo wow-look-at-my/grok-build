@@ -774,13 +774,13 @@ fn endpoints(
 }
 #[test]
 fn inference_url_defaults_to_proxy() {
-    let ep = endpoints("https://proxy.grok.com/v1", None, None);
-    assert_eq!(ep.resolve_inference_base_url(), "https://proxy.grok.com/v1");
+    let ep = endpoints("https://proxy.grok.invalid/v1", None, None);
+    assert_eq!(ep.resolve_inference_base_url(), "https://proxy.grok.invalid/v1");
 }
 #[test]
 fn inference_url_uses_models_base_url() {
     let ep = endpoints(
-        "https://proxy.grok.com/v1",
+        "https://proxy.grok.invalid/v1",
         Some("https://enterprise.acme.com/v1"),
         None,
     );
@@ -792,7 +792,7 @@ fn inference_url_uses_models_base_url() {
 #[test]
 fn inference_url_base_url_wins_over_proxy() {
     let ep = endpoints(
-        "https://proxy.grok.com/v1",
+        "https://proxy.grok.invalid/v1",
         Some("https://inference.acme.com/v1"),
         Some("https://registry.acme.com/api/models"),
     );
@@ -803,16 +803,16 @@ fn inference_url_base_url_wins_over_proxy() {
 }
 #[test]
 fn list_url_defaults_to_proxy_models() {
-    let ep = endpoints("https://proxy.grok.com/v1", None, None);
+    let ep = endpoints("https://proxy.grok.invalid/v1", None, None);
     assert_eq!(
         ep.resolve_models_list_url(),
-        "https://proxy.grok.com/v1/models"
+        "https://proxy.grok.invalid/v1/models"
     );
 }
 #[test]
 fn list_url_derived_from_base_url() {
     let ep = endpoints(
-        "https://proxy.grok.com/v1",
+        "https://proxy.grok.invalid/v1",
         Some("https://api.example.invalid/v1"),
         None,
     );
@@ -824,7 +824,7 @@ fn list_url_derived_from_base_url() {
 #[test]
 fn list_url_explicit_overrides_derivation() {
     let ep = endpoints(
-        "https://proxy.grok.com/v1",
+        "https://proxy.grok.invalid/v1",
         Some("https://inference.acme.com/v1"),
         Some("https://registry.acme.com/api/list-models"),
     );

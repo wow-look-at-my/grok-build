@@ -3239,7 +3239,7 @@ fn enterprise_two_file_merge_routes_managed_config_to_proxy() {
             r#"
 [endpoints]
 xai_api_base_url = "https://inference.acme-corp.example/xai/v1"
-cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.com/v1"
+cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.invalid/v1"
 
 [model.grok-build]
 base_url = "https://inference.acme-corp.example/xai/v1"
@@ -3277,7 +3277,7 @@ xai_api_base_url = "https://inference.acme-corp.example/xai/v1"
         .unwrap();
     assert_eq!(
             cfg.endpoints.resolve_managed_config_url(),
-            "https://cli-chat-proxy.grok.com/v1/deployment/config"
+            "https://cli-chat-proxy.grok.invalid/v1/deployment/config"
         );
     assert!(
             !cfg.endpoints
@@ -3333,7 +3333,7 @@ fn managed_config_feedback_user_reaches_resolved_config() {
     let managed = toml::from_str(
             r#"
 [endpoints]
-cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.com/v1"
+cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.invalid/v1"
 
 [feedback.user]
 name = ["os_user"]

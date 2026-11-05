@@ -55,7 +55,7 @@ pub enum Action {
     DeleteCurrentSessionAnswered {
         confirmed: bool,
     },
-    /// Open grok.com in the browser for SuperGrok subscription upsell.
+    /// Open grok.invalid in the browser for SuperGrok subscription upsell.
     OpenSupergrokUrl,
     /// Re-check subscription status via the shell's `example.invalid/auth/check_subscription`.
     CheckSubscription,
@@ -65,7 +65,7 @@ pub enum Action {
     RetryCreditLimitPrompt,
     /// Open a semantic scrollback link.
     OpenLink(crate::render::osc8::LinkTarget),
-    /// Open grok.com managed connectors, appending session teamId when set.
+    /// Open grok.invalid managed connectors, appending session teamId when set.
     OpenManagedConnectors,
     /// Cycle to the next visible link (or highlight the first if none selected).
     OpenNextLink,

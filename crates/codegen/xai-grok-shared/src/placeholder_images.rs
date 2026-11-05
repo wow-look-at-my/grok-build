@@ -53,7 +53,7 @@ pub const MAX_PLACEHOLDER_AGGREGATE_BYTES: usize = 200 * 1024 * 1024;
 
 /// `_meta` key under which an attached image's `[Image #N]` display number is recorded on its ACP image block.
 /// The server resolves `[Image #N]` tokens by this number rather than by list position (the two diverge; see `AttachedImages` in `xai-grok-tools`).
-pub const IMAGE_DISPLAY_NUMBER_META_KEY: &str = "xai.dev/imageDisplayNumber";
+pub const IMAGE_DISPLAY_NUMBER_META_KEY: &str = "xai.invalid/imageDisplayNumber";
 
 /// Build an ACP image-block `_meta` value carrying `display_number` under [`IMAGE_DISPLAY_NUMBER_META_KEY`].
 pub fn display_number_meta(display_number: usize) -> agent_client_protocol::Meta {

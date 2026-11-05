@@ -51,7 +51,7 @@
   },
   {
     "category": "fixes",
-    "description": "**Resumed grok.com chats** now use the conversation's last model instead of the gateway default.",
+    "description": "**Resumed grok.invalid chats** now use the conversation's last model instead of the gateway default.",
     "breaking_change": false
   },
   {

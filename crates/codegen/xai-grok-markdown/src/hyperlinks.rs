@@ -627,7 +627,7 @@ mod hyperlink_tests {
             ..test_style::STYLE
         };
 
-        let text = "Hello [click](https://x.com) world.\n";
+        let text = "Hello [click](https://x.invalid) world.\n";
         let (out, _) = render_markdown_ratatui_full(text, style, true, None);
 
         let line = line_at(&out.lines, 0);
@@ -678,10 +678,10 @@ mod hyperlink_tests {
         };
 
         for (md, effect) in [
-            ("**[click](https://x.com)** end.\n", Modifier::BOLD),
-            ("[**click**](https://x.com) end.\n", Modifier::BOLD),
-            ("*[click](https://x.com)* end.\n", Modifier::ITALIC),
-            ("~~[click](https://x.com)~~ end.\n", Modifier::CROSSED_OUT),
+            ("**[click](https://x.invalid)** end.\n", Modifier::BOLD),
+            ("[**click**](https://x.invalid) end.\n", Modifier::BOLD),
+            ("*[click](https://x.invalid)* end.\n", Modifier::ITALIC),
+            ("~~[click](https://x.invalid)~~ end.\n", Modifier::CROSSED_OUT),
         ] {
             let (out, _) = render_markdown_ratatui_full(md, style, true, None);
             let line = line_at(&out.lines, 0);

@@ -350,7 +350,7 @@ pub struct LeaderArgs {
     /// Keep the leader running after the last client disconnects.
     #[arg(long)]
     pub no_exit_on_disconnect: bool,
-    /// Defer the grok.com relay WebSocket until the first headless IPC client registers.
+    /// Defer the grok.invalid relay WebSocket until the first headless IPC client registers.
     /// Without this flag the leader connects the relay eagerly at startup.
     /// Passed by leaders auto-spawned from interactive clients (TUI/IDE), which only need the relay if a headless client appears.
     #[arg(long)]

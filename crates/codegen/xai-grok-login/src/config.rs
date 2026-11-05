@@ -46,7 +46,7 @@ fn default_team_oauth2_scopes() -> Vec<String> {
 pub enum PreferredAuthMethod {
     /// `XAI_API_KEY` / auth.json `xai::api_key` / per-model BYOK (`xai.api_key`).
     ApiKey,
-    /// OIDC / OAuth2 session (`cached_token`, interactive `grok.com` / `oidc`, including devbox-minted OIDC).
+    /// OIDC / OAuth2 session (`cached_token`, interactive `grok.invalid` / `oidc`, including devbox-minted OIDC).
     Oidc,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]

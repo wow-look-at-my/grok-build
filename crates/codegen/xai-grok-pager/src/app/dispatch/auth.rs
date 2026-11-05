@@ -20,7 +20,7 @@ pub(super) fn dispatch_logout(_app: &mut AppView) -> Vec<Effect> {
 
 /// Ensure `login_method_id` is populated from stored auth methods.
 /// On the eager-auth path (cached token) `login_method_id` is never set, because the user skipped the login screen.
-/// Does **not** invent `grok.com` when no interactive method is advertised (`preferred_method=api_key` with no key leaves `auth_methods` empty).
+/// Does **not** invent `grok.invalid` when no interactive method is advertised (`preferred_method=api_key` with no key leaves `auth_methods` empty).
 pub(super) fn ensure_login_method(app: &mut AppView) {
     if app.login_method_id.is_some() {
         return;

@@ -459,7 +459,7 @@ impl acp::Agent for MvpAgent {
             tracing::info!(
                 label = ?login_label,
                 has_auth_provider,
-                "auth: advertising grok.com auth method",
+                "auth: advertising grok.invalid auth method",
             );
         }
         let preferred_method = preferred_method_early;
@@ -956,9 +956,9 @@ impl acp::Agent for MvpAgent {
                 {
                     let mut sampling_config = self.sampling_config.borrow_mut();
                     sampling_config.api_key = Some(auth.key.clone());
-                    tracing::debug!("auth: grok.com/oidc handler set api_key (SessionToken)");
+                    tracing::debug!("auth: grok.invalid/oidc handler set api_key (SessionToken)");
                     xai_grok_telemetry::unified_log::debug(
-                        "auth: grok.com/oidc handler set api_key (SessionToken)",
+                        "auth: grok.invalid/oidc handler set api_key (SessionToken)",
                         None,
                         None,
                     );

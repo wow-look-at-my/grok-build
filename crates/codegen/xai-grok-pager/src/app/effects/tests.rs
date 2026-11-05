@@ -112,10 +112,10 @@ fn format_acp_error_rate_limit_surfaces_detail_or_fallback() {
         ));
     assert_eq!(format_acp_error(&capacity, false), cap_body);
     assert_eq!(format_acp_error(&capacity, true), cap_body);
-    let rpm_body = "You are sending requests too quickly. Please slow down, or upgrade to a Grok subscription for higher limits: https://grok.com/supergrok";
+    let rpm_body = "You are sending requests too quickly. Please slow down, or upgrade to a Grok subscription for higher limits: https://grok.invalid/supergrok";
     let rpm = acp::Error::new(RATE_LIMITED_ERROR_CODE, "Rate limited")
         .data(format!("API error (status 429 Too Many Requests): {rpm_body}"));
-    assert!(format_acp_error(&rpm, false).contains("grok.com/supergrok"));
+    assert!(format_acp_error(&rpm, false).contains("grok.invalid/supergrok"));
     assert_eq!(format_acp_error(&rpm, true), RATE_LIMITED_USER_MESSAGE_API_KEY);
     let empty = acp::Error::new(RATE_LIMITED_ERROR_CODE, "Rate limited");
     assert_eq!(format_acp_error(&empty, false), RATE_LIMITED_USER_MESSAGE_OAUTH);

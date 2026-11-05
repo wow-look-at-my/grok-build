@@ -1483,7 +1483,7 @@ impl MvpAgent {
             xai_chat_state::AuthType::ApiKey
         }
     }
-    /// Fall through to `xai.api_key` if the startup probe still allows it, else `grok.com`.
+    /// Fall through to `xai.api_key` if the startup probe still allows it, else `grok.invalid`.
     /// `None` when `preferred_method` is pinned.
     pub(super) fn cached_token_fallthrough_method_id(
         &self,
@@ -1500,7 +1500,7 @@ impl MvpAgent {
         )?;
         Some(acp::AuthMethodId::new(id))
     }
-    /// Shared exit for missing/expired/legacy `cached_token`: fall through with `use_oauth` only when the target is interactive `grok.com`.
+    /// Shared exit for missing/expired/legacy `cached_token`: fall through with `use_oauth` only when the target is interactive `grok.invalid`.
     /// When `preferred_method` is pinned, fail instead of falling through.
     pub(super) async fn authenticate_after_cached_token_unavailable(
         &self,
@@ -2305,7 +2305,7 @@ impl MvpAgent {
         );
         (id.clone(), new_config)
     }
-    /// Whether the current session is a personal grok.com account on a gated tier (free / X Basic). The Imagine tools stay advertised to the model but are flagged tier-restricted.
+    /// Whether the current session is a personal grok.invalid account on a gated tier (free / X Basic). The Imagine tools stay advertised to the model but are flagged tier-restricted.
     /// They then short-circuit at call time with the SuperGrok upsell prose (see `ImageGenConfig`/`VideoGenConfig`'s `tier_restricted`).
     /// Fails **open** (returns `false`) whenever we can't positively confirm a restricted personal tier. So this client gate is a UX optimization (a clean in-chat upsell instead of a doomed request), never the security boundary. The only difference is the absent-tier policy (the pager hides on `None`, we fail open on `None`).
     fn is_tier_restricted_capability(&self) -> bool {

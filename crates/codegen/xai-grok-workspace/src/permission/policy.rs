@@ -2117,7 +2117,7 @@ mod tests {
         ));
         assert!(evaluate_policy(&AccessKind::Read(Some("src/lib.rs".into())), &policy).is_none());
         assert!(evaluate_policy(&AccessKind::Bash("ls".into()), &policy).is_none());
-        assert!(evaluate_policy(&AccessKind::WebFetch("https://x.com".into()), &policy).is_none());
+        assert!(evaluate_policy(&AccessKind::WebFetch("https://x.invalid".into()), &policy).is_none());
     }
 
     #[test]
@@ -2129,7 +2129,7 @@ mod tests {
             pattern_mode: PatternMode::Glob,
         }]);
         assert!(matches!(
-            evaluate_policy(&AccessKind::WebFetch("https://x.com".into()), &policy),
+            evaluate_policy(&AccessKind::WebFetch("https://x.invalid".into()), &policy),
             Some(Decision::Reject(_))
         ));
         assert!(evaluate_policy(&AccessKind::WebSearch("rust".into()), &policy).is_none());

@@ -771,7 +771,7 @@ mod tests {
         let formatted = format_request_failure(
             Some(401),
             Some(WireErrorType::Api),
-            r#"Unauthorized (401) from https://cli-chat-proxy.grok.com/v1/responses: {"error":"Invalid or expired credentials (auth_kind=bearer)"}"#,
+            r#"Unauthorized (401) from https://cli-chat-proxy.grok.invalid/v1/responses: {"error":"Invalid or expired credentials (auth_kind=bearer)"}"#,
         );
         assert_eq!(formatted.status, Some(401));
         assert!(formatted.detail.contains("Invalid or expired credentials"));
@@ -900,7 +900,7 @@ mod tests {
         let formatted = format_request_failure(
             None,
             Some(WireErrorType::Http),
-            "error sending request for url (https://server.grok.com/v1/responses)",
+            "error sending request for url (https://server.grok.invalid/v1/responses)",
         );
         assert!(
             !formatted.message().contains("http"),

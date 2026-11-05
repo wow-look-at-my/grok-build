@@ -105,7 +105,7 @@ pub struct AcpConnection {
     /// Seeded into every new `AgentSession` so autocomplete has shell builtins and skills immediately, before any `AvailableCommandsUpdate` arrives.
     pub available_commands: Vec<acp::AvailableCommand>,
     pub needs_login: bool,
-    /// Login button label from `AuthMethod.name` (e.g., "grok.com", "Acme Corp").
+    /// Login button label from `AuthMethod.name` (e.g., "grok.invalid", "Acme Corp").
     pub login_label: Option<String>,
     /// The auth method ID to use for login (copied from the first advertised method).
     pub login_method_id: Option<acp::AuthMethodId>,
@@ -592,7 +592,7 @@ pub fn startup_auth_metadata(
 }
 /// Find an interactive login method from the auth methods list.
 /// Used when eager auth (cached_token or API key) fails and we need to fall back to the welcome screen with a working login button.
-/// Scans the list for a `grok.com` or `oidc` method; these are the ones that can trigger a browser-based re-auth flow.
+/// Scans the list for a `grok.invalid` or `oidc` method; these are the ones that can trigger a browser-based re-auth flow.
 pub fn find_interactive_login_method(
     auth_methods: &[acp::AuthMethod],
 ) -> (Option<String>, Option<acp::AuthMethodId>, AuthStartMode) {
@@ -853,21 +853,21 @@ mod tests {
     }
     #[test]
     fn startup_auth_grok_com_no_provider_needs_login_pending() {
-        let methods = vec![make_auth_method("grok.com", "grok.com", None)];
+        let methods = vec![make_auth_method("grok.invalid", "grok.invalid", None)];
         let (needs, label, method_id, mode) = startup_auth_metadata(&methods);
         assert!(needs);
-        assert_eq!(label.as_deref(), Some("grok.com"));
-        assert_eq!(method_id.as_ref().unwrap().0.as_ref(), "grok.com");
+        assert_eq!(label.as_deref(), Some("grok.invalid"));
+        assert_eq!(method_id.as_ref().unwrap().0.as_ref(), "grok.invalid");
         assert_eq!(mode, AuthStartMode::Pending);
     }
     #[test]
     fn startup_auth_grok_com_with_external_provider_command() {
         let meta = serde_json::json!({ "external_provider": true });
-        let methods = vec![make_auth_method("grok.com", "Acme Corp", Some(meta))];
+        let methods = vec![make_auth_method("grok.invalid", "Acme Corp", Some(meta))];
         let (needs, label, method_id, mode) = startup_auth_metadata(&methods);
         assert!(needs);
         assert_eq!(label.as_deref(), Some("Acme Corp"));
-        assert_eq!(method_id.as_ref().unwrap().0.as_ref(), "grok.com");
+        assert_eq!(method_id.as_ref().unwrap().0.as_ref(), "grok.invalid");
         assert_eq!(mode, AuthStartMode::Command);
     }
     #[test]
@@ -919,13 +919,13 @@ mod tests {
         let (needs, _, _, _) = startup_auth_metadata(&methods);
         assert!(
             needs,
-            "with grok.com first, the pager must require login -- pinning \
+            "with grok.invalid first, the pager must require login -- pinning \
              the BAD-ordering failure mode (xai.api_key not first)",
         );
     }
     #[test]
     fn startup_auth_method_id_is_copied_not_synthesized() {
-        let methods = vec![make_auth_method("grok.com", "My Login", None)];
+        let methods = vec![make_auth_method("grok.invalid", "My Login", None)];
         let (_, _, method_id, _) = startup_auth_metadata(&methods);
         let Some(first) = methods.first() else {
             panic!("expected an auth method");
@@ -935,7 +935,7 @@ mod tests {
     #[test]
     fn startup_auth_external_provider_false_is_pending() {
         let meta = serde_json::json!({ "external_provider": false });
-        let methods = vec![make_auth_method("grok.com", "grok.com", Some(meta))];
+        let methods = vec![make_auth_method("grok.invalid", "grok.invalid", Some(meta))];
         let (_, _, _, mode) = startup_auth_metadata(&methods);
         assert_eq!(mode, AuthStartMode::Pending);
     }

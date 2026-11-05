@@ -413,8 +413,8 @@ mod tests {
 
     #[test]
     fn autolink_and_reference_links_counted() {
-        assert_eq!(analyze("<https://x.com>\n").stats.links, 1);
-        assert_eq!(analyze("[a][b]\n\n[b]: https://x.com\n").stats.links, 1);
+        assert_eq!(analyze("<https://x.invalid>\n").stats.links, 1);
+        assert_eq!(analyze("[a][b]\n\n[b]: https://x.invalid\n").stats.links, 1);
     }
 
     #[test]
@@ -426,7 +426,7 @@ mod tests {
     fn as_pairs_pins_every_pair() {
         // One golden doc exercising several element types pins every label, value, and order at once
         // A mislabel like ("inline_math", display_math) would fail here
-        let doc = "# Title\n## Sub\n\nSome **bold**, *italic*, ~~strike~~, `code`, and a [link](https://x.com).\n\n| a | b |\n| - | - |\n| c | d |\n\n- [ ] todo\n- [x] done\n- plain\n";
+        let doc = "# Title\n## Sub\n\nSome **bold**, *italic*, ~~strike~~, `code`, and a [link](https://x.invalid).\n\n| a | b |\n| - | - |\n| c | d |\n\n- [ ] todo\n- [x] done\n- plain\n";
         assert_eq!(
             analyze(doc).stats.as_pairs(),
             [
