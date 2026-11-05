@@ -681,7 +681,10 @@ mod hyperlink_tests {
             ("**[click](https://x.invalid)** end.\n", Modifier::BOLD),
             ("[**click**](https://x.invalid) end.\n", Modifier::BOLD),
             ("*[click](https://x.invalid)* end.\n", Modifier::ITALIC),
-            ("~~[click](https://x.invalid)~~ end.\n", Modifier::CROSSED_OUT),
+            (
+                "~~[click](https://x.invalid)~~ end.\n",
+                Modifier::CROSSED_OUT,
+            ),
         ] {
             let (out, _) = render_markdown_ratatui_full(md, style, true, None);
             let line = line_at(&out.lines, 0);

@@ -2117,7 +2117,9 @@ mod tests {
         ));
         assert!(evaluate_policy(&AccessKind::Read(Some("src/lib.rs".into())), &policy).is_none());
         assert!(evaluate_policy(&AccessKind::Bash("ls".into()), &policy).is_none());
-        assert!(evaluate_policy(&AccessKind::WebFetch("https://x.invalid".into()), &policy).is_none());
+        assert!(
+            evaluate_policy(&AccessKind::WebFetch("https://x.invalid".into()), &policy).is_none()
+        );
     }
 
     #[test]

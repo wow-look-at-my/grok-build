@@ -3630,7 +3630,13 @@ fn e2e_user_config_overrides_prefetched_model() {
     let mut prefetched = IndexMap::new();
     prefetched.insert(
         dm.to_string(),
-        test_model_entry(dm, "https://cli-chat-proxy.grok.invalid/v1", None, None, None),
+        test_model_entry(
+            dm,
+            "https://cli-chat-proxy.grok.invalid/v1",
+            None,
+            None,
+            None,
+        ),
     );
     let (_, models) = resolve_models_from_toml(
         &format!(
