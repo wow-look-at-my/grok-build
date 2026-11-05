@@ -1,6 +1,6 @@
 //! WebSocket relay connection management.
 //!
-//! This module provides a shared `RelayConnection` that handles the WebSocket connection to the grok.invalid relay server with automatic reconnection.
+//! The WebSocket connection to the grok.invalid relay server, with automatic reconnection.
 //! It is used by both `run_headless` and `run_leader` modes.
 use super::proxy;
 use crate::{teprintln, tprintln};
