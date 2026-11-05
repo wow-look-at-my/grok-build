@@ -51,6 +51,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - The +/- counts are the working tree against HEAD: staged, unstaged, and untracked files git does not ignore.
 - The diff reads the working tree. It runs off-thread behind a 5 s throttle in its own cache, not on the render path.
 - The +/- counts are a full work-tree scan, as costly as `git status`. A refresh reuses the last scan until the shared watcher's `ChangeCounter` moves or the HEAD tree changes (`cached_line_stats`). With no watcher, the scan runs at most once each `UNWATCHED_SCAN_INTERVAL`, and a warning names the cause. Never scan on each refresh: every idle pager then keeps several cores busy.
+- Each refresh runs on its own short thread at the lowest CPU priority (`lower_thread_priority`): the highest nice value on Linux. This also covers which the scan's gix workers inherit, and the background class on macOS. Not the blocking pool: an unprivileged thread cannot raise its priority again. A pool thread will keep it for unrelated work.
 
 ## Git status reuse in `git_gate`
 

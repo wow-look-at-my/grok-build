@@ -45,7 +45,11 @@ fn spawn_refresh(cwd: PathBuf) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         return;
     };
-    xai_spawn::spawn_blocking_on(&handle, move || {
+    // An own thread, not the blocking pool: an unprivileged thread cannot raise its priority again.
+    // A pool thread would keep the low priority for unrelated work.
+    let refresh = move || {
+        let _runtime = handle.enter();
+        lower_thread_priority();
         // A panic in the git read must not take down the pager.
         let stats = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             compute(&cwd, LineStats::Cached)
@@ -64,7 +68,36 @@ fn spawn_refresh(cwd: PathBuf) {
         if let Ok(mut cache) = CACHE.lock() {
             insert(&mut cache, cwd, (stats, Instant::now()));
         }
-    });
+    };
+    if let Err(e) = std::thread::Builder::new()
+        .name("branch-stats".into())
+        .spawn(refresh)
+    {
+        tracing::warn!(error = %e, "branch stats: cannot start the refresh thread");
+    }
+}
+
+/// The lowest CPU priority for the calling thread: the highest nice value on Linux. The work-tree scan starts its
+/// worker threads from this thread, and on Linux they inherit the value. On macOS
+/// `setpriority(PRIO_PROCESS)` acts on the whole process, so the thread uses the background class.
+fn lower_thread_priority() {
+    #[cfg(target_os = "linux")]
+    // SAFETY: gettid and setpriority read no memory; they only change this thread's nice value.
+    let rc = unsafe {
+        let tid = libc::gettid() as libc::id_t;
+        libc::setpriority(libc::PRIO_PROCESS, tid, 19)
+    };
+    #[cfg(target_os = "macos")]
+    // SAFETY: as above. PRIO_DARWIN_THREAD with a value of zero names the calling thread.
+    let rc = unsafe { libc::setpriority(libc::PRIO_DARWIN_THREAD, 0, libc::PRIO_DARWIN_BG) };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let rc = 0;
+    if rc != 0 {
+        tracing::warn!(
+            error = %std::io::Error::last_os_error(),
+            "branch stats: cannot lower the refresh thread's priority; the scan runs at normal priority"
+        );
+    }
 }
 
 fn insert(cache: &mut HashMap<PathBuf, CacheEntry>, key: PathBuf, entry: CacheEntry) {
@@ -481,6 +514,30 @@ mod tests {
         git(tmp.path(), &["init", "-q", "-b", "master"]);
         commit_file(tmp.path(), "a.txt", "one\n");
         tmp
+    }
+
+    #[cfg(target_os = "linux")]
+    fn this_thread_nice() -> i32 {
+        // SAFETY: gettid and getpriority read no memory.
+        unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_refresh_thread_and_its_scan_workers_run_at_the_lowest_priority() {
+        let (refresh, worker) = std::thread::spawn(|| {
+            lower_thread_priority();
+            let worker = std::thread::spawn(this_thread_nice).join().unwrap();
+            (this_thread_nice(), worker)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(refresh, 19, "the refresh thread runs at nice 19");
+        assert_eq!(
+            worker, 19,
+            "a thread it starts, as gix does for the scan, inherits nice 19"
+        );
+        assert_ne!(this_thread_nice(), 19, "the caller's priority is untouched");
     }
 
     async fn cached(dir: &Path) -> (BranchStats, u64) {
