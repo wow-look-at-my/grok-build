@@ -218,7 +218,7 @@ impl AgentView {
     pub(super) fn enter_queue_edit(&mut self, id: u64, is_server: bool, row: Option<QueueRowRef>) {
         use crate::app::agent::QueueEntryKind;
         // Optimistic echo whose enqueue RPC has not confirmed: the shell has no row to hold yet
-        // Toast instead of silently dropping the keypress, and wait for the confirming `example.invalid/queue/changed` before allowing the edit
+        // keypress. Wait for the confirming `example.invalid/queue/changed` before allowing the edit
         // Both gates enforce the same unconfirmed-row rule, so a change to one likely applies to the other
         if let Some(sid) = row.as_ref().and_then(|r| r.server_id.as_deref())
             && self.optimistic_queue_ids.contains(sid)

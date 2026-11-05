@@ -4464,8 +4464,11 @@ async fn roster_merge_round_trips_namespaced_ids_and_broadcasts_changes() {
     cancel.cancel();
 }
 
-/// `example.invalid/models/update` is a machine-wide catalog notification with no sessionId. It must broadcast to every registered client, not just the last-active one.
-/// Every model picker then refreshes after a config.toml / models_cache.json hot-reload. Uses the production wire form: agent ext notifications arrive `_`-prefixed (`_example.invalid/models/update`).
+/// `example.invalid/models/update` is a machine-wide catalog notification
+/// with no sessionId. It must broadcast to every registered client, not the
+/// last-active one. Every model picker then refreshes after a config.toml /
+/// models_cache.json hot-reload. Uses the production wire form: agent ext
+/// notifications arrive `_`-prefixed (`_example.invalid/models/update`).
 #[tokio::test]
 async fn models_update_broadcasts_to_all_clients() {
     let temp = TempDir::new().unwrap();

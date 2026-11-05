@@ -473,7 +473,7 @@ fn is_machine_wide_broadcast_notification(json: &serde_json::Value) -> bool {
         )
     )
 }
-/// The namespaced method a leader payload carries, normalizing the two ext wire forms the gateway produces: direct: `{"method":"example.invalid/foo", ...}` -> `example.invalid/foo` wrapped: `{"method":"_example.invalid/foo","params":{"method":"example.invalid/foo",...}}` -> `example.invalid/foo`
+/// The namespaced method a leader payload carries, normalizing both ext wire
 /// Gateway-forwarded ext methods/notifications (`ext_method` / `ext_notification`) arrive WRAPPED. Examples: `ask_user_question`, `exit_plan_mode`, `session_notification`.
 /// A wrapped payload has a top-level `_`-prefixed method with the real method and params nested one level under `params`. Anything that classifies a payload by method name MUST use this: matching the raw top-level `method` misses the wrapped form.
 pub(super) fn method_of(json: &serde_json::Value) -> Option<&str> {

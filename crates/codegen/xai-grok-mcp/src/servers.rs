@@ -327,9 +327,9 @@ impl InitProgress {
     }
 }
 
-/// One in-process SDK MCP server registration: its tool-namespace name and the SDK-side id echoed back in `example.invalid/mcp/sdk_call`.
+/// One in-process SDK MCP server registration: its tool-namespace name and the SDK-side id echoed back in `example.invalid/mcp/sdk_call`. A named struct
 /// A named struct (rather than a `(String, String)` tuple) so callers can't transpose the two strings.
-/// `Deserialize`d from a `_meta["example.invalid/mcp/servers"]` entry, so the `serverId` wire field name is declared (and serde-checked) exactly once here.
+/// the `serverId` wire field name is declared (and serde-checked) exactly once here.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AcpServerEntry {
     pub name: McpServerName,
@@ -1441,7 +1441,6 @@ pub struct McpTool {
 }
 
 /// Data needed to register an MCP tool via `register_erased()`.
-/// **Model-visible** (default, or `["model", "app"]`): registered in `ToolBridge` so the LLM can invoke them during a conversation; **App-visible only** (`["app"]`): not registered in `ToolBridge`, so the LLM never sees them. These are UI-only actions surfaced to the frontend via `example.invalid/mcp/tools_changed` notifications. They are callable via `example.invalid/mcp/call`.
 pub struct McpToolRegistration {
     pub name: String,
     pub description: String,
@@ -2855,7 +2854,7 @@ enum PendingTransport {
         config: HttpConfig,
         auth_manager: Arc<tokio::sync::Mutex<rmcp::transport::auth::AuthorizationManager>>,
     },
-    /// In-process SDK MCP server reached over the ACP reverse channel (`example.invalid/mcp/sdk_call`).
+    /// In-process SDK MCP server reached over the ACP reverse channel
     /// Rebuildable from its `server_id` and invoker, so handshake failures restore like Http (unlike the consumed Stdio child).
     Acp {
         server_id: String,
@@ -3763,7 +3762,8 @@ impl McpClient {
             // Modern-only stdio servers stay unsupported until rmcp tolerates late responses to abandoned requests.
             PendingTransport::Stdio(process) => self.serve_legacy(*process).await,
             PendingTransport::Http(config) => {
-                // One HTTP client for both phases: the probe and the legacy transports stay separate rmcp sessions, but share the connection pool, so a responsive legacy server doesn't pay a second TCP+TLS setup.
+                // One HTTP client for both phases: the probe and the transports stay separate rmcp sessions, but share
+                // the connection pool.
                 let http_client =
                     Self::build_http_client(&config, &self.server_name, self.warn_budget.clone())?;
                 self.probe_then_legacy(|| {
@@ -3955,7 +3955,7 @@ impl McpClient {
         server_id: String,
         invoker: &Arc<dyn crate::acp_transport::AcpReverseInvoker>,
     ) -> crate::acp_transport::AcpBridgeTransport {
-        // Per-reverse-call backstop on `example.invalid/mcp/sdk_call`: the larger of the startup and tool timeouts
+        // Per-reverse-call backstop on `example.invalid/mcp/sdk_call`: the It
         // It never undercuts the real outer bound: the handshake is bounded per phase in `try_handshake`
         let invoke_timeout =
             std::time::Duration::from_secs(self.startup_timeout_sec.max(self.tool_timeout_sec));

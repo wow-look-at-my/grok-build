@@ -656,7 +656,6 @@ pub struct AppView {
     /// `/usage` itself stays available for session token/cost unless [`Self::has_external_auth_provider`].
     pub usage_visible: bool,
     /// External `auth_provider_command` deployment.
-    /// No grok.invalid billing session exists; `/usage` and credit UI stay off.
     pub has_external_auth_provider: bool,
     /// `AuthMeta::backend_billed`: the agent's backend handles billing itself.
     pub backend_billed: bool,

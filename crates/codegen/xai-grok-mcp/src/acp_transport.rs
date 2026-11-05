@@ -23,7 +23,7 @@ use rmcp::transport::async_rw::AsyncRwTransport;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 
-/// Sends one MCP JSON-RPC message to an in-process server over the ACP reverse channel (`example.invalid/mcp/sdk_call`) and returns its JSON-RPC response.
+/// Sends one MCP JSON-RPC message to an in-process server over the ACP
 /// This is fail-closed: a missing tool server is a real error, unlike a hook gate.
 /// `timeout` bounds the single round trip so a missing or hung client fails this reverse call instead of stalling the agent's tool loop forever.
 #[async_trait::async_trait]

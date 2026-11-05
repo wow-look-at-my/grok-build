@@ -119,8 +119,8 @@ pub fn is_cli_chat_proxy_url(url: &str) -> bool {
     }
     false
 }
-/// True for xAI-operated endpoints (`*.example.invalid`, cli-chat-proxy, and optional non-production xAI hosts when that feature is enabled). `disable_api_key_auth` refuses keys only for these; other hosts are BYOK and exempt.
-/// Safe against invalid URLs and suffix attacks (`evil-example.invalid.example`). Scheme-agnostic so credential *refusal* fails closed. To decide where to *attach* a credential, use [`is_xai_api_bearer_url`].
+/// True for xAI-operated endpoints (`*.example.invalid`, cli-chat-proxy, and
+/// optional non-production xAI hosts when that feature is enabled).
 pub fn is_xai_api_url(url: &str) -> bool {
     is_xai_api_url_impl(url, false)
 }

@@ -968,8 +968,6 @@ impl StorageClient {
             .context("Failed to parse storage download response")?;
 
         // Step 2: fetch the object via the signed URL, streaming to dest.
-        // Use the raw client: a signed URL carries its own auth and must
-        // NOT carry the proxy credential.
         let object_resp = self
             .raw_http_client
             .get(&download_resp.signed_url)

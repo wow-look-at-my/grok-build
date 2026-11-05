@@ -21,7 +21,7 @@ use super::*;
 /// It bounds the detached task: a client that stays connected without answering (modal left open, a client bug) would otherwise hold it forever.
 const TRUST_PROMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-/// ACP `example.invalid/folder_trust/request` payload, sent by the agent to the GUI client.
+/// ACP `example.invalid/folder_trust/request` payload, sent by the agent to
 /// Serialized as `camelCase` for the ACP JSON-RPC wire format.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

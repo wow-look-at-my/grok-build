@@ -600,7 +600,7 @@ pub enum SessionCommand {
         elapsed_ms: Option<u64>,
         processed: oneshot::Sender<()>,
     },
-    /// Update MCP servers for an existing session (used during reconnect or mid-session via the `example.invalid/session/update_mcp_servers` extension method).
+    /// Update MCP servers for an existing session (used during reconnect or
     /// This replaces the current MCP server configuration and triggers re-initialization.
     /// The caller is notified via `respond_to` once MCP re-initialization completes (or immediately if configs are unchanged).
     UpdateMcpServers {

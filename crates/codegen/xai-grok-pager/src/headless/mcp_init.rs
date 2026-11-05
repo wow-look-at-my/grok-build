@@ -1,4 +1,4 @@
-//! One bounded `example.invalid/mcp/list` snapshot for Messages `init.mcp_servers`.
+//! One bounded `example.invalid/mcp/list` snapshot for Messages
 //! The shell's Blocking startup grace runs later on the prompt; this must not add a second wait.
 
 use std::path::Path;

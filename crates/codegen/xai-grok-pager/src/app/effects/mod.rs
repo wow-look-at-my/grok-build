@@ -5763,7 +5763,7 @@ pub(crate) fn take_coalesced_interjects(
     spawn_ordered_interjects(tasks, acp_tx, agent_id, session_id, items);
     None
 }
-/// Build the `example.invalid/interject` params.
+/// Build the `example.invalid/interject` params. The optional structured
 /// The optional structured `content` (text and images) is omitted ENTIRELY when `None` so the legacy wire shape stays byte-identical.
 /// Extracted from the spawn for testability.
 fn build_interject_params(

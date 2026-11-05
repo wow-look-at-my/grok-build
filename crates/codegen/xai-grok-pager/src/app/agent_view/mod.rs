@@ -2698,7 +2698,10 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-1");
     }
-    /// None-fallback (older shells / no promptId): with no turn identity on the notification AND a newer turn active, a late first-time arrival cannot be distinguished from the new turn's first follow_ups, so it follows the legacy newest-wins (renders). This path is not reachable for current shells (which always stamp `promptId`) or for buffer-replays (suppressed upstream by the `_meta["example.invalid/replayed"]` gate); it is pinned here so the stamped-path fix above is understood to be the deterministic guard.
+    /// None-fallback (older shells / no promptId). With no turn identity on
+    /// the notification AND a newer turn active, a late first-time arrival
+    /// cannot be distinguished. From the new turn's first follow_ups. It
+    /// follows the newest-wins (renders).
     #[test]
     fn apply_follow_ups_none_prompt_first_time_follows_legacy_newest_wins() {
         let mut agent = make_agent();
@@ -2709,7 +2712,8 @@ pub(crate) mod test_fixtures {
         );
         assert_eq!(agent.follow_ups.as_ref().unwrap().response_id, "resp-x");
     }
-    /// Buffer-before-adoption: a stamped `example.invalid/follow_ups` for a turn that is NOT yet current (its `session/update` adoption raced behind the ext channel) must be BUFFERED, not dropped, and then RENDER when that turn becomes current and is flushed.
+    /// Buffer-before-adoption. A stamped `example.invalid/follow_ups`. For a turn that is NOT yet current (its `session/update` adoption raced behind the ext channel) must be BUFFERED, not dropped, and then RENDER when that turn becomes current and is
+    /// flushed.
     #[test]
     fn apply_follow_ups_buffered_before_adoption_flushes_on_adoption() {
         let mut agent = make_agent();

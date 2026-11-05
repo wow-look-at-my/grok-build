@@ -3,7 +3,7 @@
 //! - `GET  /rest/user-skills`: enabled user-uploaded skills
 //!
 //! Transport only.
-//! Chat `example.invalid/commands/list` / ACP `available_commands_update` map this catalog to slash commands.
+//! `available_commands_update` map this catalog to slash commands.
 //!
 //! Desktop/shell chat uses this REST path, not gateway `conversation.commands.updated`.
 //! That keeps one process-local source for `available_commands_update`, list_commands, and slash resolve/expansion.
@@ -34,7 +34,6 @@ pub const CHAT_PRODUCT_META_KEY: &str = "product";
 const LIST_CATALOG_ATTEMPTS: u32 = 3;
 const LIST_CATALOG_BACKOFF: Duration = Duration::from_millis(100);
 /// Per-request budget for product Skills REST.
-/// The shared client only sets a connect timeout; without this a hung grok.invalid stalls the session actor.
 const LIST_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Default, Deserialize)]

@@ -102,7 +102,7 @@ pub fn project_scope_allowed(cwd: &Path) -> bool {
 }
 
 /// Whether an interactive GUI trust PROMPT is warranted for `cwd`. Warranted means the feature is on, the workspace is NOT store-trusted, and repo-local code-exec configs are present (something to gate).
-/// Interactivity is forced `true` because the caller already confirmed the client can prompt (it advertised `example.invalid/folderTrust.interactive`). The TTY-based [`decide_inputs`] default is false under the ACP stdio transport.
+/// means the feature is on, the workspace is NOT store-trusted, and
 /// Mirrors the [`decide`] precedence so it cannot drift from the gate. Feature-off (kill-switch / opt-out) / store-trusted / no-configs all collapse to a non-`Prompt` verdict and return false.
 pub(crate) fn prompt_warranted(cwd: &Path, remote: Option<&RemoteSettings>) -> bool {
     let key = workspace_key(cwd);

@@ -3518,8 +3518,8 @@ impl MvpAgent {
         }
     }
     /// Insert the per-session `_meta` keys shared by `new_session` and `load_session`.
-    /// The keys are `example.invalid/sessionConfig`, `example.invalid/sessionDetail`,
-    /// and `example.invalid/memoryMode`.
+    /// `load_session`. The keys are `example.invalid/sessionConfig`,
+    /// `example.invalid/sessionDetail`, and `example.invalid/memoryMode`.
     /// Keeping both response paths on this one builder stops them drifting.
     pub(super) fn insert_session_config_meta(
         &self,

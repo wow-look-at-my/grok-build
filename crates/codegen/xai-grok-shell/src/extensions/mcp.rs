@@ -258,7 +258,7 @@ pub struct McpToolsChanged {
     pub tools: Vec<McpToolEntry>,
 }
 
-// Re-export the `example.invalid/mcp/server_status` schema and method constant from the dispatcher module External callers then have a single import point alongside the other `example.invalid/mcp/*` types
+// Re-export the `example.invalid/mcp/server_status` schema and method
 // The canonical definitions stay in [`crate::session::mcp_dispatcher`]: their primary consumer is the dispatcher loop and its unit tests
 // This import from `session` into `extensions` inverts the typical `extensions` to `session` flow Moving the types here would require either making the dispatcher import from `extensions` (the same inversion) or duplicating the schema Leaving the re-export here keeps the single import point without duplicating definitions
 pub use crate::session::mcp_dispatcher::{

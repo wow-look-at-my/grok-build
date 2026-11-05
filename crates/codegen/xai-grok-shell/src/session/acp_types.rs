@@ -390,7 +390,7 @@ pub struct FeedbackDraftEditedBody {
     pub terminal_info: Option<prod_mc_cli_chat_proxy_types::feedback_types::FeedbackTerminalInfo>,
 }
 
-/// Pager attestation carried on the one-shot `example.invalid/feedback/upload-trace` request. Deliberately no
+/// Pager attestation carried on the one-shot
 /// catch-all variant: an unknown intent fails the request instead of changing its gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

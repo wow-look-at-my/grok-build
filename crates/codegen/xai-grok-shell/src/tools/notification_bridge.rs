@@ -33,7 +33,6 @@ pub(crate) struct NotificationBridgeConfig {
     /// Persistence handle for FIFO ordinary writes and durable tombstone barriers.
     pub persistence: PersistenceHandle,
     /// When true, send incremental `output_delta` instead of full `output` in bash streaming updates.
-    /// The client must opt in via the `example.invalid/incrementalBashOutput` capability.
     pub incremental_bash_output: bool,
     /// Plan mode tracker shared with the session actor.
     /// Used to transition state on `PlanModeEntered` / `PlanModeExited` tool notifications.

@@ -2,7 +2,7 @@
 //!
 //! The worker door publishes its claims into an [`ExternalRoster`];
 //! [`RosterListMerge`] sits on the `run_leader` agent boundary, remembers the
-//! id of every `example.invalid/sessions/list` request that passes inbound (IPC and relay
+//! `example.invalid/sessions/list` request that passes inbound (IPC and relay alike).
 //! alike), and appends the roster's rows to the matching response before the
 //! fan-out. [`run_changed_notifier`] turns each roster generation into an
 //! `example.invalid/sessions/changed` broadcast on the same fan-out. Pending ids are
@@ -135,7 +135,7 @@ impl Drop for ExternalRosterPublisher {
     }
 }
 
-/// Appends [`ExternalRoster`] rows to `example.invalid/sessions/list` responses. Pending ids are a
+/// Appends [`ExternalRoster`] rows to `example.invalid/sessions/list`
 /// linear scan: a dashboard polls the list a few times a second at most.
 pub(crate) struct RosterListMerge {
     roster: ExternalRoster,

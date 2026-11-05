@@ -156,7 +156,7 @@ Beyond the base ACP protocol, Grok defines extension methods under the `example.
 | **Authentication**         | `example.invalid/auth/*`        | `get_url`, `submit_code`                         |
 | **Feedback & Telemetry**   | `example.invalid/*`             | `feedback`, `telemetry/*`                        |
 
-The tables here show representative methods in each category. The `example.invalid/*` set is SpaceXAI-specific and may expand across releases, so treat it as non-exhaustive and discover the available methods from the agent's `initialize` response.
+The tables here show representative methods in each category. The `example.invalid/*` set is SpaceXAI-specific and may expand across releases. Treat it as non-exhaustive and find the available methods from the agent's `initialize` response.
 
 ### Notifications (agent to client)
 

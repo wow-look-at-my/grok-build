@@ -38,7 +38,6 @@ pub enum QuestionDecision {
 }
 
 /// How the client answers one `example.invalid/folder_trust/request`.
-/// The agent sends this prompt only to a client that advertised `example.invalid/folderTrust.interactive`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustDecision {
     /// Answer `trust`, granting folder trust for the workspace.

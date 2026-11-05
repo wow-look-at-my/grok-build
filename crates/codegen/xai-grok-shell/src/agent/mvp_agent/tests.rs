@@ -2736,7 +2736,7 @@ async fn ensure_plugin_registry_lazily_populates_snapshot() {
 /// Regression: the shared snapshot was built from the boot-time in-memory `[plugins]` config, which
 /// `config.toml` edits never refresh. A plugin toggled after the agent started (marketplace install,
 /// `grok plugin enable|disable`, a client editing the file) kept its boot-time `enabled` for
-/// session-less `example.invalid/plugins/list` / `example.invalid/skills/list` callers until restart, while per-session
+/// `example.invalid/plugins/list` / `example.invalid/skills/list` callers until restart. This happens while per-session
 /// registries, which read disk, were right. The shared rebuild must read disk too.
 ///
 /// Exercised through a project `.grok/config.toml` (merged by `resolve_effective_plugins_config` for
@@ -2788,7 +2788,7 @@ async fn shared_plugin_registry_snapshot_reads_plugins_config_from_disk() {
         "rebuild must take `disabled` from config on disk, not the boot-time config"
     );
 }
-/// Scaffolding for the session-less `example.invalid/plugins/reload` regressions: a hermetic GROK_HOME, the
+/// Scaffolding for the session-less `example.invalid/plugins/reload` regressions. A hermetic GROK_HOME, the
 /// folder-trust feature in its release-build default (`GROK_FOLDER_TRUST` unset), and an agent whose
 /// launch dir is `repo` (captured from the process cwd at construction, so callers hold `serial`).
 struct ReloadHarness {
@@ -2944,7 +2944,7 @@ async fn plugins_reload_rechecks_launch_dir_trust() {
 }
 /// The lazy boot build reads disk config through the folder-trust gate. It must not lean on the
 /// startup primer: with the gate on, a no-configs launch dir leaves the primer's allow non-durable
-/// (nothing recorded), so a later lazy build — reachable from a session-less `example.invalid/plugins/list`
+/// later lazy build. Reachable from a session-less `example.invalid/plugins/list` long after long after
 /// long after startup, once repo-local configs have appeared and remote settings have moved to the
 /// kill-switch — would hit the gate's cold-key backstop, which resolves WITHOUT remote settings and
 /// records a kill-switch-blind deny that no reconcile can lift.
@@ -5944,7 +5944,7 @@ fn spawn_active_work_actor(
         }
     });
 }
-/// Drive `example.invalid/internal/evict_sessions` through the real `ext_notification` handler path (not the internal helper).
+/// Drive `example.invalid/internal/evict_sessions` through the real
 /// This matches how the leader server signals a client disconnect.
 async fn drive_disconnect(agent: &MvpAgent, sid: &acp::SessionId) {
     drive_disconnect_many(agent, &[sid]).await;

@@ -77,7 +77,7 @@ fn strip_sampling_api_error_prefix(detail: &str) -> &str {
     detail.trim()
 }
 
-/// IC sometimes reuses OAuth free-tier upsell copy on 429s ("upgrade to a Grok subscription" / grok.invalid/supergrok).
+/// IC sometimes reuses OAuth free-tier upsell copy on 429s ("upgrade to a That is wrong for API-key / team auth. Higher limits come from
 /// That is wrong for API-key / team auth: higher limits come from credits and spend-based rate-limit tiers, not a personal SuperGrok plan.
 fn pushes_consumer_subscription_upsell(detail: &str) -> bool {
     let d = detail.to_ascii_lowercase();

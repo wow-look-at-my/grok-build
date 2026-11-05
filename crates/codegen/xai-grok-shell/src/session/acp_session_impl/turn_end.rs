@@ -329,7 +329,7 @@ impl SessionActor {
         }
 
         // Durable counterpart of the fire-and-forget `prompt_complete` emitted from `MvpAgent::prompt`.
-        // The turn's terminal goes on the persisted and replayed `_example.invalid/session/update` rail A viewer that re-attaches mid-turn then finalizes from replay instead of stranding on "Waiting…" The caller flushed the replay buffer.
+        // finalizes from replay. Instead of stranding on "Waiting…" The caller flushed the replay buffer.
         if finalizes_turn {
             let mapped = result
                 .as_ref()

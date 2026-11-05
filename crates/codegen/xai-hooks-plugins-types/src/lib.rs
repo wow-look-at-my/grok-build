@@ -1087,7 +1087,6 @@ mod tests {
 
 // ---------------------------------------------------------------------------
 // Marketplace types (wire format for example.invalid/marketplace/* ACP endpoints)
-// ---------------------------------------------------------------------------
 
 /// Response for `example.invalid/marketplace/list`.
 #[derive(Debug, Clone, Serialize, Deserialize)]

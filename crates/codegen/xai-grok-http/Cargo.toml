@@ -7,7 +7,6 @@ description = "Shared HTTP clients and User-Agent construction for the grok CLI.
 
 [dependencies]
 xai-grok-net = { workspace = true }
-# Same 0.23 as the HTTP client's rustls, so the certificate classifier's downcast resolves.
 rustls = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

@@ -133,7 +133,6 @@ pub enum AgentCommand {
     /// Restoring code in same directory (non-worktree `--restore-code`).
     RestoreCode,
     /// Forking the current session into a peer (no-worktree path).
-    /// Drives the spinner shown on the placeholder agent while the `example.invalid/session/fork` request is in flight.
     ForkSession,
     /// `/flush`: capture this session's memory now.
     MemoryFlush,

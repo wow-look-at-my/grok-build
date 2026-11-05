@@ -46,12 +46,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Branch-stats notes
 
-- The status bar shows `↑ahead ↓behind +ins -del` after the branch name (`branch_stats.rs`, drawn in `agent_view/render.rs`). A count of zero is not drawn.
-- Ahead/behind is against the branch the checkout tracks. The order is: the checked-out branch's configured upstream, including the same-named remote-tracking branch, the reflog's `branch: Created from X`, `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. The current branch's local ref is never its own base, so a branch tracking `origin/<name>` compares against that remote copy.
-- The +/- counts are the working tree against HEAD: staged, unstaged, and untracked files git does not ignore.
-- The diff reads the working tree. It runs off-thread behind a 5 s throttle in its own cache, not on the render path.
-- The +/- counts are a full work-tree scan, as costly as `git status`. A refresh reuses the last scan until the shared watcher's `ChangeCounter` moves or the HEAD tree changes (`cached_line_stats`). With no watcher, the scan runs at most once each `UNWATCHED_SCAN_INTERVAL`, and a warning names the cause. Never scan on each refresh: every idle pager then keeps several cores busy.
-- Each refresh runs on its own short thread at the lowest CPU priority (`lower_thread_priority`): the highest nice value on Linux. This also covers which the scan's gix workers inherit, and the background class on macOS. Not the blocking pool: an unprivileged thread cannot raise its priority again. A pool thread will keep it for unrelated work.
+[docs/branch-stats-notes.md](docs/branch-stats-notes.md) holds this section.
 
 ## Git status reuse in `git_gate`
 
@@ -64,11 +59,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## A blocking wait is a gap, in Queue mode too
 
-- The turn loop harvests queued follow-ups before each model request (`harvest_queued_prompts_into_interjections`). A turn parked in an interruptible wait tool (`get_task_output` with a wait, `wait_tasks`, `Await`) makes no request until the task ends. As a result, Queue mode held the row behind a task that can run for minutes.
-- The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. A foreground subagent call is such a wait (`is_foreground_task_call`). The default agent renames its `run_in_background` flag to `background`. The check reads both names. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. A pending send-now is exempt.
-- A wait, and the harvest before each model request, take every row an empty Enter will (`harvest_queued_prompts_into_interjections(true)`), a row queued before the turn started included. A goal run is not exempt, in the shell or in the pager (`is_parked_on_sendable_wait`). A message never needs the empty-Enter force-send to end a wait.
-- A foreground call is a gap too (`ForegroundHandoff` in `tool_calls.rs`). A queued row moves a shell command to the background by its call id. The command keeps running. An MCP call, or a built-in tool that only reads or fetches (`is_detachable_kind`: web, media generation, deploy, LSP), runs on its own task. The row answers the call as backgrounded (`bg-<call id>`), and `report_detached_call` sends its result through the background-task completion path. A tool that edits files or waits on the user keeps the turn waiting. The whole result is written under `{session_dir}/background_tool_calls/`.
-- A `/skill` typed mid-turn takes the shell queue like plain text (the `InjectSkill` arm in `dispatch/prompt.rs`). The harvest folds a slash row whose leading token is a skill (`slash_commands::leading_token_is_skill`). The drain expands it. A builtin still waits for its own turn, because only `resolve` runs one.
+[docs/a-blocking-wait-is-a-gap-in-queue-mode-too.md](docs/a-blocking-wait-is-a-gap-in-queue-mode-too.md) holds this section.
 
 ## `/context` shows provider counts only
 
@@ -164,12 +155,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Streaming tool-call notes
 
-- A call's arguments reach the pager as the model writes them. The path is `SamplingEvent::ToolCallDelta` → `XaiSessionUpdate::ToolCallDeltaChunk` → `AcpUpdateTracker::handle_tool_call_delta`. The real `ToolCall` then adopts the row those deltas built. So a call keeps the position it held while it was typed.
-- The row shows the CONTENT. It does not show a progress number alone. `OtherToolCallBlock::streaming_preview` holds the decoded tail of the arguments. The block draws it under the header in every display mode. `Collapsed` is included, because that is the mode a call is in while it streams. A preview drawn only when expanded left a write that read `◆ write` and nothing else until the file was whole.
-- `StreamingArgsTail` (`acp/streaming_args.rs`) decodes the JSON escapes as the fragments land. A provider splits the arguments at arbitrary offsets. So an escape sequence can straddle a fragment boundary. The decoder carries that state across. A raw fragment puts `\n` on the screen and draws a file write as one line thousands of columns wide.
-- The tail is bounded in both directions. It drops the older lines. One line stops growing at its character cap. A tab becomes spaces. So a large write costs a fixed row height however long it runs.
-- The byte count beside the name is what the tail cannot say. A tail of a large body looks the same at any size.
-- The preview truncates each line. It never wraps one. Every fragment redraws it. A wrapped line changes the block's height as the model types, which makes the whole transcript jump.
+[docs/streaming-tool-call-notes.md](docs/streaming-tool-call-notes.md) holds this section.
 
 ## Explore-mode `git` tool
 
@@ -259,11 +245,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Todo-stop-gate notes
 
-- The built-in todo gate is a participant in the turn-end STOP-HOOK gate, not a mechanism beside it (`acp_session_impl/turn.rs`, on `StopGateDecision::AllowStop`). It fires only after the user hooks allowed the stop. Its reminder rides the same `stop_hook_feedback` user message a hook block uses. It consumes the SAME `stop_continuations_this_turn` budget. So `MAX_STOP_HOOK_CONTINUATIONS_PER_TURN` is the stuck-release: a model that never engages its todos stops anyway.
-- switches, and they are ORed, not ANDed (`todo_stop_gate_enabled`). The persisted `[ui].stop_gate_unfinished_todos` toggle ships ON and is the switch. `todo_gate.enabled` (remote `todo_gate_enabled`, or the `--todo-gate` CLI force-enable) is an opt-in on top, for a session whose toggle the user turned off. ANDing them is what shipped the feature dead: `TodoGateConfig::default().enabled` is false, so every default session took the `None` arm and the gate never ran.
-- `todo_gate_applicable` is the other half and still binds. It allows no gate while the goal loop is active, because the continuation directive drives the loop there. It allows no gate for a prompt that carries no `<task_completion_discipline>` block.
-- A queued user row outranks the built-in CI gate at turn end: `turn.rs` breaks the round when `has_runnable_queued_user_row` is true. The row runs as its own turn. The todo gate is off in practice, because `carries_task_completion_discipline` always returns `false`.
-- `todo_stop_gate_blocks` is pure and table-tested. The actor supplies the toggle, the shared continuation counter, and `evaluate_todo_gate` over the live todo state.
+[docs/todo-stop-gate-notes.md](docs/todo-stop-gate-notes.md) holds this section.
 
 ## `send_message` notes
 
@@ -302,11 +284,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## `/fork` and running subagents
 
-- A fork copies `updates.jsonl`, and the child's load replays it. A `subagent_spawned` with no matching `subagent_finished` is therefore inherited. `prepare_replay_lines` reports it as unfinished and the child opens with that agent's row. The run itself stays the parent's, because `emit_subagent_notification` addresses the `parent_session_id` recorded at spawn. So the finish never reaches the child.
-- The copy drops the records of every subagent that is still RUNNING at the fork point (`CopySessionOptions::carry_running_subagents`, default off). A subagent that already finished is history the conversation refers to. Its spawn and finish pair is copied either way. This is the same boundary the copy draws for workflow and goal projections.
-- Running is decided over the lines the copy KEEPS. It is not decided over the whole source file. A `target_prompt_index` that cuts a finish away leaves a spawn the child reads as live. That spawn is dropped too.
-- `/fork --agents` opts back in. The records are copied. The child's load then reconciles them the way a resumed session's are (`reconcile_orphaned_subagents_with_backend`). An agent this process still has running keeps its row. One that is gone is finished as cancelled. The child still cannot receive that run's output, because the run answers to the parent.
-- The flag rides `ForkSessionRequest::include_agents` on `example.invalid/session/fork` and `ResumeSessionInWorktreeRequest::include_agents` on the worktree fork. So `/fork --worktree --agents` behaves the same.
+[docs/fork-and-running-subagents.md](docs/fork-and-running-subagents.md) holds this section.
 
 ## Reasoning-effort support gate notes
 
@@ -314,12 +292,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Model-request parallelism cap
 
-- `[ui].max_parallel_requests` (default 7, `0` = no cap) is the most model requests one process sends at once (`xai-grok-sampler/src/request_slots.rs`). A request past it waits in a FIFO queue. Every config load applies it (`apply_max_parallel_requests` in `util/config/campaigns.rs`), so a reload changes it live. A lowered cap never cuts off a request in flight.
-- The slot is taken in the client's send methods and held until the response stream is dropped. So every caller is covered: the sampler actor, `conversation_collect`, and compaction's direct stream calls.
-- The actor takes its slot in `run_one_attempt` BEFORE `FirstTokenDeadline::start`, and runs the send under `with_slot_held` so the client takes no second one. The TTFT limit, the idle timeout and the rate gate therefore all start after the queue.
-- A caller's own deadline around a model call uses `timeout_excluding_queue`, not `tokio::time::timeout`. It moves the deadline by the time spent queued. The clock is a task-local, and `Submit` carries it to the actor's task by hand.
-- A rate-floor backup takes its own slot. With every slot in use it waits, and the slow original keeps streaming.
-- A queued try says so: `SamplingEvent::Queued`/`Dequeued` → transient `XaiSessionUpdate::RequestQueued`/`RequestDequeued` → `AcpUpdateTracker::request_queued`. The status row then reads `Queued: 7 model requests already running…` (`WaitingReason::Queued`) in place of "Waiting for response". Without it a queued turn looks like a stalled model.
+[docs/model-request-parallelism-cap.md](docs/model-request-parallelism-cap.md) holds this section.
 
 ## Workflow agent-concurrency notes
 

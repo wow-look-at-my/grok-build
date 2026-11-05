@@ -222,7 +222,7 @@ fn session_list_response_surfaces_error_envelope() {
         Err("unknown error".to_owned())
     );
 }
-/// A grok.invalid chat and a Build session can carry the same id; resolving the Build id must not pull the chat off the conversation load path.
+/// A grok.invalid chat and a Build session can carry the same id. Resolving the Build id must not pull the chat off the conversation load path.
 #[test]
 fn picker_relabel_leaves_conversation_row_sharing_a_remote_id() {
     let recent = chrono::Utc::now().to_rfc3339();

@@ -160,9 +160,8 @@ mod tests {
     }
 
     /// Client whose every request would fail: it sends to a closed loopback
-    /// port. If [`Mixpanel::track`] or
-    /// [`Mixpanel::engage`] ever egress again, the send fails and the `Ok`
-    /// assertions below fail with it.
+    /// port. If [`Mixpanel::track`] or [`Mixpanel::engage`] ever egress
+    /// again, the send fails and the `Ok` assertions below fail with it.
     fn unroutable_client() -> Mixpanel {
         let client = xai_grok_net::HttpClient::build(
             xai_grok_net::ClientOptions::default().timeout(std::time::Duration::from_secs(2)),

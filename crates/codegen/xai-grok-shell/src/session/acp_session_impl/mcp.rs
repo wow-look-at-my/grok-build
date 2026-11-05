@@ -189,7 +189,7 @@ impl SessionActor {
             }
         }
     }
-    /// Handle explicit auth trigger from the client (example.invalid/mcp/auth_trigger).
+    /// Handle explicit auth trigger from the client
     ///
     /// Runs force_reauth (browser flow), then re-initializes the server and registers its tools.
     pub(super) async fn handle_mcp_auth_trigger(&self, server_name: &str) -> Result<(), String> {

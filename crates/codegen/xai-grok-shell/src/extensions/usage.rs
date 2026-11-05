@@ -1,9 +1,4 @@
 //! `example.invalid/session/usage`: cumulative session token and cost totals as [`PromptUsage`].
-//!
-//! Projects the in-memory [`xai_chat_state::UsageLedger`] (main-loop + folded
-//! subagent spend). Partial costs are preserved with a `costIsPartial` flag;
-//! only incomplete usage (genuine data loss) scrubs cost. Totals reset
-//! when a session is resumed in a new agent process.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};

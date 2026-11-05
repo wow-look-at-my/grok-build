@@ -35,7 +35,7 @@ pub const WORKSPACE_EVENTS_TOOL_ID: &str = "workspace_events";
 /// Tool ID used for `ToolNotification` forwarding frames.
 pub const WORKSPACE_TOOL_NOTIFICATIONS_TOOL_ID: &str = "workspace_tool_notifications";
 
-/// Tool ID used for workspace-originated client ext-notification frames (e.g. `example.invalid/search/fuzzy/status`). Carries `{ method, params }`.
+/// Tool ID used for workspace-originated client ext-notification frames (e.g. `example.invalid/search/fuzzy/status`).
 pub const WORKSPACE_CLIENT_EXT_NOTIFICATIONS_TOOL_ID: &str = "workspace_client_ext_notifications";
 
 /// What a workspace RPC says about human presence, for idle-hibernation.

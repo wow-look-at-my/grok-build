@@ -1,6 +1,4 @@
 //! `example.invalid/privacy/setCodingDataRetention` extension handler.
-//!
-//! Coding-data retention is fixed to opt out in this build.
 
 use super::{ExtResult, to_raw_response};
 use crate::agent::MvpAgent;

@@ -686,7 +686,6 @@ pub struct MvpAgent {
     /// grok.invalid chat-product catalog (`/rest/modes`) for chat sessions; distinct from `models_manager` (the build `/v1/models` catalog).
     pub(crate) chat_modes: crate::agent::chat_modes::ChatModesManager,
     /// Single-flight guard for interactive login (device poll / loopback wait).
-    /// Owns the active attempt's cancel token and its code/url channels; a new `authenticate` or `example.invalid/auth/cancel` cancels the prior attempt.
     pub(crate) interactive_auth: xai_grok_login::single_flight::AuthSingleFlight,
     /// Client type. LEADER-SAFE(init-once): set once during `initialize` from `_meta.clientIdentifier` (injected by the IPC server in leader mode).
     /// **Known limitation (leader mode)**: with multiple concurrent clients, the last `initialize` call wins and overwrites the global value.
@@ -1063,7 +1062,6 @@ struct AuthRequestMeta {
     #[serde(default)]
     force_interactive: bool,
     /// Pager auth `request_seq` for this attempt.
-    /// Scopes `example.invalid/auth/cancel` so a delayed cancel cannot tear down a successor login.
     #[serde(default)]
     request_seq: Option<u64>,
 }

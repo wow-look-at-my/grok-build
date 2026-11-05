@@ -1,5 +1,4 @@
 //! `example.invalid/session/state` reads a session's metadata columns.
-//! `example.invalid/session/import` writes them, with the transcript, to recreate a session on another host.
 
 use std::path::{Path, PathBuf};
 

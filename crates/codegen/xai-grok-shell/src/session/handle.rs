@@ -124,7 +124,6 @@ pub struct SessionHandle {
     /// Stored per-session so subagents inherit it at spawn.
     pub non_interactive: bool,
     /// Plan mode tracker, shared with the session actor via Arc.
-    /// Exposed so the `example.invalid/toggle_plan_mode` handler can toggle plan mode without going through the session command channel.
     pub plan_mode: std::sync::Arc<parking_lot::Mutex<crate::session::plan_mode::PlanModeTracker>>,
     /// Debug flag: when set to `true`, the next turn unconditionally triggers auto-compaction regardless of context window usage.
     /// Consumed (reset to `false`) atomically on use via `compare_exchange`.

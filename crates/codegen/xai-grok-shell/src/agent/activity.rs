@@ -1,7 +1,8 @@
 //! Send-safe view of the agent's in-flight work, shared with the leader's `tokio::spawn` tasks. Those tasks cannot read the `!Send` `MvpAgent` state on the `LocalSet`.
 //!
 //! The leader's `agent_busy` flag only counts IPC (Unix-socket) requests.
-//! Relay (grok.invalid WebSocket) traffic is bridged straight into the agent's ACP stdin and never sets it.
+//! Relay (grok.invalid WebSocket) traffic is bridged straight into the
+//! agent's ACP stdin and never sets it.
 //!
 //! [`AgentActivity::is_busy`] derives busyness from agent state regardless of transport.
 //! [`AgentActivity::flush_all_sessions`] lets the shutdown path end session actors gracefully instead of aborting them via `LocalSet` drop.
