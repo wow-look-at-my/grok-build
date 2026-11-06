@@ -2944,7 +2944,7 @@ async fn plugins_reload_rechecks_launch_dir_trust() {
 }
 /// The lazy boot build reads disk config through the folder-trust gate. It must not lean on the
 /// startup primer: with the gate on, a no-configs launch dir leaves the primer's allow non-durable
-/// later lazy build. Reachable from a session-less `example.invalid/plugins/list` long after long after
+/// Reachable from a session-less `example.invalid/plugins/list` long after long after long after long
 /// long after startup, once repo-local configs have appeared and remote settings have moved to the
 /// kill-switch — would hit the gate's cold-key backstop, which resolves WITHOUT remote settings and
 /// records a kill-switch-blind deny that no reconcile can lift.

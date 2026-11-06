@@ -686,7 +686,7 @@ where
 /// The relay is the durable server-side store for every session on this
 /// connection and persists `user_message_chunk` solely from the agent's
 /// notifications — it never re-derives the prompt from `session/prompt`. Since
-/// (`example.invalid/userMessageEcho`), a relay whose `initialize` omits the
+/// silently loses every `initialize` omits the flag silently loses every user
 /// `initialize` omits the flag silently loses every user prompt from stored
 /// history. Declaring it here, where the relay's frames enter the agent, makes
 /// persistence independent of the relay build; an explicit value from the relay

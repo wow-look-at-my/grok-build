@@ -329,7 +329,7 @@ impl InitProgress {
 
 /// One in-process SDK MCP server registration: its tool-namespace name and the SDK-side id echoed back in `example.invalid/mcp/sdk_call`. A named struct
 /// A named struct (rather than a `(String, String)` tuple) so callers can't transpose the two strings.
-/// the `serverId` wire field name is declared (and serde-checked) exactly once here.
+/// serde-checked) exactly once here.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct AcpServerEntry {
     pub name: McpServerName,
