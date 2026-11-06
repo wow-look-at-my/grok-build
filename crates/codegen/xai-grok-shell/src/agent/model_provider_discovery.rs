@@ -474,9 +474,24 @@ struct Claim<'a> {
 /// block that names another provider does not claim. A block that names no
 /// provider claims the listing of the provider on its URL. its URL, it claims
 /// the first listing of its model id. The caller lets one block claim one
-/// listing only.
+/// listing only. A block keyed by the listed id (`<provider>/<slug>`) claims
+/// that listing first: the picker shows that id, so users write it.
 fn claiming_block<'a>(cfg: &'a config::Config, provider_id: &str, slug: &str) -> Option<Claim<'a>> {
     let provider = cfg.model_providers.get(provider_id)?;
+    let listed_key = discovered_model_key(provider_id, slug);
+    if let Some((key, block)) = cfg.config_models.get_key_value(&listed_key)
+        && block.model.as_deref().is_none_or(|m| m == slug)
+        && block
+            .model_provider
+            .as_deref()
+            .is_none_or(|named| named == provider_id)
+    {
+        return Some(Claim {
+            key,
+            block,
+            routes_to_provider: true,
+        });
+    }
     cfg.config_models
         .iter()
         .filter(|(key, block)| block.model.as_deref().unwrap_or(key.as_str()) == slug)
@@ -1127,6 +1142,38 @@ mod tests {
         assert!(
             discovered.contains_key("gateway/small-one"),
             "the rest of the listing still arrives"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_block_keyed_by_the_listed_id_sets_the_window() {
+        let (base, server) = start_listing_server(two_model_listing()).await;
+        let cfg = config_from(&format!(
+            r#"
+            [model_providers.gateway]
+            base_url = "{base}/v1"
+            api_key = "sk-provider"
+
+            [model."gateway/big-one"]
+            context_window = 32000
+            "#
+        ));
+
+        let discovered = resolve_discovered_models(&cfg, &discover_provider_models(&cfg).await);
+        server.abort();
+
+        let big = &discovered["gateway/big-one"];
+        assert_eq!(
+            big.info.context_window.get(),
+            32_000,
+            "the block the picker id names must override the listed window"
+        );
+        assert_eq!(big.info.model, "big-one");
+        assert_eq!(big.info.base_url, format!("{base}/v1"));
+        assert_eq!(big.info.model_provider.as_deref(), Some("gateway"));
+        assert_eq!(
+            discovered["gateway/small-one"].info.context_window.get(),
+            128_000
         );
     }
 

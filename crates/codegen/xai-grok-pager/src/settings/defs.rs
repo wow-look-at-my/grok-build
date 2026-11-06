@@ -1022,6 +1022,31 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: false,
         },
+        // SHELL-owned `[model."<id>"] context_window`, one value per model.
+        SettingMeta {
+            key: crate::settings::context_limits::CONTEXT_WINDOW_LIMIT_KEY,
+            category: SettingCategory::Models,
+            owner: SettingOwner::Shell,
+            label: "Context window limit",
+            description: "Cap the context window of a model, for example 350k on a 1M model. \
+                          Auto-compaction and the context bar then use the cap. Pick a model, \
+                          then type the limit. Leave it empty to use the window of the model.",
+            keywords: &[
+                "context",
+                "window",
+                "context window",
+                "limit",
+                "cap",
+                "tokens",
+                "ctx",
+                "size",
+                "compact",
+                "compaction",
+                "model",
+            ],
+            kind: SettingKind::ModelContextLimits,
+            restart_required: false,
+        },
         // SHELL-owned `[features].subagent_model_inheritance`, a registry feature row rather than a `[ui]` key
         // `restart_required` because each agent latches the mode when it is built; the row's value is the next-start resolution
         // Each `\n` starts a new line in the expanded detail (a Bool row never reaches the single-line sub-pane header)

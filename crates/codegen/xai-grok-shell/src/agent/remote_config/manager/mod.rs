@@ -590,6 +590,22 @@ impl ModelsManager {
         models.get(key.0.as_ref()).map(f)
     }
 
+    /// The catalog window of `model_id`, and whether config or a listing pinned it.
+    pub(crate) fn model_context_window(
+        &self,
+        model_id: &str,
+    ) -> Option<(std::num::NonZeroU64, bool)> {
+        self.with_catalog_entry(model_id, |e| {
+            (e.info().context_window, e.info().context_window_pinned)
+        })
+    }
+
+    /// The window a config block or a listing set for `model_id`. A guess at run time must not replace it.
+    pub(crate) fn pinned_context_window(&self, model_id: &str) -> Option<std::num::NonZeroU64> {
+        self.model_context_window(model_id)
+            .and_then(|(cw, pinned)| pinned.then_some(cw))
+    }
+
     pub(crate) fn model_supports_reasoning_effort(&self, model_id: &str) -> bool {
         self.with_catalog_entry(model_id, |e| e.info().supports_reasoning_effort)
             .unwrap_or(false)

@@ -177,6 +177,13 @@ fn handle_picking_enum(state: &mut SettingsModalState, key: &KeyEvent) -> Settin
             supports_preview,
             |state| state.picker_query.pop().is_some(),
         ),
+        KeyCode::Enter if is_context_limit_key(state, setting_key) => {
+            let Some(model_id) = picker_choice_at_owned(state, setting_key, choices_idx) else {
+                return SettingsKeyOutcome::Unchanged;
+            };
+            state.enter_context_limit_editor(setting_key, model_id);
+            SettingsKeyOutcome::Changed
+        }
         KeyCode::Enter => {
             // A filtered list with no matches has nothing to commit.
             if dynamic_picker && picker_choices_len(state, setting_key) == 0 {
@@ -398,6 +405,11 @@ fn handle_editing_value(state: &mut SettingsModalState, key: &KeyEvent) -> Setti
         _ => unreachable!("editing handler requires String or Int state"),
     };
 
+    if is_context_limit_key(state, setting_key) && matches!(key.code, KeyCode::Enter | KeyCode::Esc)
+    {
+        return finish_context_limit_edit(state, setting_key, key.code == KeyCode::Enter);
+    }
+
     if key.code == KeyCode::Enter {
         let SettingsMode::EditingString { editor, .. } = &state.state.mode else {
             unreachable!("String editor state changed during commit");
@@ -453,6 +465,59 @@ fn handle_editing_value(state: &mut SettingsModalState, key: &KeyEvent) -> Setti
         editor.handle_key_with_insert_policy(key, safe_settings_char)
     };
     apply_string_edit(state, validator, outcome)
+}
+
+/// Whether `key` is the context window limit row.
+fn is_context_limit_key(state: &SettingsModalState, key: SettingKey) -> bool {
+    matches!(
+        state.registry.find(key).map(|m| &m.kind),
+        Some(SettingKind::ModelContextLimits)
+    )
+}
+
+/// Enter commits the limit and returns to the settings list. Esc returns to the model chooser and writes nothing.
+fn finish_context_limit_edit(
+    state: &mut SettingsModalState,
+    setting_key: SettingKey,
+    commit: bool,
+) -> SettingsKeyOutcome {
+    let Some(target) = state.context_limit_target.clone() else {
+        tracing::error!(
+            target: "settings",
+            key = setting_key,
+            "context limit editor has no target model; nothing to write",
+        );
+        state.transition_to_browse();
+        return SettingsKeyOutcome::Changed;
+    };
+    if !commit {
+        state.enter_context_limit_chooser(setting_key);
+        return SettingsKeyOutcome::Changed;
+    }
+    let SettingsMode::EditingString { editor, .. } = &state.state.mode else {
+        unreachable!("context limit editor requires String state");
+    };
+    let tokens = match crate::settings::context_limits::parse_token_amount(editor.text()) {
+        Ok(tokens) => tokens,
+        Err(error) => {
+            if let SettingsMode::EditingString {
+                validation_error, ..
+            } = &mut state.state.mode
+            {
+                *validation_error = Some(error);
+            }
+            return SettingsKeyOutcome::Unchanged;
+        }
+    };
+    state.transition_to_browse();
+    if tokens == target.limit {
+        return SettingsKeyOutcome::Changed;
+    }
+    SettingsKeyOutcome::Action(Action::SetModelContextWindow {
+        model_id: target.model_id,
+        label: target.label,
+        tokens,
+    })
 }
 
 fn apply_string_edit(

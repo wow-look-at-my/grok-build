@@ -6,6 +6,7 @@ use ratatui::layout::Rect;
 
 use crate::app::actions::Action;
 use crate::input::line_editor::LineEditor;
+use crate::settings::context_limits::{self, ContextLimitTarget};
 use crate::settings::{
     CodingDataSharingLock, EnumChoice, OwnedEnumChoice, PagerLocalSnapshot, SettingCategory,
     SettingKey, SettingKind, SettingMeta, SettingValue, SettingsRegistry, StringValidator,
@@ -253,6 +254,8 @@ pub struct SettingsModalState {
     pub(super) picker_query: String,
     /// True after `/` in an open picker. Keys then go to `picker_query`, in a static picker too.
     pub(super) picker_search_active: bool,
+    /// The model the context limit editor writes to, while that editor is open.
+    pub context_limit_target: Option<ContextLimitTarget>,
 }
 
 impl SettingsModalState {
@@ -295,6 +298,7 @@ impl SettingsModalState {
             picker_last_click: None,
             picker_query: String::new(),
             picker_search_active: false,
+            context_limit_target: None,
         }
     }
 
@@ -587,6 +591,7 @@ impl SettingsModalState {
         self.picker_last_click = None;
         self.picker_query.clear();
         self.picker_search_active = false;
+        self.context_limit_target = None;
     }
 
     /// Open the editor or picker of a non-Bool group child. Returns `false`
@@ -678,6 +683,13 @@ impl SettingsModalState {
     pub(super) fn try_enter_picking_enum_for(&mut self, key: SettingKey) -> bool {
         self.picker_query.clear();
         self.picker_search_active = false;
+        if matches!(
+            self.registry.find(key).map(|m| &m.kind),
+            Some(SettingKind::ModelContextLimits)
+        ) {
+            self.enter_context_limit_chooser(key);
+            return true;
+        }
         let (first_canonical, current_value, supports_preview, resolved_choices) = {
             let Some(meta) = self.registry.find(key) else {
                 return false;
@@ -782,6 +794,50 @@ impl SettingsModalState {
         self.transition_to_picking_enum(key, choices_idx, original_value, supports_preview);
         self.hover_row = None;
         true
+    }
+
+    /// Open the model chooser of the context limit row on the current model.
+    pub(super) fn enter_context_limit_chooser(&mut self, key: SettingKey) {
+        let choices = context_limits::choices(&self.pager_snapshot);
+        let current_id = self
+            .pager_snapshot
+            .current_model_name
+            .as_deref()
+            .and_then(|name| self.pager_snapshot.resolve_model_name(name))
+            .map(|id| id.0.to_string())
+            .unwrap_or_default();
+        let choices_idx = choices
+            .iter()
+            .position(|c| c.canonical == current_id)
+            .unwrap_or(0);
+        self.context_limit_target = None;
+        self.transition_to_picking_enum(key, choices_idx, SettingValue::String(current_id), false);
+        self.hover_row = None;
+    }
+
+    /// Open the limit editor for `model_id`, chosen in the context limit chooser.
+    pub(super) fn enter_context_limit_editor(&mut self, key: SettingKey, model_id: String) {
+        let label = self
+            .pager_snapshot
+            .available_models
+            .iter()
+            .find(|(_, id)| id.0.as_ref() == model_id)
+            .map(|(name, id)| crate::settings::registry::model_choice_label(name, id))
+            .unwrap_or_else(|| model_id.clone());
+        let limit = self.pager_snapshot.context_limits.get(&model_id).copied();
+        let target = ContextLimitTarget {
+            window: self.pager_snapshot.model_windows.get(&model_id).copied(),
+            limit,
+            label,
+            model_id,
+        };
+        let mut editor = LineEditor::default();
+        editor.set_text(context_limits::editor_text(limit));
+        self.picker_query.clear();
+        self.picker_search_active = false;
+        self.context_limit_target = Some(target);
+        self.transition_to_editing_string(key, editor, StringValidator::TokenAmount, None);
+        self.hover_row = None;
     }
 
     /// Transition to `PickingGroup` if the focused row is a `Group`.
@@ -1195,6 +1251,7 @@ pub(super) fn validate_string(
 ) -> Option<String> {
     match validator {
         StringValidator::Any => None,
+        StringValidator::TokenAmount => context_limits::parse_token_amount(buffer).err(),
         StringValidator::NonEmptyToken => {
             if buffer.is_empty() {
                 Some("Value cannot be empty".to_string())
@@ -1301,6 +1358,7 @@ pub(super) fn picker_choices(state: &SettingsModalState, key: SettingKey) -> Vec
         SettingKind::DynamicEnum { source, .. } => {
             dynamic_enum_choices(*source, &state.pager_snapshot)
         }
+        SettingKind::ModelContextLimits => context_limits::choices(&state.pager_snapshot),
         _ => Vec::new(),
     }
 }
@@ -1309,7 +1367,7 @@ pub(super) fn picker_choices(state: &SettingsModalState, key: SettingKey) -> Vec
 pub(super) fn picker_is_dynamic(state: &SettingsModalState, key: SettingKey) -> bool {
     matches!(
         state.registry.find(key).map(|meta| &meta.kind),
-        Some(SettingKind::DynamicEnum { .. })
+        Some(SettingKind::DynamicEnum { .. } | SettingKind::ModelContextLimits)
     )
 }
 

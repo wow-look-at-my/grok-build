@@ -1228,6 +1228,10 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app,
                 subagent_model_inheritance: subagent_model_inheritance_from_app,
+                model_windows: crate::settings::context_limits::catalog_windows(
+                    &app.models.available,
+                ),
+                context_limits: app.model_context_limits.clone(),
             },
         };
         command.run_with_token(&mut ctx, invocation.token, invocation.args)

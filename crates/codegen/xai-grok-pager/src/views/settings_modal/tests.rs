@@ -820,7 +820,9 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "coding_data_sharing",
         // SHELL-owned default_model (Models category).
         "default_model",
-        // SHELL-owned `[features]` row (Models category, registered right after default_model).
+        // SHELL-owned `[model."<id>"] context_window` chooser (Models category).
+        "model_context_window",
+        // SHELL-owned `[features]` row (Models category, registered right after the context limit row).
         "subagent_model_inheritance",
     ];
     expected.extend(
@@ -8226,4 +8228,211 @@ fn slash_starts_a_search_in_a_static_picker_and_esc_backs_out() {
         !matches!(s.mode(), SettingsModalMode::PickingEnum { .. }),
         "the second Esc leaves the picker"
     );
+}
+
+const CONTEXT_KEY: &str = crate::settings::context_limits::CONTEXT_WINDOW_LIMIT_KEY;
+
+/// A modal with catalog models: the current one at a 1M window, and one
+/// whose config sets a 64k limit.
+fn context_limit_state() -> SettingsModalState {
+    let model = |name: &str, id: &str| {
+        (
+            name.to_owned(),
+            agent_client_protocol::ModelId::new(Arc::from(id)),
+        )
+    };
+    let snapshot = PagerLocalSnapshot {
+        current_model_name: Some("Big One".to_owned()),
+        available_models: vec![model("Small", "gw/small"), model("Big One", "gw/big-one")],
+        model_windows: [
+            ("gw/big-one".to_owned(), 1_000_000),
+            ("gw/small".to_owned(), 64_000),
+        ]
+        .into(),
+        context_limits: [("gw/small".to_owned(), 64_000)].into(),
+        ..PagerLocalSnapshot::default()
+    };
+    SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        snapshot,
+    )
+}
+
+/// The row value names the limited model, so the list shows what is set.
+#[test]
+fn context_limit_row_value_summarizes_the_limits() {
+    let mut s = context_limit_state();
+    assert_eq!(
+        s.value_for(CONTEXT_KEY),
+        Some(SettingValue::String("Small 64k".to_owned()))
+    );
+    s.pager_snapshot
+        .context_limits
+        .insert("gw/big-one".to_owned(), 350_000);
+    assert_eq!(
+        s.value_for(CONTEXT_KEY),
+        Some(SettingValue::String("2 models".to_owned()))
+    );
+    s.pager_snapshot.context_limits.clear();
+    assert_eq!(
+        s.value_for(CONTEXT_KEY),
+        Some(SettingValue::String(String::new()))
+    );
+}
+
+/// `d` on the row asks to reset it, as on every other row.
+#[test]
+fn d_on_the_context_limit_row_opens_the_reset_confirm() {
+    let mut s = context_limit_state();
+    assert!(s.focus_key(CONTEXT_KEY));
+    assert!(matches!(
+        press(&mut s, KeyCode::Char('d')),
+        SettingsKeyOutcome::Action(Action::OpenResetConfirm { key }) if key == CONTEXT_KEY
+    ));
+}
+
+fn press(s: &mut SettingsModalState, code: KeyCode) -> SettingsKeyOutcome {
+    handle_settings_key(s, &KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+#[test]
+fn context_limit_row_is_found_by_a_search_for_context() {
+    let mut s = make_state();
+    for query in ["context", "ctx", "limit", "window"] {
+        s.set_query(query);
+        assert!(
+            s.filtered_indices().iter().any(|&i| matches!(
+                s.rows.get(i),
+                Some(RowEntry::Setting { key, .. }) if *key == CONTEXT_KEY
+            )),
+            "a search for {query:?} must show the context window limit row",
+        );
+    }
+}
+
+/// Enter opens a chooser on the current model. Each choice shows its window
+/// or its limit. Enter on a choice opens the editor, and a typed `350k`
+/// commits the limit for that model.
+#[test]
+fn context_limit_flow_sets_a_limit_on_the_current_model() {
+    let mut s = context_limit_state();
+    assert!(s.focus_key(CONTEXT_KEY));
+    assert!(matches!(
+        press(&mut s, KeyCode::Enter),
+        SettingsKeyOutcome::Changed
+    ));
+    let labels: Vec<String> = picker_choices(&s, CONTEXT_KEY)
+        .into_iter()
+        .map(|c| c.display)
+        .collect();
+    assert_eq!(
+        labels,
+        ["Big One \u{00B7} 1M", "Small \u{00B7} 64k limit"],
+        "the current model comes first, and a configured limit is marked",
+    );
+    assert_eq!(picker_choice_idx(&s), 0);
+
+    press(&mut s, KeyCode::Enter);
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::EditingValue { key } if key == CONTEXT_KEY
+    ));
+    assert_eq!(
+        s.editing_buffer(),
+        Some(""),
+        "no limit means an empty editor"
+    );
+
+    type_text(&mut s, "350k");
+    assert_eq!(s.editing_validation_error(), None);
+    let out = press(&mut s, KeyCode::Enter);
+    match out {
+        SettingsKeyOutcome::Action(Action::SetModelContextWindow {
+            model_id,
+            label,
+            tokens,
+        }) => {
+            assert_eq!(model_id, "gw/big-one");
+            assert_eq!(label, "Big One");
+            assert_eq!(tokens, Some(350_000));
+        }
+        other => panic!("expected SetModelContextWindow, got {other:?}"),
+    }
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+}
+
+/// The editor of a limited model starts on the limit. An empty commit removes it.
+#[test]
+fn context_limit_flow_clears_a_limit() {
+    let mut s = context_limit_state();
+    s.focus_key(CONTEXT_KEY);
+    press(&mut s, KeyCode::Enter);
+    press(&mut s, KeyCode::Down);
+    press(&mut s, KeyCode::Enter);
+    assert_eq!(s.editing_buffer(), Some("64k"));
+    for _ in 0..3 {
+        press(&mut s, KeyCode::Backspace);
+    }
+    let out = press(&mut s, KeyCode::Enter);
+    assert!(
+        matches!(
+            &out,
+            SettingsKeyOutcome::Action(Action::SetModelContextWindow { model_id, tokens: None, .. })
+                if model_id == "gw/small"
+        ),
+        "an empty editor removes the limit, got {out:?}",
+    );
+}
+
+/// Bad input keeps the editor open with an error. Esc goes back to the chooser
+/// and writes nothing.
+#[test]
+fn context_limit_editor_rejects_bad_input_and_esc_returns_to_the_chooser() {
+    let mut s = context_limit_state();
+    s.focus_key(CONTEXT_KEY);
+    press(&mut s, KeyCode::Enter);
+    press(&mut s, KeyCode::Enter);
+    type_text(&mut s, "lots");
+    assert!(s.editing_validation_error().is_some());
+    assert!(matches!(
+        press(&mut s, KeyCode::Enter),
+        SettingsKeyOutcome::Unchanged
+    ));
+    assert!(matches!(s.mode(), SettingsModalMode::EditingValue { .. }));
+
+    assert!(matches!(
+        press(&mut s, KeyCode::Esc),
+        SettingsKeyOutcome::Changed
+    ));
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingEnum { key, .. } if key == CONTEXT_KEY
+    ));
+    assert!(
+        s.context_limit_target.is_none(),
+        "the chooser holds no editor target"
+    );
+}
+
+/// The editor header names the model and how to type a limit.
+#[test]
+fn context_limit_editor_renders_the_model_and_the_hint() {
+    let mut s = context_limit_state();
+    s.focus_key(CONTEXT_KEY);
+    press(&mut s, KeyCode::Enter);
+    press(&mut s, KeyCode::Enter);
+    let area = Rect::new(0, 0, 100, 30);
+    let mut buf = Buffer::empty(area);
+    render_settings_modal(&mut buf, area, &mut s, false, None);
+    let text: String = (0..area.height)
+        .map(|y| {
+            (0..area.width)
+                .map(|x| buf[(x, y)].symbol().to_owned())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Big One"), "{text}");
+    assert!(text.contains("350k"), "the hint shows an example: {text}");
 }

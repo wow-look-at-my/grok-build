@@ -572,6 +572,14 @@ pub enum Action {
     SetHarnessModel(&'static str, String),
     /// Commit one model group into `[model_groups.<id>] model`.
     SetModelGroupModel(&'static str, String),
+    /// Commit `[model."<model_id>"] context_window`. `None` removes the limit.
+    SetModelContextWindow {
+        model_id: String,
+        label: String,
+        tokens: Option<u64>,
+    },
+    /// Remove every `[model."<id>"] context_window` limit. The reset of the context limit row.
+    ClearModelContextWindows,
     /// Commit one subagent type's model into `[subagents.models].<type>`.
     SetSubagentModel(&'static str, String),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
@@ -1706,6 +1714,15 @@ pub enum Effect {
         feature: xai_grok_shell::agent::config::Feature,
         saved: Option<bool>,
     },
+    /// Write `[model."<model_id>"] context_window`, or delete it for `tokens == None`; completes as
+    /// [`TaskResult::ModelContextWindowPersisted`].
+    PersistModelContextWindow {
+        model_id: String,
+        label: String,
+        tokens: Option<u64>,
+        /// The limit before this write. A failed write puts it back.
+        previous: Option<u64>,
+    },
     /// Toggle mouse reporting off and on to unwedge xterm.js's button tracker
     /// (see `AgentView::reset_wedged_mouse_reporting`). An effect so it rides the escape
     /// writer; `process_effects` re-checks capture so a toggle-off in the same batch wins.
@@ -2416,6 +2433,14 @@ pub enum WorkspaceWriteCompletion {
         patch: xai_grok_dashboard_store::LayoutPatch,
         outcome: xai_grok_dashboard_store::LayoutApplyOutcome,
     },
+}
+/// The `[model."<id>"] context_window` write that a [`TaskResult::ModelContextWindowPersisted`] reports.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelContextWindowWrite {
+    pub model_id: String,
+    pub label: String,
+    pub tokens: Option<u64>,
+    pub previous: Option<u64>,
 }
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
@@ -3273,6 +3298,11 @@ pub enum TaskResult {
     FeatureOverridePersisted {
         feature: xai_grok_shell::agent::config::Feature,
         result: Result<Option<bool>, String>,
+    },
+    /// One [`Effect::PersistModelContextWindow`] write finished.
+    ModelContextWindowPersisted {
+        write: ModelContextWindowWrite,
+        result: Result<(), String>,
     },
     /// Off-thread clipboard attachment probe finished (see [`Effect::ProbeClipboardAttachment`]); dispatch attaches the chip.
     ClipboardAttachmentProbed {

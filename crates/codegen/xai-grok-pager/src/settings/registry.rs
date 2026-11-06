@@ -197,6 +197,8 @@ pub enum StringValidator {
     HttpUrlOrEmpty,
     /// No constraint (any UTF-8 accepted).
     Any,
+    /// A token count such as `350k`, `1.5m` or `350000`. Empty, `0` and `none` remove the value.
+    TokenAmount,
 }
 
 /// Value-kind metadata, including per-kind defaults.
@@ -238,6 +240,8 @@ pub enum SettingKind {
     Group {
         children: &'static [SettingKey],
     },
+    /// A chooser of catalog models, then an editor for the context window limit of the chosen model.
+    ModelContextLimits,
 }
 
 /// One row in the registry.
@@ -431,6 +435,10 @@ pub struct PagerLocalSnapshot {
     pub voice_stt_language: String,
     /// Mirrors `AppView::subagent_model_inheritance` at snapshot time.
     pub subagent_model_inheritance: FeatureOverrideState,
+    /// The catalog window of each model, by model id.
+    pub model_windows: std::collections::BTreeMap<String, u64>,
+    /// Mirrors the `[model."<id>"] context_window` limits of the user `config.toml`, by model key.
+    pub context_limits: std::collections::BTreeMap<String, u64>,
 }
 
 impl Default for PagerLocalSnapshot {
@@ -455,6 +463,8 @@ impl Default for PagerLocalSnapshot {
             subagent_model_inheritance: FeatureOverrideState::new(
                 Feature::SubagentModelInheritance,
             ),
+            model_windows: std::collections::BTreeMap::new(),
+            context_limits: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -870,6 +880,10 @@ pub fn current_value_for(
                 },
             ))
         }
+        // A summary of the configured context window limits. Empty means none.
+        crate::settings::context_limits::CONTEXT_WINDOW_LIMIT_KEY => Some(SettingValue::String(
+            crate::settings::context_limits::summary(pager),
+        )),
         // A subagent type's pin reads from `[subagents.models].<type>`.
         key if crate::settings::subagent_models::type_for_setting_key(key).is_some() => {
             let name = crate::settings::subagent_models::type_for_setting_key(key)?;
@@ -903,6 +917,8 @@ pub fn default_value_for(meta: &SettingMeta) -> SettingValue {
         // `DynamicEnum` widens to `String` for runtime catalog values.
         SettingKind::DynamicEnum { default, .. } => SettingValue::String((*default).to_string()),
         // Group rows carry no scalar value; the render and reset paths special-case them first, so the returned value is never observed
+        // No configured limit is the default.
+        SettingKind::ModelContextLimits => SettingValue::String(String::new()),
         SettingKind::Group { .. } => SettingValue::Bool(false),
     }
 }
@@ -1441,6 +1457,13 @@ mod tests {
                         "UiConfig::default() must pin no subagent model"
                     );
                 }
+                // The limits live in `[model."<id>"]`, outside `UiConfig`. None is the default.
+                (
+                    crate::settings::context_limits::CONTEXT_WINDOW_LIMIT_KEY,
+                    SettingKind::ModelContextLimits,
+                ) => {
+                    assert!(PagerLocalSnapshot::default().context_limits.is_empty());
+                }
                 _ => panic!(
                     "settings::defs::default_settings() contains entry `{}` with no \
                      matching arm in defaults_match_ui_config_default. Add an arm.",
@@ -1524,6 +1547,7 @@ mod tests {
                     | (SettingKind::Int { .. }, SettingValue::Int(_))
                     // `DynamicEnum` uses `SettingValue::String`.
                     | (SettingKind::DynamicEnum { .. }, SettingValue::String(_))
+                    | (SettingKind::ModelContextLimits, SettingValue::String(_))
             );
             assert!(
                 kind_matches,
@@ -1952,6 +1976,8 @@ mod tests {
                 (SettingKind::DynamicEnum { default, .. }, SettingValue::String(s)) => {
                     assert_eq!(s, default);
                 }
+                // No configured limit is the default.
+                (SettingKind::ModelContextLimits, SettingValue::String(s)) => assert!(s.is_empty()),
                 _ => panic!("default_value_for kind mismatch for `{}`", meta.key),
             }
         }

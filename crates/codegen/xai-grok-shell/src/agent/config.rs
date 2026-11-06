@@ -3916,7 +3916,7 @@ pub(crate) fn resolve_model_list(
             }
         }
         for (key, entry) in resolved.iter_mut() {
-            if entry.info.context_window.get() == default_cw {
+            if !entry.info.context_window_pinned && entry.info.context_window.get() == default_cw {
                 let resolved_cw = crate::agent::remote_config::resolve_context_window(
                     &entry.info.model,
                     &cw_sources,
@@ -3933,8 +3933,9 @@ pub(crate) fn resolve_model_list(
             }
             // BYOK/custom-base gap: the sibling resolve above (and the generic /v1/models prefetch) only ever sees the xAI
             // proxy listing.
-            let still_default = entry.info.context_window.get() == default_cw
-                || entry.info.context_window.get() == CONFIG_DEFAULT_CONTEXT_WINDOW;
+            let still_default = !entry.info.context_window_pinned
+                && (entry.info.context_window.get() == default_cw
+                    || entry.info.context_window.get() == CONFIG_DEFAULT_CONTEXT_WINDOW);
             if still_default && entry.own_credential().is_some() {
                 let api_key = entry.own_credential();
                 let base_url = entry.info.base_url.clone();
@@ -4628,6 +4629,7 @@ impl ConfigModelOverride {
         }
         if let Some(cw) = self.context_window.and_then(NonZeroU64::new) {
             entry.info.context_window = cw;
+            entry.info.context_window_pinned = true;
         }
         if self.max_request_bytes.is_some() {
             entry.info.max_request_bytes = self.max_request_bytes;
@@ -4840,6 +4842,9 @@ pub struct ModelInfo {
     /// Whether this model is resident in VRAM right now.
     #[serde(skip, default)]
     pub loaded_in_vram: Option<bool>,
+    /// A config block or a listing set `context_window`. Nothing replaces a pinned window with a guessed one.
+    #[serde(skip, default)]
+    pub context_window_pinned: bool,
 }
 impl Default for ModelInfo {
     /// [`Self::fallback`] with an empty slug, so construction sites (tests especially) can use `..Default::default()`
@@ -4901,6 +4906,7 @@ impl ModelInfo {
             extra_body: Default::default(),
             pricing_lookup_enabled: true,
             loaded_in_vram: None,
+            context_window_pinned: false,
         }
     }
     pub(crate) fn from_config(entry: &ModelEntryConfig) -> Self {
@@ -4953,6 +4959,7 @@ impl ModelInfo {
             extra_body: Default::default(),
             pricing_lookup_enabled: true,
             loaded_in_vram: entry.loaded_in_vram,
+            context_window_pinned: false,
         }
     }
     /// Whether `id` is one of the ids this model sends: its own, or the one it uses at some effort.
@@ -5841,6 +5848,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 extra_body: Default::default(),
                 pricing_lookup_enabled: true,
                 loaded_in_vram: None,
+                context_window_pinned: false,
             },
             mtls_cert_dir: None,
             api_key: Some(bearer),
@@ -6089,6 +6097,7 @@ fn resolve_hidden_default_web_search_sampling_config(
             extra_body: Default::default(),
             pricing_lookup_enabled: true,
             loaded_in_vram: None,
+            context_window_pinned: false,
         },
         mtls_cert_dir: None,
         api_key: None,
