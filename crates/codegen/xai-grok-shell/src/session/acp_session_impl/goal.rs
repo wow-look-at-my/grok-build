@@ -416,7 +416,11 @@ impl SessionActor {
             return GoalRoundDecision::EndTurn;
         }
         let Some(plan) = self
-            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd)
+            .prepare_goal_continuation(
+                current_tokens,
+                GoalContinuationPurpose::TurnEnd,
+                Some(GoalOpenReason::ClaimRejected),
+            )
             .await
         else {
             return GoalRoundDecision::EndTurn;
@@ -1562,13 +1566,24 @@ impl SessionActor {
 
     /// The continuation next step read off the live todo list, or `None` when the list resource is missing.
     async fn goal_next_step_from_todos(&self) -> Option<String> {
-        let todo_tool = self.resolve_goal_tool_names().await.todo;
+        let names = self.resolve_goal_tool_names().await;
         let todos = self.goal_todo_snapshot().await?;
+        let has_gaps = self
+            .goal_tracker
+            .lock()
+            .snapshot()
+            .is_some_and(|o| o.last_classifier_gaps.is_some());
+        let reason = goal_open_reason_without_verdict(
+            has_gaps,
+            !self.goal_runs_on_workflow_engine(),
+            &names.goal,
+        );
         Some(next_step_from_todos(
             todos
                 .iter()
                 .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
-            &todo_tool,
+            &names.todo,
+            reason,
         ))
     }
 
@@ -1638,7 +1653,7 @@ impl SessionActor {
     pub(crate) async fn reseed_active_goal_after_compaction(&self) {
         let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
         let Some(plan) = self
-            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::Compaction)
+            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::Compaction, None)
             .await
         else {
             return;
@@ -1691,10 +1706,13 @@ impl SessionActor {
         true
     }
 
+    /// `open_reason` is why the goal is still open, when the caller holds a verdict.
+    /// `None` derives it from the panel gaps and the driver.
     async fn prepare_goal_continuation(
         &self,
         current_tokens: i64,
         purpose: GoalContinuationPurpose,
+        open_reason: Option<GoalOpenReason<'_>>,
     ) -> Option<GoalContinuationPlan> {
         let legacy = !self.goal_runs_on_workflow_engine();
         let apply_turn_end = matches!(purpose, GoalContinuationPurpose::TurnEnd);
@@ -1806,14 +1824,18 @@ impl SessionActor {
                 refuted,
             )
         };
+        let open_reason = open_reason.unwrap_or_else(|| {
+            goal_open_reason_without_verdict(!verifier_gaps.is_empty(), legacy, goal_tool)
+        });
         let next_step = match self.goal_todo_snapshot().await {
             Some(todos) => next_step_from_todos(
                 todos
                     .iter()
                     .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
                 todo_tool,
+                open_reason,
             ),
-            None => format!("Check your `{todo_tool}` list for next steps."),
+            None => next_step_without_todos(todo_tool, open_reason),
         };
         let tokens = u64::try_from(tokens_used).unwrap_or(0);
         let bail_preface = if stop_pattern.is_some() {
@@ -1988,19 +2010,25 @@ impl SessionActor {
             return GoalRoundDecision::EndTurn;
         }
         let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
-        let Some(mut plan) = self
-            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd)
+        // A candidate_complete verdict is no reason the goal is open: the panel that rejected it left the gaps.
+        let open_reason = match verdict.decision {
+            GoalEvaluatorDecision::CandidateComplete => None,
+            decision => Some(GoalOpenReason::Evaluator {
+                blocked: decision == GoalEvaluatorDecision::Blocked,
+                evidence: &verdict.evidence,
+                next_step: &verdict.next_step,
+            }),
+        };
+        let Some(plan) = self
+            .prepare_goal_continuation(
+                current_tokens,
+                GoalContinuationPurpose::TurnEnd,
+                open_reason,
+            )
             .await
         else {
             return GoalRoundDecision::EndTurn;
         };
-        if lite {
-            plan.directive.push_str("\nWhy the goal is not met yet: ");
-            plan.directive.push_str(verdict.evidence.trim());
-        }
-        plan.directive.push_str("\nEvaluator next step: ");
-        plan.directive.push_str(verdict.next_step.trim());
-        plan.directive.push('\n');
         if let Some(rec) = plan.strategy_rec.as_deref() {
             self.consume_strategist_note(rec);
         }
@@ -2021,7 +2049,7 @@ impl SessionActor {
             return GoalRoundDecision::EndTurn;
         }
         let Some(plan) = self
-            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd)
+            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd, None)
             .await
         else {
             return GoalRoundDecision::EndTurn;
@@ -2115,7 +2143,7 @@ impl SessionActor {
     pub(super) async fn maybe_queue_goal_continuation(&self) {
         let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
         let Some(plan) = self
-            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd)
+            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd, None)
             .await
         else {
             return;
@@ -2734,7 +2762,7 @@ impl SessionActor {
             return self.finish_round_with_blocked_claim(&claim).await;
         }
         let Some(plan) = self
-            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd)
+            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd, None)
             .await
         else {
             return GoalRoundDecision::EndTurn;
