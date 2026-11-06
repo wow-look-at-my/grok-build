@@ -202,3 +202,103 @@ pub fn editor_description(target: &ContextLimitTarget) -> String {
         target.label
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_token_amount_reads_suffixes_and_plain_counts() {
+        for (input, want) in [
+            ("350000", 350_000),
+            ("350k", 350_000),
+            ("350K", 350_000),
+            (" 350 k ", 350_000),
+            ("1.5m", 1_500_000),
+            ("1M", 1_000_000),
+            ("0.5M", 500_000),
+            ("350_000", 350_000),
+            ("350,000", 350_000),
+            ("128.5k", 128_500),
+        ] {
+            assert_eq!(parse_token_amount(input), Ok(Some(want)), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn parse_token_amount_reads_clear_words() {
+        for input in ["", "   ", "0", "none", "Default", "OFF", "clear", "unset"] {
+            assert_eq!(parse_token_amount(input), Ok(None), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn parse_token_amount_rejects_bad_input() {
+        for input in [
+            "abc", "k", "-5k", "1.5", "12x", "nan k", "inf m", "350", "999", "200m",
+        ] {
+            assert!(parse_token_amount(input).is_err(), "{input:?} must fail");
+        }
+        assert_eq!(
+            parse_token_amount("350"),
+            Err("Too small: 350 tokens. Did you mean 350k?".to_owned()),
+            "a missing suffix gets a hint"
+        );
+    }
+
+    #[test]
+    fn short_tokens_is_compact_and_round_trips() {
+        for (tokens, want) in [
+            (1_000_000, "1M"),
+            (350_000, "350k"),
+            (1_500_000, "1.5M"),
+            (131_072, "131.1k"),
+            (2_097_152, "2.1M"),
+            (999, "999"),
+        ] {
+            assert_eq!(short_tokens(tokens), want);
+        }
+        for tokens in [350_000, 1_000_000, 1_500_000, 64_000] {
+            assert_eq!(
+                parse_token_amount(&short_tokens(tokens)),
+                Ok(Some(tokens)),
+                "the editor text of a limit parses back to it"
+            );
+        }
+    }
+
+    #[test]
+    fn limits_from_config_reads_only_positive_windows() {
+        let root: toml::Value = toml::from_str(
+            r#"
+            [model."gw/big-one"]
+            context_window = 350000
+            [model.other]
+            name = "No window"
+            [model.zero]
+            context_window = 0
+            "#,
+        )
+        .unwrap();
+        let limits = limits_from_config(&root);
+        assert_eq!(limits.len(), 1);
+        assert_eq!(limits.get("gw/big-one"), Some(&350_000));
+    }
+
+    #[test]
+    fn catalog_windows_reads_total_context_tokens_meta() {
+        let mut available = indexmap::IndexMap::new();
+        let id = acp::ModelId::new(std::sync::Arc::from("gw/big-one"));
+        let mut meta = serde_json::Map::new();
+        meta.insert("totalContextTokens".to_owned(), 1_000_000.into());
+        available.insert(
+            id.clone(),
+            acp::ModelInfo::new(id, "Big One".to_owned()).meta(Some(meta)),
+        );
+        let bare = acp::ModelId::new(std::sync::Arc::from("bare"));
+        available.insert(bare.clone(), acp::ModelInfo::new(bare, "Bare".to_owned()));
+        let windows = catalog_windows(&available);
+        assert_eq!(windows.get("gw/big-one"), Some(&1_000_000));
+        assert!(!windows.contains_key("bare"));
+    }
+}

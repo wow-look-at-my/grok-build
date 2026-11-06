@@ -1070,7 +1070,7 @@ fn every_setting_has_action_for_reset_arm() {
     with_theme_test_env(|| {
         let reg = crate::settings::SettingsRegistry::defaults();
         for meta in reg.all() {
-            if matches!(meta.kind, crate::settings::SettingKind::Group { .. }) {
+            if meta.kind.is_navigational() {
                 continue;
             }
             let default_value = crate::settings::default_value_for(meta);
@@ -3560,5 +3560,57 @@ fn mouse_reporting_toggle_enqueues_capture_escapes_on_the_writer_queue() {
     assert!(
         rx.try_recv().is_err(),
         "toggle-on queues exactly one payload"
+    );
+}
+/// The context limit commit writes through one effect. The toast waits for the write.
+#[test]
+fn set_model_context_window_persists_then_toasts() {
+    let mut app = test_app_with_agent();
+    let effects = dispatch(
+        Action::SetModelContextWindow {
+            model_id: "gw/big-one".to_owned(),
+            label: "Big One".to_owned(),
+            tokens: Some(350_000),
+        },
+        &mut app,
+    );
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::PersistModelContextWindow { model_id, tokens: Some(350_000), .. }]
+                if model_id == "gw/big-one"
+        ),
+        "expected one PersistModelContextWindow, got {effects:?}",
+    );
+    let toast_of = |app: &AppView| {
+        app.agents
+            .get(&AgentId(0))
+            .and_then(|a| a.toast.as_ref())
+            .map(|(s, _)| s.as_str().to_owned())
+    };
+    let _ = dispatch(
+        Action::TaskComplete(TaskResult::ModelContextWindowPersisted {
+            label: "Big One".to_owned(),
+            tokens: Some(350_000),
+            result: Ok(()),
+        }),
+        &mut app,
+    );
+    assert_eq!(
+        toast_of(&app).as_deref(),
+        Some("\u{2713} Context window limit for Big One: 350k")
+    );
+    let _ = dispatch(
+        Action::TaskComplete(TaskResult::ModelContextWindowPersisted {
+            label: "Big One".to_owned(),
+            tokens: None,
+            result: Err("disk full".to_owned()),
+        }),
+        &mut app,
+    );
+    let toast = toast_of(&app).unwrap_or_default();
+    assert!(
+        toast.contains("Could not save context window limit") && toast.contains("disk full"),
+        "a failed write must say so, got {toast:?}",
     );
 }

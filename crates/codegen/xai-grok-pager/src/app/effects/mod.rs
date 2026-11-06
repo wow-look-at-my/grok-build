@@ -2380,6 +2380,26 @@ pub(crate) fn execute(
                     }
                 });
         }
+        Effect::PersistModelContextWindow {
+            model_id,
+            label,
+            tokens,
+        } => {
+            tasks
+                .spawn(async move {
+                    let result = xai_grok_shell::util::config::set_model_context_window(
+                            model_id,
+                            tokens,
+                        )
+                        .await
+                        .map_err(|e| e.to_string());
+                    TaskResult::ModelContextWindowPersisted {
+                        label,
+                        tokens,
+                        result,
+                    }
+                });
+        }
         Effect::Authenticate {
             request_seq,
             method_id,

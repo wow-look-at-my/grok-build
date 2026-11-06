@@ -823,6 +823,9 @@ pub(super) fn dispatch_send_prompt_submission(
                     ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                     voice_stt_language: voice_stt_language_from_app,
                     subagent_model_inheritance: subagent_model_inheritance_from_app,
+                    model_windows: crate::settings::context_limits::catalog_windows(
+                        &agent.session.models.available,
+                    ),
                 },
             };
 

@@ -95,6 +95,9 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app.clone(),
                 subagent_model_inheritance: subagent_model_inheritance_from_app,
+                model_windows: crate::settings::context_limits::catalog_windows(
+                    &agent.session.models.available,
+                ),
             };
             if coding_data_sharing_lock_from_app.is_some()
                 && matches!(
@@ -238,6 +241,9 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
         voice_stt_language: voice_stt_language_from_app,
         subagent_model_inheritance: subagent_model_inheritance_from_app,
+        model_windows: crate::settings::context_limits::catalog_windows(
+            &agent.session.models.available,
+        ),
     };
     let mut state = Box::new(SettingsModalState::new(
         registry,
@@ -583,7 +589,17 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         ask_user_question_timeout_enabled: app.ask_user_question_timeout_enabled,
         voice_stt_language: app.voice_config.language.clone(),
         subagent_model_inheritance: app.subagent_model_inheritance,
+        model_windows: agent_model_windows(app),
     }
+}
+
+fn agent_model_windows(app: &AppView) -> std::collections::BTreeMap<String, u64> {
+    if let ActiveView::Agent(id) = app.active_view
+        && let Some(agent) = app.agents.get(&id)
+    {
+        return crate::settings::context_limits::catalog_windows(&agent.session.models.available);
+    }
+    std::collections::BTreeMap::new()
 }
 
 /// Map a `(SettingKey, SettingValue)` to the matching typed `Action::SetX(value)`.

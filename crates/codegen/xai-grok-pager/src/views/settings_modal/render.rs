@@ -632,8 +632,8 @@ pub(super) fn render_rows(
                 let is_selected = row_idx == state.selected;
                 let is_expanded = expanded_snapshot.contains(key);
 
-                // Group rows carry no scalar value; render a chevron row that opens the sub-sheet (skips the value/edited machinery below)
-                if matches!(meta.kind, SettingKind::Group { .. }) {
+                // Navigational rows carry no scalar value; render a chevron row that opens the sub-pane (skips the value/edited machinery below)
+                if meta.kind.is_navigational() {
                     let is_hovered = hover_row_snapshot == Some(row_idx);
                     let value_rect = render_setting_group_row(
                         buf,
@@ -811,8 +811,8 @@ fn compute_filtered_row_heights(state: &SettingsModalState, area_width: u16) -> 
                     heights.push(1);
                     continue;
                 };
-                // Group rows carry no value; the height is the chevron row plus the expanded description (cap 8), agreeing with the forward render loop
-                if matches!(meta.kind, SettingKind::Group { .. }) {
+                // Navigational rows carry no value; the height is the chevron row plus the expanded description (cap 8), agreeing with the forward render loop
+                if meta.kind.is_navigational() {
                     let mut h: u16 = 1;
                     if state.expanded_keys.contains(key) {
                         h = h.saturating_add(wrapped_description_height(
@@ -1697,8 +1697,19 @@ pub(super) fn render_editing_value(
         return;
     };
 
+    // The context limit editor names the model it writes to.
+    let context_target = state
+        .context_limit_target
+        .as_ref()
+        .filter(|_| matches!(meta.kind, SettingKind::ModelContextLimits));
+    let context_description =
+        context_target.map(crate::settings::context_limits::editor_description);
+    let (header_label, header_description) = match (context_target, &context_description) {
+        (Some(target), Some(description)) => (target.label.as_str(), description.as_str()),
+        _ => (meta.label, meta.description),
+    };
     // Editors reserve title + gap + the input row (3 rows) before the description
-    let header_rows = render_sub_pane_header(buf, area, theme, meta.label, meta.description, 3);
+    let header_rows = render_sub_pane_header(buf, area, theme, header_label, header_description, 3);
     if area.height <= header_rows {
         return;
     }
@@ -1748,7 +1759,9 @@ pub(super) fn render_editing_value(
                 StringValidator::NonEmptyToken => "<type a value>",
                 StringValidator::Any => "<type a value>",
                 StringValidator::HttpUrlOrEmpty => "<http://host/v1>",
+                StringValidator::TokenAmount => "<empty: no limit>",
             },
+            SettingKind::ModelContextLimits => "<empty: no limit, e.g. 350k>",
             _ => "",
         };
         if !placeholder.is_empty() && visible_buffer_w > 0 {

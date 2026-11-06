@@ -49,3 +49,60 @@ pub(in crate::app::dispatch) fn handle_feature_override_persisted(
     ui::refresh_open_settings_modals(app);
     effects
 }
+
+/// Ask for the `[model."<id>"] context_window` write. The toast follows the write, because the value has no
+/// pager-side mirror to show it earlier.
+pub(in crate::app::dispatch) fn set_model_context_window(
+    model_id: String,
+    label: String,
+    tokens: Option<u64>,
+) -> Vec<Effect> {
+    tracing::info!(
+        target: "settings",
+        key = crate::settings::context_limits::CONTEXT_WINDOW_LIMIT_KEY,
+        model = %model_id,
+        ?tokens,
+        "setting changed",
+    );
+    vec![Effect::PersistModelContextWindow {
+        model_id,
+        label,
+        tokens,
+    }]
+}
+
+/// One `[model."<id>"] context_window` write finished.
+pub(in crate::app::dispatch) fn handle_model_context_window_persisted(
+    app: &mut AppView,
+    label: &str,
+    tokens: Option<u64>,
+    result: Result<(), String>,
+) -> Vec<Effect> {
+    if let Err(error) = result {
+        tracing::warn!(
+            target: "settings",
+            key = crate::settings::context_limits::CONTEXT_WINDOW_LIMIT_KEY,
+            model = label,
+            %error,
+            "setting persist failed",
+        );
+        toast_persist_failure(app, "context window limit", &error);
+        return vec![];
+    }
+    app.show_toast(&context_window_saved_toast(label, tokens));
+    vec![]
+}
+
+/// The toast text for a saved limit.
+pub(in crate::app::dispatch) fn context_window_saved_toast(
+    label: &str,
+    tokens: Option<u64>,
+) -> String {
+    match tokens {
+        Some(tokens) => format!(
+            "\u{2713} Context window limit for {label}: {}",
+            crate::settings::context_limits::short_tokens(tokens)
+        ),
+        None => format!("\u{2713} Context window limit for {label} removed"),
+    }
+}

@@ -197,6 +197,8 @@ pub enum StringValidator {
     HttpUrlOrEmpty,
     /// No constraint (any UTF-8 accepted).
     Any,
+    /// A token count such as `350k`, `1.5m` or `350000`. Empty, `0` and `none` remove the value.
+    TokenAmount,
 }
 
 /// Value-kind metadata, including per-kind defaults.
@@ -238,6 +240,15 @@ pub enum SettingKind {
     Group {
         children: &'static [SettingKey],
     },
+    /// A navigational row that opens a chooser of catalog models, then an editor for the context window limit of the chosen model.
+    ModelContextLimits,
+}
+
+impl SettingKind {
+    /// A row that opens a sub-pane and carries no scalar value of its own.
+    pub fn is_navigational(&self) -> bool {
+        matches!(self, Self::Group { .. } | Self::ModelContextLimits)
+    }
 }
 
 /// One row in the registry.
@@ -431,6 +442,8 @@ pub struct PagerLocalSnapshot {
     pub voice_stt_language: String,
     /// Mirrors `AppView::subagent_model_inheritance` at snapshot time.
     pub subagent_model_inheritance: FeatureOverrideState,
+    /// The catalog window of each model, by model id.
+    pub model_windows: std::collections::BTreeMap<String, u64>,
 }
 
 impl Default for PagerLocalSnapshot {
@@ -455,6 +468,7 @@ impl Default for PagerLocalSnapshot {
             subagent_model_inheritance: FeatureOverrideState::new(
                 Feature::SubagentModelInheritance,
             ),
+            model_windows: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -902,7 +916,7 @@ pub fn default_value_for(meta: &SettingMeta) -> SettingValue {
         // `DynamicEnum` widens to `String` for runtime catalog values.
         SettingKind::DynamicEnum { default, .. } => SettingValue::String((*default).to_string()),
         // Group rows carry no scalar value; the render and reset paths special-case them first, so the returned value is never observed
-        SettingKind::Group { .. } => SettingValue::Bool(false),
+        SettingKind::Group { .. } | SettingKind::ModelContextLimits => SettingValue::Bool(false),
     }
 }
 
@@ -920,8 +934,8 @@ mod tests {
             if meta.owner == SettingOwner::Pager {
                 continue;
             }
-            // Group rows have no scalar default to compare.
-            if matches!(meta.kind, SettingKind::Group { .. }) {
+            // Navigational rows have no scalar default to compare.
+            if meta.kind.is_navigational() {
                 continue;
             }
             match (meta.key, &meta.kind) {
@@ -1498,8 +1512,8 @@ mod tests {
         let ui = UiConfig::default();
         let pager = PagerLocalSnapshot::default();
         for meta in reg.all() {
-            // Group rows carry no scalar value; they are not read via this path.
-            if matches!(meta.kind, SettingKind::Group { .. }) {
+            // Navigational rows carry no scalar value; they are not read via this path.
+            if meta.kind.is_navigational() {
                 continue;
             }
             let value = current_value_for(meta.key, &ui, &pager).unwrap_or_else(|| {
@@ -1924,8 +1938,8 @@ mod tests {
     fn default_value_for_returns_kind_default() {
         let reg = SettingsRegistry::defaults();
         for meta in reg.all() {
-            // Group rows have no meaningful scalar default (sentinel only).
-            if matches!(meta.kind, SettingKind::Group { .. }) {
+            // Navigational rows have no meaningful scalar default (sentinel only).
+            if meta.kind.is_navigational() {
                 continue;
             }
             let v = default_value_for(meta);

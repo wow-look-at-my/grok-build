@@ -570,6 +570,12 @@ pub enum Action {
     SetHarnessModel(&'static str, String),
     /// Commit one model group into `[model_groups.<id>] model`.
     SetModelGroupModel(&'static str, String),
+    /// Commit `[model."<model_id>"] context_window`. `None` removes the limit.
+    SetModelContextWindow {
+        model_id: String,
+        label: String,
+        tokens: Option<u64>,
+    },
     /// Commit one subagent type's model into `[subagents.models].<type>`.
     SetSubagentModel(&'static str, String),
     /// Commit the `show_tips` preference. Persisted to `[cli].show_tips`.
@@ -1703,6 +1709,13 @@ pub enum Effect {
     PersistFeatureOverride {
         feature: xai_grok_shell::agent::config::Feature,
         saved: Option<bool>,
+    },
+    /// Write `[model."<model_id>"] context_window`, or delete it for `tokens == None`; completes as
+    /// [`TaskResult::ModelContextWindowPersisted`].
+    PersistModelContextWindow {
+        model_id: String,
+        label: String,
+        tokens: Option<u64>,
     },
     /// Toggle mouse reporting off and on to unwedge xterm.js's button tracker
     /// (see `AgentView::reset_wedged_mouse_reporting`). An effect so it rides the escape
@@ -3271,6 +3284,12 @@ pub enum TaskResult {
     FeatureOverridePersisted {
         feature: xai_grok_shell::agent::config::Feature,
         result: Result<Option<bool>, String>,
+    },
+    /// One [`Effect::PersistModelContextWindow`] write finished.
+    ModelContextWindowPersisted {
+        label: String,
+        tokens: Option<u64>,
+        result: Result<(), String>,
     },
     /// Off-thread clipboard attachment probe finished (see [`Effect::ProbeClipboardAttachment`]); dispatch attaches the chip.
     ClipboardAttachmentProbed {

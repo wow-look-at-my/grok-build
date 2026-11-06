@@ -1169,6 +1169,11 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::ClearDefaultModel => clear_default_model(app),
         Action::SetHarnessModel(slot, model) => set_harness_model(app, slot, model),
         Action::SetModelGroupModel(group, model) => set_model_group_model(app, group, model),
+        Action::SetModelContextWindow {
+            model_id,
+            label,
+            tokens,
+        } => super::settings::set_model_context_window(model_id, label, tokens),
         Action::SetSubagentModel(agent_type, model) => set_subagent_model(app, agent_type, model),
         Action::SetMaxThoughtsWidth(v) => set_max_thoughts_width(app, v),
         Action::SetMinOutputTokensPerSec(v) => set_min_output_tokens_per_sec(app, v),
