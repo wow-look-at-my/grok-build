@@ -1582,12 +1582,11 @@ impl SessionActor {
     /// The continuation next step read off the live todo list. A missing list gives the reason the goal is open.
     async fn goal_next_step_from_todos(&self) -> String {
         let todos = self.goal_todo_snapshot().await;
-        let has_gaps = self
+        let reason = self
             .goal_tracker
             .lock()
             .snapshot()
-            .is_some_and(|o| o.last_classifier_gaps.is_some());
-        let reason = goal_open_reason_without_verdict(has_gaps);
+            .map_or(GoalOpenReason::Unchecked, goal_open_reason_without_verdict);
         match todos {
             Some(todos) => next_step_from_todos(
                 todos
@@ -1772,6 +1771,7 @@ impl SessionActor {
             scratch_ready,
             rounds_since_verify,
             refuted,
+            state_reason,
         ) = {
             let mut tracker = self.goal_tracker.lock();
             tracker.account_elapsed();
@@ -1790,6 +1790,7 @@ impl SessionActor {
                 .as_deref()
                 .map(|p| format!("Plan: {}\n\n", p.display()))
                 .unwrap_or_default();
+            let state_reason = goal_open_reason_without_verdict(o);
             let verifier_gaps = if std::mem::take(&mut o.verification_cancelled_by_user) {
                 format!(
                     "{}\n\n",
@@ -1824,10 +1825,10 @@ impl SessionActor {
                 o.scratch_dir_ready,
                 rounds_since_verify,
                 refuted,
+                state_reason,
             )
         };
-        let open_reason = open_reason
-            .unwrap_or_else(|| goal_open_reason_without_verdict(!verifier_gaps.is_empty()));
+        let open_reason = open_reason.unwrap_or(state_reason);
         let next_step = match self.goal_todo_snapshot().await {
             Some(todos) => next_step_from_todos(
                 todos

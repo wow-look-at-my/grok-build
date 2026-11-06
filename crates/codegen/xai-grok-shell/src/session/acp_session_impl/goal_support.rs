@@ -448,13 +448,19 @@ pub(super) enum GoalOpenReason<'a> {
     VerifierGaps,
     /// The review rejected a `## Cannot complete` claim. The rejection above lists the untried steps.
     ClaimRejected,
+    /// The user cancelled the panel. `USER_CANCELLED_VERIFICATION_NOTE` above says why.
+    VerificationCancelled,
     /// No verdict is at hand, for example after a compaction. There is no reason to state.
     Unchecked,
 }
 
-/// The reason when no verdict came with this nudge: the panel's gaps if there are any, else which check comes next.
-pub(super) fn goal_open_reason_without_verdict(has_verifier_gaps: bool) -> GoalOpenReason<'static> {
-    if has_verifier_gaps {
+/// The reason when no verdict came with this nudge, read off the goal's state. A user cancel wins over older gaps.
+pub(super) fn goal_open_reason_without_verdict(
+    o: &crate::session::goal_tracker::GoalOrchestration,
+) -> GoalOpenReason<'static> {
+    if o.verification_cancelled_by_user {
+        GoalOpenReason::VerificationCancelled
+    } else if o.last_classifier_gaps.is_some() {
         GoalOpenReason::VerifierGaps
     } else {
         GoalOpenReason::Unchecked
@@ -517,6 +523,9 @@ pub(super) fn goal_open_step(reason: GoalOpenReason<'_>) -> String {
         GoalOpenReason::ClaimRejected => "The review rejected your claim that the goal cannot \
                                           be completed. Do the untried steps listed above."
             .to_owned(),
+        GoalOpenReason::VerificationCancelled => {
+            "Find what the user says is missing, and fix it.".to_owned()
+        }
         GoalOpenReason::Unchecked => "Finish the step you were working on.".to_owned(),
     }
 }
@@ -2013,15 +2022,27 @@ mod verification_scope_tests {
     }
 
     #[test]
-    fn the_reason_without_a_verdict_prefers_the_panel_gaps() {
+    fn the_reason_without_a_verdict_prefers_a_cancel_then_the_panel_gaps() {
+        let mut o = crate::session::goal_tracker::make_base_orchestration();
         assert!(matches!(
-            goal_open_reason_without_verdict(true),
-            GoalOpenReason::VerifierGaps
-        ));
-        assert!(matches!(
-            goal_open_reason_without_verdict(false),
+            goal_open_reason_without_verdict(&o),
             GoalOpenReason::Unchecked
         ));
+        o.last_classifier_gaps = Some("- the parser drops the last line".into());
+        assert!(matches!(
+            goal_open_reason_without_verdict(&o),
+            GoalOpenReason::VerifierGaps
+        ));
+        o.verification_cancelled_by_user = true;
+        assert!(matches!(
+            goal_open_reason_without_verdict(&o),
+            GoalOpenReason::VerificationCancelled
+        ));
+        let step = goal_open_step(GoalOpenReason::VerificationCancelled);
+        assert!(
+            !step.contains("rejected"),
+            "a cancel is not a rejection: {step}"
+        );
     }
 }
 
