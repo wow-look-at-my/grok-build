@@ -149,6 +149,71 @@ async fn a_full_goal_still_hands_a_candidate_to_the_panel() {
         .await;
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn a_user_cancel_of_the_panel_keeps_the_goal_and_points_at_the_user() {
+    use crate::session::goal_classifier::{
+        GoalClassifierOutcome, USER_CANCELLED_VERIFICATION_NOTE,
+    };
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            let actor = goal_actor(&server).await;
+            let GoalSetupOutcome::Inference { .. } = actor
+                .setup_goal("make the tests pass", None, GoalMode::Full)
+                .await
+            else {
+                panic!("a full goal with the planner off must flow through to inference");
+            };
+            let policy = actor.resolve_goal_classifier_policy();
+            let attempt = actor
+                .reserve_classifier_attempt_slot(&policy)
+                .expect("an active goal reserves a slot");
+            actor
+                .apply_classifier_outcome(
+                    &policy,
+                    attempt,
+                    GoalClassifierOutcome::UserCancelled {
+                        details_path: "/tmp/cancelled.md".into(),
+                    },
+                    &actor.goal_notify_sender(),
+                )
+                .await;
+            {
+                let tracker = actor.goal_tracker.lock();
+                assert_eq!(
+                    tracker.status(),
+                    Some(GoalStatus::Active),
+                    "a cancel never pauses or ends the goal"
+                );
+                let o = tracker.snapshot().unwrap();
+                assert_eq!(o.classifier_runs_attempted, 0, "a cancel is not an attempt");
+                assert_eq!(o.consecutive_not_achieved, 0, "a cancel is not a rejection");
+            }
+            let plan = actor
+                .prepare_goal_continuation(0, GoalContinuationPurpose::TurnEnd)
+                .await
+                .expect("the goal continues");
+            assert!(
+                plan.directive.contains(USER_CANCELLED_VERIFICATION_NOTE),
+                "{}",
+                plan.directive
+            );
+            assert!(!plan.directive.contains("Verification rejected"));
+            let again = actor
+                .prepare_goal_continuation(0, GoalContinuationPurpose::TurnEnd)
+                .await
+                .expect("the goal continues");
+            assert!(
+                !again.directive.contains(USER_CANCELLED_VERIFICATION_NOTE),
+                "the note is delivered once"
+            );
+        })
+        .await;
+}
+
 /// Bind the real `todo_write` tool to the actor's live todo list.
 async fn arm_todo_writes(actor: &mut SessionActor) {
     *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;

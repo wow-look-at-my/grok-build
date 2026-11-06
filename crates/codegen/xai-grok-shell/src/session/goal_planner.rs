@@ -47,7 +47,8 @@ mod budget_tests {
 }
 
 /// Best-effort wait for a subagent cancel to be acknowledged before giving up.
-const GOAL_PLANNER_CANCEL_ACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+pub(crate) const GOAL_PLANNER_CANCEL_ACK_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(2);
 
 /// `None`/`None` inherits the current model and the session harness (the historic `SubagentRuntimeOverrides::default()` behavior).
 /// When either field is `Some` the pair is "explicit".
