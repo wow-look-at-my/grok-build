@@ -159,13 +159,15 @@ async fn context_window_limit_reaches_the_running_session() {
     harness.update(Duration::from_millis(300));
     harness.inject_keys(keys::ESC).expect("close settings");
     // The config watcher reloads the models and sends the window to the session.
-    harness.wait_for_text("/ 1K", TIMEOUT).unwrap_or_else(|_| {
-        panic!(
-            "the context bar must show the limit\nlog:\n{}\nscreen:\n{}",
-            window_log(&content),
-            harness.screen_contents()
-        )
-    });
+    harness
+        .wait_for_text("/ 1.0K", TIMEOUT)
+        .unwrap_or_else(|_| {
+            panic!(
+                "the context bar must show the limit\nlog:\n{}\nscreen:\n{}",
+                window_log(&content),
+                harness.screen_contents()
+            )
+        });
 
     let long_prompt = "lorem ipsum dolor sit amet ".repeat(220);
     harness
