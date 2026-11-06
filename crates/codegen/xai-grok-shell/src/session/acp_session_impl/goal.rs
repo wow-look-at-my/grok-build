@@ -1582,7 +1582,6 @@ impl SessionActor {
             todos
                 .iter()
                 .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
-            &names.todo,
             reason,
         ))
     }
@@ -1636,7 +1635,7 @@ impl SessionActor {
         let next_step = self
             .goal_next_step_from_todos()
             .await
-            .unwrap_or_else(|| format!("Check your `{}` list for next steps.", names.todo));
+            .unwrap_or_else(|| "Check your todo list for next steps.".to_owned());
         let body = if is_active {
             format!(
                 "Objective: {objective}\nStatus: {status}\nTokens: {tokens_used} | Elapsed: {elapsed}\n\n{GOAL_CONTINUATION_SENTINEL}\n{next_step}\n\nDo not restart this goal or revive a prior unrelated task."
@@ -1832,10 +1831,9 @@ impl SessionActor {
                 todos
                     .iter()
                     .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
-                todo_tool,
                 open_reason,
             ),
-            None => next_step_without_todos(todo_tool, open_reason),
+            None => next_step_without_todos(open_reason),
         };
         let tokens = u64::try_from(tokens_used).unwrap_or(0);
         let bail_preface = if stop_pattern.is_some() {

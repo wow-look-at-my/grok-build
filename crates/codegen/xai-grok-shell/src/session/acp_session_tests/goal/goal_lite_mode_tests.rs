@@ -94,7 +94,7 @@ async fn a_lite_goal_is_sent_back_with_the_reason_then_ends_on_the_evaluator_alo
             match actor.run_goal_round_end().await {
                 GoalRoundDecision::Continue(directive) => assert!(
                     directive.contains(
-                        "the goal check found the goal not met yet.\nWhy: two tests still fail"
+                        "Next step:\nThe goal check found the goal not met yet.\nWhy: two tests still fail"
                     ),
                     "the model must be told why it was sent back: {directive}"
                 ),
