@@ -69,7 +69,7 @@ async fn context_window_limit_setting_writes_config_and_shows_the_limit() {
         .inject_keys(keys::ENTER)
         .expect("pick the first model");
     harness
-        .wait_for_text("350k, 1.5m or 350000", TIMEOUT)
+        .wait_for_text("Type a limit", TIMEOUT)
         .unwrap_or_else(|_| panic!("limit editor opens\n{}", harness.screen_contents()));
     harness.inject_keys(b"350k").expect("type limit");
     harness.inject_keys(keys::ENTER).expect("save limit");
