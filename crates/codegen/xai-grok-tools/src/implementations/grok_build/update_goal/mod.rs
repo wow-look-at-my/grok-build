@@ -10,6 +10,12 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 
 pub use xai_grok_tools_api::slash_commands::UPDATE_GOAL_TOOL_NAME;
 
+/// What the model reads after the user cancels a goal verification skeptic.
+pub const USER_CANCELLED_VERIFICATION_NOTE: &str = "The user cancelled the goal verification \
+     skeptic because they think you are not ready to complete the goal yet. This was not an \
+     error, and submitting again unchanged will not help. Read the user's message(s) again, \
+     find what you missed, fix it, and only then claim completion again.";
+
 // ---------------------------------------------------------------------------
 // Input schema
 // ---------------------------------------------------------------------------
@@ -70,6 +76,8 @@ pub enum UpdateGoalAck {
     /// contradiction or environment-unverifiable blocker); the goal
     /// paused for a user decision.
     ClassifierBlocked { details_path: String },
+    /// The user cancelled a skeptic, so the whole panel stopped. The goal stays active.
+    ClassifierUserCancelled,
     /// Classifier disabled by policy; goal marked complete directly.
     CompletedWithoutClassifier,
     /// Second `update_goal(completed: true)` arrived while a
@@ -375,6 +383,10 @@ pub fn render_ack_into_output(
                 ),
             ))
         }
+        UpdateGoalAck::ClassifierUserCancelled => Err(xai_tool_runtime::ToolError::custom(
+            "goal_verification_cancelled_by_user",
+            USER_CANCELLED_VERIFICATION_NOTE.to_owned(),
+        )),
         UpdateGoalAck::ClassifierConcurrentInFlight {
             details_path,
             attempt,

@@ -457,6 +457,9 @@ pub struct GoalOrchestration {
     /// So the freshest verifier feedback reaches the model each round rather than once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_classifier_gaps: Option<String>,
+    /// The user cancelled the last verification panel.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub verification_cancelled_by_user: bool,
     /// First verification round's full `FINAL_RESPONSE`, replayed on later rounds.
     /// So a cold skeptic panel sees the whole deliverable, not just that round's fix note.
     /// Captured once (capped); never cleared on `Achieved`: it must outlive each round.
@@ -877,6 +880,7 @@ impl GoalTracker {
             last_classifier_details_path: None,
             last_classifier_at: None,
             last_classifier_gaps: None,
+            verification_cancelled_by_user: false,
             first_final_response: None,
             skeptic0_session_id: None,
             skeptic_model_assignment: Vec::new(),
@@ -1268,6 +1272,7 @@ pub(crate) fn make_base_orchestration() -> GoalOrchestration {
         last_classifier_details_path: None,
         last_classifier_at: None,
         last_classifier_gaps: None,
+        verification_cancelled_by_user: false,
         first_final_response: None,
         skeptic0_session_id: None,
         skeptic_model_assignment: Vec::new(),
