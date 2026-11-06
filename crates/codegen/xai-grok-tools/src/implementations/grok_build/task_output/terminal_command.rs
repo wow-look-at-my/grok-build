@@ -144,6 +144,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-1".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -168,6 +169,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-2".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -207,6 +209,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-big".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -242,6 +245,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-run".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -280,6 +284,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-size".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -316,6 +321,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-multi".into(), "tc-other".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -350,6 +356,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-param".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -390,6 +397,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-override".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -422,6 +430,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-uncapped".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
@@ -447,6 +456,7 @@ mod tests {
             TaskOutputToolInput {
                 task_ids: vec!["tc-short".into()],
                 timeout_ms: None,
+                ..Default::default()
             },
         )
         .await
