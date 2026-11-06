@@ -120,7 +120,7 @@ async fn context_window_limit_reaches_the_running_session() {
 
     let binary = pager_binary().expect("pager binary");
     let mut harness =
-        PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, DEFAULT_COLS, &content, &[])
+        PtyHarness::spawn_with_content_env(&binary, DEFAULT_ROWS, DEFAULT_COLS, &content, &[], &[("GROK_DEBUG_LOG", "/mnt/cc-tmpfs/claude-0/-home-user-grok-build/6eb1f69e-0376-53c8-97ec-a9e303c504e3/scratchpad/dbg.log")])
             .expect("spawn pager");
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
