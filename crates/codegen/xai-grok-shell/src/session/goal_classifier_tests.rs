@@ -59,6 +59,7 @@ async fn channel_spawner_request_is_harness_internal() {
         trace_sink: None,
         skeptic_overrides: Vec::new(),
         fallback: Default::default(),
+        panel_cancel: Default::default(),
     };
     let handle = xai_spawn::spawn(async move {
         let _ = spawner
@@ -115,6 +116,7 @@ async fn channel_spawner_applies_per_index_model_to_request() {
             RoleSpawnOverride::default(),
         ],
         fallback: Default::default(),
+        panel_cancel: Default::default(),
     };
     let handle = xai_spawn::spawn(async move {
         // Skeptic 0 with a resume id: even on the cold path it carries skeptic_overrides[0]
@@ -174,6 +176,7 @@ async fn channel_spawner_inherit_index_leaves_model_none() {
         trace_sink: None,
         skeptic_overrides: vec![RoleSpawnOverride::default()],
         fallback: Default::default(),
+        panel_cancel: Default::default(),
     };
     let handle = xai_spawn::spawn(async move {
         let _ = spawner
@@ -217,6 +220,7 @@ async fn channel_spawner_skeptic_blocks_its_caller_in_the_session_cwd() {
         trace_sink: None,
         skeptic_overrides: vec![RoleSpawnOverride::default()],
         fallback: Default::default(),
+        panel_cancel: Default::default(),
     };
     let handle = xai_spawn::spawn(async move {
         let _ = spawner
@@ -1951,6 +1955,8 @@ struct MockSpawner {
     /// `skeptic_idx` arg observed per spawn, in spawn order.
     skeptic_idxs: Mutex<Vec<u32>>,
     spawn_count: std::sync::atomic::AtomicUsize,
+    /// A held skeptic returns cancelled when the stage cancels the panel.
+    panel_cancel: tokio_util::sync::CancellationToken,
 }
 
 impl MockSpawner {
@@ -1961,12 +1967,17 @@ impl MockSpawner {
             resume_froms: Mutex::new(Vec::new()),
             skeptic_idxs: Mutex::new(Vec::new()),
             spawn_count: std::sync::atomic::AtomicUsize::new(0),
+            panel_cancel: tokio_util::sync::CancellationToken::new(),
         }
     }
 }
 
 #[async_trait::async_trait]
 impl GoalClassifierSpawner for MockSpawner {
+    fn cancel_panel(&self) {
+        self.panel_cancel.cancel();
+    }
+
     async fn spawn_classifier(
         &self,
         _id: &str,
@@ -2000,7 +2011,15 @@ impl GoalClassifierSpawner for MockSpawner {
         }
 
         if let Some(hold) = response.hold {
-            hold.notified().await;
+            tokio::select! {
+                _ = hold.notified() => {}
+                _ = self.panel_cancel.cancelled() => {
+                    return Err(SpawnError::Runtime {
+                        message: "panel cancelled".into(),
+                        cancelled: true,
+                    });
+                }
+            }
         }
         response.terminal
     }
@@ -2451,24 +2470,79 @@ async fn verification_stage_retries_a_skeptic_that_gave_no_verdict() {
 }
 
 #[tokio::test]
-async fn verification_stage_skeptic_cancelled_counts_as_refute() {
-    let spawner: Arc<dyn GoalClassifierSpawner> = Arc::new(MockSpawner::new([
+async fn a_user_cancel_of_skeptic_0_stops_the_panel_with_no_verdict() {
+    let mock = Arc::new(MockSpawner::new([
         MockResponse::cancelled(),
         MockResponse::not_refuted(),
     ]));
-    let (_log, emit) = collect_events();
-    let _wsp = tempfile::tempdir().unwrap();
+    let spawner: Arc<dyn GoalClassifierSpawner> = mock.clone();
+    let (log, emit) = collect_events();
+    let wsp = tempfile::tempdir().unwrap();
     let vid = unique_verifier_id();
-    let outcome = run_verification_stage(
+    let result = run_verification_stage(
         spawner,
-        stage_inputs("obj", "ok", _wsp.path(), &vid, 1, 2),
+        stage_inputs("obj", "ok", wsp.path(), &vid, 1, 2),
         &emit,
     )
+    .await;
+    let GoalClassifierOutcome::UserCancelled { details_path } = result.outcome else {
+        panic!(
+            "a user cancel must not become a verdict: {:?}",
+            result.outcome
+        );
+    };
+    assert!(!result.panel_ran, "a cancel keeps the prior resume chain");
+    assert_eq!(
+        mock.spawn_count.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the cold panel never starts and the cancel is never retried",
+    );
+    let body = tokio::fs::read_to_string(&details_path).await.unwrap();
+    assert!(body.contains(USER_CANCELLED_VERIFICATION_NOTE), "{body}");
+    let _ = tokio::fs::remove_file(&details_path).await;
+    let log = log.lock().unwrap();
+    assert!(
+        log.iter().any(|t| t.contains("GoalVerifierUserCancelled")),
+        "{log:?}"
+    );
+    assert!(
+        !log.iter()
+            .any(|t| t.starts_with("verdict:") || t.starts_with("agg:")),
+        "a cancel emits no verdict: {log:?}",
+    );
+}
+
+#[tokio::test]
+async fn a_user_cancel_in_the_cold_panel_cancels_the_other_skeptics() {
+    let never = Arc::new(Notify::new());
+    let held = MockResponse {
+        hold: Some(never.clone()),
+        ..MockResponse::not_refuted()
+    };
+    let mock = Arc::new(MockSpawner::new([
+        MockResponse::not_refuted(),
+        held,
+        MockResponse::cancelled(),
+    ]));
+    let spawner: Arc<dyn GoalClassifierSpawner> = mock.clone();
+    let (_log, emit) = collect_events();
+    let wsp = tempfile::tempdir().unwrap();
+    let vid = unique_verifier_id();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_verification_stage(
+            spawner,
+            stage_inputs("obj", "ok", wsp.path(), &vid, 1, 3),
+            &emit,
+        ),
+    )
     .await
-    .outcome;
-    // N=2: skeptic 0 synthetic-refutes (cancel), cold skeptic 1 clears
-    // Approval rests on the cold panel (skeptic 1), which meets needed(1), so the verdict is Achieved
-    assert!(matches!(outcome, GoalClassifierOutcome::Achieved { .. }));
+    .expect("the held skeptic must be cancelled, not awaited");
+    assert!(mock.panel_cancel.is_cancelled());
+    let GoalClassifierOutcome::UserCancelled { details_path } = result.outcome else {
+        panic!("expected UserCancelled: {:?}", result.outcome);
+    };
+    let _ = tokio::fs::remove_file(&details_path).await;
 }
 
 #[tokio::test]
@@ -3161,6 +3235,7 @@ async fn cold_fallback_after_resume_failure_carries_pool0_model_on_request() {
             RoleSpawnOverride::default(),
         ],
         fallback: Default::default(),
+        panel_cancel: Default::default(),
     });
 
     let (_log, emit) = collect_events();
@@ -3519,6 +3594,7 @@ async fn channel_spawner_blocks_until_subagent_result() {
         trace_sink: None,
         skeptic_overrides: Vec::new(),
         fallback: Default::default(),
+        panel_cancel: Default::default(),
     };
     let spawn_task = xai_spawn::spawn(async move {
         spawner
