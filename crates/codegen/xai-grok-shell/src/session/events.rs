@@ -169,8 +169,6 @@ pub(crate) fn prior_turn_interrupt_from_cancellation(
 }
 
 // ── GoalClassifier discriminator vocabulary ───────────────────────────.
-// Single source of truth for the `reason` field on `Event::GoalClassifierFailOpen`.
-// The producer wraps the reason strings via the `as_const_str()` method on `GoalClassifierFailOpenReason`.
 
 /// Fail-open: legacy wire string; the runner does not emit it.
 pub(crate) const GOAL_CLASSIFIER_FAIL_OPEN_TIMEOUT: &str = "timeout";

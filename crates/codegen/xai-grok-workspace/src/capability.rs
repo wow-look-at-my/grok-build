@@ -118,8 +118,6 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
 
     match kind {
         // Meta tools: always allowed.
-        // `SendMessage` is one of them: a read-only explorer still has to be
-        // able to answer the session that spawned it.
         Plan | EnterPlan | ExitPlan | AskUser | Skill | SearchTool | SendMessage => true,
 
         // Read class.
