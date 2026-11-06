@@ -2635,7 +2635,7 @@ mod tests {
             date_bound: Some(SearchDateBound::new(None, Some("2024-03-15".into())).unwrap()),
         };
         let w = WebSearchOptions {
-            allowed_domains: Some(vec!["x.com".into()]),
+            allowed_domains: Some(vec!["x.invalid".into()]),
             excluded_domains: None,
         };
 

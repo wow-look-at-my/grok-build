@@ -66,7 +66,7 @@ mod tests {
             ("http://localhost:11434/v1", Some(prod), plain),
             ("http://127.0.0.1:8080/v1", Some(prod), plain),
             ("https://api.openai.com/v1", Some(prod), plain),
-            ("https://api.x.ai/v1", Some(prod), plain),
+            ("https://api.example.invalid/v1", Some(prod), plain),
         ] {
             assert_eq!(
                 request_compression_for(base_url, zstd_origin),

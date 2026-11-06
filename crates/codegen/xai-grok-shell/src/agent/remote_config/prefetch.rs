@@ -15,7 +15,7 @@ pub(crate) struct PrefetchInputs {
     pub(crate) model_fetch_auth: ModelFetchAuth,
 }
 
-/// Resolves startup endpoints from the effective config rather than env vars alone, so the prefetch cannot leak the bearer to api.x.ai.
+/// Resolves startup endpoints from the effective config rather than env vars alone, so the prefetch cannot leak the bearer to api.example.invalid.
 pub(in crate::agent::remote_config) fn resolve_startup_endpoints() -> config::EndpointsConfig {
     config::EndpointsConfig::from_effective_config()
 }

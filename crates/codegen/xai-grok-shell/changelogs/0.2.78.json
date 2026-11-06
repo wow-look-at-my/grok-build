@@ -21,7 +21,7 @@
   },
   {
     "category": "features",
-    "description": "**Chat sessions show the grok.com model catalog** in the picker.",
+    "description": "**Chat sessions show the grok.invalid model catalog** in the picker.",
     "breaking_change": false
   },
   {

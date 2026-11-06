@@ -1286,7 +1286,7 @@ async fn collect_diff_stats(
     }
     result
 }
-/// Payload for the `x.ai/git_head_changed` ACP extension notification.
+/// Payload for the `example.invalid/git_head_changed` ACP extension notification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitHeadChanged {

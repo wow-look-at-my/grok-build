@@ -2,12 +2,12 @@
 //!
 //! The worker door publishes its claims into an [`ExternalRoster`];
 //! [`RosterListMerge`] sits on the `run_leader` agent boundary, remembers the
-//! id of every `x.ai/sessions/list` request that passes inbound (IPC and relay
+//! `example.invalid/sessions/list` request that passes inbound (IPC and relay alike).
 //! alike), and appends the roster's rows to the matching response before the
 //! fan-out. [`run_changed_notifier`] turns each roster generation into an
-//! `x.ai/sessions/changed` broadcast on the same fan-out. Pending ids are
+//! `example.invalid/sessions/changed` broadcast on the same fan-out. Pending ids are
 //! compared as JSON values because IPC ids are namespaced strings while relay
-//! ids are whatever grok.com sent, and they expire after
+//! ids are whatever grok.invalid sent, and they expire after
 //! [`PENDING_LIST_TTL`] so an unanswered request cannot leak. Compiled in
 //! every build: without the worker door the roster is simply empty and
 //! every line passes through untouched.
@@ -135,7 +135,7 @@ impl Drop for ExternalRosterPublisher {
     }
 }
 
-/// Appends [`ExternalRoster`] rows to `x.ai/sessions/list` responses. Pending ids are a
+/// Appends [`ExternalRoster`] rows to `example.invalid/sessions/list`
 /// linear scan: a dashboard polls the list a few times a second at most.
 pub(crate) struct RosterListMerge {
     roster: ExternalRoster,
@@ -150,7 +150,7 @@ impl RosterListMerge {
         }
     }
 
-    /// Records the `id` of an inbound `x.ai/sessions/list` request; every other line is ignored.
+    /// Records the `id` of an inbound `example.invalid/sessions/list` request; every other line is ignored.
     pub(crate) fn observe_inbound(&self, line: &str) {
         // Every client request passes here (prompts with attachments included); only a list
         // request is worth parsing, and only while there are rows to merge into its answer
@@ -264,7 +264,7 @@ fn list_sessions_mut(json: &mut Value) -> Option<&mut Vec<Value>> {
     body.get_mut("sessions")?.as_array_mut()
 }
 
-/// The `x.ai/sessions/changed` line for a roster change, shaped like the agent's own
+/// The `example.invalid/sessions/changed` line for a roster change, shaped like the agent's own
 /// broadcast (`_`-prefixed method, bare params).
 pub(crate) fn changed_notification(upserted: Vec<RosterEntry>, removed: Vec<String>) -> String {
     serde_json::json!({
@@ -275,7 +275,7 @@ pub(crate) fn changed_notification(upserted: Vec<RosterEntry>, removed: Vec<Stri
     .to_string()
 }
 
-/// Writes one `x.ai/sessions/changed` line into `sink` per roster generation that changed a
+/// Writes one `example.invalid/sessions/changed` line into `sink` per roster generation that changed a
 /// row, carrying only the rows that differ from the last emission plus the removals. Runs for
 /// the leader's lifetime: the owning task is dropped with the `LocalSet`.
 pub(crate) async fn run_changed_notifier(roster: ExternalRoster, mut sink: impl FnMut(String)) {

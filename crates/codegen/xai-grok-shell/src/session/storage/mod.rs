@@ -670,7 +670,7 @@ impl Iterator for UpdatesIterator {
 
 const ACP_SESSION_UPDATE_METHOD: &str = "session/update";
 
-pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";
+pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "_example.invalid/session/update";
 
 /// One type for both notification kinds, so all session updates can be stored in chronological order.
 /// The `Serialize` implementation produces a format without timestamp (for GCS uploads, etc.).
@@ -724,7 +724,7 @@ pub(crate) struct SessionUpdateEnvelope {
     /// Useful for debugging timing issues in the updates.jsonl file.
     #[serde(default)]
     pub timestamp: u64,
-    /// Either "session/update" for ACP or "_x.ai/session/update" for xAI extensions.
+    /// Either "session/update" for ACP or "_example.invalid/session/update" for xAI extensions.
     pub method: String,
     pub params: serde_json::Value,
 }
@@ -2679,7 +2679,7 @@ mod tests {
     /// Wrap a xAI notification as the envelope stored in updates.jsonl.
     fn xai_envelope(session_update_json: &str) -> String {
         format!(
-            r#"{{"timestamp":1,"method":"_x.ai/session/update","params":{{"sessionId":"s","update":{session_update_json}}}}}"#
+            r#"{{"timestamp":1,"method":"_example.invalid/session/update","params":{{"sessionId":"s","update":{session_update_json}}}}}"#
         )
     }
 

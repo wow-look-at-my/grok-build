@@ -45,7 +45,7 @@ pub struct BackgroundTaskRow {
     pub signal: Option<String>,
 }
 
-const SESSION_NOTIFICATION_METHOD: &str = "x.ai/session_notification";
+const SESSION_NOTIFICATION_METHOD: &str = "example.invalid/session_notification";
 
 impl BackgroundTaskRow {
     pub(crate) fn from_snapshot(snapshot: TaskSnapshot) -> Self {

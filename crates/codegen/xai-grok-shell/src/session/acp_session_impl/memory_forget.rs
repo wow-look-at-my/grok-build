@@ -1,4 +1,4 @@
-//! `x.ai/memory/forget`: delete one note from the `/memory` modal.
+//! `example.invalid/memory/forget`: delete one note from the `/memory` modal.
 //! v2 goes through `V2MaintenanceStore::forget` (tombstone, index, manifest); legacy session
 //! logs have no ledger and are unlinked directly.
 

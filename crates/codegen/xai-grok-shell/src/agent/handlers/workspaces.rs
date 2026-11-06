@@ -43,7 +43,7 @@ struct WorkspacesListResponse {
 
 #[derive(Debug, Serialize)]
 struct WorkspacesMeta {
-    #[serde(rename = "x.ai/partial")]
+    #[serde(rename = "example.invalid/partial")]
     partial: PartialInfo,
 }
 
@@ -187,7 +187,9 @@ mod tests {
             Some(0)
         );
         assert!(value.get("nextPageToken").is_none());
-        let partial = value.get("_meta").and_then(|m| m.get("x.ai/partial"));
+        let partial = value
+            .get("_meta")
+            .and_then(|m| m.get("example.invalid/partial"));
         assert_eq!(
             partial
                 .and_then(|p| p.get("workspaces"))

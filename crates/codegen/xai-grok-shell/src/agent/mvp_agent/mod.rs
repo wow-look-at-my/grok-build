@@ -91,7 +91,7 @@ use tokio_util::sync::CancellationToken;
 use xai_grok_paths::AbsPathBuf;
 use xai_grok_workspace::session::git::GitDiscoveryResult;
 use xai_hunk_tracker::HunkTrackerActor;
-/// Hard-error message for legacy Direct hub-bind sessions (`x.ai/cloud_server_id`).
+/// Hard-error message for legacy Direct hub-bind sessions (`example.invalid/cloud_server_id`).
 pub(crate) const DIRECT_HUB_CLOUD_REMOVED_MSG: &str = "Direct hub cloud removed; use Gateway (envId or existing-workspace attach)";
 /// Reject session `_meta` that still requests Direct hub bind.
 ///
@@ -99,7 +99,7 @@ pub(crate) const DIRECT_HUB_CLOUD_REMOVED_MSG: &str = "Direct hub cloud removed;
 pub(crate) fn reject_direct_hub_cloud_meta(
     session_meta: Option<&acp::Meta>,
 ) -> Result<(), acp::Error> {
-    if session_meta.and_then(|m| m.get("x.ai/cloud_server_id")).is_some() {
+    if session_meta.and_then(|m| m.get("example.invalid/cloud_server_id")).is_some() {
         return Err(acp::Error::invalid_params().data(DIRECT_HUB_CLOUD_REMOVED_MSG));
     }
     Ok(())
@@ -165,7 +165,7 @@ pub(crate) fn jwt_claim_matches_user_subscription_tier(
 }
 /// ACP `_meta` key for the intent to run a chat session on a local workspace (pager stamps it on chat create).
 #[cfg(feature = "local-workspace")]
-const LOCAL_WORKSPACE_META_KEY: &str = "x.ai/local_workspace";
+const LOCAL_WORKSPACE_META_KEY: &str = "example.invalid/local_workspace";
 /// True when `_meta` carries a valid local-workspace intent object (`mode` is `"own"` or `"attach"`).
 #[cfg(feature = "local-workspace")]
 fn local_workspace_intent_present(meta: Option<&acp::Meta>) -> bool {
@@ -273,13 +273,13 @@ impl BridgeAttach {
         !matches!(self, Self::NotAttached)
     }
 }
-/// Parse `_meta["x.ai/session"].kind` into [`SessionKind`]; absent, unknown, or malformed maps to `Build`.
+/// Parse `_meta["example.invalid/session"].kind` into [`SessionKind`]; absent, unknown, or malformed maps to `Build`.
 fn parse_session_kind(
     meta: Option<&acp::Meta>,
 ) -> crate::session::unified_list::SessionKind {
     use crate::session::unified_list::SessionKind;
     use serde::Deserialize;
-    meta.and_then(|m| m.get("x.ai/session"))
+    meta.and_then(|m| m.get("example.invalid/session"))
         .and_then(|s| s.get("kind"))
         .and_then(|k| SessionKind::deserialize(k).ok())
         .unwrap_or(SessionKind::Build)
@@ -352,7 +352,7 @@ fn chat_new_session_model_state(
     state
 }
 /// `initialize` response `_meta` key advertising `pluginDirs` support.
-pub(crate) const SESSION_PLUGIN_DIRS_CAPABILITY_KEY: &str = "x.ai/pluginDirs";
+pub(crate) const SESSION_PLUGIN_DIRS_CAPABILITY_KEY: &str = "example.invalid/pluginDirs";
 /// Thin chat-kind profile shared by [`MvpAgent::load_chat_session`] and chat-kind `session/new`.
 /// Noop persistence, no MCP, no client FS / terminal / code-nav.
 /// Keeps spawn options from drifting between new and load.
@@ -405,7 +405,7 @@ fn parse_no_replay(meta: Option<&acp::Meta>) -> bool {
     meta.and_then(|m| m.get("noReplay")).and_then(|v| v.as_bool()).unwrap_or(false)
 }
 /// Insert `key`/`value` into a notification's `_meta`, creating the map if absent.
-/// Used to stamp `x.ai/leaderClientId` onto replay notifications so the leader can unicast them to the loading client only.
+/// Used to stamp `example.invalid/leaderClientId` onto replay notifications so the leader can unicast them to the loading client only.
 /// See `forward_raw_replay_line`.
 fn stamp_meta_value(meta: &mut Option<acp::Meta>, key: &str, value: &serde_json::Value) {
     meta.get_or_insert_with(acp::Meta::new).insert(key.to_string(), value.clone());
@@ -418,7 +418,7 @@ fn mark_as_replay(
     let obj = meta.get_or_insert_with(acp::Meta::new);
     obj.insert("isReplay".to_string(), is_replay);
     if let Some(persist) = persist_data {
-        obj.insert("x.ai/persist".to_string(), persist.clone());
+        obj.insert("example.invalid/persist".to_string(), persist.clone());
     }
 }
 /// Typed `_meta` payload for `PromptResponse`.
@@ -528,7 +528,7 @@ pub(crate) fn build_prompt_response_meta(
     };
     serde_json::to_value(meta).expect("PromptResponseMeta is always serializable")
 }
-/// Typed payload for the `x.ai/settings/update` notification sent to pager clients after remote settings are refreshed on `/new`.
+/// Typed payload for the `example.invalid/settings/update` notification sent to pager clients after remote settings are refreshed on `/new`.
 ///
 /// Keeping this as a `#[derive(Serialize)]` struct gives compile-time contract safety between the shell and the pager deserializer.
 #[derive(serde::Serialize)]
@@ -683,20 +683,19 @@ pub struct MvpAgent {
     pub(crate) sampling_config: RefCell<SamplingConfig>,
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) models_manager: crate::agent::remote_config::ModelsManager,
-    /// grok.com chat-product catalog (`/rest/modes`) for chat sessions; distinct from `models_manager` (the build `/v1/models` catalog).
+    /// grok.invalid chat-product catalog (`/rest/modes`) for chat sessions; distinct from `models_manager` (the build `/v1/models` catalog).
     pub(crate) chat_modes: crate::agent::chat_modes::ChatModesManager,
     /// Single-flight guard for interactive login (device poll / loopback wait).
-    /// Owns the active attempt's cancel token and its code/url channels; a new `authenticate` or `x.ai/auth/cancel` cancels the prior attempt.
     pub(crate) interactive_auth: xai_grok_login::single_flight::AuthSingleFlight,
     /// Client type. LEADER-SAFE(init-once): set once during `initialize` from `_meta.clientIdentifier` (injected by the IPC server in leader mode).
     /// **Known limitation (leader mode)**: with multiple concurrent clients, the last `initialize` call wins and overwrites the global value.
     /// Per-client telemetry attribution (AB experiments, analytics, worktree-pool eligibility) then uses whichever client most recently initialized. That may not be the client that owns the current session. This is considered acceptable because `client_type` is used only for non-safety-critical telemetry and experiment filtering.
     client_type: RefCell<ClientType>,
-    /// Whether the current client advertised `x.ai/codeNavigation.enabled`.
+    /// Whether the current client advertised `example.invalid/codeNavigation.enabled`.
     /// Updated on every `initialize()` call, with the same last-client-wins rule as `client_type`.
     /// Using `Cell<bool>` (not `RefCell`) so `.get()` is a plain copy with no borrow that could be held across an await point.
     code_nav_enabled: std::cell::Cell<bool>,
-    /// Whether the current client advertised `x.ai/folderTrust.interactive` (it can render the interactive folder-trust prompt). Set on every `initialize()` (last-client-wins, like `code_nav_enabled`).
+    /// Whether the current client advertised `example.invalid/folderTrust.interactive` (it can render the interactive folder-trust prompt). Set on every `initialize()` (last-client-wins, like `code_nav_enabled`).
     /// Gates the DORMANT agent-to-client trust round-trip in `new_session`/`load_session`. `Cell<bool>` so `.get()` is a borrow-free copy across await points.
     interactive_trust_client: std::cell::Cell<bool>,
     /// Workspaces (canonical `workspace_key`) already prompted/decided for the interactive folder-trust round-trip this process. Dedups re-prompts on `load_session` reconnect and concurrent same-workspace sessions.
@@ -845,7 +844,7 @@ pub struct MvpAgent {
     /// Last value handed out by `next_announcements_gen` (single-threaded LocalSet, so a plain `Cell` suffices).
     /// LEADER-SAFE(shared): one agent-wide push stream.
     announcements_gen: std::cell::Cell<u64>,
-    /// Announcements list last actually emitted via `x.ai/announcements/update` (expiry-filtered), the diff baseline for `emit_announcements`.
+    /// Announcements list last actually emitted via `example.invalid/announcements/update` (expiry-filtered), the diff baseline for `emit_announcements`.
     /// Owned by the emit gate: full-settings refreshes move `remote_settings` without touching this. So their changes still get pushed on the next gate call. LEADER-SAFE(shared): one agent-wide push stream.
     last_emitted_announcements: RefCell<Vec<xai_grok_announcements::RemoteAnnouncement>>,
     /// Idempotency guard: the periodic announcements refresh task is spawned at most once (on the first `initialize`).
@@ -1063,7 +1062,6 @@ struct AuthRequestMeta {
     #[serde(default)]
     force_interactive: bool,
     /// Pager auth `request_seq` for this attempt.
-    /// Scopes `x.ai/auth/cancel` so a delayed cancel cannot tear down a successor login.
     #[serde(default)]
     request_seq: Option<u64>,
 }
@@ -1156,7 +1154,7 @@ impl MvpAgent {
         )
     }
 }
-/// Parse the client-advertised `x.ai/hunkTracker.mode` string.
+/// Parse the client-advertised `example.invalid/hunkTracker.mode` string.
 /// Case-insensitive and trimmed.
 /// Absent, blank, `off`, or `disabled` yields `None`; unknown yields `AllDirty`.
 fn resolve_hunk_tracking_mode(
@@ -1381,7 +1379,7 @@ impl MvpAgent {
                             .gateway
                             .forward_with_completion(
                                 acp::ExtNotification::new(
-                                    "x.ai/task_completed",
+                                    "example.invalid/task_completed",
                                     params.into_inner().into(),
                                 ),
                             ),
@@ -1470,7 +1468,7 @@ impl MvpAgent {
             self.retry_subscription_check().await;
         }
     }
-    /// Single-shot subscription check called by the pager's "Check subscription" button (`x.ai/auth/check_subscription`). The pager calls this every 5s while the paywall is shown, acting as the poller.
+    /// Single-shot subscription check called by the pager's "Check subscription" button (`example.invalid/auth/check_subscription`). The pager calls this every 5s while the paywall is shown, acting as the poller.
     /// Queries `/user?include=subscription` for the live tier from the subscription API. If a qualifying tier is found, does a best-effort JWT refresh and settings re-fetch, then lifts the gate.
     /// The match test is [`jwt_claim_matches_user_subscription_tier`]; a bare `refresh_chain` Ok or any older paid claim is not enough. Catalog refresh is not awaited so gate lift / auth meta are not blocked on `/v1/models`.
     pub(crate) async fn retry_subscription_check(&self) {
@@ -1840,7 +1838,7 @@ impl MvpAgent {
             tracing::warn!(error = %e, "auto worktree gc failed");
         }
     }
-    /// Fire-and-forget `x.ai/settings/update` from the current remote snapshot.
+    /// Fire-and-forget `example.invalid/settings/update` from the current remote snapshot.
     pub(super) fn emit_settings_update_notification(&self) {
         let payload = {
             let cfg = self.cfg.borrow();
@@ -1885,7 +1883,7 @@ impl MvpAgent {
         if let Ok(params) = serde_json::value::to_raw_value(&payload) {
             self.gateway
                 .forward_fire_and_forget(
-                    acp::ExtNotification::new("x.ai/settings/update", params.into()),
+                    acp::ExtNotification::new("example.invalid/settings/update", params.into()),
                 );
         }
     }
@@ -1984,7 +1982,7 @@ impl MvpAgent {
             agent_ref.get().enforce_grok_code_access(&auth).await;
         });
     }
-    /// Spawn a best-effort bundle sync. Re-fires on every call site (init, cached_token, grok.com/oidc); the cheap pre-checks below absorb repeats so reconnects are cheap.
+    /// Spawn a best-effort bundle sync. Re-fires on every call site (init, cached_token, grok.invalid/oidc); the cheap pre-checks below absorb repeats so reconnects are cheap.
     /// Pre-spawn gating order (cheapest first, all synchronous): Auth gate: avoid spawning a no-op task on every init.
     /// Single-flight guard: if a previous sync is still in flight (e.g., initialize, cached_token, and oidc fired in quick succession before the first sync's tar extract finished), drop this call to avoid racing concurrent extracts that would interleave per-file writes against `~/.grok/bundled/` and the manifest.
     pub(crate) fn maybe_sync_bundle_in_background(&self, force: bool) {

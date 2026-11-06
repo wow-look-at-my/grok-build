@@ -2,7 +2,7 @@
 //! tools and pager voice dictation.
 //!
 //! An xAI host accepts two credential kinds and nothing else: an xAI API key, or an xAI OAuth2
-//! access token (JWT header `typ` `at+jwt`, issuer `auth.x.ai`). The login this manager holds may
+//! access token (JWT header `typ` `at+jwt`, issuer `auth.example.invalid`). The login this manager holds may
 //! have been issued by a foreign authority, and such a login is never a side-call bearer. The
 //! model turn already refuses it for chat (`WireValidBearerResolver`); this module is the single
 //! place that refuses it for everything else, so no tool client and no voice client reads the

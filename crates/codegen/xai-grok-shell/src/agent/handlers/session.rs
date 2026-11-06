@@ -22,26 +22,26 @@ fn backfill_session_summary(summary: &mut Summary) {
     }
 }
 
-/// Router for x.ai/session/* and x.ai/session_summaries/* methods.
+/// Router for example.invalid/session/* and example.invalid/session_summaries/* methods.
 pub(crate) async fn handle(
     agent: &MvpAgent,
     args: &acp::ExtRequest,
 ) -> Result<acp::ExtResponse, acp::Error> {
     match args.method.as_ref() {
-        "x.ai/session/info" => handle_session_info(agent, args).await,
-        "x.ai/session/close" => handle_session_close(agent, args).await,
-        "x.ai/session/list" => handle_session_list(agent, args).await,
-        "x.ai/sessions/list" => handle_roster_list(agent, args).await,
-        m if m.starts_with("x.ai/session_summaries/") => {
+        "example.invalid/session/info" => handle_session_info(agent, args).await,
+        "example.invalid/session/close" => handle_session_close(agent, args).await,
+        "example.invalid/session/list" => handle_session_list(agent, args).await,
+        "example.invalid/sessions/list" => handle_roster_list(agent, args).await,
+        m if m.starts_with("example.invalid/session_summaries/") => {
             handle_session_summaries(agent, args).await
         }
         _ => Err(acp::Error::method_not_found()),
     }
 }
 
-/// `x.ai/sessions/list`, the FleetView roster.
+/// `example.invalid/sessions/list`, the FleetView roster.
 /// Returns every resident session plus on-disk `Dormant` sessions that were touched recently.
-/// Clients poll this while the dashboard is open and reconcile against the `x.ai/sessions/changed` broadcast.
+/// Clients poll this while the dashboard is open and reconcile against the `example.invalid/sessions/changed` broadcast.
 async fn handle_roster_list(
     agent: &MvpAgent,
     _args: &acp::ExtRequest,
@@ -151,7 +151,7 @@ async fn handle_session_close(
     tracing::info!(
         session_id = %sid.0,
         ?outcome,
-        "x.ai/session/close"
+        "example.invalid/session/close"
     );
 
     // `success` stays for existing callers; `outcome` says what the close actually did (`closed`, `notResident`, `superseded`)
@@ -168,7 +168,7 @@ async fn handle_session_summaries(
     args: &acp::ExtRequest,
 ) -> Result<acp::ExtResponse, acp::Error> {
     match args.method.as_ref() {
-        "x.ai/session_summaries/session_list" => {
+        "example.invalid/session_summaries/session_list" => {
             let req = serde_json::from_str::<SessionListRequest>(args.params.get())?;
             let cwd = req.workspace_directory.to_string_lossy().to_string();
 
@@ -190,7 +190,7 @@ async fn handle_session_summaries(
 
             Ok(acp::ExtResponse::new(value))
         }
-        "x.ai/session_summaries/workspace_list" => {
+        "example.invalid/session_summaries/workspace_list" => {
             tracing::debug!("xai/session_summaries/workspace_list is working");
             let _req = serde_json::from_str::<AllSessionOverviewRequest>(args.params.get())?;
 
@@ -202,7 +202,7 @@ async fn handle_session_summaries(
 
             summaries_to_overview_response(summaries)
         }
-        "x.ai/session_summaries/workspace_list_recent" => {
+        "example.invalid/session_summaries/workspace_list_recent" => {
             let req = serde_json::from_str::<RecentSessionsRequest>(args.params.get())?;
 
             let _timer = crate::instrumentation_timer!("session.list_sessions_recent");

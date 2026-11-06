@@ -1,6 +1,6 @@
 //! Bundle status state and response types.
 //!
-//! Pager-side cache of what `xai-grok-shell` reports from `x.ai/bundle/status`.
+//! Pager-side cache of what `xai-grok-shell` reports from `example.invalid/bundle/status`.
 //! The shell downloads the bundle in the background after auth.
 //! The pager reads that snapshot for the agents modal (`/config-agents`).
 
@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 /// Pager-local snapshot of bundle availability on disk.
 ///
-/// Populated from `x.ai/bundle/status` ACP responses.
+/// Populated from `example.invalid/bundle/status` ACP responses.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BundleState {
     pub has_cache: bool,
@@ -21,7 +21,7 @@ pub struct BundleState {
     pub role_details: Vec<RoleDetail>,
 }
 
-/// Deserialized response from `x.ai/bundle/status`.
+/// Deserialized response from `example.invalid/bundle/status`.
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BundleStatusResult {

@@ -2,12 +2,12 @@
 
 Bring Grok into your terminal. Fast, flicker-free CLI built for plans, subagents, and parallel work.
 
-**[Homepage](https://x.ai/cli)** | **[Documentation](https://docs.x.ai/build/overview)**
+**[Homepage](https://example.invalid/cli)** | **[Documentation](https://docs.example.invalid/build/overview)**
 
 ## Install
 
 ```bash
-curl -fsSL https://x.ai/cli/install.sh | bash
+curl -fsSL https://example.invalid/cli/install.sh | bash
 ```
 
 Or install with npm:
@@ -26,7 +26,7 @@ grok
 grok -p "Explain this codebase"
 ```
 
-On first launch, Grok opens your browser to authenticate. For CI or headless environments, use an API key from [console.x.ai](https://console.x.ai):
+On first launch, Grok opens your browser to authenticate. For CI or headless environments, use an API key from [console.example.invalid](https://console.example.invalid):
 
 ```bash
 export XAI_API_KEY="xai-..."
@@ -50,7 +50,7 @@ npm i -g @xai-official/grok@latest
 
 ## Documentation
 
-For full documentation including configuration, MCP servers, custom models, headless mode, agent mode, and more, visit [docs.x.ai/build/overview](https://docs.x.ai/build/overview).
+For full documentation including configuration, MCP servers, custom models, headless mode, agent mode, and more, visit [docs.example.invalid/build/overview](https://docs.example.invalid/build/overview).
 
 ## Feedback
 

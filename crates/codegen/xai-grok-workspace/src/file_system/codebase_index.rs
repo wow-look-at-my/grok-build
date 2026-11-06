@@ -122,10 +122,10 @@ mod tests {
         assert!(cache_path.to_string_lossy().ends_with("goto_index.bin"));
     }
 
-    // Lazy-start: `get()` is `None` until created (`x.ai/code/status` `reason: notStarted`); `get_or_create()` starts on the first eligible code-nav request.
+    // Lazy-start: `get()` is `None` until created (`example.invalid/code/status` `reason: notStarted`); `get_or_create()` starts on the first eligible code-nav request.
 
     /// An empty manager returns `None` for any path — the steady state before any code-nav request.
-    /// `x.ai/code/status` then reports `reason: notStarted`.
+    /// `example.invalid/code/status` then reports `reason: notStarted`.
     #[test]
     fn test_get_returns_none_before_any_index_created() {
         let mgr = CodebaseIndexManager::new();

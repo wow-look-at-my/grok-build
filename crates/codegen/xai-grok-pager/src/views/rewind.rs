@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use crate::theme::Theme;
 use crate::views::prompt_widget::StashedPrompt;
 
-/// One rewindable prompt, as the agent's `x.ai/rewind/points` reply names it.
+/// One rewindable prompt, as the agent's `example.invalid/rewind/points` reply names it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
 #[serde(try_from = "RewindPointInfoWire")]
 pub struct RewindPointInfo {
@@ -85,7 +85,7 @@ impl TryFrom<RewindPointInfoWire> for RewindPointInfo {
     }
 }
 
-/// The `x.ai/rewind/points` reply. See [`RewindPointInfo`]'s note on keys.
+/// The `example.invalid/rewind/points` reply. See [`RewindPointInfo`]'s note on keys.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(try_from = "RewindPointsResponseWire")]
 pub struct RewindPointsResponse {
@@ -120,7 +120,7 @@ impl TryFrom<RewindPointsResponseWire> for RewindPointsResponse {
     }
 }
 
-/// The `x.ai/rewind/execute` reply. See [`RewindPointInfo`]'s note on keys.
+/// The `example.invalid/rewind/execute` reply. See [`RewindPointInfo`]'s note on keys.
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(try_from = "RewindResponseWire")]
 pub struct RewindResponse {

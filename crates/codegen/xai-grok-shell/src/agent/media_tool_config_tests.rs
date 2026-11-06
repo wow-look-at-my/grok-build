@@ -17,7 +17,7 @@ fn credentials(static_bearer: Option<&str>) -> MediaToolCredentials {
 
 #[test]
 fn the_static_bearer_is_the_configured_key_and_nothing_else() {
-    let cfg = config("[endpoints]\nxai_api_base_url = \"https://api.x.ai/v1\"\n");
+    let cfg = config("[endpoints]\nxai_api_base_url = \"https://api.example.invalid/v1\"\n");
 
     let ImageGenConfig::Enabled {
         api_key, base_url, ..
@@ -26,7 +26,7 @@ fn the_static_bearer_is_the_configured_key_and_nothing_else() {
         panic!("image tools are enabled by default");
     };
     assert_eq!(None, api_key);
-    assert_eq!("https://api.x.ai/v1", base_url);
+    assert_eq!("https://api.example.invalid/v1", base_url);
 
     let ImageGenConfig::Enabled { api_key, .. } =
         image_gen_config(&cfg, &credentials(Some("xai-key")))

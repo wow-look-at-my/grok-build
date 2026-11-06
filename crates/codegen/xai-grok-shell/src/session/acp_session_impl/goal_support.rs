@@ -2070,7 +2070,7 @@ mod verification_scope_tests {
 
     fn names() -> GoalToolNames {
         GoalToolNames {
-            goal: "x.ai/goal".to_string(),
+            goal: "example.invalid/goal".to_string(),
             task: "task".to_string(),
             todo: "todo_write".to_string(),
         }

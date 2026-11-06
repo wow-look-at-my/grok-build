@@ -68,7 +68,7 @@ Switch between the prompt input and scrollback pane.
 
 ## Blocking cards
 
-Surfaces block the agent on your answer and take over the keyboard while they are open: the **question card** (`ask_user_question`). This is the **MCP elicitation card** (`x.ai/mcp/elicit`), the **permission prompt**, and the **cancel-turn panel**. When more than one is open the permission prompt has the keyboard first, then the cancel-turn panel, then question, then elicitation. The shortcuts bar always shows the keys of whichever one receivs them.
+Surfaces block the agent on your answer and take over the keyboard while they are open: the **question card** (`ask_user_question`). This is the **MCP elicitation card** (`example.invalid/mcp/elicit`), the **permission prompt**, and the **cancel-turn panel**. When more than one is open the permission prompt has the keyboard first, then the cancel-turn panel, then question, then elicitation. The shortcuts bar always shows the keys of whichever one receivs them.
 
 They share one contract:
 
@@ -77,7 +77,7 @@ They share one contract:
 - With the keyboard parked, the shortcuts bar shows the scrollback's own keys, and its focus hint names the card rather than the prompt: `Tab/Space: question`. That hint is pinned. As a result, a narrow bar can never trim away the only route back.
 - Inside the dashboard's session overlay there is one more rung: once the keyboard is parked, the next `Esc` returns to the dashboard. This leaves the card pending. (`Ctrl+\` still leaves from any state.)
 
-### MCP elicitation card (`x.ai/mcp/elicit`)
+### MCP elicitation card (`example.invalid/mcp/elicit`)
 
 Shown when an MCP server asks for user input (form fields or URL consent). The title always includes the MCP server name.
 

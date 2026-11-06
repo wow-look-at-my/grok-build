@@ -65,7 +65,7 @@ impl SessionActor {
         self.emit_transient_notification(notification);
     }
 
-    /// Emit `x.ai/git_head_changed` after an edit or shell command that may have moved HEAD (e.g. `git checkout`, `git commit`).
+    /// Emit `example.invalid/git_head_changed` after an edit or shell command that may have moved HEAD (e.g. `git checkout`, `git commit`).
     /// Clients then update their status bar and changes panel immediately instead of waiting for the debounced fs-watch refresh.
     pub(super) async fn maybe_notify_git_branch(&self) {
         if !self.git_head_enabled {
@@ -104,7 +104,8 @@ impl SessionActor {
             main_repo,
         };
         if let Ok(raw) = serde_json::value::to_raw_value(&params) {
-            let notification = acp::ExtNotification::new("x.ai/git_head_changed", raw.into());
+            let notification =
+                acp::ExtNotification::new("example.invalid/git_head_changed", raw.into());
             self.notifications
                 .gateway
                 .forward_fire_and_forget(notification);
@@ -328,7 +329,7 @@ impl SessionActor {
         }
 
         // Durable counterpart of the fire-and-forget `prompt_complete` emitted from `MvpAgent::prompt`.
-        // The turn's terminal goes on the persisted and replayed `_x.ai/session/update` rail A viewer that re-attaches mid-turn then finalizes from replay instead of stranding on "Waiting…" The caller flushed the replay buffer.
+        // finalizes from replay. Instead of stranding on "Waiting…" The caller flushed the replay buffer.
         if finalizes_turn {
             let mapped = result
                 .as_ref()

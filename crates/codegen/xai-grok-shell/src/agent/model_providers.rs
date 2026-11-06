@@ -470,7 +470,7 @@ mod tests {
     };
 
     /// The whole point of the provider-side credential probe: a session that
-    /// declared another endpoint must not be sent to the grok.com sign-in. The
+    /// declared another endpoint must not be sent to the grok.invalid sign-in. The
     /// catalog cannot say so here because autodetection has not run yet.
     #[test]
     fn a_declared_provider_is_byok_before_any_of_its_models_are_known() {
@@ -541,7 +541,7 @@ mod tests {
         let raw_config: toml::Value = toml::from_str(
             r#"
             [endpoints]
-            cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.com/v1"
+            cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.invalid/v1"
 
             [model_providers.messages]
             api_base_url = "https://inference.internal/anthropic"

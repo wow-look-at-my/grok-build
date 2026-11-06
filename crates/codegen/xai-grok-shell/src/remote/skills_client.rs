@@ -1,9 +1,9 @@
-//! grok.com product Skills catalog, served by the same REST sources grok-web uses:
+//! grok.invalid product Skills catalog, served by the same REST sources grok-web uses:
 //! - `POST /rest/skills`: first-party bundled skills (docx, pdf, ffmpeg, …)
 //! - `GET  /rest/user-skills`: enabled user-uploaded skills
 //!
 //! Transport only.
-//! Chat `x.ai/commands/list` / ACP `available_commands_update` map this catalog to slash commands.
+//! `available_commands_update` map this catalog to slash commands.
 //!
 //! Desktop/shell chat uses this REST path, not gateway `conversation.commands.updated`.
 //! That keeps one process-local source for `available_commands_update`, list_commands, and slash resolve/expansion.
@@ -25,7 +25,7 @@ use xai_grok_tools::implementations::skills::types::{SkillInfo, SkillScope};
 use xai_grok_login::AuthManager;
 
 /// The first-party host. Only compared against, never used as a default.
-const GROK_WEB_URL: &str = "https://grok.com";
+const GROK_WEB_URL: &str = "https://grok.invalid";
 
 /// Marker stored on SkillInfo.metadata / AvailableCommand._meta so clients can tell product Skills from Build disk discovery without name allowlists.
 pub const CHAT_PRODUCT_META_VALUE: &str = "chat";
@@ -34,7 +34,6 @@ pub const CHAT_PRODUCT_META_KEY: &str = "product";
 const LIST_CATALOG_ATTEMPTS: u32 = 3;
 const LIST_CATALOG_BACKOFF: Duration = Duration::from_millis(100);
 /// Per-request budget for product Skills REST.
-/// The shared client only sets a connect timeout; without this a hung grok.com stalls the session actor.
 const LIST_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -267,7 +266,7 @@ fn product_skill_info(
 
 #[derive(Debug, thiserror::Error)]
 pub enum SkillsError {
-    #[error("no grok.com credentials")]
+    #[error("no grok.invalid credentials")]
     NoAuth,
     #[error("network error: {0}")]
     Network(#[from] xai_grok_net::Error),
@@ -437,7 +436,7 @@ impl SkillsClient {
         xai_grok_otel::inject_trace_context_into_request(builder)
     }
 
-    /// Grok.com product Skills require first-party session auth (the same gate as managed MCP and sibling grok.com clients), not plain BYOK API keys.
+    /// grok.invalid product Skills require first-party session auth (the same gate as managed MCP and sibling grok.invalid clients), not plain BYOK API keys.
     async fn require_skills_auth(&self) -> Result<xai_grok_login::GrokAuth, SkillsError> {
         let auth = self.auth.auth().await.map_err(|_| SkillsError::NoAuth)?;
         if !auth.is_managed_mcp_eligible() {
@@ -446,7 +445,7 @@ impl SkillsClient {
         Ok(auth)
     }
 
-    /// Credentials to try for grok.com product Skills REST. Primary first. When primary is OIDC on the default grok.com host, also try non-OIDC keys for the same user from this AuthManager's `auth.json`.
+    /// Credentials to try for grok.invalid product Skills REST. Primary first. When primary is OIDC on the default grok.invalid host, also try non-OIDC keys for the same user from this AuthManager's `auth.json`.
     /// Team OIDC is often rejected with `oauth2-auth-forbidden`.
     /// Order / isolation (see [`skills_auth_alt_candidates`]): same-tenant-tagged alts first when primary is tagged untagged same-user alts as 403 recovery when primary is tagged untagged primary never accepts team-tagged alts
     fn skills_auth_candidates(

@@ -529,7 +529,7 @@ fn dispatch_fork_without_agents_flag_asks_the_shell_to_drop_them() {
 }
 
 /// `/fork --agents` is the opt-in, and it has to survive the whole dispatch
-/// path to reach `x.ai/session/fork`.
+/// path to reach `example.invalid/session/fork`.
 #[test]
 fn dispatch_fork_agents_flag_reaches_the_fork_effect() {
     let mut app = fork_test_app();
@@ -545,7 +545,7 @@ fn dispatch_fork_agents_flag_reaches_the_fork_effect() {
 }
 
 /// The worktree fork runs through `CreateWorktreeSession`, which carries the
-/// flag on to `x.ai/git/worktree/resume_session`.
+/// flag on to `example.invalid/git/worktree/resume_session`.
 #[test]
 fn dispatch_fork_agents_flag_reaches_the_worktree_effect() {
     let mut app = fork_test_app();

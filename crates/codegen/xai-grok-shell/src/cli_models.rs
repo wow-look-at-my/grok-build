@@ -75,17 +75,17 @@ pub async fn list_models(
     .await?;
     fetch_model_state(acp_tx).await
 }
-/// Fetch model state via `x.ai/models/list` over an initialized channel.
+/// Fetch model state via `example.invalid/models/list` over an initialized channel.
 pub async fn fetch_model_state(acp_tx: &AcpAgentTx) -> Result<acp::SessionModelState> {
     let params = serde_json::value::to_raw_value(&serde_json::json!({}))?;
     let resp: acp::ExtResponse = acp_send(
-        acp::ExtRequest::new("x.ai/models/list", params.into()),
+        acp::ExtRequest::new("example.invalid/models/list", params.into()),
         acp_tx,
     )
     .await?;
     parse_models_list_response(resp.0.get())
 }
-/// Parse an `x.ai/models/list` payload; a handler error wins over a missing result.
+/// Parse an `example.invalid/models/list` payload; a handler error wins over a missing result.
 fn parse_models_list_response(raw: &str) -> Result<acp::SessionModelState> {
     let parsed: crate::session::ExtMethodResult<acp::SessionModelState> =
         serde_json::from_str(raw)?;
@@ -104,7 +104,7 @@ mod tests {
     use serial_test::serial;
     use xai_grok_login::{AuthMode, GrokAuth};
     use xai_grok_test_support::EnvGuard;
-    const EXPECTED_LOGIN_HOST: &str = "grok.com";
+    const EXPECTED_LOGIN_HOST: &str = "grok.invalid";
     /// A session the compiled-in backend recognises as its own, which `AuthBackend::owns` requires.
     fn session_credential() -> GrokAuth {
         GrokAuth {

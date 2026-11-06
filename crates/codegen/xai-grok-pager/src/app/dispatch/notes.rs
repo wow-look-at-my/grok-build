@@ -599,7 +599,7 @@ fn encode_feedback_image_slice(
     (encoded, notice)
 }
 
-/// Send a raw remember note for LLM-powered rewriting via `x.ai/memory/rewrite`.
+/// Send a raw remember note for LLM-powered rewriting via `example.invalid/memory/rewrite`.
 /// Clears remember mode and prompts the LLM to reformat the note with session context.
 /// Falls back to direct `SaveMemoryNote` when no session is available.
 fn send_remember_note(app: &mut AppView, text: String, record_in_history: bool) -> Vec<Effect> {
@@ -1123,7 +1123,7 @@ pub(crate) struct BtwImageEncode {
     pub skipped_display_numbers: Vec<usize>,
 }
 
-/// Encode composer images into `x.ai/btw` content blocks.
+/// Encode composer images into `example.invalid/btw` content blocks.
 /// `blocks: None` keeps the text-only wire. `omitted` is how many attachments did not encode.
 /// Caller unlinks the image files after this returns.
 pub(crate) fn encode_btw_images(
@@ -1223,7 +1223,7 @@ pub(super) fn dispatch_send_recap(app: &mut AppView, auto: bool) -> Vec<Effect> 
     };
 
     // The shell is authoritative (remote settings, config, env)
-    // Skip client requests entirely when the feature is off so we never hit `x.ai/recap`
+    // Skip client requests entirely when the feature is off so we never hit `example.invalid/recap`
     if !app.session_recap_available {
         if !auto {
             agent.show_toast("Session recap is not enabled");

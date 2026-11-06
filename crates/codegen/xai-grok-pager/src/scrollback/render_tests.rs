@@ -1674,7 +1674,7 @@ fn overlay_content_line_offset_skips_header_lines() {
 fn overlay_content_line_offset_out_of_range_is_safe() {
     let output = make_block_output(&[("only line", None)]);
     // line_index=0, but offset=5 pushes adjusted_line=5 past pre_wrap_segments
-    let links = [make_hyperlink(0, 0..4, "https://x.com", 1)];
+    let links = [make_hyperlink(0, 0..4, "https://x.invalid", 1)];
     let mut overlay = LinkOverlay::new();
     map_hyperlinks_to_overlay(&links, &output, 0, 0, 10, 0, 5, &[], None, &mut overlay);
 

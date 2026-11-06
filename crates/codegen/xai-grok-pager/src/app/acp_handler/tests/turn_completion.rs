@@ -1075,7 +1075,7 @@
             meta: Some(serde_json::json!({ "isReplay": false })),
         };
         let notif = acp::ExtNotification::new(
-            "x.ai/session/update",
+            "example.invalid/session/update",
             std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
         );
         let _ = handle_ext_notification(&notif, &mut app);
@@ -1103,7 +1103,7 @@
             agent.session.state = AgentState::TurnRunning;
         }
         let rate_limit_copy = "You've hit the rate limit for your plan. Upgrade your \
-                               subscription for higher limits: https://grok.com/supergrok";
+                               subscription for higher limits: https://grok.invalid/supergrok";
         let payload = SessionNotification {
             session_id: acp::SessionId::new("sess-wake"),
             update: XaiSessionUpdate::TurnCompleted {
@@ -1118,7 +1118,7 @@
             meta: Some(serde_json::json!({ "isReplay": false })),
         };
         let notif = acp::ExtNotification::new(
-            "x.ai/session/update",
+            "example.invalid/session/update",
             std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
         );
 
@@ -2397,7 +2397,7 @@
             meta: None,
         };
         acp::ExtNotification::new(
-            "x.ai/session/update",
+            "example.invalid/session/update",
             std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
         )
     }
@@ -2716,7 +2716,7 @@
             meta: Some(meta),
         };
         acp::ExtNotification::new(
-            "x.ai/session/update",
+            "example.invalid/session/update",
             std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
         )
     }
@@ -3462,7 +3462,7 @@
             let _ = handle(
                 make_ext_session_notification_with_method(
                     "sess-parent",
-                    "x.ai/session/update",
+                    "example.invalid/session/update",
                     spawned,
                 ),
                 &mut app,
@@ -3518,7 +3518,7 @@
             let _ = handle(
                 make_ext_session_notification_with_method(
                     "sess-parent",
-                    "x.ai/session/update",
+                    "example.invalid/session/update",
                     spawned,
                 ),
                 &mut app,

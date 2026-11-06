@@ -476,7 +476,7 @@ impl AgentView {
                 && let Some(server_id) = row.server_id.clone()
             {
                 // Still an optimistic echo: its `session/prompt` RPC is in flight, so an interject now would overtake the row shell-side and no-op.
-                // Park the intent; the confirming `x.ai/queue/changed` broadcast fires it with the row's authoritative version.
+                // Park the intent; the confirming `example.invalid/queue/changed` broadcast fires it with the row's authoritative version.
                 if self.optimistic_queue_ids.contains(&server_id) {
                     self.send_now_awaiting_confirm = Some(server_id);
                     return InputOutcome::Changed;
@@ -522,7 +522,7 @@ impl AgentView {
         InputOutcome::Changed
     }
 
-    /// Reconcile this client's optimistic queue echoes against a raw `x.ai/queue/changed` broadcast.
+    /// Reconcile this client's optimistic queue echoes against a raw `example.invalid/queue/changed` broadcast.
     /// Also resolves a parked queue-row send-now ([`Self::send_now_awaiting_confirm`]).
     /// The raw pre-merge entries are used because the mirrored snapshot re-pins unconfirmed echoes, so it can't tell confirmation apart.
     pub(crate) fn resolve_send_now_awaiting_confirm(
@@ -662,7 +662,7 @@ impl AgentView {
 
         // Queue-specific actions (delete, edit, reorder); `x` or Delete deletes the row
         if let Some(event) = self.queue.handle_key(key, registry) {
-            // Server rows route to the agent as `x.ai/queue/*` commands (the rebroadcast is the source of truth); local rows mutate in place.
+            // Server rows route to the agent as `example.invalid/queue/*` commands (the rebroadcast is the source of truth); local rows mutate in place.
             let (is_server, row) = self.resolve_queue_row(Self::queue_event_id(&event));
 
             match event {
@@ -850,7 +850,7 @@ impl AgentView {
         self.show_toast("The agent's queued rows always run first — can't reorder across them");
     }
 
-    /// Reorder payload for `x.ai/queue/reorder`. Omit only running; include
+    /// Reorder payload for `example.invalid/queue/reorder`. Omit only running; include
     /// send-now in the list but do not swap past it (shell ranks missing ids last).
     fn server_queue_reordered(&self, selection_id: u64, up: bool) -> Option<Vec<String>> {
         let row = self.queue.row_ref(selection_id)?;

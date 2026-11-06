@@ -1,5 +1,5 @@
 //! Filesystem helpers backing the client-facing `workspace.client_fs_*` RPCs.
-//! The grok.com conversation-files UI and the chat backend call them, tunneled through the server.
+//! The grok.invalid conversation-files UI and the chat backend call them, tunneled through the server.
 //!
 //! Deliberately separate from the shell-facing ext ops in [`ext_fs`](super::ext_fs).
 //! Every path is relative to the client-fs base (`WorkspaceHandle::client_fs_base`) and resolves through the root-confinement helper.

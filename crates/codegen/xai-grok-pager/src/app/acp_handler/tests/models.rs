@@ -1,7 +1,7 @@
 #![cfg_attr(rustfmt, rustfmt::skip)]
     use super::*;
 
-    /// Regression: a machine-wide `x.ai/models/update` broadcast carries each model's static catalog-default effort (`high`).
+    /// Regression: a machine-wide `example.invalid/models/update` broadcast carries each model's static catalog-default effort (`high`).
     /// It does not carry the session's chosen `xhigh` and must not clobber that per-session choice.
     #[test]
     fn models_update_preserves_user_reasoning_effort() {
@@ -320,7 +320,7 @@
     }
 
     /// `reasoning_effort` round-trips through the broadcast: the follower applies it alongside the model id.
-    /// The prompt header and status bar then show the right effort without waiting for a later `x.ai/models/update`.
+    /// The prompt header and status bar then show the right effort without waiting for a later `example.invalid/models/update`.
     #[test]
     fn model_changed_applies_reasoning_effort_on_follower() {
         use xai_grok_shell::sampling::types::ReasoningEffort;

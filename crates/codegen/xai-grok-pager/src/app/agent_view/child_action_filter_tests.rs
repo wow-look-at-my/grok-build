@@ -203,7 +203,7 @@ fn child_navigation_and_link_actions_pass_filter() {
         Action::FocusPrompt,
         Action::FocusScrollback,
         Action::CancelTurn,
-        Action::OpenUrl(String::from("https://x.ai")),
+        Action::OpenUrl(String::from("https://example.invalid")),
         Action::OpenNextLink,
         Action::OpenBlockViewer,
         Action::OpenScrollbackSearch(None),

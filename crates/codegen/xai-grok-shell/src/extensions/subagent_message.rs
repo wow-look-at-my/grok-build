@@ -1,4 +1,4 @@
-//! `x.ai/subagent/message` — queue or steer literal text to an owned child.
+//! `example.invalid/subagent/message` — queue or steer literal text to an owned child.
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};

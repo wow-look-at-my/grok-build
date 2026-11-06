@@ -434,7 +434,7 @@ pub struct RemoteSettings {
     pub subscription_watch_interval_secs: Option<u64>,
     #[serde(default)]
     pub writeback_enabled: Option<bool>,
-    /// OAuth2 provider issuer URL (e.g., "https://auth.x.ai").
+    /// OAuth2 provider issuer URL (e.g., "https://auth.example.invalid").
     /// When present together with `oauth2_client_id`, the client uses the OAuth2 authorization code flow.
     /// Remote settings control it so the rollout can be gradual.
     #[serde(default)]
@@ -442,7 +442,7 @@ pub struct RemoteSettings {
     /// OAuth2 client_id for the CLI. It pairs with `oauth2_issuer`.
     #[serde(default)]
     pub oauth2_client_id: Option<String>,
-    /// When `Some(true)`, enables grok's default OAuth2 (xAI auth.x.ai).
+    /// When `Some(true)`, enables grok's default OAuth2 (xAI auth.example.invalid).
     /// Enterprise OIDC (user's own IdP via `oidc` config) always wins.
     /// The `--oauth` CLI flag overrides it.
     #[serde(default)]
@@ -1452,7 +1452,7 @@ mod tests {
                 "id": "tos-2026-08",
                 "version": 3,
                 "title": "Updated terms",
-                "body": "Review our [Terms of Service](https://x.ai/legal/tos) before continuing.",
+                "body": "Review our [Terms of Service](https://example.invalid/legal/tos) before continuing.",
                 "accept_label": "Accept and continue"
             }
         }"#;
@@ -1463,7 +1463,7 @@ mod tests {
         assert!(
             gate.body
                 .as_deref()
-                .is_some_and(|b| b.contains("https://x.ai/legal/tos"))
+                .is_some_and(|b| b.contains("https://example.invalid/legal/tos"))
         );
     }
     /// A poisoned response would leave `zdr_access_enabled` false and hard-block ZDR users.

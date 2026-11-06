@@ -1780,8 +1780,8 @@ mod tests {
             Some("localhost:18080")
         );
         assert_eq!(
-            endpoint_host("https://user:pw@api.x.ai/v1?x=1").as_deref(),
-            Some("api.x.ai")
+            endpoint_host("https://user:pw@api.example.invalid/v1?x=1").as_deref(),
+            Some("api.example.invalid")
         );
         assert_eq!(endpoint_host("").as_deref(), None);
     }

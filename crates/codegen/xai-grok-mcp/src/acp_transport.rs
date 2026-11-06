@@ -1,7 +1,7 @@
 //! rmcp transport bridge over the ACP reverse channel.
 //!
 //! In-process SDK MCP servers (the official `grok-agent-sdk`'s `@tool` / `create_sdk_mcp_server`) run in the SDK-host process, not behind a socket.
-//! The agent reaches them by sending each MCP JSON-RPC message to the client as a reverse `x.ai/mcp/sdk_call` request and feeding the response back.
+//! The agent reaches them by sending each MCP JSON-RPC message to the client as a reverse `example.invalid/mcp/sdk_call` request and feeding the response back.
 //! This module adapts that request/response channel into an rmcp transport.
 //! An in-process server then reuses the same `RunningService` tool-dispatch path as HTTP/stdio servers for tool calls.
 //!
@@ -23,7 +23,7 @@ use rmcp::transport::async_rw::AsyncRwTransport;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 
-/// Sends one MCP JSON-RPC message to an in-process server over the ACP reverse channel (`x.ai/mcp/sdk_call`) and returns its JSON-RPC response.
+/// Sends one MCP JSON-RPC message to an in-process server over the ACP
 /// This is fail-closed: a missing tool server is a real error, unlike a hook gate.
 /// `timeout` bounds the single round trip so a missing or hung client fails this reverse call instead of stalling the agent's tool loop forever.
 #[async_trait::async_trait]
@@ -124,7 +124,7 @@ async fn read_requests(
                 continue;
             }
         };
-        // An id-less message is a notification (no response), and the SDK peer rejects reverse `x.ai/mcp/sdk_call`s without a JSON-RPC id
+        // An id-less message is a notification (no response), and the SDK peer rejects reverse `example.invalid/mcp/sdk_call`s without a JSON-RPC id
         // So id-less messages are logged and discarded locally.
         // Safe only because the SDK `Server` is lenient about never receiving `initialized` (a documented v1 limit)
         let Some(id) = message.get("id").filter(|id| !id.is_null()).cloned() else {

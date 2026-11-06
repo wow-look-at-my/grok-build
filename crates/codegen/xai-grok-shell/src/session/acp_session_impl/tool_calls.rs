@@ -470,7 +470,7 @@ pub(super) struct BridgeToolSuccess<'a> {
     pub model_output_override: Option<String>,
 }
 impl SessionActor {
-    /// Merge the canonical `x.ai/tool` identity envelope into a tool-call event's `_meta`, resolving the tool from the live toolset by wire name.
+    /// Merge the canonical `example.invalid/tool` identity envelope into a tool-call event's `_meta`, resolving the tool from the live toolset by wire name.
     pub(super) fn stamp_tool_meta(
         &self,
         existing: Option<acp::Meta>,
@@ -2666,7 +2666,7 @@ impl SessionActor {
         };
         Ok(Ok(prepared))
     }
-    /// Issue the `x.ai/exit_plan_mode` reverse-request and await the user's decision.
+    /// Issue the `example.invalid/exit_plan_mode` reverse-request and await the user's decision.
     /// Shared by the mid-turn intercept and the resume re-park.
     /// Marks `awaiting_plan_approval` while the request is outstanding and clears it on every exit path via [`AwaitingApprovalGuard`].
     pub(super) async fn request_plan_approval(
@@ -2691,7 +2691,7 @@ impl SessionActor {
             "exit_plan_mode reverse-request must carry a non-empty sessionId (design §5.4)"
         );
         let ext_request = acp::ExtRequest::new(
-            "x.ai/exit_plan_mode",
+            "example.invalid/exit_plan_mode",
             serde_json::value::to_raw_value(&ext_req)
                 .expect("ExitPlanModeExtRequest serialization should not fail")
                 .into(),

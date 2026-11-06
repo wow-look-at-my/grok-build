@@ -443,7 +443,7 @@
             reason: "API error (status 429 Too Many Requests): \
                      Some resource has been exhausted: You are sending requests too quickly. \
                      Please slow down, or upgrade to a Grok subscription for higher limits: \
-                     https://grok.com/supergrok"
+                     https://grok.invalid/supergrok"
                 .into(),
             is_rate_limited: true,
         };
@@ -454,7 +454,7 @@
         match last_session_event(&scrollback) {
             Some(SessionEvent::RetryFailed { error, .. }) => {
                 assert_eq!(error, RATE_LIMITED_USER_MESSAGE_API_KEY);
-                assert!(!error.contains("grok.com/supergrok"));
+                assert!(!error.contains("grok.invalid/supergrok"));
             }
             other => panic!("expected API-key rate-limit RetryFailed, got {other:?}"),
         }
@@ -693,7 +693,7 @@
         apply_retry_state(
             &RetryState::Failed {
                 error_type: "auth".into(),
-                message: "Unauthorized (401) from https://cli-chat-proxy.grok.com/v1/messages: \
+                message: "Unauthorized (401) from https://cli-chat-proxy.grok.invalid/v1/messages: \
                           no auth context"
                     .into(),
             },
@@ -1599,7 +1599,7 @@
             meta: Some(serde_json::json!({ "isReplay": true })),
         };
         let raw = serde_json::value::to_raw_value(&payload).unwrap();
-        let request = acp::ExtNotification::new("x.ai/session_notification", raw.into());
+        let request = acp::ExtNotification::new("example.invalid/session_notification", raw.into());
         let changed = handle(
             AcpClientMessage::ExtNotification(xai_acp_lib::AcpArgs {
                 request,
@@ -1679,7 +1679,7 @@
             meta,
         };
         let raw = serde_json::value::to_raw_value(&notif).unwrap();
-        acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw))
+        acp::ExtNotification::new("example.invalid/session_notification", std::sync::Arc::from(raw))
     }
 
     #[test]
@@ -1766,10 +1766,10 @@
             update: XaiSessionUpdate::SessionSummaryGenerated {
                 session_summary: String::new(),
             },
-            meta: Some(serde_json::json!({ "x.ai/titleIsManual": false })),
+            meta: Some(serde_json::json!({ "example.invalid/titleIsManual": false })),
         };
         let raw = serde_json::value::to_raw_value(&n).unwrap();
-        let notif = acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw));
+        let notif = acp::ExtNotification::new("example.invalid/session_notification", std::sync::Arc::from(raw));
         assert!(handle_session_notification(&notif, &mut app));
         let agent = &app.agents.get(&AgentId(0)).unwrap_or_else(|| panic!("missing map entry"));
         assert!(
@@ -1793,10 +1793,10 @@
             update: XaiSessionUpdate::SessionSummaryGenerated {
                 session_summary: String::new(),
             },
-            meta: Some(serde_json::json!({ "x.ai/titleIsManual": false })),
+            meta: Some(serde_json::json!({ "example.invalid/titleIsManual": false })),
         };
         let raw = serde_json::value::to_raw_value(&n).unwrap();
-        let notif = acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw));
+        let notif = acp::ExtNotification::new("example.invalid/session_notification", std::sync::Arc::from(raw));
         assert!(handle_session_notification(&notif, &mut app));
         let agent = &app.agents.get(&AgentId(0)).unwrap_or_else(|| panic!("missing map entry"));
         assert!(
@@ -1860,7 +1860,7 @@
         );
     }
 
-    // ── HooksChanged (x.ai/session/update push) ─────────────────────────
+    // ── HooksChanged (example.invalid/session/update push) ─────────────────────────
 
     fn hooks_changed_ext(
         session_id: &str,
@@ -1876,7 +1876,7 @@
             meta: None,
         };
         let raw = serde_json::value::to_raw_value(&notif).unwrap();
-        acp::ExtNotification::new("x.ai/session_notification", std::sync::Arc::from(raw))
+        acp::ExtNotification::new("example.invalid/session_notification", std::sync::Arc::from(raw))
     }
 
     fn push_hook(name: &str, source_dir: &str) -> xai_hooks_plugins_types::HookInfo {

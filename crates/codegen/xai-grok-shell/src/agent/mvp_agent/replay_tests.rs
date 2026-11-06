@@ -85,7 +85,7 @@ fn recorded_completion(output: String) -> Value {
 }
 
 fn replay_line(record: &Value) -> String {
-    serde_json::json!({ "method": "_x.ai/session/update", "params": record }).to_string()
+    serde_json::json!({ "method": "_example.invalid/session/update", "params": record }).to_string()
 }
 
 /// The branch a plain resume takes: `_meta` is added to the record, so the fit has to happen after that and not before.
@@ -166,7 +166,7 @@ async fn replay_leaves_other_oversized_records_alone() {
         r#"{{"sessionId":"s","update":{{"sessionUpdate":"subagent_spawned","subagent_id":"{}"}}}}"#,
         "x".repeat(64 * 1024)
     );
-    let line = format!(r#"{{"method":"_x.ai/session/update","params":{recorded}}}"#);
+    let line = format!(r#"{{"method":"_example.invalid/session/update","params":{recorded}}}"#);
     agent.forward_raw_replay_line(
         &line,
         /*persist_data*/ None,
@@ -200,7 +200,7 @@ async fn a_stale_task_completion_is_frame_bounded() {
     let (agent, mut rx) = build_agent_with_gateway();
     let dir = tempfile::tempdir().unwrap();
     let line = format!(
-        r#"{{"timestamp":1,"method":"_x.ai/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"task_backgrounded","task_id":"stale-1","command":"{}","cwd":"/tmp"}}}}}}"#,
+        r#"{{"timestamp":1,"method":"_example.invalid/session/update","params":{{"sessionId":"s","update":{{"sessionUpdate":"task_backgrounded","task_id":"stale-1","command":"{}","cwd":"/tmp"}}}}}}"#,
         "c".repeat(64 * 1024)
     );
     let path = dir.path().join("updates.jsonl");
@@ -221,7 +221,7 @@ async fn a_stale_task_completion_is_frame_bounded() {
 async fn stale_task_reconcile_keeps_incrementals_without_list() {
     let (agent, mut rx) = build_agent_with_gateway();
     let dir = tempfile::tempdir().unwrap();
-    let line = r#"{"timestamp":1,"method":"_x.ai/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"task_backgrounded","task_id":"stale-1","command":"sleep 1","cwd":"/tmp"}}}"#;
+    let line = r#"{"timestamp":1,"method":"_example.invalid/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"task_backgrounded","task_id":"stale-1","command":"sleep 1","cwd":"/tmp"}}}"#;
     let path = dir.path().join("updates.jsonl");
     std::fs::write(&path, line).unwrap();
 
@@ -230,13 +230,13 @@ async fn stale_task_reconcile_keeps_incrementals_without_list() {
     let notifs = drain_ext_notifications(&mut rx);
     assert!(
         notifs.iter().any(|(method, params)| {
-            method == "x.ai/task_completed" && params.contains("session_restart")
+            method == "example.invalid/task_completed" && params.contains("session_restart")
         }),
         "incremental completion must stay: {notifs:?}"
     );
     assert!(
         !notifs.iter().any(|(method, params)| {
-            method == "x.ai/session_notification"
+            method == "example.invalid/session_notification"
                 && params.contains("\"sessionUpdate\":\"background_tasks\"")
         }),
         "reconcile is not the last-wins list writer: {notifs:?}"
@@ -247,8 +247,8 @@ async fn stale_task_reconcile_keeps_incrementals_without_list() {
 async fn cold_load_with_no_orphans_emits_no_reconcile_notifications() {
     let (agent, mut rx) = build_agent_with_gateway();
     let dir = tempfile::tempdir().unwrap();
-    let line = r#"{"timestamp":1,"method":"_x.ai/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"task_backgrounded","task_id":"done-1","command":"sleep 1","cwd":"/tmp"}}}
-{"timestamp":2,"method":"_x.ai/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"task_completed","task_snapshot":{"task_id":"done-1"}}}}"#;
+    let line = r#"{"timestamp":1,"method":"_example.invalid/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"task_backgrounded","task_id":"done-1","command":"sleep 1","cwd":"/tmp"}}}
+{"timestamp":2,"method":"_example.invalid/session/update","params":{"sessionId":"s","update":{"sessionUpdate":"task_completed","task_snapshot":{"task_id":"done-1"}}}}"#;
     let path = dir.path().join("updates.jsonl");
     std::fs::write(&path, line).unwrap();
 

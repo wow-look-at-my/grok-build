@@ -94,7 +94,7 @@ fn plugins_action_install_and_update_respect_marketplace_lockdown() {
         // Install action must be refused by the acquisition gate.
         let response = ext_method(
             &conn,
-            "x.ai/plugins/action",
+            "example.invalid/plugins/action",
             json!({
                 "sessionId": session_id.0.to_string(),
                 "action": {"type": "install", "source": plugin_dir.display().to_string()},
@@ -128,7 +128,7 @@ fn plugins_action_install_and_update_respect_marketplace_lockdown() {
         // fetch (per-repo failure line, not a git error).
         let response = ext_method(
             &conn,
-            "x.ai/plugins/action",
+            "example.invalid/plugins/action",
             json!({
                 "sessionId": session_id.0.to_string(),
                 "action": {"type": "update", "plugin_id": "blocked-plugin"},
@@ -164,7 +164,10 @@ fn plugins_action_install_and_update_respect_marketplace_lockdown() {
         .expect("serialize mcp/toggle params");
         let err = tokio::time::timeout(
             RPC_TIMEOUT,
-            conn.ext_method(acp::ExtRequest::new("x.ai/mcp/toggle", Arc::from(params))),
+            conn.ext_method(acp::ExtRequest::new(
+                "example.invalid/mcp/toggle",
+                Arc::from(params),
+            )),
         )
         .await
         .expect("mcp/toggle timed out")

@@ -1,5 +1,5 @@
 //! Optional fetch-before and branch-after steps for
-//! `x.ai/git/worktree/create_from_worktree_sync`. Best effort: the worktree
+//! `example.invalid/git/worktree/create_from_worktree_sync`. Best effort: the worktree
 //! is created either way.
 
 use std::path::Path;

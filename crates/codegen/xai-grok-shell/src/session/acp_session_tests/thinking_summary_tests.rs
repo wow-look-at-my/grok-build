@@ -26,7 +26,7 @@ fn summary_update(msg: &xai_acp_lib::AcpClientMessage) -> Option<serde_json::Val
     let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
         return None;
     };
-    if args.request.method.as_ref() != "x.ai/session_notification" {
+    if args.request.method.as_ref() != "example.invalid/session_notification" {
         return None;
     }
     let Ok(value) = serde_json::from_str::<serde_json::Value>(args.request.params.get()) else {

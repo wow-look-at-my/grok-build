@@ -272,7 +272,7 @@ fn split_wrapped_monitor_event(event_text: &str) -> Option<(&str, &str)> {
     Some((description, inner))
 }
 /// Format drained [`MonitorEventNotification`]s for the turn loop's hidden synthetic user message. Model-facing only —
-/// the pager renders monitor events from the structured `x.ai/monitor_event` notification, never by parsing this text.
+/// the pager renders monitor events from the structured `example.invalid/monitor_event` notification, never by parsing this text.
 /// Multiple events batch under one count preamble, grouped per monitor (first-seen order, within-monitor order kept).
 pub fn format_monitor_events(
     events: &[crate::implementations::grok_build::monitor::types::MonitorEventNotification],

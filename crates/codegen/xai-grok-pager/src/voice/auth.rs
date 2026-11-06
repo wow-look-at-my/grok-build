@@ -1,6 +1,6 @@
 //! Bridge the shell's `AuthManager` onto the voice crate's bearer provider.
 //!
-//! voice-api accepts an xAI API key or an xAI OAuth2 token at `api.x.ai` and attributes per-user billing for OAuth.
+//! voice-api accepts an xAI API key or an xAI OAuth2 token at `api.example.invalid` and attributes per-user billing for OAuth.
 //! The bearer comes from the shell's side-call resolver, the same one the Imagine tools use, so a login issued by a
 //! foreign authority is refused here and no socket opens for it.
 //!

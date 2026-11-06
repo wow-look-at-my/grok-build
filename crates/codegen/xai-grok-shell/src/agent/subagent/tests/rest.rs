@@ -1287,7 +1287,7 @@ fn drain_cancelled_finish_broadcasts(
         let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
             continue;
         };
-        assert_eq!(args.request.method.as_ref(), "x.ai/session_notification");
+        assert_eq!(args.request.method.as_ref(), "example.invalid/session_notification");
         let notification: SessionNotification = serde_json::from_str(
                 args.request.params.get(),
             )
@@ -2172,7 +2172,7 @@ async fn read_parent_sampling_config_keeps_catalog_threshold_when_routing_slug_i
 #[serial_test::serial(remote_sig_disarm)]
 async fn read_parent_sampling_config_keeps_auto_when_catalog_has_slug_key_only() {
     let _env = crate::env::EnvVarGuard::remove("GROK_REQUEST_COMPRESSION");
-    let parent_base_url = "https://api.x.ai/v1";
+    let parent_base_url = "https://api.example.invalid/v1";
     let mut models = indexmap::IndexMap::new();
     let mut entry = test_model_entry("grok-4.5");
     entry.info.supports_backend_search = true;
@@ -2248,7 +2248,7 @@ async fn read_parent_sampling_config_fallback_wires_bearer_resolver() {
         crate::agent::auth_method::CACHED_TOKEN_AUTH_METHOD_ID,
     );
     ctx.sampling_config.model = "grok-4.5".to_string();
-    ctx.sampling_config.base_url = "https://api.x.ai/v1".to_string();
+    ctx.sampling_config.base_url = "https://api.example.invalid/v1".to_string();
     let (config, _) = read_parent_sampling_config(&ctx).await;
     assert!(config.bearer_resolver.is_some());
 }
@@ -2287,7 +2287,7 @@ async fn read_parent_sampling_config_fallback_never_strips_a_fallback_key() {
     );
     ctx.auth = None;
     ctx.sampling_config.model = "grok-4.5".to_string();
-    ctx.sampling_config.base_url = "https://api.x.ai/v1".to_string();
+    ctx.sampling_config.base_url = "https://api.example.invalid/v1".to_string();
     ctx.sampling_config.api_key = Some("xai-env-fallback".to_string());
     let (config, _) = read_parent_sampling_config(&ctx).await;
     assert!(config.bearer_resolver.is_none());
@@ -2301,7 +2301,7 @@ async fn read_parent_sampling_config_fallback_no_resolver_for_api_key_method() {
         crate::agent::auth_method::XAI_API_KEY_METHOD_ID,
     );
     ctx.sampling_config.model = "grok-4.5".to_string();
-    ctx.sampling_config.base_url = "https://api.x.ai/v1".to_string();
+    ctx.sampling_config.base_url = "https://api.example.invalid/v1".to_string();
     let (config, _) = read_parent_sampling_config(&ctx).await;
     assert!(config.bearer_resolver.is_none());
 }
@@ -2389,7 +2389,7 @@ async fn read_parent_sampling_config_fallback_resolves_backend_search_from_catal
     ctx.parent_chat_state = None;
     ctx.sampling_config.model = "grok-4.5".to_string();
     ctx.sampling_config.api_backend = crate::sampling::ApiBackend::Responses;
-    ctx.sampling_config.base_url = "https://api.x.ai/v1".to_string();
+    ctx.sampling_config.base_url = "https://api.example.invalid/v1".to_string();
     ctx.sampling_config.supports_backend_search = false;
     ctx.models_manager = crate::agent::remote_config::ModelsManager::new(
         None,

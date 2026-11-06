@@ -9,8 +9,8 @@ use super::{
 #[test]
 fn warm_state_machine() {
     assert_eq!(
-        endpoint_origin("https://api.x.ai/v1?api-version=x"),
-        Some("https://api.x.ai".to_string()),
+        endpoint_origin("https://api.example.invalid/v1?api-version=x"),
+        Some("https://api.example.invalid".to_string()),
         "origin phase: path and query are stripped to the dialable origin"
     );
     assert_eq!(

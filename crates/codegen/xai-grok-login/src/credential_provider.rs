@@ -790,7 +790,7 @@ mod tests {
         for denied in [
             "https://byok.attacker.example/v1",
             // First-party host, but cleartext: bearer requires https.
-            "http://api.x.ai/v1",
+            "http://api.example.invalid/v1",
         ] {
             let resolved =
                 embedding_session_credentials(denied, Some(&mgr), Some(api_key_provider.clone()));
@@ -801,7 +801,7 @@ mod tests {
         }
 
         let resolved = embedding_session_credentials(
-            "https://api.x.ai/v1",
+            "https://api.example.invalid/v1",
             Some(&mgr),
             Some(api_key_provider),
         );

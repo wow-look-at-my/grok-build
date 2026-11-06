@@ -587,7 +587,7 @@ impl InitPass {
         })) {
             self.gateway
                 .forward_fire_and_forget(acp::ExtNotification::new(
-                    "x.ai/mcp_initialized",
+                    "example.invalid/mcp_initialized",
                     params.into(),
                 ));
         }

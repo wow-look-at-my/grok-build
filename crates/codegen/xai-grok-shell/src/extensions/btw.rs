@@ -1,4 +1,4 @@
-//! `x.ai/btw` extension handler: dispatch a side question to the active session via `SessionCommand::SideQuestion` and return the answer.
+//! `example.invalid/btw` extension handler: dispatch a side question to the active session via `SessionCommand::SideQuestion` and return the answer.
 
 use agent_client_protocol as acp;
 use tokio::sync::oneshot;
@@ -43,7 +43,7 @@ pub fn side_question_omit_notice(omitted: usize) -> String {
     format!("{omitted} attached image(s) were not included (over the 50MB side-question limit).")
 }
 
-/// Handle `x.ai/btw`, a side question that doesn't interrupt the current turn.
+/// Handle `example.invalid/btw`, a side question that doesn't interrupt the current turn.
 pub(super) async fn handle_btw(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]

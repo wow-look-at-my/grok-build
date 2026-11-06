@@ -635,7 +635,7 @@ fn a_provider_model_never_keeps_the_proxy_url() {
     let cfg = config_from_toml(
         r#"
             [endpoints]
-            cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.com/v1"
+            cli_chat_proxy_base_url = "https://cli-chat-proxy.grok.invalid/v1"
             models_base_url = "http://localhost:18080/v1"
             [model_providers.messages]
             models_autodetect = false
@@ -866,11 +866,11 @@ fn default_model_honors_allowlist_when_no_default_set() {
             allowed_models = ["keep-*"]
             [model.zzz-first]
             model = "zzz-first"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.keep-one]
             model = "keep-one"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
     );
@@ -896,12 +896,12 @@ fn favorites_come_from_both_the_catalog_list_and_the_provider_list() {
 
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
 
             [model.grok-3]
             model = "grok-3"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
 
             [model.claude-sonnet]
@@ -962,7 +962,7 @@ fn no_favorites_configured_marks_nothing() {
         r#"
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
     );
@@ -982,7 +982,7 @@ fn an_invalid_favorites_glob_marks_nothing_and_keeps_the_catalog() {
 
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
     );
@@ -1003,11 +1003,11 @@ fn validate_selectable_rejects_bad_allowlists() {
             allowed_models = ["grok-4*"]
             [model.grok-3]
             model = "grok-3"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
     );
@@ -1024,7 +1024,7 @@ fn validate_selectable_rejects_bad_allowlists() {
             allowed_models = ["nomatch-*"]
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
     );
@@ -1061,11 +1061,11 @@ fn set_session_model_fleet_deny_uses_organization_message() {
             [models]
             [model.grok-3]
             model = "grok-3"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             [model.grok-4]
             model = "grok-4"
-            base_url = "https://api.x.ai/v1"
+            base_url = "https://api.example.invalid/v1"
             context_window = 256000
             "#,
     )
@@ -2945,8 +2945,11 @@ fn listing_json_context_window_lands_in_model_info() {
     ];
     for (json, expected) in cases {
         let value: serde_json::Value = serde_json::from_str(json).unwrap();
-        let parsed = crate::remote::client::parse_remote_model_value(&value, "https://api.x.ai/v1")
-            .expect("entry should parse");
+        let parsed = crate::remote::client::parse_remote_model_value(
+            &value,
+            "https://api.example.invalid/v1",
+        )
+        .expect("entry should parse");
         let info = config::ModelInfo::from_config(&parsed);
         assert_eq!(
             info.context_window.get(),

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Grok CLI installer (enterprise channel) — https://x.ai/cli/enterprise-install.sh
+# Grok CLI installer (enterprise channel) — https://example.invalid/cli/enterprise-install.sh
 #
 # Standalone installer for the enterprise channel. This is intentionally a full
 # copy of the install logic (not a wrapper around install.sh) so that changes to
@@ -109,8 +109,8 @@ read_grok_token() {
 }
 
 # Resolve auth: OIDC token > legacy token
-OIDC_SCOPE="https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828"
-LEGACY_SCOPE="https://accounts.x.ai/sign-in"
+OIDC_SCOPE="https://auth.example.invalid::b1a00492-073a-47ea-816f-4c329264a828"
+LEGACY_SCOPE="https://accounts.example.invalid/sign-in"
 AUTH_SOURCE=""
 
 OIDC_TOKEN=$(read_grok_token "$OIDC_SCOPE" 2>/dev/null) || true
@@ -150,7 +150,7 @@ if [ "$os" = "macos" ] && [ "$arch" = "x86_64" ]; then
     fi
 fi
 
-BASE_URL_PRIMARY="https://x.ai/cli"
+BASE_URL_PRIMARY="https://example.invalid/cli"
 BASE_URL_FALLBACK="https://storage.googleapis.com/grok-build-public-artifacts/cli"
 DOWNLOAD_DIR="$HOME/.grok/downloads"
 BIN_DIR="${GROK_BIN_DIR:-$HOME/.grok/bin}"
@@ -159,7 +159,7 @@ mkdir -p "$DOWNLOAD_DIR" "$BIN_DIR"
 platform="${os}-${arch}"
 CHANNEL="enterprise"
 
-# Pick a working BASE_URL: try Cloudflare-fronted x.ai first, fall back to
+# Pick a working BASE_URL: try Cloudflare-fronted example.invalid first, fall back to
 # direct GCS if it's unreachable. The probe doubles as the channel-pointer
 # fetch when no explicit TARGET was passed, so the happy path costs zero
 # extra HTTP requests.

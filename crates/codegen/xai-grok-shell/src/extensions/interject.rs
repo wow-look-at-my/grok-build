@@ -1,4 +1,4 @@
-//! `x.ai/interject` extension handler.
+//! `example.invalid/interject` extension handler.
 //!
 //! Queues a mid-turn interjection into the active session's pending interjection buffer.
 //! The session actor drains it at the next safe point in `process_conversation_turn`.
@@ -9,7 +9,7 @@ use super::{ExtResult, parse_params};
 use crate::agent::MvpAgent;
 use crate::session::SessionCommand;
 
-pub const INTERJECT_METHOD: &str = "x.ai/interject";
+pub const INTERJECT_METHOD: &str = "example.invalid/interject";
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,7 +24,7 @@ pub struct InterjectRequest {
     pub content: Vec<acp::ContentBlock>,
 }
 
-/// Handle `x.ai/interject`: queue a mid-turn user interjection.
+/// Handle `example.invalid/interject`: queue a mid-turn user interjection.
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     let req: InterjectRequest = parse_params(args)?;
     let sid: acp::SessionId = req.session_id.clone().into();

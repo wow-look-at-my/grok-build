@@ -81,7 +81,7 @@ impl acp::Client for SubagentFinishedRecorder {
     }
 
     async fn ext_notification(&self, args: acp::ExtNotification) -> acp::Result<()> {
-        if args.method.as_ref() != "x.ai/session_notification" {
+        if args.method.as_ref() != "example.invalid/session_notification" {
             return Ok(());
         }
         let Ok(params) = serde_json::from_str::<serde_json::Value>(args.params.get()) else {

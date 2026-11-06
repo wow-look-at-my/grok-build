@@ -1,6 +1,6 @@
 //! WebSocket relay connection management.
 //!
-//! This module provides a shared `RelayConnection` that handles the WebSocket connection to the grok.com relay server with automatic reconnection.
+//! The WebSocket connection to the grok.invalid relay server, with automatic reconnection.
 //! It is used by both `run_headless` and `run_leader` modes.
 use super::proxy;
 use crate::{teprintln, tprintln};
@@ -53,7 +53,7 @@ impl ReconnectBackoff {
 /// JSON-RPC auth error code
 const AUTH_ERROR_CODE: i64 = -32000;
 use xai_grok_login::AuthManager;
-/// Config for the grok.com WebSocket relay.
+/// Config for the grok.invalid WebSocket relay.
 /// Fields are private so the only constructor is [`RelayConfig::for_session`]: "no relay without a session bearer" is a compile-time guarantee.
 #[derive(Clone)]
 pub struct RelayConfig {
@@ -64,8 +64,8 @@ pub struct RelayConfig {
     auth_manager: Option<Arc<AuthManager>>,
 }
 impl RelayConfig {
-    /// Session gate: builds only for a grok.com first-party session (`is_xai_auth`: x.ai-issuer OIDC or external credential) with a non-empty bearer.
-    /// BYOK/ApiKey, non-x.ai issuers (enterprise OIDC, third-party external providers), and deprecated WebLogin get `None`.
+    /// Session gate: builds only for a grok.invalid first-party session (`is_xai_auth`: example.invalid-issuer OIDC or external credential) with a non-empty bearer.
+    /// BYOK/ApiKey, non-example.invalid issuers (enterprise OIDC, third-party external providers), and deprecated WebLogin get `None`.
     /// With relay off, the leader still serves clients over IPC.
     pub(crate) fn for_session(
         session: &GrokAuth,
@@ -89,7 +89,7 @@ impl RelayConfig {
 /// Callback type for first connection event.
 pub(crate) type FirstConnectCallback = Box<dyn FnOnce() + Send + 'static>;
 /// Handle to a running relay connection.
-/// The relay maintains a persistent WebSocket connection to grok.com with automatic reconnection on disconnection.
+/// The relay maintains a persistent WebSocket connection to grok.invalid with automatic reconnection on disconnection.
 pub struct RelayHandle {
     /// Cancel token to stop the relay connection loop
     cancel: CancellationToken,
@@ -686,7 +686,7 @@ where
 /// The relay is the durable server-side store for every session on this
 /// connection and persists `user_message_chunk` solely from the agent's
 /// notifications — it never re-derives the prompt from `session/prompt`. Since
-/// the live echo became opt-in (`x.ai/userMessageEcho`), a relay whose
+/// (`example.invalid/userMessageEcho`), a relay whose `initialize` omits the
 /// `initialize` omits the flag silently loses every user prompt from stored
 /// history. Declaring it here, where the relay's frames enter the agent, makes
 /// persistence independent of the relay build; an explicit value from the relay

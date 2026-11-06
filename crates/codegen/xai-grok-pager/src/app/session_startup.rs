@@ -80,7 +80,7 @@ impl DeferredStartupActions {
             || self.open_dashboard
     }
 }
-/// Build `x.ai/session/fork` params shared by TUI effects and headless.
+/// Build `example.invalid/session/fork` params shared by TUI effects and headless.
 /// `new_cwd` is the write namespace for the child (parent session cwd when cross-cwd); preflight must use the same path via [`effective_fork_new_cwd`].
 pub fn fork_session_params(
     parent_session_id: &str,
@@ -161,7 +161,7 @@ pub fn parent_session_is_worktree(session_id: &str, cwd: &Path) -> bool {
     }
     false
 }
-/// Parse `newSessionId` from an `x.ai/session/fork` ACP response body.
+/// Parse `newSessionId` from an `example.invalid/session/fork` ACP response body.
 pub fn fork_response_new_session_id(resp_json: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(resp_json).unwrap_or_default();
     if v.get("error").is_some_and(|e| !e.is_null()) {
@@ -699,7 +699,7 @@ pub enum MaterializedStartup {
         /// The target missed local id and title resolution and was deferred to the worktree resume handler.
         /// Worktree failure messages append the no-match hint only for this outcome (never inferred from shape).
         deferred_local_miss: bool,
-        /// Pre-TUI conversation-only remote restore: the follow-up `LoadSession` must send `x.ai/restore_code: false`.
+        /// Pre-TUI conversation-only remote restore: the follow-up `LoadSession` must send `example.invalid/restore_code: false`.
         /// Agent `[cli] restore_code` must not checkout in-place on the new local child.
         suppress_code_restore: bool,
     },
@@ -730,7 +730,7 @@ pub struct MaterializeCtx {
     pub has_worktree: bool,
     /// When true, attempt remote restore if the session is not on disk.
     pub allow_remote_restore: bool,
-    /// Process-wide flag: resume targets are grok.com conversations, not the local disk store.
+    /// Process-wide flag: resume targets are grok.invalid conversations, not the local disk store.
     /// Always `false` without the optional feature; setting it anyway errors rather than silently falling back to disk.
     pub chat_mode: bool,
     /// See [`TitleResolution`]; carried from the pre-sandbox pin outcome.
@@ -812,7 +812,7 @@ async fn most_recent_session_id(
         })?;
     Ok((first.info.id.to_string(), first.display_title_opt()))
 }
-/// `AuthManager` for direct grok.com calls made outside the agent (pre-ACP `--continue` conversation listing, the GCS restore effect).
+/// `AuthManager` for direct grok.invalid calls made outside the agent (pre-ACP `--continue` conversation listing, the GCS restore effect).
 /// Wires the auth-provider refresher before the first `auth()`.
 /// Without it, environments that mint credentials via `auth_provider_command` report `NoOauth`.
 pub(crate) fn pre_acp_auth_manager(

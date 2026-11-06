@@ -107,7 +107,7 @@ pub struct CreditLimitUpsellClicked {
     pub choice: CreditLimitChoice,
 }
 
-/// Emitted when a previously access-gated user re-authenticates and the gate is lifted, i.e. they subscribed (externally on grok.com) and came back.
+/// Emitted when a previously access-gated user re-authenticates and the gate is lifted, i.e. they subscribed (externally on grok.invalid) and came back.
 /// This is the actual conversion signal for SuperGrok Heavy subscriptions attributed to Grok Build.
 /// The user saw the gate in Grok Build, went and paid, then returned with access.
 #[derive(Serialize)]

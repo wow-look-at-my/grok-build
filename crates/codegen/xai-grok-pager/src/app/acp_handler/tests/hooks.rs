@@ -35,7 +35,7 @@
             meta: None,
         };
         acp::ExtNotification::new(
-            "x.ai/session/update",
+            "example.invalid/session/update",
             serde_json::value::to_raw_value(&payload).unwrap().into(),
         )
     }
@@ -53,7 +53,7 @@
             meta: Some(serde_json::json!({ "isReplay": false })),
         };
         acp::ExtNotification::new(
-            "x.ai/session/update",
+            "example.invalid/session/update",
             serde_json::value::to_raw_value(&payload).unwrap().into(),
         )
     }

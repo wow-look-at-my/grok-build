@@ -21,7 +21,7 @@
   },
   {
     "category": "features",
-    "description": "The \"Managed by grok.com\" link in the Extensions modal is now clickable and underlined.",
+    "description": "The \"Managed by grok.invalid\" link in the Extensions modal is now clickable and underlined.",
     "breaking_change": false
   },
   {

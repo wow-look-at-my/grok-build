@@ -35,7 +35,7 @@ fn thought_chunk(
 }
 
 /// The shell's `thinking_summary` broadcast, built through the typed payload so
-/// the wire shape cannot drift from what the shell emits. `x.ai/session/update`
+/// the wire shape cannot drift from what the shell emits. `example.invalid/session/update`
 /// is the method a reload replays persisted updates under.
 fn thinking_summary_notif(
     session_id: &str,
@@ -52,7 +52,7 @@ fn thinking_summary_notif(
         meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
     acp::ExtNotification::new(
-        "x.ai/session/update",
+        "example.invalid/session/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }
@@ -358,7 +358,7 @@ fn summary_status_notif(
         meta: None,
     };
     acp::ExtNotification::new(
-        "x.ai/session/update",
+        "example.invalid/session/update",
         std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
     )
 }

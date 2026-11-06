@@ -33,7 +33,7 @@ fn headless_ack_signal_classifies_messages() {
         ),
         response_tx: tx,
     });
-    let unrelated = ext("x.ai/models/update", serde_json::json!({}));
+    let unrelated = ext("example.invalid/models/update", serde_json::json!({}));
     assert_eq!(
         [
             Some(AckSignal::QueueChanged),

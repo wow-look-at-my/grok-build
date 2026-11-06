@@ -1,4 +1,4 @@
-//! `x.ai/session/rename` ext-handler coverage: resident `ManualTitleRenamed` enqueue, non-resident skip, and control-char stripping at the boundary.
+//! `example.invalid/session/rename` ext-handler coverage: resident `ManualTitleRenamed` enqueue, non-resident skip, and control-char stripping at the boundary.
 
 use agent_client_protocol as acp;
 use xai_grok_test_support::EnvGuard;
@@ -37,7 +37,7 @@ async fn drive_rename(
     let raw = serde_json::value::to_raw_value(&params).unwrap();
     agent
         .ext_method(acp::ExtRequest::new(
-            "x.ai/session/rename",
+            "example.invalid/session/rename",
             std::sync::Arc::from(raw),
         ))
         .await
@@ -419,7 +419,7 @@ async fn rename_fanout_stamps_title_is_manual_meta() {
         let AcpClientMessage::ExtNotification(args) = msg else {
             continue;
         };
-        if args.request.method.as_ref() != "x.ai/session_notification" {
+        if args.request.method.as_ref() != "example.invalid/session_notification" {
             continue;
         }
         let v: serde_json::Value = serde_json::from_str(args.request.params.get()).unwrap();
@@ -439,7 +439,7 @@ async fn rename_fanout_stamps_title_is_manual_meta() {
     }
     assert!(
         saw_manual_meta,
-        "drive_rename must stamp _meta.x.ai/titleIsManual on SessionSummaryGenerated"
+        "drive_rename must stamp _meta.example.invalid/titleIsManual on SessionSummaryGenerated"
     );
 }
 
@@ -462,7 +462,7 @@ async fn drive_reset(
     let raw = serde_json::value::to_raw_value(&params).unwrap();
     agent
         .ext_method(acp::ExtRequest::new(
-            "x.ai/session/rename",
+            "example.invalid/session/rename",
             std::sync::Arc::from(raw),
         ))
         .await
@@ -702,7 +702,7 @@ async fn reset_fanout_stamps_title_is_manual_false() {
     while let Ok(msg) = rx.try_recv() {
         match msg {
             AcpClientMessage::ExtNotification(args) => {
-                if args.request.method.as_ref() != "x.ai/session_notification" {
+                if args.request.method.as_ref() != "example.invalid/session_notification" {
                     continue;
                 }
                 let v: serde_json::Value = serde_json::from_str(args.request.params.get()).unwrap();
@@ -756,7 +756,7 @@ async fn reset_fanout_stamps_title_is_manual_false() {
     }
     assert!(
         saw_unpin_ext,
-        "reset must stamp _meta.x.ai/titleIsManual=false on SessionSummaryGenerated"
+        "reset must stamp _meta.example.invalid/titleIsManual=false on SessionSummaryGenerated"
     );
     assert!(
         saw_unpin_siu,
@@ -822,7 +822,7 @@ async fn reset_already_auto_is_idempotent_and_skips_persistence_msg() {
     while let Ok(msg) = rx.try_recv() {
         match msg {
             AcpClientMessage::ExtNotification(args) => {
-                if args.request.method.as_ref() != "x.ai/session_notification" {
+                if args.request.method.as_ref() != "example.invalid/session_notification" {
                     continue;
                 }
                 let v: serde_json::Value = serde_json::from_str(args.request.params.get()).unwrap();

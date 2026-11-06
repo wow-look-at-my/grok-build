@@ -82,7 +82,7 @@ fn non_empty_base_cutoff_wins_per_tool_and_an_empty_one_reverts_to_the_seed() {
     let seed = ToolOverrides {
         x_search: Some(x_cut("2020-01-01")),
         web_search: Some(WebSearchOptions {
-            allowed_domains: Some(vec!["x.com".into()]),
+            allowed_domains: Some(vec!["x.invalid".into()]),
             excluded_domains: None,
         }),
     };
@@ -102,7 +102,7 @@ fn non_empty_base_cutoff_wins_per_tool_and_an_empty_one_reverts_to_the_seed() {
 fn inherited_cutoff_agrees_with_the_wire_echo_so_the_two_implementations_cannot_drift() {
     use xai_grok_sampling_types::{HostedTool, apply_tool_overrides};
     let web = WebSearchOptions {
-        allowed_domains: Some(vec!["x.com".into()]),
+        allowed_domains: Some(vec!["x.invalid".into()]),
         excluded_domains: None,
     };
     let cases = [

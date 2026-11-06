@@ -349,7 +349,7 @@ fn stale_auth_copy_timeout_does_not_clear_newer_feedback() {
     app.auth_state = AuthState::Authenticating {
         request_seq: 1,
         handle: None,
-        auth_url: Some("https://grok.com/auth".to_owned()),
+        auth_url: Some("https://grok.invalid/auth".to_owned()),
         mode: AuthMode::Command,
     };
 
@@ -985,7 +985,7 @@ fn confirmation_required_builds_plugins_confirmation_with_confirmed_true() {
     }
 }
 
-/// Regression: a failed `x.ai/subagent/cancel` RPC must NOT finalize the row; the subagent may still be running.
+/// Regression: a failed `example.invalid/subagent/cancel` RPC must NOT finalize the row; the subagent may still be running.
 /// Only a shell response of "nothing live" finalizes it.
 #[test]
 fn kill_rpc_failure_does_not_finalize_but_nothing_live_does() {
@@ -2497,7 +2497,7 @@ fn gate_refreshed_emits_check_subscription_on_gate_lift() {
     // User starts gated (no subscription).
     app.gate = Some(xai_grok_login::GateInfo {
         message: "SuperGrok subscription required".into(),
-        url: Some("https://grok.com/supergrok".into()),
+        url: Some("https://grok.invalid/supergrok".into()),
         label: Some("Subscribe".into()),
     });
     assert!(!app.has_access());

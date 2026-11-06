@@ -107,11 +107,11 @@ mod tests {
         headers.insert("X-Custom".to_string(), "value".to_string());
         let config = WebSearchConfig::Enabled {
             api_key: "secret-key-12345".to_string(),
-            base_url: "https://api.x.ai/v1".to_string(),
+            base_url: "https://api.example.invalid/v1".to_string(),
             model: "test-web-search-model".to_string(),
             extra_headers: headers,
             alpha_test_key: Some("alpha-secret".to_string()),
-            allowed_domains: Some(vec!["docs.x.ai".to_string()]),
+            allowed_domains: Some(vec!["docs.example.invalid".to_string()]),
             excluded_domains: None,
         };
         let redacted = config.redacted();
@@ -126,12 +126,15 @@ mod tests {
                 excluded_domains,
             } => {
                 assert_eq!(api_key, "***REDACTED***");
-                assert_eq!(base_url, "https://api.x.ai/v1");
+                assert_eq!(base_url, "https://api.example.invalid/v1");
                 assert_eq!(model, "test-web-search-model");
                 assert_eq!(extra_headers.get("X-Custom").unwrap(), "value");
                 assert!(alpha_test_key.is_none());
                 // Domain filters survive redaction (not secrets).
-                assert_eq!(allowed_domains, Some(vec!["docs.x.ai".to_string()]));
+                assert_eq!(
+                    allowed_domains,
+                    Some(vec!["docs.example.invalid".to_string()])
+                );
                 assert!(excluded_domains.is_none());
             }
             _ => panic!("Expected Enabled variant"),
@@ -142,7 +145,7 @@ mod tests {
     fn test_config_serde_roundtrip() {
         let config = WebSearchConfig::Enabled {
             api_key: "key".to_string(),
-            base_url: "https://api.x.ai/v1".to_string(),
+            base_url: "https://api.example.invalid/v1".to_string(),
             model: "test-web-search-model".to_string(),
             extra_headers: IndexMap::new(),
             alpha_test_key: None,
@@ -159,7 +162,7 @@ mod tests {
         let json = r#"{
             "status": "enabled",
             "api_key": "xai-abc123",
-            "base_url": "https://api.x.ai/v1",
+            "base_url": "https://api.example.invalid/v1",
             "model": "test-web-search-model"
         }"#;
         let config: WebSearchConfig = serde_json::from_str(json).unwrap();

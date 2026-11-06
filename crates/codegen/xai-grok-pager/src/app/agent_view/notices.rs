@@ -497,13 +497,13 @@ mod mouse_off_banner_tests {
     #[test]
     fn show_toast_scrubs_control_chars() {
         let mut view = make_running_agent();
-        view.show_toast("a\nb\rc\thttps://x.ai");
+        view.show_toast("a\nb\rc\thttps://example.invalid");
         let msg = view.toast.as_ref().map(|(m, _)| m.as_str()).unwrap_or("");
         assert!(
             !msg.chars().any(char::is_control),
             "show_toast must scrub controls: {msg:?}"
         );
-        assert!(msg.contains("https://x.ai"), "{msg:?}");
+        assert!(msg.contains("https://example.invalid"), "{msg:?}");
     }
 
     #[test]

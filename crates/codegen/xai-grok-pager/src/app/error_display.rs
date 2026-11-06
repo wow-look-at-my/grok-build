@@ -771,7 +771,7 @@ mod tests {
         let formatted = format_request_failure(
             Some(401),
             Some(WireErrorType::Api),
-            r#"Unauthorized (401) from https://cli-chat-proxy.grok.com/v1/responses: {"error":"Invalid or expired credentials (auth_kind=bearer)"}"#,
+            r#"Unauthorized (401) from https://cli-chat-proxy.grok.invalid/v1/responses: {"error":"Invalid or expired credentials (auth_kind=bearer)"}"#,
         );
         assert_eq!(formatted.status, Some(401));
         assert!(formatted.detail.contains("Invalid or expired credentials"));
@@ -900,7 +900,7 @@ mod tests {
         let formatted = format_request_failure(
             None,
             Some(WireErrorType::Http),
-            "error sending request for url (https://server.grok.com/v1/responses)",
+            "error sending request for url (https://server.grok.invalid/v1/responses)",
         );
         assert!(
             !formatted.message().contains("http"),
@@ -979,7 +979,7 @@ mod tests {
 
     #[test]
     fn retry_activity_label_uses_request_failure_headline() {
-        let dns = "request error: error sending request for url (https://api.x.ai/v1/responses): client error (Connect): dns error: failed to lookup address information: Temporary failure in name resolution";
+        let dns = "request error: error sending request for url (https://api.example.invalid/v1/responses): client error (Connect): dns error: failed to lookup address information: Temporary failure in name resolution";
         assert_eq!(
             format_retry_activity_label(8, 10, dns, None, RetryLabelStyle::Status),
             "Connection failed | Retrying (attempt 8)..."
@@ -1034,7 +1034,7 @@ mod tests {
             format_request_failure(
                 None,
                 Some(WireErrorType::Other),
-                "error sending request for url (https://api.x.ai)"
+                "error sending request for url (https://api.example.invalid)"
             )
             .headline,
             "Request failed"

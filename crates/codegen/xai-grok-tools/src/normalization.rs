@@ -19,7 +19,7 @@ pub fn tool_identity_of(metadata: &dyn ToolMetadata) -> ToolIdentity {
         read_only: metadata.is_read_only(),
     }
 }
-/// Resolve `wire_name` in `toolset` and merge the canonical `x.ai/tool` object into `existing` (see [`CanonicalToolMeta::merge_into`]). Returns
+/// Resolve `wire_name` in `toolset` and merge the canonical `example.invalid/tool` object into `existing` (see [`CanonicalToolMeta::merge_into`]). Returns
 /// `existing` unchanged when the tool is unknown (uninitialized MCP, backend-hosted), so markers like `bash_mode`/`backend` are never
 /// clobbered. This is the harness entry point for stamping tool-call `_meta`.
 pub fn merge_tool_meta(
@@ -46,7 +46,7 @@ pub fn norm_offset_i64(offset: Option<i64>) -> Option<u64> {
         _ => None,
     }
 }
-/// Project a tool's **typed** input into the harness-independent `input` dict of the `x.ai/tool` `_meta` object. Equivalent tools across
+/// Project a tool's **typed** input into the harness-independent `input` dict of the `example.invalid/tool` `_meta` object. Equivalent tools across
 /// toolsets emit the same keys with the same meaning (a harness may add an extra key). Absent optional fields are omitted (never `null`). Bulky
 /// payload fields (edit `old_string`/`new_string`, full write contents) are never projected — consumers read them from `raw_input`.
 pub fn canonical_input(input: &ToolInput) -> Option<serde_json::Value> {

@@ -609,7 +609,7 @@ mod tests {
     fn state_with_a_shared_name() -> ModelState {
         let mut state = ModelState::default();
         for (id, info) in [
-            routed_model("grok-4.7", "Grok 4.7", None, "api.x.ai"),
+            routed_model("grok-4.7", "Grok 4.7", None, "api.example.invalid"),
             routed_model(
                 "local/grok-4.7",
                 "grok-4.7",

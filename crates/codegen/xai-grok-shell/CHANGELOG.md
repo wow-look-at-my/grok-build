@@ -154,7 +154,7 @@
 
 ## Bug Fixes
 
-- **Plugin and skill listings** from x.ai/plugins/list and x.ai/skills/* now reflect the latest config.toml even before the first session.
+- **Plugin and skill listings** from example.invalid/plugins/list and example.invalid/skills/* now reflect the latest config.toml even before the first session.
 - **Fixed crashes** on the first TLS handshake for Windows on ARM64 builds.
 - **Slash commands** like `/feedback` typed during plan approval now execute correctly.
 
@@ -1451,7 +1451,7 @@
 ## Features
 
 - **System notifications** now carry structured kind/title/body for better rendering.
-- **x.ai/pr/status** now reports whether an open PR is in the merge queue.
+- **example.invalid/pr/status** now reports whether an open PR is in the merge queue.
 - **Compact mode** now activates automatically on very small terminals.
 - **Up arrow** on an empty prompt now browses prompt history; `/history` searches it.
 - **Stop hook runs** now appear inline on the turn-completed line instead of a separate block.
@@ -1469,7 +1469,7 @@
 - **Terminal commands** with no args now run through a shell, matching the CLI.
 - **Agent teardown** no longer crashes on slim Linux images that lack the ps command.
 - **Esc** now dismisses an open /btw panel before backing out of a dashboard overlay.
-- **Resumed grok.com chats** now use the conversation's last model instead of the gateway default.
+- **Resumed grok.invalid chats** now use the conversation's last model instead of the gateway default.
 - **JetBrains terminals on Windows** now default to minimal mode to avoid raw mouse-report leaks in the prompt.
 - **Skill token highlights** now survive line wraps and the slash menu opens when typing / before existing text.
 - **Truncated or tiny images** are now dropped before sending and previously poisoned sessions self-heal on restart.
@@ -1508,7 +1508,7 @@
 - **Single tool calls** that belong to a verb group now collapse into an aggregated header row.
 - **Fixed sessions** that became permanently stuck after tool-use history corruption.
 - **/always-approve** and **/auto** now toggle their mode on and off when run repeatedly.
-- **Terminal command cards** on grok.com now correctly settle after foreground bash tasks.
+- **Terminal command cards** on grok.invalid now correctly settle after foreground bash tasks.
 - **Copy failure** toast now recommends trying /minimal for native terminal rendering.
 
 ## Performance
@@ -1549,7 +1549,7 @@
 ## Features
 
 - MCP permission prompts now show the planned arguments so you can judge what the tool will actually do.
-- The "Managed by grok.com" link in the Extensions modal is now clickable and underlined.
+- The "Managed by grok.invalid" link in the Extensions modal is now clickable and underlined.
 - Dragging inside rendered markdown tables now selects whole cells or rectangular ranges and copies as TSV.
 - Shift+Tab now goes straight to Plan mode when the plan-mode tip is showing.
 
@@ -1829,7 +1829,7 @@
 
 - **Contextual hints** now show shortcuts like plan mode or clipboard paste when relevant.
 - **Graceful shutdowns** now allow interrupted turns to resume with a configurable pause budget.
-- **Grok.com chat sessions** now integrate fully with the gateway bridge for model catalog and resume.
+- **grok.invalid chat sessions** now integrate fully with the gateway bridge for model catalog and resume.
 
 ## Bug Fixes
 
@@ -1844,7 +1844,7 @@
 
 ## Features
 
-- **Chat sessions show the grok.com model catalog** in the picker.
+- **Chat sessions show the grok.invalid model catalog** in the picker.
 
 ## Bug Fixes
 
@@ -2677,7 +2677,7 @@
 ## Features
 
 - **Official xAI plugin marketplace** now appears automatically in the Marketplace tab on first launch.
-- **Image and video generation** now use api.x.ai directly for all users.
+- **Image and video generation** now use api.example.invalid directly for all users.
 - **New image-to-video and reference-to-video tools** are now available for generating videos from images.
 - **New imagine skill** provides prompt-craft and workflow guidance for image generation and editing tools.
 
@@ -2850,7 +2850,7 @@
 
 ## Features
 
-- Memory system: /remember command, note modal with raw/enhanced preview, x.ai/memory/rewrite ACP extension, Ctrl+F fullscreen toggle for /memory modal.
+- Memory system: /remember command, note modal with raw/enhanced preview, example.invalid/memory/rewrite ACP extension, Ctrl+F fullscreen toggle for /memory modal.
 - Agent configuration: /config-agents modal with agents, personas, and defaults.
 - Goal classifier: end-to-end goal tracking with subagent-powered classification.
 

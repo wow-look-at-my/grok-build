@@ -1,4 +1,4 @@
-//! Mid-turn interjection dispatch: optimistic local echo, the `x.ai/interject` effect, and prompt-history recording.
+//! Mid-turn interjection dispatch: optimistic local echo, the `example.invalid/interject` effect, and prompt-history recording.
 
 use super::ctx::NO_SESSION_NOTICE;
 use super::voice::voice_stop_on_submit;
@@ -75,7 +75,7 @@ fn dispatch_interject_on_inner(
     }
 
     // Push a standard user prompt block locally for instant feedback
-    // Record its id so the broadcast echo (`x.ai/session/interjection`) is deduped instead of rendering a second copy on this pane
+    // Record its id so the broadcast echo (`example.invalid/session/interjection`) is deduped instead of rendering a second copy on this pane
     let interjection_id = uuid::Uuid::new_v4().to_string();
     agent.self_interjection_ids.insert(interjection_id.clone());
     let entry_id = agent
@@ -119,7 +119,7 @@ fn dispatch_interject_on_inner(
 }
 
 /// Interrupt the running turn with the whole queue (bare Enter on an empty
-/// composer while busy). Server-owned rows ride one `x.ai/queue/deliver_now`:
+/// composer while busy). Server-owned rows ride one `example.invalid/queue/deliver_now`:
 /// the shell harvests them into the running turn and cancels the in-flight
 /// model stream. The model stops mid-response and reads them. Local rows the
 /// shell has never seen (image prompts, skill-expanded slash rows, anything

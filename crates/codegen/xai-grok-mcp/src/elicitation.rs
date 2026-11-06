@@ -438,7 +438,7 @@ mod tests {
         let url_p = ElicitRequestParams::UrlElicitationParams {
             meta: None,
             message: "u".into(),
-            url: "https://x.ai".into(),
+            url: "https://example.invalid".into(),
             elicitation_id: "id1".into(),
         };
         let fields = wire_mode_and_fields(&url_p).expect("url mode is supported");
@@ -450,7 +450,7 @@ mod tests {
         else {
             panic!("expected url mode");
         };
-        assert_eq!(url, "https://x.ai");
+        assert_eq!(url, "https://example.invalid");
         assert_eq!(elicitation_id, "id1");
     }
 

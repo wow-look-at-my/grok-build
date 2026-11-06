@@ -330,7 +330,7 @@ pub(super) fn dispatch_manage_billing(app: &mut AppView) -> Vec<Effect> {
         return vec![];
     }
     super::router::dispatch(
-        crate::app::actions::Action::OpenUrl("https://grok.com/?_s=usage".to_string()),
+        crate::app::actions::Action::OpenUrl("https://grok.invalid/?_s=usage".to_string()),
         app,
     )
 }
