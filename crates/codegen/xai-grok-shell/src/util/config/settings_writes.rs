@@ -294,6 +294,77 @@ pub async fn set_feedback_trace_card(value: bool) -> Result<()> {
     .await
 }
 
+/// Persist `[model."<model_key>"] context_window` in the user `config.toml`.
+/// `None` removes the key, and a block left empty goes with it.
+pub async fn set_model_context_window(model_key: String, tokens: Option<u64>) -> Result<()> {
+    if model_key.trim().is_empty() || model_key.len() > MAX_DEFAULT_MODEL_LEN {
+        anyhow::bail!("invalid model id {model_key:?}");
+    }
+    if tokens == Some(0) {
+        anyhow::bail!("a context window must be at least 1 token");
+    }
+    rewrite_user_config_locked("context window", move |path| {
+        write_model_context_window(
+            path,
+            &model_key,
+            tokens,
+            crate::util::config::persist::atomic_write_follow_bound,
+        )
+    })
+    .await
+}
+
+pub(super) fn write_model_context_window(
+    path: &Path,
+    model_key: &str,
+    tokens: Option<u64>,
+    write: impl FnOnce(&Path, &BoundDest, &str) -> std::io::Result<()>,
+) -> Result<()> {
+    rewrite_user_config_table(path, "context window", write, |root| {
+        apply_model_context_window(root, model_key, tokens)
+            .with_context(|| format!("{} [model] must be a table of tables", path.display()))
+    })
+}
+
+/// The TOML edit of [`write_model_context_window`], apart from the disk.
+pub(crate) fn apply_model_context_window(
+    root: &mut toml::map::Map<String, toml::Value>,
+    model_key: &str,
+    tokens: Option<u64>,
+) -> Result<()> {
+    let Some(tokens) = tokens else {
+        let Some(models) = root.get_mut("model").and_then(toml::Value::as_table_mut) else {
+            return Ok(());
+        };
+        if let Some(block) = models
+            .get_mut(model_key)
+            .and_then(toml::Value::as_table_mut)
+        {
+            block.remove("context_window");
+            if block.is_empty() {
+                models.remove(model_key);
+            }
+        }
+        if models.is_empty() {
+            root.remove("model");
+        }
+        return Ok(());
+    };
+    let value = i64::try_from(tokens).context("context window does not fit in a TOML integer")?;
+    let models = root
+        .entry("model".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .context("[model] is not a table")?;
+    let block = models
+        .entry(model_key.to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .with_context(|| format!("[model.\"{model_key}\"] is not a table"))?;
+    block.insert("context_window".to_owned(), toml::Value::Integer(value));
+    Ok(())
+}
+
 /// Persist or remove a registry `[features]` key in the user `config.toml`.
 /// `None` deletes the key so the remote and default tiers apply again.
 pub async fn set_feature_override(feature: Feature, value: Option<bool>) -> Result<()> {

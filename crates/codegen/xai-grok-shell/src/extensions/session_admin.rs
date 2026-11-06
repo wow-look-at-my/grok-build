@@ -805,6 +805,10 @@ fn handle_reload_models(agent: &MvpAgent) -> ExtResult {
 
     let count = agent.models_manager.models().len();
     tracing::info!(count, "model list reloaded from config.toml");
+    // The return only reports a count. A failed send is already logged.
+    let _ = send_reload_to_residents(agent, "context window", || {
+        SessionCommand::ReloadContextWindow
+    });
     ExtMethodResult::success(serde_json::json!({ "models": count }))
         .to_ext_response()
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))

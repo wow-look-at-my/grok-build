@@ -414,6 +414,10 @@ impl SessionActor {
         };
         let current_model = &current_config.model;
         let base_url = &current_config.base_url;
+        let window_pinned = self
+            .models_manager
+            .pinned_context_window(current_model)
+            .is_some();
         // BYOK / custom-provider base (e.g. `https://gateway.pazer.ai/v1`).
         // The cli-chat-proxy `/models-v2` listing below will never contain it.
         // Refresh the model metadata from the model's OWN `/v1/models`
@@ -446,6 +450,7 @@ impl SessionActor {
             };
             if let Some(cw) = refreshed {
                 if current_config.context_window != cw
+                    && !window_pinned
                     && self.compaction.context_window_override.is_none()
                 {
                     tracing::info!(
@@ -543,6 +548,7 @@ impl SessionActor {
         let mut config_changed = false;
         let mut updated_config = current_config.clone();
         if current_config.context_window != new_context_window
+            && !window_pinned
             && self.compaction.context_window_override.is_none()
         {
             tracing::info!(
@@ -588,6 +594,10 @@ impl SessionActor {
         if let Some(new_cw) = metadata.context_window.and_then(std::num::NonZeroU64::new)
             && current_config.context_window != new_cw
             && self.compaction.context_window_override.is_none()
+            && self
+                .models_manager
+                .pinned_context_window(&current_config.model)
+                .is_none()
         {
             if new_cw < current_config.context_window {
                 tracing::warn!(

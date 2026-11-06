@@ -21,6 +21,37 @@ impl SessionActor {
         self.output_rate_floor.set(policy);
     }
 
+    /// Handle [`SessionCommand::ReloadContextWindow`]: a config edit to a
+    /// model's `context_window` reaches the running session.
+    pub(super) async fn handle_reload_context_window(&self) {
+        if self.compaction.context_window_override.is_some() {
+            return;
+        }
+        let Some(mut cfg) = self.chat_state_handle.get_sampling_config().await else {
+            return;
+        };
+        let Some((window, _)) = self.models_manager.model_context_window(&cfg.model) else {
+            tracing::warn!(
+                session_id = %self.session_info.id.0,
+                model = %cfg.model,
+                "context window reload skipped: the model is not in the catalog"
+            );
+            return;
+        };
+        if window == cfg.context_window {
+            return;
+        }
+        tracing::info!(
+            session_id = %self.session_info.id.0,
+            model = %cfg.model,
+            from = cfg.context_window.get(),
+            to = window.get(),
+            "context window reloaded from config"
+        );
+        cfg.context_window = window;
+        self.chat_state_handle.update_sampling_config(cfg);
+    }
+
     /// The model for one harness slot, or `None` when it inherits the session
     /// model.
     pub(crate) fn harness_model(&self, slot_id: &str) -> Option<String> {
