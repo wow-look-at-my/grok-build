@@ -9,6 +9,22 @@ fn config_text(content: &ContentController) -> String {
     std::fs::read_to_string(content.home().join(".grok").join("config.toml")).unwrap_or_default()
 }
 
+/// The log lines about the model reload and the context window, for a failure message.
+fn window_log(content: &ContentController) -> String {
+    let path = content
+        .home()
+        .join(".grok")
+        .join("logs")
+        .join("unified.jsonl");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| format!("(no log at {}: {e})", path.display()))
+        .lines()
+        .filter(|l| l.contains("context") || l.contains("model config") || l.contains("reload"))
+        .take(60)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn open_limit_row(harness: &mut PtyHarness) {
     harness.inject_keys(keys::F2).expect("open settings");
     harness
@@ -143,20 +159,31 @@ async fn context_window_limit_reaches_the_running_session() {
     harness.update(Duration::from_millis(300));
     harness.inject_keys(keys::ESC).expect("close settings");
     // The config watcher reloads the models and sends the window to the session.
-    harness.update(Duration::from_secs(3));
+    harness.wait_for_text("/ 1K", TIMEOUT).unwrap_or_else(|_| {
+        panic!(
+            "the context bar must show the limit\nlog:\n{}\nscreen:\n{}",
+            window_log(&content),
+            harness.screen_contents()
+        )
+    });
 
     let long_prompt = "lorem ipsum dolor sit amet ".repeat(220);
     harness
-        .inject_keys(format!("{long_prompt}\r").as_bytes())
+        .inject_keys(long_prompt.as_bytes())
+        .expect("type long prompt");
+    harness.update(Duration::from_millis(500));
+    harness
+        .inject_keys(keys::ENTER)
         .expect("submit long prompt");
     harness
         .wait_until("the session compacts", Duration::from_secs(60), |h| {
-            let screen = h.screen_contents();
+            let screen = h.full_text();
             screen.contains("Compacting") || screen.contains("compacted")
         })
         .unwrap_or_else(|_| {
             panic!(
-                "a 1k limit must make the session compact\n{}",
+                "a 1k limit must make the session compact\nlog:\n{}\nscreen:\n{}",
+                window_log(&content),
                 harness.screen_contents()
             )
         });
