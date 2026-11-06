@@ -178,17 +178,6 @@ fn input_title(
                 }
             }
         }
-        ToolInput::UpdateGoal(ug) => {
-            if ug.completed == Some(true) {
-                "Goal: marking complete".to_string()
-            } else if let Some(ref reason) = ug.blocked_reason {
-                format!("Goal: blocked — {reason}")
-            } else if let Some(ref msg) = ug.message {
-                format!("Goal: {msg}")
-            } else {
-                "Goal: update".to_string()
-            }
-        }
         ToolInput::Monitor(m) => format!("Start monitor: {}", m.description),
         ToolInput::SchedulerCreate(sc) => match (&sc.task_id, &sc.interval) {
             (Some(id), Some(interval)) => format!("Update scheduled task {id} (every {interval})"),

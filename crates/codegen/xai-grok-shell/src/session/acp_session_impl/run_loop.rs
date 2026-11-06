@@ -1717,7 +1717,6 @@ pub(super) async fn run_session(
                                         &disabled_tools,
                                     )
                                     .await;
-                                session.refresh_goal_harness_enabled().await;
 
                                 let disabled_vec: Vec<String> = if tool_name.is_empty() {
                                     disabled_tools
@@ -1832,7 +1831,6 @@ pub(super) async fn run_session(
                             drop(mcp_state);
 
                             session.refresh_mcp_snapshot_and_schedule_reminder().await;
-                            session.refresh_goal_harness_enabled().await;
 
                             // Persist to config and emit notification in background.
                             let notifications = session.notifications.gateway.clone();

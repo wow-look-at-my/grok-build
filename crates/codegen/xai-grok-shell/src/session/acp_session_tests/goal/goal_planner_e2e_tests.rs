@@ -300,6 +300,14 @@ async fn make_planner_actor(
     coordinator_tx: Option<tokio::sync::mpsc::UnboundedSender<SubagentEvent>>,
     planner_enabled: bool,
 ) -> (StdArc<SessionActor>, TempDir) {
+    let (actor, tmp) = make_planner_actor_unshared(coordinator_tx, planner_enabled).await;
+    (StdArc::new(actor), tmp)
+}
+
+async fn make_planner_actor_unshared(
+    coordinator_tx: Option<tokio::sync::mpsc::UnboundedSender<SubagentEvent>>,
+    planner_enabled: bool,
+) -> (SessionActor, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let (gateway_tx, _gateway_rx) =
         tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
@@ -316,7 +324,7 @@ async fn make_planner_actor(
     if let Some(tx) = coordinator_tx {
         actor.tool_context.subagent_event_tx = Some(tx);
     }
-    (StdArc::new(actor), tmp)
+    (actor, tmp)
 }
 
 /// Like [`make_planner_actor`] but retains the persistence receiver so a test can inspect the `GoalUpdated` notifications the planner run emits.
@@ -560,7 +568,13 @@ async fn a_lite_goal_never_spawns_the_planner() {
         .run_until(async {
             let (tx, _count, capture) =
                 spawn_planner_coordinator_capturing(scripted_planner_with_todos());
-            let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            let server = xai_grok_test_support::MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_goal_capture());
+            let (mut actor, _tmp) = make_planner_actor_unshared(Some(tx), true).await;
+            arm_todo_writes(&mut actor).await;
+            point_model_at(&actor, &server).await;
 
             let GoalSetupOutcome::Inference { reminder } =
                 actor.setup_goal("ship it", None, GoalMode::Lite).await
@@ -2058,7 +2072,6 @@ async fn stop_then_slash_goal_resume_reopens_spawn_admission_before_planner_retr
         .run_until(async {
             let (tx, log) = spawn_latching_planner_coordinator();
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
             create_test_goal(&actor);
             let _ = actor
                 .auto_pause_goal_if_active_with_message(

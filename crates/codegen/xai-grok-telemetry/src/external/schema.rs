@@ -501,7 +501,6 @@ pub(crate) const BUILTIN_TOOL_NAMES: &[&str] = &[
     "use_tool",
     "memory_search",
     "memory_get",
-    "update_goal",
 ];
 
 /// Default `tool_name` reduction: built-ins pass verbatim, MCP-qualified names (`server__tool`) collapse to `"mcp_tool"`.

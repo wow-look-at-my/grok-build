@@ -240,11 +240,7 @@ fn apply_workflow_tool_gates(
     background_workflows_enabled: bool,
 ) {
     use xai_grok_tools::types::tool::ToolKind;
-    if background_workflows_enabled {
-        tool_config
-            .tools
-            .retain(|tool| tool.kind != Some(ToolKind::GoalUpdate));
-    } else {
+    if !background_workflows_enabled {
         tool_config
             .tools
             .retain(|tool| tool.kind != Some(ToolKind::Workflow));

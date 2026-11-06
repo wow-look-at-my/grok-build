@@ -116,7 +116,7 @@ pub enum PromptOrigin {
     NotificationDrain,
     /// The goal orchestrator injects a system reminder into context and then triggers a model turn so the model can print a visible progress update.
     GoalSummary,
-    /// Nudge injected when the verification stage rejects an `update_goal(completed: true)` attempt.
+    /// Nudge injected when the verification stage rejects a completion candidate.
     /// Carries the "not yet achieved — keep working" system-reminder body alongside the path to the persisted details file.
     /// The variant name retains the `Classifier` prefix for wire stability.
     GoalClassifierNudge,
