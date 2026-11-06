@@ -580,6 +580,12 @@ impl ToolBridge {
         let _ = self.registry.update_resource(resource).await;
     }
 
+    /// Queue a save of the resources state. A change made outside a tool call
+    /// needs this, because only a tool call saves on its own.
+    pub async fn persist_state(&self) {
+        self.registry.persist_state().await;
+    }
+
     /// See [`FinalizedToolset::update_resources_with`].
     pub async fn update_resources_with(
         &self,

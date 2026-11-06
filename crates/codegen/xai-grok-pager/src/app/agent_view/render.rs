@@ -4278,7 +4278,15 @@ impl AgentView {
         if self.show_goal_detail
             && let Some(ref goal) = self.goal_state
         {
-            let todos = self.todo.todos();
+            // Archived items belong to earlier goals.
+            let todos: Vec<_> = self
+                .todo
+                .todos()
+                .iter()
+                .filter(|t| !t.archived)
+                .cloned()
+                .collect();
+            let todos = todos.as_slice();
             let overlay_rect = crate::views::goal_detail::goal_detail_area(area, goal, todos);
             let tick = self.tasks.tick_count() as usize;
             let active_subagent_tokens = self.live_standalone_subagent_tokens();

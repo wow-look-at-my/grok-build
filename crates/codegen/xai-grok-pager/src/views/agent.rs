@@ -947,6 +947,7 @@ mod tests {
             pending: 1,
             completed: 2,
             cancelled: 3,
+            archived: 0,
         };
         let spans = render_todo_badge_spans(&counts, false, &Theme::current())
             .expect("a badge for a live list");

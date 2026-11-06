@@ -1993,6 +1993,7 @@ mod tests {
                     meta: None,
                     verification: None,
                     verification_passed: false,
+                    archived: false,
                 }],
                 state: TodoState::default(),
             })
@@ -2054,6 +2055,7 @@ mod tests {
                 meta: None,
                 verification: None,
                 verification_passed: false,
+                archived: false,
             }],
             state: TodoState::default(),
         });
