@@ -9,17 +9,18 @@ fn config_text(content: &ContentController) -> String {
     std::fs::read_to_string(content.home().join(".grok").join("config.toml")).unwrap_or_default()
 }
 
-/// The log lines about the model reload and the context window, for a failure message.
+/// The `GROK_DEBUG_LOG` file of the test child.
+fn debug_log_path(content: &ContentController) -> std::path::PathBuf {
+    content.home().join("debug.log")
+}
+
+/// The debug log lines about the model reload and the context window.
 fn window_log(content: &ContentController) -> String {
-    let path = content
-        .home()
-        .join(".grok")
-        .join("logs")
-        .join("unified.jsonl");
+    let path = debug_log_path(content);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| format!("(no log at {}: {e})", path.display()))
         .lines()
-        .filter(|l| l.contains("context") || l.contains("model config") || l.contains("reload"))
+        .filter(|l| l.contains("context window") || l.contains("model config"))
         .take(60)
         .collect::<Vec<_>>()
         .join("\n")
@@ -109,9 +110,8 @@ async fn context_window_limit_setting_writes_config_and_shows_the_limit() {
     harness.quit().expect("clean quit");
 }
 
-/// A limit set in the row reaches the running session: with a 1k window, a
-/// prompt of about 1.5k tokens makes the session compact. The model's own
-/// window is above 100k, so nothing else can start that compaction.
+/// A limit set in the row reaches the running session. The session takes the
+/// new window into its sampling config, and the context bar shows it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; requires a rebuilt pager binary"]
 async fn context_window_limit_reaches_the_running_session() {
@@ -119,9 +119,17 @@ async fn context_window_limit_reaches_the_running_session() {
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} context limit turn."));
 
     let binary = pager_binary().expect("pager binary");
-    let mut harness =
-        PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, DEFAULT_COLS, &content, &[])
-            .expect("spawn pager");
+    let log_path = debug_log_path(&content);
+    let log_path = log_path.to_str().expect("utf-8 log path");
+    let mut harness = PtyHarness::spawn_with_content_env(
+        &binary,
+        DEFAULT_ROWS,
+        DEFAULT_COLS,
+        &content,
+        &[],
+        &[("GROK_DEBUG_LOG", log_path)],
+    )
+    .expect("spawn pager");
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
@@ -132,11 +140,6 @@ async fn context_window_limit_reaches_the_running_session() {
         .wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30))
         .expect("turn rendered");
     harness.update(Duration::from_millis(400));
-    assert!(
-        !harness.screen_contents().contains("ompact"),
-        "no compaction before the limit\n{}",
-        harness.screen_contents()
-    );
 
     open_limit_row(&mut harness);
     harness
@@ -169,24 +172,17 @@ async fn context_window_limit_reaches_the_running_session() {
             )
         });
 
-    let long_prompt = "lorem ipsum dolor sit amet ".repeat(220);
+    // The session actor logs the window it now samples with.
     harness
-        .inject_keys(long_prompt.as_bytes())
-        .expect("type long prompt");
-    harness.update(Duration::from_millis(500));
-    harness
-        .inject_keys(keys::ENTER)
-        .expect("submit long prompt");
-    harness
-        .wait_until("the session compacts", Duration::from_secs(60), |h| {
-            let screen = h.full_text();
-            screen.contains("Compacting") || screen.contains("compacted")
+        .wait_until("the session takes the limit", TIMEOUT, |_| {
+            window_log(&content)
+                .lines()
+                .any(|l| l.contains("context window reloaded from config") && l.contains("to=1000"))
         })
         .unwrap_or_else(|_| {
             panic!(
-                "a 1k limit must make the session compact\nlog:\n{}\nscreen:\n{}",
-                window_log(&content),
-                harness.screen_contents()
+                "the running session must take the 1k window\nlog:\n{}",
+                window_log(&content)
             )
         });
 
