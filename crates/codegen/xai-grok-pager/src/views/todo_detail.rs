@@ -274,6 +274,7 @@ mod tests {
             meta: None,
             verification: verification.map(str::to_owned),
             verification_passed: passed,
+            archived: false,
         }
     }
 

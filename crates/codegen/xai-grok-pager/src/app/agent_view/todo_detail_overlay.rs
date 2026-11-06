@@ -81,6 +81,7 @@ mod todo_detail_overlay_tests {
             meta: None,
             verification: None,
             verification_passed: false,
+            archived: false,
         }
     }
 

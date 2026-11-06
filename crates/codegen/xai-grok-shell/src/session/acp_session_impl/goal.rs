@@ -534,6 +534,7 @@ impl SessionActor {
                     tracker.complete();
                     notify.emit_goal_updated(&mut tracker, tokens_used, finished);
                 }
+                self.archive_finished_todos().await;
                 self.maybe_run_goal_summarizer(attempt).await;
             }
             GoalClassifierOutcome::NotAchieved {
@@ -1263,12 +1264,42 @@ impl SessionActor {
         }
     }
 
+    /// Archive the finished todos, so that each goal starts on a short list.
+    /// The items stay in the state. The client gets the new list as a plan.
+    pub(super) async fn archive_finished_todos(&self) {
+        use crate::tools::todo::{TodoState, plan_entry_from_todo_item};
+        use xai_grok_tools::types::resources::State;
+        let bridge = self.agent.borrow().tool_bridge().clone();
+        let shared = bridge.shared_resources().await;
+        let entries: Vec<acp::PlanEntry> = {
+            let mut res = shared.lock().await;
+            let Some(state) = res.get_mut::<State<TodoState>>() else {
+                return;
+            };
+            let archived = state.0.archive_finished();
+            if archived == 0 {
+                return;
+            }
+            tracing::info!(archived, "archived finished todos");
+            state
+                .0
+                .todo_items()
+                .cloned()
+                .map(plan_entry_from_todo_item)
+                .collect()
+        };
+        bridge.persist_state().await;
+        self.send_update(acp::SessionUpdate::Plan(acp::Plan::new(entries)), None)
+            .await;
+    }
+
     /// Create the goal orchestration and announce it. Returns the new goal id.
     pub(super) async fn create_goal_orchestration(
         &self,
         objective: &str,
         token_budget: Option<i64>,
     ) -> String {
+        self.archive_finished_todos().await;
         let goal_id = uuid::Uuid::new_v4().to_string();
         let created_at = chrono::Utc::now().to_rfc3339();
         let token_baseline = self.chat_state_handle.get_total_tokens().await as i64;
@@ -2067,6 +2098,7 @@ impl SessionActor {
             self.goal_notify_sender()
                 .emit_goal_updated(&mut tracker, tokens_used, finished);
         }
+        self.archive_finished_todos().await;
         self.send_slash_command_output(&format!("Goal complete.\n{}", evidence.trim()))
             .await;
     }

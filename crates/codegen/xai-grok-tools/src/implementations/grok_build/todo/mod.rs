@@ -79,6 +79,7 @@ pub(crate) fn apply_merge(
             meta: None,
             verification: u.verification.clone().filter(|v| !v.trim().is_empty()),
             verification_passed: false,
+            archived: false,
         };
         if prepend {
             state.insert_at(front, u.id.clone(), item);
@@ -94,13 +95,25 @@ pub(crate) fn apply_merge(
 const FINISHED_ITEM_ECHO_CHARS: usize = 100;
 
 /// Every write echoes the whole list, and the list never shrinks. So a
-/// finished item echoes only its first line. The state keeps the full text.
+/// finished item echoes only its first line, and an archived item echoes
+/// only as part of one count line. The state keeps the full text.
 pub(crate) fn summarize_todo_state(state: &TodoState) -> String {
     if state.is_empty() {
         "No tasks currently tracked.".into()
     } else {
         let mut out = String::new();
+        let archived = state.archived_count();
+        if archived > 0 {
+            writeln!(
+                &mut out,
+                "({archived} finished items from earlier goals are archived and not listed. Their ids still accept updates.)"
+            )
+            .ok();
+        }
         for (id, t) in state.todo_items_with_ids() {
+            if t.archived {
+                continue;
+            }
             let finished = matches!(t.status, TodoStatus::Completed | TodoStatus::Cancelled);
             if finished {
                 let first = t.content.lines().next().unwrap_or("");
@@ -397,6 +410,11 @@ impl TodoStatus {
             Self::Cancelled => "[cancelled]",
         }
     }
+
+    /// True for `Completed` and `Cancelled`.
+    pub const fn is_finished(&self) -> bool {
+        matches!(self, Self::Completed | Self::Cancelled)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -414,6 +432,9 @@ pub struct TodoItem {
     /// Whether the current `verification` prompt has passed a verifier run.
     #[serde(default)]
     pub verification_passed: bool,
+    /// A finished item from an earlier goal. It stays in the state, but the echo and the todo pane collapse it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -477,8 +498,29 @@ impl TodoState {
         }
         if let Some(status) = status {
             todo.status = status;
+            if !status.is_finished() {
+                todo.archived = false;
+            }
         }
         true
+    }
+
+    /// Archive every finished item that is not archived yet. Returns how many
+    /// items this call archived. Nothing leaves the state.
+    pub fn archive_finished(&mut self) -> usize {
+        let mut archived = 0;
+        for todo in self.todos.values_mut() {
+            if todo.status.is_finished() && !todo.archived {
+                todo.archived = true;
+                archived += 1;
+            }
+        }
+        archived
+    }
+
+    /// How many items are archived.
+    pub fn archived_count(&self) -> usize {
+        self.todos.values().filter(|t| t.archived).count()
     }
 
     /// Borrow an item by id.
@@ -878,6 +920,7 @@ mod tests {
             meta: None,
             verification: None,
             verification_passed: false,
+            archived: false,
         };
         for i in 0..5 {
             state.push(format!("a{i}").into(), running());
@@ -1274,10 +1317,95 @@ mod tests {
                     meta: None,
                     verification: None,
                     verification_passed: false,
+                    archived: false,
                 },
             );
         }
         state
+    }
+
+    #[test]
+    fn archive_marks_only_finished_items_and_keeps_every_item() {
+        let mut state = seed_state(&[
+            ("1", "open", TodoStatus::Pending),
+            ("2", "running", TodoStatus::InProgress),
+            ("3", "done", TodoStatus::Completed),
+            ("4", "dropped", TodoStatus::Cancelled),
+        ]);
+        assert_eq!(state.archive_finished(), 2);
+        assert_eq!(
+            state.archive_finished(),
+            0,
+            "a second call archives nothing new"
+        );
+        assert_eq!(state.todo_items().count(), 4, "archive removes nothing");
+        let archived: Vec<_> = state
+            .todo_items_with_ids()
+            .filter(|(_, t)| t.archived)
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(archived, ["3", "4"]);
+        assert_eq!(state.archived_count(), 2);
+    }
+
+    #[test]
+    fn reopening_an_archived_item_unarchives_it() {
+        let mut state = seed_state(&[("1", "done", TodoStatus::Completed)]);
+        state.archive_finished();
+        state.update(&"1".to_string(), Some("new text"), None);
+        assert!(
+            state.item(&"1".to_string()).unwrap().archived,
+            "a text edit keeps it archived"
+        );
+        state.update(&"1".to_string(), None, Some(TodoStatus::InProgress));
+        let item = state.item(&"1".to_string()).unwrap();
+        assert!(!item.archived, "open work is never archived");
+        assert_eq!(item.content, "new text");
+    }
+
+    #[test]
+    fn the_echo_collapses_archived_items_into_one_count_line() {
+        let mut state = seed_state(&[
+            ("1", "old done", TodoStatus::Completed),
+            ("2", "old dropped", TodoStatus::Cancelled),
+        ]);
+        state.archive_finished();
+        let mut state2 = state.clone();
+        apply_merge(
+            &mut state2,
+            &[TodoUpdate {
+                id: "3".into(),
+                content: Some("new work".into()),
+                status: Some(TodoStatus::Pending),
+                verification: None,
+                verification_context: None,
+            }],
+            false,
+        )
+        .unwrap();
+        let echo = summarize_todo_state(&state2);
+        assert!(!echo.contains("old done"), "{echo}");
+        assert!(!echo.contains("old dropped"), "{echo}");
+        assert!(
+            echo.contains("(2 finished items from earlier goals are archived"),
+            "{echo}"
+        );
+        assert!(echo.contains("- [pending] 3: new work\n"), "{echo}");
+    }
+
+    #[test]
+    fn archived_flag_round_trips_and_defaults_off() {
+        let mut state = seed_state(&[("1", "done", TodoStatus::Completed)]);
+        state.archive_finished();
+        let json = serde_json::to_value(&state).unwrap();
+        let back: TodoState = serde_json::from_value(json).unwrap();
+        assert!(back.item(&"1".to_string()).unwrap().archived);
+        let legacy: TodoItem =
+            serde_json::from_str(r#"{"content":"x","status":"completed"}"#).unwrap();
+        assert!(
+            !legacy.archived,
+            "state saved before the flag reads as not archived"
+        );
     }
 
     #[test]

@@ -778,6 +778,7 @@ mod tests {
                 meta: None,
                 verification: None,
                 verification_passed: false,
+                archived: false,
             },
         );
         state.push(
@@ -789,6 +790,7 @@ mod tests {
                 meta: None,
                 verification: None,
                 verification_passed: false,
+                archived: false,
             },
         );
         state.push(
@@ -800,6 +802,7 @@ mod tests {
                 meta: None,
                 verification: None,
                 verification_passed: false,
+                archived: false,
             },
         );
 
@@ -861,6 +864,7 @@ mod tests {
                     meta: None,
                     verification: None,
                     verification_passed: false,
+                    archived: false,
                 },
             ],
             state: xai_grok_tools::implementations::grok_build::todo::TodoState::default(),

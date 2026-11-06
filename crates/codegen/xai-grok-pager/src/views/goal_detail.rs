@@ -1845,6 +1845,7 @@ mod tests {
             meta: None,
             verification: None,
             verification_passed: false,
+            archived: false,
         }
     }
 
