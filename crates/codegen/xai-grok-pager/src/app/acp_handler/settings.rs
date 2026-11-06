@@ -35,6 +35,10 @@ pub(super) fn handle_models_update(notif: &acp::ExtNotification, app: &mut AppVi
                 .session
                 .models
                 .update_catalog(new_models.available.clone());
+            // A config edit can change the window. The bar must show it now, not after the next turn.
+            if let Some(used) = agent.context_state.as_ref().map(|c| c.used) {
+                super::session_notification::refresh_context_used(agent, used);
+            }
         }
         true
     } else {
