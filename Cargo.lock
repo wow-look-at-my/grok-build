@@ -12096,6 +12096,7 @@ dependencies = [
  "xai-dirs",
  "xai-fast-worktree",
  "xai-file-utils",
+ "xai-fsnotify",
  "xai-gix-status",
  "xai-grok-active-sessions",
  "xai-grok-agent",

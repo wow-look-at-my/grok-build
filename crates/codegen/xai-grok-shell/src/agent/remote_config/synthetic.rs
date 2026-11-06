@@ -191,7 +191,7 @@ mod tests {
             !is_synthetic_listing(&value),
             "an OpenAI-style entry must not be mis-detected as Synthetic"
         );
-        let parsed = parse_remote_model_value(&value, "https://api.x.ai/v1").unwrap();
+        let parsed = parse_remote_model_value(&value, "https://api.example.invalid/v1").unwrap();
         let applied = apply_synthetic_schema(&value, parsed.clone());
         assert_eq!(applied.context_window, parsed.context_window);
         assert_eq!(applied.max_completion_tokens, parsed.max_completion_tokens);

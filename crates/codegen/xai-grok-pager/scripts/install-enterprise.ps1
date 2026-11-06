@@ -1,5 +1,5 @@
 #
-# Grok CLI installer (enterprise channel) for PowerShell - https://x.ai/cli/enterprise-install.ps1
+# Grok CLI installer (enterprise channel) for PowerShell - https://example.invalid/cli/enterprise-install.ps1
 #
 # Standalone installer for the enterprise channel. Intentionally a full copy of
 # the install logic so changes to the stable installer cannot break enterprise.
@@ -8,9 +8,9 @@
 # Env: GROK_BIN_DIR
 #
 # Usage:
-#   irm https://x.ai/cli/enterprise-install.ps1 | iex                                       # latest enterprise
-#   & ([scriptblock]::Create((irm https://x.ai/cli/enterprise-install.ps1))) -Version 0.1.42 # specific version
-#   $env:GROK_VERSION="0.1.42"; irm https://x.ai/cli/enterprise-install.ps1 | iex           # specific version (alt)
+#   irm https://example.invalid/cli/enterprise-install.ps1 | iex                                       # latest enterprise
+#   & ([scriptblock]::Create((irm https://example.invalid/cli/enterprise-install.ps1))) -Version 0.1.42 # specific version
+#   $env:GROK_VERSION="0.1.42"; irm https://example.invalid/cli/enterprise-install.ps1 | iex           # specific version (alt)
 #
 
 param(
@@ -33,7 +33,7 @@ if (-not $Version -and $env:GROK_VERSION) {
 
 # This script is Windows-only. PS 5.1 has no Platform property and only runs on Windows.
 if ($PSVersionTable.Platform -and $PSVersionTable.Platform -ne 'Win32NT') {
-    Write-Error "This installer is for Windows. On macOS/Linux, use: curl -fsSL https://x.ai/cli/enterprise-install.sh | bash"
+    Write-Error "This installer is for Windows. On macOS/Linux, use: curl -fsSL https://example.invalid/cli/enterprise-install.sh | bash"
     exit 1
 }
 
@@ -266,8 +266,8 @@ if ($Version -and $Version -notmatch '^\d+\.\d+\.\d+(-\S+)?$') {
 
 # --- Resolve auth ---
 
-$OidcScope = 'https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828'
-$LegacyScope = 'https://accounts.x.ai/sign-in'
+$OidcScope = 'https://auth.example.invalid::b1a00492-073a-47ea-816f-4c329264a828'
+$LegacyScope = 'https://accounts.example.invalid/sign-in'
 $AuthSource = ''
 
 $oidcToken = Read-GrokToken $OidcScope
@@ -298,7 +298,7 @@ $platform = "windows-$arch"
 
 # --- Resolve version ---
 
-$BaseUrlPrimary = 'https://x.ai/cli'
+$BaseUrlPrimary = 'https://example.invalid/cli'
 $BaseUrlFallback = 'https://storage.googleapis.com/grok-build-public-artifacts/cli'
 $DownloadDir = Join-Path $GrokDir 'downloads'
 $BinDir = if ($env:GROK_BIN_DIR) { $env:GROK_BIN_DIR } else { Join-Path $GrokDir 'bin' }
@@ -308,7 +308,7 @@ New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 
 $Channel = 'enterprise'
 
-# Pick a working BaseUrl: try Cloudflare-fronted x.ai first, fall back to
+# Pick a working BaseUrl: try Cloudflare-fronted example.invalid first, fall back to
 # direct GCS if it's unreachable. The probe doubles as the channel-pointer
 # fetch when no -Version was passed, so the happy path costs zero extra requests.
 if (-not $Version) { Write-Host "Fetching latest $Channel version..." -ForegroundColor DarkGray }

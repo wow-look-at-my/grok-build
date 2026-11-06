@@ -80,11 +80,11 @@ pub struct RoleDetail {
 }
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/bundle/sync" => {
+        "example.invalid/bundle/sync" => {
             let req: BundleSyncRequest = parse_params(args)?;
             to_ext_response(sync_bundle(agent, req).await)
         }
-        "x.ai/bundle/status" => {
+        "example.invalid/bundle/status" => {
             let _req: BundleStatusRequest = parse_params(args)?;
             to_ext_response(status_bundle())
         }

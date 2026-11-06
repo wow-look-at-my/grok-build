@@ -961,7 +961,7 @@ async fn legacy_auth_hint_on_404_model_not_found() {
 fn unauthorized_401_error() -> xai_grok_sampler::SamplingErrorInfo {
     xai_grok_sampler::SamplingErrorInfo {
             kind: xai_grok_sampler::SamplingErrorKind::Api,
-            message: "Unauthorized (401) from https://cli-chat-proxy.grok.com/v1/responses: {\"error\":\"Invalid or expired credentials (auth_kind=bearer, x_xai_token_auth=xai-grok-cli, upstream=Unauthenticated, reason=no auth context)\"}".into(),
+            message: "Unauthorized (401) from https://cli-chat-proxy.grok.invalid/v1/responses: {\"error\":\"Invalid or expired credentials (auth_kind=bearer, x_xai_token_auth=xai-grok-cli, upstream=Unauthenticated, reason=no auth context)\"}".into(),
             status_code: Some(401),
             is_retryable: false,
             retry_after_secs: None,
@@ -1624,7 +1624,7 @@ async fn seed_provider_memo(actor: &Arc<SessionActor>, provider: xai_grok_login:
 }
 
 /// Regression: switching from a provider-backed model to a first-party model must drop the minted provider token from the chat credentials.
-/// The token must never go out on a later request to `api.x.ai`.
+/// The token must never go out on a later request to `api.example.invalid`.
 /// Mirrors the forward direction in `set_session_model_invalidates_byok_memo_for_same_model_id`.
 #[tokio::test(flavor = "current_thread")]
 async fn switch_to_first_party_model_drops_minted_provider_token() {
@@ -1650,7 +1650,7 @@ async fn switch_to_first_party_model_drops_minted_provider_token() {
 
             let cfg = xai_grok_sampler::SamplerConfig {
                 api_key: Some("session-jwt".to_string()),
-                base_url: "https://api.x.ai/v1".to_string(),
+                base_url: "https://api.example.invalid/v1".to_string(),
                 model,
                 context_window: 256_000,
                 ..Default::default()

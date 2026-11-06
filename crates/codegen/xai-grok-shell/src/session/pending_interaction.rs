@@ -24,9 +24,9 @@ pub(crate) type PendingInteractions = Arc<Mutex<HashMap<String, PendingKind>>>;
 pub enum PendingKind {
     /// `request_permission` for a tool action.
     Permission,
-    /// `x.ai/ask_user_question`.
+    /// `example.invalid/ask_user_question`.
     Question,
-    /// `x.ai/exit_plan_mode` plan approval.
+    /// `example.invalid/exit_plan_mode` plan approval.
     PlanApproval,
     McpElicitation,
 }
@@ -49,7 +49,7 @@ fn broadcast(gateway: &GatewaySender, session_id: &acp::SessionId, update: XaiSe
     };
     if let Ok(params) = serde_json::value::to_raw_value(&notification) {
         gateway.forward_fire_and_forget(acp::ExtNotification::new(
-            "x.ai/session_notification",
+            "example.invalid/session_notification",
             params.into(),
         ));
     }

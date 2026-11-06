@@ -1,4 +1,4 @@
-//! `x.ai/share_session` extension handler.
+//! `example.invalid/share_session` extension handler.
 //!
 //! Loads a local session, exports it, uploads the message payload to cloud storage via a signed URL, and asks the backend for a public share URL.
 //! The signed URL lets large sessions bypass the proxy/backend body-size limits.
@@ -19,7 +19,7 @@ use xai_grok_telemetry::id::agent_id;
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/share_session" => {
+        "example.invalid/share_session" => {
             tracing::info!("handling share session request");
             handle_share_session(agent, args).await
         }
@@ -189,11 +189,11 @@ mod tests {
         let expires_at = Utc::now() + ttl;
 
         // We must explicitly set oidc_issuer to a first-party xAI issuer.
-        // Only OIDC tokens against https://auth.x.ai (or the local-dev equivalent) return true from is_xai_auth()
+        // Only OIDC tokens against https://auth.example.invalid (or the local-dev equivalent) return true from is_xai_auth()
         // The share tests need that to exercise the happy path through require_xai_auth_for_share
         let auth = GrokAuth {
             auth_mode: AuthMode::Oidc,
-            oidc_issuer: Some("https://auth.x.ai".to_string()),
+            oidc_issuer: Some("https://auth.example.invalid".to_string()),
             key: "test-key".into(),
             expires_at: Some(expires_at),
             create_time: Utc::now() - Duration::hours(1),

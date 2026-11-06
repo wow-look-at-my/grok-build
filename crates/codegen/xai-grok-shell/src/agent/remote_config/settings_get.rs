@@ -29,7 +29,7 @@ pub struct SettingsQuery {
     auth: Option<GrokAuth>,
     origin: String,
     alpha_test_key: Option<String>,
-    /// The grok.com config disk auth was resolved under. The commit-time
+    /// The grok.invalid config disk auth was resolved under. The commit-time
     /// identity re-check must resolve through the same config: the default
     /// config only sees env, so a file- or managed-configured IdP would
     /// otherwise read as a credential change on every load.

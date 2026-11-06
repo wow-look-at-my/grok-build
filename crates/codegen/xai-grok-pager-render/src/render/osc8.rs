@@ -723,7 +723,7 @@ mod tests {
         std::fs::write(dir.path().join("images/1.jpg"), b"x").unwrap();
         let media = vec![dir.path().join("images/1.jpg")];
 
-        assert!(local_link_to_file_target("https://x.ai", &media, None).is_none());
+        assert!(local_link_to_file_target("https://example.invalid", &media, None).is_none());
         assert!(local_link_to_file_target("mailto:a@b.c", &media, None).is_none());
         assert!(local_link_to_file_target("#section", &media, None).is_none());
         // Relative path that isn't a known generated media file (no cwd).
@@ -1301,13 +1301,13 @@ mod tests {
 
     #[test]
     fn scan_content_x_offset_applied() {
-        let line = make_line("https://x.ai");
+        let line = make_line("https://example.invalid");
         let mut overlay = LinkOverlay::new();
         scan_unjoined(std::iter::once((0, &line)), 10, &[], &mut overlay);
 
         assert_eq!(overlay.links().len(), 1);
         assert_eq!(nth_link(&overlay, 0).col_start, 10);
-        assert_eq!(nth_link(&overlay, 0).col_end, 10 + 12);
+        assert_eq!(nth_link(&overlay, 0).col_end, 10 + 23);
     }
 
     // ── File path detection ──

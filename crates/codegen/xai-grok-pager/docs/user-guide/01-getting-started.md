@@ -11,25 +11,25 @@ You can use it interactively as a full-screen TUI, run it headlessly for scripti
 Install the latest stable release (macOS, Linux, or Windows via Git Bash):
 
 ```bash
-curl -fsSL https://x.ai/cli/install.sh | bash
+curl -fsSL https://example.invalid/cli/install.sh | bash
 ```
 
 Install a specific version:
 
 ```bash
-curl -fsSL https://x.ai/cli/install.sh | bash -s 0.1.42
+curl -fsSL https://example.invalid/cli/install.sh | bash -s 0.1.42
 ```
 
 On **Windows (PowerShell)**, use the native PowerShell installer:
 
 ```powershell
-irm https://x.ai/cli/install.ps1 | iex
+irm https://example.invalid/cli/install.ps1 | iex
 ```
 
 Install a specific version:
 
 ```powershell
-$env:GROK_VERSION="0.1.42"; irm https://x.ai/cli/install.ps1 | iex
+$env:GROK_VERSION="0.1.42"; irm https://example.invalid/cli/install.ps1 | iex
 ```
 
 The PowerShell installer automatically adds `%USERPROFILE%\.grok\bin` to your User PATH. Alternatively, install via [Git for Windows](https://gitforwindows.org/) (Git Bash) or MSYS2 using the bash script above. WSL users get the Linux binary automatically.
@@ -56,7 +56,7 @@ To fetch a repository through Grove (NFS on macOS, FUSE on Linux), enable `grok 
 grok clone <url> [dir]
 ```
 
-The default is a depth-1 checkout of the selected branch. Pass `--full-history` for a complete clone. Clone enablement is independent of session / `-w` Grove worktrees (the convenience above turns both on. The specific knobs still win). the grok.com sign-in below — see [grok clone](27-grok-clone.md#authentication) and [Configuration reference](26-config-reference.md).
+The default is a depth-1 checkout of the selected branch. Pass `--full-history` for a complete clone. Clone enablement is independent of session / `-w` Grove worktrees (the convenience above turns both on. The specific knobs still win). the grok.invalid sign-in below — see [grok clone](27-grok-clone.md#authentication) and [Configuration reference](26-config-reference.md).
 
 ---
 
@@ -68,7 +68,7 @@ Start Grok by running:
 grok
 ```
 
-On first launch, Grok opens your browser to authenticate with grok.com. After you sign in, Grok stores your credentials in `~/.grok/auth.json`, where they persist across sessions. Grok refreshes your credentials automatically and prompts you to sign in again when they can no longer be renewed.
+On first launch, Grok opens your browser to authenticate with grok.invalid. After you sign in, Grok stores your credentials in `~/.grok/auth.json`, where they persist across sessions. Grok refreshes your credentials automatically and prompts you to sign in again when they can no longer be renewed.
 
 If you prefer API key authentication (e.g., for CI/CD or environments without a browser), set the `XAI_API_KEY` environment variable instead:
 

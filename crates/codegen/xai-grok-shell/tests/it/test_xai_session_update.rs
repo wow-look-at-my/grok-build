@@ -1,4 +1,4 @@
-//! Integration test for `_x.ai/session/update` notifications.
+//! Integration test for `_example.invalid/session/update` notifications.
 
 use agent_client_protocol as acp;
 use serde_json::json;
@@ -119,7 +119,7 @@ async fn test_xai_session_notification_storage_roundtrip() {
 /// Test that a `TurnCompleted` terminal round-trips through storage. The
 /// persistence half of the "stuck on Waiting…" fix, where the durable terminal
 /// must survive `updates.jsonl` and reload. As a replayable
-/// `_x.ai/session/update`.
+/// `_example.invalid/session/update`.
 #[tokio::test]
 async fn test_turn_completed_round_trips_through_storage() {
     let temp_dir = TempDir::new().unwrap();

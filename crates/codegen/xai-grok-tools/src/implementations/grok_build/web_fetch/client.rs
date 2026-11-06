@@ -1316,7 +1316,7 @@ mod tests {
             "![a](data:image/png;base64,AAAA==) text ![b](data:image/jpeg;base64,/9j/4AAQ==)",
             "![img](https://example.com/logo.png) and [link](https://example.com)",
             "data:text/html,%3Ch1%3EHello%3C%2Fh1%3E",
-            "Just normal markdown with **bold** and [link](https://x.com)",
+            "Just normal markdown with **bold** and [link](https://x.invalid)",
             r#"<img src="data:image/png;base64,iVBORw0KGgo="> text"#,
             "background: url(data:image/svg+xml;base64,PHN2Zz4=) no-repeat",
             "before data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7 after",

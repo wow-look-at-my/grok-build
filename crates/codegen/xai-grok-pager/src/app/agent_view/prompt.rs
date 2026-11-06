@@ -41,7 +41,7 @@ impl AgentView {
     }
 
     /// Append the replayed transcript's `UserPrompt` blocks to `session.prompt_history`, newest first.
-    /// The browse reads that list alone, and the `x.ai/prompt_history` fetch delivers an empty list when it fails.
+    /// The browse reads that list alone, and the `example.invalid/prompt_history` fetch delivers an empty list when it fails.
     /// This is therefore what makes a restored session's prompts recallable.
     pub(in crate::app) fn seed_prompt_history_from_scrollback(&mut self) {
         let recorded: std::collections::HashSet<String> = self
@@ -1648,7 +1648,7 @@ mod prompt_suggestion_key_tests {
     use crate::app::app_view::InputOutcome;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    /// Idle agent with the gate open and a loaded suggestion: the state right after a turn ends with `x.ai/suggestPrompt` resolved.
+    /// Idle agent with the gate open and a loaded suggestion: the state right after a turn ends with `example.invalid/suggestPrompt` resolved.
     /// Pins the settings cache so `resolve_enabled()` never reads the dev machine's config.toml (thread-local, so per-test).
     fn suggestion_agent(text: &str) -> AgentView {
         crate::appearance::cache::set_prompt_suggestions(true);

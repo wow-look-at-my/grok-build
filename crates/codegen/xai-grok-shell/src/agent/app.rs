@@ -78,7 +78,7 @@ fn internal_reload_request_line(
 ) -> String {
     crate::leader::protocol::internal_request_line(id, method, params)
 }
-/// Start a skills file watcher and wire it to inject `x.ai/internal/reload_skills` messages into the shared ACP incoming stream.
+/// Start a skills file watcher and wire it to inject `example.invalid/internal/reload_skills` messages into the shared ACP incoming stream.
 /// The messages fire when SKILL.md files change on disk.
 /// Returns the watcher task, or `None` if no directories could be watched.
 fn spawn_skills_file_watcher<W>(
@@ -241,7 +241,7 @@ pub async fn run_headless(
     crate::http::set_process_client_mode_headless();
     use crate::agent::relay::spawn_relay_connection_with_callback;
     use tokio_util::sync::CancellationToken;
-    const HEADLESS_NO_SESSION: &str = "Headless mode requires a grok.com session. \
+    const HEADLESS_NO_SESSION: &str = "Headless mode requires a grok.invalid session. \
         Run `grok login` to sign in, or use `grok agent stdio` for API-key access.";
     xai_file_utils::queue::cleanup_orphaned_uploads(
         &grok_home::grok_home(),
@@ -492,7 +492,7 @@ fn relay_config_for_session(
 }
 /// A bare leader has no local IPC clients; remote prompts arrive *through* the relay, so it must be up before any demand signal could exist.
 /// Gating it on headless registration is a chicken-and-egg deadlock: the agent never registers and tooling reports "No online agents". A leader serving only TUI-dashboard / IDE clients never opens the relay.
-/// It then never pays the per-message clone/parse/log/TLS duplication of mirroring every agent message to grok.com. Until the relay starts, `agent_to_ws_tx` stays `None`, so the outbound bridge skips the relay clone entirely. Must be called within a `LocalSet` (uses `spawn_local`).
+/// It then never pays the per-message clone/parse/log/TLS duplication of mirroring every agent message to grok.invalid. Until the relay starts, `agent_to_ws_tx` stays `None`, so the outbound bridge skips the relay clone entirely. Must be called within a `LocalSet` (uses `spawn_local`).
 fn spawn_leader_relay(
     slot: Rc<std::cell::RefCell<Option<crate::agent::relay::RelayHandle>>>,
     relay_config: crate::agent::relay::RelayConfig,
@@ -530,7 +530,7 @@ fn spawn_leader_relay(
         *slot_for_task.borrow_mut() = Some(handle);
     });
 }
-/// Everything needed to arm the leader's grok.com relay *after* startup. A leader that boots without auth used to disable the relay forever: the decision was made once in [`run_leader`] and never revisited.
+/// Everything needed to arm the leader's grok.invalid relay *after* startup. A leader that boots without auth used to disable the relay forever: the decision was made once in [`run_leader`] and never revisited.
 /// On devboxes that turned a transient mint-provider outage at provision time into a permanently invisible box.
 /// The external auth provider succeeded minutes later and the config watcher hot-reloaded the token into the leader. But the relay never connected, the agent never registered, and tooling reported the (healthy) box as "not found online" for its whole lifetime.
 struct DeferredRelayArm {
@@ -547,7 +547,7 @@ struct DeferredRelayArm {
 impl DeferredRelayArm {
     /// Arm the relay for a hot-reloaded session if it is relay-eligible. Consumes the parts and returns `None` when the relay was armed.
     /// Returns `Some(self)` when the session is not relay-eligible, so a later eligible token can still arm.
-    /// Ineligible means BYOK / non-x.ai issuer; see [`RelayConfig::for_session`](crate::agent::relay::RelayConfig::for_session). Must be called within a `LocalSet` (delegates to [`spawn_leader_relay`]).
+    /// Ineligible means BYOK / non-example.invalid issuer; see [`RelayConfig::for_session`](crate::agent::relay::RelayConfig::for_session). Must be called within a `LocalSet` (delegates to [`spawn_leader_relay`]).
     fn arm_if_eligible(self, session: &GrokAuth, auth_manager: &Arc<AuthManager>) -> Option<Self> {
         let Some(relay_config) = crate::agent::relay::RelayConfig::for_session(
             session,
@@ -557,7 +557,7 @@ impl DeferredRelayArm {
         ) else {
             return Some(self);
         };
-        info!("Relay-eligible auth token appeared after startup — arming grok.com relay");
+        info!("Relay-eligible auth token appeared after startup — arming grok.invalid relay");
         spawn_leader_relay(
             self.slot,
             relay_config,
@@ -591,7 +591,7 @@ pub fn apply_otel_config(auth_manager: &AuthManager, grok_com_config: &GrokComCo
 pub struct LeaderRunOptions {
     /// Keep serving after the last IPC client disconnects (devbox / systemd leaders).
     pub no_exit_on_disconnect: bool,
-    /// Defer the grok.com relay until the first headless client registers.
+    /// Defer the grok.invalid relay until the first headless client registers.
     pub relay_on_demand: bool,
     pub memory_config: Option<crate::config::MemoryConfig>,
     /// Start the worker door after readiness; `None` defers to `[cursor_worker] auto_start`.
@@ -608,7 +608,7 @@ fn refuse_in_flight_leader_lock(e: crate::leader::LockError) -> anyhow::Error {
     );
     anyhow::Error::new(e).context("refusing to start a second leader-lock acquirer")
 }
-/// Run the agent in leader mode, accepting IPC connections from multiple clients. When a grok.com session is present, the leader connects to the websocket relay after startup (post-auth, post-prefetch).
+/// Run the agent in leader mode, accepting IPC connections from multiple clients. When a grok.invalid session is present, the leader connects to the websocket relay after startup (post-auth, post-prefetch).
 /// BYOK / no-session leaders start serving clients over IPC only. A relay-eligible token hot-reloaded later arms the relay via [`DeferredRelayArm`]. IPC server started (`tokio::spawn`); socket bound HERE, before auth.
 /// Bounded non-interactive auth (no blocking model/settings prefetch; those stream in after readiness). `None` (BYOK / no session) is not an error: the relay stays off and a background cold-mint / re-login can start it later.
 #[tracing::instrument(level = "debug", skip_all)]
@@ -992,7 +992,7 @@ pub async fn run_leader(
                 );
             } else {
                 info!(
-                    "Relay not started: no grok.com session token \
+                    "Relay not started: no grok.invalid session token \
                      (BYOK / local-only leader); will arm if an eligible \
                      token is hot-reloaded"
                 );
@@ -1145,7 +1145,7 @@ pub async fn run_leader(
                             info!("UI config change detected by watcher");
                             let notification = serde_json::json!({
                                 "jsonrpc": "2.0",
-                                "method": "x.ai/config_changed",
+                                "method": "example.invalid/config_changed",
                                 "params": {
                                     "section": "ui",
                                     "changes": {
@@ -1248,7 +1248,7 @@ mod tests {
         });
         (addr, count)
     }
-    /// A `RelayConfig` built via the production constructor (`for_session`) with a relay-eligible x.ai OIDC session.
+    /// A `RelayConfig` built via the production constructor (`for_session`) with a relay-eligible example.invalid OIDC session.
     fn test_relay_config(addr: std::net::SocketAddr) -> crate::agent::relay::RelayConfig {
         let auth = GrokAuth {
             auth_mode: AuthMode::Oidc,
@@ -1261,7 +1261,7 @@ mod tests {
             ..Default::default()
         };
         crate::agent::relay::RelayConfig::for_session(&auth, &cfg, None, None)
-            .expect("x.ai OIDC session must be relay-eligible")
+            .expect("example.invalid OIDC session must be relay-eligible")
     }
     /// The embedded startup gate (every pager `--no-leader` / fallback path) must be fail-closed by construction.
     /// A session user stays closed until the agent resolves settings, even when an env API key is also present.
@@ -1337,7 +1337,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     }
-    /// Regression test for the bare-leader relay gating bug. A bare `grok agent leader` (devbox/systemd: no local IPC clients, `relay_on_demand == false`) must connect the grok.com relay eagerly.
+    /// Regression test for the bare-leader relay gating bug. A bare `grok agent leader` (devbox/systemd: no local IPC clients, `relay_on_demand == false`) must connect the grok.invalid relay eagerly.
     /// Remote prompts arrive *through* the relay, so on such a leader no headless-registration demand signal can ever fire.
     /// Gating the relay on it means the agent never registers with the backend ("No online agents") even though the box is healthy.
     #[tokio::test]
@@ -1566,7 +1566,7 @@ mod tests {
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(
             msg.get("method").and_then(|v| v.as_str()),
-            Some("_x.ai/internal/reload_models"),
+            Some("_example.invalid/internal/reload_models"),
             "wire method must carry the `_` ext prefix or the ACP decoder \
              rejects it with method_not_found"
         );
@@ -1595,7 +1595,7 @@ mod tests {
         let msg: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
         assert_eq!(
             msg.get("method").and_then(|v| v.as_str()),
-            Some("_x.ai/internal/auth_cleared")
+            Some("_example.invalid/internal/auth_cleared")
         );
     }
 }

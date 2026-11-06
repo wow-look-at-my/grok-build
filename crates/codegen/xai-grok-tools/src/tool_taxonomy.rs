@@ -22,16 +22,16 @@ pub mod field {
     pub const PATTERN: &str = "pattern";
 }
 /// The single `_meta` key holding the canonical tool identity as one nested
-/// object (mirroring `x.ai/mcp_tool`). Consumers deserialize it into
+/// object (mirroring `example.invalid/mcp_tool`). Consumers deserialize it into
 /// [`CanonicalToolMeta`].
-pub const TOOL_META_KEY: &str = "x.ai/tool";
+pub const TOOL_META_KEY: &str = "example.invalid/tool";
 /// Version of the canonical tool `_meta` contract. Bump on any breaking change
 /// to keys or value shapes so consumers can adapt.
 pub const TOOL_META_VERSION: u32 = 1;
 impl ToolKind {
     /// Unified, harness-independent display label for this semantic kind. A pure function of the kind, so equivalent tools
     /// across toolsets share it (`read_file` and `Read` → `Read`; `run_terminal_cmd` and `Shell` → `Run Command`). Display
-    /// only; the model's tool name is `name` in `x.ai/tool`. Exhaustive, so a new `ToolKind` must add a label to compile.
+    /// only; the model's tool name is `name` in `example.invalid/tool`. Exhaustive, so a new `ToolKind` must add a label to compile.
     pub fn presentation_name(self) -> &'static str {
         match self {
             ToolKind::Read => "Read",
@@ -219,7 +219,7 @@ impl CanonicalToolMeta {
         }
     }
     /// Attach under [`TOOL_META_KEY`], preserving existing `_meta` keys
-    /// (`bash_mode`, `backend`, `x.ai/mcp_tool`, …).
+    /// (`bash_mode`, `backend`, `example.invalid/mcp_tool`, …).
     pub fn merge_into(&self, existing: Option<serde_json::Value>) -> serde_json::Value {
         debug_assert!(
             matches!(existing, None | Some(serde_json::Value::Object(_))),

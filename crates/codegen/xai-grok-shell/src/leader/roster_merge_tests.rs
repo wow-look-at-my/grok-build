@@ -61,7 +61,8 @@ fn list_response(id: Value, result: &ExtMethodResult<RosterListResponse>) -> Str
 }
 
 fn list_request(id: Value) -> String {
-    json!({"jsonrpc": "2.0", "id": id, "method": "_x.ai/sessions/list", "params": {}}).to_string()
+    json!({"jsonrpc": "2.0", "id": id, "method": "_example.invalid/sessions/list", "params": {}})
+        .to_string()
 }
 
 fn session_ids(out: &str, path: &[&str]) -> Vec<Value> {
@@ -120,12 +121,12 @@ fn appends_rows_to_bare_response_with_numeric_id() {
 fn records_the_nested_method_of_a_wrapped_ext_request() {
     let merge = merge_with(vec![row("cursor-worker:bc-1")]);
     merge.observe_inbound(
-        r#"{"jsonrpc":"2.0","id":"1|1","method":"_x.ai/sessions/list","params":{"method":"x.ai/sessions/list","params":{}}}"#,
+        r#"{"jsonrpc":"2.0","id":"1|1","method":"_example.invalid/sessions/list","params":{"method":"example.invalid/sessions/list","params":{}}}"#,
     );
     assert_eq!(1, merge.pending_len());
     // The nested method is authoritative: a wrapper naming another method is not a list.
     merge.observe_inbound(
-        r#"{"jsonrpc":"2.0","id":"1|2","method":"_x.ai/sessions/list","params":{"method":"x.ai/session/info","params":{}}}"#,
+        r#"{"jsonrpc":"2.0","id":"1|2","method":"_example.invalid/sessions/list","params":{"method":"example.invalid/session/info","params":{}}}"#,
     );
     assert_eq!(1, merge.pending_len());
 }
@@ -199,12 +200,13 @@ fn unrelated_traffic_is_untouched_and_unrecorded() {
     let merge = merge_with(vec![row("cursor-worker:bc-1")]);
     merge.observe_inbound(r#"{"jsonrpc":"2.0","id":"3|5","method":"session/prompt","params":{}}"#);
     merge.observe_inbound(
-        r#"{"jsonrpc":"2.0","method":"_x.ai/sessions/list","params":{"note":"no id, not a request"}}"#,
+        r#"{"jsonrpc":"2.0","method":"_example.invalid/sessions/list","params":{"note":"no id, not a request"}}"#,
     );
     merge.observe_inbound(
-        r#"{"jsonrpc":"2.0","id":null,"method":"_x.ai/sessions/list","params":{}}"#,
+        r#"{"jsonrpc":"2.0","id":null,"method":"_example.invalid/sessions/list","params":{}}"#,
     );
-    merge.observe_inbound(r#"[{"jsonrpc":"2.0","id":1,"method":"_x.ai/sessions/list"}]"#);
+    merge
+        .observe_inbound(r#"[{"jsonrpc":"2.0","id":1,"method":"_example.invalid/sessions/list"}]"#);
     merge.observe_inbound("not json but mentions sessions/list");
     assert_eq!(0, merge.pending_len());
 
@@ -326,7 +328,10 @@ impl Notifier {
             .expect("notifier emitted within the timeout")
             .expect("sink open");
         let json = parsed(&line);
-        assert_eq!(Some(&json!("_x.ai/sessions/changed")), json.get("method"));
+        assert_eq!(
+            Some(&json!("_example.invalid/sessions/changed")),
+            json.get("method")
+        );
         json.get("params").cloned().unwrap_or(Value::Null)
     }
 
@@ -424,6 +429,9 @@ fn changed_notification_is_machine_wide_broadcast_shape() {
     let json = parsed(&line);
     assert_eq!(Some(&json!("2.0")), json.get("jsonrpc"));
     assert!(json.get("id").is_none());
-    assert_eq!(Some(&json!("_x.ai/sessions/changed")), json.get("method"));
+    assert_eq!(
+        Some(&json!("_example.invalid/sessions/changed")),
+        json.get("method")
+    );
     assert!(json.pointer("/params/sessionId").is_none());
 }

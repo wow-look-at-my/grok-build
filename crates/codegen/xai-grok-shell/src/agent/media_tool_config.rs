@@ -7,7 +7,7 @@
 //!
 //! The configured `api_key` is the side-call bearer at build time, never `sampling_config.api_key`:
 //! on a foreign-issuer login that field holds the foreign session token, which must not reach a
-//! client that posts to `api.x.ai`. The per-request provider still decides what goes on the wire.
+//! client that posts to `api.example.invalid`. The per-request provider still decides what goes on the wire.
 
 use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
 use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;

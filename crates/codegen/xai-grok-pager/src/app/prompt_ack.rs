@@ -1,7 +1,7 @@
 //! Bounded wait for the agent's first acknowledgment of a sent prompt.
 //!
 //! A `session/prompt` RPC has no deadline of its own, so this bounds only the *acknowledgment*: the first
-//! `x.ai/queue/changed`, `session/update`, or turn end that names the prompt id. Shared by the TUI reconcile
+//! `example.invalid/queue/changed`, `session/update`, or turn end that names the prompt id. Shared by the TUI reconcile
 //! (`dispatch::reconcile_overdue_prompt_acks`) and the headless runner.
 //!
 //! Invariant: a [`PromptAckWatch`] exists on an agent only while `current_prompt_id == watch.prompt_id`
@@ -125,7 +125,7 @@ impl PromptAckWatch {
     }
 }
 
-/// Whether a `x.ai/queue/changed` payload proves the shell holds `prompt_id` (queued or running).
+/// Whether a `example.invalid/queue/changed` payload proves the shell holds `prompt_id` (queued or running).
 pub(crate) fn queue_changed_acks(
     changed: &crate::app::prompt_queue::QueueChanged,
     prompt_id: &str,

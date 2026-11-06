@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 pub struct PathsConfig {
     /// Additional directories to scan for skills (each contains `<skill>/SKILL.md`).
     /// `/import-claude` writes this. `list_skills_with_plugins` does not read it.
-    /// Extra injection dirs belong in `[skills] paths`. ACP `x.ai/skills/list` may
+    /// Extra injection dirs belong in `[skills] paths`. ACP `example.invalid/skills/list` may
     /// still show these dirs as source folders.
     pub extra_skill_dirs: Vec<String>,
     /// Additional directories to scan for rules (each contains `*.md`).

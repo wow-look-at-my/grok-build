@@ -45,10 +45,15 @@ fn spawn_refresh(cwd: PathBuf) {
     let Ok(handle) = tokio::runtime::Handle::try_current() else {
         return;
     };
-    xai_spawn::spawn_blocking_on(&handle, move || {
+    // An own thread, not the blocking pool: an unprivileged thread cannot raise its priority again.
+    // A pool thread would keep the low priority for unrelated work.
+    let refresh = move || {
+        let _runtime = handle.enter();
+        lower_thread_priority();
         // A panic in the git read must not take down the pager.
-        let stats =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compute_branch_stats(&cwd)));
+        let stats = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            compute(&cwd, LineStats::Cached)
+        }));
         let stats = match stats {
             Ok(Ok(stats)) => stats,
             Ok(Err(e)) => {
@@ -63,7 +68,36 @@ fn spawn_refresh(cwd: PathBuf) {
         if let Ok(mut cache) = CACHE.lock() {
             insert(&mut cache, cwd, (stats, Instant::now()));
         }
-    });
+    };
+    if let Err(e) = std::thread::Builder::new()
+        .name("branch-stats".into())
+        .spawn(refresh)
+    {
+        tracing::warn!(error = %e, "branch stats: cannot start the refresh thread");
+    }
+}
+
+/// The lowest CPU priority for the calling thread: the highest nice value on Linux. The work-tree scan starts its
+/// worker threads from this thread, and on Linux they inherit the value. On macOS
+/// `setpriority(PRIO_PROCESS)` acts on the whole process, so the thread uses the background class.
+fn lower_thread_priority() {
+    #[cfg(target_os = "linux")]
+    // SAFETY: gettid and setpriority read no memory; they only change this thread's nice value.
+    let rc = unsafe {
+        let tid = libc::gettid() as libc::id_t;
+        libc::setpriority(libc::PRIO_PROCESS, tid, 19)
+    };
+    #[cfg(target_os = "macos")]
+    // SAFETY: as above. PRIO_DARWIN_THREAD with a value of zero names the calling thread.
+    let rc = unsafe { libc::setpriority(libc::PRIO_DARWIN_THREAD, 0, libc::PRIO_DARWIN_BG) };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let rc = 0;
+    if rc != 0 {
+        tracing::warn!(
+            error = %std::io::Error::last_os_error(),
+            "branch stats: cannot lower the refresh thread's priority; the scan runs at normal priority"
+        );
+    }
 }
 
 fn insert(cache: &mut HashMap<PathBuf, CacheEntry>, key: PathBuf, entry: CacheEntry) {
@@ -82,6 +116,19 @@ fn insert(cache: &mut HashMap<PathBuf, CacheEntry>, key: PathBuf, entry: CacheEn
 /// Compute the stats for the repository that contains `cwd`. `Ok(None)` means
 /// `cwd` is not in a repository or HEAD has no commit yet.
 pub fn compute_branch_stats(cwd: &Path) -> anyhow::Result<Option<BranchStats>> {
+    compute(cwd, LineStats::Fresh)
+}
+
+/// How [`compute`] gets the line counts.
+#[derive(Clone, Copy)]
+enum LineStats {
+    /// Scan the work tree now.
+    Fresh,
+    /// Reuse the last scan until the work tree changes.
+    Cached,
+}
+
+fn compute(cwd: &Path, line_stats: LineStats) -> anyhow::Result<Option<BranchStats>> {
     let Ok(repo) = xai_grok_workspace::git_repo::discover(cwd) else {
         return Ok(None);
     };
@@ -106,7 +153,11 @@ pub fn compute_branch_stats(cwd: &Path) -> anyhow::Result<Option<BranchStats>> {
     }
 
     if !repo.is_bare() {
-        let (insertions, deletions) = worktree_line_stats(&repo, head_commit.tree_id()?.detach())?;
+        let head_tree = head_commit.tree_id()?.detach();
+        let (insertions, deletions) = match line_stats {
+            LineStats::Fresh => worktree_line_stats(&repo, head_tree)?,
+            LineStats::Cached => cached_line_stats(&repo, head_tree)?,
+        };
         stats.insertions = insertions;
         stats.deletions = deletions;
     }
@@ -199,6 +250,106 @@ fn worktree_line_stats(
         }
     }
     Ok((insertions, deletions))
+}
+
+/// A line count is a full work-tree scan, the same work as `git status`, on several cores.
+const UNWATCHED_SCAN_INTERVAL: Duration = Duration::from_secs(60);
+
+/// The last line count for one work tree.
+struct WorktreeScan {
+    head_tree: gix::ObjectId,
+    counts: (usize, usize),
+    at: Instant,
+    scans: u64,
+    /// The watcher skips ignored paths, so a build output does not cause a scan.
+    watch: Option<xai_fsnotify::ChangeCounter>,
+    /// The watcher count before the scan.
+    changes: Option<u64>,
+}
+
+impl WorktreeScan {
+    fn is_current(&self, head_tree: gix::ObjectId) -> bool {
+        if self.head_tree != head_tree {
+            return false;
+        }
+        let now = self.watch.as_ref().and_then(|watch| watch.current());
+        match (now, self.changes) {
+            (Some(now), Some(then)) => now == then,
+            _ => self.at.elapsed() < UNWATCHED_SCAN_INTERVAL,
+        }
+    }
+}
+
+static SCANS: LazyLock<Mutex<HashMap<PathBuf, WorktreeScan>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// [`worktree_line_stats`], reused until the watcher reports a change or HEAD moves.
+/// The status bar asks every [`REFRESH_TTL`], so a scan on each request keeps
+/// cores busy on an idle session.
+fn cached_line_stats(
+    repo: &gix::Repository,
+    head_tree: gix::ObjectId,
+) -> anyhow::Result<(usize, usize)> {
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| anyhow::anyhow!("bare repository"))?
+        .to_path_buf();
+    let (watch, scans) = {
+        let mut map = SCANS
+            .lock()
+            .map_err(|_| anyhow::anyhow!("scan cache poisoned"))?;
+        match map.get(&workdir) {
+            Some(scan) if scan.is_current(head_tree) => return Ok(scan.counts),
+            _ => {}
+        }
+        let previous = map.remove(&workdir);
+        let scans = previous.as_ref().map_or(0, |scan| scan.scans);
+        let watch = previous
+            .and_then(|mut scan| scan.watch.take())
+            .filter(|watch| watch.current().is_some());
+        (watch, scans)
+    };
+    let watch = match watch {
+        Some(watch) => Some(watch),
+        None => match xai_fsnotify::ChangeCounter::start(&workdir) {
+            Ok(watch) => Some(watch),
+            Err(e) => {
+                tracing::warn!(
+                    workdir = %workdir.display(),
+                    error = %e,
+                    "no file watcher for the status-bar line counts; they refresh every {}s",
+                    UNWATCHED_SCAN_INTERVAL.as_secs()
+                );
+                None
+            }
+        },
+    };
+    // Read the count before the scan, so an edit during the scan causes the next one.
+    let changes = watch.as_ref().and_then(|watch| watch.current());
+    let counts = worktree_line_stats(repo, head_tree)?;
+    let mut map = SCANS
+        .lock()
+        .map_err(|_| anyhow::anyhow!("scan cache poisoned"))?;
+    if map.len() >= CACHE_CAP
+        && let Some(oldest) = map
+            .iter()
+            .min_by_key(|(_, scan)| scan.at)
+            .map(|(k, _)| k.clone())
+    {
+        map.remove(&oldest);
+    }
+    map.insert(
+        workdir,
+        WorktreeScan {
+            head_tree,
+            counts,
+            at: Instant::now(),
+            scans: scans + 1,
+            watch,
+            changes,
+        },
+    );
+    Ok(counts)
 }
 
 #[cfg(unix)]
@@ -363,6 +514,94 @@ mod tests {
         git(tmp.path(), &["init", "-q", "-b", "master"]);
         commit_file(tmp.path(), "a.txt", "one\n");
         tmp
+    }
+
+    #[cfg(target_os = "linux")]
+    fn this_thread_nice() -> i32 {
+        // SAFETY: gettid and getpriority read no memory.
+        unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::gettid() as libc::id_t) }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_refresh_thread_and_its_scan_workers_run_at_the_lowest_priority() {
+        let (refresh, worker) = std::thread::spawn(|| {
+            lower_thread_priority();
+            let worker = std::thread::spawn(this_thread_nice).join().unwrap();
+            (this_thread_nice(), worker)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(refresh, 19, "the refresh thread runs at nice 19");
+        assert_eq!(
+            worker, 19,
+            "a thread it starts, as gix does for the scan, inherits nice 19"
+        );
+        assert_ne!(this_thread_nice(), 19, "the caller's priority is untouched");
+    }
+
+    async fn cached(dir: &Path) -> (BranchStats, u64) {
+        let dir = dir.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            let stats = compute(&dir, LineStats::Cached).unwrap().unwrap();
+            let repo = xai_grok_workspace::git_repo::discover(&dir).unwrap();
+            let workdir = repo.workdir().unwrap().to_path_buf();
+            let scans = SCANS.lock().unwrap().get(&workdir).map_or(0, |s| s.scans);
+            (stats, scans)
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_unchanged_work_tree_is_not_scanned_again() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+
+        let (stats, scans) = cached(dir).await;
+        assert_eq!((stats.insertions, scans), (0, 1));
+        for _ in 0..5 {
+            let (_, scans) = cached(dir).await;
+            assert_eq!(
+                scans, 1,
+                "a refresh with no change must reuse the last scan"
+            );
+        }
+
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let (stats, _) = cached(dir).await;
+            if stats.insertions == 1 {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the watcher never reported the edit"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+
+        // The events of one write can arrive in more than one batch. Let them settle.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let (_, settled) = cached(dir).await;
+        for _ in 0..5 {
+            let (_, scans) = cached(dir).await;
+            assert_eq!(scans, settled, "a quiet work tree is not scanned again");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_commit_rescans_the_work_tree() {
+        let tmp = repo_on_master();
+        let dir = tmp.path();
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        let (stats, _) = cached(dir).await;
+        assert_eq!(stats.insertions, 1);
+
+        git(dir, &["commit", "-qam", "two"]);
+        let (stats, _) = cached(dir).await;
+        assert_eq!(stats.insertions, 0, "a new HEAD tree forces a scan");
     }
 
     #[test]

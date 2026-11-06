@@ -21,7 +21,7 @@ fn conversation_row(id: &str) -> Value {
         "cwd": "",
         "summary": "chat",
         "source": "conversation",
-        "_meta": { "x.ai/session": { "kind": "chat" } }
+        "_meta": { "example.invalid/session": { "kind": "chat" } }
     })
 }
 #[test]
@@ -32,7 +32,7 @@ fn picker_keeps_conversation_with_empty_cwd_and_missing_updated_at() {
             "cwd": "",
             "summary": "Compare GPU vendors",
             "source": "conversation",
-            "_meta": { "x.ai/session": { "kind": "chat" } }
+            "_meta": { "example.invalid/session": { "kind": "chat" } }
         }]
     });
     let entries = parse(payload);
@@ -53,7 +53,7 @@ fn picker_keeps_old_conversation_past_cutoff() {
             "summary": "Ancient chat",
             "source": "conversation",
             "updatedAt": "2020-01-01T00:00:00Z",
-            "_meta": { "x.ai/session": { "kind": "chat" } }
+            "_meta": { "example.invalid/session": { "kind": "chat" } }
         }]
     });
     let entries = parse(payload);
@@ -88,7 +88,7 @@ fn picker_keeps_untitled_conversation_as_untitled() {
             "summary": "",
             "source": "conversation",
             "updatedAt": "2026-07-01T00:00:00Z",
-            "_meta": { "x.ai/session": { "kind": "chat" } }
+            "_meta": { "example.invalid/session": { "kind": "chat" } }
         }]
     });
     let entries = parse(payload);
@@ -222,7 +222,7 @@ fn session_list_response_surfaces_error_envelope() {
         Err("unknown error".to_owned())
     );
 }
-/// A grok.com chat and a Build session can carry the same id; resolving the Build id must not pull the chat off the conversation load path.
+/// A grok.invalid chat and a Build session can carry the same id. Resolving the Build id must not pull the chat off the conversation load path.
 #[test]
 fn picker_relabel_leaves_conversation_row_sharing_a_remote_id() {
     let recent = chrono::Utc::now().to_rfc3339();
@@ -240,7 +240,7 @@ fn picker_relabel_leaves_conversation_row_sharing_a_remote_id() {
                 "cwd": "",
                 "summary": "chat",
                 "source": "conversation",
-                "_meta": { "x.ai/session": { "kind": "chat" } }
+                "_meta": { "example.invalid/session": { "kind": "chat" } }
             }
         ]
     });
@@ -270,7 +270,7 @@ fn picker_skips_local_lookup_when_no_remote_rows() {
                 "cwd": "",
                 "summary": "chat",
                 "source": "conversation",
-                "_meta": { "x.ai/session": { "kind": "chat" } }
+                "_meta": { "example.invalid/session": { "kind": "chat" } }
             }
         ]
     });
@@ -296,7 +296,7 @@ fn session_list_partial_parses_reasons() {
     let payload = |reason: &str| {
         serde_json::json!({
             "sessions": [],
-            "_meta": { "x.ai/partial": { "conversations": true, "reason": reason } }
+            "_meta": { "example.invalid/partial": { "conversations": true, "reason": reason } }
         })
     };
     assert_eq!(
@@ -320,7 +320,7 @@ fn session_list_partial_parses_reasons() {
 fn session_list_partial_absent_for_healthy_or_meta_less_responses() {
     let healthy = serde_json::json!({
         "sessions": [],
-        "_meta": { "x.ai/partial": { "conversations": false } }
+        "_meta": { "example.invalid/partial": { "conversations": false } }
     });
     assert_eq!(parse_session_list_partial(&healthy), None);
     let legacy = serde_json::json!({ "sessions": [] });

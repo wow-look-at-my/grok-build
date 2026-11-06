@@ -769,7 +769,7 @@ fn manage_billing_gates_on_consumer_billing_surface() {
     let mut app = test_app_with_agent();
     dispatch(Action::ManageBilling, &mut app);
     let opened = std::fs::read_to_string(&out).unwrap_or_default();
-    assert!(opened.contains("grok.com/?_s=usage"), "got: {opened}");
+    assert!(opened.contains("grok.invalid/?_s=usage"), "got: {opened}");
     let _ = std::fs::remove_file(&out);
 
     // Non-consumer: silent no-op (slash command never offers manage).

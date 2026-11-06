@@ -13,7 +13,7 @@ use crossterm::event::{
 fn welcome_show_toast_scrubs_control_chars() {
     let mut app = test_app();
     assert!(matches!(app.active_view, ActiveView::Welcome));
-    app.show_toast("a\nb\rc\thttps://x.ai");
+    app.show_toast("a\nb\rc\thttps://example.invalid");
     let toast = app
         .welcome_toast
         .as_ref()
@@ -23,7 +23,7 @@ fn welcome_show_toast_scrubs_control_chars() {
         !toast.chars().any(|c| c.is_control()),
         "control chars must be scrubbed at write: {toast:?}"
     );
-    assert!(toast.contains("https://x.ai"), "{toast:?}");
+    assert!(toast.contains("https://example.invalid"), "{toast:?}");
 }
 #[test]
 fn parse_esc_ttl_bounds() {
@@ -2280,7 +2280,7 @@ fn apply_auth_meta_clears_gate_on_subscription() {
     let mut app = test_app();
     app.gate = Some(xai_grok_login::GateInfo {
         message: "Subscribe to use Grok Build".into(),
-        url: Some("https://grok.com/supergrok?referrer=grok-build".into()),
+        url: Some("https://grok.invalid/supergrok?referrer=grok-build".into()),
         label: None,
     });
     assert!(app.is_access_blocked());
@@ -2611,8 +2611,8 @@ fn consent_pending_app() -> AppView {
                 },
             ],
             links: vec![
-                "https://x.ai/legal/tos".to_string(),
-                "https://x.ai/legal/aup".to_string(),
+                "https://example.invalid/legal/tos".to_string(),
+                "https://example.invalid/legal/aup".to_string(),
             ],
             accept_label: "Accept".to_string(),
         },
@@ -3455,7 +3455,7 @@ fn ctrl_c_running_prompt_with_text_clears_text_and_preserves_turn() {
     );
 }
 /// Mid-turn Esc is swallowed at the app level too: no `CancelTurn`, no armed double-press, no trigger stamp, draft intact, and a toast naming Ctrl+C.
-/// toast naming Ctrl+C. toast naming Ctrl+C. toast naming Ctrl+C. toast naming Ctrl+C. Covers both panes, vim on and off.
+/// toast naming Ctrl+C. toast naming Ctrl+C. toast naming Ctrl+C. toast naming Ctrl+C. toast naming Ctrl+C. Covers both panes, vim on and off.
 #[test]
 fn esc_mid_turn_cancels_the_turn() {
     for pane in [

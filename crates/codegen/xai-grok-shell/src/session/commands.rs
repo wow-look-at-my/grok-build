@@ -480,24 +480,24 @@ pub enum SessionCommand {
     ReloadHooks,
     /// Re-discover skills from disk and update the session's skill baseline.
     RefreshSkillBaseline,
-    /// Capture every finished or stopped turn now for `x.ai/memory/flush`.
+    /// Capture every finished or stopped turn now for `example.invalid/memory/flush`.
     FlushMemory {
         respond_to: oneshot::Sender<crate::extensions::memory::MemoryFlushResponse>,
     },
-    /// Consolidate memory now for `x.ai/memory/dream`, bypassing the automatic gates.
+    /// Consolidate memory now for `example.invalid/memory/dream`, bypassing the automatic gates.
     MemoryDream {
         respond_to: oneshot::Sender<crate::extensions::memory::MemoryDreamResponse>,
     },
-    /// List memory files and state for `x.ai/memory/list`.
+    /// List memory files and state for `example.invalid/memory/list`.
     MemoryList {
         respond_to: oneshot::Sender<Result<crate::extensions::memory::MemoryListing, String>>,
     },
-    /// Turn memory on or off for `x.ai/memory/toggle`.
+    /// Turn memory on or off for `example.invalid/memory/toggle`.
     MemoryToggle {
         enabled: bool,
         respond_to: oneshot::Sender<crate::extensions::memory::MemoryToggleResponse>,
     },
-    /// Delete one memory note for `x.ai/memory/forget`.
+    /// Delete one memory note for `example.invalid/memory/forget`.
     MemoryForget {
         path: String,
         expected_content_hash: String,
@@ -516,7 +516,7 @@ pub enum SessionCommand {
         request: RewindRequest,
         respond_to: oneshot::Sender<anyhow::Result<RewindResponse>>,
     },
-    /// Out-of-band history repair (`x.ai/session/repair`): fix tool-pairing violations that would otherwise 400 on every request.
+    /// Out-of-band history repair (`example.invalid/session/repair`): fix tool-pairing violations that would otherwise 400 on every request.
     /// The violations: orphaned or displaced `ToolResult`s, duplicates, and unanswered calls.
     /// `dry_run` only reports.
     RepairHistory {
@@ -600,7 +600,7 @@ pub enum SessionCommand {
         elapsed_ms: Option<u64>,
         processed: oneshot::Sender<()>,
     },
-    /// Update MCP servers for an existing session (used during reconnect or mid-session via the `x.ai/session/update_mcp_servers` extension method).
+    /// Update MCP servers for an existing session (used during reconnect or
     /// This replaces the current MCP server configuration and triggers re-initialization.
     /// The caller is notified via `respond_to` once MCP re-initialization completes (or immediately if configs are unchanged).
     UpdateMcpServers {
@@ -709,7 +709,7 @@ pub enum SessionCommand {
         respond_to: oneshot::Sender<Option<Vec<xai_grok_tools::types::TaskSnapshot>>>,
     },
     /// Persist + broadcast the current background-task list via
-    /// `x.ai/session_notification` (`SessionUpdate::BackgroundTasks`).
+    /// `example.invalid/session_notification` (`SessionUpdate::BackgroundTasks`).
     ///
     /// `respond_to` means load enqueued the persist+broadcast before returning.
     /// It is not a client-delivery ack. Live incremental follow-ups leave it `None`.
@@ -749,7 +749,7 @@ pub enum SessionCommand {
         action: xai_hooks_plugins_types::PluginsAction,
         respond_to: oneshot::Sender<xai_hooks_plugins_types::ActionOutcome>,
     },
-    /// This session's plugin registry, as served by `x.ai/plugins/list`.
+    /// This session's plugin registry, as served by `example.invalid/plugins/list`.
     PluginsList {
         respond_to:
             oneshot::Sender<Option<std::sync::Arc<xai_grok_agent::plugins::PluginRegistry>>>,
@@ -802,7 +802,7 @@ pub enum SessionCommand {
         owner: Option<String>,
     },
     /// Replace the text of a queued (not-yet-running) prompt in place (server-side LWW).
-    /// Last write wins via the actor's serialized mailbox; the rebroadcast of `x.ai/queue/changed` is the truth signal for every attached client.
+    /// Last write wins via the actor's serialized mailbox; the rebroadcast of `example.invalid/queue/changed` is the truth signal for every attached client.
     /// The original `owner` attribution is preserved; `editor` is recorded as the most recent editor (for future "alice edited this" UX).
     EditQueuedPrompt {
         id: String,
@@ -935,7 +935,7 @@ pub enum SessionCommand {
     /// Fire-and-forget: no response channel needed since the command just pushes to a Mutex.
     Interject {
         text: String,
-        /// Client-minted id echoed back on the broadcast `x.ai/session/interjection` so the originating pager can dedup its optimistic local block.
+        /// Client-minted id echoed back on the broadcast `example.invalid/session/interjection` so the originating pager can dedup its optimistic local block.
         /// `None` from older clients.
         id: Option<String>,
         /// Pasted images attached to the interjection.

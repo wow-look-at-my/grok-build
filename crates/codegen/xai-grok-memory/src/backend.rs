@@ -1241,7 +1241,7 @@ mod tests {
         let session: xai_grok_tools::types::SharedApiKeyProvider = Arc::new(PanicKey);
 
         let scoped = EndpointScopedCredentials::for_endpoint(
-            "https://api.x.ai/v1",
+            "https://api.example.invalid/v1",
             |_| true,
             None,
             Some(session),
@@ -1288,7 +1288,7 @@ mod tests {
         let auth: Arc<dyn xai_grok_auth::AuthCredentialProvider> = Arc::new(StubAuth);
         let api_key: xai_grok_tools::types::SharedApiKeyProvider = Arc::new(PanicKey);
         let scoped = EndpointScopedCredentials::for_endpoint(
-            "https://api.x.ai/v1",
+            "https://api.example.invalid/v1",
             |_| true,
             Some(auth),
             Some(api_key),
@@ -1299,8 +1299,13 @@ mod tests {
             model: Some("test-embedding-model".to_string()),
             ..Default::default()
         };
-        let provider =
-            build_embedding_provider(Some(&config), &scoped, None, "https://api.x.ai/v1").await;
+        let provider = build_embedding_provider(
+            Some(&config),
+            &scoped,
+            None,
+            "https://api.example.invalid/v1",
+        )
+        .await;
         assert!(
             provider.is_some(),
             "trusted endpoint must build a provider from the session credential"
@@ -1326,18 +1331,18 @@ mod tests {
         assert!(denied.is_empty(), "untrusted endpoint drops the credential");
 
         let scoped = EndpointScopedCredentials::for_endpoint(
-            "https://api.x.ai/v1",
+            "https://api.example.invalid/v1",
             |_| true,
             None,
             Some(key()),
         );
         assert!(!scoped.is_empty(), "trusted endpoint keeps the credential");
         assert!(
-            scoped.approved_for("https://API.x.ai/v1"),
+            scoped.approved_for("https://API.example.invalid/v1"),
             "host casing normalizes"
         );
         assert!(
-            !scoped.approved_for("https://api.x.ai/v2"),
+            !scoped.approved_for("https://api.example.invalid/v2"),
             "different path rejected"
         );
         assert!(

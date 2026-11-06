@@ -58,7 +58,7 @@ impl SessionActor {
                 ok_end_turn(0, None)
             }
             // Prompt-turn path for clients without the pager-local `/flush` and `/dream`;
-            // the pager calls `x.ai/memory/flush` and `x.ai/memory/dream` instead.
+            // the pager calls `example.invalid/memory/flush` and `example.invalid/memory/dream` instead.
             BuiltinAction::FlushMemory => {
                 let response = self.memory_flush_command().await;
                 self.send_host_turn_slash_command_output(&response.summary())

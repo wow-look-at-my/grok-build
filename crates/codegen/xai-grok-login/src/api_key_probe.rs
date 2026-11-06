@@ -234,12 +234,12 @@ mod tests {
     #[test]
     fn joins_api_key_path_onto_base() {
         assert_eq!(
-            api_key_info_url("https://api.x.ai/v1"),
-            "https://api.x.ai/v1/api-key"
+            api_key_info_url("https://api.example.invalid/v1"),
+            "https://api.example.invalid/v1/api-key"
         );
         assert_eq!(
-            api_key_info_url("https://api.x.ai/v1/"),
-            "https://api.x.ai/v1/api-key"
+            api_key_info_url("https://api.example.invalid/v1/"),
+            "https://api.example.invalid/v1/api-key"
         );
         assert_eq!(
             api_key_info_url("https://enterprise-api.acme.com/v1"),

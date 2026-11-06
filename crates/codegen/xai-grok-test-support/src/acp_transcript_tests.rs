@@ -39,7 +39,7 @@ fn session_update_count_excludes_extension_traffic_and_round_trips() {
     let transcript = Transcript::default();
     transcript.record(agent_text_chunk("a"));
     transcript.record(TranscriptEntry::ExtNotification {
-        method: "x.ai/session_notification".to_owned(),
+        method: "example.invalid/session_notification".to_owned(),
         params: json!({}),
     });
     transcript.record(TranscriptEntry::ExtRequest {
@@ -73,7 +73,7 @@ async fn wait_until_resolves_once_the_recorded_entries_satisfy_the_predicate() {
     assert_eq!(None, waiting.as_mut().now_or_never());
 
     transcript.record(TranscriptEntry::ExtNotification {
-        method: "x.ai/session_notification".to_owned(),
+        method: "example.invalid/session_notification".to_owned(),
         params: json!({}),
     });
 

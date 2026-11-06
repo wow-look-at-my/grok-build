@@ -174,9 +174,9 @@ pub enum TraceUploadReason {
     ZdrTeam,
     /// `[telemetry] trace_upload = false` in config.
     FeatureOff,
-    /// No grok.com auth.
+    /// No grok.invalid auth.
     NoCredentials,
-    /// Proxy mode via grok.com auth.
+    /// Proxy mode via grok.invalid auth.
     Proxy,
     /// Session handle not found (edge case).
     SessionNotFound,

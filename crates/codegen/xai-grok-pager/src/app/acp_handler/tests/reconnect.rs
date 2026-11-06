@@ -480,7 +480,7 @@
         let _ = handle(
             make_ext_session_notification_with_method(
                 "sess-subagent-reload",
-                "x.ai/session/update",
+                "example.invalid/session/update",
                 test_subagent_spawned("sess-subagent-reload", "child-replay"),
             ),
             &mut app,
@@ -516,7 +516,7 @@
         let _ = handle(
             make_ext_session_notification_with_method(
                 "sess-subagent-late-replay",
-                "x.ai/session/update",
+                "example.invalid/session/update",
                 test_subagent_spawned("sess-subagent-late-replay", "child-late-replay"),
             ),
             &mut app,
@@ -913,7 +913,7 @@
                 meta,
             };
             acp::ExtNotification::new(
-                "x.ai/session/update",
+                "example.invalid/session/update",
                 std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
             )
         }
@@ -985,7 +985,7 @@
             meta: Some(serde_json::json!({ "isReplay": true, "eventId": "sess-sub-3" })),
         };
         let notif = acp::ExtNotification::new(
-            "x.ai/session_notification",
+            "example.invalid/session_notification",
             serde_json::value::to_raw_value(&payload).unwrap().into(),
         );
         assert!(handle_ext_notification(&notif, &mut app));

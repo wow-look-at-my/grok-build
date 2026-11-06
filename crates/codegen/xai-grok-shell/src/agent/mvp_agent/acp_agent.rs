@@ -219,7 +219,7 @@ impl acp::Agent for MvpAgent {
             client_type = ?client_type,
             event = "code_nav_capability_parsed",
             "code-nav capability initialized from initialize request; \
-             index will start lazily on first x.ai/code/* request if eligible"
+             index will start lazily on first example.invalid/code/* request if eligible"
         );
         let interactive_trust_client = Self::parse_interactive_trust_capability(
             &arguments,
@@ -459,7 +459,7 @@ impl acp::Agent for MvpAgent {
             tracing::info!(
                 label = ?login_label,
                 has_auth_provider,
-                "auth: advertising grok.com auth method",
+                "auth: advertising grok.invalid auth method",
             );
         }
         let preferred_method = preferred_method_early;
@@ -581,14 +581,14 @@ impl acp::Agent for MvpAgent {
                         .load_session(true)
                         .meta(
                             serde_json::json!({
-                    "x.ai/fs_notify": true,
+                    "example.invalid/fs_notify": true,
                     // Advertised so SDKs can warn when a registration depends on hook behavior this agent doesn't honor
-                    "x.ai/hooks": {
+                    "example.invalid/hooks": {
                         "blockingEvents": crate::extensions::hooks::ADVERTISED_BLOCKING_EVENTS,
                         "decisions": crate::extensions::hooks::ADVERTISED_DECISIONS,
                         "stopSignals": crate::extensions::hooks::ADVERTISED_STOP_SIGNALS,
                     },
-                    "x.ai/capabilities": {
+                    "example.invalid/capabilities": {
                         "toolOverrides": tool_overrides_capability(),
                     },
                 })
@@ -612,7 +612,7 @@ impl acp::Agent for MvpAgent {
                     "grokShell": true,
                     // Re-deriving this precedence client-side has regressed OIDC refresh, so clients consume the agent's choice from here
                     "defaultAuthMethodId": default_auth_method_id_wire,
-                    // The agent can drive in-process SDK MCP servers over the ACP reverse channel (`x.ai/mcp/sdk_call`)
+                    // The agent can drive in-process SDK MCP servers over the ACP reverse channel (`example.invalid/mcp/sdk_call`)
                     // The SDK reads this to enable transport="acp"
                     (xai_grok_mcp::wire::MCP_SDK): true,
                     // `session/new` / `session/load` accept per-session plugin roots in `_meta.pluginDirs`
@@ -634,7 +634,7 @@ impl acp::Agent for MvpAgent {
                         .is_feature_enabled(crate::agent::config::Feature::CancelRewind),
                     // Resolved session-recap state (remote settings / config / env; default ON)
                     // The client gates BOTH its automatic away-recap poll and the manual `/recap` on this
-                    // A disabled feature produces zero `x.ai/recap` traffic
+                    // A disabled feature produces zero `example.invalid/recap` traffic
                     "sessionRecap": self.cfg.borrow().is_session_recap_enabled(),
                     "feedbackTraceOffer": self.feedback_trace_offer(),
                     "voiceMode": self.cfg.borrow().is_voice_mode_enabled(),
@@ -956,9 +956,9 @@ impl acp::Agent for MvpAgent {
                 {
                     let mut sampling_config = self.sampling_config.borrow_mut();
                     sampling_config.api_key = Some(auth.key.clone());
-                    tracing::debug!("auth: grok.com/oidc handler set api_key (SessionToken)");
+                    tracing::debug!("auth: grok.invalid/oidc handler set api_key (SessionToken)");
                     xai_grok_telemetry::unified_log::debug(
-                        "auth: grok.com/oidc handler set api_key (SessionToken)",
+                        "auth: grok.invalid/oidc handler set api_key (SessionToken)",
                         None,
                         None,
                     );
@@ -1605,7 +1605,7 @@ impl acp::Agent for MvpAgent {
                 self.gateway
                     .forward_fire_and_forget(
                         acp::ExtNotification::new(
-                            "x.ai/session/prompt_complete",
+                            "example.invalid/session/prompt_complete",
                             params.into(),
                         ),
                     );
@@ -2040,53 +2040,53 @@ impl acp::Agent for MvpAgent {
         let mut backend_no_bridge_err: Option<acp::Error> = None;
         let method = args.method.clone();
         let result = match method.as_ref() {
-            "x.ai/getApiKey" | "x.ai/setApiKey" => {
+            "example.invalid/getApiKey" | "example.invalid/setApiKey" => {
                 crate::extensions::auth::handle(self, &args).await
             }
-            "x.ai/session/info" | "x.ai/session/close" | "x.ai/session/list"
-            | "x.ai/sessions/list" => {
+            "example.invalid/session/info" | "example.invalid/session/close" | "example.invalid/session/list"
+            | "example.invalid/sessions/list" => {
                 crate::agent::handlers::session::handle(self, &args).await
             }
-            "x.ai/workspaces/list" => {
+            "example.invalid/workspaces/list" => {
                 crate::agent::handlers::workspaces::handle(self, &args).await
             }
-            "x.ai/models/list" => {
+            "example.invalid/models/list" => {
                 crate::agent::handlers::models::handle(self, &args).await
             }
-            "x.ai/session/updates" => {
+            "example.invalid/session/updates" => {
                 crate::extensions::session_updates::handle(&args, &self.gateway).await
             }
-            "x.ai/session/state" => {
+            "example.invalid/session/state" => {
                 crate::extensions::session_state::handle_state(&args).await
             }
-            "x.ai/session/import" => {
+            "example.invalid/session/import" => {
                 crate::extensions::session_state::handle_import(&args).await
             }
-            "x.ai/session/load_history" => {
+            "example.invalid/session/load_history" => {
                 crate::extensions::chat_conversation_history::handle(self, &args).await
             }
-            "x.ai/session/search" => {
+            "example.invalid/session/search" => {
                 crate::extensions::session_search::handle(self, &args).await
             }
-            "x.ai/session/resolve_local_for_worktree_resume"
-            | "x.ai/session/rehydrate" => {
+            "example.invalid/session/resolve_local_for_worktree_resume"
+            | "example.invalid/session/rehydrate" => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::worktree::handle(self, &ops, &args).await
             }
             #[cfg(feature = "local-workspace")]
-            "x.ai/session/add_local_workspace" => {
+            "example.invalid/session/add_local_workspace" => {
                 crate::extensions::session_admin::handle(self, &args).await
             }
-            "x.ai/session/rename" | "x.ai/session/delete"
-            | "x.ai/session/update_mcp_servers" | "x.ai/session/fork"
-            | "x.ai/plugins/reload" | "x.ai/commands/list" => {
+            "example.invalid/session/rename" | "example.invalid/session/delete"
+            | "example.invalid/session/update_mcp_servers" | "example.invalid/session/fork"
+            | "example.invalid/plugins/reload" | "example.invalid/commands/list" => {
                 crate::extensions::session_admin::handle(self, &args).await
             }
             m if InternalMethod::from_name(m).is_some() => {
                 crate::extensions::session_admin::handle(self, &args).await
             }
-            "x.ai/session/repair" => crate::extensions::repair::handle(self, &args).await,
-            "x.ai/session/usage" => crate::extensions::usage::handle(self, &args).await,
+            "example.invalid/session/repair" => crate::extensions::repair::handle(self, &args).await,
+            "example.invalid/session/usage" => crate::extensions::usage::handle(self, &args).await,
             crate::extensions::memory::MEMORY_FLUSH_METHOD
             | crate::extensions::memory::MEMORY_DREAM_METHOD
             | crate::extensions::memory::MEMORY_REWRITE_METHOD
@@ -2095,23 +2095,23 @@ impl acp::Agent for MvpAgent {
             | crate::extensions::memory::MEMORY_FORGET_METHOD => {
                 crate::extensions::memory::handle(self, &args).await
             }
-            "x.ai/skills/refresh-baseline" => {
+            "example.invalid/skills/refresh-baseline" => {
                 self.refresh_skill_baseline_for_all_sessions();
                 crate::extensions::to_ext_response(
                     Ok(serde_json::json!({"ok": true})),
                 )
             }
-            "x.ai/interject" => crate::extensions::interject::handle(self, &args).await,
-            "x.ai/feedback" | "x.ai/feedback/dismiss" | "x.ai/feedback/drafts/list"
-            | "x.ai/feedback/drafts/get" | "x.ai/feedback/drafts/delete"
-            | "x.ai/feedback/drafts/update" | "x.ai/feedback/upload-trace"
-            | "x.ai/btw" => crate::extensions::feedback::handle(self, &args).await,
-            "x.ai/recap" => crate::extensions::recap::handle(self, &args).await,
-            "x.ai/todo" => crate::extensions::todo::handle(self, &args).await,
+            "example.invalid/interject" => crate::extensions::interject::handle(self, &args).await,
+            "example.invalid/feedback" | "example.invalid/feedback/dismiss" | "example.invalid/feedback/drafts/list"
+            | "example.invalid/feedback/drafts/get" | "example.invalid/feedback/drafts/delete"
+            | "example.invalid/feedback/drafts/update" | "example.invalid/feedback/upload-trace"
+            | "example.invalid/btw" => crate::extensions::feedback::handle(self, &args).await,
+            "example.invalid/recap" => crate::extensions::recap::handle(self, &args).await,
+            "example.invalid/todo" => crate::extensions::todo::handle(self, &args).await,
             crate::extensions::model_agent::MODEL_AGENT_METHOD => {
                 crate::extensions::model_agent::handle(self, &args).await
             }
-            "x.ai/cloud/terminate" => {
+            "example.invalid/cloud/terminate" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2143,7 +2143,7 @@ impl acp::Agent for MvpAgent {
                     })?;
                 crate::extensions::to_raw_response(&serde_json::json!({ "ok": true }))
             }
-            "x.ai/cloud/env/list" => {
+            "example.invalid/cloud/env/list" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2168,7 +2168,7 @@ impl acp::Agent for MvpAgent {
                 }),
                 )
             }
-            "x.ai/cloud/env/create" => {
+            "example.invalid/cloud/env/create" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2225,7 +2225,7 @@ impl acp::Agent for MvpAgent {
                 }),
                 )
             }
-            "x.ai/cloud/env/update" => {
+            "example.invalid/cloud/env/update" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2285,7 +2285,7 @@ impl acp::Agent for MvpAgent {
                 }),
                 )
             }
-            "x.ai/cloud/env/delete" => {
+            "example.invalid/cloud/env/delete" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
                     "Authentication required",
@@ -2312,87 +2312,87 @@ impl acp::Agent for MvpAgent {
                     })?;
                 crate::extensions::to_raw_response(&serde_json::json!({ "ok": true }))
             }
-            "x.ai/billing" => crate::extensions::billing::handle(self, &args).await,
-            "x.ai/auto-topup-rule" => {
+            "example.invalid/billing" => crate::extensions::billing::handle(self, &args).await,
+            "example.invalid/auto-topup-rule" => {
                 crate::extensions::billing::handle(self, &args).await
             }
-            "x.ai/share_session" => crate::extensions::share::handle(self, &args).await,
-            "x.ai/privacy/setCodingDataRetention" => {
+            "example.invalid/share_session" => crate::extensions::share::handle(self, &args).await,
+            "example.invalid/privacy/setCodingDataRetention" => {
                 crate::extensions::privacy::handle(self, &args).await
             }
-            "x.ai/consent/record" => {
+            "example.invalid/consent/record" => {
                 crate::extensions::consent::handle(self, &args).await
             }
-            "x.ai/rollout/survey" => {
+            "example.invalid/rollout/survey" => {
                 crate::extensions::rollout::handle(self, &args).await
             }
-            "x.ai/prompt_history" => {
+            "example.invalid/prompt_history" => {
                 crate::extensions::prompt_history::handle(self, &args).await
             }
-            "x.ai/suggest" => crate::extensions::suggest::handle(self, &args).await,
-            "x.ai/suggestPrompt" => crate::extensions::suggest::handle(self, &args).await,
-            s if s.starts_with("x.ai/auth/") => {
+            "example.invalid/suggest" => crate::extensions::suggest::handle(self, &args).await,
+            "example.invalid/suggestPrompt" => crate::extensions::suggest::handle(self, &args).await,
+            s if s.starts_with("example.invalid/auth/") => {
                 crate::extensions::auth::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/session_summaries/") => {
+            s if s.starts_with("example.invalid/session_summaries/") => {
                 crate::agent::handlers::session::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/git/worktree/") => {
+            s if s.starts_with("example.invalid/git/worktree/") => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::worktree::handle(self, &ops, &args).await
             }
-            s if s.starts_with("x.ai/git/") => {
+            s if s.starts_with("example.invalid/git/") => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::git::handle(self, &ops, &args).await
             }
-            s if s.starts_with("x.ai/compact_conversation") => {
+            s if s.starts_with("example.invalid/compact_conversation") => {
                 crate::extensions::memory::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/plugins/") => {
+            s if s.starts_with("example.invalid/plugins/") => {
                 crate::extensions::plugins::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/marketplace/") => {
+            s if s.starts_with("example.invalid/marketplace/") => {
                 crate::extensions::marketplace::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/hooks/") => {
+            s if s.starts_with("example.invalid/hooks/") => {
                 crate::extensions::hooks::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/hunk-tracker/") => {
+            s if s.starts_with("example.invalid/hunk-tracker/") => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::hunk_tracker::handle(self, &ops, &args).await
             }
-            s if s.starts_with("x.ai/pr/") => {
+            s if s.starts_with("example.invalid/pr/") => {
                 crate::extensions::pr::handle(self, &args).await
             }
             s if s.starts_with(crate::extensions::mcp::mcp_methods::PREFIX) => {
                 crate::extensions::mcp::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/task/") => {
+            s if s.starts_with("example.invalid/task/") => {
                 crate::extensions::task::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/scheduler/") => {
+            s if s.starts_with("example.invalid/scheduler/") => {
                 crate::extensions::task::handle_scheduler(self, &args).await
             }
-            s if s.starts_with("x.ai/subagent/") => {
+            s if s.starts_with("example.invalid/subagent/") => {
                 crate::extensions::task::handle_subagent(self, &args).await
             }
-            s if s.starts_with("x.ai/terminal/") => {
+            s if s.starts_with("example.invalid/terminal/") => {
                 crate::extensions::terminal::handle(self, &args).await
             }
             s if crate::extensions::fs::is_fs_method(s) => {
                 crate::extensions::fs::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/search/") => {
+            s if s.starts_with("example.invalid/search/") => {
                 crate::extensions::search::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/bundle/") => {
+            s if s.starts_with("example.invalid/bundle/") => {
                 crate::extensions::bundle::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/code/") => {
+            s if s.starts_with("example.invalid/code/") => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::code_nav::handle(self, &ops, &args).await
             }
-            s if s.starts_with("x.ai/skills/") || s == "x.ai/workflows/list" => {
+            s if s.starts_with("example.invalid/skills/") || s == "example.invalid/workflows/list" => {
                 let compat = self.cfg.borrow().compat_resolved;
                 let cwd = crate::extensions::skills::request_cwd(&args);
                 let registry = self.plugin_registry_for_cwd(cwd.as_deref()).await;
@@ -2404,13 +2404,13 @@ impl acp::Agent for MvpAgent {
                     )
                     .await
             }
-            s if s.starts_with("x.ai/review") => {
+            s if s.starts_with("example.invalid/review") => {
                 crate::extensions::feedback::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/debug/") => {
+            s if s.starts_with("example.invalid/debug/") => {
                 crate::extensions::debug::handle(self, &args).await
             }
-            s if s.starts_with("x.ai/rewind") => {
+            s if s.starts_with("example.invalid/rewind") => {
                 crate::extensions::rewind::handle(self, &args).await
             }
             other => {
@@ -2432,7 +2432,7 @@ impl acp::Agent for MvpAgent {
         args: acp::ExtNotification,
     ) -> Result<(), acp::Error> {
         tracing::info!("Received extension notification: method={}", args.method);
-        if args.method.as_ref() == "x.ai/yolo_mode_changed"
+        if args.method.as_ref() == "example.invalid/yolo_mode_changed"
             && let Ok(params) = serde_json::from_str::<
                 serde_json::Value,
             >(args.params.get())
@@ -2505,7 +2505,7 @@ impl acp::Agent for MvpAgent {
                 );
             }
         }
-        if args.method.as_ref() == "x.ai/permissions/reset" {
+        if args.method.as_ref() == "example.invalid/permissions/reset" {
             let mut updated = 0;
             self.session_registry
                 .for_each_resident(|_, h| {
@@ -2526,7 +2526,7 @@ impl acp::Agent for MvpAgent {
         if args.method.as_ref() == InternalMethod::EvictSessions.name() {
             self.handle_evict_sessions(&args.params).await;
         }
-        if args.method.as_ref() == "x.ai/toggle_plan_mode"
+        if args.method.as_ref() == "example.invalid/toggle_plan_mode"
             && let Ok(params) = serde_json::from_str::<
                 serde_json::Value,
             >(args.params.get())
@@ -2563,7 +2563,7 @@ impl acp::Agent for MvpAgent {
                 );
             }
         }
-        if args.method.as_ref().starts_with("x.ai/queue/")
+        if args.method.as_ref().starts_with("example.invalid/queue/")
             && let Ok(params) = serde_json::from_str::<
                 serde_json::Value,
             >(args.params.get())
@@ -2601,14 +2601,14 @@ impl acp::Agent for MvpAgent {
                 }
             }
         }
-        if args.method.as_ref() == "x.ai/terminal/pty/input"
+        if args.method.as_ref() == "example.invalid/terminal/pty/input"
             && let Ok(params) = serde_json::from_str::<
                 serde_json::Value,
             >(args.params.get())
         {
             crate::extensions::terminal::handle_pty_input(&params).await;
         }
-        if args.method.as_ref() == "_x.ai/session/update" {
+        if args.method.as_ref() == "_example.invalid/session/update" {
             if let Ok(notification) = serde_json::from_str::<
                 SessionNotification,
             >(args.params.get()) {
@@ -2632,7 +2632,7 @@ impl acp::Agent for MvpAgent {
                 tracing::warn!("Failed to parse xAI session notification params");
             }
         }
-        if args.method.as_ref() == "x.ai/telemetry/non_git_decision" {
+        if args.method.as_ref() == "example.invalid/telemetry/non_git_decision" {
             #[derive(serde::Deserialize)]
             struct NonGitDecisionParams {
                 decision: String,
@@ -2658,7 +2658,7 @@ impl acp::Agent for MvpAgent {
                 tracing::warn!("Failed to parse non_git_decision telemetry params");
             }
         }
-        if args.method.as_ref() == "x.ai/telemetry/multi_agent_followup" {
+        if args.method.as_ref() == "example.invalid/telemetry/multi_agent_followup" {
             #[derive(serde::Deserialize)]
             struct MultiAgentFollowupParams {
                 preferred_agent_label: char,
@@ -2694,7 +2694,7 @@ impl acp::Agent for MvpAgent {
                 tracing::warn!("Failed to parse multi-agent followup telemetry params");
             }
         }
-        if args.method.as_ref() == "x.ai/telemetry/multi_agent_apply" {
+        if args.method.as_ref() == "example.invalid/telemetry/multi_agent_apply" {
             #[derive(serde::Deserialize)]
             struct MultiAgentApplyParams {
                 applied_agent_label: char,
@@ -2730,7 +2730,7 @@ impl acp::Agent for MvpAgent {
                 tracing::warn!("Failed to parse multi-agent apply telemetry params");
             }
         }
-        if args.method.as_ref() == "x.ai/telemetry/multi_agent_discard" {
+        if args.method.as_ref() == "example.invalid/telemetry/multi_agent_discard" {
             #[derive(serde::Deserialize)]
             struct MultiAgentDiscardParams {
                 /// (label, session_id, model_id)

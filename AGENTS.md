@@ -46,10 +46,12 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Branch-stats notes
 
-- The status bar shows `↑ahead ↓behind +ins -del` after the branch name (`branch_stats.rs`, drawn in `agent_view/render.rs`). A count of zero is not drawn.
-- Ahead/behind is against the branch the checkout tracks. The order is: the checked-out branch's configured upstream, including the same-named remote-tracking branch, the reflog's `branch: Created from X`, `origin/HEAD`, `origin/main`, `origin/master`, `main`, `master`. The current branch's local ref is never its own base, so a branch tracking `origin/<name>` compares against that remote copy.
-- The +/- counts are the working tree against HEAD: staged, unstaged, and untracked files git does not ignore.
-- The diff reads the working tree. It runs off-thread behind a 5 s throttle in its own cache, not on the render path.
+[docs/branch-stats-notes.md](docs/branch-stats-notes.md) holds this section.
+
+## Git status reuse in `git_gate`
+
+- `git_gate` joins same status and diff walks and keeps the result for `SNAPSHOT_TTL`. A client that polls `example.invalid/git/status` slower than that walked the whole tree, and ran `git branch`, `rev-parse` and `remote get-url`, on every poll.
+- Each snapshot records the root's `xai_fsnotify::ChangeCounter` count from before its walk. While the count is unchanged, the snapshot serves requests up to `WATCHED_SNAPSHOT_MAX_AGE`. The first walk of a root waits for its watcher to start, so a poll right after it reuses that walk. `with_config` turns the reuse off, so the older gate tests keep their TTL semantics.
 
 ## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
 
@@ -57,11 +59,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## A blocking wait is a gap, in Queue mode too
 
-- The turn loop harvests queued follow-ups before each model request (`harvest_queued_prompts_into_interjections`). A turn parked in an interruptible wait tool (`get_task_output` with a wait, `wait_tasks`, `Await`) makes no request until the task ends. As a result, Queue mode held the row behind a task that can run for minutes.
-- The shell now harvests at the wait too: when the wait starts (`tool_calls.rs`) and when a row arrives during it (`queue_input`). The harvested row aborts the wait, not the turn. A foreground subagent call is such a wait (`is_foreground_task_call`). The default agent renames its `run_in_background` flag to `background`. The check reads both names. The pager's parked-wait release (`release_queued_prompt_from`) no longer checks the mode either. Steer keeps its own promote path. A pending send-now is exempt.
-- A wait, and the harvest before each model request, take every row an empty Enter will (`harvest_queued_prompts_into_interjections(true)`), a row queued before the turn started included. A goal run is not exempt, in the shell or in the pager (`is_parked_on_sendable_wait`). A message never needs the empty-Enter force-send to end a wait.
-- A foreground call is a gap too (`ForegroundHandoff` in `tool_calls.rs`). A queued row moves a shell command to the background by its call id. The command keeps running. An MCP call, or a built-in tool that only reads or fetches (`is_detachable_kind`: web, media generation, deploy, LSP), runs on its own task. The row answers the call as backgrounded (`bg-<call id>`), and `report_detached_call` sends its result through the background-task completion path. A tool that edits files or waits on the user keeps the turn waiting. The whole result is written under `{session_dir}/background_tool_calls/`.
-- A `/skill` typed mid-turn takes the shell queue like plain text (the `InjectSkill` arm in `dispatch/prompt.rs`). The harvest folds a slash row whose leading token is a skill (`slash_commands::leading_token_is_skill`). The drain expands it. A builtin still waits for its own turn, because only `resolve` runs one.
+[docs/a-blocking-wait-is-a-gap-in-queue-mode-too.md](docs/a-blocking-wait-is-a-gap-in-queue-mode-too.md) holds this section.
 
 ## `/context` shows provider counts only
 
@@ -139,7 +137,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## `@sonnet` / `@haiku` / `@opus` subagents
 
 - A prompt that starts with `@sonnet [level] <task>` runs as `/sonnet` (`rewrite_model_mention` in `slash/commands/model_agent.rs`). The same goes for `@haiku` and `@opus`. The level is an optional `ReasoningEffort` word. Like `/btw`, it skips the queue and works mid-turn.
-- The pager sends `x.ai/model_agent`. The shell picks the newest eligible catalog model whose id names the family (`resolve_family_model` in `acp_session_impl/model_mention.rs`). It spawns a background `general-purpose` child with that model and effort and no owning prompt. A Stop does not cancel it. Its completion reaches the main agent like a background `task` child's.
+- The pager sends `example.invalid/model_agent`. The shell picks the newest eligible catalog model whose id names the family (`resolve_family_model` in `acp_session_impl/model_mention.rs`). It spawns a background `general-purpose` child with that model and effort and no owning prompt. A Stop does not cancel it. Its completion reaches the main agent like a background `task` child's.
 - No model of the family in the catalog is an error that lists the available ids. It never falls back to the parent model.
 
 ## `/todo` capture feature notes
@@ -157,12 +155,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Streaming tool-call notes
 
-- A call's arguments reach the pager as the model writes them. The path is `SamplingEvent::ToolCallDelta` → `XaiSessionUpdate::ToolCallDeltaChunk` → `AcpUpdateTracker::handle_tool_call_delta`. The real `ToolCall` then adopts the row those deltas built. So a call keeps the position it held while it was typed.
-- The row shows the CONTENT. It does not show a progress number alone. `OtherToolCallBlock::streaming_preview` holds the decoded tail of the arguments. The block draws it under the header in every display mode. `Collapsed` is included, because that is the mode a call is in while it streams. A preview drawn only when expanded left a write that read `◆ write` and nothing else until the file was whole.
-- `StreamingArgsTail` (`acp/streaming_args.rs`) decodes the JSON escapes as the fragments land. A provider splits the arguments at arbitrary offsets. So an escape sequence can straddle a fragment boundary. The decoder carries that state across. A raw fragment puts `\n` on the screen and draws a file write as one line thousands of columns wide.
-- The tail is bounded in both directions. It drops the older lines. One line stops growing at its character cap. A tab becomes spaces. So a large write costs a fixed row height however long it runs.
-- The byte count beside the name is what the tail cannot say. A tail of a large body looks the same at any size.
-- The preview truncates each line. It never wraps one. Every fragment redraws it. A wrapped line changes the block's height as the model types, which makes the whole transcript jump.
+[docs/streaming-tool-call-notes.md](docs/streaming-tool-call-notes.md) holds this section.
 
 ## Explore-mode `git` tool
 
@@ -252,11 +245,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Todo-stop-gate notes
 
-- The built-in todo gate is a participant in the turn-end STOP-HOOK gate, not a mechanism beside it (`acp_session_impl/turn.rs`, on `StopGateDecision::AllowStop`). It fires only after the user hooks allowed the stop. Its reminder rides the same `stop_hook_feedback` user message a hook block uses. It consumes the SAME `stop_continuations_this_turn` budget. So `MAX_STOP_HOOK_CONTINUATIONS_PER_TURN` is the stuck-release: a model that never engages its todos stops anyway.
-- switches, and they are ORed, not ANDed (`todo_stop_gate_enabled`). The persisted `[ui].stop_gate_unfinished_todos` toggle ships ON and is the switch. `todo_gate.enabled` (remote `todo_gate_enabled`, or the `--todo-gate` CLI force-enable) is an opt-in on top, for a session whose toggle the user turned off. ANDing them is what shipped the feature dead: `TodoGateConfig::default().enabled` is false, so every default session took the `None` arm and the gate never ran.
-- `todo_gate_applicable` is the other half and still binds. It allows no gate while the goal loop is active, because the continuation directive drives the loop there. It allows no gate for a prompt that carries no `<task_completion_discipline>` block.
-- A queued user row outranks the built-in CI gate at turn end: `turn.rs` breaks the round when `has_runnable_queued_user_row` is true. The row runs as its own turn. The todo gate is off in practice, because `carries_task_completion_discipline` always returns `false`.
-- `todo_stop_gate_blocks` is pure and table-tested. The actor supplies the toggle, the shared continuation counter, and `evaluate_todo_gate` over the live todo state.
+[docs/todo-stop-gate-notes.md](docs/todo-stop-gate-notes.md) holds this section.
 
 ## `send_message` notes
 
@@ -295,11 +284,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## `/fork` and running subagents
 
-- A fork copies `updates.jsonl`, and the child's load replays it. A `subagent_spawned` with no matching `subagent_finished` is therefore inherited. `prepare_replay_lines` reports it as unfinished and the child opens with that agent's row. The run itself stays the parent's, because `emit_subagent_notification` addresses the `parent_session_id` recorded at spawn. So the finish never reaches the child.
-- The copy drops the records of every subagent that is still RUNNING at the fork point (`CopySessionOptions::carry_running_subagents`, default off). A subagent that already finished is history the conversation refers to. Its spawn and finish pair is copied either way. This is the same boundary the copy draws for workflow and goal projections.
-- Running is decided over the lines the copy KEEPS. It is not decided over the whole source file. A `target_prompt_index` that cuts a finish away leaves a spawn the child reads as live. That spawn is dropped too.
-- `/fork --agents` opts back in. The records are copied. The child's load then reconciles them the way a resumed session's are (`reconcile_orphaned_subagents_with_backend`). An agent this process still has running keeps its row. One that is gone is finished as cancelled. The child still cannot receive that run's output, because the run answers to the parent.
-- The flag rides `ForkSessionRequest::include_agents` on `x.ai/session/fork` and `ResumeSessionInWorktreeRequest::include_agents` on the worktree fork. So `/fork --worktree --agents` behaves the same.
+[docs/fork-and-running-subagents.md](docs/fork-and-running-subagents.md) holds this section.
 
 ## Reasoning-effort support gate notes
 
@@ -307,12 +292,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Model-request parallelism cap
 
-- `[ui].max_parallel_requests` (default 7, `0` = no cap) is the most model requests one process sends at once (`xai-grok-sampler/src/request_slots.rs`). A request past it waits in a FIFO queue. Every config load applies it (`apply_max_parallel_requests` in `util/config/campaigns.rs`), so a reload changes it live. A lowered cap never cuts off a request in flight.
-- The slot is taken in the client's send methods and held until the response stream is dropped. So every caller is covered: the sampler actor, `conversation_collect`, and compaction's direct stream calls.
-- The actor takes its slot in `run_one_attempt` BEFORE `FirstTokenDeadline::start`, and runs the send under `with_slot_held` so the client takes no second one. The TTFT limit, the idle timeout and the rate gate therefore all start after the queue.
-- A caller's own deadline around a model call uses `timeout_excluding_queue`, not `tokio::time::timeout`. It moves the deadline by the time spent queued. The clock is a task-local, and `Submit` carries it to the actor's task by hand.
-- A rate-floor backup takes its own slot. With every slot in use it waits, and the slow original keeps streaming.
-- A queued try says so: `SamplingEvent::Queued`/`Dequeued` → transient `XaiSessionUpdate::RequestQueued`/`RequestDequeued` → `AcpUpdateTracker::request_queued`. The status row then reads `Queued: 7 model requests already running…` (`WaitingReason::Queued`) in place of "Waiting for response". Without it a queued turn looks like a stalled model.
+[docs/model-request-parallelism-cap.md](docs/model-request-parallelism-cap.md) holds this section.
 
 ## Workflow agent-concurrency notes
 
@@ -320,7 +300,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 
 ## Endpoint allowlist notes
 
-- The pricing catalog is the one compiled-in endpoint (`DEFAULT_PRICING_CATALOG_URL`, modelinfo), and its request skips the allowlist (`check_catalog_url`). Nothing else prices an Anthropic model: the wire carries no cost and `/v1/models` lists no price. The proxy, the xAI API, the grok.com clients, the env crate's hosts and voice all resolve to BLANK when unconfigured. A blank URL builds no request.
+- The pricing catalog is the one compiled-in endpoint (`DEFAULT_PRICING_CATALOG_URL`, modelinfo), and its request skips the allowlist (`check_catalog_url`). Nothing else prices an Anthropic model: the wire carries no cost and `/v1/models` lists no price. The proxy, the xAI API, the grok.invalid clients, the env crate's hosts and voice all resolve to BLANK when unconfigured. A blank URL builds no request.
 - A model request reaches only an endpoint in `[endpoints] allowed_endpoints` or `GROK_ALLOWED_ENDPOINTS` (`xai_grok_extra_ca::endpoint_allowlist`), or one the user or admin config names as a URL. Every `*url` string in those config layers adds its origin (`allow_urls_written_in_config` in `util/config/campaigns.rs`), so a provider's `base_url` needs no second entry. Campaigns and remote settings add nothing: nobody local wrote them. The check runs where each request is made. Those places are `SamplingClient::new`, the model listings, the local-runtime reads, web search, image and video generation, embeddings, voice and pricing.
 - A DNS resolver or a connector layer cannot enforce it. Behind a proxy the resolver sees the proxy's host. The HTTP client keeps a connector's target URI private.
 - `.cargo/config.toml` sets `GROK_ALLOWED_ENDPOINTS` to loopback so tests reach their mock servers. An installed binary does not get it.

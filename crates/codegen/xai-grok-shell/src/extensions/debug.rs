@@ -1,4 +1,4 @@
-//! `x.ai/debug/*` extension handlers for local client testing.
+//! `example.invalid/debug/*` extension handlers for local client testing.
 //!
 //! These methods bypass heuristics, sampling, cooldowns, and enabled checks.
 //! Client engineers can exercise a notification and its response without real experiments, real sessions, or real model inference.
@@ -16,12 +16,12 @@ use crate::session::{ExtMethodResult, SessionCommand};
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/debug/trigger_feedback" => {
+        "example.invalid/debug/trigger_feedback" => {
             tracing::info!("debug: triggering test feedback request");
             handle_trigger_feedback(agent, args).await
         }
-        "x.ai/debug/arm_auto_compact" => handle_arm_auto_compact(agent, args),
-        "x.ai/debug/agent" => handle_agent(agent).await,
+        "example.invalid/debug/arm_auto_compact" => handle_arm_auto_compact(agent, args),
+        "example.invalid/debug/agent" => handle_agent(agent).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }
@@ -33,7 +33,7 @@ async fn handle_agent(agent: &MvpAgent) -> ExtResult {
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
 
-/// Params for `x.ai/debug/trigger_feedback`, as an ACP client sends them.
+/// Params for `example.invalid/debug/trigger_feedback`, as an ACP client sends them.
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "DebugTriggerParamsWire")]
 struct DebugTriggerParams {

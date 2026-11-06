@@ -834,7 +834,7 @@ pub fn render_welcome(
 
     let mut result = match params.auth_state {
         AuthState::Pending { error } => {
-            let label = params.login_label.unwrap_or("grok.com");
+            let label = params.login_label.unwrap_or("grok.invalid");
             let login_text = format!("Login with {}", label);
             let menu = [("l", login_text.as_str()), ("q", "Quit")];
             let msg = error.as_deref().map(|e| (e, theme.accent_error));
@@ -2141,7 +2141,7 @@ fn render_welcome_done(
             let gate_link = p
                 .gate
                 .and_then(|g| g.url.as_deref())
-                .unwrap_or("https://grok.com/supergrok?referrer=grok-build");
+                .unwrap_or("https://grok.invalid/supergrok?referrer=grok-build");
             let url = Line::from(Span::styled(
                 gate_link,
                 Style::default()
@@ -4267,23 +4267,32 @@ mod tests {
     #[test]
     fn extract_user_code_parses_verification_url() {
         assert_eq!(
-            extract_user_code("https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH"),
+            extract_user_code("https://accounts.example.invalid/oauth2/device?user_code=ABCD-EFGH"),
             Some("ABCD-EFGH"),
         );
         // Trailing params after the code are ignored.
         assert_eq!(
-            extract_user_code("https://x.ai/oauth2/device?user_code=WXYZ-1234&foo=bar"),
+            extract_user_code("https://example.invalid/oauth2/device?user_code=WXYZ-1234&foo=bar"),
             Some("WXYZ-1234"),
         );
         // A param whose name merely ends in `user_code` must not be matched.
         assert_eq!(
-            extract_user_code("https://x.ai/d?foo_user_code=BAD&user_code=GOOD"),
+            extract_user_code("https://example.invalid/d?foo_user_code=BAD&user_code=GOOD"),
             Some("GOOD"),
         );
         // No code param, empty code, and unexpected characters all yield None.
-        assert_eq!(extract_user_code("https://x.ai/oauth2/device"), None);
-        assert_eq!(extract_user_code("https://x.ai/d?user_code="), None);
-        assert_eq!(extract_user_code("https://x.ai/d?user_code=AB%20CD"), None);
+        assert_eq!(
+            extract_user_code("https://example.invalid/oauth2/device"),
+            None
+        );
+        assert_eq!(
+            extract_user_code("https://example.invalid/d?user_code="),
+            None
+        );
+        assert_eq!(
+            extract_user_code("https://example.invalid/d?user_code=AB%20CD"),
+            None
+        );
     }
 
     #[test]
@@ -4291,7 +4300,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 40);
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
-        let url = "https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH";
+        let url = "https://accounts.example.invalid/oauth2/device?user_code=ABCD-EFGH";
 
         let (copy_rect, fallback_rect) = render_welcome_authenticating(
             area,
@@ -4346,7 +4355,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 40);
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
-        let url = "https://accounts.x.ai/oauth2/device?user_code=WXYZ-1234";
+        let url = "https://accounts.example.invalid/oauth2/device?user_code=WXYZ-1234";
 
         render_welcome_authenticating(
             area,
@@ -4373,7 +4382,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 40);
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
-        let url = "https://accounts.x.ai/oauth2/device?user_code=WXYZ-1234";
+        let url = "https://accounts.example.invalid/oauth2/device?user_code=WXYZ-1234";
 
         render_welcome_authenticating(
             area,
@@ -4410,7 +4419,8 @@ mod tests {
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
         // 40-col terminal; a URL longer than one row must wrap at the exact screen edge with no leading spaces so copy-paste stays intact
-        let url = "https://accounts.x.ai/oauth2/device?user_code=WXYZ-1234&extra=0123456789";
+        let url =
+            "https://accounts.example.invalid/oauth2/device?user_code=WXYZ-1234&extra=0123456789";
 
         render_welcome_authenticating(
             area,
@@ -4439,7 +4449,8 @@ mod tests {
             "long URL row must span the full terminal width:\n{text}"
         );
         assert!(
-            url.get(40..).is_some_and(|rest| second.starts_with(rest)),
+            url.get(40..)
+                .is_some_and(|rest| second.starts_with(rest.get(..40).unwrap_or(rest))),
             "wrapped remainder must start at column 0:\n{text}"
         );
     }
@@ -4449,7 +4460,7 @@ mod tests {
         let area = Rect::new(0, 0, 80, 40);
         let mut buf = Buffer::empty(area);
         let theme = Theme::current();
-        let url = "https://accounts.x.ai/oauth2/authorize?client_id=grok";
+        let url = "https://accounts.example.invalid/oauth2/authorize?client_id=grok";
 
         let (copy_rect, fallback_rect) = render_welcome_authenticating(
             area,

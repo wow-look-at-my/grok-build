@@ -457,7 +457,7 @@ pub struct McpSetupServerEntry {
     pub source: McpPreferenceSource,
 }
 
-/// Collect MCP configs that declare a `setup` schema from config and plugins. Used to show setup-required rows and drive `x.ai/mcp/setup`.
+/// Collect MCP configs that declare a `setup` schema from config and plugins. Used to show setup-required rows and drive `example.invalid/mcp/setup`.
 /// User/project **TOML** includes `enabled = false` so Space-disabled setup servers stay visible. (`handle_list` derives `session.enabled` from `disabled_mcp_servers`.)
 /// Other sources still skip native `enabled = false` because Space cannot unstick those flags.
 pub(crate) fn collect_mcp_setup_configs(

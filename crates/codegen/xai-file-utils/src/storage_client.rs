@@ -1,6 +1,6 @@
 //! REST client for uploading files to GCS via cli-chat-proxy.
 //!
-//! Routes requests through cli-chat-proxy using user's grok.com auth token.
+//! Routes requests through cli-chat-proxy using user's grok.invalid auth token.
 //! The proxy handles GCS authentication server-side.
 //!
 //! For large files that exceed Cloudflare's body size limit, use the multipart
@@ -420,7 +420,7 @@ pub struct StorageClient {
     http_client: AuthedClient,
     /// Requests that carry no credential: a signed URL carries its own auth.
     raw_http_client: AuthedClient,
-    /// Base URL for the proxy (e.g., "https://cli-chat-proxy.grok.com/v1")
+    /// Base URL for the proxy (e.g., "https://cli-chat-proxy.grok.invalid/v1")
     base_url: String,
     /// Retry configuration for handling transient failures (especially 429 errors)
     retry_config: RetryConfig,
@@ -968,8 +968,6 @@ impl StorageClient {
             .context("Failed to parse storage download response")?;
 
         // Step 2: fetch the object via the signed URL, streaming to dest.
-        // Use the raw client: a signed URL carries its own auth and must
-        // NOT carry the proxy credential.
         let object_resp = self
             .raw_http_client
             .get(&download_resp.signed_url)

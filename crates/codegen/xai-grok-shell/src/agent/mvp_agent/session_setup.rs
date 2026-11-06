@@ -144,7 +144,7 @@ impl AttachPolicy {
         agent_restore_code: bool,
     ) -> Self {
         let explicit_restore_code = meta
-            .and_then(|m| m.get("x.ai/restore_code"))
+            .and_then(|m| m.get("example.invalid/restore_code"))
             .and_then(|v| v.as_bool());
         match op {
             AttachOperation::Load => Self {
@@ -158,7 +158,7 @@ impl AttachPolicy {
         }
     }
 }
-/// Client-supplied routing an attach's replay must echo: the `x.ai/persist` blob, the leader unicast target, and the reconnect cursor.
+/// Client-supplied routing an attach's replay must echo: the `example.invalid/persist` blob, the leader unicast target, and the reconnect cursor.
 /// All ride the load request's `_meta`.
 struct ReplayRouting<'a> {
     persist_data: Option<&'a serde_json::Value>,
@@ -321,8 +321,8 @@ pub enum SessionSetupPhase {
     #[strum(message = "getting your session ready")]
     ResponseReady,
 }
-/// Wire method for the setup-progress notification, mirroring `x.ai/mcp/init_progress`.
-const SESSION_SETUP_METHOD: &str = "x.ai/session/setup";
+/// Wire method for the setup-progress notification, mirroring `example.invalid/mcp/init_progress`.
+const SESSION_SETUP_METHOD: &str = "example.invalid/session/setup";
 /// Context for the session op currently reporting setup phases.
 struct SessionSetupContext {
     /// Wire label for the payload's `method`; `session/new` today.
@@ -951,12 +951,12 @@ impl MvpAgent {
         let persist_data = arguments
             .meta
             .as_ref()
-            .and_then(|m| m.get("x.ai/persist"))
+            .and_then(|m| m.get("example.invalid/persist"))
             .cloned();
         let target_client_id = arguments
             .meta
             .as_ref()
-            .and_then(|m| m.get("x.ai/leaderClientId"))
+            .and_then(|m| m.get("example.invalid/leaderClientId"))
             .cloned();
         let acp::LoadSessionRequest {
             session_id,
@@ -1123,7 +1123,7 @@ impl MvpAgent {
         let load_envrc = {
             let skip_envrc = request_meta
                 .as_ref()
-                .and_then(|m| m.get("x.ai/skip_envrc"))
+                .and_then(|m| m.get("example.invalid/skip_envrc"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if skip_envrc {
@@ -1188,7 +1188,7 @@ impl MvpAgent {
         } = self.resolve_client_caps(request_meta.as_ref(), init);
         let prompt_display_cwd = request_meta
             .as_ref()
-            .and_then(|m| m.get("x.ai/display_cwd"))
+            .and_then(|m| m.get("example.invalid/display_cwd"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
             .or_else(|| summary.prompt_display_cwd.clone());
@@ -1891,7 +1891,7 @@ impl MvpAgent {
         let mut response_meta_map = serde_json::Map::new();
         response_meta_map.insert("sessionId".to_string(), serde_json::json!(session_id));
         if let Some(persist) = persist_data {
-            response_meta_map.insert("x.ai/persist".to_string(), persist);
+            response_meta_map.insert("example.invalid/persist".to_string(), persist);
         }
         let session_cwd = self
             .resident_handle(&session_id)
@@ -1939,7 +1939,7 @@ impl MvpAgent {
             .and_then(|h| h.current_prompt_id.lock().ok().and_then(|g| g.clone()))
         {
             response_meta_map.insert(
-                "x.ai/runningPromptId".to_string(),
+                "example.invalid/runningPromptId".to_string(),
                 serde_json::json!(running_prompt_id),
             );
         }
@@ -2006,7 +2006,7 @@ impl MvpAgent {
         );
         let mut meta = acp::Meta::new();
         meta.insert(
-            "x.ai/closeOutcome".to_string(),
+            "example.invalid/closeOutcome".to_string(),
             serde_json::json!(outcome.wire_str()),
         );
         Ok(acp::CloseSessionResponse::new().meta(meta))

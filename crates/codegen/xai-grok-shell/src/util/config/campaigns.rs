@@ -365,7 +365,7 @@ mod config_url_tests {
         );
         assert!(
             xai_grok_extra_ca::endpoint_allowlist::check_against(
-                "https://cli-chat-proxy.grok.com/v1/chat/completions",
+                "https://cli-chat-proxy.grok.invalid/v1/chat/completions",
                 &entries
             )
             .is_err()

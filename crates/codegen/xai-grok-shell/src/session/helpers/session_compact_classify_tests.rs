@@ -244,8 +244,9 @@ fn sampling_api_500_with_context_length_message_is_overflow() {
 
 #[test]
 fn sampling_http_is_transient() {
-    // request::Error has no public constructor; trigger one via a known-bad request
-    // request's TCP connect needs a Tokio reactor; futures::executor is not enough (CI runs in a Bazel sandbox where the failure surfaces)
+    // request::Error has no public constructor; trigger one via a known-bad
+    // request request's TCP connect needs a Tokio reactor; futures::executor
+    // is not enough.
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

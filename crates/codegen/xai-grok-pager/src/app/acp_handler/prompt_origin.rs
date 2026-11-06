@@ -6,7 +6,7 @@ pub(crate) fn is_server_initiated_prompt(prompt_id: &str) -> bool {
 }
 
 /// Returns true if the prompt_id is a scheduled-task (`/loop`) fire.
-/// Unlike wake turns they run through `MvpAgent::prompt()` and emit the `x.ai/session/prompt_complete` turn-end signal.
+/// wake turns they run through `MvpAgent::prompt()` and emit the
 /// That exit is why a viewer can enter `TurnRunning` for them without stranding, and why the dashboard shows a running `/loop` session as Working.
 pub(crate) fn is_scheduler_fired_prompt(prompt_id: &str) -> bool {
     matches!(
@@ -64,7 +64,7 @@ pub(crate) fn is_wake_prompt(prompt_id: &str) -> bool {
     )
 }
 
-/// That is safe only when the turn will emit a terminal `x.ai/session/prompt_complete`, the only non-interactive way a viewer leaves `TurnRunning`.
+/// That is safe only when the turn will emit a terminal
 /// Actor-run synthetic turns never do, so adopting one strands the viewer in `TurnRunning`.
 /// This guard reads only the prompt id.
 pub(crate) fn should_adopt_running_prompt(prompt_id: &str) -> bool {

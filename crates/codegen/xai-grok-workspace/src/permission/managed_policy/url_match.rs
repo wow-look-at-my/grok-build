@@ -187,7 +187,7 @@ fn split_authority_path(s: &str) -> (&str, &str) {
     }
 }
 
-/// Runtime MCP URL reduced to connect-time components by the WHATWG parser request uses. Hand-parsing diverges from the connect target.
+/// Runtime MCP URL reduced to connect-time components by the WHATWG parser
 /// Patterns must not use this: they may hold globs the parser rejects.
 struct RuntimeUrl {
     scheme: String,

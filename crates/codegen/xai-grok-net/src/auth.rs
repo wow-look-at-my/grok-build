@@ -92,7 +92,7 @@ pub enum KeyScheme {
     XApiKey,
 }
 
-/// True for a host xAI operates: `x.ai`, `grok.com`, or a subdomain of either, over https.
+/// True for a host xAI operates: `example.invalid`, `grok.invalid`, or a subdomain of either, over https.
 /// A loopback mock counts only in a test build that turns on `test-loopback-session`.
 pub fn is_xai_host(url: &request::Url) -> bool {
     if cfg!(feature = "test-loopback-session") && is_loopback(url) {
@@ -104,7 +104,7 @@ pub fn is_xai_host(url: &request::Url) -> bool {
     let Some(host) = url.host_str() else {
         return false;
     };
-    ["x.ai", "grok.com"].iter().any(|apex| {
+    ["example.invalid", "grok.invalid"].iter().any(|apex| {
         host == *apex
             || host
                 .strip_suffix(apex)
@@ -212,19 +212,19 @@ mod tests {
     #[test]
     fn xai_hosts_are_x_ai_and_grok_com_over_https() {
         for yes in [
-            "https://api.x.ai/v1",
-            "https://x.ai",
-            "https://cli-chat-proxy.grok.com/v1",
-            "https://grok.com",
+            "https://api.example.invalid/v1",
+            "https://example.invalid",
+            "https://cli-chat-proxy.grok.invalid/v1",
+            "https://grok.invalid",
         ] {
             assert!(is_xai_host(&url(yes)), "{yes}");
         }
         for no in [
             "https://gateway.pazer.ai/v1",
-            "http://api.x.ai/v1",
-            "https://evilx.ai",
-            "https://x.ai.example.com",
-            "https://notgrok.com",
+            "http://api.example.invalid/v1",
+            "https://evilexample.invalid",
+            "https://example.invalid.example.com",
+            "https://notgrok.invalid",
             "https://openrouter.ai/api/v1",
         ] {
             assert!(!is_xai_host(&url(no)), "{no}");
@@ -282,6 +282,6 @@ mod tests {
             refused,
             Err(AuthRefusal::SessionTokenInHeader { .. })
         ));
-        assert!(check_outgoing(&url("https://api.x.ai/v1"), &headers).is_ok());
+        assert!(check_outgoing(&url("https://api.example.invalid/v1"), &headers).is_ok());
     }
 }

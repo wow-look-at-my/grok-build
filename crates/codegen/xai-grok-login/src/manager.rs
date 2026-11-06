@@ -251,7 +251,7 @@ impl ScopeRemoval {
 impl AuthManager {
     /// Public default cli-chat-proxy base URL, mirroring `agent::config::CLI_CHAT_PROXY_BASE_URL_DEFAULT`.
     #[cfg(any(test, feature = "test-support"))]
-    const DEFAULT_PROXY_BASE_URL: &str = "https://cli-chat-proxy.grok.com/v1";
+    const DEFAULT_PROXY_BASE_URL: &str = "https://cli-chat-proxy.grok.invalid/v1";
     /// Test/support-only convenience against the public default proxy. Production callers resolve the
     /// configured proxy and pass it via [`Self::new_with_proxy_base_url`], so this boundary never
     /// silently sends enrichment to the public host.

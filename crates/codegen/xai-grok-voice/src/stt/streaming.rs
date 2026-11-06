@@ -21,7 +21,7 @@ pub enum StreamingSttEvent {
     Error { message: String },
 }
 
-/// Streaming STT over `wss://api.x.ai/v1/stt`.
+/// Streaming STT over `wss://api.example.invalid/v1/stt`.
 pub struct StreamingSttSession {
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
     event_rx: mpsc::Receiver<StreamingSttEvent>,

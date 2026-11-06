@@ -182,7 +182,7 @@ impl From<KillOutcome> for KillOutcomeResponse {
 
 pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/terminal/create" => {
+        "example.invalid/terminal/create" => {
             let req: CreateTerminalRequest = parse(args)?;
             let env: HashMap<String, String> = req
                 .env
@@ -204,7 +204,7 @@ pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResu
             respond(result)
         }
 
-        "x.ai/terminal/kill" => {
+        "example.invalid/terminal/kill" => {
             // Try PTY registry first, then piped terminal registry.
             let req: KillTerminalRequest = parse(args)?;
 
@@ -247,7 +247,7 @@ pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResu
             }
         }
 
-        "x.ai/terminal/output" => {
+        "example.invalid/terminal/output" => {
             let req: TerminalIdRequest = parse(args)?;
             let result = terminal::get_terminal_output(&req.session_id, &req.terminal_id)
                 .await
@@ -256,7 +256,7 @@ pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResu
             respond(result)
         }
 
-        "x.ai/terminal/wait_for_exit" => {
+        "example.invalid/terminal/wait_for_exit" => {
             let req: TerminalIdRequest = parse(args)?;
             let result = terminal::wait_for_terminal_exit(&req.session_id, &req.terminal_id)
                 .await
@@ -265,7 +265,7 @@ pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResu
             respond(result)
         }
 
-        "x.ai/terminal/release" => {
+        "example.invalid/terminal/release" => {
             let req: TerminalIdRequest = parse(args)?;
             terminal::release_terminal(&req.session_id, &req.terminal_id).await;
             ExtMethodResult::success(ReleaseTerminalResponse {})
@@ -273,7 +273,7 @@ pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResu
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))
         }
 
-        "x.ai/terminal/background" => {
+        "example.invalid/terminal/background" => {
             // Mark a terminal as backgrounded: the process keeps running but waiting callers are notified so the agent can continue
             // Route through the session's tool bridge so the LocalTerminalBackend actor unblocks the foreground waiter (BashTool::run)
             // Also try the StreamingLocalTerminalRunner registry for AcpTerminalAdapter-based sessions
@@ -287,7 +287,7 @@ pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResu
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))
         }
 
-        "x.ai/terminal/pty/create" => {
+        "example.invalid/terminal/pty/create" => {
             let req: PtyCreateRequest = parse(args)?;
             let env: HashMap<String, String> = req
                 .env
@@ -318,7 +318,7 @@ pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResu
             respond_pty(result)
         }
 
-        "x.ai/terminal/pty/load" => {
+        "example.invalid/terminal/pty/load" => {
             let req: PtyLoadRequest = parse(args)?;
             let target_client_id = req.meta.map(|m| m.client_id).unwrap_or_default();
             let result =
@@ -327,14 +327,14 @@ pub async fn handle(agent: &dyn AgentRuntime, args: &acp::ExtRequest) -> ExtResu
             respond_pty(result)
         }
 
-        "x.ai/terminal/pty/resize" => {
+        "example.invalid/terminal/pty/resize" => {
             let req: PtyResizeRequest = parse(args)?;
             respond_pty(
                 terminal::pty_session::resize_pty(&req.terminal_id, req.rows, req.cols).await,
             )
         }
 
-        "x.ai/terminal/list" => {
+        "example.invalid/terminal/list" => {
             let terminals = terminal::list_terminals().await;
             respond(Ok::<_, String>(TerminalListResponse { terminals }))
         }

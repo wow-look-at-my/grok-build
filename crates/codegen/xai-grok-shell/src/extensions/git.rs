@@ -295,18 +295,18 @@ pub async fn handle(
         }
     }
     match args.method.as_ref() {
-        "x.ai/git/git_repo_root" => {
+        "example.invalid/git/git_repo_root" => {
             let req: git::GitRepoRequest = parse_params(args)?;
             let response = git::is_git_repo(&req).await?;
             super::to_raw_response(&response)
         }
-        "x.ai/git/serialize_changes" => {
+        "example.invalid/git/serialize_changes" => {
             let _ = (args, ops);
             to_ext_response::<()>(Err(anyhow::anyhow!(
                 "git serialize_changes is unavailable in this build"
             )))
         }
-        "x.ai/git/status" => {
+        "example.invalid/git/status" => {
             let req = parse_params::<GitStatusRequest>(args)?;
             let include_untracked = req.include_untracked.unwrap_or(false);
             let include_stats = req.include_stats.unwrap_or(false);
@@ -332,7 +332,7 @@ pub async fn handle(
             })?;
             to_ext_response(Ok(result))
         }
-        "x.ai/git/files" => {
+        "example.invalid/git/files" => {
             let req = parse_params::<GitFilesRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -348,7 +348,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response(Ok(result))
         }
-        "x.ai/git/diffs" => {
+        "example.invalid/git/diffs" => {
             let req = parse_params::<GitDiffsRequest>(args)?;
             let max_bytes = req.max_patch_bytes;
             let max_lines = req.max_patch_lines;
@@ -377,7 +377,7 @@ pub async fn handle(
                 to_ext_response(Ok(data))
             }
         }
-        "x.ai/git/stage" => {
+        "example.invalid/git/stage" => {
             let req = parse_params::<GitStageRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -392,7 +392,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response(Ok(result))
         }
-        "x.ai/git/stage/content" => {
+        "example.invalid/git/stage/content" => {
             let req = parse_params::<GitStageContentRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -407,7 +407,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response(Ok(Empty {}))
         }
-        "x.ai/git/unstage" => {
+        "example.invalid/git/unstage" => {
             let req = parse_params::<GitUnstageRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -421,7 +421,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response(Ok(Empty {}))
         }
-        "x.ai/git/discard" => {
+        "example.invalid/git/discard" => {
             let req = parse_params::<GitDiscardRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -437,7 +437,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response(Ok(Empty {}))
         }
-        "x.ai/git/commit" => {
+        "example.invalid/git/commit" => {
             let req = parse_params::<GitCommitRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -457,7 +457,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response_partial(Ok(commit_result.data), commit_result.warning)
         }
-        "x.ai/git/checkout" => {
+        "example.invalid/git/checkout" => {
             let req = parse_params::<GitCheckoutRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -472,7 +472,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response(Ok(Empty {}))
         }
-        "x.ai/git/stash" => {
+        "example.invalid/git/stash" => {
             let req = parse_params::<GitStashRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -486,7 +486,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response(Ok(Empty {}))
         }
-        "x.ai/git/info" => {
+        "example.invalid/git/info" => {
             let req = parse_params::<GitInfoRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -497,7 +497,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response(Ok(result))
         }
-        "x.ai/git/branches" => {
+        "example.invalid/git/branches" => {
             let req = parse_params::<GitBranchesRequest>(args)?;
             let git_root = resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -508,7 +508,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(e.to_string()))?;
             to_ext_response(Ok(result))
         }
-        "x.ai/git/current_commit" => {
+        "example.invalid/git/current_commit" => {
             let req = parse_params::<GitCurrentCommitRequest>(args)?;
             let result = match resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref())
                 .await
@@ -522,7 +522,7 @@ pub async fn handle(
             };
             to_ext_response(Ok(result))
         }
-        "x.ai/git/checkout_session_head" => {
+        "example.invalid/git/checkout_session_head" => {
             let req = parse_params::<CheckoutSessionHeadRequest>(args)?;
             let git_root =
                 resolve_git_root(agent, ops, req.git_root, Some(&req.session_id)).await?;
@@ -565,7 +565,7 @@ pub async fn handle(
                 .map_err(|e| acp::Error::internal_error().data(format!("checkout failed: {e}")))?;
             super::to_raw_response(&result)
         }
-        "x.ai/git/checkout_commit" => {
+        "example.invalid/git/checkout_commit" => {
             let req = parse_params::<GitCheckoutCommitRequest>(args)?;
             let git_root =
                 resolve_git_root(agent, ops, req.git_root, req.session_id.as_ref()).await?;

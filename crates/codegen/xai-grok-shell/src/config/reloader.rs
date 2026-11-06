@@ -47,7 +47,7 @@ pub enum ConfigUpdate {
     OutputRateFloorChanged,
     /// `[ui].thinking_summaries` or a `[ui].thinking_summary_history_*` key changed. Every resident session re-reads them.
     ThinkingSummariesChanged,
-    /// Updated UI settings; the agent broadcasts `x.ai/config_changed` to IPC clients.
+    /// Updated UI settings; the agent broadcasts `example.invalid/config_changed` to IPC clients.
     Ui { theme: Option<String>, yolo: bool },
 }
 

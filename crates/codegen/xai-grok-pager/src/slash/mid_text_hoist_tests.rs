@@ -84,7 +84,7 @@ fn punctuated_or_uppercase_token_misses() {
 
 #[test]
 fn path_and_url_slashes_miss() {
-    for text in ["see docs/btw", "open https://x.ai/btw now"] {
+    for text in ["see docs/btw", "open https://example.invalid/btw now"] {
         assert_eq!(None, hoist(text), "{text:?}");
     }
 }

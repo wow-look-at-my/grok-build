@@ -17,11 +17,11 @@ fn auth_copy_dispatch_preserves_all_delivery_states() {
         app.auth_state = AuthState::Authenticating {
             request_seq: 1,
             handle: None,
-            auth_url: Some("https://grok.com/auth".to_owned()),
+            auth_url: Some("https://grok.invalid/auth".to_owned()),
             mode: AuthMode::Command,
         };
         let effects = crate::app::dispatch::router::dispatch_copy_auth_url(&mut app, |url| {
-            assert_eq!(url, "https://grok.com/auth");
+            assert_eq!(url, "https://grok.invalid/auth");
             delivery
         });
         assert_eq!(app.auth_clipboard_delivery, Some(delivery));
@@ -324,7 +324,7 @@ fn promo_announcement(id: &str) -> xai_grok_announcements::RemoteAnnouncement {
         severity: Some("promo".into()),
         cta: Some(xai_grok_announcements::AnnouncementCta {
             label: Some("Go".into()),
-            url: Some(format!("https://x.ai/{id}")),
+            url: Some(format!("https://example.invalid/{id}")),
             caption: None,
         }),
         ..Default::default()
@@ -362,7 +362,9 @@ fn announcements_open_cta_opens_promo_and_noops_under_critical() {
         let effects = dispatch(Action::AnnouncementsOpenCta(surface), &mut app);
         assert!(effects.is_empty(), "open is a side effect, not an Effect");
         assert!(
-            opened().lines().any(|l| l == "https://x.ai/promo-open"),
+            opened()
+                .lines()
+                .any(|l| l == "https://example.invalid/promo-open"),
             "surface {surface:?} must open the promo url; got {:?}",
             opened()
         );

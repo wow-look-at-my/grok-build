@@ -233,7 +233,7 @@ pub(super) fn send_slash_row_via_server_queue(
 }
 
 /// Push the optimistic shared-queue echo for an immediate server-authoritative send and mirror it into the owning agent.
-/// The queue pane then renders it immediately, before the confirming `x.ai/queue/changed` broadcast.
+/// The queue pane then renders it immediately, before the confirming `example.invalid/queue/changed` broadcast.
 pub(super) fn push_server_queue_echo(
     app: &mut AppView,
     agent_id: AgentId,
@@ -256,7 +256,7 @@ pub(super) fn push_server_queue_echo(
 }
 
 /// That covers a prompt restored on cancel, removed, drained, or otherwise resolved without becoming the running turn.
-/// The only client-side queue state is the optimistic echo that bridges the round-trip before the confirming `x.ai/queue/changed` broadcast.
+/// The only client-side queue state is the optimistic echo that bridges the round-trip before the confirming `example.invalid/queue/changed` broadcast.
 /// Once a prompt's RPC resolves (or we pull it back on cancel) it will never reappear in a future broadcast, so its echo must be dropped.
 pub(super) fn retire_optimistic_echo(
     optimistic: &mut std::collections::HashMap<
@@ -1134,7 +1134,7 @@ pub(crate) fn apply_turn_start_shim(
     agent.session.current_prompt_id = Some(prompt_id.clone());
     agent.attached_as_viewer = adopted_from_other_client;
     // A new (adopted) turn is starting: drop the prior turn's chips but keep the seen ring
-    // A buffer-replayed `x.ai/follow_ups` for an older response then stays rejected (no stale revival)
+    // A buffer-replayed `example.invalid/follow_ups` for an older response then stays rejected (no stale revival)
     // No seen-ring un-recording is therefore needed
     agent.clear_follow_ups();
     // The adopted turn's follow_ups may have arrived on the ext channel before this turn-start adoption (separate channels) and been buffered
@@ -1465,7 +1465,7 @@ pub(super) fn dispatch_run_edited_queued_command(
                 return vec![];
             };
             match server {
-                // Server rows are never mutated client-side; the `x.ai/queue/changed` rebroadcast is the visual result
+                // Server rows are never mutated client-side; the `example.invalid/queue/changed` rebroadcast is the visual result
                 Some(server) => effects.push(Effect::QueueRemove {
                     session_id,
                     id: server.id,
@@ -2852,7 +2852,7 @@ mod tests {
         );
     }
 
-    /// Via the shim: after starting a new turn, a buffer-replayed `x.ai/follow_ups` for a prior turn's response stays rejected (no stale revival).
+    /// Via the shim: after starting a new turn, a buffer-replayed `example.invalid/follow_ups` for a prior turn's response stays rejected (no stale revival).
     /// Its `promptId` is not the active turn and it is already seen.
     /// Covers the self-driven turn start (`p-self`).
     #[test]

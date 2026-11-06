@@ -281,7 +281,7 @@ The other `init` fields carry real data:
 
 - `apiKeySource` is `user` for API-key auth and `oauth` otherwise. Grok does not distinguish the schema's `project`, `org`, and `temporary` sources.
 - `permissionMode` is the effective headless mode mapped to the Messages enum: the `--permission-mode` value, or `bypassPermissions` under `--yolo`, else `default`. Grok-only modes such as `auto` collapse to `default`.
-- `mcp_servers[].status` is one `x.ai/mcp/list` snapshot, emitted only for `streaming-messages-json`: `connected`, `failed`, `needs-auth`, `pending`, or `disabled`. Servers still handshaking are `pending`. `disabled` is only stamped after the session reports `sessionMcpResolved`; an unresolved list row is `pending` even when `enabled` is still false. The snapshot does not wait for the Blocking startup grace; that grace still applies to the prompt's toolset. Other output formats omit the array and do not call `x.ai/mcp/list`.
+- `mcp_servers[].status` is one `example.invalid/mcp/list` snapshot, emitted only for `streaming-messages-json`: `connected`, `failed`, `needs-auth`, `pending`, or `disabled`. Servers still handshaking are `pending`. `disabled` is only stamped after the session reports `sessionMcpResolved`. An unresolved list row is `pending` even when `enabled` is still false. The snapshot does not wait for the Blocking startup grace. That grace still applies to the prompt's toolset. Other output formats omit the array and do not call `example.invalid/mcp/list`.
 
 Grok omits the schema's pure-placeholder `init` fields it has no data for, rather than emitting dummy values: `claude_code_version`, `output_style`, and `plugins`.
 
@@ -546,7 +546,7 @@ Key environment variables that affect headless mode:
 | `GROK_LOG_FILE`                | Path to a log file (used verbatim as the path; works in headless and TUI, honors `RUST_LOG`) |
 | `RUST_LOG`                     | Log level filter (e.g. `debug`). Headless logs to stderr.     |
 
-For CI environments without browser access, set `XAI_API_KEY` with an API key from [console.x.ai](https://console.x.ai):
+For CI environments without browser access, set `XAI_API_KEY` with an API key from [console.example.invalid](https://console.example.invalid):
 
 ```bash
 export XAI_API_KEY="xai-..."

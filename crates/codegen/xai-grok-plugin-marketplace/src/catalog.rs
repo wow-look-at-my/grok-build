@@ -208,7 +208,7 @@ mod tests {
             dir.path(),
             ".grok-plugin",
             r#"{
-                "$schema": "https://x.ai/grok/plugin-index.schema.json",
+                "$schema": "https://example.invalid/grok/plugin-index.schema.json",
                 "version": 1,
                 "generatedAt": "2026-06-09T12:00:00Z",
                 "plugins": {

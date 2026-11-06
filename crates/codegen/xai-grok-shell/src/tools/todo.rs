@@ -10,9 +10,9 @@ pub use xai_grok_tools::implementations::grok_build::todo::TodoStatus;
 use agent_client_protocol as acp;
 
 /// `PlanEntry.meta` key carrying an item's verifier prompt across ACP, which has no field for it.
-pub const VERIFICATION_META_KEY: &str = "x.ai/verification";
+pub const VERIFICATION_META_KEY: &str = "example.invalid/verification";
 /// `PlanEntry.meta` key carrying whether the item's verifier has passed.
-pub const VERIFICATION_PASSED_META_KEY: &str = "x.ai/verificationPassed";
+pub const VERIFICATION_PASSED_META_KEY: &str = "example.invalid/verificationPassed";
 
 /// ACP has no `Cancelled` status, so cancelled items are stored as `Completed` with `{"cancelled": true}` in meta.
 pub fn todo_item_from_plan_entry(entry: acp::PlanEntry) -> TodoItem {

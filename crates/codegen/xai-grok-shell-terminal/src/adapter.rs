@@ -635,7 +635,7 @@ impl TerminalBackend for AcpTerminalAdapter {
     }
 
     async fn list_tasks(&self) -> Vec<TaskSnapshot> {
-        // Preserve x.ai/task/list output for running rows via get_task (live terminal/output or log tail).
+        // Preserve example.invalid/task/list output for running rows via get_task (live terminal/output or log tail).
         // Bound each RPC so a hung client cannot stall enumeration indefinitely; only the timed-out id
         // falls back, and the remaining ids still get a live attempt with their own budget.
         let task_ids: Vec<String> = {

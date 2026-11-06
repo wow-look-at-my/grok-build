@@ -31,7 +31,7 @@ const MORE_INDENT: &str = "   ";
 const QUEUE_BODY_INDENT: u16 = 1;
 const STOP_LABEL: &str = "[stop]";
 
-/// Seeded at startup and on `x.ai/settings/update` from Feature::Dock.
+/// Seeded at startup and on `example.invalid/settings/update` from Feature::Dock.
 static ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(test)]

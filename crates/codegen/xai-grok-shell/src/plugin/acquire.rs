@@ -144,7 +144,7 @@ where
     }
 }
 
-/// Async [`marketplace_install`] (the `x.ai/marketplace/action` Install
+/// Async [`marketplace_install`] (the `example.invalid/marketplace/action` Install
 /// handler).
 pub(crate) async fn run_marketplace_install(
     source_url_or_path: String,
@@ -156,7 +156,7 @@ pub(crate) async fn run_marketplace_install(
     .await
 }
 
-/// Async [`marketplace_update`] (the `x.ai/marketplace/action` Update
+/// Async [`marketplace_update`] (the `example.invalid/marketplace/action` Update
 /// handler).
 pub(crate) async fn run_marketplace_update(
     provenance: MarketplaceProvenance,

@@ -11,7 +11,7 @@
 //! `/` enters filter mode (type to search names and note contents, Escape to exit).
 //! Dragging over the preview copies the selected text on release.
 //! `x` deletes with double-press confirmation: v2 topics and inbox observations via the shell's
-//! `x.ai/memory/forget` (tombstone + index + manifest update), legacy session logs by unlink.
+//! `example.invalid/memory/forget` (tombstone + index + manifest update), legacy session logs by unlink.
 
 use std::borrow::Cow;
 use std::collections::HashMap;

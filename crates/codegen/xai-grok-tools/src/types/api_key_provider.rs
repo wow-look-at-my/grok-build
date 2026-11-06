@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-/// Why a provider has no bearer for a direct `api.x.ai` call (Imagine, voice), which resolves only
+/// Why a provider has no bearer for a direct `api.example.invalid` call (Imagine, voice), which resolves only
 /// an xAI API key or xAI OAuth2 token. Neither variant is a cue to fall back to another credential.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SideCallBearerError {
@@ -28,7 +28,7 @@ pub trait ApiKeyProvider: Send + Sync + 'static {
     /// Bearer for a direct call to an xAI host (Imagine, voice), or why there is none.
     ///
     /// The default refuses: a provider that cannot say whose credential it holds must not have it
-    /// sent to `api.x.ai`. A provider that can classify its credential overrides this.
+    /// sent to `api.example.invalid`. A provider that can classify its credential overrides this.
     fn side_call_bearer(
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<String, SideCallBearerError>> + Send + '_>> {

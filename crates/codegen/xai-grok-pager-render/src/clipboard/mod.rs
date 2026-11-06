@@ -1610,7 +1610,7 @@ mod tests {
 
         assert_eq!(attachment_probe_route(None), FileUrlsThenImage);
         assert_eq!(attachment_probe_route(Some("")), FileUrlsThenImage);
-        assert_eq!(attachment_probe_route(Some("https://x.com")), Skip);
+        assert_eq!(attachment_probe_route(Some("https://x.invalid")), Skip);
         assert_eq!(attachment_probe_route(Some("hello")), ImageOnly);
         assert_eq!(attachment_probe_route(Some("file:///tmp/a")), ImageOnly);
         assert_eq!(
@@ -1850,7 +1850,7 @@ mod tests {
         let prose_4096 = "x".repeat(4096);
         let five_lines = "one\ntwo\nthree\nfour\nfive";
         let four_lines = "one\ntwo\nthree\nfour";
-        let five_lines_with_url = "one\ntwo\nthree\nfour\nhttps://x.com";
+        let five_lines_with_url = "one\ntwo\nthree\nfour\nhttps://x.invalid";
 
         let cases: [(&str, &str, bool); 5] = [
             ("4095-byte prose", &prose_4095, true),

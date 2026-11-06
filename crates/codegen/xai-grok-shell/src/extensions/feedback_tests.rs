@@ -21,7 +21,7 @@ fn pager_update_body(draft_id: &str) -> serde_json::Value {
     })
 }
 
-/// Wire spelling of the `FeedbackDraftSendRequest` the pager sends on `x.ai/feedback`.
+/// Wire spelling of the `FeedbackDraftSendRequest` the pager sends on `example.invalid/feedback`.
 fn pager_send_body() -> serde_json::Value {
     serde_json::json!({
         "session_id": "sess-1",
@@ -194,7 +194,7 @@ async fn answer_lists_drafts_and_refuses_an_unknown_method() {
         .expect("predraft appended");
 
     let listed = answer(
-        &drafts_request("x.ai/feedback/drafts/list"),
+        &drafts_request("example.invalid/feedback/drafts/list"),
         store.clone(),
         false,
     )
@@ -210,9 +210,13 @@ async fn answer_lists_drafts_and_refuses_an_unknown_method() {
         Some(1)
     );
 
-    let unknown = answer(&drafts_request("x.ai/feedback/drafts/rename"), store, false)
-        .await
-        .expect_err("an unknown drafts method is refused");
+    let unknown = answer(
+        &drafts_request("example.invalid/feedback/drafts/rename"),
+        store,
+        false,
+    )
+    .await
+    .expect_err("an unknown drafts method is refused");
     assert_eq!(unknown.code, acp::Error::method_not_found().code);
 }
 

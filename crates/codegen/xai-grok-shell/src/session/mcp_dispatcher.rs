@@ -10,7 +10,7 @@
 //! Two events with the same key collapse into the latest one.
 //! An MCP server bursting 100 `tools/list_changed` notifications inside 10 ms produces exactly one ACP push.
 //!
-//! Each surviving entry is emitted as an ACP [`agent_client_protocol::ExtNotification`] with method `x.ai/mcp/server_status`.
+//! Each surviving entry is emitted as an ACP [`agent_client_protocol::ExtNotification`] with method `example.invalid/mcp/server_status`.
 //! The payload schema is defined by [`McpServerStatusPayload`].
 //!
 //! ## Contract
@@ -40,7 +40,7 @@ use crate::extensions::mcp::{MANAGED_GATEWAY_ENTRY_PREFIX, McpServerSource};
 pub(crate) const COALESCE_WINDOW: Duration = Duration::from_millis(50);
 
 /// Method name for the ACP push.
-pub const SERVER_STATUS_METHOD: &str = "x.ai/mcp/server_status";
+pub const SERVER_STATUS_METHOD: &str = "example.invalid/mcp/server_status";
 
 /// JSON payload pushed over ACP. Fields written in camelCase per ACP convention.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -315,7 +315,7 @@ pub(crate) fn build_payload(
 }
 
 /// update `shutting_down` for `ConfigRemoved` / `Ready` keys.
-/// emit one ACP `x.ai/mcp/server_status` push per surviving buffer entry, via the provided gateway.
+/// emit one ACP `example.invalid/mcp/server_status` push per surviving buffer entry, via the provided gateway.
 /// Failures are logged and dropped; the dispatcher must not block the session actor.
 pub(crate) fn flush_window(
     session_id: &str,

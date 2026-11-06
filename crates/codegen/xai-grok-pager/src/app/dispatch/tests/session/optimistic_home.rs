@@ -769,7 +769,7 @@ fn typing_on_a_gated_welcome_does_not_leave_home() {
     let mut app = test_app();
     app.gate = Some(xai_grok_shell::auth::GateInfo {
         message: "SuperGrok subscription required".into(),
-        url: Some("https://grok.com/supergrok".into()),
+        url: Some("https://grok.invalid/supergrok".into()),
         label: Some("Subscribe".into()),
     });
     app.welcome_prompt_focused = true;

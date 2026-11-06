@@ -46,7 +46,7 @@ impl SessionActor {
         self.notifications
             .gateway
             .forward_fire_and_forget(acp::ExtNotification::new(
-                "x.ai/session_notification",
+                "example.invalid/session_notification",
                 params.into(),
             ));
     }

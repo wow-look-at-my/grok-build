@@ -773,12 +773,12 @@ impl VideoGenConfig {
 /// Prose returned to the model (as a normal, successful tool result) when a free / X Basic user
 /// calls a video tool. The model relays it to the user; the deliberate `/imagine-video` slash
 /// command shows the SuperGrok upsell modal instead.
-pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Video generation is a SuperGrok feature and isn't available on the free or X Basic tier. Let the user know they can unlock image and video generation by upgrading to SuperGrok: https://grok.com/supergrok?referrer=grok-build. Do not retry this tool.";
+pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Video generation is a SuperGrok feature and isn't available on the free or X Basic tier. Let the user know they can unlock image and video generation by upgrading to SuperGrok: https://grok.invalid/supergrok?referrer=grok-build. Do not retry this tool.";
 
 /// Error for video tool calls in a ZDR session with no output bucket.
 /// A verbatim tool *error* (unlike the [`TIER_RESTRICTED_UPSELL`] prose):
 /// paraphrasing a privacy-adjacent message risks distortion.
-pub(crate) const ZDR_RESTRICTED_MESSAGE: &str = "Video generation tools are unavailable under zero data retention (ZDR). To enable, either turn off /privacy mode to disable ZDR or supply a user-hosted storage bucket (see https://docs.x.ai/build/settings/zdr-video-storage).";
+pub(crate) const ZDR_RESTRICTED_MESSAGE: &str = "Video generation tools are unavailable under zero data retention (ZDR). To enable, either turn off /privacy mode to disable ZDR or supply a user-hosted storage bucket (see https://docs.example.invalid/build/settings/zdr-video-storage).";
 
 fn zdr_restricted_error() -> xai_tool_runtime::ToolError {
     xai_tool_runtime::ToolError::new(
@@ -1457,7 +1457,7 @@ mod tests {
     async fn request_attaches_session_and_bearer_headers() {
         let cfg = VideoGenConfig::Enabled {
             api_key: Some("k".into()),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.example.invalid/v1".into(),
             extra_headers: indexmap::IndexMap::new(),
             zdr_video_output_s3: None,
             tier_restricted: false,

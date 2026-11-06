@@ -166,7 +166,7 @@ mod tests {
     fn a_model_change_reloads_the_model_tables() {
         assert_eq!(
             method_of(&ConfigUpdate::ModelsChanged),
-            Some("x.ai/internal/reload_models"),
+            Some("example.invalid/internal/reload_models"),
         );
     }
 

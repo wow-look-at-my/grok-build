@@ -116,9 +116,9 @@ async fn client_hooks_fire_without_file_registry() {
                 .try_recv()
                 .expect("client hook must fire with no file registry");
             let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg else {
-                panic!("expected an x.ai/hooks/event ext notification");
+                panic!("expected an example.invalid/hooks/event ext notification");
             };
-            assert_eq!(args.request.method.as_ref(), "x.ai/hooks/event");
+            assert_eq!(args.request.method.as_ref(), "example.invalid/hooks/event");
             let params: serde_json::Value =
                 serde_json::from_str(args.request.params.get()).unwrap();
             assert_eq!(
@@ -403,7 +403,7 @@ async fn post_tool_use_and_failure_never_double_fire() {
             let mut failure_events = Vec::new();
             while let Ok(msg) = gateway_rx.try_recv() {
                 if let xai_acp_lib::AcpClientMessage::ExtNotification(args) = msg
-                    && args.request.method.as_ref() == "x.ai/hooks/event"
+                    && args.request.method.as_ref() == "example.invalid/hooks/event"
                 {
                     let params: serde_json::Value =
                         serde_json::from_str(args.request.params.get()).unwrap();
@@ -428,7 +428,7 @@ async fn post_tool_use_and_failure_never_double_fire() {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
-                            if args.request.method.as_ref() == "x.ai/hooks/run" {
+                            if args.request.method.as_ref() == "example.invalid/hooks/run" {
                                 let params: serde_json::Value =
                                     serde_json::from_str(args.request.params.get()).unwrap();
                                 if let Some(name) = params
@@ -446,7 +446,7 @@ async fn post_tool_use_and_failure_never_double_fire() {
                             let _ = args.response_tx.send(Ok(acp::ExtResponse::new(empty)));
                         }
                         xai_acp_lib::AcpClientMessage::ExtNotification(args) => {
-                            if args.request.method.as_ref() == "x.ai/hooks/event" {
+                            if args.request.method.as_ref() == "example.invalid/hooks/event" {
                                 let params: serde_json::Value =
                                     serde_json::from_str(args.request.params.get()).unwrap();
                                 if let Some(name) = params
@@ -574,7 +574,7 @@ async fn mcp_error_result_fires_only_failure_and_delivers_original_output() {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
-                            if args.request.method.as_ref() == "x.ai/hooks/run" {
+                            if args.request.method.as_ref() == "example.invalid/hooks/run" {
                                 let params: serde_json::Value =
                                     serde_json::from_str(args.request.params.get()).unwrap();
                                 if let Some(name) = params.pointer("/hookEventName").unwrap_or(&serde_json::Value::Null).as_str() {
@@ -588,7 +588,7 @@ async fn mcp_error_result_fires_only_failure_and_delivers_original_output() {
                             let _ = args.response_tx.send(Ok(acp::ExtResponse::new(empty)));
                         }
                         xai_acp_lib::AcpClientMessage::ExtNotification(args) => {
-                            if args.request.method.as_ref() == "x.ai/hooks/event" {
+                            if args.request.method.as_ref() == "example.invalid/hooks/event" {
                                 let params: serde_json::Value =
                                     serde_json::from_str(args.request.params.get()).unwrap();
                                 if let Some(name) = params.pointer("/hookEventName").unwrap_or(&serde_json::Value::Null).as_str() {
@@ -1162,7 +1162,7 @@ async fn file_force_stop_skips_client_gate_but_notifies() {
                 while let Some(msg) = gateway_rx.recv().await {
                     match msg {
                         xai_acp_lib::AcpClientMessage::ExtMethod(args) => {
-                            if args.request.method.as_ref() == "x.ai/hooks/run" {
+                            if args.request.method.as_ref() == "example.invalid/hooks/run" {
                                 runs.set(runs.get() + 1);
                             }
                             let empty: Arc<serde_json::value::RawValue> =
@@ -1172,7 +1172,7 @@ async fn file_force_stop_skips_client_gate_but_notifies() {
                             let _ = args.response_tx.send(Ok(acp::ExtResponse::new(empty)));
                         }
                         xai_acp_lib::AcpClientMessage::ExtNotification(args) => {
-                            if args.request.method.as_ref() == "x.ai/hooks/event" {
+                            if args.request.method.as_ref() == "example.invalid/hooks/event" {
                                 observes.set(observes.get() + 1);
                             }
                         }

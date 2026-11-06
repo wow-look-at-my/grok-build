@@ -22,7 +22,7 @@ use crate::scaled;
 /// `initialize` waits for the leader election and the relay handshake as well as the agent's own startup.
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
-const LEADER_RECONNECTED_METHOD: &str = "x.ai/leader_reconnected";
+const LEADER_RECONNECTED_METHOD: &str = "example.invalid/leader_reconnected";
 
 /// Env var naming the binary that elects/hosts the leader in a two-binary (version-skew) test.
 /// Falls back to [`grok_binary`]'s resolution.
@@ -719,20 +719,20 @@ impl LeaderStdioClient {
             .session_update_count()
     }
 
-    /// Count of `x.ai/models/update` notifications received (catalog self-heal).
+    /// Count of `example.invalid/models/update` notifications received (catalog self-heal).
     pub fn models_update_count(&self) -> usize {
         self.connection
             .handler()
             .transcript()
-            .ext_notification_count("x.ai/models/update")
+            .ext_notification_count("example.invalid/models/update")
     }
 
-    /// Count of `x.ai/settings/update` notifications received (settings self-heal).
+    /// Count of `example.invalid/settings/update` notifications received (settings self-heal).
     pub fn settings_update_count(&self) -> usize {
         self.connection
             .handler()
             .transcript()
-            .ext_notification_count("x.ai/settings/update")
+            .ext_notification_count("example.invalid/settings/update")
     }
 }
 
@@ -768,7 +768,7 @@ pub async fn wait_for_live_leader(home: &Path, timeout: Duration) -> Option<u32>
     None
 }
 
-/// Wait for evidence that the bridge finished its reconnect replay: a `x.ai/leader_reconnected` notification
+/// Wait for evidence that the bridge finished its reconnect replay: a `example.invalid/leader_reconnected` notification
 /// or a `session/update` beyond `baseline`, within the scaled `timeout`.
 pub async fn wait_for_replay_notifications(
     client: &LeaderStdioClient,

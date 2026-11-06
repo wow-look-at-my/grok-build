@@ -2,7 +2,7 @@
 //!
 //! Toggling (`t`) and diagnostics (`s`) live inside the modal, so `/memory` has one meaning.
 //! Shadows the shell builtin of the same name so opening the modal goes through
-//! `x.ai/memory/list` instead of a prompt turn that echoes into scrollback.
+//! `example.invalid/memory/list` instead of a prompt turn that echoes into scrollback.
 //! The registry hides this command until the shell advertises its own `memory` builtin.
 
 use crate::app::actions::Action;

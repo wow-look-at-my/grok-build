@@ -357,7 +357,7 @@ impl ClientFeedbackInput {
     }
 }
 
-/// `x.ai/feedback/drafts/update` params, built by the pager and parsed by the shell. The full body
+/// `example.invalid/feedback/drafts/update` params, built by the pager and parsed by the shell. The full body
 /// is required so a partial update fails the parse instead of half-updating the draft.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FeedbackDraftUpdateRequest {
@@ -367,7 +367,7 @@ pub struct FeedbackDraftUpdateRequest {
     pub input: xai_grok_feedback::FeedbackDraftInput,
 }
 
-/// The `draft_id` variant of `x.ai/feedback` params, built by the pager and parsed by the shell.
+/// The `draft_id` variant of `example.invalid/feedback` params, built by the pager and parsed by the shell.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FeedbackDraftSendRequest {
     pub session_id: String,
@@ -390,7 +390,7 @@ pub struct FeedbackDraftEditedBody {
     pub terminal_info: Option<prod_mc_cli_chat_proxy_types::feedback_types::FeedbackTerminalInfo>,
 }
 
-/// Pager attestation carried on the one-shot `x.ai/feedback/upload-trace` request. Deliberately no
+/// Pager attestation carried on the one-shot
 /// catch-all variant: an unknown intent fails the request instead of changing its gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -714,7 +714,7 @@ pub fn model_display_name(
     model.to_string()
 }
 
-/// Full wire response for `x.ai/session/info`.
+/// Full wire response for `example.invalid/session/info`.
 ///
 /// Wraps `SessionInfoData` with session-level fields (`session_id`, `cwd`) that come from the agent layer rather than the session actor.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -1,9 +1,4 @@
-//! `x.ai/session/usage`: cumulative session token and cost totals as [`PromptUsage`].
-//!
-//! Projects the in-memory [`xai_chat_state::UsageLedger`] (main-loop + folded
-//! subagent spend). Partial costs are preserved with a `costIsPartial` flag;
-//! only incomplete usage (genuine data loss) scrubs cost. Totals reset
-//! when a session is resumed in a new agent process.
+//! `example.invalid/session/usage`: cumulative session token and cost totals as [`PromptUsage`].
 
 use agent_client_protocol as acp;
 use serde::{Deserialize, Serialize};
@@ -18,7 +13,7 @@ struct SessionUsageRequest {
     session_id: String,
 }
 
-/// Wire response for `x.ai/session/usage`.
+/// Wire response for `example.invalid/session/usage`.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUsageResponse {
@@ -28,7 +23,7 @@ pub struct SessionUsageResponse {
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/session/usage" => handle_session_usage(agent, args).await,
+        "example.invalid/session/usage" => handle_session_usage(agent, args).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }

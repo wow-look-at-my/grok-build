@@ -1,7 +1,7 @@
 [
   {
     "category": "fixes",
-    "description": "**Plugin and skill listings** from x.ai/plugins/list and x.ai/skills/* now reflect the latest config.toml even before the first session.",
+    "description": "**Plugin and skill listings** from example.invalid/plugins/list and example.invalid/skills/* now reflect the latest config.toml even before the first session.",
     "breaking_change": false
   },
   {

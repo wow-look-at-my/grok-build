@@ -1,4 +1,4 @@
-//! `x.ai/feedback`, `x.ai/feedback/dismiss`, `x.ai/btw`, and `x.ai/review/*` extension handlers.
+//! `example.invalid/feedback`, `example.invalid/feedback/dismiss`, `example.invalid/btw`, and `example.invalid/review/*` extension handlers.
 //!
 //! - `feedback` and `feedback/dismiss`: persist user ratings and text locally and forward to cli-chat-proxy.
 //! - `btw`: dispatch a side question to the active session via `SessionCommand::SideQuestion` and return the answer.
@@ -23,11 +23,11 @@ use crate::session::{
 #[tracing::instrument(skip_all, fields(method = %args.method))]
 pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     match args.method.as_ref() {
-        "x.ai/btw" => {
+        "example.invalid/btw" => {
             tracing::info!("handling /btw side question");
             btw::handle_btw(agent, args).await
         }
-        "x.ai/feedback" | "x.ai/feedback/dismiss" => {
+        "example.invalid/feedback" | "example.invalid/feedback/dismiss" => {
             tracing::info!("handling user feedback");
             handle_feedback(agent, args).await
         }
@@ -35,8 +35,10 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
             tracing::info!("handling user feedback");
             handle_feedback(agent, args).await
         }
-        "x.ai/feedback/upload-trace" => feedback_trace::handle_upload_trace(agent, args).await,
-        m if m.starts_with("x.ai/review") => {
+        "example.invalid/feedback/upload-trace" => {
+            feedback_trace::handle_upload_trace(agent, args).await
+        }
+        m if m.starts_with("example.invalid/review") => {
             tracing::info!("handling review comment");
             review::handle_review(agent, args).await
         }
@@ -44,7 +46,7 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     }
 }
 
-/// Shown for every `x.ai/feedback*` request while the feature flag is off
+/// Shown for every `example.invalid/feedback*` request while the feature flag is off
 pub const FEEDBACK_DISABLED_MESSAGE: &str = "Feedback is disabled. To enable, set \
 GROK_FEEDBACK_ENABLED=true or [features] feedback = true in config.toml.";
 
@@ -80,7 +82,7 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
         m if m.starts_with(feedback_drafts::DRAFTS_METHOD_PREFIX) => {
             feedback_drafts::handle(agent, args).await
         }
-        "x.ai/feedback" => {
+        "example.invalid/feedback" => {
             let (mut feedback_input, draft_cleanup) = parse_feedback(agent, args).await?;
             let draft_request = draft_cleanup.is_some();
 
@@ -230,7 +232,7 @@ async fn handle_feedback(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult 
             .expect("to work");
             Ok(acp::ExtResponse::new(value))
         }
-        "x.ai/feedback/dismiss" => dismiss_request(agent, args).await,
+        "example.invalid/feedback/dismiss" => dismiss_request(agent, args).await,
         _ => Err(acp::Error::method_not_found()),
     }
 }

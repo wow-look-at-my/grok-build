@@ -126,7 +126,7 @@ fn effective_local_ts(m: &MergedSession) -> Option<String> {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RowMeta {
-    #[serde(rename = "x.ai/session")]
+    #[serde(rename = "example.invalid/session")]
     pub session: SessionMetaEnvelope,
 }
 
@@ -212,7 +212,7 @@ mod tests {
         );
         assert_eq!(
             ext.get("_meta")
-                .and_then(|m| m.get("x.ai/session"))
+                .and_then(|m| m.get("example.invalid/session"))
                 .and_then(|s| s.get("kind"))
                 .and_then(|v| v.as_str()),
             Some("chat")

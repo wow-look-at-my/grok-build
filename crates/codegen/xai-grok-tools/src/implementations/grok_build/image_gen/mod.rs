@@ -45,7 +45,7 @@ pub use xai_grok_tools_api::slash_commands::{
 /// Prose returned to the model (as a normal, successful tool result) when a free / X Basic user calls `image_gen` or
 /// `image_edit`. The model relays it to the user. The deliberate `/imagine` slash command shows the richer SuperGrok
 /// upsell modal instead; this covers the natural-language path.
-pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Image generation is a SuperGrok feature and isn't available on the free or X Basic tier. Let the user know they can unlock image and video generation by upgrading to SuperGrok: https://grok.com/supergrok?referrer=grok-build. Do not retry this tool.";
+pub(crate) const TIER_RESTRICTED_UPSELL: &str = "Image generation is a SuperGrok feature and isn't available on the free or X Basic tier. Let the user know they can unlock image and video generation by upgrading to SuperGrok: https://grok.invalid/supergrok?referrer=grok-build. Do not retry this tool.";
 
 /// HTTP client for xAI Imagine API. Cloned per-request; shares `Arc` state.
 #[derive(Clone)]
@@ -524,7 +524,7 @@ mod tests {
     fn per_tool_gates_are_independent() {
         let cfg = ImageGenConfig::Enabled {
             api_key: Some("k".into()),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.example.invalid/v1".into(),
             extra_headers: indexmap::IndexMap::new(),
             image_gen_enabled: false,
             image_edit_enabled: true,
@@ -546,7 +546,7 @@ mod tests {
         preset.insert(SESSION_ID_HEADER.to_string(), "caller-set".to_string());
         let cfg = ImageGenConfig::Enabled {
             api_key: Some("k".into()),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.example.invalid/v1".into(),
             extra_headers: preset,
             image_gen_enabled: true,
             image_edit_enabled: true,
@@ -561,7 +561,7 @@ mod tests {
 
         let cfg_plain = ImageGenConfig::Enabled {
             api_key: Some("k".into()),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.example.invalid/v1".into(),
             extra_headers: indexmap::IndexMap::new(),
             image_gen_enabled: true,
             image_edit_enabled: true,
@@ -584,7 +584,7 @@ mod tests {
     async fn post_json_attaches_session_and_bearer_headers() {
         let cfg = ImageGenConfig::Enabled {
             api_key: Some("k".into()),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.example.invalid/v1".into(),
             extra_headers: indexmap::IndexMap::new(),
             image_gen_enabled: true,
             image_edit_enabled: true,
@@ -619,7 +619,7 @@ mod tests {
     fn client_selects_model_from_override() {
         let mk = |model_override: Option<&str>| ImageGenConfig::Enabled {
             api_key: Some("k".into()),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.example.invalid/v1".into(),
             extra_headers: indexmap::IndexMap::new(),
             image_gen_enabled: true,
             image_edit_enabled: true,
@@ -650,7 +650,7 @@ mod tests {
     fn client_selects_edit_model_from_override() {
         let mk = |edit_model_override: Option<&str>| ImageGenConfig::Enabled {
             api_key: Some("k".into()),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.example.invalid/v1".into(),
             extra_headers: indexmap::IndexMap::new(),
             image_gen_enabled: true,
             image_edit_enabled: true,
@@ -702,7 +702,7 @@ mod tests {
         // the short-circuit returns before any other resource (e.g. SessionFolder) is required.
         let cfg = ImageGenConfig::Enabled {
             api_key: Some("k".into()),
-            base_url: "https://api.x.ai/v1".into(),
+            base_url: "https://api.example.invalid/v1".into(),
             extra_headers: indexmap::IndexMap::new(),
             image_gen_enabled: true,
             image_edit_enabled: true,

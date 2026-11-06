@@ -119,8 +119,8 @@ pub fn is_cli_chat_proxy_url(url: &str) -> bool {
     }
     false
 }
-/// True for xAI-operated endpoints (`*.x.ai`, cli-chat-proxy, and optional non-production xAI hosts when that feature is enabled). `disable_api_key_auth` refuses keys only for these; other hosts are BYOK and exempt.
-/// Safe against invalid URLs and suffix attacks (`evil-x.ai.example`). Scheme-agnostic so credential *refusal* fails closed. To decide where to *attach* a credential, use [`is_xai_api_bearer_url`].
+/// True for xAI-operated endpoints (`*.example.invalid`, cli-chat-proxy, and
+/// optional non-production xAI hosts when that feature is enabled).
 pub fn is_xai_api_url(url: &str) -> bool {
     is_xai_api_url_impl(url, false)
 }
@@ -153,7 +153,7 @@ pub fn is_trusted_xai_https_url(url: &str) -> bool {
     }
     parsed
         .host_str()
-        .is_some_and(|host| host == "x.ai" || host.ends_with(".x.ai"))
+        .is_some_and(|host| host == "example.invalid" || host.ends_with(".example.invalid"))
 }
 fn is_xai_api_url_impl(url: &str, require_https: bool) -> bool {
     if require_https {
@@ -165,7 +165,7 @@ fn is_xai_api_url_impl(url: &str, require_https: bool) -> bool {
     xai_grok_net::Url::parse(url)
         .ok()
         .and_then(|url| url.host_str().map(str::to_owned))
-        .is_some_and(|host| host == "x.ai" || host.ends_with(".x.ai"))
+        .is_some_and(|host| host == "example.invalid" || host.ends_with(".example.invalid"))
 }
 fn is_loopback_host(parsed: &xai_grok_net::Url) -> bool {
     match parsed.host() {
@@ -390,59 +390,65 @@ mod tests {
     #[test]
     fn test_is_cli_chat_proxy_url_accepts_proxy_subpath() {
         assert!(is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+            "https://cli-chat-proxy.grok.invalid/v1/chat/completions"
         ));
     }
     #[test]
     fn test_is_cli_chat_proxy_url_rejects_public_api() {
-        assert!(!is_cli_chat_proxy_url("https://api.x.ai/v1"));
+        assert!(!is_cli_chat_proxy_url("https://api.example.invalid/v1"));
     }
     #[test]
     fn test_is_cli_chat_proxy_url_rejects_spoofed_hostname() {
         assert!(!is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com.evil.example/v1"
+            "https://cli-chat-proxy.grok.invalid.evil.example/v1"
         ));
     }
     #[test]
     fn test_is_cli_chat_proxy_url_rejects_v11_prefix_confusion() {
         assert!(!is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com/v11/chat/completions"
+            "https://cli-chat-proxy.grok.invalid/v11/chat/completions"
         ));
     }
     #[test]
     fn test_is_xai_api_url() {
-        assert!(is_xai_api_url("https://api.x.ai/v1"));
-        assert!(is_xai_api_url("https://api.x.ai/v1/chat/completions"));
-        assert!(is_xai_api_url("https://x.ai"));
+        assert!(is_xai_api_url("https://api.example.invalid/v1"));
         assert!(is_xai_api_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+            "https://api.example.invalid/v1/chat/completions"
+        ));
+        assert!(is_xai_api_url("https://example.invalid"));
+        assert!(is_xai_api_url(
+            "https://cli-chat-proxy.grok.invalid/v1/chat/completions"
         ));
         assert!(!is_xai_api_url("https://api.openai.com/v1"));
         assert!(!is_xai_api_url("https://api.anthropic.com/v1"));
         assert!(!is_xai_api_url("https://generativelanguage.googleapis.com"));
-        assert!(!is_xai_api_url("https://api.x.ai.evil.example/v1"));
-        assert!(!is_xai_api_url("https://evil-x.ai.attacker.com/v1"));
-        assert!(!is_xai_api_url("https://prefixx.ai/v1"));
+        assert!(!is_xai_api_url(
+            "https://api.example.invalid.evil.example/v1"
+        ));
+        assert!(!is_xai_api_url(
+            "https://evil-example.invalid.attacker.com/v1"
+        ));
+        assert!(!is_xai_api_url("https://prefixexample.invalid/v1"));
         assert!(!is_xai_api_url("not-a-url"));
         assert!(!is_xai_api_url(""));
-        assert!(is_xai_api_url("http://api.x.ai/v1"));
+        assert!(is_xai_api_url("http://api.example.invalid/v1"));
         assert!(is_xai_api_url("http://localhost:11434/v1"));
     }
     #[test]
     fn test_is_xai_api_bearer_url() {
-        assert!(is_xai_api_bearer_url("https://api.x.ai/v1"));
-        assert!(!is_xai_api_bearer_url("http://api.x.ai/v1"));
+        assert!(is_xai_api_bearer_url("https://api.example.invalid/v1"));
+        assert!(!is_xai_api_bearer_url("http://api.example.invalid/v1"));
         assert!(!is_xai_api_bearer_url("http://localhost:11434/v1"));
         {
             assert!(!is_xai_api_bearer_url("https://localhost:11434/v1"));
             assert!(!is_xai_api_bearer_url("https://127.0.0.2:11434/v1"));
             assert!(!is_xai_api_bearer_url("https://[::1]:11434/v1"));
         }
-        assert!(is_xai_api_bearer_url("https://API.X.AI/v1"));
+        assert!(is_xai_api_bearer_url("https://API.EXAMPLE.INVALID/v1"));
         assert!(!is_xai_api_bearer_url(
-            "https://api.x.ai@attacker.example/v1"
+            "https://api.example.invalid@attacker.example/v1"
         ));
-        assert!(!is_xai_api_bearer_url("https://х.ai/v1"));
+        assert!(!is_xai_api_bearer_url("https://еxample.invalid/v1"));
     }
     #[test]
     fn test_truncate() {

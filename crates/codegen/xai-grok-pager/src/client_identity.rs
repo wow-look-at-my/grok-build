@@ -7,7 +7,7 @@ pub fn pager_client_version() -> &'static str {
     xai_grok_version::version()
 }
 
-/// `User-Agent` for the pager's own HTTP clients that call `api.x.ai` directly (voice STT).
+/// `User-Agent` for the pager's own HTTP clients that call `api.example.invalid` directly (voice STT).
 ///
 /// Matches the sampler's `grok-shell/<version> (os; arch)` shape so server-side dashboards bucket voice traffic alongside chat / imagine requests.
 pub fn client_user_agent() -> String {

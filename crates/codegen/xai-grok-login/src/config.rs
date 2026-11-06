@@ -46,7 +46,7 @@ fn default_team_oauth2_scopes() -> Vec<String> {
 pub enum PreferredAuthMethod {
     /// `XAI_API_KEY` / auth.json `xai::api_key` / per-model BYOK (`xai.api_key`).
     ApiKey,
-    /// OIDC / OAuth2 session (`cached_token`, interactive `grok.com` / `oidc`, including devbox-minted OIDC).
+    /// OIDC / OAuth2 session (`cached_token`, interactive `grok.invalid` / `oidc`, including devbox-minted OIDC).
     Oidc,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,9 +119,9 @@ pub struct OAuth2ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub referrer: Option<String>,
 }
-pub const XAI_OAUTH2_ISSUER: &str = "https://auth.x.ai";
+pub const XAI_OAUTH2_ISSUER: &str = "https://auth.example.invalid";
 /// A separate const so the frozen contract test pins the production allowlist even when the non-production feature adds staging and local origins.
-const PROD_ACCOUNTS_APP_ORIGINS: &[&str] = &["https://accounts.x.ai"];
+const PROD_ACCOUNTS_APP_ORIGINS: &[&str] = &["https://accounts.example.invalid"];
 /// Production build: accepts only the production accounts app.
 pub fn allowed_accounts_app_origins() -> Vec<String> {
     PROD_ACCOUNTS_APP_ORIGINS
@@ -168,8 +168,8 @@ pub fn is_xai_oauth2_issuer(issuer: &str) -> bool {
     issuer == XAI_OAUTH2_ISSUER || issuer == XAI_OAUTH2_LOCAL_ISSUER
 }
 /// auth.json scope key used by the pre-OIDC `grok login --legacy` flow.
-/// Matches the key format produced by the original `accounts.x.ai` relay auth.
-pub const LEGACY_AUTH_SCOPE: &str = "https://accounts.x.ai/sign-in";
+/// Matches the key format produced by the original `accounts.example.invalid` relay auth.
+pub const LEGACY_AUTH_SCOPE: &str = "https://accounts.example.invalid/sign-in";
 impl GrokComConfig {
     /// Pinning a team (`force_login_team_uuid`) disables `xai.api_key` auth: team membership can't be verified from a bare API key.
     /// The `GROK_DISABLE_API_KEY_AUTH` env lockdown is read at call time and OR-ed in, so a lower-trust user `config.toml` cannot turn it back off.
@@ -378,14 +378,14 @@ mod tests {
     #[test]
     fn team_auth_scope_is_base_scope() {
         let cfg = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.example.invalid".into(),
             client_id: "client-123".into(),
             scopes: default_team_oauth2_scopes(),
             principal_type: Some("Team".into()),
             principal_id: Some("team-abc".into()),
             referrer: Some("grok-build".into()),
         };
-        assert_eq!(cfg.auth_scope(), "https://auth.x.ai::client-123");
+        assert_eq!(cfg.auth_scope(), "https://auth.example.invalid::client-123");
     }
     #[test]
     fn env_flag_enabled_treats_falsy_spellings_as_off() {
@@ -399,20 +399,23 @@ mod tests {
     #[test]
     fn personal_auth_scope_is_base_scope() {
         let cfg = OAuth2ProviderConfig {
-            issuer: "https://auth.x.ai".into(),
+            issuer: "https://auth.example.invalid".into(),
             client_id: "client-123".into(),
             scopes: default_oauth2_scopes(),
             principal_type: None,
             principal_id: None,
             referrer: Some("grok-build".into()),
         };
-        assert_eq!(cfg.auth_scope(), "https://auth.x.ai::client-123");
+        assert_eq!(cfg.auth_scope(), "https://auth.example.invalid::client-123");
     }
-    /// FROZEN loopback contract: the accounts-app origins the CLI's loopback callback server accepts cross-origin requests from. The consent page (served from accounts.x.ai) delivers the code via `fetch(..., cors)`.
+    /// FROZEN loopback contract: the accounts-app origins the CLI's loopback
     /// Removing an origin therefore breaks loopback delivery for already-installed CLIs. Keep in sync with the oauth2-provider / accounts-app deployments. Non-production / local-dev origins are opt-in only.
     #[test]
     fn allowed_accounts_app_origins_are_frozen() {
-        assert_eq!(PROD_ACCOUNTS_APP_ORIGINS, &["https://accounts.x.ai"]);
+        assert_eq!(
+            PROD_ACCOUNTS_APP_ORIGINS,
+            &["https://accounts.example.invalid"]
+        );
         assert_eq!(allowed_accounts_app_origins(), PROD_ACCOUNTS_APP_ORIGINS);
     }
     /// FROZEN client contract: the 10 scopes the xAI OAuth2 client requests.

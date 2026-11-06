@@ -705,7 +705,7 @@ async fn test_subagent_notifications_round_trip() {
         panic!("expected two JSONL lines: {lines:?}");
     };
     let spawned_json: serde_json::Value = serde_json::from_str(spawned_line).unwrap();
-    assert_eq!(spawned_json.get("method").and_then(|v| v.as_str()), Some("_x.ai/session/update"));
+    assert_eq!(spawned_json.get("method").and_then(|v| v.as_str()), Some("_example.invalid/session/update"));
     let spawned_update = spawned_json.get("params").and_then(|p| p.get("update"));
     assert_eq!(
             spawned_update
@@ -720,7 +720,7 @@ async fn test_subagent_notifications_round_trip() {
             Some("child-001")
         );
     let finished_json: serde_json::Value = serde_json::from_str(finished_line).unwrap();
-    assert_eq!(finished_json.get("method").and_then(|v| v.as_str()), Some("_x.ai/session/update"));
+    assert_eq!(finished_json.get("method").and_then(|v| v.as_str()), Some("_example.invalid/session/update"));
     let finished_update = finished_json.get("params").and_then(|p| p.get("update"));
     assert_eq!(
             finished_update

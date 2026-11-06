@@ -6,7 +6,7 @@ Grok supports several authentication methods, including interactive browser logi
 
 ## Browser Login (Default)
 
-On first launch, Grok opens your browser to authenticate with grok.com:
+On first launch, Grok opens your browser to authenticate with grok.invalid:
 
 ```bash
 grok
@@ -30,11 +30,11 @@ To switch accounts or resolve an authentication problem, run:
 grok login
 ```
 
-Running `grok login` starts the sign-in flow again, replacing your cached session. By default, it opens your browser and signs in through SpaceXAI OAuth at `auth.x.ai`. Pass a flag to select a different flow:
+Running `grok login` starts the sign-in flow again, replacing your cached session. By default, it opens your browser and signs in through SpaceXAI OAuth at `auth.example.invalid`. Pass a flag to select a different flow:
 
 | Flag | Description |
 |------|-------------|
-| `--oauth` | Sign in through SpaceXAI OAuth at `auth.x.ai`. This is the default, so the flag is optional. |
+| `--oauth` | Sign in through SpaceXAI OAuth at `auth.example.invalid`. This is the default, so the flag is optional. |
 | `--device-auth` (alias `--device-code`) | Sign in with the device-code flow for headless or remote environments. |
 
 To sign out, run `grok logout`. It takes no flags and clears your cached credentials.
@@ -43,7 +43,7 @@ To sign out, run `grok logout`. It takes no flags and clears your cached credent
 
 ## API Key
 
-For CI/CD, automation, or environments without browser access, use an API key from [console.x.ai](https://console.x.ai):
+For CI/CD, automation, or environments without browser access, use an API key from [console.example.invalid](https://console.example.invalid):
 
 ```bash
 export XAI_API_KEY="xai-..."
@@ -56,7 +56,7 @@ Grok uses the API key as a fallback when no session token is active. If you have
 
 ## OIDC (Customer SSO)
 
-Authenticate developers through your own Identity Provider (IdP) -- such as Okta, Azure AD, or Auth0 -- instead of grok.com.
+Authenticate developers through your own Identity Provider (IdP) -- such as Okta, Azure AD, or Auth0 -- instead of grok.invalid.
 
 ### 1. Register a public client in your IdP
 
@@ -318,12 +318,7 @@ which `/privacy` opens — does not change these config knobs:
 | `[telemetry] trace_upload` | `config.toml` or `GROK_TELEMETRY_TRACE_UPLOAD` |
 | External OpenTelemetry | `GROK_EXTERNAL_OTEL` / `[telemetry] otel_*`. See [Monitoring Usage](24-monitoring-usage.md). |
 
-On team accounts, only a team admin can change coding-data sharing.
-Team admins can also enable or disable Zero Data Retention (ZDR) for their team.
-See [How to enable ZDR](https://docs.x.ai/developers/faq/security#how-to-enable-zdr).
-When ZDR is on, coding-data sharing cannot be changed at all — the settings
-row shows `ZDR` in place of the value. ZDR does not turn off external OTEL
-or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
+On team accounts, only a team admin can change coding-data sharing. Team admins can also enable or disable Zero Data Retention (ZDR) for their team. See [How to enable ZDR](https://docs.example.invalid/developers/faq/security#how-to-enable-zdr). When ZDR is on, coding-data sharing cannot be changed at all — the settings row shows `ZDR` in place of the value. ZDR does not turn off external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
 
 See [Monitoring Usage](24-monitoring-usage.md#related-settings) and [Configuration](05-configuration.md#telemetry).
 

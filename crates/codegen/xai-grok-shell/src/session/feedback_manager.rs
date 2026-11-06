@@ -584,7 +584,7 @@ impl FeedbackManager {
         None
     }
 
-    /// Engineers developing clients can call this via the `x.ai/debug/trigger_feedback` ACP extension method.
+    /// Engineers developing clients can call this via the `example.invalid/debug/trigger_feedback` ACP extension method.
     /// When a `feedback_client` is configured, the request is also recorded via the feedback API, exactly like a real trigger.
     /// The subsequent `complete_request` / `dismiss_request` round-trip from the client then works end-to-end.
     #[tracing::instrument(name = "feedback.force_feedback_request", skip_all, fields(

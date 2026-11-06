@@ -30,7 +30,7 @@ pub(crate) const SUPPRESS_AUTH: u8 = 4;
 pub(crate) struct PendingManualCompact {
     /// The command's argument, from `/compact <instructions>`.
     pub instructions: Option<String>,
-    /// The waiting `x.ai/compact_conversation` caller.
+    /// The waiting `example.invalid/compact_conversation` caller.
     pub respond_to: tokio::sync::oneshot::Sender<Result<(), agent_client_protocol::Error>>,
 }
 
