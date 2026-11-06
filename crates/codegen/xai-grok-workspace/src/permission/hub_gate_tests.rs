@@ -97,7 +97,6 @@ fn daemon_tool_table() -> Vec<(&'static str, Value, Class)> {
             json!({"tool_name": "linear__save_issue", "tool_input": {}}),
             Class::Mcp,
         ),
-        ("update_goal", json!({"completed": true}), Class::Read),
         (
             "workflow",
             json!({"source": {"type": "name", "name": "review"}}),

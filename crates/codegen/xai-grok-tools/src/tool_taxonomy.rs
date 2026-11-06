@@ -67,7 +67,6 @@ impl ToolKind {
             ToolKind::SearchTool => "Search Tools",
             ToolKind::UseTool => "Use Tool",
             ToolKind::Monitor => "Monitor",
-            ToolKind::GoalUpdate => "Update Goal",
             ToolKind::Workflow => "Workflow",
             ToolKind::Ci => "CI Status",
             ToolKind::Git => "Git",
@@ -116,7 +115,6 @@ impl ToolKind {
             | ToolKind::SearchTool
             | ToolKind::UseTool
             | ToolKind::Monitor
-            | ToolKind::GoalUpdate
             | ToolKind::Workflow
             // Reads nothing and writes nothing here.
             | ToolKind::SendMessage

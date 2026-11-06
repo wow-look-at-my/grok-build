@@ -552,8 +552,7 @@ pub(crate) fn acp_tool_update(
                     .raw_output(raw_output_json(output, rewriter)),
             ))
         }
-        ToolOutput::UpdateGoal(_)
-        | ToolOutput::Workflow(_)
+        ToolOutput::Workflow(_)
         | ToolOutput::Monitor(_)
         | ToolOutput::SchedulerCreate(_)
         | ToolOutput::SchedulerDelete(_)

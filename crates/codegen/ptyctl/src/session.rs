@@ -426,7 +426,7 @@ pub(crate) mod tests {
         let session = start_session(vec![
             "/bin/sh".into(),
             "-c".into(),
-            "sleep 0.3; echo READY; sleep 30".into(),
+            "sleep 0.3; echo READY; read line".into(),
         ])
         .await;
 
@@ -443,8 +443,8 @@ pub(crate) mod tests {
             outcome.elapsed_ms
         );
 
-        // Interrupt the trailing `sleep 30` so the child exits.
-        shutdown(&session, "<C-c>").await;
+        // Release `read` with a line.
+        shutdown(&session, "<CR>").await;
     }
 
     /// A wait for absent text times out at the deadline and carries the diagnostic snapshot.

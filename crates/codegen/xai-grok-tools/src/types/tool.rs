@@ -91,7 +91,6 @@ pub enum ToolKind {
     SearchTool,
     UseTool,
     Monitor,
-    GoalUpdate,
     Workflow,
     Ci,
     Git,

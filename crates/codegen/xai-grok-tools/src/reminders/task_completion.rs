@@ -700,7 +700,6 @@ pub fn consumed_completion_ids(output: &ToolOutput) -> Vec<&str> {
         | ToolOutput::SchedulerCreate(_)
         | ToolOutput::SchedulerDelete(_)
         | ToolOutput::SchedulerList(_)
-        | ToolOutput::UpdateGoal(_)
         | ToolOutput::Ci(_)
         | ToolOutput::Workflow(_)
         | ToolOutput::SendMessage(_)

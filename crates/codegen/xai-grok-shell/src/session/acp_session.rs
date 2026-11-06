@@ -333,7 +333,6 @@ pub(crate) struct InputItem {
 use crate::session::commands::{NotificationPriority, NotificationSource};
 /// Built by [`SessionActor::resolve_goal_tool_names()`] to avoid duplicating `tool_for_kind()` calls across goal functions.
 struct GoalToolNames {
-    goal: String,
     task: String,
     todo: String,
 }
@@ -343,7 +342,6 @@ struct GoalToolNames {
 pub(super) const GOAL_TASK_DISCIPLINE_TEMPLATE: &str =
     include_str!("templates/goal_task_discipline.md");
 pub(super) const GOAL_RULES_TEMPLATE: &str = include_str!("templates/goal_rules.md");
-pub(super) const GOAL_RULES_TEMPLATE_LEGACY: &str = include_str!("templates/goal_rules_legacy.md");
 /// Plan-aware preamble folded into the goal-rules block when the planner is enabled and a plan exists.
 /// Empty on the legacy path.
 const GOAL_PLAN_BLOCK_TEMPLATE: &str = include_str!("templates/goal_plan_block.md");
@@ -352,8 +350,6 @@ const GOAL_PLAN_BLOCK_TEMPLATE: &str = include_str!("templates/goal_plan_block.m
 /// A `/goal … --budget N` cap IS enforced at the turn-end continuation gate (terminal `BudgetLimited`).
 pub(super) const GOAL_CONTINUATION_DIRECTIVE_TEMPLATE: &str =
     include_str!("templates/goal_continuation_directive.md");
-pub(super) const GOAL_CONTINUATION_DIRECTIVE_TEMPLATE_LEGACY: &str =
-    include_str!("templates/goal_continuation_directive_legacy.md");
 /// Compact can run mid-turn (`run_compact_only` / CompactAndResubmit); those
 /// callers must not inherit TurnEnd drain, `rounds_since_verify++`, or budget stop.
 enum GoalContinuationPurpose {
@@ -971,7 +967,6 @@ pub(crate) struct SessionActor {
     pub(crate) goal_enabled: bool,
     pub(crate) background_workflows_enabled: bool,
     goal_harness_enabled: std::sync::atomic::AtomicBool,
-    goal_harness_availability_reconciled: std::sync::atomic::AtomicBool,
     /// Session-scoped state for the `/goal` Design-Execute-Verify loop.
     /// Modeled after `plan_mode` above.
     pub(crate) goal_tracker: Arc<parking_lot::Mutex<crate::session::goal_tracker::GoalTracker>>,
@@ -983,16 +978,6 @@ pub(crate) struct SessionActor {
     /// Auto-pauses the goal with `GoalPauseReason::BackOff` once the counter reaches [`GOAL_CONTINUATION_BACKOFF_THRESHOLD`].
     /// In-memory only; session restart is itself a reset.
     pub(crate) goal_continuation_streak: std::sync::atomic::AtomicU32,
-    pub(crate) goal_update_rx: std::cell::RefCell<
-        Option<
-            tokio::sync::mpsc::UnboundedReceiver<
-                xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope,
-            >,
-        >,
-    >,
-    pub(crate) goal_update_tx: tokio::sync::mpsc::UnboundedSender<
-        xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope,
-    >,
     pub(crate) workflow_manager:
         Arc<tokio::sync::Mutex<crate::session::workflow::manager::WorkflowManager>>,
     pub(crate) workflow_launch_tx: tokio::sync::mpsc::UnboundedSender<
@@ -1036,11 +1021,6 @@ pub(crate) struct SessionActor {
     /// Set on session load once `maybe_reconcile_active_goal_without_plan` has run.
     /// Subsequent prompt-flow ticks then don't repeat the pause-on-load check.
     pub(crate) goal_plan_reconciled: std::sync::atomic::AtomicBool,
-    pub(crate) pending_classifier_completions: parking_lot::Mutex<
-        VecDeque<xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalInput>,
-    >,
-    /// [`Self::account_not_achieved_without_sampler`].
-    pub(crate) goal_classifier_in_flight: std::sync::atomic::AtomicBool,
     /// Agent-level managed MCP gateway catalog cache.
     pub(crate) managed_mcp_handle: crate::session::managed_mcp::ManagedMcpStateHandle,
     /// Admitted client MCP seed. Set from `UpdateMcpServers.client_seed` on this actor.
@@ -1290,9 +1270,6 @@ impl SessionActor {
         let tool_names = self.registered_tool_names().await;
         let has_workflow_runs = !self.workflow_tracker().await.lock().list().is_empty();
         let availability = self.build_command_availability(&tool_names, has_workflow_runs);
-        if !self.goal_runs_on_workflow_engine() {
-            self.maybe_reconcile_active_goal_without_harness().await;
-        }
         self.maybe_reconcile_active_goal_without_plan().await;
         availability
     }
@@ -1314,11 +1291,7 @@ impl SessionActor {
         has_workflow_runs: bool,
     ) -> slash_commands::CommandAvailability {
         let mut availability = self.build_local_command_availability(tool_names);
-        availability.goal = if self.goal_runs_on_workflow_engine() {
-            self.sync_goal_harness()
-        } else {
-            self.sync_goal_harness_from_tools(tool_names)
-        };
+        availability.goal = self.sync_goal_harness();
         availability.workflow_management = has_workflow_runs;
         availability
     }
@@ -1336,11 +1309,6 @@ impl SessionActor {
             || tool_names
                 .iter()
                 .any(|n| n == MEMORY_SEARCH_TOOL_NAME || n == MEMORY_GET_TOOL_NAME);
-        let goal = if self.goal_runs_on_workflow_engine() {
-            self.goal_enabled
-        } else {
-            goal_slash_and_harness_available(self.goal_enabled, tool_names)
-        };
         slash_commands::CommandAvailability {
             feedback: self.feedback_manager.is_enabled(),
             memory: self.memory.is_enabled() && can_read_memory,
@@ -1352,7 +1320,7 @@ impl SessionActor {
             }),
             hooks: self.hook_registry.borrow().is_some(),
             plugins: self.plugin_registry.borrow().is_some(),
-            goal,
+            goal: self.goal_enabled,
             workflows: tool_names.iter().any(|n| {
                 n == xai_grok_tools::implementations::grok_build::workflow::WORKFLOW_TOOL_NAME
             }),
@@ -1387,9 +1355,6 @@ impl SessionActor {
             }
         }
         crate::session::pending_interaction::has_parked_plan_approval(&self.pending_interactions)
-    }
-    pub(crate) fn goal_runs_on_workflow_engine(&self) -> bool {
-        self.background_workflows_enabled
     }
     /// Uses `AgentMessageChunk` so the text appears in the conversation scrollback.
     /// Then flushes the replay buffer so the text is delivered before the turn ends.

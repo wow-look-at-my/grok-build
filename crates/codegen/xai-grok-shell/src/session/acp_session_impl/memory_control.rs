@@ -214,7 +214,6 @@ impl SessionActor {
             let state = if enabled { "enabled" } else { "disabled" };
             format!("Memory is already {state}.")
         };
-        self.refresh_goal_harness_enabled().await;
         msg
     }
 

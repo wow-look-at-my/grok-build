@@ -52,7 +52,6 @@ pub(crate) mod storage;
 pub mod task;
 pub mod task_output;
 pub mod todo;
-pub mod update_goal;
 pub mod video_gen;
 pub mod web_fetch;
 pub mod web_search;
@@ -94,7 +93,6 @@ pub use send_subagent_message::{
 pub use task::{TaskTool, is_task_tool_id};
 pub use task_output::{GetTerminalCommandOutputTool, TaskOutputTool, WaitTasksTool};
 pub use todo::TodoWriteTool;
-pub use update_goal::{UPDATE_GOAL_TOOL_NAME, UpdateGoalTool};
 pub use video_gen::{
     IMAGE_TO_VIDEO_TOOL_NAME, IMAGINE_VIDEO_COMMAND_NAME, ImageToVideoTool,
     REFERENCE_TO_VIDEO_TOOL_NAME, ReferenceToVideoTool, imagine_video_instruction,

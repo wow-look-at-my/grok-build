@@ -3,7 +3,7 @@
 //! - `GET  /rest/user-skills`: enabled user-uploaded skills
 //!
 //! Transport only.
-//! `available_commands_update` map this catalog to slash commands.
+//! commands.
 //!
 //! Desktop/shell chat uses this REST path, not gateway `conversation.commands.updated`.
 //! That keeps one process-local source for `available_commands_update`, list_commands, and slash resolve/expansion.

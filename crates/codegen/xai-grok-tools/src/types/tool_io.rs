@@ -24,7 +24,6 @@ use crate::implementations::grok_build::search_replace::SearchReplaceInput;
 use crate::implementations::grok_build::send_feedback::SendFeedbackInput;
 use crate::implementations::grok_build::send_subagent_message::SendSubagentMessageInput;
 use crate::implementations::grok_build::todo::TodoWriteInput;
-use crate::implementations::grok_build::update_goal::UpdateGoalInput;
 use crate::implementations::grok_build::video_gen::{ImageToVideoInput, ReferenceToVideoInput};
 use crate::implementations::grok_build::web_fetch::WebFetchInput;
 use crate::implementations::grok_build::web_search::WebSearchInput;
@@ -87,7 +86,6 @@ pub enum ToolInput {
     SchedulerCreate(crate::implementations::grok_build::scheduler::create::SchedulerCreateInput),
     SchedulerDelete(crate::implementations::grok_build::scheduler::delete::SchedulerDeleteInput),
     SchedulerList(crate::implementations::grok_build::scheduler::list::SchedulerListInput),
-    UpdateGoal(UpdateGoalInput),
     Ci(crate::implementations::grok_build::ci::CiInput),
     Git(crate::implementations::grok_build::git::GitInput),
     Workflow(crate::implementations::grok_build::workflow::WorkflowToolInput),
