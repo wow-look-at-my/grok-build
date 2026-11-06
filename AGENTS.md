@@ -305,6 +305,12 @@ Every one of those is the test doing its job. Making them pass there means weake
 - A DNS resolver or a connector layer cannot enforce it. Behind a proxy the resolver sees the proxy's host. The HTTP client keeps a connector's target URI private.
 - `.cargo/config.toml` sets `GROK_ALLOWED_ENDPOINTS` to loopback so tests reach their mock servers. An installed binary does not get it.
 
+## Configured context windows are pinned
+
+- A `context_window` from a `[model.<id>]` block, a provider block or a listing sets `ModelInfo::context_window_pinned`. The sibling and provider lookups. The idle-resume refresh and the response-header upgrade never replace a pinned window, even when it equals a default value.
+- A block keyed by a listed model's own id (`[model."<provider>/<slug>"]`) claims that listing (`claiming_block`). Without the claim, `merge_additive_catalog` replaced the block with the listing.
+- A config reload sends `ReloadContextWindow` to every running session. Settings › "Context window limit" writes the value through `set_model_context_window` (`settings/context_limits.rs` in the pager).
+
 ## `[model_providers.<id>]` notes
 
 [docs/model-providers-id-notes.md](docs/model-providers-id-notes.md) holds this section.
