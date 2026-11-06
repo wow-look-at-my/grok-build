@@ -160,6 +160,7 @@ pub(crate) fn test_app() -> AppView {
         subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
             xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
         ),
+        model_context_limits: std::collections::BTreeMap::new(),
         zdr_access_enabled: false,
         usage_billing_redirect_url: None,
         access_gate_shown_logged: false,
