@@ -94,6 +94,60 @@ pub(crate) async fn test_grok_build_agent_with_todo() -> xai_grok_agent::Agent {
     use xai_grok_tools::registry::types::ToolConfig;
     test_agent_with_tools(vec![ToolConfig::for_tool::<TodoWriteTool>()]).await
 }
+/// Give `actor` the real `todo_write` tool, bound to its live todo list.
+#[cfg(test)]
+pub(crate) async fn arm_todo_writes(actor: &mut SessionActor) {
+    *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+    actor
+        .workspace_ops
+        .bind_local_session(
+            &actor.session_id_string(),
+            actor.tool_context.cwd.as_path().to_path_buf(),
+            actor.tool_context.hunk_tracker_handle.clone(),
+            actor.agent.borrow().tool_bridge().toolset(),
+            None,
+        )
+        .expect("bind_local_session");
+}
+/// Send `actor`'s model calls to `server`.
+#[cfg(test)]
+pub(crate) async fn point_model_at(
+    actor: &SessionActor,
+    server: &xai_grok_test_support::MockInferenceServer,
+) {
+    let mut cfg = actor
+        .chat_state_handle
+        .get_sampling_config()
+        .await
+        .expect("test actor has sampling config");
+    cfg.base_url = server.url();
+    cfg.api_backend = xai_grok_sampling_types::ApiBackend::Responses;
+    cfg.model = "test".to_string();
+    actor.chat_state_handle.update_sampling_config(cfg);
+    let mut creds = actor.chat_state_handle.get_credentials().await;
+    creds.api_key = Some("test-key".to_string());
+    actor.chat_state_handle.update_credentials(creds);
+}
+/// The item [`lite_goal_capture`] puts on the list.
+#[cfg(test)]
+pub(crate) const LITE_GOAL_CAPTURED_STEP: &str = "Run the test suite and fix each failure";
+/// The capture run `/goal --lite` starts with: one `todo_write` call. Queue it before any other response.
+#[cfg(test)]
+pub(crate) fn lite_goal_capture() -> xai_grok_test_support::ScriptedResponse {
+    let args = serde_json::json!({
+        "todos": [{"id": "c1", "content": LITE_GOAL_CAPTURED_STEP, "status": "pending"}]
+    })
+    .to_string();
+    xai_grok_test_support::ScriptedResponse::sse(
+        xai_grok_test_support::sse::responses_api_reasoning_then_tool_call_events(
+            "the objective is one step",
+            "call_capture_1",
+            "todo_write",
+            &args,
+            "test",
+        ),
+    )
+}
 #[cfg(test)]
 pub(crate) async fn test_agent_with_active_message_tool() -> xai_grok_agent::Agent {
     use xai_grok_tools::implementations::grok_build::send_subagent_message::SendSubagentMessageTool;

@@ -32,8 +32,46 @@ fn verdict(decision: &str, evidence: &str) -> ScriptedResponse {
     ScriptedResponse::sse(responses_api_script_exact(&json, "test"))
 }
 
-/// An actor on the workflow-engine driver whose session model is `server`.
+/// An actor on the workflow-engine driver whose session model is `server`, with the real todo tool.
 async fn goal_actor(server: &MockInferenceServer) -> SessionActor {
+    let mut actor = goal_actor_without_todo_tool(server).await;
+    arm_todo_writes(&mut actor).await;
+    actor
+}
+
+use super::support::{LITE_GOAL_CAPTURED_STEP as CAPTURED_STEP, lite_goal_capture as lite_capture};
+
+/// Every todo on the session's list, as `(id, content, status)`.
+async fn todo_list(actor: &SessionActor) -> Vec<(String, String, crate::tools::todo::TodoStatus)> {
+    use crate::tools::todo::TodoState;
+    use xai_grok_tools::types::resources::State;
+    actor
+        .agent
+        .borrow()
+        .tool_bridge()
+        .read_resource::<State<TodoState>>()
+        .await
+        .map(|state| {
+            state
+                .0
+                .todo_items_with_ids()
+                .map(|(id, item)| (id.clone(), item.content.clone(), item.status))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Mark every item done, so the round end reaches the evaluator.
+async fn finish_all_todos(actor: &SessionActor) {
+    let todos: Vec<_> = todo_list(actor)
+        .await
+        .into_iter()
+        .map(|(id, content, _)| serde_json::json!({"id": id, "content": content, "status": "completed"}))
+        .collect();
+    write_todos(actor, serde_json::Value::Array(todos)).await;
+}
+
+async fn goal_actor_without_todo_tool(server: &MockInferenceServer) -> SessionActor {
     let (gateway_tx, gateway_rx) =
         tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
     drain_gateway(gateway_rx);
@@ -43,19 +81,7 @@ async fn goal_actor(server: &MockInferenceServer) -> SessionActor {
     let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
     actor.background_workflows_enabled = true;
     set_goal_harness_for_tests(&actor);
-
-    let mut cfg = actor
-        .chat_state_handle
-        .get_sampling_config()
-        .await
-        .expect("test actor has sampling config");
-    cfg.base_url = server.url();
-    cfg.api_backend = xai_grok_sampling_types::ApiBackend::Responses;
-    cfg.model = "test".to_string();
-    actor.chat_state_handle.update_sampling_config(cfg);
-    let mut creds = actor.chat_state_handle.get_credentials().await;
-    creds.api_key = Some("test-key".to_string());
-    actor.chat_state_handle.update_credentials(creds);
+    point_model_at(&actor, server).await;
     actor
 }
 
@@ -67,6 +93,7 @@ async fn a_lite_goal_is_sent_back_with_the_reason_then_ends_on_the_evaluator_alo
             let server = MockInferenceServer::start()
                 .await
                 .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_capture());
             server.enqueue_response("/v1/responses", verdict("continue", "two tests still fail"));
             server.enqueue_response(
                 "/v1/responses",
@@ -80,6 +107,7 @@ async fn a_lite_goal_is_sent_back_with_the_reason_then_ends_on_the_evaluator_alo
             else {
                 panic!("a lite goal must flow through to inference");
             };
+            finish_all_todos(&actor).await;
             assert!(
                 reminder.contains("When that check finds the work complete, the goal ends."),
                 "lite rules must say the check ends the goal: {reminder}"
@@ -112,6 +140,75 @@ async fn a_lite_goal_is_sent_back_with_the_reason_then_ends_on_the_evaluator_alo
                 actor.goal_tracker.lock().status(),
                 Some(GoalStatus::Complete)
             );
+        })
+        .await;
+}
+
+/// `/goal --lite <objective>` runs `/todo <objective>` before the goal exists.
+#[tokio::test(flavor = "current_thread")]
+async fn a_lite_goal_starts_with_the_objective_captured_on_the_todo_list() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            server.set_keep_requests(true);
+            server.enqueue_response("/v1/responses", lite_capture());
+            let actor = goal_actor(&server).await;
+
+            let GoalSetupOutcome::Inference { .. } = actor
+                .setup_goal("make the tests pass", None, GoalMode::Lite)
+                .await
+            else {
+                panic!("a lite goal must flow through to inference");
+            };
+            let bodies = evaluator_bodies(&server);
+            assert_eq!(bodies.len(), 1, "one capture call, nothing else");
+            assert!(
+                bodies[0].contains("todo-capture agent")
+                    && bodies[0].contains("make the tests pass"),
+                "the capture gets the objective as its request: {}",
+                bodies[0]
+            );
+            let todos = todo_list(&actor).await;
+            assert_eq!(todos.len(), 1, "{todos:?}");
+            assert_eq!(todos[0].1, CAPTURED_STEP);
+            assert_eq!(todos[0].2, crate::tools::todo::TodoStatus::Pending);
+            assert_eq!(actor.goal_tracker.lock().status(), Some(GoalStatus::Active));
+        })
+        .await;
+}
+
+/// A capture that adds nothing leaves no goal behind: the goal never starts with an empty list.
+#[tokio::test(flavor = "current_thread")]
+async fn a_lite_goal_does_not_start_when_the_capture_fails() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let server = MockInferenceServer::start()
+                .await
+                .expect("mock inference server");
+            let actor = goal_actor_without_todo_tool(&server).await;
+
+            let GoalSetupOutcome::Message(message) = actor
+                .setup_goal("make the tests pass", None, GoalMode::Lite)
+                .await
+            else {
+                panic!("a failed capture must not start the goal");
+            };
+            assert!(
+                message.starts_with(
+                    "Goal not started: putting the objective on the todo list failed:"
+                ),
+                "{message}"
+            );
+            assert_eq!(
+                actor.goal_tracker.lock().status(),
+                None,
+                "no goal was created"
+            );
+            assert_eq!(server.request_count(), 0);
         })
         .await;
 }
@@ -149,21 +246,6 @@ async fn a_full_goal_still_hands_a_candidate_to_the_panel() {
             );
         })
         .await;
-}
-
-/// Bind the real `todo_write` tool to the actor's live todo list.
-async fn arm_todo_writes(actor: &mut SessionActor) {
-    *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
-    actor
-        .workspace_ops
-        .bind_local_session(
-            &actor.session_id_string(),
-            actor.tool_context.cwd.as_path().to_path_buf(),
-            actor.tool_context.hunk_tracker_handle.clone(),
-            actor.agent.borrow().tool_bridge().toolset(),
-            None,
-        )
-        .expect("bind_local_session");
 }
 
 async fn write_todos(actor: &SessionActor, todos: serde_json::Value) {
@@ -215,12 +297,12 @@ async fn a_round_with_open_todos_is_bounced_without_an_evaluator_call() {
             let server = MockInferenceServer::start()
                 .await
                 .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_capture());
             server.enqueue_response(
                 "/v1/responses",
                 verdict("candidate_complete", "the suite passed on the last run"),
             );
-            let mut actor = goal_actor(&server).await;
-            arm_todo_writes(&mut actor).await;
+            let actor = goal_actor(&server).await;
             let GoalSetupOutcome::Inference { .. } = actor
                 .setup_goal("make the tests pass", None, GoalMode::Lite)
                 .await
@@ -235,24 +317,17 @@ async fn a_round_with_open_todos_is_bounced_without_an_evaluator_call() {
             }
             assert_eq!(
                 server.request_count_for("/v1/responses"),
-                0,
-                "no evaluator request while todos are open"
+                1,
+                "only the capture: no evaluator request while todos are open"
             );
             assert_eq!(actor.goal_tracker.lock().status(), Some(GoalStatus::Active));
 
-            write_todos(
-                &actor,
-                serde_json::json!([
-                    {"id": "t2", "content": "wire the parser in", "status": "completed"},
-                    {"id": "t3", "content": "cover it with a test", "status": "completed"},
-                ]),
-            )
-            .await;
+            finish_all_todos(&actor).await;
             assert!(matches!(
                 actor.run_goal_round_end().await,
                 GoalRoundDecision::EndTurn
             ));
-            assert_eq!(server.request_count_for("/v1/responses"), 1);
+            assert_eq!(server.request_count_for("/v1/responses"), 2);
             assert_eq!(
                 actor.goal_tracker.lock().status(),
                 Some(GoalStatus::Complete),
@@ -273,8 +348,8 @@ async fn update_goal_completed_with_open_todos_is_rejected_without_a_validator()
             let server = MockInferenceServer::start()
                 .await
                 .expect("mock inference server");
-            let mut actor = goal_actor(&server).await;
-            arm_todo_writes(&mut actor).await;
+            server.enqueue_response("/v1/responses", lite_capture());
+            let actor = goal_actor(&server).await;
             for mode in [GoalMode::Lite, GoalMode::Full] {
                 let GoalSetupOutcome::Inference { .. } =
                     actor.setup_goal("make the tests pass", None, mode).await
@@ -315,7 +390,11 @@ async fn update_goal_completed_with_open_todos_is_rejected_without_a_validator()
                 );
                 actor.goal_tracker.lock().complete();
             }
-            assert_eq!(server.request_count(), 0, "no validator request was made");
+            assert_eq!(
+                server.request_count(),
+                1,
+                "only the lite goal's capture: no validator request was made"
+            );
         })
         .await;
 }
@@ -364,6 +443,9 @@ async fn a_give_up_claim_is_sent_back_with_steps_then_upheld_on_the_same_path_fo
                     .await
                     .expect("mock inference server");
                 server.set_keep_requests(true);
+                if mode == GoalMode::Lite {
+                    server.enqueue_response("/v1/responses", lite_capture());
+                }
                 server.enqueue_response(
                     "/v1/responses",
                     claim_verdict("rejected", &[UNTRIED_STEP], ""),
@@ -407,9 +489,16 @@ async fn a_give_up_claim_is_sent_back_with_steps_then_upheld_on_the_same_path_fo
                     GoalRoundDecision::EndTurn
                 ));
                 let bodies = evaluator_bodies(&server);
-                assert_eq!(bodies.len(), 2, "{mode:?}: one validator call per claim");
+                let capture_calls = usize::from(mode == GoalMode::Lite);
+                assert_eq!(
+                    bodies.len(),
+                    capture_calls + 2,
+                    "{mode:?}: one validator call per claim"
+                );
+                let second_review = &bodies[capture_calls + 1];
                 assert!(
-                    bodies[1].contains("prior_rejected_steps") && bodies[1].contains(UNTRIED_STEP),
+                    second_review.contains("prior_rejected_steps")
+                        && second_review.contains(UNTRIED_STEP),
                     "{mode:?}: the second review must check the steps the first one gave"
                 );
                 // The test actor has the verifier off, so InfraPaused proves
@@ -443,12 +532,12 @@ async fn open_todos_do_not_bounce_a_give_up_claim_unheard() {
             let server = MockInferenceServer::start()
                 .await
                 .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_capture());
             server.enqueue_response(
                 "/v1/responses",
                 claim_verdict("upheld", &[], "Send the qtcar logs from before 08:46"),
             );
-            let mut actor = goal_actor(&server).await;
-            arm_todo_writes(&mut actor).await;
+            let actor = goal_actor(&server).await;
             let GoalSetupOutcome::Inference { .. } = actor
                 .setup_goal("find the stall", None, GoalMode::Lite)
                 .await
@@ -461,7 +550,11 @@ async fn open_todos_do_not_bounce_a_give_up_claim_unheard() {
                 actor.run_goal_round_end().await,
                 GoalRoundDecision::EndTurn
             ));
-            assert_eq!(server.request_count_for("/v1/responses"), 1);
+            assert_eq!(
+                server.request_count_for("/v1/responses"),
+                2,
+                "the capture, then the claim review"
+            );
             assert_eq!(
                 actor.goal_tracker.lock().status(),
                 Some(GoalStatus::InfraPaused),
@@ -482,6 +575,7 @@ async fn update_goal_blocked_reason_is_reviewed_instead_of_counted() {
             let server = MockInferenceServer::start()
                 .await
                 .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_capture());
             server.enqueue_response(
                 "/v1/responses",
                 claim_verdict("rejected", &[UNTRIED_STEP], ""),
@@ -517,8 +611,8 @@ async fn update_goal_blocked_reason_is_reviewed_instead_of_counted() {
             }
             assert_eq!(
                 server.request_count(),
-                0,
-                "the review waits for the turn end"
+                1,
+                "only the capture: the review waits for the turn end"
             );
             assert_eq!(actor.goal_tracker.lock().status(), Some(GoalStatus::Active));
 
@@ -529,7 +623,7 @@ async fn update_goal_blocked_reason_is_reviewed_instead_of_counted() {
                 ),
                 GoalRoundDecision::EndTurn => panic!("a rejected claim must send the agent back"),
             }
-            assert_eq!(server.request_count_for("/v1/responses"), 1);
+            assert_eq!(server.request_count_for("/v1/responses"), 2);
             assert!(
                 actor
                     .goal_tracker
@@ -622,6 +716,9 @@ async fn lite_and_full_goals_run_the_panel_on_an_upheld_claim() {
                 let server = MockInferenceServer::start()
                     .await
                     .expect("mock inference server");
+                if mode == GoalMode::Lite {
+                    server.enqueue_response("/v1/responses", lite_capture());
+                }
                 server.enqueue_response(
                     "/v1/responses",
                     claim_verdict("upheld", &[], "Capture a Tracy trace of updateColor()"),

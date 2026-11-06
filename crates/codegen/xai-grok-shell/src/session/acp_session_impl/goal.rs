@@ -1200,6 +1200,15 @@ impl SessionActor {
         token_budget: Option<i64>,
         mode: crate::session::goal_tracker::GoalMode,
     ) -> GoalSetupOutcome {
+        // A lite goal has no planner to write its steps. It starts the way `/todo <objective>` does.
+        if mode == crate::session::goal_tracker::GoalMode::Lite {
+            let capture_id = format!("goal-{}", uuid::Uuid::new_v4());
+            if let Err(error) = self.run_todo_capture(objective, false, &capture_id).await {
+                return GoalSetupOutcome::Message(format!(
+                    "Goal not started: putting the objective on the todo list failed: {error}"
+                ));
+            }
+        }
         self.create_goal_orchestration(objective, token_budget)
             .await;
         {
