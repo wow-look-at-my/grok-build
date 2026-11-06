@@ -2252,5 +2252,8 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
         TaskResult::FeatureOverridePersisted { feature, result } => {
             settings::handle_feature_override_persisted(app, feature, result)
         }
+        TaskResult::ModelContextWindowPersisted { write, result } => {
+            settings::handle_model_context_window_persisted(app, write, result)
+        }
     }
 }

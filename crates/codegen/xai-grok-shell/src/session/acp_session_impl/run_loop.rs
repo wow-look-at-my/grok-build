@@ -920,6 +920,9 @@ pub(super) async fn run_session(
                         SessionCommand::ReloadThinkingSummaries => {
                             session.handle_reload_thinking_summaries();
                         }
+                        SessionCommand::ReloadContextWindow => {
+                            session.handle_reload_context_window().await;
+                        }
                         SessionCommand::OverrideModelName { model_name, extra_headers, context_window } => {
                             // Update the actor's SamplingConfig model, headers, and context window
                             if let Some(mut cfg) = session.chat_state_handle.get_sampling_config().await {
