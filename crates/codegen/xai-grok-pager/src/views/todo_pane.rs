@@ -145,6 +145,8 @@ pub struct TodoCounts {
     pub pending: usize,
     pub completed: usize,
     pub cancelled: usize,
+    /// Finished items from earlier goals. The other counts and `total` leave them out.
+    pub archived: usize,
 }
 
 impl TodoCounts {
@@ -160,6 +162,9 @@ impl TodoCounts {
 fn empty_placeholder_message(todos_empty: bool, counts: TodoCounts) -> String {
     if todos_empty {
         return "No todo items.".into();
+    }
+    if counts.total() == 0 && counts.archived > 0 {
+        return format!("{} archived. Press a to show them.", counts.archived);
     }
     match (counts.completed, counts.cancelled) {
         (_, 0) => "All done.".into(),
@@ -186,7 +191,7 @@ fn header_count_line(counts: TodoCounts) -> Option<Line<'static>> {
     }
     let theme = crate::theme::Theme::current();
     let count_style = Style::default().fg(theme.text_secondary);
-    Some(Line::from(vec![
+    let mut spans = vec![
         Span::styled(counts.completed.to_string(), count_style),
         Span::styled("/", Style::default().fg(theme.gray_dim)),
         Span::styled(total.to_string(), count_style),
@@ -194,7 +199,14 @@ fn header_count_line(counts: TodoCounts) -> Option<Line<'static>> {
             format!(" {}", crate::glyphs::check_mark()),
             Style::default().fg(theme.text_secondary),
         ),
-    ]))
+    ];
+    if counts.archived > 0 {
+        spans.push(Span::styled(
+            format!("  {} archived (a)", counts.archived),
+            Style::default().fg(theme.gray_dim),
+        ));
+    }
+    Some(Line::from(spans))
 }
 
 /// Lines the header (the `done/total` count) occupies at the top of the pane.
@@ -222,6 +234,8 @@ pub struct TodoPane {
     list_style: ListPaneStyle,
     /// Whether to show completed and cancelled items.
     show_done: bool,
+    /// Whether to show archived items. Off by default: they are finished work from earlier goals.
+    show_archived: bool,
     /// Shared visibility and focus state.
     pub overlay: OverlayState,
     /// Last theme kind seen; used to detect theme switches and restyle.
@@ -259,6 +273,7 @@ impl TodoPane {
             style: TodoPaneStyle::default(),
             list_style: ListPaneStyle::default(),
             show_done: true,
+            show_archived: false,
             overlay: OverlayState::hidden(),
             last_theme: crate::theme::Theme::current_kind(),
             last_click: None,
@@ -266,14 +281,20 @@ impl TodoPane {
         }
     }
 
-    /// Indices into `todos()` of the items that pass the `show_done` filter, in list order.
+    /// Whether `item` passes the `show_done` and `show_archived` filters.
+    fn is_shown(&self, item: &TodoItem) -> bool {
+        if item.archived {
+            return self.show_archived;
+        }
+        self.show_done || !item.status.is_finished()
+    }
+
+    /// Indices into `todos()` of the items that pass the filters, in list order.
     pub fn visible_indices(&self) -> Vec<usize> {
         self.todos
             .iter()
             .enumerate()
-            .filter(|(_, t)| {
-                self.show_done || !matches!(t.status, TodoStatus::Completed | TodoStatus::Cancelled)
-            })
+            .filter(|(_, t)| self.is_shown(t))
             .map(|(i, _)| i)
             .collect()
     }
@@ -323,6 +344,10 @@ impl TodoPane {
     fn compute_counts(items: &[TodoItem]) -> TodoCounts {
         let mut c = TodoCounts::default();
         for item in items {
+            if item.archived {
+                c.archived += 1;
+                continue;
+            }
             match item.status {
                 TodoStatus::InProgress => c.in_progress += 1,
                 TodoStatus::Pending => c.pending += 1,
@@ -362,6 +387,16 @@ impl TodoPane {
         self.show_done = !self.show_done;
     }
 
+    /// Whether archived items are shown.
+    pub fn show_archived(&self) -> bool {
+        self.show_archived
+    }
+
+    /// Toggle visibility of archived items.
+    pub fn toggle_show_archived(&mut self) {
+        self.show_archived = !self.show_archived;
+    }
+
     /// Desired height in lines for layout computation.
     pub fn desired_height(&self, view_height: u16) -> u16 {
         if !self.overlay.visible {
@@ -378,16 +413,9 @@ impl TodoPane {
             .max(1)
     }
 
-    /// Number of items that pass the `show_done` filter.
+    /// Number of items that pass the filters.
     fn visible_count(&self) -> usize {
-        if self.show_done {
-            self.todos.len()
-        } else {
-            self.todos
-                .iter()
-                .filter(|t| !matches!(t.status, TodoStatus::Completed | TodoStatus::Cancelled))
-                .count()
-        }
+        self.todos.iter().filter(|t| self.is_shown(t)).count()
     }
 
     /// Rebuild `entries` from `todos`, filtered by `show_done`. Items preserve their original order
@@ -396,9 +424,7 @@ impl TodoPane {
     fn rebuild_entries(&mut self) {
         self.entries.clear();
         for (idx, item) in self.todos.iter().enumerate() {
-            if !self.show_done
-                && matches!(item.status, TodoStatus::Completed | TodoStatus::Cancelled)
-            {
+            if !self.is_shown(item) {
                 continue;
             }
             self.entries
@@ -413,6 +439,11 @@ impl TodoPane {
         // 'h' toggles show_done (only when not typing in the search or filter bar)
         if key.code == KeyCode::Char('h') && self.list_state.input_mode().is_none() {
             self.toggle_show_done();
+            self.rebuild_entries();
+            return true;
+        }
+        if key.code == KeyCode::Char('a') && self.list_state.input_mode().is_none() {
+            self.toggle_show_archived();
             self.rebuild_entries();
             return true;
         }
@@ -587,6 +618,7 @@ mod tests {
             meta: None,
             verification: None,
             verification_passed: false,
+            archived: false,
         }
     }
 
@@ -633,6 +665,52 @@ mod tests {
             lines[1].contains("alpha"),
             "items render below the header: {lines:?}",
         );
+    }
+
+    fn archived(content: &str) -> TodoItem {
+        TodoItem {
+            archived: true,
+            ..item(content, TodoStatus::Completed)
+        }
+    }
+
+    #[test]
+    fn archived_items_collapse_into_the_header_until_a_is_pressed() {
+        let mut pane = TodoPane::new();
+        pane.update_todos(vec![
+            archived("old one"),
+            archived("old two"),
+            item("new done", TodoStatus::Completed),
+            item("new open", TodoStatus::Pending),
+        ]);
+
+        let lines = render_pane(&mut pane, 60, 8);
+        assert_eq!(
+            lines[0].trim(),
+            format!("1/2 {}  2 archived (a)", crate::glyphs::check_mark()),
+            "the count leaves archived items out: {lines:?}",
+        );
+        assert!(
+            !lines.iter().any(|l| l.contains("old")),
+            "archived rows are hidden: {lines:?}"
+        );
+        assert_eq!(pane.visible_indices(), [2, 3]);
+
+        assert!(pane.handle_key(&KeyEvent::new(
+            KeyCode::Char('a'),
+            crossterm::event::KeyModifiers::NONE
+        )));
+        assert_eq!(pane.visible_indices(), [0, 1, 2, 3]);
+        let lines = render_pane(&mut pane, 60, 8);
+        assert!(lines.iter().any(|l| l.contains("old one")), "{lines:?}");
+    }
+
+    #[test]
+    fn a_list_of_only_archived_items_says_how_to_show_them() {
+        let mut pane = TodoPane::new();
+        pane.update_todos(vec![archived("old one")]);
+        let lines = render_pane(&mut pane, 60, 4);
+        assert_eq!(lines[0].trim(), "1 archived. Press a to show them.");
     }
 
     /// Cancelled tasks stay out of the denominator, so the count can still reach `N/N`.

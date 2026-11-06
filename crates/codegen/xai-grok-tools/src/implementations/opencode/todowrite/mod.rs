@@ -360,6 +360,7 @@ impl xai_tool_runtime::Tool for TodoWriteTool {
                         meta: None,
                         verification: None,
                         verification_passed: false,
+                        archived: false,
                     },
                 );
             }

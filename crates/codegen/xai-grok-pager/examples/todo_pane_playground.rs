@@ -32,6 +32,7 @@ fn item(content: &str, status: TodoStatus) -> TodoItem {
         meta: None,
         verification: None,
         verification_passed: false,
+        archived: false,
     }
 }
 
