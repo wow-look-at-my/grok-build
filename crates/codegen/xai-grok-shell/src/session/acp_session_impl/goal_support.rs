@@ -662,9 +662,14 @@ pub(super) fn next_step_from_todos<'a>(
             "`{id}`: {}",
             neutralize_reminder_tags(cap_chars(content, GOAL_NEXT_STEP_MAX_CHARS))
         ),
+        None if todos.is_empty() => format!(
+            "Your `{todo_tool}` list is empty. Add the plan's steps to it, plus an item \
+             for each acceptance criterion. Then work through them."
+        ),
         None => format!(
-            "Your `{todo_tool}` list has no open item. Put the plan's remaining steps \
-             on it, and add an item for each acceptance criterion that does not hold yet."
+            "Every item on your `{todo_tool}` list is done, but the goal is not complete \
+             yet. Add a new item for each step that is still missing, including each \
+             acceptance criterion that does not hold yet. Then work through the new items."
         ),
     }
 }
@@ -2145,9 +2150,15 @@ mod verification_scope_tests {
             [("plan-a", "done already", TodoStatus::Completed)],
             "todo_write",
         );
-        assert!(closed.contains("no open item"), "{closed}");
+        assert!(
+            closed.starts_with("Every item on your `todo_write` list is done"),
+            "{closed}"
+        );
         let empty = next_step_from_todos([], "todo_write");
-        assert!(empty.contains("Put the plan's remaining steps"), "{empty}");
+        assert!(
+            empty.starts_with("Your `todo_write` list is empty"),
+            "{empty}"
+        );
     }
 }
 
