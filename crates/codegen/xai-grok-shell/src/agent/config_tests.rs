@@ -1583,7 +1583,7 @@ fn enforce_disable_api_key_auth_blocks_first_party_only() {
     assert_eq!(creds.auth_type, AuthType::SessionToken);
 }
 /// Regression for the OVERRIDE_MODEL kill-switch bypass. A first-party model with its own api_key resolves to `ApiKey` (priority 1, beating the session).
-/// session). The kill switch, now applied inside `try_resolve_model_credentials`, swaps it for the session token. BYOK (non-example.invalid) own keys are
+/// session). session). session). The kill switch, now applied inside `try_resolve_model_credentials`, swaps it for the session token. BYOK
 /// (`try_resolve_model_credentials` loads global config, so this exercises its resolve and enforce core.)
 #[test]
 fn try_resolve_model_credentials_swaps_first_party_own_key_under_kill_switch() {
