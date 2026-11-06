@@ -8248,15 +8248,47 @@ fn context_limit_state() -> SettingsModalState {
             ("gw/small".to_owned(), 64_000),
         ]
         .into(),
+        context_limits: [("gw/small".to_owned(), 64_000)].into(),
         ..PagerLocalSnapshot::default()
     };
-    let mut s = SettingsModalState::new(
+    SettingsModalState::new(
         Arc::new(SettingsRegistry::defaults()),
         UiConfig::default(),
         snapshot,
+    )
+}
+
+/// The row value names the limited model, so the list shows what is set.
+#[test]
+fn context_limit_row_value_summarizes_the_limits() {
+    let mut s = context_limit_state();
+    assert_eq!(
+        s.value_for(CONTEXT_KEY),
+        Some(SettingValue::String("Small 64k".to_owned()))
     );
-    s.context_limits.insert("gw/small".to_owned(), 64_000);
-    s
+    s.pager_snapshot
+        .context_limits
+        .insert("gw/big-one".to_owned(), 350_000);
+    assert_eq!(
+        s.value_for(CONTEXT_KEY),
+        Some(SettingValue::String("2 models".to_owned()))
+    );
+    s.pager_snapshot.context_limits.clear();
+    assert_eq!(
+        s.value_for(CONTEXT_KEY),
+        Some(SettingValue::String(String::new()))
+    );
+}
+
+/// `d` on the row asks to reset it, as on every other row.
+#[test]
+fn d_on_the_context_limit_row_opens_the_reset_confirm() {
+    let mut s = context_limit_state();
+    assert!(s.focus_key(CONTEXT_KEY));
+    assert!(matches!(
+        press(&mut s, KeyCode::Char('d')),
+        SettingsKeyOutcome::Action(Action::OpenResetConfirm { key }) if key == CONTEXT_KEY
+    ));
 }
 
 fn press(s: &mut SettingsModalState, code: KeyCode) -> SettingsKeyOutcome {

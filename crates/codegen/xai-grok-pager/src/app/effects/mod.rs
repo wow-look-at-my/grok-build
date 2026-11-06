@@ -2384,18 +2384,23 @@ pub(crate) fn execute(
             model_id,
             label,
             tokens,
+            previous,
         } => {
             tasks
                 .spawn(async move {
                     let result = xai_grok_shell::util::config::set_model_context_window(
-                            model_id,
+                            model_id.clone(),
                             tokens,
                         )
                         .await
                         .map_err(|e| e.to_string());
                     TaskResult::ModelContextWindowPersisted {
-                        label,
-                        tokens,
+                        write: crate::app::actions::ModelContextWindowWrite {
+                            model_id,
+                            label,
+                            tokens,
+                            previous,
+                        },
                         result,
                     }
                 });

@@ -1577,6 +1577,16 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
                 agent.session.models.set_current(id, None);
             }
         }
+        "model_context_window" => {
+            let _ = dispatch(
+                Action::SetModelContextWindow {
+                    model_id: "gw/big-one".to_owned(),
+                    label: "Big One".to_owned(),
+                    tokens: Some(350_000),
+                },
+                app,
+            );
+        }
         "max_thoughts_width" => {
             let _ = dispatch(Action::SetMaxThoughtsWidth(200), app);
         }
@@ -3562,7 +3572,26 @@ fn mouse_reporting_toggle_enqueues_capture_escapes_on_the_writer_queue() {
         "toggle-on queues exactly one payload"
     );
 }
-/// The context limit commit writes through one effect. The toast waits for the write.
+fn context_limit_toast(app: &AppView) -> Option<String> {
+    app.agents
+        .get(&AgentId(0))
+        .and_then(|a| a.toast.as_ref())
+        .map(|(s, _)| s.as_str().to_owned())
+}
+
+fn big_one_write(
+    tokens: Option<u64>,
+    previous: Option<u64>,
+) -> crate::app::actions::ModelContextWindowWrite {
+    crate::app::actions::ModelContextWindowWrite {
+        model_id: "gw/big-one".to_owned(),
+        label: "Big One".to_owned(),
+        tokens,
+        previous,
+    }
+}
+
+/// The commit updates the mirror at once and writes through one effect. The toast waits for the write.
 #[test]
 fn set_model_context_window_persists_then_toasts() {
     let mut app = test_app_with_agent();
@@ -3577,40 +3606,77 @@ fn set_model_context_window_persists_then_toasts() {
     assert!(
         matches!(
             effects.as_slice(),
-            [Effect::PersistModelContextWindow { model_id, tokens: Some(350_000), .. }]
+            [Effect::PersistModelContextWindow { model_id, tokens: Some(350_000), previous: None, .. }]
                 if model_id == "gw/big-one"
         ),
         "expected one PersistModelContextWindow, got {effects:?}",
     );
-    let toast_of = |app: &AppView| {
-        app.agents
-            .get(&AgentId(0))
-            .and_then(|a| a.toast.as_ref())
-            .map(|(s, _)| s.as_str().to_owned())
-    };
+    assert_eq!(app.model_context_limits.get("gw/big-one"), Some(&350_000));
     let _ = dispatch(
         Action::TaskComplete(TaskResult::ModelContextWindowPersisted {
-            label: "Big One".to_owned(),
-            tokens: Some(350_000),
+            write: big_one_write(Some(350_000), None),
             result: Ok(()),
         }),
         &mut app,
     );
     assert_eq!(
-        toast_of(&app).as_deref(),
+        context_limit_toast(&app).as_deref(),
         Some("\u{2713} Context window limit for Big One: 350k")
+    );
+}
+
+/// A failed write puts the mirror back and says so.
+#[test]
+fn set_model_context_window_failure_rolls_back_and_toasts() {
+    let mut app = test_app_with_agent();
+    let _ = dispatch(
+        Action::SetModelContextWindow {
+            model_id: "gw/big-one".to_owned(),
+            label: "Big One".to_owned(),
+            tokens: Some(350_000),
+        },
+        &mut app,
     );
     let _ = dispatch(
         Action::TaskComplete(TaskResult::ModelContextWindowPersisted {
-            label: "Big One".to_owned(),
-            tokens: None,
+            write: big_one_write(Some(350_000), None),
             result: Err("disk full".to_owned()),
         }),
         &mut app,
     );
-    let toast = toast_of(&app).unwrap_or_default();
+    assert!(
+        app.model_context_limits.is_empty(),
+        "the failed limit is gone"
+    );
+    let toast = context_limit_toast(&app).unwrap_or_default();
     assert!(
         toast.contains("Could not save context window limit") && toast.contains("disk full"),
         "a failed write must say so, got {toast:?}",
+    );
+}
+
+/// The reset of the row removes every limit, one write for each.
+#[test]
+fn clear_model_context_windows_removes_every_limit() {
+    let mut app = test_app_with_agent();
+    app.model_context_limits.insert("a".to_owned(), 100_000);
+    app.model_context_limits.insert("b".to_owned(), 200_000);
+    let effects = dispatch(Action::ClearModelContextWindows, &mut app);
+    assert!(app.model_context_limits.is_empty());
+    let cleared: Vec<(&str, Option<u64>, Option<u64>)> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::PersistModelContextWindow {
+                model_id,
+                tokens,
+                previous,
+                ..
+            } => Some((model_id.as_str(), *tokens, *previous)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        cleared,
+        [("a", None, Some(100_000)), ("b", None, Some(200_000))]
     );
 }

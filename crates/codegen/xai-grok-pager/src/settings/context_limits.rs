@@ -144,10 +144,8 @@ pub fn limits_from_config(root: &toml::Value) -> BTreeMap<String, u64> {
 
 /// One chooser row per catalog model. The current model comes first, and the
 /// rest sort by label.
-pub fn choices(
-    snapshot: &PagerLocalSnapshot,
-    limits: &BTreeMap<String, u64>,
-) -> Vec<OwnedEnumChoice> {
+pub fn choices(snapshot: &PagerLocalSnapshot) -> Vec<OwnedEnumChoice> {
+    let limits = &snapshot.context_limits;
     let current = snapshot.current_model_name.as_deref();
     let mut rows: Vec<(bool, OwnedEnumChoice)> = snapshot
         .available_models
@@ -178,6 +176,24 @@ pub fn choices(
     });
     rows.dedup_by(|a, b| a.1.canonical == b.1.canonical);
     rows.into_iter().map(|(_, choice)| choice).collect()
+}
+
+/// The row value: `Big One 350k` for one limit, `2 models` for more, empty for none.
+pub fn summary(snapshot: &PagerLocalSnapshot) -> String {
+    let limits = &snapshot.context_limits;
+    let Some((id, tokens)) = limits.iter().next() else {
+        return String::new();
+    };
+    if limits.len() > 1 {
+        return format!("{} models", limits.len());
+    }
+    let label = snapshot
+        .available_models
+        .iter()
+        .find(|(_, mid)| mid.0.as_ref() == id.as_str())
+        .map(|(name, mid)| model_choice_label(name, mid))
+        .unwrap_or_else(|| id.clone());
+    format!("{label} {}", short_tokens(*tokens))
 }
 
 /// `Name · 1M`, or `Name · 350k limit` for a model with a configured limit.

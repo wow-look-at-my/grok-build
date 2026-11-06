@@ -811,7 +811,7 @@ fn compute_filtered_row_heights(state: &SettingsModalState, area_width: u16) -> 
                     heights.push(1);
                     continue;
                 };
-                // Navigational rows carry no value; the height is the chevron row plus the expanded description (a later cap), agreeing with the forward render loop
+                // Group rows carry no value; the height is the chevron row plus the expanded description (a later cap), agreeing with the forward render loop
                 if matches!(meta.kind, SettingKind::Group { .. }) {
                     let mut h: u16 = 1;
                     if state.expanded_keys.contains(key) {
@@ -2218,6 +2218,8 @@ pub(super) fn value_display(
         SettingValue::String(s) => {
             if s.is_empty() && matches!(meta.kind, SettingKind::DynamicEnum { .. }) {
                 "(no override)".to_string()
+            } else if s.is_empty() && matches!(meta.kind, SettingKind::ModelContextLimits) {
+                "none".to_string()
             } else {
                 s.clone()
             }

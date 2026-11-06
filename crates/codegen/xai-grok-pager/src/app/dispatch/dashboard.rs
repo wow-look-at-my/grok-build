@@ -1231,6 +1231,7 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 model_windows: crate::settings::context_limits::catalog_windows(
                     &app.models.available,
                 ),
+                context_limits: app.model_context_limits.clone(),
             },
         };
         command.run_with_token(&mut ctx, invocation.token, invocation.args)

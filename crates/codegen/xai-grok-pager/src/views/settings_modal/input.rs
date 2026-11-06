@@ -513,10 +513,6 @@ fn finish_context_limit_edit(
     if tokens == target.limit {
         return SettingsKeyOutcome::Changed;
     }
-    match tokens {
-        Some(tokens) => state.context_limits.insert(target.model_id.clone(), tokens),
-        None => state.context_limits.remove(&target.model_id),
-    };
     SettingsKeyOutcome::Action(Action::SetModelContextWindow {
         model_id: target.model_id,
         label: target.label,

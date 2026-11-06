@@ -254,8 +254,6 @@ pub struct SettingsModalState {
     pub(super) picker_query: String,
     /// True after `/` in an open picker. Keys then go to `picker_query`, in a static picker too.
     pub(super) picker_search_active: bool,
-    /// The `[model."<id>"] context_window` values, read when the context limit chooser opens.
-    pub context_limits: std::collections::BTreeMap<String, u64>,
     /// The model the context limit editor writes to, while that editor is open.
     pub context_limit_target: Option<ContextLimitTarget>,
 }
@@ -300,7 +298,6 @@ impl SettingsModalState {
             picker_last_click: None,
             picker_query: String::new(),
             picker_search_active: false,
-            context_limits: std::collections::BTreeMap::new(),
             context_limit_target: None,
         }
     }
@@ -801,10 +798,7 @@ impl SettingsModalState {
 
     /// Open the model chooser of the context limit row on the current model.
     pub(super) fn enter_context_limit_chooser(&mut self, key: SettingKey) {
-        if !cfg!(test) {
-            self.context_limits = context_limits::configured_limits();
-        }
-        let choices = context_limits::choices(&self.pager_snapshot, &self.context_limits);
+        let choices = context_limits::choices(&self.pager_snapshot);
         let current_id = self
             .pager_snapshot
             .current_model_name
@@ -830,7 +824,7 @@ impl SettingsModalState {
             .find(|(_, id)| id.0.as_ref() == model_id)
             .map(|(name, id)| crate::settings::registry::model_choice_label(name, id))
             .unwrap_or_else(|| model_id.clone());
-        let limit = self.context_limits.get(&model_id).copied();
+        let limit = self.pager_snapshot.context_limits.get(&model_id).copied();
         let target = ContextLimitTarget {
             window: self.pager_snapshot.model_windows.get(&model_id).copied(),
             limit,
@@ -1363,9 +1357,7 @@ pub(super) fn picker_choices(state: &SettingsModalState, key: SettingKey) -> Vec
         SettingKind::DynamicEnum { source, .. } => {
             dynamic_enum_choices(*source, &state.pager_snapshot)
         }
-        SettingKind::ModelContextLimits => {
-            context_limits::choices(&state.pager_snapshot, &state.context_limits)
-        }
+        SettingKind::ModelContextLimits => context_limits::choices(&state.pager_snapshot),
         _ => Vec::new(),
     }
 }
