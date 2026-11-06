@@ -69,7 +69,12 @@ async fn goal_round_shows_check_and_directive() {
         DEFAULT_COLS,
         &content,
         &["--yolo", "--trust"],
-        &[("GROK_GOAL", "1")],
+        // A full goal with no planner and no verifier: the evaluator is the only side call.
+        &[
+            ("GROK_GOAL", "1"),
+            ("GROK_GOAL_PLANNER", "0"),
+            ("GROK_GOAL_CLASSIFIER", "0"),
+        ],
         Some(content.home()),
     )
     .expect("spawn pager");
@@ -77,7 +82,7 @@ async fn goal_round_shows_check_and_directive() {
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome");
     harness
-        .inject_keys(b"/goal --lite write two markers")
+        .inject_keys(b"/goal write two markers")
         .expect("type goal");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(b"\r").expect("submit goal");

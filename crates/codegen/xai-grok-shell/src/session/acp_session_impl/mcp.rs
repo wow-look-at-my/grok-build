@@ -189,7 +189,7 @@ impl SessionActor {
             }
         }
     }
-    /// Handle explicit auth trigger from the client
+    /// Handle explicit auth trigger from the client Runs force_reauth Runs
     ///
     /// Runs force_reauth (browser flow), then re-initializes the server and registers its tools.
     pub(super) async fn handle_mcp_auth_trigger(&self, server_name: &str) -> Result<(), String> {
@@ -237,7 +237,6 @@ impl SessionActor {
             })?;
         self.refresh_mcp_snapshot_and_schedule_reminder().await;
         self.emit_mcp_tools_changed_notifications(ui_tools);
-        self.refresh_goal_harness_enabled().await;
         tracing::info!(
             server = server_name,
             "MCP server authenticated and tools registered via auth_trigger"

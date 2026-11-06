@@ -351,7 +351,7 @@ async fn paused_goal_does_not_override_later_human_query() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn compact_reseed_skips_turn_end_drain_and_round_count() {
+async fn compact_reseed_skips_round_count() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -361,13 +361,6 @@ async fn compact_reseed_skips_turn_end_drain_and_round_count() {
                 let mut tracker = actor.goal_tracker.lock();
                 tracker.snapshot_mut().expect("goal").rounds_since_verify = 4;
             }
-            actor.pending_classifier_completions.lock().push_back(
-                xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalInput {
-                    completed: None,
-                    message: Some("progress".into()),
-                    blocked_reason: None,
-                },
-            );
 
             actor.reseed_active_goal_after_compaction().await;
 
@@ -380,11 +373,6 @@ async fn compact_reseed_skips_turn_end_drain_and_round_count() {
                     .rounds_since_verify,
                 4,
                 "compact reseed must not count as a worker round"
-            );
-            assert_eq!(
-                actor.pending_classifier_completions.lock().len(),
-                1,
-                "compact reseed must not TurnEnd-drain pending classifier completions"
             );
 
             let after = actor.chat_state_handle.get_conversation().await;

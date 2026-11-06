@@ -2972,7 +2972,6 @@ impl SessionActor {
                 )],
             ),
             ToolInput::Workflow(_) => (acp::ToolKind::Other, vec![], vec![]),
-            ToolInput::UpdateGoal(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::Monitor(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::SchedulerCreate(_) => (acp::ToolKind::Other, vec![], vec![]),
             ToolInput::SchedulerDelete(_) => (acp::ToolKind::Other, vec![], vec![]),

@@ -30,6 +30,17 @@ pub struct TodoCaptureOutcome {
     pub wake_reminder: Option<String>,
 }
 
+/// What one capture run appended, before anyone is told about it.
+#[derive(Debug, Clone)]
+pub(super) struct CapturedTodos {
+    /// Contents of the appended items, in the order they were added.
+    pub added: Vec<String>,
+    /// Read-only tool calls the capture agent spent getting there.
+    pub tools_used: usize,
+    /// The name the session gives the todo tool.
+    pub todo_tool: String,
+}
+
 /// Failure surface of a `/todo` capture run. Typed to the ACP boundary so
 /// model errors keep the canonical mapping (rate limits, auth) instead of a
 /// flattened string, same as [`SideQuestionError`](crate::session::SideQuestionError).
@@ -393,6 +404,33 @@ impl SessionActor {
         urgent: bool,
         capture_id: &str,
     ) -> Result<TodoCaptureOutcome, TodoCaptureError> {
+        let CapturedTodos {
+            added,
+            tools_used,
+            todo_tool,
+        } = self.run_todo_capture(request, urgent, capture_id).await?;
+        // The list alone does not say who wrote an item.
+        let reminder = captured_todos_reminder(urgent, &todo_tool, &added);
+        let wake_reminder = if self.turn_is_running() {
+            self.deliver_reminder_to_main_agent(reminder);
+            None
+        } else {
+            Some(reminder)
+        };
+        Ok(TodoCaptureOutcome {
+            added,
+            tools_used,
+            wake_reminder,
+        })
+    }
+
+    /// The capture run alone: it appends the items and tells nobody. `/goal --lite` uses it to seed the list.
+    pub(super) async fn run_todo_capture(
+        &self,
+        request: &str,
+        urgent: bool,
+        capture_id: &str,
+    ) -> Result<CapturedTodos, TodoCaptureError> {
         let bridge = self.agent.borrow().tool_bridge().clone();
         let todo_tool = self.resolve_capture_todo_tool(&bridge).await?;
 
@@ -577,18 +615,10 @@ impl SessionActor {
             %transcript,
             "todo capture appended items"
         );
-        // The list alone does not say who wrote an item.
-        let reminder = captured_todos_reminder(urgent, &todo_tool, &added);
-        let wake_reminder = if self.turn_is_running() {
-            self.deliver_reminder_to_main_agent(reminder);
-            None
-        } else {
-            Some(reminder)
-        };
-        Ok(TodoCaptureOutcome {
+        Ok(CapturedTodos {
             added,
             tools_used,
-            wake_reminder,
+            todo_tool,
         })
     }
 
@@ -998,7 +1028,6 @@ mod tests {
             ToolKind::Task,
             ToolKind::Monitor,
             ToolKind::Workflow,
-            ToolKind::GoalUpdate,
             ToolKind::Plan,
             ToolKind::EnterPlan,
             ToolKind::ExitPlan,

@@ -233,35 +233,6 @@ pub(crate) enum NoNudgeReason {
     FeatureDisabled,
 }
 
-/// Distinguishes turn-end drains from mid-turn drains.
-/// Turn-end is the safe boundary to fire the verification stage, since no model inference is running.
-/// Mid-turn `update_goal(completed: true)` calls are deferred so the verifier-skeptic subagents never race the parent's sampler.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DrainPurpose {
-    /// End-of-turn drain.
-    /// Verification-eligible completions fire the verification stage (if enabled, Active, and not already running).
-    /// Deferred completions from prior mid-turn drains are processed FIFO ahead of the regular channel.
-    TurnEnd,
-    /// Mid-turn drain (e.g. on `SubagentSpawned`).
-    /// Verification-eligible completions are deferred to `pending_classifier_completions` for processing at the next turn-end.
-    MidTurn,
-}
-
-/// Origin of a drain entry.
-/// `Pending` entries had their acks resolved at defer time; `Channel` entries still carry a live oneshot.
-pub(crate) enum DrainSource {
-    Pending(xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalInput),
-    Channel(xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope),
-}
-
-/// Reason a NotAchieved verdict was synthesized without invoking the sampler.
-/// Used by `account_not_achieved_without_sampler` to label the synthetic details file and (in future variants) emit distinct telemetry.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum NotAchievedSyntheticReason {
-    /// A second `update_goal(completed: true)` arrived while a classifier was already running for this goal.
-    ConcurrentInFlight,
-}
-
 /// Decision for one in-turn goal round (see [`SessionActor::run_goal_round_end`]).
 /// `Continue` keeps the turn alive and runs another round with the carried directive injected.
 /// `EndTurn` ends the turn because the goal resolved (achieved, paused, blocked) or this isn't a goal turn.

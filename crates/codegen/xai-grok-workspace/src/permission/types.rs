@@ -274,7 +274,6 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             | ToolInput::EnterPlanMode(_)
             | ToolInput::ExitPlanMode(_)
             | ToolInput::AskUserQuestion(_)
-            | ToolInput::UpdateGoal(_)
             // `ci` runs only allowlisted read-only `gh` queries.
             | ToolInput::Ci(_)
             // `git` runs allowlisted reads in a write-denied child.

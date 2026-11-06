@@ -649,7 +649,6 @@ impl ToolRegistryBuilder {
         b.register::<grok_build::KillTaskTool>();
         b.register::<grok_build::KillTerminalCommandTool>();
         b.register::<grok_build::TodoWriteTool>();
-        b.register::<grok_build::UpdateGoalTool>();
         b.register::<grok_build::SendMessageTool>();
         b.register::<grok_build::CiTool>();
         b.register::<grok_build::GitTool>();

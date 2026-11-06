@@ -37,54 +37,6 @@ enum PlannerAttemptStep {
     },
 }
 
-impl DrainSource {
-    /// Consume the source, returning `(input, Option<ack_tx>)`.
-    /// `None` means the ack was already resolved.
-    pub(super) fn into_parts(
-        self,
-    ) -> (
-        xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalInput,
-        Option<
-            tokio::sync::oneshot::Sender<
-                xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalAck,
-            >,
-        >,
-    ) {
-        match self {
-            Self::Pending(i) => (i, None),
-            Self::Channel((i, ack)) => (i, Some(ack)),
-        }
-    }
-}
-
-/// Send an `UpdateGoalAck` only if the ack channel is live (channel source).
-/// No-op for a `Pending` source; its ack was already resolved.
-pub(super) fn try_send_ack(
-    ack_tx: Option<
-        tokio::sync::oneshot::Sender<
-            xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalAck,
-        >,
-    >,
-    ack: xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalAck,
-) {
-    if let Some(tx) = ack_tx {
-        send_ack(tx, ack);
-    }
-}
-
-pub(super) fn send_ack(
-    ack_tx: tokio::sync::oneshot::Sender<
-        xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalAck,
-    >,
-    ack: xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalAck,
-) {
-    if ack_tx.send(ack).is_err() {
-        tracing::debug!("update_goal ack receiver dropped before harness could respond");
-    }
-}
-
-pub(super) const GOAL_CLASSIFIER_PENDING_QUEUE_CAP: usize = 4;
-
 /// Contents of a session's live todo list, in order. A missing `TodoState` A
 /// missing `TodoState` resource reads as an empty list. Seeding appends onto
 /// whatever is there, and "nothing tracked yet" is the state a fresh goal
@@ -103,46 +55,6 @@ async fn live_todo_contents(bridge: &xai_grok_tools::bridge::ToolBridge) -> Vec<
                 .collect()
         })
         .unwrap_or_default()
-}
-
-pub(super) struct InFlightGuard<'a> {
-    pub(super) flag: &'a std::sync::atomic::AtomicBool,
-}
-
-impl Drop for InFlightGuard<'_> {
-    fn drop(&mut self) {
-        self.flag.store(false, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-impl NotAchievedSyntheticReason {
-    /// Per-variant Markdown body for the synthetic details file.
-    /// The exhaustive match forces a new variant to supply its own prose.
-    pub(super) fn details_body(self, attempt: u32, max_runs: u32) -> String {
-        match self {
-            Self::ConcurrentInFlight => format!(
-                "# Goal classifier — Not Achieved (synthetic)\n\n\
-                 **Attempt:** {attempt} of {max_runs}\n\
-                 **Reason:** ConcurrentInFlight\n\n\
-                 The harness short-circuited this `update_goal(completed: true)` call \
-                 because a classifier was already in flight for the previous completion \
-                 attempt. The second attempt was accounted as Not Achieved (counting \
-                 toward `classifier_max_runs`) to bound model retry spam.\n\n\
-                 No sampler call was made; no token cost was incurred for this attempt.\n",
-            ),
-        }
-    }
-
-    /// One-line gaps summary inlined into the rejection nudge for the synthetic (no-sampler) `NotAchieved` path.
-    /// Mirrors the bullet shape of `goal_classifier::build_gaps_summary` so the nudge reads uniformly regardless of which path produced it.
-    pub(super) fn gaps_summary(self) -> String {
-        match self {
-            Self::ConcurrentInFlight => "- a verification was already running for the previous \
-                 completion attempt; this duplicate `completed: true` was rejected without \
-                 re-running the panel"
-                .to_string(),
-        }
-    }
 }
 
 /// Disarm-able tracker scope-guard: runs `on_drop` on scope exit AND when a state can never outlive its run.
@@ -325,41 +237,6 @@ pub(super) fn render_goal_rules(
         )
 }
 
-pub(super) fn render_goal_rules_legacy(
-    objective: &str,
-    names: &GoalToolNames,
-    block_recap: &str,
-    goal_state: &str,
-    plan_path: Option<&std::path::Path>,
-    plan_todos_seeded: bool,
-    scratch_dir: &str,
-    scratch_ready: bool,
-) -> String {
-    let discipline = render_goal_task_discipline(names);
-    let plan_block = match plan_path {
-        Some(path) => render_goal_plan_block(path, names, plan_todos_seeded),
-        None => String::new(),
-    };
-    GOAL_RULES_TEMPLATE_LEGACY
-        .replace("{OBJECTIVE}", objective)
-        .replace("{GOAL_TOOL}", &names.goal)
-        .replace("{TASK_TOOL}", &names.task)
-        .replace("{TODO_TOOL}", &names.todo)
-        .replace("{PLAN_BLOCK}", &plan_block)
-        .replace("{BLOCK_RECAP}", block_recap)
-        .replace("{DISCIPLINE_BLOCK}", &discipline)
-        .replace("{GOAL_STATE}", goal_state)
-        .replace("{SCRATCH_DIR}", scratch_dir)
-        .replace(
-            "{SCRATCH_STATUS}",
-            if scratch_ready {
-                "The dir has been created for you."
-            } else {
-                "Create it with `mkdir -p` if it does not already exist."
-            },
-        )
-}
-
 /// Assemble a goal auto-pause message from the `headline` (why the goal paused), `pause_summary`, and the `details_path` pointer.
 /// `pause_summary` lists the blockers grouped by classification and arrives already sanitized.
 /// The summary block is dropped when empty so a degenerate pause stays well-formed.
@@ -465,54 +342,6 @@ pub(super) fn render_goal_continuation_directive(
         .replace("{strategist_note}", &strategist_note)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn render_goal_continuation_directive_legacy(
-    objective: &str,
-    tokens: u64,
-    elapsed: &str,
-    bail_preface: &str,
-    plan_pointer: &str,
-    verifier_gaps: &str,
-    strategist_note: &str,
-    reverify_block: &str,
-    next_step: &str,
-    todo_tool: &str,
-    goal_tool: &str,
-    scratch_dir: &str,
-    scratch_ready: bool,
-) -> String {
-    debug_assert!(
-        !objective.is_empty(),
-        "render_goal_continuation_directive_legacy requires a non-empty objective; \
-         an empty value leaves the Objective: line dangling in the nudge",
-    );
-    let bail_preface = neutralize_directive_slot(bail_preface);
-    let verifier_gaps = neutralize_directive_slot(verifier_gaps);
-    let strategist_note = neutralize_directive_slot(strategist_note);
-    let next_step = neutralize_directive_slot(next_step);
-    GOAL_CONTINUATION_DIRECTIVE_TEMPLATE_LEGACY
-        .replace("{objective}", objective)
-        .replace("{tokens}", &tokens.to_string())
-        .replace("{elapsed}", elapsed)
-        .replace("{bail_preface}", &bail_preface)
-        .replace("{plan_pointer}", plan_pointer)
-        .replace("{verifier_gaps}", &verifier_gaps)
-        .replace("{reverify_block}", reverify_block)
-        .replace("{next_step}", &next_step)
-        .replace("{todo_tool}", todo_tool)
-        .replace("{goal_tool}", goal_tool)
-        .replace("{scratch_dir}", scratch_dir)
-        .replace(
-            "{scratch_status}",
-            if scratch_ready {
-                "(created for you)"
-            } else {
-                "(create with `mkdir -p` if missing)"
-            },
-        )
-        .replace("{strategist_note}", &strategist_note)
-}
-
 /// Render the `{reverify_block}` slot.
 /// Empty unless the goal has been refuted at least once AND has run `>= threshold` rounds since the last verification fired.
 /// Reframes the loop (passing verification is the ONLY way to finish) and inlines the live count; the lead hardens past `3 * threshold`.
@@ -533,31 +362,6 @@ pub(super) fn render_goal_reverify_block(
         "{lead} You have run {rounds_since_verify} rounds since the last \
          adversarial rejection. The host evaluates completion after every round. \
          Fix the single concrete gap rather than making cosmetic changes.\n\n"
-    )
-}
-
-pub(super) fn render_goal_reverify_block_legacy(
-    rounds_since_verify: u32,
-    refuted: bool,
-    threshold: u32,
-    goal_tool: &str,
-) -> String {
-    if !refuted || rounds_since_verify < threshold {
-        return String::new();
-    }
-    let lead = if rounds_since_verify >= threshold.saturating_mul(3) {
-        "STOP DRIFTING — RE-VERIFY NOW."
-    } else {
-        "Re-verify before continuing."
-    };
-    format!(
-        "{lead} You have run {rounds_since_verify} rounds since your last \
-         verification without calling `{goal_tool}(completed: true)`. The ONLY \
-         way to finish this goal is to PASS verification — not to keep editing. \
-         If the plan's `## Verification plan` steps now hold, call \
-         `{goal_tool}(completed: true)` THIS round to re-trigger the skeptic \
-         panel. If they do NOT, name the SINGLE concrete gap still blocking it \
-         and fix exactly that — do not make cosmetic changes to look busy.\n\n"
     )
 }
 
@@ -628,30 +432,50 @@ pub(super) fn render_verifier_gaps_block(gaps: &str) -> String {
     )
 }
 
-pub(super) fn render_verifier_gaps_block_legacy(gaps: &str, goal_tool: &str) -> String {
-    if gaps.is_empty() {
-        return String::new();
-    }
-    format!(
-        "Verification REJECTED your last `{goal_tool}(completed: true)` claim. \
-         Fix every gap the skeptic panel flagged below — these take priority — \
-         before claiming completion again:\n{gaps}\n\n",
-    )
-}
-
 /// `char` cap on the model-authored todo text inlined as the next step.
 pub(super) const GOAL_NEXT_STEP_MAX_CHARS: usize = 400;
+
+/// Why an active goal is still open. The next step names it when no todo is open.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum GoalOpenReason<'a> {
+    /// The round-end evaluator judged the work. `blocked` is its `blocked` decision.
+    Evaluator {
+        blocked: bool,
+        evidence: &'a str,
+        next_step: &'a str,
+    },
+    /// The verification panel rejected the last candidate. [`render_verifier_gaps_block`] lists the gaps.
+    VerifierGaps,
+    /// The review rejected a `## Cannot complete` claim. The rejection above lists the untried steps.
+    ClaimRejected,
+    /// The user cancelled the panel. `USER_CANCELLED_VERIFICATION_NOTE` above says why.
+    VerificationCancelled,
+    /// No verdict is at hand, for example after a compaction. There is no reason to state.
+    Unchecked,
+}
+
+/// The reason when no verdict came with this nudge, read off the goal's state. A user cancel wins over older gaps.
+pub(super) fn goal_open_reason_without_verdict(
+    o: &crate::session::goal_tracker::GoalOrchestration,
+) -> GoalOpenReason<'static> {
+    if o.verification_cancelled_by_user {
+        GoalOpenReason::VerificationCancelled
+    } else if o.last_classifier_gaps.is_some() {
+        GoalOpenReason::VerifierGaps
+    } else {
+        GoalOpenReason::Unchecked
+    }
+}
 
 /// The next step for the continuation nudge. The todo list is the only
 /// checklist, so the nudge reads it: the first `in_progress` item, else the
 /// first `pending` one. It names the id, so the model can update the item
 /// without a read first. The item text is capped and its reminder-frame tags
 /// are broken, so it cannot close the `<system-reminder>` it is inlined into.
-/// Verifier gaps are NOT consulted here: [`render_verifier_gaps_block`]
-/// carries them.
+/// With no open item, the step says why the goal is still open (`reason`).
 pub(super) fn next_step_from_todos<'a>(
     todos: impl IntoIterator<Item = (&'a str, &'a str, crate::tools::todo::TodoStatus)>,
-    todo_tool: &str,
+    reason: GoalOpenReason<'_>,
 ) -> String {
     use crate::session::goal_classifier::{cap_chars, neutralize_reminder_tags};
     use crate::tools::todo::TodoStatus;
@@ -662,10 +486,47 @@ pub(super) fn next_step_from_todos<'a>(
             "`{id}`: {}",
             neutralize_reminder_tags(cap_chars(content, GOAL_NEXT_STEP_MAX_CHARS))
         ),
-        None => format!(
-            "Your `{todo_tool}` list has no open item. Put the plan's remaining steps \
-             on it, and add an item for each acceptance criterion that does not hold yet."
-        ),
+        None => goal_open_step(reason),
+    }
+}
+
+/// The next step when no todo is open, or the list cannot be read: why the goal is still open.
+pub(super) fn goal_open_step(reason: GoalOpenReason<'_>) -> String {
+    use crate::session::goal_classifier::neutralize_reminder_tags;
+    match reason {
+        GoalOpenReason::Evaluator {
+            blocked,
+            evidence,
+            next_step,
+        } => {
+            let evidence = neutralize_reminder_tags(evidence.trim().to_owned());
+            let next_step = neutralize_reminder_tags(next_step.trim().to_owned());
+            if blocked {
+                format!(
+                    "The goal check found the goal blocked.\n\
+                     Why: {evidence}\n\
+                     Needed: {next_step}\n\
+                     Do that if you can. If only the user can, end your reply with a \
+                     `## Cannot complete` section."
+                )
+            } else {
+                format!(
+                    "The goal check found the goal not met yet.\n\
+                     Why: {evidence}\n\
+                     What is still missing: {next_step}"
+                )
+            }
+        }
+        GoalOpenReason::VerifierGaps => {
+            "Verification rejected the work. Fix each gap listed above.".to_owned()
+        }
+        GoalOpenReason::ClaimRejected => "The review rejected your claim that the goal cannot \
+                                          be completed. Do the untried steps listed above."
+            .to_owned(),
+        GoalOpenReason::VerificationCancelled => {
+            "Find what the user says is missing, and fix it.".to_owned()
+        }
+        GoalOpenReason::Unchecked => "Finish the step you were working on.".to_owned(),
     }
 }
 
@@ -1136,11 +997,6 @@ pub(crate) fn planner_cancelled_pause_message() -> String {
     "Planning cancelled; resume with /goal to plan again.".to_string()
 }
 
-pub(crate) fn goal_slash_and_harness_available(goal_enabled: bool, tool_names: &[String]) -> bool {
-    use xai_grok_tools::implementations::grok_build::UPDATE_GOAL_TOOL_NAME;
-    goal_enabled && tool_names.iter().any(|n| n == UPDATE_GOAL_TOOL_NAME)
-}
-
 /// True for an active `/goal` session with the goal harness enabled (laziness, continuation, TodoGate goal arm).
 pub(crate) fn laziness_injection_active(
     goal_harness_enabled: bool,
@@ -1198,47 +1054,6 @@ impl SessionActor {
         self.goal_harness_enabled
             .store(self.goal_enabled, std::sync::atomic::Ordering::Relaxed);
         self.goal_enabled
-    }
-
-    pub(super) fn sync_goal_harness_from_tools(&self, tool_names: &[String]) -> bool {
-        let enabled = goal_slash_and_harness_available(self.goal_enabled, tool_names);
-        self.goal_harness_enabled
-            .store(enabled, std::sync::atomic::Ordering::Relaxed);
-        enabled
-    }
-
-    pub(super) async fn refresh_goal_harness_enabled(&self) {
-        if self.goal_runs_on_workflow_engine() {
-            self.sync_goal_harness();
-        } else {
-            let tool_names = self.registered_tool_names().await;
-            self.sync_goal_harness_from_tools(&tool_names);
-        }
-    }
-
-    pub(super) async fn maybe_reconcile_active_goal_without_harness(&self) {
-        if self
-            .goal_harness_availability_reconciled
-            .swap(true, std::sync::atomic::Ordering::Relaxed)
-        {
-            return;
-        }
-        if self.goal_harness_enabled() {
-            return;
-        }
-        if self.goal_tracker.lock().status()
-            != Some(crate::session::goal_tracker::GoalStatus::Active)
-        {
-            return;
-        }
-        let _ = self
-            .auto_pause_goal_if_active_with_message(
-                crate::session::goal_tracker::GoalPauseReason::User,
-                "Goal paused: `update_goal` is not available in this session's toolset. \
-                 Run /goal resume after the tool is registered."
-                    .into(),
-            )
-            .await;
     }
 
     /// Load-time safety net: an Active goal restored with `plan_file == None` (legacy snapshot) is paused with the canonical message.
@@ -2070,7 +1885,6 @@ mod verification_scope_tests {
 
     fn names() -> GoalToolNames {
         GoalToolNames {
-            goal: "example.invalid/goal".to_string(),
             task: "task".to_string(),
             todo: "todo_write".to_string(),
         }
@@ -2128,8 +1942,9 @@ mod verification_scope_tests {
             ("plan-b", "write the parser", TodoStatus::Pending),
             ("plan-c", "fix the build", TodoStatus::InProgress),
         ];
+        let unchecked = GoalOpenReason::Unchecked;
         assert_eq!(
-            next_step_from_todos(todos, "todo_write"),
+            next_step_from_todos(todos, unchecked),
             "`plan-c`: fix the build",
             "in_progress wins over an earlier pending item"
         );
@@ -2138,16 +1953,96 @@ mod verification_scope_tests {
             ("plan-b", "write the parser", TodoStatus::Pending),
         ];
         assert_eq!(
-            next_step_from_todos(only_pending, "todo_write"),
+            next_step_from_todos(only_pending, unchecked),
             "`plan-b`: write the parser"
         );
-        let closed = next_step_from_todos(
-            [("plan-a", "done already", TodoStatus::Completed)],
-            "todo_write",
+        assert_eq!(
+            next_step_from_todos([], unchecked),
+            goal_open_step(unchecked),
+            "an empty list gets no special text"
         );
-        assert!(closed.contains("no open item"), "{closed}");
-        let empty = next_step_from_todos([], "todo_write");
-        assert!(empty.contains("Put the plan's remaining steps"), "{empty}");
+    }
+
+    /// With every todo done, the step says why the goal is still open, and does not talk about the list.
+    #[test]
+    fn a_done_list_gets_the_reason_the_goal_is_open() {
+        use crate::tools::todo::TodoStatus;
+        let done = || [("plan-a", "done already", TodoStatus::Completed)];
+        let step = |reason| next_step_from_todos(done(), reason);
+
+        let evaluator = step(GoalOpenReason::Evaluator {
+            blocked: false,
+            evidence: "two tests still fail",
+            next_step: "fix `parse_args` for an empty argv",
+        });
+        assert_eq!(
+            evaluator,
+            "The goal check found the goal not met yet.\nWhy: two tests still fail\n\
+             What is still missing: fix `parse_args` for an empty argv"
+        );
+
+        let blocked = step(GoalOpenReason::Evaluator {
+            blocked: true,
+            evidence: "the deploy needs a token",
+            next_step: "the user adds DEPLOY_TOKEN",
+        });
+        assert!(
+            blocked.contains("found the goal blocked.\nWhy: the deploy needs a token\nNeeded: the user adds DEPLOY_TOKEN"),
+            "{blocked}"
+        );
+        assert!(blocked.contains("## Cannot complete"), "{blocked}");
+
+        let gaps = step(GoalOpenReason::VerifierGaps);
+        assert_eq!(
+            gaps,
+            "Verification rejected the work. Fix each gap listed above."
+        );
+
+        let claim = step(GoalOpenReason::ClaimRejected);
+        assert!(claim.contains("rejected your claim"), "{claim}");
+
+        let unchecked = step(GoalOpenReason::Unchecked);
+        assert_eq!(unchecked, "Finish the step you were working on.");
+
+        for text in [&evaluator, &blocked, &gaps, &claim, &unchecked] {
+            assert!(!text.contains("todo"), "the list is not the reason: {text}");
+        }
+
+        let unread = goal_open_step(GoalOpenReason::Evaluator {
+            blocked: false,
+            evidence: "two tests still fail",
+            next_step: "fix them",
+        });
+        assert!(
+            unread.starts_with(
+                "The goal check found the goal not met yet.\nWhy: two tests still fail"
+            ),
+            "{unread}"
+        );
+    }
+
+    #[test]
+    fn the_reason_without_a_verdict_prefers_a_cancel_then_the_panel_gaps() {
+        let mut o = crate::session::goal_tracker::make_base_orchestration();
+        assert!(matches!(
+            goal_open_reason_without_verdict(&o),
+            GoalOpenReason::Unchecked
+        ));
+        o.last_classifier_gaps = Some("- the parser drops the last line".into());
+        assert!(matches!(
+            goal_open_reason_without_verdict(&o),
+            GoalOpenReason::VerifierGaps
+        ));
+        o.verification_cancelled_by_user = true;
+        assert!(matches!(
+            goal_open_reason_without_verdict(&o),
+            GoalOpenReason::VerificationCancelled
+        ));
+        let step = goal_open_step(GoalOpenReason::VerificationCancelled);
+        assert!(
+            !step.contains("rejected"),
+            "a cancel is not a rejection: {step}"
+        );
     }
 }
 

@@ -164,7 +164,10 @@ pub(crate) enum GoalClassifierOutcome {
 }
 
 /// Continuation text after the user cancels a skeptic.
-pub(crate) use xai_grok_tools::implementations::grok_build::update_goal::USER_CANCELLED_VERIFICATION_NOTE;
+pub(crate) const USER_CANCELLED_VERIFICATION_NOTE: &str = "The user cancelled the goal verification \
+     skeptic because they think you are not ready to complete the goal yet. This was not an \
+     error, and submitting again unchanged will not help. Read the user's message(s) again, \
+     find what you missed, fix it, and only then claim completion again.";
 
 /// Subagent spawn abstraction. Production uses [`ChannelSpawner`]; tests use [`MockSpawner`].
 #[async_trait::async_trait]

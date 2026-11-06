@@ -1381,11 +1381,7 @@ impl SessionActor {
                     if crate::session::PromptOrigin::from_prompt_id(prompt_id).is_synthetic()
                         || !self.has_pending_goal_continuation().await
                     {
-                        let decision = if self.goal_runs_on_workflow_engine() {
-                            self.run_goal_round_end().await
-                        } else {
-                            self.run_goal_round_end_legacy().await
-                        };
+                        let decision = self.run_goal_round_end().await;
                         if let GoalRoundDecision::Continue(directive) = decision {
                             salvage.round_boundary();
                             self.inject_goal_continuation_message(directive).await;

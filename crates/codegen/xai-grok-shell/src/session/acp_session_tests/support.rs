@@ -83,16 +83,64 @@ pub(crate) async fn test_agent_backend_search(
     )
 }
 #[cfg(test)]
-pub(crate) async fn test_agent_with_goal_tool() -> xai_grok_agent::Agent {
-    use xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalTool;
-    use xai_grok_tools::registry::types::ToolConfig;
-    test_agent_with_tools(vec![ToolConfig::for_tool::<UpdateGoalTool>()]).await
-}
-#[cfg(test)]
 pub(crate) async fn test_grok_build_agent_with_todo() -> xai_grok_agent::Agent {
     use xai_grok_tools::implementations::grok_build::todo::TodoWriteTool;
     use xai_grok_tools::registry::types::ToolConfig;
     test_agent_with_tools(vec![ToolConfig::for_tool::<TodoWriteTool>()]).await
+}
+/// Give `actor` the real `todo_write` tool, bound to its live todo list.
+#[cfg(test)]
+pub(crate) async fn arm_todo_writes(actor: &mut SessionActor) {
+    *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
+    actor
+        .workspace_ops
+        .bind_local_session(
+            &actor.session_id_string(),
+            actor.tool_context.cwd.as_path().to_path_buf(),
+            actor.tool_context.hunk_tracker_handle.clone(),
+            actor.agent.borrow().tool_bridge().toolset(),
+            None,
+        )
+        .expect("bind_local_session");
+}
+/// Send `actor`'s model calls to `server`.
+#[cfg(test)]
+pub(crate) async fn point_model_at(
+    actor: &SessionActor,
+    server: &xai_grok_test_support::MockInferenceServer,
+) {
+    let mut cfg = actor
+        .chat_state_handle
+        .get_sampling_config()
+        .await
+        .expect("test actor has sampling config");
+    cfg.base_url = server.url();
+    cfg.api_backend = xai_grok_sampling_types::ApiBackend::Responses;
+    cfg.model = "test".to_string();
+    actor.chat_state_handle.update_sampling_config(cfg);
+    let mut creds = actor.chat_state_handle.get_credentials().await;
+    creds.api_key = Some("test-key".to_string());
+    actor.chat_state_handle.update_credentials(creds);
+}
+/// The item [`lite_goal_capture`] puts on the list.
+#[cfg(test)]
+pub(crate) const LITE_GOAL_CAPTURED_STEP: &str = "Run the test suite and fix each failure";
+/// The capture run `/goal --lite` starts with: one `todo_write` call. Queue it before any other response.
+#[cfg(test)]
+pub(crate) fn lite_goal_capture() -> xai_grok_test_support::ScriptedResponse {
+    let args = serde_json::json!({
+        "todos": [{"id": "c1", "content": LITE_GOAL_CAPTURED_STEP, "status": "pending"}]
+    })
+    .to_string();
+    xai_grok_test_support::ScriptedResponse::sse(
+        xai_grok_test_support::sse::responses_api_reasoning_then_tool_call_events(
+            "the objective is one step",
+            "call_capture_1",
+            "todo_write",
+            &args,
+            "test",
+        ),
+    )
 }
 #[cfg(test)]
 pub(crate) async fn test_agent_with_active_message_tool() -> xai_grok_agent::Agent {
@@ -494,7 +542,6 @@ async fn create_test_actor_inner(
         goal_enabled: false,
         background_workflows_enabled: false,
         goal_harness_enabled: std::sync::atomic::AtomicBool::new(false),
-        goal_harness_availability_reconciled: std::sync::atomic::AtomicBool::new(false),
         goal_tracker: Arc::new(parking_lot::Mutex::new(
             crate::session::goal_tracker::GoalTracker::new(std::path::PathBuf::from(
                 "/tmp/test-session",
@@ -502,8 +549,6 @@ async fn create_test_actor_inner(
         )),
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-        goal_update_rx: std::cell::RefCell::new(None),
-        goal_update_tx: tokio::sync::mpsc::unbounded_channel().0,
         workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle().0,
         workflow_launch_tx: tokio::sync::mpsc::unbounded_channel().0,
         goal_classifier_enabled: false,
@@ -518,8 +563,6 @@ async fn create_test_actor_inner(
         goal_strategist_every: 5,
         goal_reverify_after: crate::session::acp_session::GOAL_REVERIFY_AFTER_DEFAULT,
         goal_plan_reconciled: std::sync::atomic::AtomicBool::new(false),
-        pending_classifier_completions: parking_lot::Mutex::new(std::collections::VecDeque::new()),
-        goal_classifier_in_flight: std::sync::atomic::AtomicBool::new(false),
         managed_mcp_handle: Default::default(),
         initial_client_mcp_servers: Default::default(),
         tool_metadata_snapshot: Arc::new(std::sync::Mutex::new(Default::default())),

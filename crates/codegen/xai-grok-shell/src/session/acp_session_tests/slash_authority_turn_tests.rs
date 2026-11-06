@@ -734,7 +734,7 @@ async fn parent_skill_lookup_matches_advertised_gated_collision_and_skill_only_l
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn shared_command_availability_syncs_classic_goal_harness() {
+async fn shared_command_availability_syncs_goal_harness_from_goal_enabled() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -743,7 +743,6 @@ async fn shared_command_availability_syncs_classic_goal_harness() {
             let (mut actor, _event_rx) =
                 create_test_actor_ex(0, 256_000, 85, gateway_tx, persistence_tx).await;
             actor.goal_enabled = true;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
 
             let tool_names = actor.registered_tool_names().await;
             assert!(!actor.goal_harness_enabled());
@@ -767,7 +766,7 @@ async fn goal_set_with_failed_planner_makes_no_inference_request() {
                 .expect("mock inference server");
             let session_dir = tempfile::tempdir().expect("tempdir");
             let goal_dir = session_dir.path().to_path_buf();
-            let agent = test_agent_with_goal_tool().await;
+            let agent = test_agent_default().await;
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<SubagentEvent>();
             // Every planner spawn fails, so the goal pauses as `Planner` before any model turn.
             xai_spawn::spawn_local(async move {
