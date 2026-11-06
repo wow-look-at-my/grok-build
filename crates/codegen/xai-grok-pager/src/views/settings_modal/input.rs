@@ -847,8 +847,10 @@ fn handle_browse(state: &mut SettingsModalState, key: &KeyEvent) -> SettingsKeyO
             // Cancel therefore returns to this exact modal state, with filter, scroll, and selection
             // preserved. Headers and unmapped rows are no-ops; `d` only acts on a focused setting row.
             match state.focused_setting() {
-                // Navigational rows have no scalar default to reset.
-                Some((_, meta)) if meta.kind.is_navigational() => SettingsKeyOutcome::Unchanged,
+                // Group rows have no scalar default to reset.
+                Some((_, meta)) if matches!(meta.kind, SettingKind::Group { .. }) => {
+                    SettingsKeyOutcome::Unchanged
+                }
                 // A locked row isn't the user's to change, by `d` any more than by Enter (which `try_enter_picking_enum` refuses)
                 // The dispatch-time guard would catch it anyway, but only after a confirm dialog for a change that cannot happen
                 Some((key, _meta)) if state.row_lock(key).is_some() => {

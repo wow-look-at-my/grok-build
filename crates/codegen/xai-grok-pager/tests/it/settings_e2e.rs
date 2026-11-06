@@ -39,6 +39,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "multiline_mode",
     "permission_mode",
     "default_model",
+    "model_context_window",
     "max_thoughts_width",
     "min_output_tokens_per_sec",
     "output_rate_sustained_secs",
@@ -1942,6 +1943,7 @@ fn registry_kind_membership_through_pr_14() {
 
             SettingKind::DynamicEnum { .. } => "DynamicEnum",
             SettingKind::Group { .. } => "Group",
+            SettingKind::ModelContextLimits => "ModelContextLimits",
             other => panic!(
                 "registry_kind_membership: setting `{}` has unknown kind {:?} — \
                  add an arm here AND a kind-membership assertion below",
@@ -2070,6 +2072,13 @@ fn registry_kind_membership_through_pr_14() {
         group_keys,
         vec!["contextual_hints", "output_rate_floor"],
         "Group kind membership drift",
+    );
+
+    let limit_keys = by_kind.remove("ModelContextLimits").unwrap_or_default();
+    assert_eq!(
+        limit_keys,
+        vec!["model_context_window"],
+        "ModelContextLimits kind membership drift",
     );
 
     // No unexpected kinds.
@@ -2214,8 +2223,8 @@ fn defaults_round_trip_through_registry() {
     };
 
     for meta in reg.all() {
-        // Group rows carry no scalar value/default to round-trip.
-        if matches!(meta.kind, SettingKind::Group { .. }) {
+        // Navigational rows carry no scalar value/default to round-trip.
+        if meta.kind.is_navigational() {
             continue;
         }
         let live_value = current_value_for(meta.key, &ui, &pager)
@@ -2394,9 +2403,9 @@ fn d_key_emits_open_reset_confirm_action_for_compact_mode() {
 fn d_key_emits_open_reset_confirm_for_every_setting() {
     let reg = SettingsRegistry::defaults();
     for meta in reg.all() {
-        // Group rows have no scalar value to reset (consistent with the registry reset-arm coverage test)
-        // Their children are hidden from the top-level list; neither is `d`-resettable directly
-        if matches!(meta.kind, SettingKind::Group { .. }) || is_group_child(&reg, meta.key) {
+        // Navigational rows have no scalar value to reset (consistent with the registry reset-arm coverage test)
+        // Group children are hidden from the top-level list; neither is `d`-resettable directly
+        if meta.kind.is_navigational() || is_group_child(&reg, meta.key) {
             continue;
         }
         let mut s = make_state();
