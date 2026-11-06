@@ -1557,17 +1557,15 @@ impl SessionActor {
         let mut ctx = format!(
             "Objective: {objective}\nDo not restart this goal or revive a prior unrelated task. Continue from the current next step."
         );
-        if let Some(step) = self.goal_next_step_from_todos().await {
-            ctx.push_str("\nNext step: ");
-            ctx.push_str(&step);
-        }
+        ctx.push_str("\nNext step: ");
+        ctx.push_str(&self.goal_next_step_from_todos().await);
         Some(ctx)
     }
 
-    /// The continuation next step read off the live todo list, or `None` when the list resource is missing.
-    async fn goal_next_step_from_todos(&self) -> Option<String> {
+    /// The continuation next step read off the live todo list. A missing list gives the reason the goal is open.
+    async fn goal_next_step_from_todos(&self) -> String {
         let names = self.resolve_goal_tool_names().await;
-        let todos = self.goal_todo_snapshot().await?;
+        let todos = self.goal_todo_snapshot().await;
         let has_gaps = self
             .goal_tracker
             .lock()
@@ -1578,12 +1576,15 @@ impl SessionActor {
             !self.goal_runs_on_workflow_engine(),
             &names.goal,
         );
-        Some(next_step_from_todos(
-            todos
-                .iter()
-                .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
-            reason,
-        ))
+        match todos {
+            Some(todos) => next_step_from_todos(
+                todos
+                    .iter()
+                    .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
+                reason,
+            ),
+            None => goal_open_step(reason),
+        }
     }
 
     /// Preserves caller `/compact <text>` when folding in the goal pin.
@@ -1632,10 +1633,7 @@ impl SessionActor {
             };
             (o.objective.clone(), status, elapsed, is_active)
         };
-        let next_step = self
-            .goal_next_step_from_todos()
-            .await
-            .unwrap_or_else(|| "Check your todo list for next steps.".to_owned());
+        let next_step = self.goal_next_step_from_todos().await;
         let body = if is_active {
             format!(
                 "Objective: {objective}\nStatus: {status}\nTokens: {tokens_used} | Elapsed: {elapsed}\n\n{GOAL_CONTINUATION_SENTINEL}\n{next_step}\n\nDo not restart this goal or revive a prior unrelated task."
@@ -1833,7 +1831,7 @@ impl SessionActor {
                     .map(|(id, content, status)| (id.as_str(), content.as_str(), *status)),
                 open_reason,
             ),
-            None => next_step_without_todos(open_reason),
+            None => goal_open_step(open_reason),
         };
         let tokens = u64::try_from(tokens_used).unwrap_or(0);
         let bail_preface = if stop_pattern.is_some() {

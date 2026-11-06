@@ -657,7 +657,7 @@ pub(super) enum GoalOpenReason<'a> {
     ClaimRejected,
     /// The driver checks the work only when the agent calls the goal tool.
     AwaitingClaim { goal_tool: &'a str },
-    /// No verdict is at hand. The evaluator runs when the turn ends.
+    /// No verdict is at hand, for example after a compaction. There is no reason to state.
     Unchecked,
 }
 
@@ -695,23 +695,12 @@ pub(super) fn next_step_from_todos<'a>(
             "`{id}`: {}",
             neutralize_reminder_tags(cap_chars(content, GOAL_NEXT_STEP_MAX_CHARS))
         ),
-        None => goal_open_step(todos.is_empty(), reason),
+        None => goal_open_step(reason),
     }
 }
 
-/// The next step when the todo list cannot be read. A verdict still reaches the model.
-pub(super) fn next_step_without_todos(reason: GoalOpenReason<'_>) -> String {
-    match reason {
-        GoalOpenReason::Unchecked | GoalOpenReason::AwaitingClaim { .. } => {
-            "Check your todo list for next steps.".to_owned()
-        }
-        reason => goal_open_step(false, reason),
-    }
-}
-
-/// The next step when no todo is open: why the goal is still open. The list
-/// is named only when it is empty and nothing else says what to do.
-fn goal_open_step(empty_list: bool, reason: GoalOpenReason<'_>) -> String {
+/// The next step when no todo is open, or the list cannot be read: why the goal is still open.
+pub(super) fn goal_open_step(reason: GoalOpenReason<'_>) -> String {
     use crate::session::goal_classifier::neutralize_reminder_tags;
     match reason {
         GoalOpenReason::Evaluator {
@@ -743,21 +732,11 @@ fn goal_open_step(empty_list: bool, reason: GoalOpenReason<'_>) -> String {
         GoalOpenReason::ClaimRejected => "The review rejected your claim that the goal cannot \
                                           be completed. Do the untried steps listed above."
             .to_owned(),
-        GoalOpenReason::AwaitingClaim { goal_tool } if empty_list => format!(
-            "Your todo list is empty. Add the plan's steps to it and do them. Then call \
-             `{goal_tool}(completed: true)` so the verifier checks the work."
-        ),
         GoalOpenReason::AwaitingClaim { goal_tool } => format!(
             "The verifier checks the work only when you call `{goal_tool}(completed: true)`. \
              Call it if every part of the objective is done."
         ),
-        GoalOpenReason::Unchecked if empty_list => "Your todo list is empty. Add the plan's \
-                                                    steps to it and do them. The goal check \
-                                                    runs when your turn ends."
-            .to_owned(),
-        GoalOpenReason::Unchecked => "The goal check runs when your turn ends. End the turn if \
-                                      every part of the objective is done."
-            .to_owned(),
+        GoalOpenReason::Unchecked => "Finish the step you were working on.".to_owned(),
     }
 }
 
@@ -2234,8 +2213,11 @@ mod verification_scope_tests {
             next_step_from_todos(only_pending, unchecked),
             "`plan-b`: write the parser"
         );
-        let empty = next_step_from_todos([], unchecked);
-        assert!(empty.starts_with("Your todo list is empty."), "{empty}");
+        assert_eq!(
+            next_step_from_todos([], unchecked),
+            goal_open_step(unchecked),
+            "an empty list gets no special text"
+        );
     }
 
     /// With every todo done, the step says why the goal is still open, and does not talk about the list.
@@ -2285,16 +2267,13 @@ mod verification_scope_tests {
         );
 
         let unchecked = step(GoalOpenReason::Unchecked);
-        assert!(
-            unchecked.starts_with("The goal check runs when your turn ends."),
-            "{unchecked}"
-        );
+        assert_eq!(unchecked, "Finish the step you were working on.");
 
         for text in [&evaluator, &blocked, &gaps, &claim, &legacy, &unchecked] {
             assert!(!text.contains("todo"), "the list is not the reason: {text}");
         }
 
-        let unread = next_step_without_todos(GoalOpenReason::Evaluator {
+        let unread = goal_open_step(GoalOpenReason::Evaluator {
             blocked: false,
             evidence: "two tests still fail",
             next_step: "fix them",
