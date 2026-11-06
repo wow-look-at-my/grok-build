@@ -2223,8 +2223,8 @@ fn defaults_round_trip_through_registry() {
     };
 
     for meta in reg.all() {
-        // Navigational rows carry no scalar value/default to round-trip.
-        if meta.kind.is_navigational() {
+        // Group rows carry no scalar value/default to round-trip.
+        if matches!(meta.kind, SettingKind::Group { .. }) {
             continue;
         }
         let live_value = current_value_for(meta.key, &ui, &pager)
@@ -2403,9 +2403,9 @@ fn d_key_emits_open_reset_confirm_action_for_compact_mode() {
 fn d_key_emits_open_reset_confirm_for_every_setting() {
     let reg = SettingsRegistry::defaults();
     for meta in reg.all() {
-        // Navigational rows have no scalar value to reset (consistent with the registry reset-arm coverage test)
-        // Group children are hidden from the top-level list; neither is `d`-resettable directly
-        if meta.kind.is_navigational() || is_group_child(&reg, meta.key) {
+        // Group rows have no scalar value to reset (consistent with the registry reset-arm coverage test)
+        // Their children are hidden from the top-level list; neither is `d`-resettable directly
+        if matches!(meta.kind, SettingKind::Group { .. }) || is_group_child(&reg, meta.key) {
             continue;
         }
         let mut s = make_state();

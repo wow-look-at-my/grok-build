@@ -1070,7 +1070,7 @@ fn every_setting_has_action_for_reset_arm() {
     with_theme_test_env(|| {
         let reg = crate::settings::SettingsRegistry::defaults();
         for meta in reg.all() {
-            if meta.kind.is_navigational() {
+            if matches!(meta.kind, crate::settings::SettingKind::Group { .. }) {
                 continue;
             }
             let default_value = crate::settings::default_value_for(meta);

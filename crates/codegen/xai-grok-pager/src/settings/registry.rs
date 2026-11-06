@@ -916,7 +916,9 @@ pub fn default_value_for(meta: &SettingMeta) -> SettingValue {
         // `DynamicEnum` widens to `String` for runtime catalog values.
         SettingKind::DynamicEnum { default, .. } => SettingValue::String((*default).to_string()),
         // Group rows carry no scalar value; the render and reset paths special-case them first, so the returned value is never observed
-        SettingKind::Group { .. } | SettingKind::ModelContextLimits => SettingValue::Bool(false),
+        // No configured limit is the default.
+        SettingKind::ModelContextLimits => SettingValue::String(String::new()),
+        SettingKind::Group { .. } => SettingValue::Bool(false),
     }
 }
 
@@ -934,8 +936,8 @@ mod tests {
             if meta.owner == SettingOwner::Pager {
                 continue;
             }
-            // Navigational rows have no scalar default to compare.
-            if meta.kind.is_navigational() {
+            // Group rows have no scalar default to compare.
+            if matches!(meta.kind, SettingKind::Group { .. }) {
                 continue;
             }
             match (meta.key, &meta.kind) {
@@ -1512,8 +1514,8 @@ mod tests {
         let ui = UiConfig::default();
         let pager = PagerLocalSnapshot::default();
         for meta in reg.all() {
-            // Navigational rows carry no scalar value; they are not read via this path.
-            if meta.kind.is_navigational() {
+            // Group rows carry no scalar value; they are not read via this path.
+            if matches!(meta.kind, SettingKind::Group { .. }) {
                 continue;
             }
             let value = current_value_for(meta.key, &ui, &pager).unwrap_or_else(|| {
@@ -1938,8 +1940,8 @@ mod tests {
     fn default_value_for_returns_kind_default() {
         let reg = SettingsRegistry::defaults();
         for meta in reg.all() {
-            // Navigational rows have no meaningful scalar default (sentinel only).
-            if meta.kind.is_navigational() {
+            // Group rows have no meaningful scalar default (sentinel only).
+            if matches!(meta.kind, SettingKind::Group { .. }) {
                 continue;
             }
             let v = default_value_for(meta);

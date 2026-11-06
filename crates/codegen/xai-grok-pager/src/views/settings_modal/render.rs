@@ -632,8 +632,8 @@ pub(super) fn render_rows(
                 let is_selected = row_idx == state.selected;
                 let is_expanded = expanded_snapshot.contains(key);
 
-                // Navigational rows carry no scalar value; render a chevron row that opens the sub-pane (skips the value/edited machinery below)
-                if meta.kind.is_navigational() {
+                // Group rows carry no scalar value; render a chevron row that opens the sub-sheet (skips the value/edited machinery below)
+                if matches!(meta.kind, SettingKind::Group { .. }) {
                     let is_hovered = hover_row_snapshot == Some(row_idx);
                     let value_rect = render_setting_group_row(
                         buf,
@@ -811,8 +811,8 @@ fn compute_filtered_row_heights(state: &SettingsModalState, area_width: u16) -> 
                     heights.push(1);
                     continue;
                 };
-                // Navigational rows carry no value; the height is the chevron row plus the expanded description (cap 8), agreeing with the forward render loop
-                if meta.kind.is_navigational() {
+                // Navigational rows carry no value; the height is the chevron row plus the expanded description (a later cap), agreeing with the forward render loop
+                if matches!(meta.kind, SettingKind::Group { .. }) {
                     let mut h: u16 = 1;
                     if state.expanded_keys.contains(key) {
                         h = h.saturating_add(wrapped_description_height(
