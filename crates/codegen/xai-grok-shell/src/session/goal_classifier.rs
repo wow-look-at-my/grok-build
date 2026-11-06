@@ -21,7 +21,7 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use xai_grok_tools::implementations::grok_build::task::backend::ChannelBackend;
+use xai_grok_tools::implementations::grok_build::task::backend::{ChannelBackend, SubagentBackend};
 use xai_grok_tools::implementations::grok_build::task::types::{
     SubagentOwner, SubagentRequest, SubagentRuntimeOverrides,
 };
@@ -157,7 +157,17 @@ pub(crate) enum GoalClassifierOutcome {
         /// Empty when the failure happened before path resolution (e.g. an unsafe path was rejected by the validator).
         details_path: String,
     },
+    /// The user cancelled a skeptic. The rest of the panel is cancelled too, and no verdict exists.
+    UserCancelled {
+        details_path: String,
+    },
 }
+
+/// Continuation text after the user cancels a skeptic.
+pub(crate) const USER_CANCELLED_VERIFICATION_NOTE: &str = "The user cancelled the goal verification \
+     skeptic because they think you are not ready to complete the goal yet. This was not an \
+     error, and submitting again unchanged will not help. Read the user's message(s) again, \
+     find what you missed, fix it, and only then claim completion again.";
 
 /// Subagent spawn abstraction. Production uses [`ChannelSpawner`]; tests use [`MockSpawner`].
 #[async_trait::async_trait]
@@ -173,6 +183,9 @@ pub(crate) trait GoalClassifierSpawner: Send + Sync {
         details_path: &Path,
         resume_from: Option<&str>,
     ) -> Result<String, SpawnError>;
+
+    /// Cancel every skeptic of the panel that is still running.
+    fn cancel_panel(&self) {}
 }
 
 #[derive(Debug)]
@@ -455,10 +468,16 @@ pub(crate) struct ChannelSpawner {
     pub(crate) skeptic_overrides: Vec<RoleSpawnOverride>,
     /// Where a spawn-and-retry-once fail-open is reported. `Default` in tests.
     pub(crate) fallback: crate::session::goal_planner::RoleFallbackReporter,
+    /// One token for the whole panel. A cancel of it cancels every skeptic still in flight.
+    pub(crate) panel_cancel: tokio_util::sync::CancellationToken,
 }
 
 #[async_trait::async_trait]
 impl GoalClassifierSpawner for ChannelSpawner {
+    fn cancel_panel(&self) {
+        self.panel_cancel.cancel();
+    }
+
     async fn spawn_classifier(
         &self,
         id: &str,
@@ -546,11 +565,30 @@ impl ChannelSpawner {
             spawn_root: Default::default(),
             tool_call_id: None,
         };
+        if self.panel_cancel.is_cancelled() {
+            return Err(SpawnError::Runtime {
+                message: "the user cancelled the verification panel".into(),
+                cancelled: true,
+            });
+        }
         let backend = ChannelBackend::new(self.event_tx.clone());
-        let result = backend
-            .spawn_with_foreground_wait(request, self.foreground_wait.as_ref())
-            .await
-            .map_err(|error| SpawnError::Transport(error.to_string()))?;
+        let result = tokio::select! {
+            biased;
+            _ = self.panel_cancel.cancelled() => {
+                let _ = tokio::time::timeout(
+                    crate::session::goal_planner::GOAL_PLANNER_CANCEL_ACK_TIMEOUT,
+                    backend.cancel(id),
+                )
+                .await;
+                return Err(SpawnError::Runtime {
+                    message: "the user cancelled the verification panel".into(),
+                    cancelled: true,
+                });
+            }
+            result = backend.spawn_with_foreground_wait(request, self.foreground_wait.as_ref()) => {
+                result.map_err(|error| SpawnError::Transport(error.to_string()))?
+            }
+        };
         if result.backgrounded {
             return Err(SpawnError::Runtime {
                 message: "engine bug: goal role subagent was auto-backgrounded despite await_to_completion".into(),
@@ -1958,6 +1996,10 @@ pub(crate) async fn run_verification_stage(
             inputs.inherit_tool_names,
         )
         .await;
+        if first.cancelled {
+            return user_cancelled_outcome(&details_path, details_raw, inputs.attempt, emit_event)
+                .await;
+        }
         // Any refute with a verdict is decisive, whatever its confidence. Only a failed skeptic defers to the cold panel.
         let decisive = first.refuted && !first.has_no_verdict();
         if decisive && !first.blocking.is_blocking() {
@@ -1978,12 +2020,7 @@ pub(crate) async fn run_verification_stage(
             });
             let mut all = Vec::with_capacity(n as usize);
             all.push(first);
-            all.extend(
-                futures::future::join_all(rest)
-                    .await
-                    .into_iter()
-                    .map(|(r, _)| r),
-            );
+            all.extend(run_panel_cancel_together(&spawner, rest).await);
             (all, decisive, Some(skeptic0_id))
         }
     } else {
@@ -1999,13 +2036,14 @@ pub(crate) async fn run_verification_stage(
                 inputs.inherit_tool_names,
             )
         });
-        let results = futures::future::join_all(spawns)
-            .await
-            .into_iter()
-            .map(|(r, _)| r)
-            .collect();
+        let results = run_panel_cancel_together(&spawner, spawns).await;
         (results, false, None)
     };
+
+    if results.iter().any(|r| r.cancelled) {
+        return user_cancelled_outcome(&details_path, details_raw, inputs.attempt, emit_event)
+            .await;
+    }
 
     for r in &results {
         emit_event(Event::GoalVerifierSkepticVerdict {
@@ -2091,6 +2129,55 @@ pub(crate) async fn run_verification_stage(
         skeptic0_session_id,
         panel_ran: true,
     }
+}
+
+/// Run the skeptics together. The first cancelled skeptic cancels the rest of the panel.
+/// The results come back in input order.
+async fn run_panel_cancel_together<F>(
+    spawner: &Arc<dyn GoalClassifierSpawner>,
+    skeptics: impl IntoIterator<Item = F>,
+) -> Vec<SkepticResult>
+where
+    F: std::future::Future<Output = (SkepticResult, String)>,
+{
+    use futures::StreamExt;
+    let mut pending: futures::stream::FuturesUnordered<_> = skeptics
+        .into_iter()
+        .enumerate()
+        .map(|(pos, f)| async move { (pos, f.await.0) })
+        .collect();
+    let mut done = Vec::with_capacity(pending.len());
+    let mut cancelled = false;
+    while let Some((pos, result)) = pending.next().await {
+        if result.cancelled && !cancelled {
+            cancelled = true;
+            spawner.cancel_panel();
+        }
+        done.push((pos, result));
+    }
+    done.sort_by_key(|(pos, _)| *pos);
+    done.into_iter().map(|(_, r)| r).collect()
+}
+
+/// The stage result after the user cancels a skeptic. No verdict exists, so the goal stays active.
+async fn user_cancelled_outcome(
+    details_path: &Path,
+    details_raw: String,
+    attempt: u32,
+    emit_event: &dyn Fn(Event),
+) -> VerificationStageResult {
+    emit_event(Event::GoalVerifierUserCancelled { attempt });
+    write_details_file(
+        details_path,
+        &format!(
+            "# Goal verification — cancelled by the user\n\n{USER_CANCELLED_VERIFICATION_NOTE}\n"
+        ),
+    )
+    .await;
+    GoalClassifierOutcome::UserCancelled {
+        details_path: details_raw,
+    }
+    .into()
 }
 
 /// Render the aggregated details file the rejection directive points the model at.

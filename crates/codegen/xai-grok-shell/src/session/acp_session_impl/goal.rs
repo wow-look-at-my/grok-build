@@ -364,6 +364,17 @@ impl SessionActor {
                     false,
                 );
                 self.verify_goal_candidate(Some(claim)).await;
+                let user_cancelled = self
+                    .goal_tracker
+                    .lock()
+                    .snapshot()
+                    .is_some_and(|o| o.verification_cancelled_by_user);
+                if user_cancelled {
+                    self.remember_claim_rejection(None);
+                    return BlockedClaimReview::Rejected(
+                        "The user stopped the review of your claim.".to_owned(),
+                    );
+                }
                 let gaps = {
                     let tracker = self.goal_tracker.lock();
                     if tracker.status() != Some(crate::session::goal_tracker::GoalStatus::Active) {
@@ -486,7 +497,10 @@ impl SessionActor {
             .await;
     }
 
-    fn reserve_classifier_attempt_slot(&self, policy: &GoalClassifierPolicy) -> Option<u32> {
+    pub(super) fn reserve_classifier_attempt_slot(
+        &self,
+        policy: &GoalClassifierPolicy,
+    ) -> Option<u32> {
         let mut tracker = self.goal_tracker.lock();
         let snapshot = tracker.snapshot_mut()?;
         snapshot.classifier_runs_attempted = snapshot.classifier_runs_attempted.saturating_add(1);
@@ -495,7 +509,7 @@ impl SessionActor {
         Some(snapshot.classifier_runs_attempted)
     }
 
-    async fn apply_classifier_outcome(
+    pub(super) async fn apply_classifier_outcome(
         &self,
         policy: &GoalClassifierPolicy,
         attempt: u32,
@@ -588,10 +602,25 @@ impl SessionActor {
                 self.auto_pause_for_classifier_blocked(&details_path, &pause_summary)
                     .await;
             }
+            GoalClassifierOutcome::UserCancelled { details_path } => {
+                self.record_user_cancelled_verification(&details_path);
+                notify.emit_goal_updated(&mut self.goal_tracker.lock(), tokens_used, finished);
+            }
             GoalClassifierOutcome::FailOpenAchieved { .. } => {
                 unreachable!("infra outcomes are handled fail-closed before apply")
             }
         }
+    }
+
+    /// A user cancel of the panel is no verdict. It does not count against the cap, and the goal stays active.
+    fn record_user_cancelled_verification(&self, details_path: &str) {
+        let mut tracker = self.goal_tracker.lock();
+        tracker.rollback_classifier_attempt();
+        if let Some(o) = tracker.snapshot_mut() {
+            o.verification_cancelled_by_user = true;
+            o.last_classifier_details_path = Some(details_path.to_owned());
+        }
+        self.goal_notify_sender().persist_goal_state(&tracker);
     }
 
     pub(super) fn record_verdict_on_orchestration(
@@ -909,6 +938,7 @@ impl SessionActor {
                 trace_sink: Some((self.chat_state_handle.clone(), task_tool_name)),
                 skeptic_overrides,
                 fallback: self.goal_role_fallback_reporter().await,
+                panel_cancel: tokio_util::sync::CancellationToken::new(),
             });
 
         let implementer_scratch =
@@ -1686,7 +1716,7 @@ impl SessionActor {
 
     /// `open_reason` is why the goal is still open, when the caller holds a verdict.
     /// `None` derives it from the panel gaps and the driver.
-    async fn prepare_goal_continuation(
+    pub(super) async fn prepare_goal_continuation(
         &self,
         current_tokens: i64,
         purpose: GoalContinuationPurpose,
@@ -1760,11 +1790,17 @@ impl SessionActor {
                 .as_deref()
                 .map(|p| format!("Plan: {}\n\n", p.display()))
                 .unwrap_or_default();
-            let verifier_gaps = o
-                .last_classifier_gaps
-                .as_deref()
-                .map(render_verifier_gaps_block)
-                .unwrap_or_default();
+            let verifier_gaps = if std::mem::take(&mut o.verification_cancelled_by_user) {
+                format!(
+                    "{}\n\n",
+                    crate::session::goal_classifier::USER_CANCELLED_VERIFICATION_NOTE
+                )
+            } else {
+                o.last_classifier_gaps
+                    .as_deref()
+                    .map(render_verifier_gaps_block)
+                    .unwrap_or_default()
+            };
             let strategy_rec = o.last_strategy_recommendation.clone();
             let strategist_note = strategy_rec
                 .as_deref()

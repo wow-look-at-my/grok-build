@@ -116,6 +116,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A `## Verification plan` step reads back what the goal built. It is not a permit. The implementer read "do X to confirm Y" as an instruction to do X. A planner-invented check then became an action on a system nobody put in scope. Every place that demands verification says so now. Those are the planner prompt's `## Verification plan` contract, `goal_rules.md`'s VERIFY AS YOU GO, `goal_plan_block.md`, and the per-turn continuation directive.
 - The planner is told to prefer reading what the work already produced over operating anything. Files, logs, hashes, build output and source are what it reads. That is the whole mechanism. There is no label grammar and no validator. An earlier try added a reach DSL, a keyword list and a reject-and-retry loop to a planner prompt that is already long. That buys rigidity rather than scope discipline.
 
+## A user cancel of a skeptic stops the panel
+
+- The first cancelled skeptic cancels the rest of the panel (`run_panel_cancel_together`, `ChannelSpawner::panel_cancel`). The stage returns `GoalClassifierOutcome::UserCancelled`. It is no verdict and no infra failure: the try is rolled back and the goal stays active. A cancel never pauses or ends a goal.
+- The next continuation directive carries `USER_CANCELLED_VERIFICATION_NOTE` one time (`verification_cancelled_by_user`). It tells the model the user thinks it is not ready, and to re-read the user's messages. The legacy `update_goal` ack carries the same text.
+
 ## Open todos block the goal validator
 
 - While the todo list has a `pending` or `in_progress` item, no validator runs. `run_goal_round_end` skips the evaluator and the panel and continues the round (`bounce_round_for_unfinished_todos`).

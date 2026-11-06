@@ -180,6 +180,10 @@ pub enum Event {
         total: u32,
         achieved: bool,
     },
+    /// The user cancelled a skeptic, so the stage cancelled the whole panel.
+    GoalVerifierUserCancelled {
+        attempt: u32,
+    },
     GoalPrematureStopDetected {
         pattern: &'static str,
     },
