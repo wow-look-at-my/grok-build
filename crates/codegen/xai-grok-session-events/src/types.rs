@@ -100,21 +100,8 @@ pub enum Event {
         attempt: u32,
         latency_ms: u64,
     },
-    GoalClassifierFailClosed {
-        reason: &'static str,
-        attempt: u32,
-    },
     GoalClassifierCapReached {
         attempt: u32,
-    },
-    GoalClassifierMidTurnDeferred {
-        pending_depth: u32,
-    },
-    GoalClassifierDroppedAfterCap {
-        attempts_seen: u32,
-    },
-    GoalClassifierPendingQueueCleared {
-        dropped: u32,
     },
     GoalPlannerFired {
         attempt: u32,

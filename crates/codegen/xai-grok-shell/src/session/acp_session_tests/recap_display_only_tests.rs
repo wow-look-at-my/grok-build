@@ -156,7 +156,7 @@ async fn side_question_projects_agent_messages_without_mutating_history() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
             let server = MockInferenceServer::start().await.unwrap();
             server.set_response("an answer");
@@ -205,7 +205,7 @@ async fn auxiliary_calls_send_the_session_reasoning_effort() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
             let server = MockInferenceServer::start().await.unwrap();
             server.set_response("an answer");
@@ -256,7 +256,7 @@ async fn side_question_routes_on_the_session_id_when_the_key_is_not_forwarded() 
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
             let server = MockInferenceServer::start().await.unwrap();
             server.set_response("an answer");
@@ -911,7 +911,7 @@ async fn recap_request_rides_parent_prompt_cache() {
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
             // Register a real tool so the "recap sends the main turn's tools" assertion is non-vacuous
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
             let server = MockInferenceServer::start().await.unwrap();
             server.set_response("You asked about the borrow checker.");
@@ -980,7 +980,7 @@ async fn recap_request_sends_hosted_tools_under_backend_search() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
             // Backend-search fixture: agent carries hosted tools and both gates are on.
             {
@@ -1229,7 +1229,7 @@ async fn recap_hosted_tools_reflect_the_active_per_turn_override() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
             // The backend-search fixture seeds an *unbounded* x_search (options: None)
             // Any bound the recap sends can only have come from the per-turn override below
@@ -1307,7 +1307,7 @@ async fn side_question_request_rides_parent_prompt_cache() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
             let server = MockInferenceServer::start().await.unwrap();
             server.set_response("The borrow checker enforces shared-xor-mutable.");
@@ -1355,7 +1355,7 @@ async fn side_question_request_rides_parent_prompt_cache() {
             );
             let tools = j(body, "tools").as_array().expect("tools must be present");
 
-            // The fixture registers `update_goal`, so an empty or unrelated tool list cannot pass.
+            // The fixture registers `todo_write`, so an empty or unrelated tool list cannot pass.
             let sent: Vec<&str> = tools
                 .iter()
                 .filter(|t| j(t, "type") == "function")
@@ -1363,7 +1363,7 @@ async fn side_question_request_rides_parent_prompt_cache() {
                 .collect();
             assert_eq!(
                 sent,
-                vec!["update_goal"],
+                vec!["todo_write"],
                 "side question must send the fixture's main-turn tool"
             );
 
@@ -1411,7 +1411,7 @@ async fn auxiliary_calls_keep_the_main_turn_prefix() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
             let server = MockInferenceServer::start().await.unwrap();
             server.set_response("a summary");
@@ -1471,7 +1471,7 @@ async fn messages_side_calls_preserve_completed_reasoning() {
             let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
             actor.turn_summary_enabled = true;
             actor.title_refresh_enabled = true;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
             let actor = std::sync::Arc::new(actor);
 
             let server = MockInferenceServer::start().await.unwrap();
@@ -1593,7 +1593,7 @@ async fn messages_side_calls_strip_reasoning_without_supported_thinking_effort()
                 let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
                 actor.turn_summary_enabled = true;
                 actor.title_refresh_enabled = true;
-                *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+                *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
                 let actor = std::sync::Arc::new(actor);
 
                 let server = MockInferenceServer::start().await.unwrap();
@@ -1697,7 +1697,7 @@ async fn side_question_trims_reasoning_orphaned_by_mid_turn_truncation() {
                 tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
             let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
             let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
+            *actor.agent.borrow_mut() = test_grok_build_agent_with_todo().await;
 
             let server = MockInferenceServer::start().await.unwrap();
             server.set_response("xor means one or the other, not both.");

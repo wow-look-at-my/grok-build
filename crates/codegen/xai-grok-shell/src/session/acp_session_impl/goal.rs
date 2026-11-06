@@ -139,11 +139,6 @@ pub(super) const BLOCKED_CLAIM_PANEL_REJECTION: &str = "Your claim that you cann
      goal was REJECTED by the verification panel. The verifier gaps below are steps you can take \
      yourself. Do each of them before you claim again.";
 
-/// The `update_goal(blocked_reason)` answer. The review runs when the turn ends.
-pub(super) const BLOCKED_CLAIM_RECORDED: &str = "Claim recorded. When this turn ends, the goal \
-     evaluator reviews it. If it agrees, the goal pauses for the user. If not, you get the \
-     concrete steps you have not tried. End your turn now.";
-
 pub(super) fn render_blocked_claim_rejection(evidence: &str, steps: &str) -> String {
     format!(
         "Your claim that you cannot finish the goal was REJECTED.\nWhy: {evidence}\n\
@@ -152,7 +147,7 @@ pub(super) fn render_blocked_claim_rejection(evidence: &str, steps: &str) -> Str
 }
 
 /// Add the claim to the panel's final response when the response does not
-/// already carry it. A claim from `update_goal` is not in the reply text.
+/// already carry it.
 pub(super) fn with_blocked_claim(final_response: String, claim: Option<&str>) -> String {
     use crate::session::goal_evaluator::BLOCKED_CLAIM_HEADING;
     match claim {
@@ -1153,10 +1148,6 @@ impl SessionActor {
         use xai_grok_tools::types::tool::ToolKind;
         let bridge = self.agent.borrow().tool_bridge().clone();
         GoalToolNames {
-            goal: bridge
-                .tool_for_kind(ToolKind::GoalUpdate)
-                .await
-                .unwrap_or_else(|| "update_goal".into()),
             task: bridge
                 .tool_for_kind(ToolKind::Task)
                 .await
@@ -1270,7 +1261,6 @@ impl SessionActor {
             }
         }
         self.goal_turn_task_ids.lock().clear();
-        self.clear_pending_classifier_completions();
         self.goal_continuation_streak
             .store(0, std::sync::atomic::Ordering::Relaxed);
 
@@ -1319,18 +1309,6 @@ impl SessionActor {
     ) -> String {
         let scratch_dir = crate::session::goal_tracker::implementer_scratch_dir(&o.verifier_id);
         let scratch = scratch_dir.to_string_lossy();
-        if !self.goal_runs_on_workflow_engine() {
-            return render_goal_rules_legacy(
-                objective,
-                names,
-                block_recap,
-                goal_state,
-                plan_path,
-                o.plan_todos_seeded,
-                &scratch,
-                o.scratch_dir_ready,
-            );
-        }
         render_goal_rules(
             objective,
             names,
@@ -1573,18 +1551,13 @@ impl SessionActor {
 
     /// The continuation next step read off the live todo list. A missing list gives the reason the goal is open.
     async fn goal_next_step_from_todos(&self) -> String {
-        let names = self.resolve_goal_tool_names().await;
         let todos = self.goal_todo_snapshot().await;
         let has_gaps = self
             .goal_tracker
             .lock()
             .snapshot()
             .is_some_and(|o| o.last_classifier_gaps.is_some());
-        let reason = goal_open_reason_without_verdict(
-            has_gaps,
-            !self.goal_runs_on_workflow_engine(),
-            &names.goal,
-        );
+        let reason = goal_open_reason_without_verdict(has_gaps);
         match todos {
             Some(todos) => next_step_from_todos(
                 todos
@@ -1697,7 +1670,6 @@ impl SessionActor {
             return false;
         }
         self.goal_tracker.lock().budget_limit();
-        self.clear_pending_classifier_completions();
         let notify = self.goal_notify_sender();
         notify.emit_goal_updated(
             &mut self.goal_tracker.lock(),
@@ -1720,12 +1692,7 @@ impl SessionActor {
         purpose: GoalContinuationPurpose,
         open_reason: Option<GoalOpenReason<'_>>,
     ) -> Option<GoalContinuationPlan> {
-        let legacy = !self.goal_runs_on_workflow_engine();
         let apply_turn_end = matches!(purpose, GoalContinuationPurpose::TurnEnd);
-        if apply_turn_end && legacy {
-            self.drain_goal_updates(current_tokens, DrainPurpose::TurnEnd)
-                .await;
-        }
 
         let goal_active = laziness_injection_active(
             self.goal_harness_enabled(),
@@ -1761,7 +1728,6 @@ impl SessionActor {
 
         let names = self.resolve_goal_tool_names().await;
         let todo_tool = &names.todo;
-        let goal_tool = names.goal.as_str();
 
         let planner_enabled = self.goal_planner_on();
         let (
@@ -1797,13 +1763,7 @@ impl SessionActor {
             let verifier_gaps = o
                 .last_classifier_gaps
                 .as_deref()
-                .map(|gaps| {
-                    if legacy {
-                        render_verifier_gaps_block_legacy(gaps, goal_tool)
-                    } else {
-                        render_verifier_gaps_block(gaps)
-                    }
-                })
+                .map(render_verifier_gaps_block)
                 .unwrap_or_default();
             let strategy_rec = o.last_strategy_recommendation.clone();
             let strategist_note = strategy_rec
@@ -1830,9 +1790,8 @@ impl SessionActor {
                 refuted,
             )
         };
-        let open_reason = open_reason.unwrap_or_else(|| {
-            goal_open_reason_without_verdict(!verifier_gaps.is_empty(), legacy, goal_tool)
-        });
+        let open_reason = open_reason
+            .unwrap_or_else(|| goal_open_reason_without_verdict(!verifier_gaps.is_empty()));
         let next_step = match self.goal_todo_snapshot().await {
             Some(todos) => next_step_from_todos(
                 todos
@@ -1852,48 +1811,23 @@ impl SessionActor {
         let lite = self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite;
         let reverify_block = if lite {
             String::new()
-        } else if legacy {
-            render_goal_reverify_block_legacy(
-                rounds_since_verify,
-                refuted,
-                self.goal_reverify_after,
-                goal_tool,
-            )
         } else {
             render_goal_reverify_block(rounds_since_verify, refuted, self.goal_reverify_after)
         };
-        let directive = if legacy {
-            render_goal_continuation_directive_legacy(
-                &objective,
-                tokens,
-                &elapsed,
-                bail_preface,
-                &plan_pointer,
-                &verifier_gaps,
-                &strategist_note,
-                &reverify_block,
-                &next_step,
-                todo_tool,
-                goal_tool,
-                &scratch_dir,
-                scratch_ready,
-            )
-        } else {
-            render_goal_continuation_directive(
-                &objective,
-                tokens,
-                &elapsed,
-                bail_preface,
-                &plan_pointer,
-                &verifier_gaps,
-                &strategist_note,
-                &reverify_block,
-                &next_step,
-                todo_tool,
-                &scratch_dir,
-                scratch_ready,
-            )
-        };
+        let directive = render_goal_continuation_directive(
+            &objective,
+            tokens,
+            &elapsed,
+            bail_preface,
+            &plan_pointer,
+            &verifier_gaps,
+            &strategist_note,
+            &reverify_block,
+            &next_step,
+            todo_tool,
+            &scratch_dir,
+            scratch_ready,
+        );
         Some(GoalContinuationPlan {
             directive,
             stop_pattern,
@@ -2100,46 +2034,6 @@ impl SessionActor {
             .await;
     }
 
-    /// Answer a lite goal's `update_goal(completed: true)` with a single
-    /// evaluator call. The goal completes only on `candidate_complete`.
-    async fn lite_completion_ack(
-        &self,
-    ) -> xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalAck {
-        use crate::session::goal_evaluator::GoalEvaluatorDecision;
-        use xai_grok_tools::implementations::grok_build::update_goal::{
-            RejectReason, UpdateGoalAck,
-        };
-        if self.goal_tracker.lock().status()
-            != Some(crate::session::goal_tracker::GoalStatus::Active)
-        {
-            return UpdateGoalAck::Rejected {
-                reason: RejectReason::NonActive,
-                detail: "Goal is not Active; cannot mark complete".to_string(),
-            };
-        }
-        match self.evaluate_goal_round().await {
-            Ok(verdict) if verdict.decision == GoalEvaluatorDecision::CandidateComplete => {
-                self.complete_lite_goal(&verdict.evidence).await;
-                UpdateGoalAck::CompletedWithoutClassifier
-            }
-            Ok(verdict) => UpdateGoalAck::Rejected {
-                reason: RejectReason::LiteCheckNotMet,
-                detail: format!(
-                    "The completion check says the goal is not met yet: {}\nNext step: {}",
-                    verdict.evidence.trim(),
-                    verdict.next_step.trim()
-                ),
-            },
-            Err(error) => UpdateGoalAck::Rejected {
-                reason: RejectReason::LiteCheckNotMet,
-                detail: format!(
-                    "The completion check could not reach a verdict: {error}. The goal stays \
-                     open."
-                ),
-            },
-        }
-    }
-
     pub(super) async fn inject_goal_continuation_message(&self, directive: String) {
         self.prune_prior_goal_continuation_directives().await;
         self.push_model_input(ConversationItem::goal_summary(directive));
@@ -2270,7 +2164,6 @@ impl SessionActor {
                 None => tracker.pause(reason),
             };
         }
-        self.clear_pending_classifier_completions();
         let (tokens_used, finished_marginal) = self.goal_tokens(current_tokens);
         let notify = self.goal_notify_sender();
         notify.emit_goal_updated(
@@ -2323,668 +2216,6 @@ impl SessionActor {
                 .map(|(id, item)| (id.clone(), item.content.clone(), item.status))
                 .collect(),
         )
-    }
-}
-
-impl SessionActor {
-    pub(super) async fn drain_goal_updates(&self, current_tokens: i64, purpose: DrainPurpose) {
-        self.drain_goal_updates_with_extra(current_tokens, purpose, Vec::new())
-            .await;
-    }
-
-    pub(super) async fn drain_goal_updates_with_extra(
-        &self,
-        current_tokens: i64,
-        purpose: DrainPurpose,
-        extra: Vec<xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope>,
-    ) {
-        use xai_grok_tools::implementations::grok_build::update_goal::{
-            RejectReason, UpdateGoalAck,
-        };
-        if !self.goal_harness_enabled() {
-            let reject = || UpdateGoalAck::Rejected {
-                reason: RejectReason::HarnessDisabled,
-                detail: "Goal mode is not active for this session (no /goal run in \
-                         progress); update_goal has no effect."
-                    .to_string(),
-            };
-            for (_input, ack_tx) in extra {
-                send_ack(ack_tx, reject());
-            }
-            if let Some(rx) = self.goal_update_rx.borrow_mut().as_mut() {
-                while let Ok((_input, ack_tx)) = rx.try_recv() {
-                    send_ack(ack_tx, reject());
-                }
-            }
-            return;
-        }
-        let mut cmds: Vec<DrainSource> = match purpose {
-            DrainPurpose::TurnEnd => self
-                .pending_classifier_completions
-                .lock()
-                .drain(..)
-                .map(DrainSource::Pending)
-                .collect(),
-            DrainPurpose::MidTurn => Vec::new(),
-        };
-        cmds.extend(extra.into_iter().map(DrainSource::Channel));
-        {
-            let mut rx_slot = self.goal_update_rx.borrow_mut();
-            if let Some(rx) = rx_slot.as_mut() {
-                cmds.extend(std::iter::from_fn(|| rx.try_recv().ok()).map(DrainSource::Channel));
-            }
-        }
-        let notify = self.goal_notify_sender();
-        let mut block_seen = false;
-        let mut cap_dropped: u32 = 0;
-        let mut auto_paused_mid_drain = false;
-        for source in cmds {
-            let (cmd, ack_tx) = source.into_parts();
-            if auto_paused_mid_drain {
-                cap_dropped = cap_dropped.saturating_add(1);
-                try_send_ack(
-                    ack_tx,
-                    UpdateGoalAck::Rejected {
-                        reason: RejectReason::DroppedAfterPauseInDrain,
-                        detail: "Goal auto-paused during verification; this completion was \
-                                 dropped without further verification"
-                            .to_string(),
-                    },
-                );
-                drop(cmd);
-                continue;
-            }
-            if block_seen {
-                try_send_ack(
-                    ack_tx,
-                    UpdateGoalAck::Rejected {
-                        reason: RejectReason::BlockSeenInDrain,
-                        detail: "A claim that the goal cannot be finished is already waiting \
-                                 for review; this update was dropped"
-                            .to_string(),
-                    },
-                );
-                continue;
-            }
-            if let Some(reason) = cmd.blocked_reason {
-                let claim = match cmd.message {
-                    Some(detail) => format!("{reason}\n{detail}"),
-                    None => reason,
-                };
-                let stored = {
-                    let mut tracker = self.goal_tracker.lock();
-                    let active =
-                        tracker.status() == Some(crate::session::goal_tracker::GoalStatus::Active);
-                    if active && let Some(o) = tracker.snapshot_mut() {
-                        o.pending_blocked_claim = Some(claim);
-                    }
-                    notify.persist_goal_state(&tracker);
-                    active
-                };
-                if stored {
-                    block_seen = true;
-                    try_send_ack(
-                        ack_tx,
-                        UpdateGoalAck::Accepted {
-                            summary: BLOCKED_CLAIM_RECORDED.to_string(),
-                        },
-                    );
-                } else {
-                    try_send_ack(
-                        ack_tx,
-                        UpdateGoalAck::Rejected {
-                            reason: RejectReason::BlockedAgainstNonActive,
-                            detail: "Goal is not Active; blocked_reason ignored".to_string(),
-                        },
-                    );
-                }
-                continue;
-            }
-            if cmd.completed != Some(true) {
-                let (tokens_used, finished_marginal) = self.goal_tokens(current_tokens);
-                let mut tracker = self.goal_tracker.lock();
-                notify.emit_goal_updated(&mut tracker, tokens_used, finished_marginal);
-                drop(tracker);
-                let summary = cmd
-                    .message
-                    .clone()
-                    .map(|m| format!("{m}."))
-                    .unwrap_or_else(|| "Goal updated.".to_string());
-                try_send_ack(ack_tx, UpdateGoalAck::Accepted { summary });
-                continue;
-            }
-
-            let goal_active = self.goal_tracker.lock().status()
-                == Some(crate::session::goal_tracker::GoalStatus::Active);
-            if goal_active && let Some(detail) = self.unfinished_goal_todos_bounce().await {
-                try_send_ack(
-                    ack_tx,
-                    UpdateGoalAck::Rejected {
-                        reason: RejectReason::UnfinishedTodos,
-                        detail,
-                    },
-                );
-                continue;
-            }
-
-            if self.goal_tracker.lock().mode() == crate::session::goal_tracker::GoalMode::Lite {
-                let ack = self.lite_completion_ack().await;
-                try_send_ack(ack_tx, ack);
-                continue;
-            }
-
-            let policy = self.resolve_goal_classifier_policy();
-
-            if !policy.enabled {
-                let (tokens_used, finished_marginal) = self.goal_tokens(current_tokens);
-                self.prune_subagent_records_for_active_goal();
-                self.clear_pending_classifier_completions();
-                let mut tracker = self.goal_tracker.lock();
-                tracker.complete();
-                notify.emit_goal_updated(&mut tracker, tokens_used, finished_marginal);
-                drop(tracker);
-                try_send_ack(ack_tx, UpdateGoalAck::CompletedWithoutClassifier);
-                continue;
-            }
-
-            let non_active_meta: Option<(u32, bool)> = {
-                let tracker = self.goal_tracker.lock();
-                match tracker.snapshot() {
-                    Some(o) if o.status == crate::session::goal_tracker::GoalStatus::Active => None,
-                    Some(o) => Some((
-                        o.classifier_runs_attempted,
-                        o.status == crate::session::goal_tracker::GoalStatus::BackOffPaused
-                            && o.classifier_max_runs
-                                .is_some_and(|cap| o.classifier_runs_attempted >= cap),
-                    )),
-                    None => Some((0, false)),
-                }
-            };
-            if let Some((attempts_seen, post_cap)) = non_active_meta {
-                tracing::debug!(
-                    "completed: true against non-Active goal; dropping classifier fire"
-                );
-                if post_cap {
-                    self.events.emit(
-                        crate::session::events::Event::GoalClassifierDroppedAfterCap {
-                            attempts_seen,
-                        },
-                    );
-                    try_send_ack(
-                        ack_tx,
-                        UpdateGoalAck::Rejected {
-                            reason: RejectReason::PostCap,
-                            detail: format!(
-                                "Classifier cap already reached ({attempts_seen} attempts); goal \
-                                 is BackOff-paused. Do not call update_goal again until the user \
-                                 resumes."
-                            ),
-                        },
-                    );
-                } else {
-                    self.events.emit(
-                        crate::session::events::Event::GoalClassifierFailOpen {
-                            reason: crate::session::events::GoalClassifierFailOpenReason::GoalNotActiveAtResolve
-                                .as_const_str(),
-                            attempt: attempts_seen,
-                            latency_ms: 0,
-                        },
-                    );
-                    try_send_ack(
-                        ack_tx,
-                        UpdateGoalAck::Rejected {
-                            reason: RejectReason::NonActive,
-                            detail: "Goal is not Active; cannot mark complete".to_string(),
-                        },
-                    );
-                }
-                continue;
-            }
-
-            if matches!(purpose, DrainPurpose::MidTurn) {
-                let pending_depth = {
-                    let mut q = self.pending_classifier_completions.lock();
-                    if q.len() >= GOAL_CLASSIFIER_PENDING_QUEUE_CAP {
-                        q.pop_front();
-                        self.events.emit(
-                            crate::session::events::Event::GoalClassifierFailClosed {
-                                reason:
-                                    crate::session::events::GoalClassifierFailClosedReason::PendingQueueFull
-                                        .as_const_str(),
-                                attempt: 0,
-                            },
-                        );
-                    }
-                    q.push_back(cmd);
-                    u32::try_from(q.len()).unwrap_or(u32::MAX)
-                };
-                self.events.emit(
-                    crate::session::events::Event::GoalClassifierMidTurnDeferred { pending_depth },
-                );
-                try_send_ack(ack_tx, UpdateGoalAck::DeferredToTurnEnd { pending_depth });
-                continue;
-            }
-
-            if self
-                .goal_classifier_in_flight
-                .compare_exchange(
-                    false,
-                    true,
-                    std::sync::atomic::Ordering::SeqCst,
-                    std::sync::atomic::Ordering::SeqCst,
-                )
-                .is_err()
-            {
-                self.events
-                    .emit(crate::session::events::Event::GoalClassifierFailClosed {
-                    reason:
-                        crate::session::events::GoalClassifierFailClosedReason::ConcurrentInFlight
-                            .as_const_str(),
-                    attempt: 0,
-                });
-                let synthetic_info = self
-                    .account_not_achieved_without_sampler(
-                        &policy,
-                        NotAchievedSyntheticReason::ConcurrentInFlight,
-                    )
-                    .await;
-                if let Some((attempt, details_path, cap_reached)) = synthetic_info {
-                    if cap_reached {
-                        if self.cap_just_reached() {
-                            auto_paused_mid_drain = true;
-                        }
-                        try_send_ack(
-                            ack_tx,
-                            UpdateGoalAck::ClassifierCapReached {
-                                details_path,
-                                attempt,
-                            },
-                        );
-                    } else {
-                        try_send_ack(
-                            ack_tx,
-                            UpdateGoalAck::ClassifierConcurrentInFlight {
-                                details_path,
-                                attempt,
-                                max_runs: policy.max_runs,
-                            },
-                        );
-                    }
-                } else {
-                    try_send_ack(
-                        ack_tx,
-                        UpdateGoalAck::Rejected {
-                            reason: RejectReason::InFlightOrchestrationVanished,
-                            detail: "Goal orchestration vanished during in-flight short-circuit"
-                                .to_string(),
-                        },
-                    );
-                }
-                continue;
-            }
-            let _in_flight_guard = InFlightGuard {
-                flag: &self.goal_classifier_in_flight,
-            };
-            let fire_started = std::time::Instant::now();
-
-            let Some(attempt) = self.reserve_classifier_attempt_slot(&policy) else {
-                self.events
-                    .emit(crate::session::events::Event::GoalClassifierFailOpen {
-                    reason:
-                        crate::session::events::GoalClassifierFailOpenReason::GoalNotActiveAtResolve
-                            .as_const_str(),
-                    attempt: 0,
-                    latency_ms: fire_started.elapsed().as_millis() as u64,
-                });
-                try_send_ack(
-                    ack_tx,
-                    UpdateGoalAck::Rejected {
-                        reason: RejectReason::OrchestrationVanished,
-                        detail: "Goal orchestration vanished before classifier could start"
-                            .to_string(),
-                    },
-                );
-                continue;
-            };
-
-            self.emit_goal_verifying(current_tokens);
-
-            let mut slot_guard = TrackerDropGuard::new(&self.goal_tracker, |t| {
-                use crate::session::goal_tracker::GoalStatus;
-                if !matches!(
-                    t.status(),
-                    Some(
-                        GoalStatus::BackOffPaused
-                            | GoalStatus::NoProgressPaused
-                            | GoalStatus::Blocked
-                    ),
-                ) {
-                    t.rollback_classifier_attempt();
-                }
-            });
-
-            let outcome = {
-                let _verifying_latch = TrackerDropGuard::new(&self.goal_tracker, |t| {
-                    if let Some(o) = t.snapshot_mut() {
-                        o.verifying_in_flight = false;
-                        o.current_subagent_role = None;
-                    }
-                });
-                self.run_verification_stage_for_drain(attempt, policy.max_runs, None)
-                    .await
-            };
-
-            let status_changed = self.goal_tracker.lock().status()
-                != Some(crate::session::goal_tracker::GoalStatus::Active);
-            if status_changed {
-                self.events
-                    .emit(crate::session::events::Event::GoalClassifierFailOpen {
-                    reason:
-                        crate::session::events::GoalClassifierFailOpenReason::GoalNotActiveAtResolve
-                            .as_const_str(),
-                    attempt,
-                    latency_ms: fire_started.elapsed().as_millis() as u64,
-                });
-                try_send_ack(
-                    ack_tx,
-                    UpdateGoalAck::Rejected {
-                        reason: RejectReason::StatusChangedDuringClassifier,
-                        detail: "Goal transitioned to non-Active during classifier run".to_string(),
-                    },
-                );
-                continue;
-            }
-            slot_guard.disarm();
-
-            let ack = self
-                .apply_classifier_outcome_legacy(&policy, attempt, outcome, &notify)
-                .await;
-            if !auto_paused_mid_drain && self.goal_is_paused() {
-                auto_paused_mid_drain = true;
-            }
-            try_send_ack(ack_tx, ack);
-        }
-        if cap_dropped > 0 {
-            self.events.emit(
-                crate::session::events::Event::GoalClassifierPendingQueueCleared {
-                    dropped: cap_dropped,
-                },
-            );
-        }
-    }
-
-    fn cap_just_reached(&self) -> bool {
-        let tracker = self.goal_tracker.lock();
-        tracker.snapshot().is_some_and(|o| {
-            o.status == crate::session::goal_tracker::GoalStatus::BackOffPaused
-                && o.classifier_max_runs
-                    .is_some_and(|cap| o.classifier_runs_attempted >= cap)
-        })
-    }
-
-    fn goal_is_paused(&self) -> bool {
-        self.goal_tracker
-            .lock()
-            .status()
-            .is_some_and(|s| s.is_paused())
-    }
-
-    pub(crate) fn clear_pending_classifier_completions(&self) {
-        self.pending_classifier_completions.lock().clear();
-    }
-
-    /// In-turn goal loop step: run verification for the round just completed.
-    /// Decides whether to continue the loop in-turn (with the continuation directive) or end the turn.
-    /// The premature-stop signal, if any, is emitted here, once per continued round.
-    pub(super) async fn run_goal_round_end_legacy(&self) -> GoalRoundDecision {
-        let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
-        if self.goal_harness_enabled() {
-            // The drain moves an `update_goal(blocked_reason)` claim into the
-            // tracker, so the claim review sees it below.
-            self.drain_goal_updates(current_tokens, DrainPurpose::TurnEnd)
-                .await;
-        }
-        let claim = {
-            let mut tracker = self.goal_tracker.lock();
-            let active = tracker.status() == Some(crate::session::goal_tracker::GoalStatus::Active);
-            tracker
-                .snapshot_mut()
-                .and_then(|o| o.pending_blocked_claim.take())
-                .filter(|_| active)
-        };
-        let claim = match claim {
-            Some(claim) => Some(claim),
-            None => crate::session::goal_evaluator::current_round_blocked_claim(
-                &self.chat_state_handle.get_conversation().await,
-            ),
-        };
-        if let Some(claim) = claim
-            && laziness_injection_active(
-                self.goal_harness_enabled(),
-                self.goal_tracker.lock().status(),
-            )
-        {
-            return self.finish_round_with_blocked_claim(&claim).await;
-        }
-        let Some(plan) = self
-            .prepare_goal_continuation(current_tokens, GoalContinuationPurpose::TurnEnd, None)
-            .await
-        else {
-            return GoalRoundDecision::EndTurn;
-        };
-        // A Continue directive is unconditionally injected; returning it commits the embedded strategist note for delivery
-        if let Some(rec) = plan.strategy_rec.as_deref() {
-            self.consume_strategist_note(rec);
-        }
-        if let Some(pattern) = plan.stop_pattern {
-            self.record_and_emit_premature_stop(pattern);
-        }
-        GoalRoundDecision::Continue(plan.directive)
-    }
-
-    async fn account_not_achieved_without_sampler(
-        &self,
-        policy: &GoalClassifierPolicy,
-        reason: NotAchievedSyntheticReason,
-    ) -> Option<(u32, String, bool)> {
-        use crate::session::goal_classifier::format_details_path;
-        use crate::session::goal_tracker::GoalClassifierVerdict;
-
-        let (attempt, verifier_id) = {
-            let mut tracker = self.goal_tracker.lock();
-            let o = tracker.snapshot_mut()?;
-            o.classifier_runs_attempted = o.classifier_runs_attempted.saturating_add(1);
-            o.classifier_max_runs = Some(policy.max_runs);
-            (o.classifier_runs_attempted, o.verifier_id.clone())
-        };
-        let details_path = format_details_path(&verifier_id, attempt);
-        let body = reason.details_body(attempt, policy.max_runs);
-        let wrote_details =
-            if crate::session::goal_tracker::ensure_goal_scratch_root(&verifier_id).is_ok() {
-                tokio::fs::write(&details_path, body).await.is_ok()
-            } else {
-                false
-            };
-        let details_ptr: Option<&str> = wrote_details.then_some(details_path.as_str());
-
-        let gaps_summary = reason.gaps_summary();
-        {
-            let mut tracker = self.goal_tracker.lock();
-            Self::record_verdict_on_orchestration(
-                &mut tracker,
-                GoalClassifierVerdict::NotAchieved,
-                details_ptr,
-                GapsUpdate::Preserve,
-            );
-            tracker.record_not_achieved_streak();
-        }
-
-        let cap_reached = attempt >= policy.max_runs;
-        if cap_reached {
-            let pause_summary = format!(
-                "{}:\n{gaps_summary}",
-                crate::session::goal_classifier::PAUSE_GROUP_FIXABLE,
-            );
-            self.auto_pause_for_classifier_cap(attempt, details_ptr.unwrap_or(""), &pause_summary)
-                .await;
-        } else {
-            let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
-            let (tokens_used, finished_marginal) = self.goal_tokens(current_tokens);
-            let notify = self.goal_notify_sender();
-            notify.emit_goal_updated(
-                &mut self.goal_tracker.lock(),
-                tokens_used,
-                finished_marginal,
-            );
-        }
-        Some((attempt, details_ptr.unwrap_or("").to_owned(), cap_reached))
-    }
-
-    async fn apply_classifier_outcome_legacy(
-        &self,
-        policy: &GoalClassifierPolicy,
-        attempt: u32,
-        outcome: crate::session::goal_classifier::GoalClassifierOutcome,
-        notify: &crate::session::goal_orchestrator::GoalNotifySender,
-    ) -> xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalAck {
-        use crate::session::goal_classifier::GoalClassifierOutcome;
-        use crate::session::goal_tracker::GoalClassifierVerdict;
-        use xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalAck;
-
-        let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
-        let (tokens_used, finished_marginal) = self.goal_tokens(current_tokens);
-        match outcome {
-            GoalClassifierOutcome::Achieved { details_path } => {
-                self.prune_subagent_records_for_active_goal();
-                self.clear_pending_classifier_completions();
-                let details_path = {
-                    let mut tracker = self.goal_tracker.lock();
-                    Self::record_verdict_on_orchestration(
-                        &mut tracker,
-                        GoalClassifierVerdict::Achieved,
-                        Some(details_path.as_str()),
-                        GapsUpdate::Clear,
-                    );
-                    tracker.reset_strategist_state();
-                    tracker.complete();
-                    let details_path = tracker
-                        .snapshot()
-                        .and_then(|o| o.last_classifier_details_path.clone())
-                        .unwrap_or(details_path);
-                    notify.emit_goal_updated(&mut tracker, tokens_used, finished_marginal);
-                    details_path
-                };
-                self.maybe_run_goal_summarizer(attempt).await;
-                UpdateGoalAck::ClassifierAchieved { details_path }
-            }
-            GoalClassifierOutcome::NotAchieved {
-                details_path,
-                gaps_summary,
-                pause_summary,
-                gap_fingerprint,
-            } => {
-                {
-                    let mut tracker = self.goal_tracker.lock();
-                    Self::record_verdict_on_orchestration(
-                        &mut tracker,
-                        GoalClassifierVerdict::NotAchieved,
-                        Some(details_path.as_str()),
-                        GapsUpdate::Set(gaps_summary.as_str()),
-                    );
-                    tracker.record_not_achieved_streak();
-                }
-                if attempt >= policy.max_runs {
-                    self.auto_pause_for_classifier_cap(attempt, &details_path, &pause_summary)
-                        .await;
-                    return UpdateGoalAck::ClassifierCapReached {
-                        details_path,
-                        attempt,
-                    };
-                }
-                let stalled = !gap_fingerprint.is_empty()
-                    && self
-                        .goal_tracker
-                        .lock()
-                        .record_classifier_stall(&gap_fingerprint);
-                if stalled {
-                    self.auto_pause_for_classifier_stall(&details_path, &pause_summary)
-                        .await;
-                    return UpdateGoalAck::ClassifierStalled {
-                        details_path,
-                        attempt,
-                    };
-                }
-                let every = self.goal_strategist_every;
-                let claimed =
-                    self.goal_tracker
-                        .lock()
-                        .claim_strategist_fire(|consecutive, last_fired| {
-                            crate::session::goal_strategist::strategist_should_fire(
-                                consecutive,
-                                last_fired,
-                                every,
-                            )
-                        });
-                if let Some(consecutive_not_achieved) = claimed {
-                    self.maybe_run_goal_strategist(attempt, consecutive_not_achieved)
-                        .await;
-                }
-                notify.emit_goal_updated(
-                    &mut self.goal_tracker.lock(),
-                    tokens_used,
-                    finished_marginal,
-                );
-                UpdateGoalAck::ClassifierNotAchieved {
-                    details_path,
-                    attempt,
-                    max_runs: policy.max_runs,
-                }
-            }
-            GoalClassifierOutcome::Blocked {
-                details_path,
-                pause_summary,
-            } => {
-                {
-                    let mut tracker = self.goal_tracker.lock();
-                    Self::record_verdict_on_orchestration(
-                        &mut tracker,
-                        GoalClassifierVerdict::NotAchieved,
-                        Some(details_path.as_str()),
-                        GapsUpdate::Clear,
-                    );
-                    tracker.rollback_classifier_attempt();
-                    tracker.reset_classifier_stall();
-                    tracker.reset_strategist_state();
-                }
-                self.auto_pause_for_classifier_blocked(&details_path, &pause_summary)
-                    .await;
-                UpdateGoalAck::ClassifierBlocked { details_path }
-            }
-            GoalClassifierOutcome::FailOpenAchieved {
-                reason,
-                details_path,
-            } => {
-                tracing::warn!(
-                    ?reason,
-                    "goal verification fail-open (infra-class) → Achieved",
-                );
-                self.prune_subagent_records_for_active_goal();
-                self.clear_pending_classifier_completions();
-                let mut tracker = self.goal_tracker.lock();
-                Self::record_verdict_on_orchestration(
-                    &mut tracker,
-                    GoalClassifierVerdict::Achieved,
-                    (!details_path.is_empty()).then_some(details_path.as_str()),
-                    GapsUpdate::Clear,
-                );
-                tracker.reset_strategist_state();
-                tracker.complete();
-                notify.emit_goal_updated(&mut tracker, tokens_used, finished_marginal);
-                UpdateGoalAck::ClassifierFailOpenAchieved {
-                    reason: reason.as_const_str(),
-                }
-            }
-        }
     }
 }
 

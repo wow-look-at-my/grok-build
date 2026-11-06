@@ -2072,7 +2072,6 @@ async fn stop_then_slash_goal_resume_reopens_spawn_admission_before_planner_retr
         .run_until(async {
             let (tx, log) = spawn_latching_planner_coordinator();
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
-            *actor.agent.borrow_mut() = test_agent_with_goal_tool().await;
             create_test_goal(&actor);
             let _ = actor
                 .auto_pause_goal_if_active_with_message(

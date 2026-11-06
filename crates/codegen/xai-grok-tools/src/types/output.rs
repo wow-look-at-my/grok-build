@@ -552,7 +552,6 @@ pub enum ToolOutput {
     SchedulerCreate(crate::implementations::grok_build::scheduler::create::SchedulerCreateOutput),
     SchedulerDelete(crate::implementations::grok_build::scheduler::delete::SchedulerDeleteOutput),
     SchedulerList(crate::implementations::grok_build::scheduler::list::SchedulerListOutput),
-    UpdateGoal(crate::implementations::grok_build::update_goal::UpdateGoalOutput),
     Ci(crate::implementations::grok_build::ci::CiOutput),
     Workflow(crate::implementations::grok_build::workflow::WorkflowToolOutput),
     SendMessage(crate::implementations::grok_build::send_message::SendMessageOutput),
@@ -885,7 +884,6 @@ impl ToolOutput {
                     serde_json::to_string_pretty(&o.tasks).unwrap_or_default()
                 }
             }
-            ToolOutput::UpdateGoal(o) => o.summary.clone(),
             // The summary leads, because it says what to do next. The runs and
             // the log text follow it as JSON for a model that wants the detail.
             ToolOutput::Ci(o) => match serde_json::to_string_pretty(o) {

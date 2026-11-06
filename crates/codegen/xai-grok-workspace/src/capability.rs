@@ -93,7 +93,6 @@ pub(crate) const ALL_TOOL_KINDS: &[ToolKind] = &[
     ToolKind::SearchTool,
     ToolKind::UseTool,
     ToolKind::Monitor,
-    ToolKind::GoalUpdate,
     ToolKind::Workflow,
     ToolKind::Ci,
     ToolKind::Git,
@@ -121,9 +120,7 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
         // Meta tools: always allowed.
         // `SendMessage` is one of them: a read-only explorer still has to be
         // able to answer the session that spawned it.
-        Plan | EnterPlan | ExitPlan | AskUser | Skill | SearchTool | GoalUpdate | SendMessage => {
-            true
-        }
+        Plan | EnterPlan | ExitPlan | AskUser | Skill | SearchTool | SendMessage => true,
 
         // Read class.
         Read | MemoryGet | MemorySearch => {

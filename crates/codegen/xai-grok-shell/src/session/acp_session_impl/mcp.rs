@@ -237,7 +237,6 @@ impl SessionActor {
             })?;
         self.refresh_mcp_snapshot_and_schedule_reminder().await;
         self.emit_mcp_tools_changed_notifications(ui_tools);
-        self.refresh_goal_harness_enabled().await;
         tracing::info!(
             server = server_name,
             "MCP server authenticated and tools registered via auth_trigger"

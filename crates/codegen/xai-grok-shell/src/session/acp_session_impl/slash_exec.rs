@@ -873,7 +873,6 @@ impl SessionActor {
                     }
                 };
                 if changed {
-                    self.clear_pending_classifier_completions();
                     let (tokens_used, finished) = self.goal_tokens(current_tokens);
                     self.goal_notify_sender().emit_goal_updated(
                         &mut self.goal_tracker.lock(),
@@ -908,7 +907,6 @@ impl SessionActor {
                     .store(0, std::sync::atomic::Ordering::Relaxed);
                 self.goal_turn_task_ids.lock().clear();
                 self.subagent_token_records.lock().clear();
-                self.clear_pending_classifier_completions();
                 self.send_xai_notification(crate::session::goal_orchestrator::build_goal_cleared())
                     .await;
                 self.send_host_turn_slash_command_output("Goal cleared.")

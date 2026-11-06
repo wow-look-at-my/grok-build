@@ -65,7 +65,6 @@ pub fn max_calls_per_batch(kind: ToolKind, limits: &MediaGenBatchLimits) -> Opti
         | ToolKind::SearchTool
         | ToolKind::UseTool
         | ToolKind::Monitor
-        | ToolKind::GoalUpdate
         | ToolKind::Workflow
         | ToolKind::Feedback
         | ToolKind::Other => None,

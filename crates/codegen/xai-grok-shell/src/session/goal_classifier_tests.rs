@@ -2016,9 +2016,6 @@ fn collect_events() -> (Arc<Mutex<Vec<String>>>, impl Fn(Event) + Send + Sync) {
             Event::GoalClassifierFired { .. } => "fired".to_string(),
             Event::GoalClassifierVerdict { verdict, .. } => format!("verdict:{verdict:?}"),
             Event::GoalClassifierFailOpen { reason, .. } => format!("fail_open:{reason}"),
-            Event::GoalClassifierFailClosed { reason, .. } => {
-                format!("fail_closed:{reason}")
-            }
             Event::GoalClassifierCapReached { .. } => "cap_reached".to_string(),
             Event::GoalVerifierSkepticVerdict {
                 skeptic_idx,

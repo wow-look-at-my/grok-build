@@ -1028,7 +1028,6 @@ mod tests {
             ToolKind::Task,
             ToolKind::Monitor,
             ToolKind::Workflow,
-            ToolKind::GoalUpdate,
             ToolKind::Plan,
             ToolKind::EnterPlan,
             ToolKind::ExitPlan,

@@ -118,8 +118,8 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Open todos block the goal validator
 
-- While the todo list has a `pending` or `in_progress` item, no validator runs. `run_goal_round_end` skips the evaluator and the panel and continues the round (`bounce_round_for_unfinished_todos`). `update_goal(completed: true)` is rejected with `RejectReason::UnfinishedTodos` before the lite check, the classifier, or the mid-turn deferral.
-- Both answers start with `UNFINISHED_TODOS_BOUNCE` and list every open item with its status and id (`unfinished_todos_bounce` in `goal_support.rs`). A missing todo resource reads as no open item. The validator still runs.
+- While the todo list has a `pending` or `in_progress` item, no validator runs. `run_goal_round_end` skips the evaluator and the panel and continues the round (`bounce_round_for_unfinished_todos`).
+- The bounce starts with `UNFINISHED_TODOS_BOUNCE` and list every open item with its status and id (`unfinished_todos_bounce` in `goal_support.rs`). A missing todo resource reads as no open item. The validator still runs.
 
 ## Lite `/goal` mode
 
@@ -127,11 +127,9 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A lite goal starts the way `/todo <objective>` does. `setup_goal` runs the capture (`run_todo_capture`) before it creates the goal. A capture that adds nothing returns an error, and no goal starts.
 - The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is last.
 - Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
-- On the legacy driver, a lite `update_goal(completed: true)` makes one evaluator call and is refused with `LiteCheckNotMet` unless the verdict is `candidate_complete`.
-
 ## A give-up claim is reviewed, not counted
 
-- The agent claims it cannot finish with a `## Cannot complete` section in its reply. On the legacy driver, `update_goal(blocked_reason)` also counts. The round end calls `review_blocked_claim` (`acp_session_impl/goal.rs`) before the todo bounce. Lite and full share this path.
+- The agent claims it cannot finish with a `## Cannot complete` section in its reply. The round end calls `review_blocked_claim` (`acp_session_impl/goal.rs`) before the todo bounce. Lite and full share this path.
 - The evaluator judges the claim first (`build_blocked_claim_request` in `goal_evaluator.rs`). A rejection must list concrete untried steps, and `is_vague_step` refuses "try harder" steps. An upheld claim must name the user action. The next review gets the last rejected steps.
 - Both modes send an upheld claim to the panel a completion candidate gets (`verify_goal_candidate(Some(claim))`). A lite goal's panel is one skeptic and no summarizer. The `## Cannot complete` rule in `goal_verifier_prompt.md` tells the skeptics how to judge it.
 

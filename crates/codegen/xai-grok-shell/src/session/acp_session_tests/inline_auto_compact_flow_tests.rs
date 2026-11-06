@@ -214,7 +214,6 @@ async fn create_test_actor(
         goal_enabled: false,
         background_workflows_enabled: false,
         goal_harness_enabled: std::sync::atomic::AtomicBool::new(false),
-        goal_harness_availability_reconciled: std::sync::atomic::AtomicBool::new(false),
         goal_tracker: Arc::new(parking_lot::Mutex::new(
             crate::session::goal_tracker::GoalTracker::new(std::path::PathBuf::from(
                 "/tmp/test-session",
@@ -222,8 +221,6 @@ async fn create_test_actor(
         )),
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-        goal_update_rx: std::cell::RefCell::new(None),
-        goal_update_tx: tokio::sync::mpsc::unbounded_channel().0,
         workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle().0,
         workflow_launch_tx: tokio::sync::mpsc::unbounded_channel().0,
         goal_classifier_enabled: false,
@@ -238,8 +235,6 @@ async fn create_test_actor(
         goal_strategist_every: 5,
         goal_reverify_after: crate::session::acp_session::GOAL_REVERIFY_AFTER_DEFAULT,
         goal_plan_reconciled: std::sync::atomic::AtomicBool::new(false),
-        pending_classifier_completions: parking_lot::Mutex::new(std::collections::VecDeque::new()),
-        goal_classifier_in_flight: std::sync::atomic::AtomicBool::new(false),
         managed_mcp_handle: Default::default(),
         initial_client_mcp_servers: Default::default(),
         tool_metadata_snapshot: Arc::new(std::sync::Mutex::new(Default::default())),
@@ -670,7 +665,6 @@ async fn create_test_actor_with_memory(
         goal_enabled: false,
         background_workflows_enabled: false,
         goal_harness_enabled: std::sync::atomic::AtomicBool::new(false),
-        goal_harness_availability_reconciled: std::sync::atomic::AtomicBool::new(false),
         goal_tracker: Arc::new(parking_lot::Mutex::new(
             crate::session::goal_tracker::GoalTracker::new(std::path::PathBuf::from(
                 "/tmp/test-session",
@@ -678,8 +672,6 @@ async fn create_test_actor_with_memory(
         )),
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-        goal_update_rx: std::cell::RefCell::new(None),
-        goal_update_tx: tokio::sync::mpsc::unbounded_channel().0,
         workflow_manager: crate::session::workflow::manager::WorkflowManager::test_bundle().0,
         workflow_launch_tx: tokio::sync::mpsc::unbounded_channel().0,
         goal_classifier_enabled: false,
@@ -694,8 +686,6 @@ async fn create_test_actor_with_memory(
         goal_strategist_every: 5,
         goal_reverify_after: crate::session::acp_session::GOAL_REVERIFY_AFTER_DEFAULT,
         goal_plan_reconciled: std::sync::atomic::AtomicBool::new(false),
-        pending_classifier_completions: parking_lot::Mutex::new(std::collections::VecDeque::new()),
-        goal_classifier_in_flight: std::sync::atomic::AtomicBool::new(false),
         managed_mcp_handle: Default::default(),
         initial_client_mcp_servers: Default::default(),
         tool_metadata_snapshot: Arc::new(std::sync::Mutex::new(Default::default())),

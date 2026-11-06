@@ -420,9 +420,6 @@ pub struct GoalOrchestration {
     pub evaluator_blocker_key: Option<String>,
     #[serde(default)]
     pub evaluator_blocked_streak: u32,
-    /// A give-up claim from `update_goal(blocked_reason)`. The round end reviews it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending_blocked_claim: Option<String>,
     /// The untried steps from the last rejected give-up claim. The next review checks them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_claim_rejection: Option<String>,
@@ -867,7 +864,6 @@ impl GoalTracker {
             pause_message: None,
             evaluator_blocker_key: None,
             evaluator_blocked_streak: 0,
-            pending_blocked_claim: None,
             last_claim_rejection: None,
             verifier_id,
             classifier_runs_attempted: 0,
@@ -1258,7 +1254,6 @@ pub(crate) fn make_base_orchestration() -> GoalOrchestration {
         pause_message: None,
         evaluator_blocker_key: None,
         evaluator_blocked_streak: 0,
-        pending_blocked_claim: None,
         last_claim_rejection: None,
         verifier_id: generate_verifier_id(),
         classifier_runs_attempted: 0,

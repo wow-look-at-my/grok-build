@@ -152,8 +152,6 @@ After assembly, mention the final output path.
 - **Real people:** reference-first — drive the video from a verified reference image; never animate a named person without one.
 - Don't loop the same clip unless asked.";
 
-pub const UPDATE_GOAL_TOOL_NAME: &str = "update_goal";
-
 pub const WORKFLOW_TOOL_NAME: &str = "workflow";
 
 pub const GOAL_COMMAND_NAME: &str = "goal";
@@ -165,30 +163,6 @@ pub const GOAL_RESERVED_SUBCOMMANDS: &[&str] = &["status", "pause", "resume", "c
 pub fn goal_usage_message() -> &'static str {
     "Usage: /goal <objective>\n\
      Set an objective to work toward until it is complete."
-}
-
-pub fn goal_instruction(objective: &str) -> String {
-    format!(
-        "# /goal -- pursue an objective\n\n\
-         A goal has been set: {objective}\n\n\
-         Work directly on this goal and carry it as far as you can. Deliver \
-         everything the user asked for yourself: no follow-up questions, no \
-         manual steps left for the user. If the conversation continues, keep \
-         pursuing the goal until it is complete.\n\n\
-         TRACKING: break the objective into concrete steps and track them \
-         (use your todo tool if one is available), marking each done as you \
-         finish it.\n\n\
-         VERIFY AS YOU GO: test each change on the real path before moving on. \
-         A completion claim must be backed by evidence produced in this \
-         session, not assumptions.\n\n\
-         Call update_goal(completed: true, message: \"summary\") ONLY when the \
-         goal is fully achieved. Call update_goal(blocked_reason: \"reason\") \
-         only when truly stuck after 3+ consecutive failed attempts at the \
-         same problem. Call update_goal(message: \"status note\") to log \
-         progress along the way. If update_goal returns an error, continue \
-         working the goal and report status in your reply instead.\n\n\
-         Start now."
-    )
 }
 
 #[cfg(test)]
@@ -234,15 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn goal_instruction_carries_objective_and_contract_tokens() {
-        let text = goal_instruction("ship the widget");
-        assert!(text.contains("ship the widget"));
-        assert!(text.contains("update_goal(completed: true"));
-        assert!(text.contains("blocked_reason"));
-        assert!(
-            !text.contains("system-reminder"),
-            "expansions ride as user messages and must not claim reminder authority"
-        );
+    fn goal_usage_message_names_the_command() {
         assert!(goal_usage_message().contains("Usage: /goal"));
     }
 

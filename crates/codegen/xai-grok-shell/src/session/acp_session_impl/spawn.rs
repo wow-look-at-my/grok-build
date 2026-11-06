@@ -1628,9 +1628,6 @@ pub(crate) async fn spawn_session_actor(
         .map(|e| e.to_string())
         .collect();
     let upload_queue = Arc::new(std::sync::OnceLock::new());
-    let (goal_update_tx, goal_update_rx) = tokio::sync::mpsc::unbounded_channel::<
-        xai_grok_tools::implementations::grok_build::update_goal::UpdateGoalEnvelope,
-    >();
     let workflow_restore = spawn_step!("workflow_restore");
     crate::session::workflow::registry::warm_builtin_cache();
     let workflow_session_dir = crate::session::persistence::session_dir(&session_info);
@@ -1977,17 +1974,10 @@ pub(crate) async fn spawn_session_actor(
         plan_mode: plan_mode.clone(),
         goal_enabled,
         background_workflows_enabled,
-        goal_harness_enabled: std::sync::atomic::AtomicBool::new(if background_workflows_enabled {
-            goal_enabled
-        } else {
-            false
-        }),
-        goal_harness_availability_reconciled: std::sync::atomic::AtomicBool::new(false),
+        goal_harness_enabled: std::sync::atomic::AtomicBool::new(goal_enabled),
         goal_tracker,
         goal_turn_task_ids: parking_lot::Mutex::new(std::collections::HashSet::new()),
         goal_continuation_streak: std::sync::atomic::AtomicU32::new(0),
-        goal_update_rx: std::cell::RefCell::new(Some(goal_update_rx)),
-        goal_update_tx,
         workflow_manager: workflow_manager.clone(),
         workflow_launch_tx: workflow_launch_tx.clone(),
         goal_classifier_enabled: effective_config
@@ -2013,8 +2003,6 @@ pub(crate) async fn spawn_session_actor(
         goal_strategist_every,
         goal_reverify_after,
         goal_plan_reconciled: std::sync::atomic::AtomicBool::new(false),
-        pending_classifier_completions: parking_lot::Mutex::new(VecDeque::new()),
-        goal_classifier_in_flight: std::sync::atomic::AtomicBool::new(false),
         managed_mcp_handle,
         tool_metadata_snapshot: Arc::new(std::sync::Mutex::new(Default::default())),
         mcp_announcements: Mutex::new(
@@ -2124,26 +2112,6 @@ pub(crate) async fn spawn_session_actor(
                 tracing::debug!("sampler event drainer exiting (channel closed)");
             });
         }
-        if !background_workflows_enabled {
-            let drainer_session = session.clone();
-            let Some(mut goal_update_rx) = session.goal_update_rx.borrow_mut().take() else {
-                unreachable!("goal_update_rx must be Some at session spawn");
-            };
-            xai_spawn::spawn_local(async move {
-                while let Some(envelope) = goal_update_rx.recv().await {
-                    let current_tokens =
-                        drainer_session.chat_state_handle.get_total_tokens().await as i64;
-                    drainer_session
-                        .drain_goal_updates_with_extra(
-                            current_tokens,
-                            DrainPurpose::MidTurn,
-                            vec![envelope],
-                        )
-                        .await;
-                }
-                tracing::debug!("goal update drainer exiting (channel closed)");
-            });
-        }
         {
             let snapshot = session.tool_metadata_snapshot.clone();
             let tool_index = crate::session::tool_index::Bm25ToolSearchIndex::new(snapshot);
@@ -2187,18 +2155,6 @@ pub(crate) async fn spawn_session_actor(
                 ),
             )
             .await;
-        if !background_workflows_enabled {
-            session
-                .agent
-                .borrow()
-                .tool_bridge()
-                .update_resource(
-                    xai_grok_tools::implementations::grok_build::update_goal::GoalUpdateHandle(
-                        session.goal_update_tx.clone(),
-                    ),
-                )
-                .await;
-        }
         if let Some(ref display_cwd) = prompt_display_cwd {
             session
                 .agent

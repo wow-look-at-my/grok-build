@@ -721,10 +721,6 @@ impl SessionActor {
                 }
                 if self.goal_harness_enabled() {
                     let current_tokens = self.chat_state_handle.get_total_tokens().await as i64;
-                    if !self.goal_runs_on_workflow_engine() {
-                        self.drain_goal_updates(current_tokens, DrainPurpose::MidTurn)
-                            .await;
-                    }
                     let (tokens_used, finished_marginal) = self.goal_tokens(current_tokens);
                     let notify = self.goal_notify_sender();
                     notify.emit_goal_updated(

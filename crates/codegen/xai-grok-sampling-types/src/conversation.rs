@@ -166,7 +166,7 @@ pub enum SyntheticReason {
     /// The goal system triggers a model turn so it can print visible progress.
     /// Wakes the agent.
     GoalSummary,
-    /// Goal-achievement classifier nudge injected after the classifier rejects an `update_goal(completed: true)` attempt.
+    /// Goal-achievement classifier nudge injected after the classifier rejects a completion candidate.
     /// Wakes the agent with a "not yet achieved — keep working" reminder pointing at the persisted details file.
     GoalClassifierNudge,
     /// Scheduled task (`/loop`) prompt fired by the scheduler.
@@ -1443,7 +1443,7 @@ impl ConversationItem {
         })
     }
 
-    /// Goal-achievement classifier nudge injected after the classifier rejects an `update_goal(completed: true)` attempt.
+    /// Goal-achievement classifier nudge injected after the classifier rejects a completion candidate.
     /// Tagged distinctly from `goal_summary` so trace tooling can tell the two synthetic user turns apart.
     /// The wire role/tag is the same `<system-reminder>` shape for both.
     pub fn goal_classifier_nudge(content: impl Into<String>) -> Self {

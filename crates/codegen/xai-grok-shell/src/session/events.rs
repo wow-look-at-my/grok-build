@@ -169,8 +169,8 @@ pub(crate) fn prior_turn_interrupt_from_cancellation(
 }
 
 // ── GoalClassifier discriminator vocabulary ───────────────────────────.
-// Single source of truth for the `reason` field on `Event::GoalClassifierFailOpen` / `Event::GoalClassifierFailClosed`.
-// The producer wraps the reason strings via the `as_const_str()` methods on `GoalClassifierFailOpenReason` / `GoalClassifierFailClosedReason`.
+// Single source of truth for the `reason` field on `Event::GoalClassifierFailOpen`.
+// The producer wraps the reason strings via the `as_const_str()` method on `GoalClassifierFailOpenReason`.
 
 /// Fail-open: legacy wire string; the runner does not emit it.
 pub(crate) const GOAL_CLASSIFIER_FAIL_OPEN_TIMEOUT: &str = "timeout";
@@ -187,23 +187,13 @@ pub(crate) const GOAL_CLASSIFIER_FAIL_OPEN_FILE_WRITE_FAILED: &str = "file_write
 /// Fail-open: the goal was no longer Active when the runner resolved its inputs (status changed during the spawn).
 pub(crate) const GOAL_CLASSIFIER_FAIL_OPEN_GOAL_NOT_ACTIVE: &str = "goal_not_active_at_resolve";
 
-/// Fail-closed: a second `update_goal(completed: true)` arrived while a verification stage was already in flight for this goal.
-/// Caller must not double-spawn.
-pub(crate) const GOAL_CLASSIFIER_FAIL_CLOSED_CONCURRENT: &str = "concurrent_in_flight";
-
-/// Fail-closed: the deferred-completion queue overflowed and the oldest entry was dropped to make room for a newer one.
-/// PARSE-class analogue of `ConcurrentInFlight` for the runaway-`completed: true` path.
-pub(crate) const GOAL_CLASSIFIER_FAIL_CLOSED_PENDING_QUEUE_FULL: &str = "pending_queue_full";
-
 #[allow(clippy::const_is_empty)]
 const _: () = assert!(
     !GOAL_CLASSIFIER_FAIL_OPEN_TIMEOUT.is_empty()
         && !GOAL_CLASSIFIER_FAIL_OPEN_SAMPLER_ERROR.is_empty()
         && !GOAL_CLASSIFIER_FAIL_OPEN_ABORTED.is_empty()
         && !GOAL_CLASSIFIER_FAIL_OPEN_FILE_WRITE_FAILED.is_empty()
-        && !GOAL_CLASSIFIER_FAIL_OPEN_GOAL_NOT_ACTIVE.is_empty()
-        && !GOAL_CLASSIFIER_FAIL_CLOSED_CONCURRENT.is_empty()
-        && !GOAL_CLASSIFIER_FAIL_CLOSED_PENDING_QUEUE_FULL.is_empty(),
+        && !GOAL_CLASSIFIER_FAIL_OPEN_GOAL_NOT_ACTIVE.is_empty(),
     "GoalClassifier discriminator consts must be non-empty",
 );
 
@@ -234,24 +224,6 @@ impl GoalClassifierFailOpenReason {
             Self::Aborted => GOAL_CLASSIFIER_FAIL_OPEN_ABORTED,
             Self::FileWriteFailed => GOAL_CLASSIFIER_FAIL_OPEN_FILE_WRITE_FAILED,
             Self::GoalNotActiveAtResolve => GOAL_CLASSIFIER_FAIL_OPEN_GOAL_NOT_ACTIVE,
-        }
-    }
-}
-
-/// PARSE-class fail-closed reasons.
-/// The verification stage routes per-skeptic parse failures (malformed terminal token, missing verdict JSON) through synthetic refute votes.
-/// The only live variants here are therefore the drain-path race guards (`ConcurrentInFlight`, `PendingQueueFull`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GoalClassifierFailClosedReason {
-    ConcurrentInFlight,
-    PendingQueueFull,
-}
-
-impl GoalClassifierFailClosedReason {
-    pub(crate) fn as_const_str(self) -> &'static str {
-        match self {
-            Self::ConcurrentInFlight => GOAL_CLASSIFIER_FAIL_CLOSED_CONCURRENT,
-            Self::PendingQueueFull => GOAL_CLASSIFIER_FAIL_CLOSED_PENDING_QUEUE_FULL,
         }
     }
 }
