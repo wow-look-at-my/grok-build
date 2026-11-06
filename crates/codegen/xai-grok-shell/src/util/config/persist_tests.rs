@@ -1,6 +1,8 @@
 use super::super::load::load_config_from_toml;
 use super::super::mcp::{McpConfig, parse_mcp_config_with_oauth};
-use super::super::settings_writes::{write_dashboard_preview, write_feature_override};
+use super::super::settings_writes::{
+    write_dashboard_preview, write_feature_override, write_model_context_window,
+};
 use super::*;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
@@ -595,6 +597,47 @@ fn feature_override_writer_inserts_replaces_and_removes_the_key() {
         None,
         read_features(&path),
         "an emptied [features] table is dropped"
+    );
+}
+#[test]
+fn model_context_window_write_round_trips_through_the_loader() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[model.\"gw/big-one\"]\nname = \"Big\"\n\n[model.other]\ncontext_window = 9000\n",
+    )
+    .unwrap();
+    let read = |path: &std::path::Path| -> TomlValue {
+        toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    };
+    let window_of = |key: &str| -> Option<u64> {
+        let cfg = crate::agent::config::Config::new_from_toml_cfg(&read(&path)).unwrap();
+        cfg.config_models.get(key).and_then(|m| m.context_window)
+    };
+    write_model_context_window(
+        &path,
+        "gw/big-one",
+        Some(350_000),
+        atomic_write_follow_bound,
+    )
+    .unwrap();
+    assert_eq!(window_of("gw/big-one"), Some(350_000));
+    assert_eq!(window_of("other"), Some(9000), "other blocks are untouched");
+
+    write_model_context_window(&path, "gw/big-one", None, atomic_write_follow_bound).unwrap();
+    assert_eq!(window_of("gw/big-one"), None);
+    assert_eq!(
+        read(&path)["model"]["gw/big-one"]["name"].as_str(),
+        Some("Big"),
+        "a block with other keys keeps them"
+    );
+
+    write_model_context_window(&path, "fresh", Some(1000), atomic_write_follow_bound).unwrap();
+    write_model_context_window(&path, "fresh", None, atomic_write_follow_bound).unwrap();
+    assert!(
+        read(&path)["model"].get("fresh").is_none(),
+        "an emptied block is dropped"
     );
 }
 #[test]

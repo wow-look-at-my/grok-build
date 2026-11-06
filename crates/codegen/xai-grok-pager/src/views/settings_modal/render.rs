@@ -811,7 +811,7 @@ fn compute_filtered_row_heights(state: &SettingsModalState, area_width: u16) -> 
                     heights.push(1);
                     continue;
                 };
-                // Group rows carry no value; the height is the chevron row plus the expanded description (cap 8), agreeing with the forward render loop
+                // Group rows carry no value; the height is the chevron row plus the expanded description (a later cap), agreeing with the forward render loop
                 if matches!(meta.kind, SettingKind::Group { .. }) {
                     let mut h: u16 = 1;
                     if state.expanded_keys.contains(key) {
@@ -1697,8 +1697,19 @@ pub(super) fn render_editing_value(
         return;
     };
 
+    // The context limit editor names the model it writes to.
+    let context_target = state
+        .context_limit_target
+        .as_ref()
+        .filter(|_| matches!(meta.kind, SettingKind::ModelContextLimits));
+    let context_description =
+        context_target.map(crate::settings::context_limits::editor_description);
+    let (header_label, header_description) = match (context_target, &context_description) {
+        (Some(target), Some(description)) => (target.label.as_str(), description.as_str()),
+        _ => (meta.label, meta.description),
+    };
     // Editors reserve title + gap + the input row (3 rows) before the description
-    let header_rows = render_sub_pane_header(buf, area, theme, meta.label, meta.description, 3);
+    let header_rows = render_sub_pane_header(buf, area, theme, header_label, header_description, 3);
     if area.height <= header_rows {
         return;
     }
@@ -1748,7 +1759,9 @@ pub(super) fn render_editing_value(
                 StringValidator::NonEmptyToken => "<type a value>",
                 StringValidator::Any => "<type a value>",
                 StringValidator::HttpUrlOrEmpty => "<http://host/v1>",
+                StringValidator::TokenAmount => "<empty: no limit>",
             },
+            SettingKind::ModelContextLimits => "<empty: no limit, e.g. 350k>",
             _ => "",
         };
         if !placeholder.is_empty() && visible_buffer_w > 0 {
@@ -2205,6 +2218,8 @@ pub(super) fn value_display(
         SettingValue::String(s) => {
             if s.is_empty() && matches!(meta.kind, SettingKind::DynamicEnum { .. }) {
                 "(no override)".to_string()
+            } else if s.is_empty() && matches!(meta.kind, SettingKind::ModelContextLimits) {
+                "none".to_string()
             } else {
                 s.clone()
             }

@@ -59,6 +59,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
+    let context_limits_from_app = app.model_context_limits.clone();
     for agent in app.agents.values_mut() {
         // Walk both `Settings` and `ResetSettingsConfirm`
         // The confirm dialog embeds settings state that must stay fresh through async persist failures
@@ -95,6 +96,10 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app.clone(),
                 subagent_model_inheritance: subagent_model_inheritance_from_app,
+                model_windows: crate::settings::context_limits::catalog_windows(
+                    &agent.session.models.available,
+                ),
+                context_limits: context_limits_from_app.clone(),
             };
             if coding_data_sharing_lock_from_app.is_some()
                 && matches!(
@@ -185,6 +190,11 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     // Snapshot the registry, UiConfig, and pager-local state before the mutable borrow on `agent` so the borrow checker is happy
     let registry = app.settings_registry.clone();
     let ui_snapshot = app.current_ui.clone();
+    // Read the limits again, so a hand edit of config.toml shows in the modal.
+    if !cfg!(test) {
+        app.model_context_limits = crate::settings::context_limits::configured_limits();
+    }
+    let context_limits_from_app = app.model_context_limits.clone();
     // Capture app-level fields before the mut-borrow on the agent.
     let coding_data_sharing_opt_out_from_app = app.coding_data_retention_opt_out;
     let coding_data_sharing_lock_from_app = app.coding_data_sharing_lock();
@@ -238,6 +248,10 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
         voice_stt_language: voice_stt_language_from_app,
         subagent_model_inheritance: subagent_model_inheritance_from_app,
+        model_windows: crate::settings::context_limits::catalog_windows(
+            &agent.session.models.available,
+        ),
+        context_limits: context_limits_from_app,
     };
     let mut state = Box::new(SettingsModalState::new(
         registry,
@@ -583,7 +597,18 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         ask_user_question_timeout_enabled: app.ask_user_question_timeout_enabled,
         voice_stt_language: app.voice_config.language.clone(),
         subagent_model_inheritance: app.subagent_model_inheritance,
+        model_windows: agent_model_windows(app),
+        context_limits: app.model_context_limits.clone(),
     }
+}
+
+fn agent_model_windows(app: &AppView) -> std::collections::BTreeMap<String, u64> {
+    if let ActiveView::Agent(id) = app.active_view
+        && let Some(agent) = app.agents.get(&id)
+    {
+        return crate::settings::context_limits::catalog_windows(&agent.session.models.available);
+    }
+    std::collections::BTreeMap::new()
 }
 
 /// Map a `(SettingKey, SettingValue)` to the matching typed `Action::SetX(value)`.
@@ -705,6 +730,12 @@ pub(in crate::app::dispatch) fn action_for_reset(
                 );
                 None
             }
+        }
+        // The default is no limit, so the reset removes every limit.
+        (crate::settings::context_limits::CONTEXT_WINDOW_LIMIT_KEY, SettingValue::String(s))
+            if s.is_empty() =>
+        {
+            Some(Action::ClearModelContextWindows)
         }
         // max_thoughts_width: direct round-trip.
         ("max_thoughts_width", SettingValue::Int(i)) => Some(Action::SetMaxThoughtsWidth(*i)),

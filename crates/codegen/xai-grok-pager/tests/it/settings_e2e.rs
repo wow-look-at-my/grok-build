@@ -39,6 +39,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "multiline_mode",
     "permission_mode",
     "default_model",
+    "model_context_window",
     "max_thoughts_width",
     "min_output_tokens_per_sec",
     "output_rate_sustained_secs",
@@ -1942,6 +1943,7 @@ fn registry_kind_membership_through_pr_14() {
 
             SettingKind::DynamicEnum { .. } => "DynamicEnum",
             SettingKind::Group { .. } => "Group",
+            SettingKind::ModelContextLimits => "ModelContextLimits",
             other => panic!(
                 "registry_kind_membership: setting `{}` has unknown kind {:?} — \
                  add an arm here AND a kind-membership assertion below",
@@ -2072,6 +2074,13 @@ fn registry_kind_membership_through_pr_14() {
         "Group kind membership drift",
     );
 
+    let limit_keys = by_kind.remove("ModelContextLimits").unwrap_or_default();
+    assert_eq!(
+        limit_keys,
+        vec!["model_context_window"],
+        "ModelContextLimits kind membership drift",
+    );
+
     // No unexpected kinds.
     assert!(
         by_kind.is_empty(),
@@ -2162,6 +2171,8 @@ fn defaults_round_trip_through_registry() {
             "multiline_mode" => SettingValue::Bool(false),
             "permission_mode" => SettingValue::Enum("ask"),
             "default_model" => SettingValue::String(String::new()),
+            // No configured context window limit.
+            "model_context_window" => SettingValue::String(String::new()),
             "max_thoughts_width" => SettingValue::Int(120),
             // The rate gate ships armed, well under any healthy rate.
             "min_output_tokens_per_sec" => SettingValue::Int(15),
@@ -4377,6 +4388,96 @@ fn pr14_mouse_click_on_dynamic_enum_row_opens_picker() {
     assert!(
         matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "default_model"),
         "second click on DynamicEnum row must transition to PickingEnum, got {:?}",
+        s.mode(),
+    );
+}
+
+fn context_limit_snapshot() -> PagerLocalSnapshot {
+    PagerLocalSnapshot {
+        current_model_name: Some("Big One".to_string()),
+        available_models: vec![(
+            "Big One".to_string(),
+            agent_client_protocol::ModelId::new(std::sync::Arc::from("gw/big-one")),
+        )],
+        model_windows: [("gw/big-one".to_string(), 1_000_000)].into(),
+        ..PagerLocalSnapshot::default()
+    }
+}
+
+/// Keyboard: Enter opens the model chooser, Enter picks the model, and a typed
+/// `350k` commits the limit for that model.
+#[test]
+fn keyboard_sets_a_context_window_limit() {
+    let mut s = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        context_limit_snapshot(),
+    );
+    navigate_to(&mut s, "model_context_window");
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::PickingEnum {
+            key: "model_context_window",
+            choices_idx: 0,
+            ..
+        }
+    ));
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert!(matches!(
+        s.mode(),
+        SettingsModalMode::EditingValue {
+            key: "model_context_window"
+        }
+    ));
+    for ch in "350k".chars() {
+        let _ = handle_settings_key(&mut s, &press(KeyCode::Char(ch)));
+    }
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert!(
+        matches!(
+            &outcome,
+            SettingsKeyOutcome::Action(Action::SetModelContextWindow {
+                model_id,
+                tokens: Some(350_000),
+                ..
+            }) if model_id == "gw/big-one"
+        ),
+        "expected SetModelContextWindow, got {outcome:?}",
+    );
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+}
+
+/// Mouse: a second click on the row opens the model chooser, as on a model row.
+#[test]
+fn mouse_click_on_context_window_limit_row_opens_the_chooser() {
+    let mut s = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        context_limit_snapshot(),
+    );
+    s.list_area = Rect {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 80,
+    };
+    s.row_rects.resize(s.rows.len(), Rect::default());
+    let row_idx = row_idx_for(&s, "model_context_window");
+    s.row_rects[row_idx] = Rect {
+        x: 0,
+        y: row_idx as u16,
+        width: 80,
+        height: 1,
+    };
+    let click = MouseEventKind::Down(crossterm::event::MouseButton::Left);
+    let outcome = handle_settings_mouse(&mut s, click, 20, row_idx as u16);
+    assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+    let outcome = handle_settings_mouse(&mut s, click, 20, row_idx as u16);
+    assert!(matches!(outcome, SettingsKeyOutcome::Changed));
+    assert!(
+        matches!(s.mode(), SettingsModalMode::PickingEnum { key, .. } if key == "model_context_window"),
+        "the second click must open the model chooser, got {:?}",
         s.mode(),
     );
 }

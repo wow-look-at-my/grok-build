@@ -8967,6 +8967,34 @@ fn config_model_without_explicit_window_inherits_prefetched_sibling_by_slug() {
     );
 }
 #[test]
+fn a_configured_window_equal_to_the_default_is_not_replaced_by_a_sibling() {
+    for configured in [DEFAULT_CONTEXT_WINDOW, CONFIG_DEFAULT_CONTEXT_WINDOW] {
+        let mut cfg = Config::default();
+        cfg.config_models.insert(
+            "synthetic".to_owned(),
+            ConfigModelOverride {
+                model: Some("syn:large:text".to_owned()),
+                base_url: Some("https://api.synthetic.new/openai/v1".to_owned()),
+                context_window: Some(configured),
+                ..Default::default()
+            },
+        );
+        let mut prefetched = IndexMap::new();
+        prefetched.insert(
+            "syn:large:text".to_owned(),
+            prefetch_model_entry("syn:large:text", 1_000_000, ApiBackend::default()),
+        );
+        let resolved = resolve_model_list(&cfg, Some(prefetched));
+        let entry = &resolved["synthetic"];
+        assert_eq!(
+            entry.info.context_window.get(),
+            configured,
+            "the user wrote this window, so a sibling listing must not replace it"
+        );
+        assert!(entry.info.context_window_pinned);
+    }
+}
+#[test]
 fn resolve_model_list_does_not_override_explicitly_set_context_window() {
     let cfg = Config::default();
     let dm = crate::models::default_model();

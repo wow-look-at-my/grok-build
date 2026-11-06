@@ -63,8 +63,8 @@ fn resolve_byok_context_window_on_request_path<'a>(
     use crate::agent::config::CONFIG_DEFAULT_CONTEXT_WINDOW;
     let default_cw = crate::remote::DEFAULT_CONTEXT_WINDOW;
     let current = model.info().context_window.get();
-    let is_sentinel = current == default_cw
-        || current == CONFIG_DEFAULT_CONTEXT_WINDOW;
+    let is_sentinel = !model.info().context_window_pinned
+        && (current == default_cw || current == CONFIG_DEFAULT_CONTEXT_WINDOW);
     if !is_sentinel {
         return std::borrow::Cow::Borrowed(model);
     }
