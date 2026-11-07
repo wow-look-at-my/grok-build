@@ -58,7 +58,7 @@ There are no inline group headers. Sort order keeps same-state rows adjacent, an
 
 **Dashboard preview** is under **Appearance** in `/settings` (search for "preview"). The list gains space when you turn off the preview and reply panel. You must open a session to reply or answer permissions with the preview off. The new-agent prompt stays available. The setting persists across restarts. You can turn it back on in the same place.
 
-`[ui] dashboard_preview = true` in `config.json` also enables it.
+`ui.dashboard_preview` set to `true` in `config.json` also enables it.
 
 The dispatch input uses the same prompt chrome as the agent view. Press `Ctrl+/` to flip it into **search mode**: the `❯` prefix becomes a yellow `Search:` and typing live-filters the list instead of dispatching.
 
@@ -186,7 +186,7 @@ Prefixes (only inside search mode):
 
 ## Persistence
 
-Per-user preferences under `[dashboard]` in `~/.grok/config.json`:
+Per-user preferences under `ui.dashboard` in `~/.grok/config.json`:
 
 ```json
 {

@@ -1733,50 +1733,64 @@ mod tests {
         assert!(matches!(status, UpdateStatus::LiveLocal));
     }
 
+    fn marketplace_json(marketplace: serde_json::Value) -> String {
+        serde_json::json!({ "extensions": { "marketplace": marketplace } }).to_string()
+    }
+
     #[test]
-    fn remove_toml_selects_correct_entry() {
-        let content = "[[marketplace.sources]]\nname = \"a\"\ngit = \"https://a.com\"\n\n\
-                       [[marketplace.sources]]\nname = \"b\"\ngit = \"https://b.com\"\n";
-        let new = remove_toml_marketplace_block(content, "https://a.com").unwrap();
+    fn remove_source_selects_correct_entry() {
+        let content = marketplace_json(serde_json::json!({ "sources": [
+            { "name": "a", "git": "https://a.com" },
+            { "name": "b", "git": "https://b.com" }
+        ] }));
+        let new = remove_marketplace_source_block(&content, "https://a.com").unwrap();
         assert!(!new.contains("\"a\"") && new.contains("\"b\""), "{new}");
     }
 
     #[test]
-    fn remove_toml_no_match_returns_none() {
-        let content = "[[marketplace.sources]]\nname = \"x\"\ngit = \"https://a.com\"\n";
-        assert!(remove_toml_marketplace_block(content, "https://nope.com").is_none());
+    fn remove_source_no_match_returns_none() {
+        let content = marketplace_json(
+            serde_json::json!({ "sources": [{ "name": "x", "git": "https://a.com" }] }),
+        );
+        assert!(remove_marketplace_source_block(&content, "https://nope.com").is_none());
     }
 
     #[test]
-    fn remove_toml_matches_tilde_path_entry_by_expanded_identity() {
-        // Loaded sources carry expanded paths, so removal by identity must still find a hand-written `path = "~/x"` entry
+    fn remove_source_matches_tilde_path_entry_by_expanded_identity() {
+        // Loaded sources carry expanded paths, so removal by identity must still find a hand-written `"path": "~/x"` entry
         let Some(home) = xai_dirs::home_dir() else {
             return;
         };
-        let content = "[[marketplace.sources]]\nname = \"dev\"\npath = \"~/dev/plugins\"\n";
+        let content = marketplace_json(
+            serde_json::json!({ "sources": [{ "name": "dev", "path": "~/dev/plugins" }] }),
+        );
         let identity = home.join("dev/plugins").display().to_string();
-        let new = remove_toml_marketplace_block(content, &identity).unwrap();
+        let new = remove_marketplace_source_block(&content, &identity).unwrap();
         assert!(!new.contains("dev/plugins"), "{new}");
     }
 
     #[test]
-    fn remove_toml_cleans_empty_section() {
-        let content = "[[marketplace.sources]]\nname = \"x\"\ngit = \"https://a.com\"\n";
-        let new = remove_toml_marketplace_block(content, "https://a.com").unwrap();
+    fn remove_source_cleans_empty_section() {
+        let content = marketplace_json(
+            serde_json::json!({ "sources": [{ "name": "x", "git": "https://a.com" }] }),
+        );
+        let new = remove_marketplace_source_block(&content, "https://a.com").unwrap();
         assert!(!new.contains("marketplace"), "{new}");
     }
 
     #[test]
-    fn remove_toml_preserves_sibling_keys_when_sources_empty() {
-        let content = "[marketplace]\nofficial_marketplace_auto_installed = true\n\n\
-                       [[marketplace.sources]]\nname = \"x\"\ngit = \"https://a.com\"\n";
-        let new = remove_toml_marketplace_block(content, "https://a.com").unwrap();
+    fn remove_source_preserves_sibling_keys_when_sources_empty() {
+        let content = marketplace_json(serde_json::json!({
+            "official_marketplace_auto_installed": true,
+            "sources": [{ "name": "x", "git": "https://a.com" }]
+        }));
+        let new = remove_marketplace_source_block(&content, "https://a.com").unwrap();
         assert!(
             new.contains("official_marketplace_auto_installed"),
             "sticky flag must survive removing the last source: {new}"
         );
         assert!(
-            !new.contains("[[marketplace.sources]]"),
+            !new.contains("\"sources\""),
             "empty sources array should be dropped: {new}"
         );
     }

@@ -1223,12 +1223,12 @@ mod official_source_tests {
     }
 
     #[test]
-    fn set_official_flag_in_toml_preserves_other_content() {
-        let content = "[ui]\ntheme = \"dark\"\n";
-        let out = crate::plugin::set_official_flag_in_toml(content).unwrap();
-        assert!(out.contains("theme = \"dark\""), "{out}");
+    fn set_official_flag_in_text_preserves_other_content() {
+        let content = r#"{"ui": {"theme": "dark"}}"#;
+        let out = crate::plugin::set_official_flag_in_text(content).unwrap();
+        assert!(out.contains("\"theme\": \"dark\""), "{out}");
         assert!(
-            out.contains("official_marketplace_auto_installed = true"),
+            out.contains("\"official_marketplace_auto_installed\": true"),
             "{out}"
         );
     }
