@@ -1,5 +1,5 @@
 //! Sandbox profiles. Built-in: `workspace`, `devbox`, `read-only`, `strict`,
-//! `off`. Custom profiles via `~/.grok/sandbox.toml` or `.grok/sandbox.toml`.
+//! `off`. Custom profiles via `~/.grok/sandbox.json` or `.grok/sandbox.json`.
 //! A custom profile's `deny` list is kernel-enforced (read and write/rename) on both platforms.
 
 #[cfg(all(feature = "enforce", unix))]
@@ -149,19 +149,19 @@ impl std::str::FromStr for ProfileName {
     }
 }
 
-/// Load sandbox config from `~/.grok/sandbox.toml` and `.grok/sandbox.toml`. Project config may add new profile names
+/// Load sandbox config from `~/.grok/sandbox.json` and `.grok/sandbox.json`. Project config may add new profile names
 /// only. It cannot redefine a name already present in the global config. Last-write-wins would let a malicious workspace
 /// hollow out a user/enterprise custom profile while keeping the trusted name.
 pub fn load_sandbox_config(workspace: &Path) -> SandboxConfig {
     let mut config = SandboxConfig::default();
 
-    // Global config: ~/.grok/sandbox.toml
+    // Global config: ~/.grok/sandbox.json
     let global_path = grok_home().join(SANDBOX_CONFIG_FILENAME);
     if let Some(global) = load_config_file(&global_path) {
         config = global;
     }
 
-    // Project config: <workspace>/.grok/sandbox.toml (additive only)
+    // Project config: <workspace>/.grok/sandbox.json (additive only)
     let project_path = workspace.join(".grok").join(SANDBOX_CONFIG_FILENAME);
     if let Some(project) = load_config_file(&project_path) {
         merge_project_profiles(&mut config, project);
