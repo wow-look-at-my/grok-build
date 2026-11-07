@@ -1044,16 +1044,29 @@ impl AgentView {
         } else {
             display_state.clone()
         };
-        let turn_status_height = if turn_status::should_show(
+        let turn_status_pad_left = if dock_on {
+            crate::views::welcome::PROMPT_GUTTER
+        } else {
+            HorizontalLayout::ACCENT + layout_cfg.block_pad_left.saturating_sub(1)
+        };
+        let turn_status_height = if !turn_status::should_show(
             &status_state,
             turn_status_drain_blocked,
             self.session_starting_since,
             turn_status_watchers,
             turn_status_parked,
         ) {
+            0
+        } else if self.plan_approval_view.is_some() || send_now_gap || turn_status_parked {
             1
         } else {
-            0
+            turn_status::desired_height(
+                &status_state,
+                &self.resolve_turn_activity(),
+                AgentViewLayout::inner_width(area, layout_cfg, compact)
+                    .saturating_sub(turn_status_pad_left),
+                u16::MAX,
+            )
         };
         let prompt_gap = if appearance.prompt.compact
             || (turn_status_height > 0 && !appearance.turn_status.gap)
@@ -1113,6 +1126,18 @@ impl AgentView {
         if question_view_h > 0 {
             layout_params.prompt_height =
                 prompt_height.min(AgentViewLayout::rows_available_for_prompt(layout_params));
+        }
+        if turn_status_height > 1 {
+            // The retry error takes every scrollback row above the scrollback floor, and never a prompt row.
+            let probe = AgentViewLayout::compute(AgentViewLayoutParams {
+                turn_status_height: 1,
+                ..layout_params
+            });
+            let spare = probe
+                .scrollback
+                .height
+                .saturating_sub(agent::SCROLLBACK_MIN_ROWS);
+            layout_params.turn_status_height = turn_status_height.min(spare.saturating_add(1));
         }
         let mut layout = AgentViewLayout::compute(layout_params);
         let search_active =
@@ -2016,11 +2041,7 @@ impl AgentView {
             self.hovered_link_idx = None;
         }
         if turn_status_height > 0 {
-            let pad_left = if dock_on {
-                crate::views::welcome::PROMPT_GUTTER
-            } else {
-                HorizontalLayout::ACCENT + layout_cfg.block_pad_left.saturating_sub(1)
-            };
+            let pad_left = turn_status_pad_left;
             let turn_area = Rect {
                 x: layout.turn_status.x + pad_left,
                 y: layout.turn_status.y,

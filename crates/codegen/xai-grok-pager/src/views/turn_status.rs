@@ -1,4 +1,4 @@
-//! Turn status line: a single-row widget showing the current turn activity.
+//! Turn status line: a widget showing the current turn activity. It is one row, plus the wrapped error while a request retries.
 //!
 //! Layout: `⠧ Run command 0.2s              1m20s ⇣12k [stop]`
 //!
@@ -186,7 +186,7 @@ pub struct TurnStatusArgs<'a> {
 
 /// Render the turn status line into the given area.
 ///
-/// The caller is responsible for only allocating a 1-row area when `should_show()` returns true (and 0 rows when false).
+/// The caller allocates [`desired_height`] rows when `should_show()` returns true, and no rows when false.
 pub fn render_turn_status(
     buf: &mut Buffer,
     area: Rect,
@@ -531,6 +531,7 @@ pub fn render_turn_status(
 
     let left_line = Line::from(left_spans);
     buf.set_line(area.x, area.y, &left_line, area.width);
+    render_retry_reason(buf, area, state, activity, activity_style);
 
     let right_start_x = area.x + area.width.saturating_sub(right_width as u16);
 
@@ -648,16 +649,16 @@ impl<'a> GoalHarnessActivity<'a> {
     }
 }
 
-/// Longest retry reason the status bar carries.
-const RETRY_REASON_MAX: usize = 80;
-
-/// Label for a retry in progress. `waiting_secs` is how much of the backoff
-/// is left, `Some(0)` or `None` once the retried request is in flight. Both
-/// halves matter: the reason says WHY the turn stalled, and the countdown
-/// says the wait is bounded. Without them the bar read `Retrying (attempt
-/// 1)…` for a whole minute and named neither.
-fn retry_label(attempt: u32, max_retries: u32, reason: &str, waiting_secs: Option<u64>) -> String {
-    let reason = reason.trim();
+/// Header row for a retry in progress. `waiting_secs` is how much of the
+/// backoff is left, `Some(0)` or `None` once the retried request is in
+/// flight. The reason is not in it: [`retry_reason_lines`] draws the reason
+/// whole, on the rows below.
+fn retry_label(
+    attempt: u32,
+    max_retries: u32,
+    has_reason: bool,
+    waiting_secs: Option<u64>,
+) -> String {
     let budget = if max_retries == u32::MAX {
         "∞".to_string()
     } else {
@@ -667,19 +668,78 @@ fn retry_label(attempt: u32, max_retries: u32, reason: &str, waiting_secs: Optio
         Some(secs) if secs > 0 => format!("Retrying in {secs}s ({attempt}/{budget})"),
         _ => format!("Retrying ({attempt}/{budget})"),
     };
-    if reason.is_empty() {
-        label.push('…');
-        return label;
-    }
-    label.push_str(": ");
-    if reason.chars().count() > RETRY_REASON_MAX {
-        let head: String = reason.chars().take(RETRY_REASON_MAX - 1).collect();
-        label.push_str(head.trim_end());
-    } else {
-        label.push_str(reason);
-    }
-    label.push('…');
+    label.push(if has_reason { ':' } else { '…' });
     label
+}
+
+/// Columns the reason rows are indented by, so they line up under the label.
+const RETRY_REASON_INDENT: u16 = 2;
+
+/// The error that caused a retry, wrapped to `width`. It is never cut: an
+/// error that makes the prompt go out again must be readable in full.
+fn retry_reason_lines(
+    state: &AgentState,
+    activity: &Option<TurnActivity>,
+    width: u16,
+) -> Vec<String> {
+    let (AgentState::TurnRunning, Some(TurnActivity::Retrying { reason, .. })) = (state, activity)
+    else {
+        return Vec::new();
+    };
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return Vec::new();
+    }
+    let wrap_width = width.saturating_sub(RETRY_REASON_INDENT).max(1) as usize;
+    textwrap::wrap(reason, wrap_width)
+        .into_iter()
+        .map(|line| line.into_owned())
+        .collect()
+}
+
+/// Rows the turn status needs at `width`: one, plus the wrapped retry reason.
+/// `max_rows` keeps the prompt on screen. A reason with more rows than that
+/// ends its last row in `…`.
+pub fn desired_height(
+    state: &AgentState,
+    activity: &Option<TurnActivity>,
+    width: u16,
+    max_rows: u16,
+) -> u16 {
+    let reason_rows = retry_reason_lines(state, activity, width).len();
+    let rows = u16::try_from(reason_rows)
+        .unwrap_or(u16::MAX)
+        .saturating_add(1);
+    rows.min(max_rows.max(1))
+}
+
+/// Draw the wrapped retry reason on the rows under the header row.
+fn render_retry_reason(
+    buf: &mut Buffer,
+    area: Rect,
+    state: &AgentState,
+    activity: &Option<TurnActivity>,
+    style: Style,
+) {
+    let rows = area.height.saturating_sub(1) as usize;
+    if rows == 0 {
+        return;
+    }
+    let x = area.x + RETRY_REASON_INDENT.min(area.width);
+    let width = area.width.saturating_sub(RETRY_REASON_INDENT);
+    let mut lines = retry_reason_lines(state, activity, area.width);
+    if lines.len() > rows {
+        lines.truncate(rows);
+        if let Some(last) = lines.last_mut() {
+            if last.width() >= width as usize {
+                last.pop();
+            }
+            last.push('…');
+        }
+    }
+    for (y, line) in (area.y + 1..).zip(lines) {
+        buf.set_line(x, y, &Line::from(Span::styled(line, style)), width);
+    }
 }
 
 /// Compute activity style, label, and whether it's a tool.
@@ -752,7 +812,12 @@ fn compute_activity(
             });
             (
                 Style::default().fg(theme.warning),
-                retry_label(*attempt, *max_retries, reason, waiting_secs),
+                retry_label(
+                    *attempt,
+                    *max_retries,
+                    !reason.trim().is_empty(),
+                    waiting_secs,
+                ),
                 false,
             )
         }
@@ -935,42 +1000,118 @@ mod tests {
 
     use super::*;
 
-    /// A retry line names the failure and says how long the wait lasts. Both
-    /// facts are on the wire, so both belong on the line.
+    /// The header row says how long the wait lasts. The reason goes below it.
     #[test]
-    fn a_retry_names_its_error_and_counts_its_wait_down() {
-        let reason = "API error (status 429 Too Many Requests): rate limit exceeded";
-        assert_eq!(
-            retry_label(1, 5, reason, Some(27)),
-            format!("Retrying in 27s (1/5): {reason}…")
-        );
+    fn a_retry_header_counts_its_wait_down() {
+        assert_eq!(retry_label(1, 5, true, Some(27)), "Retrying in 27s (1/5):");
         // The wait is over; the retried request is in flight.
-        assert_eq!(
-            retry_label(1, 5, reason, Some(0)),
-            format!("Retrying (1/5): {reason}…")
-        );
-        assert_eq!(
-            retry_label(1, 5, reason, None),
-            format!("Retrying (1/5): {reason}…")
-        );
-    }
-
-    #[test]
-    fn a_long_retry_reason_is_cut_to_the_bar() {
-        let reason = "x".repeat(RETRY_REASON_MAX * 2);
-        let label = retry_label(2, 5, &reason, None);
-        assert!(label.starts_with("Retrying (2/5): "));
-        assert!(
-            label.chars().count() < "Retrying (2/5): ".chars().count() + RETRY_REASON_MAX + 2,
-            "reason must be cut: {label}"
-        );
-        assert!(label.ends_with('…'));
+        assert_eq!(retry_label(1, 5, true, Some(0)), "Retrying (1/5):");
+        assert_eq!(retry_label(1, 5, true, None), "Retrying (1/5):");
     }
 
     #[test]
     fn a_retry_with_no_reason_still_reads_as_one() {
-        assert_eq!(retry_label(3, 5, "   ", Some(4)), "Retrying in 4s (3/5)…");
-        assert_eq!(retry_label(40, u32::MAX, "", None), "Retrying (40/∞)…");
+        assert_eq!(retry_label(3, 5, false, Some(4)), "Retrying in 4s (3/5)…");
+        assert_eq!(retry_label(40, u32::MAX, false, None), "Retrying (40/∞)…");
+        let activity = retrying("   ");
+        assert_eq!(
+            desired_height(&AgentState::TurnRunning, &activity, 40, 20),
+            1
+        );
+    }
+
+    fn retrying(reason: &str) -> Option<TurnActivity> {
+        Some(TurnActivity::Retrying {
+            attempt: 2,
+            max_retries: 5,
+            reason: reason.to_string(),
+            retry_until: None,
+            error_type: None,
+        })
+    }
+
+    fn row_text(buf: &Buffer, y: u16) -> String {
+        let area = buf.area;
+        (area.x..area.x + area.width)
+            .filter_map(|x| buf.cell((x, y)).map(|c| c.symbol().to_string()))
+            .collect::<String>()
+    }
+
+    fn render_retry(activity: &Option<TurnActivity>, area: Rect) -> Buffer {
+        let mut buf = Buffer::empty(area);
+        render_turn_status(
+            &mut buf,
+            area,
+            TurnStatusArgs {
+                state: &AgentState::TurnRunning,
+                activity,
+                turn_elapsed: Some(Duration::from_secs(30)),
+                activity_started_at: None,
+                tick: 0,
+                drain_blocked: false,
+                buttons: Some(MouseButtons::default()),
+                has_running_execute: false,
+                total_tokens: None,
+                output_rate: None,
+                session_starting_since: None,
+                is_bash_turn: false,
+                is_pending_user_input: false,
+                goal_harness: None,
+                watchers: Watchers::default(),
+                parked: false,
+                flat_background: false,
+                held_queue: 0,
+                held_queue_top_sendable: false,
+            },
+        );
+        buf
+    }
+
+    /// A long retry error wraps onto rows of its own. Every word of it is on
+    /// screen, and none of it is cut.
+    #[test]
+    fn a_long_retry_reason_wraps_and_is_never_cut() {
+        let reason = "request error: error sending request for url \
+            (https://api.example.invalid/v1/responses): client error (Connect): \
+            dns error: failed to lookup address information: Temporary failure \
+            in name resolution END";
+        let activity = retrying(reason);
+        let width = 40;
+        let height = desired_height(&AgentState::TurnRunning, &activity, width, 50);
+        assert!(height > 2, "the reason must wrap: {height} rows");
+        let area = Rect::new(0, 0, width, height);
+        let buf = render_retry(&activity, area);
+        assert!(row_text(&buf, 0).contains("Retrying (2/5):"));
+        let shown: String = (1..height)
+            .map(|y| row_text(&buf, y).trim().to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        // A word wider than the row (the URL) is split, so compare the text with no whitespace.
+        let text = |s: &str| s.split_whitespace().collect::<String>();
+        assert_eq!(text(&shown), text(reason));
+    }
+
+    /// A reason with more rows than the cap marks the cut with `…`.
+    #[test]
+    fn a_capped_retry_reason_says_it_was_cut() {
+        let activity = retrying(&"word ".repeat(200));
+        assert_eq!(
+            desired_height(&AgentState::TurnRunning, &activity, 40, 4),
+            4
+        );
+        let area = Rect::new(0, 0, 40, 4);
+        let buf = render_retry(&activity, area);
+        assert!(row_text(&buf, 3).trim_end().ends_with('…'));
+    }
+
+    /// Only a running turn carries the reason rows. A cancel reads `Cancelling…` alone.
+    #[test]
+    fn a_cancelling_retry_has_no_reason_rows() {
+        let activity = retrying("API error (status 503)");
+        assert_eq!(
+            desired_height(&AgentState::TurnCancelling, &activity, 40, 20),
+            1
+        );
     }
 
     /// Sendable waits = exactly the wait reasons the shell aborts on a queued
