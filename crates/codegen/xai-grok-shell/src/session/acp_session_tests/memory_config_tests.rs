@@ -762,7 +762,7 @@ async fn v2_session_is_pinned_to_isolated_storage_and_disables_legacy_pipeline()
                 .store(true, std::sync::atomic::Ordering::Relaxed);
             let message = disabled_actor.memory_toggle(true).await;
             assert!(
-                message.contains("`[memory] enabled = false`"),
+                message.contains("`memory.enabled` is `false` in config.json"),
                 "the toggle must say the config default still applies, got: {message}"
             );
             assert!(disabled_actor.memory.is_enabled());
