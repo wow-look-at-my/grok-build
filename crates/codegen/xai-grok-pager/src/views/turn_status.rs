@@ -693,7 +693,6 @@ fn retry_reason_lines(
     let wrap_width = width.saturating_sub(RETRY_REASON_INDENT).max(1) as usize;
     textwrap::wrap(reason, wrap_width)
         .into_iter()
-        .take(0)
         .map(|line| line.into_owned())
         .collect()
 }
