@@ -99,7 +99,7 @@ internal hardening notes, not here.
 
 ## How Memory Is Stored
 
-By default (v2), each scope stores Markdown under `~/.grok/memory-v2/`: `topics/` for curated notes and `observations/_inbox/` for new facts. With `[memory_v2] enabled = false` and legacy memory on, files live under `~/.grok/memory/` (`MEMORY.md` plus hashed workspace directories).
+With `memory.v2.enabled` set to `false` and legacy memory on, files live under `~/.grok/memory/` (`MEMORY.md` plus hashed workspace directories).
 
 ---
 
@@ -304,7 +304,7 @@ The default embedding model is unset, so memory starts in full-text-only mode. I
 
 ### Source Weights
 
-Each memory source has a weight multiplier applied to its score. All sources default to `1.0`, and you can adjust any of them under `[memory.search.source_weights]`:
+Each memory source has a weight multiplier applied to its score. All sources default to `1.0`, and you can adjust any of them under `memory.search.source_weights`:
 
 | Source | Weight | Description |
 |--------|--------|-------------|
