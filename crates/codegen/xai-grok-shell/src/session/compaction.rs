@@ -253,7 +253,10 @@ impl SessionActor {
         let sampling_cfg = self.chat_state_handle.get_sampling_config().await;
         let strips = sampling_cfg
             .as_ref()
-            .map(|c| c.api_backend == ApiBackend::Messages)
+            .map(|c| {
+                xai_grok_sampler::resolve_api_backend(&c.base_url, &c.model, &c.api_backend)
+                    == ApiBackend::Messages
+            })
             .unwrap_or(false);
         let model_slug = sampling_cfg
             .as_ref()
@@ -1092,7 +1095,7 @@ impl SessionActor {
         };
         // The summary needs none of the thinking. It stays only where it buys a prompt-cache hit: the same model. That hit is on a backend that
         // takes a block it did not mint as text.
-        let summary_strips_reasoning = sampling_config.api_backend == ApiBackend::Messages
+        let summary_strips_reasoning = sampling_client.api_backend() == ApiBackend::Messages
             || !xai_grok_sampling_types::same_model(&model_id, &sampling_config.model);
         let compaction = xai_grok_telemetry::events::CompactionScope::begin(
             xai_grok_telemetry::events::CompactionBeginParams {
