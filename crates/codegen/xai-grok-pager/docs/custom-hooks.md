@@ -54,7 +54,7 @@ Hooks are discovered from several places (all are merged):
 | Config    | `config.json`, `managed_config.toml`, `requirements.toml` | Always | Hooks shipped in your (or your organization's) config |
 | Plugin    | Bundled inside installed plugins  | Per-plugin   | Shared team hooks |
 
-Config-file hooks use the same schema under the `hooks` key; see the [Hooks user guide](user-guide/10-hooks.md#hooks-in-config-files) for details.
+Config-file hooks use the same schema under the `hooks` key. See the [Hooks user guide](user-guide/10-hooks.md#hooks-in-config-files) for details.
 
 **Trusting a project**: The first time you open a project with hooks, open the hooks modal (`Ctrl+L` outside the VS Code family, or `/hooks` on any terminal) or run `/hooks-trust`. This is the same folder-trust gate as `--trust`, recorded in `~/.grok/trusted_folders.json`. Trust prevents untrusted repos from running arbitrary code.
 

@@ -147,12 +147,7 @@ through `grok wrap`, for example `grok wrap ssh user@host`. The same command can
 wrap container and pod shells. It also restores terminal modes after a dropped
 connection.
 
-When an SSH session is not using `grok wrap`, Grok shows the one-time tip
-“Run `/doctor` for details and fixes.” The tip stops appearing after the session
-is launched through wrap. Turn it off with `/settings` → **Show contextual
-hints** → **SSH wrap**, or set `ssh_wrap` to `false` under
-`ui.contextual_hints` in `$GROK_HOME/config.json`. This setting does not hide
-the Doctor recommendation.
+Grok shows the one-time tip “Run `/doctor` for details and fixes.” The tip stops appearing after the session is launched through wrap. Do this when an SSH session is not using `grok wrap`. Turn it off with `/settings` → **Show contextual hints** → **SSH wrap**, or set `ssh_wrap` to `false` under `ui.contextual_hints` in `$GROK_HOME/config.json`. This setting does not hide the Doctor recommendation.
 
 For repeated SSH use, Doctor offers `grok doctor fix ssh-wrap`. It also shows
 the one-off command, the file that would change, and the cases where the alias
