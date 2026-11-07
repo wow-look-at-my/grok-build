@@ -1980,19 +1980,28 @@ You can override specific fields of built-in models without redefining everythin
 
 The target endpoint must support the Responses API and web search.
 
-> **Overriding with a custom model:** Setting `[models] web_search` alone is not
+> **Overriding with a custom model:** Setting `models.web_search` alone is not
 > enough if the model isn't already in the catalog (built-in defaults or
-> `grok models` output). You also need a `[model.*]` entry so Grok knows
+> `grok models` output). You also need a `models.definitions.*` entry so Grok knows
 > how to reach it. Without both, web search is silently disabled.
 >
-> ```toml
-> [models]
-> web_search = "my-custom-model"       # 1. tell web search which model to use
->
-> [model.my-custom-model]              # 2. tell Grok how to reach it
-> model = "my-custom-model"
-> api_backend = "responses"            # required — web search uses the Responses API
-> base_url = "https://api.example.com/v1" # required unless a [model_providers] block or [endpoints] models_base_url supplies it
+> ```jsonc
+> {
+>   "models": {
+>     // 1. tell web search which model to use
+>     "web_search": "my-custom-model",
+>     "definitions": {
+>       // 2. tell Grok how to reach it
+>       "my-custom-model": {
+>         "model": "my-custom-model",
+>         // required: web search uses the Responses API
+>         "api_backend": "responses",
+>         // required unless a models.providers block or endpoints.models_base_url supplies it
+>         "base_url": "https://api.example.com/v1"
+>       }
+>     }
+>   }
+> }
 > ```
 
 ### Examples
