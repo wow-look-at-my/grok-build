@@ -1013,10 +1013,10 @@ mod tests {
             "arming must not require applied=true"
         );
     }
-    /// Create a temp workspace whose `.grok/sandbox.toml` contains `toml_body`.
+    /// Create a temp workspace whose `.grok/sandbox.json` contains `json_body`.
     /// Returns the workspace path (caller removes it).
     #[cfg(all(feature = "enforce", unix))]
-    fn temp_workspace_with_sandbox_toml(tag: &str, toml_body: &str) -> PathBuf {
+    fn temp_workspace_with_sandbox_toml(tag: &str, json_body: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -1026,18 +1026,20 @@ mod tests {
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(
             grok.join(xai_grok_config::SANDBOX_CONFIG_FILENAME),
-            toml_body,
+            json_body,
         )
         .unwrap();
         ws
     }
     /// Create a temp workspace defining a `denytest` profile (extends `workspace`) with the given `deny` list.
-    /// `deny_toml` is the raw TOML array body (e.g. `"\".env\""`).
+    /// `deny_json` is the raw JSON array body (e.g. `"\".env\""`).
     #[cfg(all(feature = "enforce", unix))]
-    fn temp_workspace_with_deny(tag: &str, deny_toml: &str) -> PathBuf {
+    fn temp_workspace_with_deny(tag: &str, deny_json: &str) -> PathBuf {
         temp_workspace_with_sandbox_toml(
             tag,
-            &format!("[profiles.denytest]\nextends = \"workspace\"\ndeny = [{deny_toml}]\n"),
+            &format!(
+                r#"{{"profiles": {{"denytest": {{"extends": "workspace", "deny": [{deny_json}]}}}}}}"#
+            ),
         )
     }
     #[test]

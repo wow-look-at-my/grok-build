@@ -44,7 +44,7 @@ The jail binds these paths, in this order:
 4. Each `--ro PATH` and `--rw PATH`, in the order you typed them.
 5. `$GROK_HOME` (`~/.grok`), read-write. A symlinked `~/.grok` works: the jail mounts it at the path grok uses. A file or folder that `~/.grok` links to elsewhere, such as a `config.json` kept in a dotfiles repository, has its folder bound read-write too. Settings save in place. A link to a folder that contains your home directory is not bound, and grok prints a warning.
 
-A `--rw` on a parent, such as `--rw ~` or a working directory of `~`, does not expose the host `~/.cache` or `/tmp`. They are mounted over it. A flag on the directory itself or a path in it, such as `--rw ~/.cache/go-build`, gives the host directory back. To change the default, set `tmp` or `cache` in the `[jail]` table of `~/.grok/config.json` to `overlay`, `tmpfs`, `rw` or `ro`.
+A `--rw` on a parent, such as `--rw ~` or a working directory of `~`, does not expose the host `~/.cache` or `/tmp`. They are mounted over it. A flag on the directory itself or a path in it, such as `--rw ~/.cache/go-build`, gives the host directory back.
 
 macOS has no mount namespaces. There the host `/tmp` and `~/.cache` are readable and never writable. `TMPDIR` names an empty session directory, and `XDG_CACHE_HOME` names an APFS copy-on-write clone of the host cache. Both are removed when the session and every process it started exited, a crash included. The next jail start removes any that a killed cleanup left behind.
 
