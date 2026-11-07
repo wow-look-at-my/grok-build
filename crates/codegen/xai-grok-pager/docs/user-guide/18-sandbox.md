@@ -38,7 +38,7 @@ grok --rw . --ro ./secrets
 
 The jail binds these paths, in this order:
 
-1. A read-only system base: `/usr`, `/bin`, `/sbin`, `/lib*`, `/etc`, `/opt`, `/run`, `/var`. A process needs them to run at all.
+1. A process needs them to run at all.
 2. A fresh `/proc` and `/dev`.
 3. `/tmp` and `~/.cache` (and `$XDG_CACHE_HOME`) as overlays of the host directories. The jail reads the host files, and its writes go to a tmpfs that disappears with the session. Nothing written there touches the host. bubblewrap before 0.11, or a setuid bubblewrap, cannot mount an overlay. There both are empty tmpfs mounts and grok prints a warning.
 4. Each `--ro PATH` and `--rw PATH`, in the order you typed them.
@@ -78,7 +78,7 @@ To block specific files (e.g. `.env` or credential paths) on top of a profile, d
 
 **workspace** -- The recommended profile for everyday development. The agent can read any file on the system (for understanding dependencies, system libraries, etc.) but can only write to the current working directory, `~/.grok/`, and temp directories (`/tmp`, `/var/tmp`, plus the macOS temp dirs). Network access is allowed for tools like `web_search` and MCP servers.
 
-**devbox** -- A reserved built-in profile for disposable development VMs. The agent can read everywhere and write to every top-level directory except `/data` and the virtual filesystems (`/proc`, `/sys`, `/dev`), including the home directory. Network access is allowed. `--sandbox devbox` runs the built-in profile, which shadows any `[profiles.devbox]` you define in `sandbox.json`.
+**devbox** -- A reserved built-in profile for disposable development VMs. Network access is allowed. `--sandbox devbox` runs the built-in profile, which shadows any `profiles.devbox` you define in `sandbox.json`.
 
 **read-only** -- Use when you want the agent to analyze code without modifying your project files. The agent can read everything but can only write to `~/.grok/` (needed for session persistence) and temp directories. Child-process network access is blocked on Linux (no-op on macOS).
 
@@ -91,7 +91,7 @@ Under `workspace`, `read-only`, and `strict` (and custom profiles that extend th
 - `~/.grok/hooks/` (hook directory)
 - `~/.grok/hooks-paths` (registry file; not loaded as hook JSON — only its absolute targets are)
 - Absolute targets listed in `hooks-paths` (relative lines are ignored; missing targets refuse sandbox start)
-- `~/.grok/config.json`, `~/.grok/trusted_folders.json`, `~/.grok/managed_config.toml`, `~/.grok/requirements.toml`, `~/.grok/sandbox.json` (settings, folder trust, managed policy, requirements, and sandbox profiles)
+
 
 These files are read-only to the agent and its tools. Grok itself still saves its settings: `/model`, the permission mode (`/auto` or Shift+Tab), the settings modal, and an accepted folder-trust prompt all persist. Grok writes `config.json` and `trusted_folders.json` through a host worker that starts before the sandbox does. The sandbox does not apply to it. The worker writes those files and no other path.
 
@@ -133,7 +133,7 @@ Use the custom profile:
 grok --sandbox project
 ```
 
-A custom profile can't reuse a built-in name. `--sandbox devbox` always runs the built-in `devbox` profile, shadowing any `[profiles.devbox]` you define.
+A custom profile cannot reuse a built-in name. `--sandbox devbox` always runs the built-in `devbox` profile, shadowing any `profiles.devbox` you define.
 
 If the user and project files define the same custom profile differently, Grok uses the user profile and shows a startup warning. Run `/doctor` to see both file locations and how to resolve the conflict. Identical definitions do not produce a warning.
 
@@ -251,7 +251,7 @@ Resuming will **not** change a session's sandbox:
 Profile resolution order for a **new** session:
 
 1. An explicit `--sandbox <profile>` flag or `GROK_SANDBOX` environment variable
-2. The `[sandbox] profile` in your config
+2. The `sandbox.profile` in your config
 3. `off` (no sandbox)
 
 ---
@@ -263,7 +263,7 @@ Profile resolution order for a **new** session:
 | Linux    | Landlock  | Kernel 5.13 or later   |
 | macOS    | Seatbelt  | macOS (all versions)   |
 
-If the sandbox cannot be applied (e.g., unsupported kernel, missing entitlements), Grok logs a warning and continues without enforcement. The exception is an explicitly-requested **custom profile**: on **both macOS and Linux**, if it cannot be applied (unknown profile, malformed `sandbox.json`, or — on Linux — `bubblewrap` unavailable for a non-empty `deny`), Grok refuses to start rather than run with its denied paths exposed.
+If the sandbox cannot be applied (e.g., unsupported kernel, missing entitlements), Grok logs a warning and continues without enforcement. The exception is an explicitly-requested **custom profile**. On **both macOS and Linux**, if it cannot be applied (unknown profile, malformed `sandbox.json`, or — on Linux — `bubblewrap` unavailable for a non-empty `deny`), Grok refuses to start rather than run with its denied paths exposed.
 
 ---
 
@@ -280,7 +280,7 @@ In practice, on Linux this means:
 
 ## Shell Environment Policy
 
-The sandbox controls which files and network a subprocess can reach. The top-level `[shell_environment_policy]` table controls which environment variables it inherits, so a tool command the model runs cannot read a secret that happens to sit in your shell environment.
+The sandbox controls which files and network a subprocess can reach. The `tools.shell_environment_policy` object controls which environment variables it inherits. A tool command the model runs cannot read a secret that happens to sit in your shell environment.
 
 ```json
 {

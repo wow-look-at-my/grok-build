@@ -50,16 +50,7 @@ Only an explicit `"enabled": false` turns subagents off.
 
 ## Usage Frequency
 
-`usage_frequency` does not enable or disable subagents -- it tunes how strongly the system prompt and the `spawn_subagent` tool description nudge the model toward using them. Six levels, from most to least eager to delegate:
-
-| Level | Effect |
-| ----- | ------ |
-| `very-often` | Default to delegating: break work into independent pieces and spawn them in parallel. |
-| `often` | Look for opportunities to delegate independent work. |
-| `default` | No added nudge either way (the baseline behavior). |
-| `rare` | Prefer doing work directly; delegate only when clearly independent. |
-| `very-rare` | Reserve subagents for the rare, unmistakably independent case. |
-| `explicit-only` | Never spawn a subagent unless the user explicitly asks for one in the conversation. |
+`usage_frequency` does not enable or disable subagents -- it tunes how strongly the system prompt and the `spawn_subagent` tool description nudge the model toward using them.
 
 ```json
 {

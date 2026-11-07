@@ -1083,7 +1083,7 @@ mod tests {
     fn requires_read_deny_for_custom_profile_with_effective_restrict_network() {
         let ws = temp_workspace_with_sandbox_toml(
             "requires-net-true",
-            "[profiles.netdeny]\nextends = \"devbox\"\nrestrict_network = true\n",
+            r#"{"profiles": {"netdeny": {"extends": "devbox", "restrict_network": true}}}"#,
         );
         assert!(requires_read_deny(
             &ProfileName::Custom("netdeny".to_string()),
@@ -1092,7 +1092,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ws);
         let ws = temp_workspace_with_sandbox_toml(
             "requires-net-false",
-            "[profiles.netoff]\nextends = \"workspace\"\nrestrict_network = false\n",
+            r#"{"profiles": {"netoff": {"extends": "workspace", "restrict_network": false}}}"#,
         );
         assert!(!requires_read_deny(
             &ProfileName::Custom("netoff".to_string()),
@@ -1101,7 +1101,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ws);
         let ws = temp_workspace_with_sandbox_toml(
             "requires-net-none",
-            "[profiles.netnone]\nextends = \"workspace\"\n",
+            r#"{"profiles": {"netnone": {"extends": "workspace"}}}"#,
         );
         assert!(!requires_read_deny(
             &ProfileName::Custom("netnone".to_string()),
@@ -1110,7 +1110,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ws);
         let ws = temp_workspace_with_sandbox_toml(
             "requires-net-inherit",
-            "[profiles.netinherit]\nextends = \"read-only\"\n",
+            r#"{"profiles": {"netinherit": {"extends": "read-only"}}}"#,
         );
         assert!(requires_read_deny(
             &ProfileName::Custom("netinherit".to_string()),
@@ -1142,7 +1142,7 @@ mod tests {
                 deny: Vec::new(),
             },
         );
-        let data_root = temp_workspace_with_sandbox_toml("requires-data-root", "");
+        let data_root = temp_workspace_with_sandbox_toml("requires-data-root", "{}");
         let existing_data = data_root.join("data");
         std::fs::create_dir(&existing_data).unwrap();
         let missing_data = data_root.join("missing-data");
@@ -1216,7 +1216,7 @@ mod tests {
         let _g = EnvGuard::remove(BWRAP_ENV_VAR);
         let ws = temp_workspace_with_sandbox_toml(
             "devbox-compose",
-            "[profiles.devcustom]\nextends = \"devbox\"\ndeny = [\"secret.pem\"]\n",
+            r#"{"profiles": {"devcustom": {"extends": "devbox", "deny": ["secret.pem"]}}}"#,
         );
         let cmd = bwrap_reexec_for_profile(&ProfileName::Custom("devcustom".to_string()), &ws)
             .expect("devbox-extending custom with deny should build a re-exec command");
@@ -1240,7 +1240,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ws);
         let ws_ws = temp_workspace_with_sandbox_toml(
             "ws-empty",
-            "[profiles.wsempty]\nextends = \"workspace\"\n",
+            r#"{"profiles": {"wsempty": {"extends": "workspace"}}}"#,
         );
         assert!(
             bwrap_reexec_for_profile(&ProfileName::Custom("wsempty".to_string()), &ws_ws).is_some(),
@@ -1253,7 +1253,7 @@ mod tests {
     fn resolve_failure_refuses_for_deny_carrying_devbox_extends() {
         let workspace = temp_workspace_with_sandbox_toml(
             "resolve-refuse",
-            "[profiles.devdeny]\nextends = \"devbox\"\ndeny = [\"secret.pem\"]\n",
+            r#"{"profiles": {"devdeny": {"extends": "devbox", "deny": ["secret.pem"]}}}"#,
         );
         let profile = ProfileName::Custom("devdeny".to_string());
         assert!(!requires_hook_write_deny(&profile, &workspace));
@@ -1267,7 +1267,7 @@ mod tests {
         let _g = EnvGuard::set(BWRAP_ENV_VAR, "1");
         let workspace = temp_workspace_with_sandbox_toml(
             "inside-bwrap-skip",
-            "[profiles.devskip]\nextends = \"devbox\"\ndeny = [\"secret.pem\"]\n",
+            r#"{"profiles": {"devskip": {"extends": "devbox", "deny": ["secret.pem"]}}}"#,
         );
         assert!(
             bwrap_reexec_for_profile(&ProfileName::Custom("devskip".to_string()), &workspace)

@@ -74,7 +74,7 @@ Skips ordinary permission prompts so tools run without waiting for a click. `den
 | Mechanism | Example |
 | --------- | ------- |
 | CLI | `--always-approve` (alias `--yolo`), or `--permission-mode bypassPermissions` |
-| Config | `[ui] permission_mode = "always-approve"` |
+| Config | `"permission_mode": "always-approve"` under `ui` |
 | Interactive | `/always-approve`, `Ctrl+O` |
 | ACP | `_meta.yoloMode: true` on `session/new` |
 
@@ -110,7 +110,7 @@ For automation that must run tools without interactive approval, use always-appr
 
 ### Disable always-approve (administrators)
 
-Organizations can prevent always-approve from being enabled via CLI, TUI, or `/always-approve`. Set this in `requirements.toml` (user-level under `~/.grok/`, or system-wide under `/etc/grok/` for enforcement users cannot remove):
+Organizations can prevent always-approve from being enabled via CLI, TUI, or `/always-approve`. Set this in `requirements.toml` (user-level under `~/.grok/`) or in `/etc/grok/requirements.json` (system-wide, for enforcement users cannot remove):
 
 ```json
 {
@@ -120,7 +120,7 @@ Organizations can prevent always-approve from being enabled via CLI, TUI, or `/a
 }
 ```
 
-Do not use `permission_mode` for this lock; that key is a switchable default. The legacy `[ui] yolo = false` key in `requirements.toml` also disables always-approve for compatibility.
+Do not use `permission_mode` for this lock; that key is a switchable default. The legacy `ui.yolo` key set to `false` in `requirements.toml` also disables always-approve for compatibility.
 
 Grok can still load Claude-style permission **rules** from managed settings; always-approve is locked with `requirements.toml` as shown above.
 
