@@ -166,7 +166,7 @@ fn gc_drops_stale_ids() {
 #[test]
 fn parse_persist_keys_rejects_non_array() {
     let s = r#"pinned = "not-an-array""#;
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("pinned").unwrap();
     let out = parse_persist_keys(item);
     assert!(out.is_empty());
@@ -177,7 +177,7 @@ fn parse_persist_keys_rejects_non_array() {
 #[test]
 fn parse_persist_key_list_rejects_non_array() {
     let s = "[reorder]\nx = 1";
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("reorder").unwrap();
     let out = parse_persist_key_list(item);
     assert!(out.is_empty());
@@ -187,7 +187,7 @@ fn parse_persist_key_list_rejects_non_array() {
 #[test]
 fn parse_persist_keys_skips_non_string_entries() {
     let s = "pinned = [1, 2, \"top:sess-7\", false]";
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("pinned").unwrap();
     let out = parse_persist_keys(item);
     assert_eq!(out.len(), 1);
@@ -203,7 +203,7 @@ fn parse_persist_keys_caps_entry_count() {
         .map(|i| format!("\"top:s-{i}\""))
         .collect();
     let s = format!("pinned = [{}]", many.join(","));
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("pinned").unwrap();
     let out = parse_persist_keys(item);
     assert!(out.len() <= MAX_PERSISTED_ENTRIES);
@@ -214,7 +214,7 @@ fn parse_persist_keys_caps_entry_count() {
 fn parse_persist_keys_rejects_overlong_strings() {
     let huge = format!("\"top:{}\"", "a".repeat(MAX_PERSIST_KEY_LEN + 10));
     let s = format!("pinned = [{huge}]");
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("pinned").unwrap();
     let out = parse_persist_keys(item);
     assert!(out.is_empty());

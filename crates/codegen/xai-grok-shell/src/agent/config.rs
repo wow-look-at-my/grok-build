@@ -1391,7 +1391,7 @@ pub struct ShellEnvironmentPolicyKnownKeys {
     pub set: Option<toml::Value>,
     pub include_only: Option<toml::Value>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Config {
     pub features: Features,
     /// `[goal]` section: canonical `/goal` configuration. See [`GoalConfig`].

@@ -333,7 +333,7 @@ pub enum FilterValue {
     Substring(String),
 }
 
-/// Persisted dashboard configuration stored under `[dashboard]` in `~/.grok/config.toml`. Lenient:
+/// Persisted dashboard configuration stored under `ui.dashboard` in `~/.grok/config.json`. Lenient:
 /// corrupted fields fall back to defaults.
 #[derive(Debug, Clone, Default)]
 pub struct PersistedDashboard {
@@ -4374,7 +4374,7 @@ fn parse_persist_keys(item: &toml::Value) -> BTreeSet<PersistedRowId> {
     out
 }
 
-fn parse_persist_key_list(item: &toml_edit::Item) -> Vec<PersistedRowId> {
+fn parse_persist_key_list(item: &toml::Value) -> Vec<PersistedRowId> {
     let Some(arr) = item.as_array() else {
         tracing::warn!("dashboard.reorder must be an array; ignoring");
         return Vec::new();
