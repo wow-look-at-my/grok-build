@@ -3891,14 +3891,8 @@ pub(crate) fn resolve_model_list(
             .collect();
         // A `[model.<key>]` window reaches only entries on the same URL, not another provider.
         let route_url = |url: &str| url.trim().trim_end_matches('/').to_ascii_lowercase();
-        let mut sources_by_url: std::collections::HashMap<String, IndexMap<String, ModelEntry>> =
-            std::collections::HashMap::new();
-        for entry in resolved.values() {
-            let url = route_url(&entry.info.base_url);
-            if sources_by_url.contains_key(&url) {
-                continue;
-            }
-            let donors = cw_sources
+        let donors_on = |url: &str| -> IndexMap<String, ModelEntry> {
+            cw_sources
                 .iter()
                 .filter(|(key, donor)| {
                     cfg.config_models
@@ -3907,9 +3901,10 @@ pub(crate) fn resolve_model_list(
                         || route_url(&donor.info.base_url) == url
                 })
                 .map(|(key, donor)| (key.clone(), donor.clone()))
-                .collect();
-            sources_by_url.insert(url, donors);
-        }
+                .collect()
+        };
+        let mut sources_by_url: std::collections::HashMap<String, IndexMap<String, ModelEntry>> =
+            std::collections::HashMap::new();
         // api_backend inherits from a sibling with the same routing slug.
         let backend_donors: std::collections::HashMap<String, ApiBackend> = resolved
             .values()
@@ -3938,10 +3933,12 @@ pub(crate) fn resolve_model_list(
         }
         for (key, entry) in resolved.iter_mut() {
             if !entry.info.context_window_pinned && entry.info.context_window.get() == default_cw {
-                let resolved_cw = crate::agent::remote_config::resolve_context_window(
-                    &entry.info.model,
-                    &sources_by_url[&route_url(&entry.info.base_url)],
-                );
+                let url = route_url(&entry.info.base_url);
+                let donors = sources_by_url
+                    .entry(url)
+                    .or_insert_with_key(|url| donors_on(url));
+                let resolved_cw =
+                    crate::agent::remote_config::resolve_context_window(&entry.info.model, donors);
                 if resolved_cw.get() != default_cw {
                     tracing::debug!(
                         model = %entry.info.model,
