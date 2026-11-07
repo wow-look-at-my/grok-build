@@ -387,10 +387,29 @@ fn put_property(
             .unwrap_or_else(|| panic!("the section `{seg}` is not an object schema"));
     }
     let props = object_at(cur, "properties");
-    if props.contains_key(*last) {
-        panic!("the JSON layout puts two keys at {path:?}");
+    let Some(existing) = props.get_mut(*last) else {
+        props.insert(last.to_string(), value);
+        return;
+    };
+    let mut value = value;
+    inline_ref(existing, defs);
+    inline_ref(&mut value, defs);
+    let (Value::Object(existing), Value::Object(mut value)) = (existing, value) else {
+        panic!("the JSON layout puts two keys that are not objects at {path:?}");
+    };
+    let moved_props = match value.remove("properties") {
+        Some(Value::Object(moved)) => moved,
+        _ => Map::new(),
+    };
+    let existing_props = object_at(existing, "properties");
+    for (key, schema) in moved_props {
+        if existing_props.insert(key.clone(), schema).is_some() {
+            panic!("the JSON layout puts two keys at {path:?}.{key}");
+        }
     }
-    props.insert(last.to_string(), value);
+    for (key, schema) in value {
+        existing.entry(key).or_insert(schema);
+    }
 }
 
 /// A config file is one layer of a deep merge over the compiled defaults, so no key of a section is required.

@@ -329,11 +329,11 @@ Change, unroll or add groups under `models.groups.<id>`. Each key is optional. O
 
 A slot that your own group lists leaves the default group it was in. So `planning` above can take `recap` without an edit to `summarization`. Two of your groups that list the same slot, an unknown slot, or a group id with characters other than `a-z`, `0-9`. `_` and `-` stop the start with an error that names the problem.
 
-A slot reads its model in this order: the slot's environment variable, then its group's `model`, then its own `[models]` entry, then its default. A group with no `model` changes nothing, so each slot keeps its own entry and default. A pick on a group's settings row writes `[model_groups.<id>] model` and removes the `[models]` entry of each slot in the group.
+A slot reads its model in this order: the slot's environment variable, then its group's `model`, then its own `[models]` entry, then its default. A group with no `model` changes nothing, so each slot keeps its own entry and default. A pick on a group's settings row writes `models.groups.<id>.model` and removes the `[models]` entry of each slot in the group.
 
 ### Custom models
 
-Add custom model endpoints to use alternative providers or self-hosted models. Each endpoint is a `[model.<id>]` entry. The base URL must include any provider-specific prefix such as `/v1`. Grok appends `/chat/completions` or `/responses`.
+Add custom model endpoints to use alternative providers or self-hosted models. Each endpoint is a `models.definitions.<id>` entry. The base URL must include any provider-specific prefix such as `/v1`. Grok appends `/chat/completions` or `/responses`.
 
 ```json
 {
@@ -362,9 +362,9 @@ Add custom model endpoints to use alternative providers or self-hosted models. E
 }
 ```
 
-Credential resolution: `api_key` > `env_key` > signed-in session token > `XAI_API_KEY`. See [Custom Models](11-custom-models.md#request-query-parameters) for `query_params` and `env_http_headers`, and [Sandbox Mode](18-sandbox.md#shell-environment-policy) for `[shell_environment_policy]`, which restricts the environment variables tool subprocesses inherit.
+Credential resolution: `api_key` > `env_key` > signed-in session token > `XAI_API_KEY`. See [Custom Models](11-custom-models.md#request-query-parameters) for `query_params` and `env_http_headers`, and [Sandbox Mode](18-sandbox.md#shell-environment-policy) for `tools.shell_environment_policy`, which restricts the environment variables tool subprocesses inherit.
 
-Several models behind one endpoint share a `[model_providers.<id>]` block instead of repeating the URL, the key, the backend and the headers on each one:
+Several models behind one endpoint share a `models.providers.<id>` block instead of repeating the URL, the key, the backend and the headers on each one:
 
 ```json
 {
@@ -449,9 +449,9 @@ Configure external tool integrations over the Model Context Protocol.
 
 Remote (HTTP/SSE) servers receive a default `User-Agent: grok-cli/<version>` header. A valid `User-Agent` entry in `headers` overrides it (Figma servers receive bare `grok-cli`). See [MCP servers](07-mcp-servers.md) for details.
 
-MCP servers can also be set per-project in `.grok/config.json`. Project-scoped config contributes `[mcp_servers]`, `[plugins]`, and `[permission]` rules. Every other section loads only from `~/.grok/config.json`.
+MCP servers can also be set per-project in `.grok/config.json`. Every other section loads only from `~/.grok/config.json`.
 
-Priority for `[mcp_servers]` and `[plugins]`: `.grok/config.json` (current dir) > `<repo-root>/.grok/config.json` > `~/.grok/config.json`. `[permission]` rules are not overridden by priority — they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
+`[permission]` rules are not overridden by priority — they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
 
 ### Memory
 
