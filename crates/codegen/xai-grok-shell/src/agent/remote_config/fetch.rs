@@ -115,7 +115,38 @@ pub(in crate::agent::remote_config) fn fetch_models_uncommitted(
 
     let _timer = crate::instrumentation_timer!("startup.fetch_models_blocking");
     let fetched_at = Utc::now();
-    match source.fetch(auth) {
+    let result = source.fetch(auth);
+    prefetch_from_result(result, endpoints, fetch_auth, scope, fetched_at)
+}
+
+/// [`prefetch_models_blocking`] for a caller on a runtime. The fetch runs on the
+/// async client, so it needs no blocking-pool thread.
+pub(crate) async fn prefetch_models_async(
+    endpoints: &config::EndpointsConfig,
+    auth: Option<&GrokAuth>,
+    fetch_auth: ModelFetchAuth,
+) -> Option<IndexMap<String, ModelEntry>> {
+    let scope = ModelsCacheScope::resolve(endpoints, fetch_auth, auth);
+    if let Some(cached) = ModelsCacheManager::new().load_fresh(&scope) {
+        return Some(cached.models);
+    }
+    if !crate::util::config::resolve_remote_fetch_enabled() {
+        tracing::info!("models fetch skipped: remote_fetch disabled");
+        return None;
+    }
+    let fetched_at = Utc::now();
+    let result = crate::remote::fetch_active_models_async(endpoints, fetch_auth, auth).await;
+    prefetch_from_result(result, endpoints, fetch_auth, scope, fetched_at).commit()
+}
+
+fn prefetch_from_result(
+    result: Result<FetchModelsResult, crate::remote::BackendError>,
+    endpoints: &config::EndpointsConfig,
+    fetch_auth: ModelFetchAuth,
+    scope: ModelsCacheScope,
+    fetched_at: DateTime<Utc>,
+) -> ModelsPrefetch {
+    match result {
         Ok(FetchModelsResult { models, etag }) if !models.is_empty() => {
             let api_base_url_override = match fetch_auth {
                 ModelFetchAuth::ApiKey => Some(endpoints.xai_api_base_url.clone()),
@@ -137,6 +168,11 @@ pub(in crate::agent::remote_config) fn fetch_models_uncommitted(
                 "models listing is empty: nothing to fall back on if a custom \
                  endpoint replaced the built-in defaults"
             );
+            xai_grok_telemetry::unified_log::warn(
+                "model catalog: the models listing is empty",
+                None,
+                Some(serde_json::json!({ "url": scope.origin })),
+            );
             ModelsPrefetch::Unavailable
         }
         Err(e) => {
@@ -145,6 +181,15 @@ pub(in crate::agent::remote_config) fn fetch_models_uncommitted(
                 error = ?e,
                 "models fetch failed: the model picker will be empty unless \
                  [model.*] entries are configured"
+            );
+            xai_grok_telemetry::unified_log::warn(
+                "model catalog: the models fetch failed",
+                None,
+                Some(serde_json::json!({
+                    "url": scope.origin,
+                    "error": e.to_string(),
+                    "elapsed_ms": (Utc::now() - fetched_at).num_milliseconds(),
+                })),
             );
             ModelsPrefetch::Unavailable
         }

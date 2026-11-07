@@ -32,9 +32,49 @@ impl ModelSource for OaiModelSource {
     }
     fn fetch(&self, auth: Option<&GrokAuth>) -> Result<FetchModelsResult, BackendError> {
         let client = crate::http::shared_startup_blocking_client();
+        let (wire, headers) = self.request_auth(auth)?;
+        let mut request = client.get(&self.endpoint.url, wire);
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        let response = request.send()?;
+        let status = response.status().as_u16();
+        let etag = etag_of(response.headers());
+        let body = response.text().unwrap_or_default();
+        self.parse_response(status, etag, &body)
+    }
+}
+
+impl OaiModelSource {
+    /// The same request as [`ModelSource::fetch`], sent on the async client. A caller on a
+    /// runtime uses this, so the fetch needs no blocking-pool thread.
+    pub(crate) async fn fetch_async(
+        &self,
+        auth: Option<&GrokAuth>,
+    ) -> Result<FetchModelsResult, BackendError> {
+        let client = crate::http::shared_client();
+        let (wire, headers) = self.request_auth(auth)?;
+        let mut request = client
+            .get(&self.endpoint.url, wire)
+            .timeout(crate::http::STARTUP_FETCH_TIMEOUT);
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        let response = request.send().await?;
+        let status = response.status().as_u16();
+        let etag = etag_of(response.headers());
+        let body = response.text().await.map_err(xai_grok_net::Error::from)?;
+        self.parse_response(status, etag, &body)
+    }
+
+    /// The credential and the extra headers for the listing request.
+    fn request_auth(
+        &self,
+        auth: Option<&GrokAuth>,
+    ) -> Result<(xai_grok_net::Auth, Vec<(&'static str, String)>), BackendError> {
         allow_endpoint(&self.endpoint.url)?;
         tracing::info!("Fetching models from {}", self.endpoint.url);
-        let request = match self.endpoint.auth {
+        match self.endpoint.auth {
             EndpointAuth::ApiKey => {
                 let wire = match crate::agent::auth_method::read_xai_api_key_env() {
                     Ok(key) => xai_grok_net::Auth::ApiKey {
@@ -47,7 +87,7 @@ impl ModelSource for OaiModelSource {
                         )
                     })?,
                 };
-                client.get(&self.endpoint.url, wire)
+                Ok((wire, Vec::new()))
             }
             EndpointAuth::Session => {
                 let auth = auth
@@ -55,34 +95,40 @@ impl ModelSource for OaiModelSource {
                     .ok_or_else(|| {
                         BackendError::Auth("No auth credentials for cli-chat-proxy".into())
                     })?;
-                let mut request = client
-                    .get(&self.endpoint.url, auth.wire_auth())
-                    .header("X-XAI-Token-Auth", "xai-grok-cli")
-                    .header("x-userid", &auth.user_id)
-                    .header("x-grok-client-version", xai_grok_version::version())
-                    .header(
+                let mut headers = vec![
+                    ("X-XAI-Token-Auth", "xai-grok-cli".to_owned()),
+                    ("x-userid", auth.user_id.clone()),
+                    (
+                        "x-grok-client-version",
+                        xai_grok_version::version().to_owned(),
+                    ),
+                    (
                         crate::http::CLIENT_MODE_HEADER,
-                        crate::http::process_client_mode(),
-                    );
+                        crate::http::process_client_mode().to_owned(),
+                    ),
+                ];
                 if let Some(email) = &auth.email {
-                    request = request.header("x-email", email);
+                    headers.push(("x-email", email.clone()));
                 }
-                request
+                Ok((auth.wire_auth(), headers))
             }
-        };
-        let response = request.send()?;
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let body = response.text().unwrap_or_default();
-            tracing::warn!("Failed to fetch models: {} - {}", status, body);
-            return Err(BackendError::RequestFailed { status, body });
         }
-        let etag = response
-            .headers()
-            .get("etag")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
-        let models_response: ModelsResponse = response.json()?;
+    }
+
+    fn parse_response(
+        &self,
+        status: u16,
+        etag: Option<String>,
+        body: &str,
+    ) -> Result<FetchModelsResult, BackendError> {
+        if !(200..300).contains(&status) {
+            tracing::warn!("Failed to fetch models: {} - {}", status, body);
+            return Err(BackendError::RequestFailed {
+                status,
+                body: body.to_owned(),
+            });
+        }
+        let models_response: ModelsResponse = serde_json::from_str(body)?;
         tracing::info!(
             "Fetched {} models from {}",
             models_response.data.len(),
@@ -114,6 +160,13 @@ impl ModelSource for OaiModelSource {
         }
         Ok(FetchModelsResult { models, etag })
     }
+}
+
+fn etag_of(headers: &xai_grok_net::header::HeaderMap) -> Option<String> {
+    headers
+        .get("etag")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointAuth {
@@ -152,6 +205,48 @@ impl ListModelsEndpoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The async fetch sends the request the blocking fetch sends and reads the same models.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial_test::serial]
+    async fn async_fetch_matches_blocking_fetch() {
+        use xai_grok_test_support::EnvGuard;
+        use xai_grok_test_support::mock_server::{MockInferenceServer, MockModelEntry};
+        let server = MockInferenceServer::start_with_models(vec![
+            MockModelEntry::new("model-a"),
+            MockModelEntry::new("model-b"),
+        ])
+        .await
+        .expect("start mock server");
+        let _key = EnvGuard::set("XAI_API_KEY", "test-api-key");
+        let _base = EnvGuard::unset("GROK_XAI_API_BASE_URL");
+        let _list = EnvGuard::unset("GROK_MODELS_LIST_URL");
+        let cfg = EndpointsConfig::from_config_value(
+            &toml::from_str(&format!(
+                "[endpoints]\nxai_api_base_url = \"{}\"",
+                server.url()
+            ))
+            .expect("endpoints toml"),
+        );
+        let source = OaiModelSource::new(&cfg, ModelFetchAuth::ApiKey);
+        let ids = |result: FetchModelsResult| {
+            result
+                .models
+                .into_iter()
+                .map(|m| m.model)
+                .collect::<Vec<_>>()
+        };
+
+        let from_async = ids(source.fetch_async(None).await.expect("async fetch"));
+        let from_blocking = ids(tokio::task::spawn_blocking(move || source.fetch(None))
+            .await
+            .expect("join")
+            .expect("blocking fetch"));
+
+        assert_eq!(from_async, ["model-a", "model-b"]);
+        assert_eq!(from_async, from_blocking);
+    }
+
     #[test]
     #[serial_test::serial]
     fn models_fetch_endpoint_matches_auth_mode() {
