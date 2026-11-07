@@ -230,7 +230,8 @@ jobs:
         timeout-minutes: 5
         run: |
           sudo apt-get install -y --no-install-recommends hyperfine
-          scripts/bench-startup.sh --binary "$PAGER_BINARY" --runs 3 --warmup 1
+          scripts/bench-startup.sh pager --binary "$PAGER_BINARY" \
+            --seed-binary "${{ github.workspace }}/target/debug/startup-resume-seed" --runs 3 --warmup 1
 
   # Clippy shares no artifact with the test build, so it needs nothing from build-test.
   lint:
