@@ -87,9 +87,7 @@ The toggle cannot override the process-wide force-disable (`--no-memory` or `GRO
 
 1. A process-wide force-disable (`--no-memory` compatibility flag or
    `GROK_MEMORY=0`) turns memory off.
-2. An explicit `memory.enabled` set to `false` in the effective config turns memory off,
-   including anything enabled by managed remote settings. The `/memory` `t`
-   toggle can still turn it on for the current session.
+2. An explicit `memory.enabled` set to `false` in the effective config turns memory off, including anything enabled by managed remote settings. The `/memory` `t` toggle can still turn it on for the current session.
 3. Otherwise memory is on, in v2 mode. `memory.v2.enabled` set to `false` selects the legacy pipeline, which then needs `GROK_MEMORY=1`, `memory.enabled` set to `true`, or a managed remote setting.
 
 Staged-rollout and kill-switch controls for operators are documented in the
@@ -304,7 +302,7 @@ The default embedding model is unset, so memory starts in full-text-only mode. I
 
 ### Source Weights
 
-Each memory source has a weight multiplier applied to its score. All sources default to `1.0`, and you can adjust any of them under `memory.search.source_weights`:
+Each memory source has a weight multiplier applied to its score. All sources default to `1.0`. You can adjust any of them under `memory.search.source_weights`:
 
 | Source | Weight | Description |
 |--------|--------|-------------|
@@ -392,7 +390,7 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `max_chunk_chars` | `1600` | Maximum chunk size in characters |
 | `chunk_overlap_chars` | `320` | Character overlap between chunks |
 
-### Embedding Settings (`[memory.embedding]`)
+### Embedding Settings (`memory.embedding`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -400,7 +398,7 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `model` | unset | Embedding model name. Unset or `""` uses full-text-only retrieval. |
 | `dimensions` | `1024` | Embedding vector dimensions |
 
-### Search Settings (`[memory.search]`)
+### Search Settings (`memory.search`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -409,14 +407,14 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `vector_weight` | `0.7` | Weight for vector similarity |
 | `text_weight` | `0.3` | Weight for BM25 text similarity |
 
-### Initial Injection Settings (`[memory.initial_injection]`)
+### Initial Injection Settings (`memory.initial_injection`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `enabled` | `true` | Enable first-turn memory injection |
 | `min_score` | `0.9` | Score threshold for first-turn results |
 
-### Dream Settings (`[memory.dream]`)
+### Dream Settings (`memory.dream`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -426,9 +424,9 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `stale_lock_secs` | `3600` | Seconds before a stale consolidation lock is reclaimed |
 | `check_interval_secs` | `3600` | Periodic Dream-gate check interval in seconds. Set `0` to disable periodic checks. |
 
-### Flush Settings (`[compaction.memory_flush]`)
+### Flush Settings (`session.compaction.memory_flush`)
 
-You configure flush under `[compaction]`, not `[memory]`, because it is a compaction behavior.
+You configure flush under `session.compaction`, not `memory`, because it is a compaction behavior.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -439,9 +437,9 @@ You configure flush under `[compaction]`, not `[memory]`, because it is a compac
 | `idle_timeout_secs` | `300` | Idle seconds before a background flush. Set `0` to disable idle flushes. |
 | `semantic_dedup_threshold` | unset | Cosine-similarity threshold for de-duplicating flushed content. When unset, defaults to `0.92`. |
 
-### Pruning Settings (`[compaction.pruning]`)
+### Pruning Settings (`session.compaction.pruning`)
 
-You configure pruning under `[compaction]`, not `[memory]`, because it is a compaction behavior.
+You configure pruning under `session.compaction`, not `memory`, because it is a compaction behavior.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -484,7 +482,7 @@ By default, Grok watches `~/.grok/memory/` for external file changes. If you edi
 ### Memory Not Working
 
 1. Verify memory is enabled: check `grok inspect` output.
-2. Check `GROK_MEMORY` or `[memory] enabled` in effective TOML.
+2. Check `GROK_MEMORY` or `memory.enabled` in the effective config.
 3. Check for `GROK_MEMORY=0` or a deprecated compatibility flag overriding config.
 
 ### Memory Not Appearing in Sessions

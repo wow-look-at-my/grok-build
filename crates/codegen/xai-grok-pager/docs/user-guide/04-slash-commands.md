@@ -160,12 +160,7 @@ Open a preview of the current saved plan. Aliases: `/show-plan`, `/plan-view`.
 
 ### `/memory`
 
-Browse, view, and manage saved memories. Alias: `/mem`. Inside the modal, `t`
-turns memory on or off for the session, `x` deletes the selected note, and `s`
-shows content-free queue, lease, retention, and pinned-rollout diagnostics.
-The `t` toggle is session-scoped: it does not edit `config.json`, and new
-sessions follow the config again. It cannot override `--no-memory` or
-`GROK_MEMORY=0`.
+Browse, view, and manage saved memories. Alias: `/mem`. Inside the modal, `t` turns memory on or off for the session. `x` deletes the selected note, and `s` shows content-free queue, lease, retention, and pinned-rollout diagnostics. The `t` toggle is session-scoped: it does not edit `config.json`, and new sessions follow the config again. It cannot override `--no-memory` or `GROK_MEMORY=0`.
 
 ```
 /memory
@@ -264,7 +259,7 @@ Set, manage, or check an autonomous goal. Grok works across rounds and only mark
 /goal clear
 ```
 
-Arguments are `<objective> [--budget <tokens>]`, or one of `status`, `pause`, `resume`, `clear`. The `--budget` here is a **token** budget for the goal run, separate from the agent-count budgets that workflows use. `/goal` appears when goal mode is enabled for the session. The host evaluates each model round and runs adversarial verification on completion candidates.
+The `--budget` here is a **token** budget for the goal run, separate from the agent-count budgets that workflows use. `/goal` appears when goal mode is enabled for the session. The host evaluates each model round and runs adversarial verification on completion candidates.
 
 ### `/deep-research <query>`
 
@@ -360,7 +355,7 @@ Turn Grok on itself. The question goes to the model along with this session's ex
 /debug why was the context size defaulted to 256k? this model is supposed to be 1m context
 ```
 
-With no question it injects the context alone and debugs whatever you say next. `/debug scroll`, `/debug fps`, and `/debug log` are unrelated developer overlays: the scroll-diagnostics HUD, the FPS overlay, and the scroll flight recorder.
+With no question it injects the context alone and debugs whatever you say next.
 
 ### `/release-notes`
 

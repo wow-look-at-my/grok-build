@@ -263,9 +263,9 @@ To install it for everyone automatically instead of person by person, see [Distr
 
 ## Distribute across an organization
 
-Admins control plugins, marketplaces, and MCP servers through grok's TOML layers plus an optional Claude policy file:
+Admins control plugins, marketplaces, and MCP servers through grok's config layers plus an optional Claude policy file:
 
-- **`managed_config.toml` / `requirements.toml`** (and macOS MDM) are **native** policy. Put allowlists, denylists, and pins here when grok should enforce them on every server and marketplace, including ones defined in the user's own config or by plugins. `requirements.toml` / MDM is the tamper-resistant tier; user-writable `~/.grok` copies are self-imposed only.
+- **`managed_config.toml` / `requirements.toml`** (and their system counterparts `/etc/grok/managed_config.json` / `/etc/grok/requirements.json`, and macOS MDM) are **native** policy. Put allowlists, denylists, and pins here when grok should enforce them on every server and marketplace, including ones defined in the user's own config or by plugins. `requirements.toml` / MDM is the tamper-resistant tier; user-writable `~/.grok` copies are self-imposed only.
 - **Claude `managed-settings.json`** is **advisory**. Its MCP and marketplace restrictions bind **foreign** subjects only — project files (`.grok/config.json`, `.mcp.json`), imported Claude configs, CLI overrides, and client-injected servers. They never bind grok-native subjects (user/system `config.json`, plugin-provided definitions, admin pins). **Adding** a marketplace or installing a new source is always treated as foreign, so an advisory strict list still refuses unlisted `marketplace add` / `plugin install` sources.
 
 Layers combine **strictest-wins**: any deny wins, every restricted source must allow, and boolean pins only tighten (`false` sticks; a later `true` cannot unpin). CamelCase Claude keys and snake_case grok keys are both accepted in TOML.
@@ -274,7 +274,7 @@ Layers combine **strictest-wins**: any deny wins, every restricted source must a
 
 ### Roll a marketplace out to everyone
 
-Add the source, and turn on the plugins you want, in `managed_config.toml`:
+Add the source, and turn on the plugins you want, in `/etc/grok/managed_config.json`:
 
 ```json
 {

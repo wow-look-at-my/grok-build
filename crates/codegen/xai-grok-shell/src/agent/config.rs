@@ -5377,6 +5377,33 @@ impl Serialize for FeatureEntries {
         self.flags.serialize(serializer)
     }
 }
+/// The registry rows and the raw-read keys are booleans; any other key is kept and ignored.
+impl schemars::JsonSchema for FeatureEntries {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "FeatureEntries".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut properties = serde_json::Map::new();
+        for spec in FEATURES {
+            let default = if spec.default_enabled { "on" } else { "off" };
+            properties.insert(
+                spec.key.to_owned(),
+                serde_json::json!({
+                    "type": "boolean",
+                    "description": format!("Default {default}. Environment: `{}`.", spec.env),
+                }),
+            );
+        }
+        for key in UNMIRRORED_BOOLEAN_FEATURES {
+            properties.insert((*key).to_owned(), serde_json::json!({ "type": "boolean" }));
+        }
+        schemars::json_schema!({
+            "type": "object",
+            "properties": properties,
+            "additionalProperties": true,
+        })
+    }
+}
 impl<'de> Deserialize<'de> for FeatureEntries {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct EntriesVisitor;
