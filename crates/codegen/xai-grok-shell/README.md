@@ -2202,7 +2202,7 @@ my-project/
 
 If you also have a `linear` server in `~/.grok/config.json`, the project version replaces it entirely.
 
-> **Note:** Only `[mcp_servers]` is supported in project-scoped `.grok/config.json`. Other config sections (models, etc.) are only read from `~/.grok/config.json`.
+> **Note:** Only `mcp.servers` is supported in project-scoped `.grok/config.json`. Other config sections (models, etc.) are only read from `~/.grok/config.json`.
 
 ### Tool Naming
 
