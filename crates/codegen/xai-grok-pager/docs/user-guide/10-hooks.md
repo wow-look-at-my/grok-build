@@ -259,7 +259,7 @@ With this set:
 - **What still runs.** Hooks the embedding client registers over ACP (an IDE or the desktop app), as under Claude Code's `allowManagedHooksOnly`. The pager's `[[ui.notifications.hooks]]` commands are a separate mechanism.
 - **Windows.** There is no root-owned layer (no `/etc/grok`), so only the signed synced `requirements.toml` hooks and ACP client hooks still run.
 
-The key is a tighten-only policy pin: any native policy layer (`requirements.toml` or `managed_config.toml` in `$GROK_HOME` or `/etc/grok`, or macOS MDM) or Claude's `managed-settings.json` can set it. The camelCase `allowManagedHooksOnly` is accepted everywhere, no layer can release it, and a non-boolean value engages it. Like the other policy pins it is read once at startup. As a result, a pin added mid-session applies at the next start, not on `/hooks` Reload. `grok inspect` lists it under **Enforced by policy** as "Hooks outside managed policy disabled" with the file that set it.
+The camelCase `allowManagedHooksOnly` is accepted everywhere, no layer can release it, and a non-boolean value engages it. Like the other policy pins it is read once at startup. As a result, a pin added mid-session applies at the next start, not on `/hooks` Reload. `grok inspect` lists it under **Enforced by policy** as "Hooks outside managed policy disabled" with the file that set it.
 
 ---
 
