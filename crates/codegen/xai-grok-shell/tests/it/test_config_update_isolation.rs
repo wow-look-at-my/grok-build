@@ -1,4 +1,4 @@
-//! Regression test: `update_config` must not leak values from `managed_config.toml` or `requirements.toml` into the user's `config.toml`.
+//! Regression test: `update_config` must not leak values from `managed_config.toml` or `requirements.toml` into the user's `config.json`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -18,6 +18,17 @@ fn test_home() -> &'static PathBuf {
         unsafe { std::env::set_var("GROK_HOME", &path) };
         path
     })
+}
+
+/// The user's `config.json` as written on disk: its text and the typed config it parses to (no merge).
+fn read_user_config(home: &std::path::Path) -> (String, xai_grok_shell::agent::config::Config) {
+    let path = home.join("config.json");
+    let raw = fs::read_to_string(&path).unwrap();
+    let tree = xai_grok_config::format::read_config_tree(&path).unwrap();
+    (
+        raw,
+        xai_grok_shell::util::config::load_config_from_toml(&tree),
+    )
 }
 
 fn reset_config_files(home: &std::path::Path) {
@@ -53,8 +64,8 @@ async fn update_config_does_not_leak_requirements_into_user_config() {
     // --- Arrange ---
 
     fs::write(
-        home.join("config.toml"),
-        "[cli]\nauto_update = true\ninstaller = \"internal\"\n",
+        home.join("config.json"),
+        "{\"cli\": {\"auto_update\": true, \"installer\": \"internal\"}}\n",
     )
     .unwrap();
 
@@ -82,15 +93,13 @@ async fn update_config_does_not_leak_requirements_into_user_config() {
     .await
     .expect("update_config should succeed");
 
-    // Assert. Read the user's config.toml back from disk (raw, no merge).
-    let raw = fs::read_to_string(home.join("config.toml")).unwrap();
-    let user_toml: toml::Value = toml::from_str(&raw).unwrap();
-    let user_cfg = xai_grok_shell::util::config::load_config_from_toml(&user_toml);
+    // Assert. Read the user's config.json back from disk (raw, no merge).
+    let (raw, user_cfg) = read_user_config(home);
 
     assert_eq!(
         user_cfg.cli.auto_update,
         Some(true),
-        "BUG REPRODUCED: auto_update in user config.toml was overwritten by \
+        "BUG REPRODUCED: auto_update in user config.json was overwritten by \
          requirements.toml value. The raw file contents:\n{raw}"
     );
 
@@ -106,8 +115,8 @@ async fn update_config_preserves_none_when_only_requirements_sets_value() {
 
     // User config has no auto_update field
     fs::write(
-        home.join("config.toml"),
-        "[cli]\ninstaller = \"internal\"\n",
+        home.join("config.json"),
+        "{\"cli\": {\"installer\": \"internal\"}}\n",
     )
     .unwrap();
 
@@ -125,9 +134,7 @@ async fn update_config_preserves_none_when_only_requirements_sets_value() {
     .expect("update_config should succeed");
 
     // Read back
-    let raw = fs::read_to_string(home.join("config.toml")).unwrap();
-    let user_toml: toml::Value = toml::from_str(&raw).unwrap();
-    let user_cfg = xai_grok_shell::util::config::load_config_from_toml(&user_toml);
+    let (raw, user_cfg) = read_user_config(home);
 
     assert_eq!(
         user_cfg.cli.auto_update, None,
@@ -144,8 +151,8 @@ async fn update_config_does_not_leak_managed_config_values() {
 
     // User config has no auto_update, only installer
     fs::write(
-        home.join("config.toml"),
-        "[cli]\ninstaller = \"internal\"\n",
+        home.join("config.json"),
+        "{\"cli\": {\"installer\": \"internal\"}}\n",
     )
     .unwrap();
 
@@ -161,9 +168,7 @@ async fn update_config_does_not_leak_managed_config_values() {
     .await
     .expect("update_config should succeed");
 
-    let raw = fs::read_to_string(home.join("config.toml")).unwrap();
-    let user_toml: toml::Value = toml::from_str(&raw).unwrap();
-    let user_cfg = xai_grok_shell::util::config::load_config_from_toml(&user_toml);
+    let (raw, user_cfg) = read_user_config(home);
 
     assert_eq!(
         user_cfg.cli.auto_update, None,
@@ -175,19 +180,19 @@ async fn update_config_does_not_leak_managed_config_values() {
     );
 }
 
-/// Settings save must not replace a user `config.toml` symlink with a regular file.
+/// Settings save must not replace a user `config.json` symlink with a regular file.
 #[tokio::test]
 #[serial]
 #[cfg(unix)]
-async fn update_config_preserves_config_toml_symlink() {
+async fn update_config_preserves_config_json_symlink() {
     let home = test_home();
     reset_config_files(home);
 
     let repo = home.join("dotfiles");
     fs::create_dir_all(&repo).unwrap();
-    let target = repo.join("config.toml");
-    fs::write(&target, "[ui]\nshow_thinking_blocks = false\n").unwrap();
-    let link = home.join("config.toml");
+    let target = repo.join("config.json");
+    fs::write(&target, "{\"ui\": {\"show_thinking_blocks\": false}}\n").unwrap();
+    let link = home.join("config.json");
     std::os::unix::fs::symlink(&target, &link).unwrap();
 
     xai_grok_shell::util::config::update_config(|cfg| {
@@ -199,13 +204,13 @@ async fn update_config_preserves_config_toml_symlink() {
     let meta = fs::symlink_metadata(&link).unwrap();
     assert!(
         meta.file_type().is_symlink(),
-        "config.toml must remain a symlink after save_config; got {:?}",
+        "config.json must remain a symlink after save_config; got {:?}",
         meta.file_type()
     );
     assert_eq!(target, fs::read_link(&link).unwrap());
     let raw = fs::read_to_string(&target).unwrap();
     assert!(
-        raw.contains("show_thinking_blocks = true"),
+        raw.contains("\"show_thinking_blocks\": true"),
         "symlink target must receive the settings save:\n{raw}"
     );
 }
@@ -248,11 +253,19 @@ async fn update_config_refuses_retarget_between_load_and_save() {
     let home = test_home();
     reset_config_files(home);
 
-    let a = home.join("a.toml");
-    let b = home.join("b.toml");
-    fs::write(&a, "[ui]\nshow_thinking_blocks = false\nfrom_a = true\n").unwrap();
-    fs::write(&b, "[ui]\nshow_thinking_blocks = false\nfrom_b = true\n").unwrap();
-    let link = home.join("config.toml");
+    let a = home.join("a.json");
+    let b = home.join("b.json");
+    fs::write(
+        &a,
+        "{\"ui\": {\"show_thinking_blocks\": false, \"from_a\": true}}\n",
+    )
+    .unwrap();
+    fs::write(
+        &b,
+        "{\"ui\": {\"show_thinking_blocks\": false, \"from_b\": true}}\n",
+    )
+    .unwrap();
+    let link = home.join("config.json");
     std::os::unix::fs::symlink(&a, &link).unwrap();
 
     let err = xai_grok_shell::util::config::update_config(|cfg| {
@@ -271,19 +284,19 @@ async fn update_config_refuses_retarget_between_load_and_save() {
     let raw_a = fs::read_to_string(&a).unwrap();
     let raw_b = fs::read_to_string(&b).unwrap();
     assert!(
-        raw_a.contains("from_a = true"),
+        raw_a.contains("\"from_a\": true"),
         "referent A must stay unmerged:\n{raw_a}"
     );
     assert!(
-        !raw_a.contains("show_thinking_blocks = true"),
+        !raw_a.contains("\"show_thinking_blocks\": true"),
         "must not publish onto A after retarget:\n{raw_a}"
     );
     assert!(
-        raw_b.contains("from_b = true"),
+        raw_b.contains("\"from_b\": true"),
         "referent B must stay unmerged:\n{raw_b}"
     );
     assert!(
-        !raw_b.contains("show_thinking_blocks = true"),
+        !raw_b.contains("\"show_thinking_blocks\": true"),
         "must not merge A's snapshot onto B:\n{raw_b}"
     );
     assert_eq!(b, fs::read_link(&link).unwrap());
