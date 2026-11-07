@@ -45,20 +45,25 @@ paths, model output, or free-form errors.
 
 Memory needs no setup. To turn it off in every session:
 
-```toml
-# ~/.grok/config.toml
-[memory]
-enabled = false
+```json
+{
+  "memory": {
+    "enabled": false
+  }
+}
 ```
 
 To use the pipeline instead of v2:
 
-```toml
-[memory]
-enabled = true
-
-[memory_v2]
-enabled = false
+```json
+{
+  "memory": {
+    "enabled": true,
+    "v2": {
+      "enabled": false
+    }
+  }
+}
 ```
 
 ### Force-Disable
@@ -240,12 +245,17 @@ Dream reorganizes individual session logs and memory entries into a coherent, de
 
 Dream also runs automatically. By default, Grok checks the consolidation gates at launch and periodically during a session, and runs Dream once enough time has passed and enough sessions have accumulated:
 
-```toml
-[memory.dream]
-enabled = true     # Run automatic consolidation (default: true)
-min_hours = 24     # Minimum hours between consolidations
-min_sessions = 5   # Minimum sessions since the last consolidation
-check_interval_secs = 3600 # Also check the gates hourly
+```json
+{
+  "memory": {
+    "dream": {
+      "check_interval_secs": 3600,
+      "enabled": true,
+      "min_hours": 24,
+      "min_sessions": 5
+    }
+  }
+}
 ```
 
 ---
@@ -258,10 +268,15 @@ On the first turn of each session, Grok automatically searches memory for conten
 
 First-turn injection can be configured:
 
-```toml
-[memory.initial_injection]
-enabled = true     # Enable or disable first-turn injection
-min_score = 0.9    # Score threshold for first-turn injection
+```json
+{
+  "memory": {
+    "initial_injection": {
+      "enabled": true,
+      "min_score": 0.9
+    }
+  }
+}
 ```
 
 ### After Compaction
@@ -301,10 +316,17 @@ Each memory source has a weight multiplier applied to its score. All sources def
 
 Session memories decay over time so recent sessions are prioritized:
 
-```toml
-[memory.search.temporal_decay]
-enabled = true           # Enable time-based decay
-half_life_days = 30.0    # Score halves after this many days
+```json
+{
+  "memory": {
+    "search": {
+      "temporal_decay": {
+        "enabled": true,
+        "half_life_days": 30.0
+      }
+    }
+  }
+}
 ```
 
 Only session chunks decay. Global and workspace memories are exempt since they contain curated long-term knowledge.
@@ -313,10 +335,17 @@ Only session chunks decay. Global and workspace memories are exempt since they c
 
 MMR re-ranking penalizes redundant results to improve diversity:
 
-```toml
-[memory.search.mmr]
-enabled = true           # Enable diversity re-ranking
-lambda = 0.7             # 0.0 = max diversity, 1.0 = pure relevance
+```json
+{
+  "memory": {
+    "search": {
+      "mmr": {
+        "enabled": true,
+        "lambda": 0.7
+      }
+    }
+  }
+}
 ```
 
 ---
@@ -438,9 +467,14 @@ By default, Grok watches `~/.grok/memory/` for external file changes. If you edi
 - Created or modified files are reindexed.
 - Deleted files have their stale chunks removed from the index.
 
-```toml
-[memory.watcher]
-enabled = true    # default
+```json
+{
+  "memory": {
+    "watcher": {
+      "enabled": true
+    }
+  }
+}
 ```
 
 ---

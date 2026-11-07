@@ -45,96 +45,68 @@ Location: `~/.grok/config.toml`. If the file is missing, Grok uses its built-in 
 
 ### General settings
 
-```toml
-[agent]
-# name = "grok-build"                  # default agent on interactive `grok` (no --plan / --agent-profile)
-# definition = "/path/to/agent.md"     # path wins over name if both are set
-
-[models]
-default = "grok-4.5"                   # model used for new sessions
-web_search = "grok-4.5"                # model used by the web_search tool
-# Optional picker allowlist (globs on catalog key or model id). Empty = unrestricted.
-# A signed policy pin replaces this list (model id only) and cannot be widened from here.
-# allowed_models = ["grok-4.5", "grok-4*"]
-
-# Defaults applied to every model; a per-model [model.<id>] value always wins.
-# See "Custom Models" for the per-model overrides and full details.
-extra_headers = { "X-Request-Tags" = "team=example,env=prod" }
-temperature = 0.7
-top_p = 0.95
-max_completion_tokens = 8192
-max_retries = 8
-inference_idle_timeout_secs = 600
-subagent_rate_limit_max_attempts = 8
-stream_tool_calls = true
-
-[ui]
-max_thoughts_width = 120               # max column width for reasoning display
-default_selected_permission = "always_allow_all_sessions" # preselected row on the FIRST approval prompt
-remember_tool_approvals = true         # show per-command "Always allow" options on permission prompts;
-                                       # grants are remembered per project (default: true); see 22-permissions-and-safety.md
-show_thinking_blocks = true            # show agent thinking blocks in the TUI (default: true)
-thinking_summaries = true              # under a collapsed thinking block, show a one-or-two-sentence
-                                       # summary of what the model worked out (default: true). Costs one
-                                       # model call per thinking block; the model answering it is
-                                       # [models].thinking_summary. A session reads it when it starts, so
-                                       # a change applies to the next session (/settings > Summarize
-                                       # thinking)
-thinking_summary_history_window_secs = 120 # how far back a thinking block's summary may look for
-                                       # earlier summaries from the same session, so it keeps the
-                                       # work's direction instead of repeating an earlier gist
-                                       # (default: 120 seconds; 0 drops the time half)
-thinking_summary_history_min_count = 5 # always include this many of the most recent summaries, even
-                                       # when they are older than the window above (default: 5; a 0
-                                       # here and a 0 window leave each summary stateless)
-group_tool_verbs = true                # fold runs of read/search/list tool calls and subagent rows
-                                       # — and finished thoughts among them — into one row (default: true)
-collapsed_edit_blocks = false          # show edits as one-line +N/-M diffstat summaries and merge
-                                       # back-to-back same-file edits into one row, expand for the
-                                       # diffs (default: false)
-page_flip_on_send = true               # pin a just-sent prompt at the top of the viewport so the
-                                       # response starts on a fresh page (default: true); set false
-                                       # so sending never moves the scroll position
-follow_up_behavior = "queue"           # mid-turn follow-ups: "queue" (wait for turn end; default) or
-                                       # "steer" (plain Enter still queues visibly, then injects at the
-                                       # next tool/model safe gap). See Keyboard Shortcuts → Mid-turn.
-
-[features]
-telemetry = false                      # anonymous usage telemetry
-feedback = true                        # feedback system (default: true)
-lsp_tools = false                      # expose the lsp tool
-codebase_indexing = true               # code graph indexing (default: true)
-two_pass_compaction = true             # prefire two-pass compaction (default: true)
-remote_fetch = true                    # allow optional online model-catalog fetches (default: true;
-                                       # set false for firewalled/air-gapped deployments; background
-                                       # managed-config sync has its own switch: managed_config)
-
-[session]
-auto_compact_threshold_percent = 85    # auto-compact at this % of context window (default: 85)
-load_envrc = true                      # load .envrc environment variables
-
-[tools]
-respect_gitignore = false              # default: false; set true to make every tool skip gitignored files
-
-# Optional caps on parallel media generation in a single model step.
-# Per tool name. First 2×-or-more burst: discard that step and retry once.
-# Any other over-cap (including a second 2× burst) keeps the first K.
-# Defaults: image 8, video 4.
-# Env vars GROK_MAX_PARALLEL_IMAGE_GEN_CALLS / GROK_MAX_PARALLEL_VIDEO_GEN_CALLS
-# override these values (see environment-variables doc).
-# [tools.media_gen]
-# max_parallel_image_gen_calls = 8
-# max_parallel_video_gen_calls = 4
+```json
+{
+  "agents": {
+    "selection": {}
+  },
+  "features": {
+    "codebase_indexing": true,
+    "feedback": true,
+    "lsp_tools": false,
+    "remote_fetch": true,
+    "telemetry": false,
+    "two_pass_compaction": true
+  },
+  "models": {
+    "default": "grok-4.5",
+    "extra_headers": {
+      "X-Request-Tags": "team=example,env=prod"
+    },
+    "inference_idle_timeout_secs": 600,
+    "max_completion_tokens": 8192,
+    "max_retries": 8,
+    "stream_tool_calls": true,
+    "subagent_rate_limit_max_attempts": 8,
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "web_search": "grok-4.5"
+  },
+  "session": {
+    "auto_compact_threshold_percent": 85,
+    "load_envrc": true
+  },
+  "tools": {
+    "respect_gitignore": false
+  },
+  "ui": {
+    "collapsed_edit_blocks": false,
+    "default_selected_permission": "always_allow_all_sessions",
+    "follow_up_behavior": "queue",
+    "group_tool_verbs": true,
+    "max_thoughts_width": 120,
+    "page_flip_on_send": true,
+    "remember_tool_approvals": true,
+    "show_thinking_blocks": true,
+    "thinking_summaries": true,
+    "thinking_summary_history_min_count": 5,
+    "thinking_summary_history_window_secs": 120
+  }
+}
 ```
 
 ### Default agent
 
 Interactive `grok` uses `[agent]` in `config.toml` when you do not pass `--plan`, `--ask-user`, or `--agent-profile`:
 
-```toml
-[agent]
-name = "my-custom-agent"
-# definition = "/path/to/agent.md"   # path wins over name
+```json
+{
+  "agents": {
+    "selection": {
+      "name": "my-custom-agent"
+    }
+  }
+}
 ```
 
 `definition` is a markdown file with YAML frontmatter. `name` is a built-in or discovered agent (`~/.grok/agents/`, `.grok/agents/`). If the named agent is missing, Grok uses `GROK_AGENT`, then the built-in default. `--agent-profile`, `--plan`, and `--ask-user` still override that session. Field list: [26-config-reference.md](26-config-reference.md).
@@ -150,9 +122,12 @@ When the agent asks to run a command (or take some other tool action), the appro
 | `allow_once` | The "Yes" / allow-once row. |
 | `reject` | The reject row. |
 
-```toml
-[ui]
-default_selected_permission = "allow_once"
+```json
+{
+  "ui": {
+    "default_selected_permission": "allow_once"
+  }
+}
 ```
 
 After you answer the first prompt the cursor turns **sticky**: each later prompt preselects whatever you last confirmed (pick "No" once and subsequent prompts start on their reject row), carrying across edit / bash / MCP prompts. This is until you start. So this setting only picks the starting point.
@@ -176,13 +151,14 @@ By default, sending a prompt scrolls it to the top of the viewport so the respon
 | `scroll_lines` | `1`–`10` (unset) | Lines per scroll tick, applied to **both** wheel and trackpad. While unset, each terminal's own profile applies (e.g. a conservative 1 line/event under tmux). Committing any value — even `3`, the number the settings pane shows — switches permanently to that explicit override. |
 | `invert_scroll` | `false` \| `true` (`false`) | Reverse vertical scroll direction ("natural" scrolling). |
 
-```toml
-[ui]
-scroll_speed = 50
-scroll_mode = "auto"     # auto | wheel | trackpad
-invert_scroll = false
-# scroll_lines is unset by default: the per-terminal profile stays in charge.
-# scroll_lines = 3
+```json
+{
+  "ui": {
+    "invert_scroll": false,
+    "scroll_mode": "auto",
+    "scroll_speed": 50
+  }
+}
 ```
 
 Each setting also has an environment-variable override, applied on first load only (again, handy for headless / test runs): `GROK_SCROLL_SPEED`, `GROK_SCROLL_MODE`, `GROK_INVERT_SCROLL` (`1`/`true`/`0`/`false`), and `GROK_SCROLL_LINES`. Precedence: env var → `config.toml` → default. Unrecognized values fall back to the default, and out-of-range numbers clamp.
@@ -201,38 +177,49 @@ The `N tok/s` counter beside the timers appears as soon as the measured rate set
 | `output_rate_max_retries` | `0`–`5` (`2`) | How many backups one call can start. After that the response is kept at whatever rate it runs. `0` starts none. |
 | `ttft_timeout_secs` | `0`–`1800` (`120`) | Time-to-first-token limit. A call with no output this many seconds after it was sent is reissued, on the same retry budget. `0` turns it off. `[model_providers.<id>].ttft_timeout_secs` overrides it for a provider, and `[model.<id>].ttft_timeout_secs` for one model. |
 
-```toml
-[ui]
-min_output_tokens_per_sec = 15
-output_rate_sustained_secs = 10
-output_rate_window_secs = 10
-output_rate_max_retries = 2
-ttft_timeout_secs = 120
+```json
+{
+  "ui": {
+    "min_output_tokens_per_sec": 15,
+    "output_rate_max_retries": 2,
+    "output_rate_sustained_secs": 10,
+    "output_rate_window_secs": 10,
+    "ttft_timeout_secs": 120
+  }
+}
 ```
 
 The older `[output_rate_floor]` table (`window_secs`, `max_retries`) still works. A `[ui]` key wins where both are set.
 
 ### Tool configuration
 
-```toml
-[toolset.bash]
-timeout_secs = 120.0                   # foreground command timeout in seconds (default: 120)
-output_byte_limit = 20000              # max captured output in bytes (default: 20000)
-
-[toolset.ask_user_question]
-timeout_enabled = true                 # false = wait forever for answers (default: true)
-timeout_secs = 1800                    # seconds to wait when enabled (default: 1800 / 30 min)
-
-[toolset.web_fetch]
-proxy_endpoint = "https://proxy.example.com"   # egress proxy URL
-allowed_domains = ["docs.rs", "example.invalid"]          # override the built-in allowlist
-allow_local = false                            # true = allow localhost / 127.0.0.0/8 / ::1 only
-
-[toolset.web_search]
-# Restrict web_search to these domains (max 5). Mutually exclusive with excluded_domains.
-allowed_domains = ["docs.example.invalid", "arxiv.org"]
-# ...or block these domains instead (leave allowed_domains unset):
-# excluded_domains = ["reddit.com", "pinterest.com"]
+```json
+{
+  "tools": {
+    "ask_user_question": {
+      "timeout_enabled": true,
+      "timeout_secs": 1800
+    },
+    "bash": {
+      "output_byte_limit": 20000,
+      "timeout_secs": 120.0
+    },
+    "web_fetch": {
+      "allow_local": false,
+      "allowed_domains": [
+        "docs.rs",
+        "example.invalid"
+      ],
+      "proxy_endpoint": "https://proxy.example.com"
+    },
+    "web_search": {
+      "allowed_domains": [
+        "docs.example.invalid",
+        "arxiv.org"
+      ]
+    }
+  }
+}
 ```
 
 `allow_local` is off by default (SSRF fail-closed). Turn it on (or set `GROK_WEB_FETCH_ALLOW_LOCAL=1`) and `web_fetch` may reach **explicit** loopback hosts only — private, link-local, and cloud-metadata ranges stay blocked. Resolution: TOML > env > default off.
@@ -247,17 +234,18 @@ The model's own per-call `allowed_domains` is ignored when you set `allowed_doma
 
 See [Authentication](02-authentication.md) for the full story.
 
-```toml
-[auth]
-auth_provider_command = "/usr/local/bin/my-auth-provider"
-auth_provider_label = "Acme Corp"
-auth_token_ttl = 3600
-
-[grok_com_config.oidc]
-issuer = "https://acme.okta.com"
-client_id = "0oa1b2c3d4e5f6g7h8i9"
-# scopes = ["openid", "profile", "email", "offline_access", "api:access"]
-# audience = "https://api.acme.com"
+```json
+{
+  "login": {
+    "auth_provider_command": "/usr/local/bin/my-auth-provider",
+    "auth_provider_label": "Acme Corp",
+    "auth_token_ttl": 3600,
+    "oidc": {
+      "client_id": "0oa1b2c3d4e5f6g7h8i9",
+      "issuer": "https://acme.okta.com"
+    }
+  }
+}
 ```
 
 ### Harness model slots
@@ -266,11 +254,14 @@ The harness sends requests to a model for many jobs beside your own turns. Each 
 
 Every slot also has a picker in the settings modal, under **Models**, or shares its group's picker (see [Model groups](#model-groups)). A slot is read when a session starts. So a change applies to the next session.
 
-```toml
-[models]
-goal_skeptic = "grok-4.5-fast"         # every skeptic in the /goal panel
-compaction = "grok-4.5-fast"           # the context-window summarizer
-permission_classifier = "grok-4.5-fast"
+```json
+{
+  "models": {
+    "compaction": "grok-4.5-fast",
+    "goal_skeptic": "grok-4.5-fast",
+    "permission_classifier": "grok-4.5-fast"
+  }
+}
 ```
 
 | Slot | What it runs | Unset |
@@ -313,17 +304,27 @@ Groups ship by default:
 
 Change, unroll or add groups under `[model_groups.<id>]`. Each key is optional. On a default group, a key you leave out keeps its default value.
 
-```toml
-[model_groups.summarization]
-model = "grok-4.5-fast"                # every slot in the group runs on this model
-
-[model_groups.query]
-members = []                           # unroll: side_note and todo_capture get their own rows again
-
-[model_groups.planning]                # a new group
-label = "Planning model"
-description = "Model for the goal planner and strategist."
-members = ["goal_planner", "goal_strategist"]
+```json
+{
+  "models": {
+    "groups": {
+      "planning": {
+        "description": "Model for the goal planner and strategist.",
+        "label": "Planning model",
+        "members": [
+          "goal_planner",
+          "goal_strategist"
+        ]
+      },
+      "query": {
+        "members": []
+      },
+      "summarization": {
+        "model": "grok-4.5-fast"
+      }
+    }
+  }
+}
 ```
 
 A slot that your own group lists leaves the default group it was in. So `planning` above can take `recap` without an edit to `summarization`. Two of your groups that list the same slot, an unknown slot, or a group id with characters other than `a-z`, `0-9`. `_` and `-` stop the start with an error that names the problem.
@@ -334,67 +335,116 @@ A slot reads its model in this order: the slot's environment variable, then its 
 
 Add custom model endpoints to use alternative providers or self-hosted models. Each endpoint is a `[model.<id>]` entry. The base URL must include any provider-specific prefix such as `/v1`. Grok appends `/chat/completions` or `/responses`.
 
-```toml
-[model.my-model]
-model = "model-id"                    # model identifier sent to API
-base_url = "https://api.example.com/v1"  # OpenAI-compatible endpoint
-name = "Display Name"                 # shown in model picker
-description = "Model description"      # optional
-api_key = "sk-..."                    # API key for this provider
-env_key = "XAI_API_KEY"               # env var(s) holding the API key; string or array (first set, non-empty wins)
-temperature = 0.7                     # sampling temperature (0.0-2.0)
-top_p = 0.95                          # nucleus sampling parameter
-max_completion_tokens = 8192          # max tokens per response
-context_window = 128000               # context window size (for auto-compact)
-query_params = { api-version = "2026-07-22" } # query params appended to every request URL
-env_http_headers = { "X-Tenant" = "TENANT_TOKEN" }    # request headers from env vars, resolved at client build
+```json
+{
+  "models": {
+    "definitions": {
+      "my-model": {
+        "api_key": "sk-...",
+        "base_url": "https://api.example.com/v1",
+        "context_window": 128000,
+        "description": "Model description",
+        "env_http_headers": {
+          "X-Tenant": "TENANT_TOKEN"
+        },
+        "env_key": "XAI_API_KEY",
+        "max_completion_tokens": 8192,
+        "model": "model-id",
+        "name": "Display Name",
+        "query_params": {
+          "api-version": "2026-07-22"
+        },
+        "temperature": 0.7,
+        "top_p": 0.95
+      }
+    }
+  }
+}
 ```
 
 Credential resolution: `api_key` > `env_key` > signed-in session token > `XAI_API_KEY`. See [Custom Models](11-custom-models.md#request-query-parameters) for `query_params` and `env_http_headers`, and [Sandbox Mode](18-sandbox.md#shell-environment-policy) for `[shell_environment_policy]`, which restricts the environment variables tool subprocesses inherit.
 
 Several models behind one endpoint share a `[model_providers.<id>]` block instead of repeating the URL, the key, the backend and the headers on each one:
 
-```toml
-[model_providers.acme]
-base_url    = "https://gateway.acme.com/v1"
-api_backend = "responses"
-env_key     = "ACME_API_KEY"
-
-[model.acme-fast]
-model = "acme-fast-1"
-model_provider = "acme"
+```json
+{
+  "models": {
+    "definitions": {
+      "acme-fast": {
+        "model": "acme-fast-1",
+        "model_provider": "acme"
+      }
+    },
+    "providers": {
+      "acme": {
+        "api_backend": "responses",
+        "base_url": "https://gateway.acme.com/v1",
+        "env_key": "ACME_API_KEY"
+      }
+    }
+  }
+}
 ```
 
 A model's own field always wins. The provider fills in the rest. See [Provider Defaults](11-custom-models.md#provider-defaults).
 
 To override a built-in model, use its name as the section key and set only the fields you need:
 
-```toml
-[model.grok-4.6]
-api_key = "my-api-key"
+```json
+{
+  "models": {
+    "definitions": {
+      "grok-4": {
+        "6": {
+          "api_key": "my-api-key"
+        }
+      }
+    }
+  }
+}
 ```
 
 ### MCP servers
 
 Configure external tool integrations over the Model Context Protocol.
 
-```toml
-[mcp_servers.github]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
-env = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_xxx" }
-enabled = true                        # enable/disable (default: true)
-startup_timeout_sec = 30              # init timeout in seconds (default: 30)
-tool_timeout_sec = 6000              # tool call timeout in seconds (default: 6000)
-tool_timeouts = { create_issue = 120 }  # per-tool timeout overrides
-
-[mcp_servers.postgres]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-postgres", "postgresql://user:pass@localhost/db"]
-
-[mcp_servers.my-streamable-server]
-url = "https://mcp.example.com/api/mcp"  # HTTP/SSE transport
-headers = { "x-mcp-session-id" = "{{session_id}}" }
+```json
+{
+  "mcp": {
+    "servers": {
+      "github": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ],
+        "command": "npx",
+        "enabled": true,
+        "env": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxx"
+        },
+        "startup_timeout_sec": 30,
+        "tool_timeout_sec": 6000,
+        "tool_timeouts": {
+          "create_issue": 120
+        }
+      },
+      "my-streamable-server": {
+        "headers": {
+          "x-mcp-session-id": "{{session_id}}"
+        },
+        "url": "https://mcp.example.com/api/mcp"
+      },
+      "postgres": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-postgres",
+          "postgresql://user:pass@localhost/db"
+        ],
+        "command": "npx"
+      }
+    }
+  }
+}
 ```
 
 Remote (HTTP/SSE) servers receive a default `User-Agent: grok-cli/<version>` header. A valid `User-Agent` entry in `headers` overrides it (Figma servers receive bare `grok-cli`). See [MCP servers](07-mcp-servers.md) for details.
@@ -407,43 +457,50 @@ Priority for `[mcp_servers]` and `[plugins]`: `.grok/config.toml` (current dir) 
 
 Persist knowledge across sessions. Memory is on by default and uses the v2 pipeline. An explicit `[memory] enabled = false` turns it off even when a managed remote setting enables it. Notes recorded by earlier versions are carried over automatically. See [13-memory.md](13-memory.md).
 
-```toml
-[memory]
-enabled = true
-
-[memory.session]
-save_on_end = true                    # write metadata summary on session end
-
-[memory.watcher]
-enabled = true                        # watch memory files for external edits
-
-[memory.search]
-max_results = 6                       # default number of results
-min_score = 0.7                       # minimum relevance score
-
-[memory.initial_injection]
-enabled = true                        # auto-inject memory on first turn
-min_score = 0.9                       # score threshold for first-turn injection
-
-[memory.embedding]
-# model is unset by default, so retrieval uses full-text search only
-dimensions = 1024                     # vector dimensions
+```json
+{
+  "memory": {
+    "embedding": {
+      "dimensions": 1024
+    },
+    "enabled": true,
+    "initial_injection": {
+      "enabled": true,
+      "min_score": 0.9
+    },
+    "search": {
+      "max_results": 6,
+      "min_score": 0.7
+    },
+    "session": {
+      "save_on_end": true
+    },
+    "watcher": {
+      "enabled": true
+    }
+  }
+}
 ```
 
 ### Subagents
 
-```toml
-[subagents]
-enabled = true
-usage_frequency = "default"           # explicit-only, very-rare, rare, default, often, very-often
-sampling_limit = 12                   # concurrent in-flight subagent sampling calls per process; defaults to max_concurrent (32) when unset (GROK_SUBAGENT_SAMPLING_LIMIT)
-
-[subagents.toggle]
-explore = true                        # enable/disable specific types
-plan = false
-
-[subagents.models]
-explore = "grok-4.6"               # route to different models
+```json
+{
+  "agents": {
+    "subagents": {
+      "enabled": true,
+      "models": {
+        "explore": "grok-4.6"
+      },
+      "sampling_limit": 12,
+      "toggle": {
+        "explore": true,
+        "plan": false
+      },
+      "usage_frequency": "default"
+    }
+  }
+}
 ```
 
 To pin the model a subagent uses, set its entry under `[subagents.models]`. Settings has one row per spawnable type, including workspace and plugin agents, and each row writes that type's entry. `usage_frequency` does not gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating. See [Subagents and Personas](16-subagents.md#usage-frequency).
@@ -454,9 +511,14 @@ The host-owned workflow engine evaluates `/goal` rounds and drives completion ve
 
 Background workflows — the `workflow` tool, named `.grok/workflows/*.rhai` scripts, `/deep-research`, and `/workflow` launches — are **on by default**. Disable with config, env, or remote settings.
 
-```toml
-[workflows]
-enabled = false                       # disable background workflows (or GROK_WORKFLOWS=0)
+```json
+{
+  "agents": {
+    "workflows": {
+      "enabled": false
+    }
+  }
+}
 ```
 
 Project workflows are discovered from `<repo-root>/.grok/workflows/`. User workflows from `~/.grok/workflows/`. Discovery and invocation key off the script's `meta.name`, so keep each filename aligned with its `meta.name`. Built-ins win over project names, and project names win over user names, so keep names unique across scopes.
@@ -467,11 +529,19 @@ Every `/goal` role has a slot in `[models]`. See [Harness model slots](#harness-
 
 `[goal]` takes a second form of pin. That form carries an agent type beside the model. Use it when a role needs a different harness flavor:
 
-```toml
-[goal]
-planner_model = { model = "grok-build", agent_type = "grok-build-plan" }
-use_current_model_only = true          # ignore every pin, including the ones above
-follow_remote_role_models = true       # opt in to server-pushed role pins
+```json
+{
+  "agents": {
+    "goal": {
+      "follow_remote_role_models": true,
+      "planner_model": {
+        "agent_type": "grok-build-plan",
+        "model": "grok-build"
+      },
+      "use_current_model_only": true
+    }
+  }
+}
 ```
 
 A `[goal]` pin wins over the matching `[models]` slot. `follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
@@ -480,33 +550,51 @@ Each launch gets a session-unique display handle such as `deep-research-2`. That
 
 ### Skills
 
-```toml
-[skills]
-paths = ["~/my-team-skills"]          # additional directories to scan
-ignore = ["~/my-team-skills/wip"]     # paths to exclude
-disabled = ["wip-skill"]              # skill names to keep listed but inactive
+```json
+{
+  "extensions": {
+    "skills": {
+      "disabled": [
+        "wip-skill"
+      ],
+      "ignore": [
+        "~/my-team-skills/wip"
+      ],
+      "paths": [
+        "~/my-team-skills"
+      ]
+    }
+  }
+}
 ```
 
 ### Harness compatibility
 
 Control vendor compatibility for Cursor and Claude. Every cell defaults to `true`. Session cells stay staged and inert until a foreign-session scanner consumes them. Each tool needs both its `sessions` cell and the matching `resume-claude` or `resume-cursor` skill — a missing skill means zero foreign-session filesystem I/O.
 
-```toml
-[compat.cursor]
-skills = true     # scan ~/.cursor/skills/ and <cwd>/.cursor/skills/
-rules = true      # scan ~/.cursor/rules/ and <dir>/.cursor/rules/
-agents = true     # scan ~/.cursor/ for named instruction files
-mcps = true       # scan ~/.cursor/mcp.json and <cwd>/.cursor/mcp.json
-hooks = true      # scan ~/.cursor/hooks.json and <cwd>/.cursor/hooks.json
-sessions = true   # staged; no scanner consumer yet
-
-[compat.claude]
-skills = true     # scan ~/.claude/skills/ and <cwd>/.claude/skills/
-rules = true      # scan ~/.claude/rules/ and <dir>/.claude/rules/
-agents = true     # scan ~/.claude/ and <dir>/.claude/CLAUDE*.md
-mcps = true       # scan ~/.claude.json for MCP servers
-hooks = true      # scan ~/.claude/settings.json for hooks
-sessions = true   # staged; no scanner consumer yet
+```json
+{
+  "extensions": {
+    "compat": {
+      "claude": {
+        "agents": true,
+        "hooks": true,
+        "mcps": true,
+        "rules": true,
+        "sessions": true,
+        "skills": true
+      },
+      "cursor": {
+        "agents": true,
+        "hooks": true,
+        "mcps": true,
+        "rules": true,
+        "sessions": true,
+        "skills": true
+      }
+    }
+  }
+}
 ```
 
 For Claude and Cursor, `rules` and `agents` are independent. Turning off named instruction files does not disable the home or project rules directory, and turning off rules does not disable named files. Claude's `agents` cell gates home-level `~/.claude/` named files and project `<dir>/.claude/CLAUDE*.md`. Generic top-level `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` stay recognized. Project rule paths are scanned at every directory from the repo root down to the current one.
@@ -517,10 +605,19 @@ Each cell can be set via environment variable or `config.toml`. See the environm
 
 ### Plugins
 
-```toml
-[plugins]
-paths = ["~/my-plugins/custom-tools"]
-disabled = ["user/a1b2c3d4/noisy-plugin"]
+```json
+{
+  "extensions": {
+    "plugins": {
+      "disabled": [
+        "user/a1b2c3d4/noisy-plugin"
+      ],
+      "paths": [
+        "~/my-plugins/custom-tools"
+      ]
+    }
+  }
+}
 ```
 
 ### Hints
@@ -529,11 +626,16 @@ disabled = ["user/a1b2c3d4/noisy-plugin"]
 
 `[hints]` is read from the **effective config merge**, with the usual precedence: system managed → user `managed_config.toml` → user `config.toml` → user `requirements.toml` → system `requirements.toml`, higher layers winning. The TUI only ever **writes** these to your user `~/.grok/config.toml`.
 
-```toml
-[hints]
-memory_modal_fullscreen = false        # remember the memory modal fullscreen state
-new_session_worktree_mode = "never"    # /new worktree prompt: "ask" | "always" | "never"
-fork_worktree_mode = "ask"             # /fork worktree prompt: "ask" | "always" | "never"
+```json
+{
+  "ui": {
+    "hints": {
+      "fork_worktree_mode": "ask",
+      "memory_modal_fullscreen": false,
+      "new_session_worktree_mode": "never"
+    }
+  }
+}
 ```
 
 | Key | Type | Default | Description |
@@ -546,18 +648,32 @@ fork_worktree_mode = "ask"             # /fork worktree prompt: "ask" | "always"
 
 Fire terminal notifications when the agent finishes a turn or needs approval. They use terminal-native protocols (OSC 9, OSC 99, OSC 777, or default focus-gates BEL) and, so they only fire when you are not looking at the terminal.
 
-```toml
-[ui.notifications]
-method = "auto"           # auto|osc9|osc99|osc777|bel|none
-condition = "unfocused"   # unfocused|always|never
-idle_threshold_secs = 3   # seconds unfocused before a notification fires
-events = ["turn_complete", "approval_required"]
-sleep_prevention = true   # prevent display sleep during agent turns
-progress_bar = true       # show tab progress bar (OSC 9;4)
-
-[ui.notifications.title]
-enabled = true
-items = ["action-required", "spinner", "activity", "session-name", "grok"]
+```json
+{
+  "ui": {
+    "notifications": {
+      "condition": "unfocused",
+      "events": [
+        "turn_complete",
+        "approval_required"
+      ],
+      "idle_threshold_secs": 3,
+      "method": "auto",
+      "progress_bar": true,
+      "sleep_prevention": true,
+      "title": {
+        "enabled": true,
+        "items": [
+          "action-required",
+          "spinner",
+          "activity",
+          "session-name",
+          "grok"
+        ]
+      }
+    }
+  }
+}
 ```
 
 | Option | Type | Default | Description |
@@ -593,27 +709,40 @@ With `method = "auto"`, Grok detects the terminal brand and picks the best proto
 
 Run your own commands when events fire. Hooks receive `$GROK_EVENT`, `$GROK_MESSAGE`, and `$GROK_SESSION_ID` in the environment.
 
-```toml
-# macOS native notification
-[[ui.notifications.hooks]]
-command = "terminal-notifier -title 'Grok' -message '$GROK_MESSAGE'"
-events = ["turn_complete", "approval_required"]
-only_unfocused = true
-timeout_secs = 10
-
-# Push to ntfy server
-[[ui.notifications.hooks]]
-command = "curl -s -d '$GROK_MESSAGE' ntfy.sh/my-grok-alerts"
-events = ["turn_complete"]
-only_unfocused = true
-timeout_secs = 10
-
-# Play a sound
-[[ui.notifications.hooks]]
-command = "afplay /System/Library/Sounds/Glass.aiff"
-events = ["turn_complete"]
-only_unfocused = true
-timeout_secs = 5
+```json
+{
+  "ui": {
+    "notifications": {
+      "hooks": [
+        {
+          "command": "terminal-notifier -title 'Grok' -message '$GROK_MESSAGE'",
+          "events": [
+            "turn_complete",
+            "approval_required"
+          ],
+          "only_unfocused": true,
+          "timeout_secs": 10
+        },
+        {
+          "command": "curl -s -d '$GROK_MESSAGE' ntfy.sh/my-grok-alerts",
+          "events": [
+            "turn_complete"
+          ],
+          "only_unfocused": true,
+          "timeout_secs": 10
+        },
+        {
+          "command": "afplay /System/Library/Sounds/Glass.aiff",
+          "events": [
+            "turn_complete"
+          ],
+          "only_unfocused": true,
+          "timeout_secs": 5
+        }
+      ]
+    }
+  }
+}
 ```
 
 | Hook Option | Type | Default | Description |
@@ -633,10 +762,19 @@ Run `/doctor` in the affected session. It shows the detected notification and fo
 
 An optional row at the bottom of the full-screen pager, disabled by default. Opt in with `[ui.status_line]`:
 
-```toml
-[ui.status_line]
-type = "builtin"                # builtin | command | disabled
-items = ["cwd", "model", "context"]
+```json
+{
+  "ui": {
+    "status_line": {
+      "items": [
+        "cwd",
+        "model",
+        "context"
+      ],
+      "type": "builtin"
+    }
+  }
+}
 ```
 
 The other keys are `items` (which built-in segments to show, in order), `command`, `padding`, and `refresh_interval` (in seconds. Re-runs a `command` row on a timer, so an incident page or a CI status reaches an idle session). The [Status Line guide](25-status-line.md) documents all of them, along with the JSON contract a `command` script reads on stdin and an example script.
@@ -656,32 +794,38 @@ These are independent knobs (see [Monitoring Usage](24-monitoring-usage.md#relat
 
 When telemetry is on, enterprises running their own collector can redirect it or turn parts off under `[telemetry]`:
 
-```toml
-[telemetry]
-events_url = "https://telemetry.your-company.com/events"  # send events to your own collector
-events_api_key = "your-collector-token"                   # auth for your collector, if required
-mixpanel_enabled = false                                  # disable Mixpanel product analytics
-trace_upload = false                                      # disable session/trace uploads (inherits the telemetry toggle when unset)
+```json
+{
+  "telemetry": {
+    "events_api_key": "your-collector-token",
+    "events_url": "https://telemetry.your-company.com/events",
+    "mixpanel_enabled": false,
+    "trace_upload": false
+  }
+}
 ```
 
 Set these only to point telemetry at your own infrastructure or to switch parts off. The built-in endpoint and credentials are managed by Grok — leave them unset to use the defaults.
 
 The same `[telemetry]` table also configures the **external OpenTelemetry stream**, an independent opt-in (it does not require the telemetry toggle above) that ships a curated, content-free usage schema. This is to your *own* OTLP collector. Collector auth comes from `OTEL_EXPORTER_OTLP_HEADERS` and is never stored on disk. See [Monitoring & Usage](24-monitoring-usage.md) for the full schema, env vars, and privacy model.
 
-```toml
-[telemetry]
-otel_enabled = true                                       # external OTEL master switch (= GROK_EXTERNAL_OTEL)
-otel_metrics_exporter = "otlp"                            # otlp | console | none
-otel_logs_exporter = "otlp"                               # otlp | console | none
-otel_endpoint = "https://collector.corp.example:4318"     # OTLP base endpoint
-otel_protocol = "http/protobuf"                           # http/protobuf | grpc
-otel_certificate = "/etc/ssl/corp-ca.pem"                 # optional: trust private CA (path only)
-otel_client_certificate = "/etc/ssl/client.crt"           # optional: mTLS client cert (path only)
-otel_client_key = "/etc/ssl/client.key"                   # optional: mTLS client key (path only)
-otel_log_user_prompts = false                             # content gate (admins pin via requirements)
-otel_log_assistant_responses = false                      # unset follows prompts; pin false for prompts-only
-otel_log_tool_details = true                              # metadata/preview; enterprise default on for SIEM join
-otel_log_tool_content = false                             # full-body gate; independent of details — does not imply names/paths
+```json
+{
+  "telemetry": {
+    "otel_certificate": "/etc/ssl/corp-ca.pem",
+    "otel_client_certificate": "/etc/ssl/client.crt",
+    "otel_client_key": "/etc/ssl/client.key",
+    "otel_enabled": true,
+    "otel_endpoint": "https://collector.corp.example:4318",
+    "otel_log_assistant_responses": false,
+    "otel_log_tool_content": false,
+    "otel_log_tool_details": true,
+    "otel_log_user_prompts": false,
+    "otel_logs_exporter": "otlp",
+    "otel_metrics_exporter": "otlp",
+    "otel_protocol": "http/protobuf"
+  }
+}
 ```
 
 Listed `[telemetry] otel_*` keys in signed `requirements.toml` **pin** over process env (destination lock). `managed_config.toml` does not. There is no `headers` key — collector tokens stay in `OTEL_EXPORTER_OTLP_HEADERS`. See [Monitoring & Usage](24-monitoring-usage.md).
@@ -696,23 +840,28 @@ Grok has no built-in updater. To update, run the installer again. These `[cli]` 
 
 A complete config for enterprise use:
 
-```toml
-[auth]
-auth_provider_command = "/usr/local/bin/my-company-auth-provider"
-auth_provider_label = "Acme Corp"
-auth_token_ttl = 3600
-
-[models]
-default = "company-grok"
-
-[model.company-grok]
-model = "grok-4.6"
-base_url = "https://grok-proxy.acme.com/"
-name = "Grok 4.6 (Proxy)"
-context_window = 128000
-
-[features]
-telemetry = false
+```json
+{
+  "features": {
+    "telemetry": false
+  },
+  "login": {
+    "auth_provider_command": "/usr/local/bin/my-company-auth-provider",
+    "auth_provider_label": "Acme Corp",
+    "auth_token_ttl": 3600
+  },
+  "models": {
+    "default": "company-grok",
+    "definitions": {
+      "company-grok": {
+        "base_url": "https://grok-proxy.acme.com/",
+        "context_window": 128000,
+        "model": "grok-4.6",
+        "name": "Grok 4.6 (Proxy)"
+      }
+    }
+  }
+}
 ```
 
 ---
@@ -816,8 +965,10 @@ truncated_lines = 3                   # lines in truncated mode
 
 ### Plugins
 
-```toml
-disable_plugins = false               # hide hooks/plugins UI entirely
+```json
+{
+  "disable_plugins": false
+}
 ```
 
 ---
@@ -857,9 +1008,17 @@ The key ones. See the README for the complete list.
 
 Grok sends a model request only to an endpoint you list. This covers chat and completion calls, model listings, web search, image and video generation, embeddings, voice and a pricing catalog you configure. The list starts empty, so a fresh config reaches nothing but the default pricing catalog (below):
 
-```toml
-[endpoints]
-allowed_endpoints = [ "api.example.com", "localhost:11434", "*.corp.example", "https://gateway.example.com/v1", ]
+```json
+{
+  "endpoints": {
+    "allowed_endpoints": [
+      "api.example.com",
+      "localhost:11434",
+      "*.corp.example",
+      "https://gateway.example.com/v1"
+    ]
+  }
+}
 ```
 
 | Entry | Allows |
@@ -875,10 +1034,15 @@ A refused request is never sent. Its error names the entry to add. Grok has one 
 
 A model whose endpoint reports no cost (Anthropic, for one) is priced from `https://modelinfo.pazer.ai`. The request is a `GET` that carries only the model id. It needs no allowlist entry.
 
-```toml
-[pricing]
-catalog_url = "https://modelinfo.pazer.ai"  # the default; "" turns lookups off
-lookup_enabled = true                        # false keeps pricing off the network
+```json
+{
+  "models": {
+    "pricing": {
+      "catalog_url": "https://modelinfo.pazer.ai",
+      "lookup_enabled": true
+    }
+  }
+}
 ```
 
 A `[model.<id>] pricing` table you write always wins over the catalog.

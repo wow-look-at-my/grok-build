@@ -48,10 +48,16 @@ Provider catalogs are combined rather than replaced. For example, models autodet
 
 Enterprise hosts can pin the **selectable** set — not only the default — in signed `requirements.toml`. That list **replaces** any user `allowed_models` (it is not a union), so `/model`, `Ctrl+M`, and `-m` cannot offer models outside it.
 
-```toml
-[models]
-default = "grok-4.5"
-allowed_models = ["grok-4.5", "grok-4*"]
+```json
+{
+  "models": {
+    "allowed_models": [
+      "grok-4.5",
+      "grok-4*"
+    ],
+    "default": "grok-4.5"
+  }
+}
 ```
 
 A fleet pin matches the **model id** (not a user-chosen catalog key), so a local `[model.<name>]` entry cannot widen the set. User-config `allowed_models` still matches catalog key or model id. Omit the key to leave user config standing. An empty array is unrestricted. A present-but-unreadable pin fail-closes (nothing selectable). A default or `-m` value outside the pinned set is rejected once the model catalog is fetched — contact your administrator; the list is not user-editable.
@@ -60,9 +66,12 @@ A fleet pin matches the **model id** (not a user-chosen catalog key), so a local
 
 Set a persistent default in `~/.grok/config.toml`:
 
-```toml
-[models]
-default = "grok-4.5"
+```json
+{
+  "models": {
+    "default": "grok-4.5"
+  }
+}
 ```
 
 ---
@@ -87,23 +96,36 @@ To send provider-specific authentication or version headers -- for example, Anth
 
 Add custom model endpoints in `~/.grok/config.toml` under `[model.<name>]` sections:
 
-```toml
-[model.my-model]
-model = "model-id"                        # Model identifier sent to the API
-base_url = "https://api.example.com/v1"   # OpenAI-compatible endpoint
-name = "Display Name"                     # Shown in the model picker
-description = "Model description"          # Optional description
-api_key = "sk-..."                        # API key for this provider (optional)
-env_key = "XAI_API_KEY"                   # Env var holding the API key (optional; string or array)
-api_backend = "chat_completions"          # "chat_completions", "responses", or "messages"
-reasoning_summary = "concise"             # Responses API only: "none", "auto", "concise", or "detailed"
-temperature = 0.7                         # Sampling temperature
-top_p = 0.95                              # Nucleus sampling parameter
-max_completion_tokens = 8192              # Maximum tokens per response
-context_window = 128000                   # Total context window in tokens
-extra_headers = { "x-api-key" = "sk-..." } # Extra request headers, sent verbatim (optional)
-query_params = { api-version = "2026-07-22" } # Query params appended to every request URL (optional)
-env_http_headers = { "X-Tenant" = "TENANT_TOKEN" }    # Headers from env vars, resolved at client build (optional)
+```json
+{
+  "models": {
+    "definitions": {
+      "my-model": {
+        "api_backend": "chat_completions",
+        "api_key": "sk-...",
+        "base_url": "https://api.example.com/v1",
+        "context_window": 128000,
+        "description": "Model description",
+        "env_http_headers": {
+          "X-Tenant": "TENANT_TOKEN"
+        },
+        "env_key": "XAI_API_KEY",
+        "extra_headers": {
+          "x-api-key": "sk-..."
+        },
+        "max_completion_tokens": 8192,
+        "model": "model-id",
+        "name": "Display Name",
+        "query_params": {
+          "api-version": "2026-07-22"
+        },
+        "reasoning_summary": "concise",
+        "temperature": 0.7,
+        "top_p": 0.95
+      }
+    }
+  }
+}
 ```
 
 ### Credential Resolution
@@ -125,29 +147,43 @@ The `context_window` value tells Grok when to trigger auto-compaction. When you 
 
 The cap is a property of the endpoint, so it also works on a shared `[model_providers.<id>]` block, where every model pointing at that provider inherits it; a `max_request_bytes` on the model itself overrides the provider's value.
 
-```toml
-[model_providers.messages-gateway]
-base_url = "https://gateway.example/v1"
-api_backend = "messages"
-max_request_bytes = 25000000   # every model on this provider inherits it
-
-[model.claude-sonnet]
-model = "claude-sonnet"
-model_provider = "messages-gateway"   # inherits 25 MB
-
-[model.claude-opus]
-model = "claude-opus"
-model_provider = "messages-gateway"
-max_request_bytes = 20000000   # per-model override
+```json
+{
+  "models": {
+    "definitions": {
+      "claude-opus": {
+        "max_request_bytes": 20000000,
+        "model": "claude-opus",
+        "model_provider": "messages-gateway"
+      },
+      "claude-sonnet": {
+        "model": "claude-sonnet",
+        "model_provider": "messages-gateway"
+      }
+    },
+    "providers": {
+      "messages-gateway": {
+        "api_backend": "messages",
+        "base_url": "https://gateway.example/v1",
+        "max_request_bytes": 25000000
+      }
+    }
+  }
+}
 ```
 
 ### Global Default Headers
 
 To apply the same headers to *every* model in the catalog -- built-in, prefetched from `/v1/models`, or custom -- set them once under the global `[models]` section instead of repeating them per model:
 
-```toml
-[models]
-extra_headers = { "X-Request-Tags" = "team=example,env=prod" }
+```json
+{
+  "models": {
+    "extra_headers": {
+      "X-Request-Tags": "team=example,env=prod"
+    }
+  }
+}
 ```
 
 These act as a base for each model's inference requests. A per-model `[model.<id>].extra_headers` entry overrides the global default **per key** (matched case-insensitively): a key set on the model wins, while any global-only keys are still inherited by that model. Like the per-model field, they ride on that model's inference calls -- not on separate services such as image generation or video generation -- which makes them handy for attribution tags (for example, cost tracking) without re-declaring them whenever a new model appears.
@@ -156,16 +192,19 @@ These act as a base for each model's inference requests. A per-model `[model.<id
 
 A few common per-model settings can also be set once under `[models]` as a default for *every* model. A per-model `[model.<id>]` value always wins; the global only fills in where a model (or the server's model list) left the field unset:
 
-```toml
-[models]
-temperature                 = 0.7
-top_p                       = 0.95
-max_completion_tokens       = 8192
-max_retries                 = 8
-rate_limit_retry_threshold  = 4
-inference_idle_timeout_secs = 600
-subagent_rate_limit_max_attempts = 8
-stream_tool_calls           = true
+```json
+{
+  "models": {
+    "inference_idle_timeout_secs": 600,
+    "max_completion_tokens": 8192,
+    "max_retries": 8,
+    "rate_limit_retry_threshold": 4,
+    "stream_tool_calls": true,
+    "subagent_rate_limit_max_attempts": 8,
+    "temperature": 0.7,
+    "top_p": 0.95
+  }
+}
 ```
 
 This is a small, fixed set of environment-wide knobs. Settings that identify a specific model (`model`, `base_url`, `api_key`, `context_window`, ...) cannot be defaulted this way, and a few settings with their own dedicated configuration -- auto-compaction (`[session]`), the system-prompt label (`[agent]`), and reasoning effort (`[models].default_reasoning_effort`) -- keep their existing homes.
@@ -178,13 +217,22 @@ This is a small, fixed set of environment-wide knobs. Settings that identify a s
 
 Some gateways route or version on the query string. `query_params` appends percent-encoded query parameters to every request Grok makes for a model. For example, a gateway that selects an API version this way:
 
-```toml
-[model.my-gateway]
-model = "my-model"
-base_url = "https://gateway.example/v1"
-api_backend = "responses"
-env_key = "GATEWAY_API_KEY"
-query_params = { api-version = "2026-07-22" }
+```json
+{
+  "models": {
+    "definitions": {
+      "my-gateway": {
+        "api_backend": "responses",
+        "base_url": "https://gateway.example/v1",
+        "env_key": "GATEWAY_API_KEY",
+        "model": "my-model",
+        "query_params": {
+          "api-version": "2026-07-22"
+        }
+      }
+    }
+  }
+}
 ```
 
 A key that also appears in the `base_url` query string is overridden (last value wins) rather than duplicated. Query parameters are saved in the session, so do not put secrets in them: use `env_http_headers` for a secret.
@@ -193,11 +241,20 @@ A key that also appears in the `base_url` query string is overridden (last value
 
 `env_http_headers` maps a request header to the name of an environment variable that supplies its value, so a per-request secret never has to be written into `config.toml`:
 
-```toml
-[model.gateway]
-model = "my-model"
-base_url = "https://gateway.example/v1"
-env_http_headers = { "X-Tenant-Token" = "GATEWAY_TENANT_TOKEN" }
+```json
+{
+  "models": {
+    "definitions": {
+      "gateway": {
+        "base_url": "https://gateway.example/v1",
+        "env_http_headers": {
+          "X-Tenant-Token": "GATEWAY_TENANT_TOKEN"
+        },
+        "model": "my-model"
+      }
+    }
+  }
+}
 ```
 
 Grok reads each variable when it builds the client for a session and places the value in the request headers only, never on disk. A header is skipped when its variable is unset or blank, and a resolved value overrides an `extra_headers` entry of the same name. Use `extra_headers` for a static value and `env_http_headers` for one that comes from the environment.
@@ -212,23 +269,36 @@ Most of a `[model.<id>]` block is not about the model at all. The endpoint, the 
 
 Put them in a `[model_providers.<id>]` block once, and point each model at it with `model_provider = "<id>"`:
 
-```toml
-[model_providers.acme]
-base_url    = "https://gateway.acme.com/v1"
-api_backend = "responses"
-env_key     = "ACME_API_KEY"
-context_window = 128000
-extra_headers = { "anthropic-version" = "2023-06-01" }
-query_params  = { api-version = "2026-07-22" }
-
-[model.acme-fast]
-model = "acme-fast-1"
-name  = "Acme Fast"
-
-[model.acme-deep]
-model = "acme-deep-1"
-name  = "Acme Deep"
-temperature = 0.2          # this model only
+```json
+{
+  "models": {
+    "definitions": {
+      "acme-deep": {
+        "model": "acme-deep-1",
+        "name": "Acme Deep",
+        "temperature": 0.2
+      },
+      "acme-fast": {
+        "model": "acme-fast-1",
+        "name": "Acme Fast"
+      }
+    },
+    "providers": {
+      "acme": {
+        "api_backend": "responses",
+        "base_url": "https://gateway.acme.com/v1",
+        "context_window": 128000,
+        "env_key": "ACME_API_KEY",
+        "extra_headers": {
+          "anthropic-version": "2023-06-01"
+        },
+        "query_params": {
+          "api-version": "2026-07-22"
+        }
+      }
+    }
+  }
+}
 ```
 
 Both models reach the gateway with the same URL, key, backend and headers. Neither restates one.
@@ -263,13 +333,20 @@ A model's own value always wins. The provider only fills in what the model left 
 
 A provider can mint tokens with a credential helper in place of a static key. Name an existing `[auth_provider.<name>]` block, or declare one inline:
 
-```toml
-[model_providers.corp]
-base_url = "https://llm.corp.internal/v1"
-
-[model_providers.corp.auth]
-command         = "/usr/local/bin/corp-token"
-token_ttl_secs  = 3600
+```json
+{
+  "models": {
+    "providers": {
+      "corp": {
+        "auth": {
+          "command": "/usr/local/bin/corp-token",
+          "token_ttl_secs": 3600
+        },
+        "base_url": "https://llm.corp.internal/v1"
+      }
+    }
+  }
+}
 ```
 
 Every model behind `model_provider = "corp"` runs that helper. A model with its own `api_key` or `env_key` bypasses it.
@@ -284,10 +361,17 @@ A provider endpoint is not an xAI endpoint, so a model behind one never falls ba
 
 A `[model_providers.<id>]` block declares a base URL. Grok asks that base what models it serves, at `<base_url>/models`, and adds every model it names to the catalog. You write no `[model.<id>]` block per model:
 
-```toml
-[model_providers.gateway]
-base_url = "https://gateway.example/v1"
-env_key = "GATEWAY_API_KEY"
+```json
+{
+  "models": {
+    "providers": {
+      "gateway": {
+        "base_url": "https://gateway.example/v1",
+        "env_key": "GATEWAY_API_KEY"
+      }
+    }
+  }
+}
 ```
 
 Each autodetected model is keyed `<provider id>/<model slug>`, for example `gateway/claude-sonnet-4-6`. The key is qualified so a slug that several providers serve stays one entry per provider, and so your own `[model.<id>]` block is never shadowed. Every autodetected model inherits the provider's connection and credential fields, exactly as a model that names `model_provider` does.
@@ -296,16 +380,21 @@ Discovery runs in the background at startup, so a slow provider never delays the
 
 These keys control it:
 
-```toml
-[model_providers.huge]
-base_url = "https://huge.example/v1"
-# This provider serves hundreds of models. Do not ask.
-models_autodetect = false
-
-[model_providers.elsewhere]
-base_url = "https://elsewhere.example/inference"
-# The listing is not at <base_url>/models.
-models_list_url = "https://elsewhere.example/catalog.json"
+```json
+{
+  "models": {
+    "providers": {
+      "elsewhere": {
+        "base_url": "https://elsewhere.example/inference",
+        "models_list_url": "https://elsewhere.example/catalog.json"
+      },
+      "huge": {
+        "base_url": "https://huge.example/v1",
+        "models_autodetect": false
+      }
+    }
+  }
+}
 ```
 
 `models_list_url` is asked for verbatim. The models it names still route to the provider's `base_url`.
@@ -314,13 +403,23 @@ models_list_url = "https://elsewhere.example/catalog.json"
 
 A provider with a large catalog fills the picker. `favorite_models` is a list of glob patterns that marks the models you want in front of you:
 
-```toml
-[models]
-favorite_models = ["grok-4*"]
-
-[model_providers.gateway]
-base_url = "https://gateway.example/v1"
-favorite_models = ["*-sonnet-*", "*-opus-*"]
+```json
+{
+  "models": {
+    "favorite_models": [
+      "grok-4*"
+    ],
+    "providers": {
+      "gateway": {
+        "base_url": "https://gateway.example/v1",
+        "favorite_models": [
+          "*-sonnet-*",
+          "*-opus-*"
+        ]
+      }
+    }
+  }
+}
 ```
 
 `/model` lists every model, newest first. Favorites come first, each with a star. Batch routes (`:batch`) are not listed, because they cannot answer an interactive turn.
@@ -360,47 +459,77 @@ When you override a built-in model, Grok starts with the default configuration (
 
 Use Claude models directly via the Anthropic Messages API:
 
-```toml
-[model.claude-opus]
-model = "claude-opus-4-6"
-base_url = "https://api.anthropic.com/v1"
-name = "Claude Opus 4.6"
-api_backend = "messages"
-context_window = 200000
-extra_headers = { "x-api-key" = "sk-ant-...", "anthropic-version" = "2023-06-01" }
+```json
+{
+  "models": {
+    "definitions": {
+      "claude-opus": {
+        "api_backend": "messages",
+        "base_url": "https://api.anthropic.com/v1",
+        "context_window": 200000,
+        "extra_headers": {
+          "anthropic-version": "2023-06-01",
+          "x-api-key": "sk-ant-..."
+        },
+        "model": "claude-opus-4-6",
+        "name": "Claude Opus 4.6"
+      }
+    }
+  }
+}
 ```
 
 The `messages` backend uses the Anthropic Messages protocol. Anthropic authenticates with an `x-api-key` header rather than `Authorization: Bearer`, so pass your key through `extra_headers`, which Grok sends verbatim.
 
 For more than one Claude model, move the shared half to a provider block:
 
-```toml
-[model_providers.anthropic]
-base_url = "https://api.anthropic.com/v1"
-api_backend = "messages"
-context_window = 200000
-env_http_headers = { "x-api-key" = "ANTHROPIC_API_KEY" }
-extra_headers = { "anthropic-version" = "2023-06-01" }
-
-[model.claude-opus]
-model = "claude-opus-4-6"
-name  = "Claude Opus 4.6"
-model_provider = "anthropic"
-
-[model.claude-haiku]
-model = "claude-haiku-4-5"
-name  = "Claude Haiku 4.5"
-model_provider = "anthropic"
+```json
+{
+  "models": {
+    "definitions": {
+      "claude-haiku": {
+        "model": "claude-haiku-4-5",
+        "model_provider": "anthropic",
+        "name": "Claude Haiku 4.5"
+      },
+      "claude-opus": {
+        "model": "claude-opus-4-6",
+        "model_provider": "anthropic",
+        "name": "Claude Opus 4.6"
+      }
+    },
+    "providers": {
+      "anthropic": {
+        "api_backend": "messages",
+        "base_url": "https://api.anthropic.com/v1",
+        "context_window": 200000,
+        "env_http_headers": {
+          "x-api-key": "ANTHROPIC_API_KEY"
+        },
+        "extra_headers": {
+          "anthropic-version": "2023-06-01"
+        }
+      }
+    }
+  }
+}
 ```
 
 ### OpenAI (Chat Completions)
 
-```toml
-[model.gpt-4o]
-model = "gpt-4o"
-base_url = "https://api.openai.com/v1"
-name = "GPT-4o"
-env_key = "OPENAI_API_KEY"
+```json
+{
+  "models": {
+    "definitions": {
+      "gpt-4o": {
+        "base_url": "https://api.openai.com/v1",
+        "env_key": "OPENAI_API_KEY",
+        "model": "gpt-4o",
+        "name": "GPT-4o"
+      }
+    }
+  }
+}
 ```
 
 `api_backend` defaults to `"chat_completions"`, so you don't need to set it explicitly for OpenAI.
@@ -409,13 +538,20 @@ env_key = "OPENAI_API_KEY"
 
 If your provider supports the newer Responses API:
 
-```toml
-[model.gpt-4o-responses]
-model = "gpt-4o"
-base_url = "https://api.openai.com/v1"
-name = "GPT-4o (Responses)"
-api_backend = "responses"
-env_key = "OPENAI_API_KEY"
+```json
+{
+  "models": {
+    "definitions": {
+      "gpt-4o-responses": {
+        "api_backend": "responses",
+        "base_url": "https://api.openai.com/v1",
+        "env_key": "OPENAI_API_KEY",
+        "model": "gpt-4o",
+        "name": "GPT-4o (Responses)"
+      }
+    }
+  }
+}
 ```
 
 On the Responses API, Grok asks for a `concise` reasoning summary by default; that is what the reasoning text shown in the UI comes from. `reasoning_summary` changes the request: `detailed` or `auto` for a fuller summary, or `none` to omit the field for gateways that reject it.
@@ -424,42 +560,72 @@ On the Responses API, Grok asks for a `concise` reasoning summary by default; th
 
 Bedrock's OpenAI-compatible gateway rejects `reasoning.summary`, so set `reasoning_summary = "none"`. It authenticates with a Bedrock API key as a bearer token; the example below mints a short-lived one through a named auth provider:
 
-```toml
-[auth_provider.bedrock]
-command = "aws-bedrock-token"   # prints a Bedrock API key on stdout (e.g. via aws-bedrock-token-generator)
-token_ttl_secs = 3600
-
-[model."bedrock-grok-4.6"]
-model = "xai.grok-4.6"
-base_url = "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
-name = "Grok 4.6 (Bedrock)"
-api_backend = "responses"
-reasoning_summary = "none"
-auth_provider = "bedrock"
-context_window = 500000
+```json
+{
+  "models": {
+    "auth_providers": {
+      "bedrock": {
+        "command": "aws-bedrock-token",
+        "token_ttl_secs": 3600
+      }
+    },
+    "definitions": {
+      "bedrock-grok-4.6": {
+        "api_backend": "responses",
+        "auth_provider": "bedrock",
+        "base_url": "https://bedrock-mantle.us-west-2.api.aws/openai/v1",
+        "context_window": 500000,
+        "model": "xai.grok-4.6",
+        "name": "Grok 4.6 (Bedrock)",
+        "reasoning_summary": "none"
+      }
+    }
+  }
+}
 ```
 
 ### Ollama and LM Studio (local models)
 
 Declare the provider and every model it serves shows up in `/model`. That Declare is with its real context window, its capabilities and a dot showing whether it is loaded in VRAM right now:
 
-```toml
-[model_providers.ollama]
+```json
+{
+  "models": {
+    "providers": {
+      "ollama": {}
+    }
+  }
+}
 ```
 
 That is the whole configuration. The provider id fills in the endpoint (`http://localhost:11434/v1`), the listing dialect and the pricing switch. LM Studio is the same:
 
-```toml
-[model_providers.lmstudio]
+```json
+{
+  "models": {
+    "providers": {
+      "lmstudio": {}
+    }
+  }
+}
 ```
 
 Anything you write yourself wins over those defaults:
 
-```toml
-[model_providers.ollama]
-base_url = "http://workstation.local:11434/v1"
-context_window_source = "loaded"   # "loaded" (default) or "max"
-favorite_models = ["qwen3-coder*"]
+```json
+{
+  "models": {
+    "providers": {
+      "ollama": {
+        "base_url": "http://workstation.local:11434/v1",
+        "context_window_source": "loaded",
+        "favorite_models": [
+          "qwen3-coder*"
+        ]
+      }
+    }
+  }
+}
 ```
 
 **Why this matters.** Asked through the OpenAI-compatible `/v1/models`, a local runtime reports an id and nothing else, so every model gets the client's default 256k window. Ollama actually loads a runner at whatever your VRAM allowed — frequently 4k — and then silently drops the oldest messages once the prompt overflows. The harness never compacts, and the conversation loses its head with no error. Reading the runtime's own listing is what makes the number true.
@@ -470,22 +636,38 @@ The green dot beside a model in `/model` means it is resident in VRAM. A dim dot
 
 Ollama's OpenAI-compatible endpoint cannot carry `num_ctx`, `keep_alive` or `truncate` at all — they are not fields on that request. To set them, use the native backend:
 
-```toml
-[model_providers.ollama]
-base_url = "http://localhost:11434"   # native paths live at the host root
-api_backend = "ollama"                # POST /api/chat
-
-[model_providers.ollama.extra_body]
-"options.num_ctx" = 32768   # pin the window the runner loads at
-keep_alive = "30m"          # stay resident between turns
-truncate = false            # error instead of silently dropping history
+```json
+{
+  "models": {
+    "providers": {
+      "ollama": {
+        "api_backend": "ollama",
+        "base_url": "http://localhost:11434",
+        "extra_body": {
+          "keep_alive": "30m",
+          "options.num_ctx": 32768,
+          "truncate": false
+        }
+      }
+    }
+  }
+}
 ```
 
 LM Studio's compatible endpoint does accept extra body fields. It needs no backend change:
 
-```toml
-[model_providers.lmstudio.extra_body]
-ttl = 1800   # unload after 30 idle minutes
+```json
+{
+  "models": {
+    "providers": {
+      "lmstudio": {
+        "extra_body": {
+          "ttl": 1800
+        }
+      }
+    }
+  }
+}
 ```
 
 `extra_body` also works on a single `[model.<id>]` block, and a model's own value wins over its provider's key by key.
@@ -494,24 +676,38 @@ Make sure the runtime runs (`ollama serve`, or LM Studio's server tab) and the m
 
 ### Together AI
 
-```toml
-[model.together-mixtral]
-model = "mistralai/Mixtral-8x7B-Instruct-v0.1"
-base_url = "https://api.together.xyz/v1"
-name = "Mixtral 8x7B"
-env_key = "TOGETHER_API_KEY"
+```json
+{
+  "models": {
+    "definitions": {
+      "together-mixtral": {
+        "base_url": "https://api.together.xyz/v1",
+        "env_key": "TOGETHER_API_KEY",
+        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "name": "Mixtral 8x7B"
+      }
+    }
+  }
+}
 ```
 
 ### Local OpenAI-Compatible Server
 
 Any server that implements the OpenAI Chat Completions or Responses API:
 
-```toml
-[model.local-llama]
-model = "llama-3.1-70b"
-base_url = "http://localhost:8080/v1"
-name = "Local Llama"
-temperature = 0.8
+```json
+{
+  "models": {
+    "definitions": {
+      "local-llama": {
+        "base_url": "http://localhost:8080/v1",
+        "model": "llama-3.1-70b",
+        "name": "Local Llama",
+        "temperature": 0.8
+      }
+    }
+  }
+}
 ```
 
 ---
@@ -538,13 +734,21 @@ grok
 
 ### Config File Alternative
 
-```toml
-[endpoints]
-models_base_url = "https://api.acme.com/v1"
-
-# Override only the API key for a specific model
-[model.grok-4.6]
-api_key = "my-api-key"
+```json
+{
+  "endpoints": {
+    "models_base_url": "https://api.acme.com/v1"
+  },
+  "models": {
+    "definitions": {
+      "grok-4": {
+        "6": {
+          "api_key": "my-api-key"
+        }
+      }
+    }
+  }
+}
 ```
 
 When you use `[endpoints]` with partial model overrides, Grok inherits the `base_url` from the endpoints config, so you do not need to specify it in each `[model.*]` section.
@@ -559,9 +763,12 @@ When you set `models_base_url`, Grok uses API key auth (`Authorization: Bearer`)
 
 The `web_search` tool uses a separate model. Configure it with:
 
-```toml
-[models]
-web_search = "grok-4.5"
+```json
+{
+  "models": {
+    "web_search": "grok-4.5"
+  }
+}
 ```
 
 Or via environment variable:
@@ -572,13 +779,18 @@ export GROK_WEB_SEARCH_MODEL="grok-4.5"
 
 If you point web search at a custom model, you also need a `[model.*]` entry so Grok can reach it. Server-side ("backend") web search runs only when the model sets `supports_backend_search = true` (and the build enables backend search); it does not depend on `api_backend`:
 
-```toml
-[models]
-web_search = "my-custom-model"
-
-[model.my-custom-model]
-model = "my-custom-model"
-supports_backend_search = true
+```json
+{
+  "models": {
+    "definitions": {
+      "my-custom-model": {
+        "model": "my-custom-model",
+        "supports_backend_search": true
+      }
+    },
+    "web_search": "my-custom-model"
+  }
+}
 ```
 
 ---
@@ -606,23 +818,28 @@ default = "my-model"
 
 A complete config for an enterprise deployment with custom models:
 
-```toml
-[auth]
-auth_provider_command = "/usr/local/bin/my-company-auth-provider"
-auth_provider_label = "Acme Corp"
-auth_token_ttl = 3600
-
-[models]
-default = "company-grok"
-
-[model.company-grok]
-model = "grok-4.6"
-base_url = "https://grok-proxy.acme.com/"
-name = "Grok 4.6 (Proxy)"
-context_window = 128000
-
-[features]
-telemetry = false
+```json
+{
+  "features": {
+    "telemetry": false
+  },
+  "login": {
+    "auth_provider_command": "/usr/local/bin/my-company-auth-provider",
+    "auth_provider_label": "Acme Corp",
+    "auth_token_ttl": 3600
+  },
+  "models": {
+    "default": "company-grok",
+    "definitions": {
+      "company-grok": {
+        "base_url": "https://grok-proxy.acme.com/",
+        "context_window": 128000,
+        "model": "grok-4.6",
+        "name": "Grok 4.6 (Proxy)"
+      }
+    }
+  }
+}
 ```
 
 ---

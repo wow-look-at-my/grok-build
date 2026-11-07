@@ -157,7 +157,7 @@ pub struct ConnectFlags {
     pub fs_read: bool,
     /// Filesystem write capability in ACP Initialize.
     pub fs_write: bool,
-    /// Installer field for config.toml.
+    /// Installer field for config.json.
     pub installer: Option<String>,
     /// Remote settings from early prefetch (used for memory config resolution).
     pub remote_settings: Option<xai_grok_shell::util::config::RemoteSettings>,
@@ -393,31 +393,39 @@ fn unsupported_leader_flags(flags: &ConnectFlags) -> Vec<&'static str> {
     }
     out
 }
-/// Write config.toml fields based on CLI flags.
+/// Write config.json fields based on CLI flags.
 pub(super) fn apply_config_writes(flags: &ConnectFlags) {
-    let config_path =
-        xai_grok_shell::util::grok_home::grok_home().join(xai_grok_config::USER_CONFIG_FILENAME);
-    let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-    let mut doc = content
-        .parse::<toml_edit::DocumentMut>()
-        .unwrap_or_default();
-    let mut changed = false;
-    if let Some(ref installer) = flags.installer {
-        let cli = doc
-            .entry("cli")
-            .or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()));
-        if let Some(tbl) = cli.as_table_mut() {
-            tbl.insert("installer", toml_edit::value(installer.as_str()));
-            changed = true;
+    let Some(ref installer) = flags.installer else {
+        return;
+    };
+    let home = xai_grok_shell::util::grok_home::grok_home();
+    let config_path = match xai_grok_config::user_config_file(&home) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to locate config.json");
+            return;
         }
-    }
-    if changed {
-        if let Some(parent) = config_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Err(e) = std::fs::write(&config_path, doc.to_string()) {
-            tracing::warn!(error = %e, "failed to write config.toml");
-        }
+    };
+    let edited = xai_grok_config::edit_config_tree(
+        &config_path,
+        xai_grok_config::format::schema_ref_for(&config_path),
+        |tree| {
+            let Some(root) = tree.as_table_mut() else {
+                return;
+            };
+            let cli = root
+                .entry("cli")
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            if let Some(tbl) = cli.as_table_mut() {
+                tbl.insert(
+                    "installer".into(),
+                    toml::Value::String(installer.to_string()),
+                );
+            }
+        },
+    );
+    if let Err(e) = edited {
+        tracing::warn!(error = %e, "failed to write config.json");
     }
 }
 /// Build the per-session `_meta` for `InitializeRequest` (TUI and leader).

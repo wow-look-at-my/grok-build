@@ -256,9 +256,9 @@ fn resolve_protocol(
     }
 }
 
-/// Load `NotificationConfig` from a raw TOML config value.
+/// Load `NotificationConfig` from the internal config tree.
 ///
-/// Looks for `[ui.notifications]`; falls back to defaults if absent or malformed.
+/// Looks for `ui.notifications`; falls back to defaults if absent or malformed.
 pub fn load_notification_config(raw_config: &toml::Value) -> NotificationConfig {
     raw_config
         .get("ui")

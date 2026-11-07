@@ -12,7 +12,7 @@ pub(crate) fn show_tips_from_toml_opt(root: &TomlValue) -> Option<bool> {
     }
 }
 /// Local `[tips]` config section.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct TipsOverride {
     pub tips: Vec<String>,

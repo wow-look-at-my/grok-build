@@ -401,15 +401,15 @@ fn persisted_write_drops_stale_onboarding_table() {
     );
 }
 
-/// Pre-populated `[hints]` table survives the dashboard write
+/// Pre-populated `ui.hints` survives the dashboard write
 /// (the guarantee — we never clobber unrelated tables).
 #[test]
 fn persisted_write_preserves_other_tables() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
+    let path = tmp.path().join("config.json");
     std::fs::write(
         &path,
-        "[hints]\nmemory_modal_fullscreen = true\n\n[ui]\ncompact_mode = false\n",
+        r#"{"ui": {"compact_mode": false, "hints": {"memory_modal_fullscreen": true}}}"#,
     )
     .unwrap();
     let p = PersistedDashboard {
@@ -419,20 +419,19 @@ fn persisted_write_preserves_other_tables() {
         reorder: Vec::new(),
     };
     write_persisted_to_path(&path, &p).unwrap();
-    let after = std::fs::read_to_string(&path).unwrap();
-    assert!(after.contains("[hints]"));
-    assert!(after.contains("memory_modal_fullscreen = true"));
-    assert!(after.contains("[ui]"));
-    assert!(after.contains("compact_mode = false"));
-    assert!(after.contains("[dashboard]"));
+    let after: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(after["ui"]["hints"]["memory_modal_fullscreen"], true);
+    assert_eq!(after["ui"]["compact_mode"], false);
+    assert_eq!(after["ui"]["dashboard"]["enabled"], true);
 }
 
 /// Garbage `enabled` value falls back to defaults at load.
 #[test]
 fn persisted_load_garbage_enabled_falls_back() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
-    std::fs::write(&path, "[dashboard]\nenabled = \"garbage\"\n").unwrap();
+    let path = tmp.path().join("config.json");
+    std::fs::write(&path, r#"{"ui": {"dashboard": {"enabled": "garbage"}}}"#).unwrap();
     let loaded = load_persisted_from_path(&path).expect("section present");
     // Garbage → default `true`.
     assert!(loaded.enabled);
@@ -445,8 +444,8 @@ fn persisted_load_garbage_enabled_falls_back() {
 #[test]
 fn persisted_write_refuses_unparseable_file() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
-    std::fs::write(&path, "this is :: not :: valid :: toml :: at all").unwrap();
+    let path = tmp.path().join("config.json");
+    std::fs::write(&path, "this is :: not :: valid :: json :: at all").unwrap();
     let p = PersistedDashboard {
         enabled: true,
         grouping: Grouping::Directory,

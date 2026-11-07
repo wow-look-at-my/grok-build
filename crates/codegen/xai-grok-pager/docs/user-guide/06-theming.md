@@ -25,9 +25,12 @@ Theme names are case-insensitive. The `auto` option (alias `system`) is document
 
 The theme paints no backgrounds at all: your messages render in bold instead of on a band, menus and prompt panels sit directly on the terminal canvas, and the selected or hovered row in any menu uses reverse video (your terminal's own foreground/background swap), so every combination stays readable on any profile. Decoration — idle borders, dividers, the scrollbar thumb — uses ANSI *bright black* as a foreground, the palette slot your profile tunes as its own dimmed tone. Focused chrome, like the active composer border, stays at the full default foreground so focus still pops. Grok also leaves your cursor color alone on this theme (other themes recolor it to their accent).
 
-```toml
-[ui]
-theme = "terminal"
+```json
+{
+  "ui": {
+    "theme": "terminal"
+  }
+}
 ```
 
 Contrast is only as good as your terminal profile: a profile with a very dark bright-black slot will render faint dividers, since Grok derives everything from your palette rather than hard-coding colors.
@@ -54,9 +57,12 @@ Submitting `/theme` on its own -- without choosing from the picker -- cycles to 
 
 Set the theme in `~/.grok/config.toml`:
 
-```toml
-[ui]
-theme = "tokyonight"
+```json
+{
+  "ui": {
+    "theme": "tokyonight"
+  }
+}
 ```
 
 ---
@@ -65,18 +71,24 @@ theme = "tokyonight"
 
 Set `theme = "auto"` to have Grok follow your operating system's light/dark appearance and switch themes automatically:
 
-```toml
-[ui]
-theme = "auto"
+```json
+{
+  "ui": {
+    "theme": "auto"
+  }
+}
 ```
 
 By default, dark mode maps to **GrokNight** and light mode maps to **GrokDay**. Override either mapping with `auto_dark_theme` and `auto_light_theme`:
 
-```toml
-[ui]
-theme = "auto"
-auto_dark_theme = "tokyonight"
-auto_light_theme = "grokday"
+```json
+{
+  "ui": {
+    "auto_dark_theme": "tokyonight",
+    "auto_light_theme": "grokday",
+    "theme": "auto"
+  }
+}
 ```
 
 `theme = "system"` is an alias for `theme = "auto"`.
@@ -320,8 +332,10 @@ Alt-screen policies:
 
 ### Plugins UI
 
-```toml
-disable_plugins = false   # Set to true to hide /hooks, /plugins commands and annotations
+```json
+{
+  "disable_plugins": false
+}
 ```
 
 ---

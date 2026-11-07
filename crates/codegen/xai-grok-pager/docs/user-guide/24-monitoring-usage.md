@@ -108,12 +108,15 @@ bodies. CONTENT does **not** imply DETAILS — CONTENT-only yields 60 KB
 `tool_output` with `tool_name` / `mcp_tool.name` still collapsed to
 `mcp_tool`.
 
-```toml
-[telemetry]
-otel_log_user_prompts = false
-otel_log_assistant_responses = false   # unset would follow prompts; pin off
-otel_log_tool_details = true           # metadata for SIEM join
-otel_log_tool_content = false          # bodies; independent of details
+```json
+{
+  "telemetry": {
+    "otel_log_assistant_responses": false,
+    "otel_log_tool_content": false,
+    "otel_log_tool_details": true,
+    "otel_log_user_prompts": false
+  }
+}
 ```
 
 `OTEL_RESOURCE_ATTRIBUTES` is deliberately ignored: the resource is built
@@ -132,21 +135,23 @@ Org defaults live under the existing `[telemetry]` table in `config.toml`
 (env vars win). The keys are `otel_`-prefixed peers of the other
 `[telemetry]` settings:
 
-```toml
-[telemetry]
-otel_enabled = true
-otel_metrics_exporter = "otlp"
-otel_logs_exporter = "otlp"
-otel_endpoint = "https://collector.corp.example:4318"
-otel_protocol = "http/protobuf"  # or "grpc"
-# Optional PEM *paths* for private-CA trust and mTLS (never PEM contents):
-otel_certificate = "/etc/ssl/corp-ca.pem"
-otel_client_certificate = "/etc/ssl/client.crt"
-otel_client_key = "/etc/ssl/client.key"
-otel_log_user_prompts = false   # admins can pin these via requirements
-otel_log_assistant_responses = false
-otel_log_tool_details = false   # code default; SIEM fleets usually true — see Recommended fleet gates
-otel_log_tool_content = false
+```json
+{
+  "telemetry": {
+    "otel_certificate": "/etc/ssl/corp-ca.pem",
+    "otel_client_certificate": "/etc/ssl/client.crt",
+    "otel_client_key": "/etc/ssl/client.key",
+    "otel_enabled": true,
+    "otel_endpoint": "https://collector.corp.example:4318",
+    "otel_log_assistant_responses": false,
+    "otel_log_tool_content": false,
+    "otel_log_tool_details": false,
+    "otel_log_user_prompts": false,
+    "otel_logs_exporter": "otlp",
+    "otel_metrics_exporter": "otlp",
+    "otel_protocol": "http/protobuf"
+  }
+}
 ```
 
 The config keys are `otel_*` under `[telemetry]`; the **env vars keep their

@@ -105,20 +105,26 @@ A symlinked `$GROK_HOME` or a `hooks-paths` entry with a symlink component is re
 
 Create custom sandbox profiles in `~/.grok/sandbox.toml` (global) or `.grok/sandbox.toml` (per-project):
 
-```toml
-[profiles.project]
-# Start from a built-in profile, then add overrides
-extends = "workspace"
-restrict_network = true
-
-# Paths the agent can read but NOT write/delete
-read_only = ["/data"]
-
-# Additional writable paths
-read_write = ["/tmp/scratch"]
-
-# Paths or globs to kernel-deny (read + write/rename, enforced; see notes below)
-deny = ["/data/shared-secrets", "**/.env", "**/*.pem"]
+```json
+{
+  "profiles": {
+    "project": {
+      "deny": [
+        "/data/shared-secrets",
+        "**/.env",
+        "**/*.pem"
+      ],
+      "extends": "workspace",
+      "read_only": [
+        "/data"
+      ],
+      "read_write": [
+        "/tmp/scratch"
+      ],
+      "restrict_network": true
+    }
+  }
+}
 ```
 
 Use the custom profile:
@@ -276,13 +282,26 @@ In practice, on Linux this means:
 
 The sandbox controls which files and network a subprocess can reach. The top-level `[shell_environment_policy]` table controls which environment variables it inherits, so a tool command the model runs cannot read a secret that happens to sit in your shell environment.
 
-```toml
-[shell_environment_policy]
-inherit = "core"                 # all (default) | core | none
-ignore_default_excludes = false  # also drop *KEY* / *SECRET* / *TOKEN*
-exclude = ["ACME_*", "CI_*"]     # drop these names
-include_only = ["PATH", "HOME"]  # if set, keep only these names
-set = { MY_FLAG = "1" }          # force these values
+```json
+{
+  "tools": {
+    "shell_environment_policy": {
+      "exclude": [
+        "ACME_*",
+        "CI_*"
+      ],
+      "ignore_default_excludes": false,
+      "include_only": [
+        "PATH",
+        "HOME"
+      ],
+      "inherit": "core",
+      "set": {
+        "MY_FLAG": "1"
+      }
+    }
+  }
+}
 ```
 
 Grok builds the child environment in order: it starts from `inherit` (`all` keeps everything, `core` keeps a small platform set such as `PATH` and `HOME`, `none` starts empty); drops the built-in secret patterns `*KEY*`, `*SECRET*`, and `*TOKEN*` unless `ignore_default_excludes = true`; drops any `exclude` matches; applies `set`; and, when `include_only` is non-empty, keeps only the matching names. Patterns are case-insensitive globs (`*`, `?`).

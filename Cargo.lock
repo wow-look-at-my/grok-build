@@ -7928,6 +7928,7 @@ checksum = "82d20c4491bc164fa2f6c5d44565947a52ad80b9505d8e36f8d54c27c739fcd0"
 dependencies = [
  "chrono",
  "dyn-clone",
+ "indexmap",
  "ref-cast",
  "schemars_derive",
  "serde",
@@ -12326,6 +12327,7 @@ dependencies = [
  "indexmap",
  "rcgen",
  "rustls",
+ "schemars",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -12517,6 +12519,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.24",
  "rustls",
+ "schemars",
  "semver",
  "serde",
  "serde_ignored",

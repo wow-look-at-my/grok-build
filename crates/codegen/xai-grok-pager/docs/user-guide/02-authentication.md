@@ -68,11 +68,15 @@ Authenticate developers through your own Identity Provider (IdP) -- such as Okta
 
 Via config file:
 
-```toml
-# ~/.grok/config.toml
-[grok_com_config.oidc]
-issuer = "https://acme.okta.com"
-client_id = "0oa1b2c3d4e5f6g7h8i9"
+```json
+{
+  "login": {
+    "oidc": {
+      "client_id": "0oa1b2c3d4e5f6g7h8i9",
+      "issuer": "https://acme.okta.com"
+    }
+  }
+}
 ```
 
 Or via environment variables:
@@ -161,12 +165,14 @@ JSON fields:
 
 Via config file:
 
-```toml
-# ~/.grok/config.toml
-[auth]
-auth_provider_command = "/usr/local/bin/my-auth-provider"
-auth_provider_label = "Acme Corp"   # optional -- customizes the TUI login button
-auth_token_ttl = 3600               # optional -- token lifetime in seconds
+```json
+{
+  "login": {
+    "auth_provider_command": "/usr/local/bin/my-auth-provider",
+    "auth_provider_label": "Acme Corp",
+    "auth_token_ttl": 3600
+  }
+}
 ```
 
 Or via environment variables:

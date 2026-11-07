@@ -117,11 +117,15 @@ Authenticate developers via your own Identity Provider (Okta, Azure AD, Auth0) i
 
 **2. Configure the CLI** (config file or env vars):
 
-```toml
-# ~/.grok/config.toml
-[grok_com_config.oidc]
-issuer = "https://acme.okta.com"
-client_id = "0oa1b2c3d4e5f6g7h8i9"
+```json
+{
+  "login": {
+    "oidc": {
+      "client_id": "0oa1b2c3d4e5f6g7h8i9",
+      "issuer": "https://acme.okta.com"
+    }
+  }
+}
 ```
 
 ```bash
@@ -211,12 +215,14 @@ echo "eyJhbGciOiJSUzI1NiIs..."
 
 #### Configuration
 
-```toml
-# ~/.grok/config.toml
-[auth]
-auth_provider_command = "/usr/local/bin/my-auth-provider"
-auth_provider_label = "Acme Corp"   # optional — customizes the TUI login button
-auth_token_ttl = 3600               # optional — token lifetime in seconds (see below)
+```json
+{
+  "login": {
+    "auth_provider_command": "/usr/local/bin/my-auth-provider",
+    "auth_provider_label": "Acme Corp",
+    "auth_token_ttl": 3600
+  }
+}
 ```
 
 ```bash
@@ -351,18 +357,26 @@ Common log messages:
 
 `auth_provider_command` above replaces Grok's *session* auth: it mints the token sent to xAI's backend. If you instead want xAI models on normal xAI login while **other models** route through a gateway (LiteLLM, corporate proxy) whose bearer tokens rotate, use a named auth provider — the rotating-token analogue of a per-model `api_key`/`env_key`.
 
-```toml
-# ~/.grok/config.toml
-[auth_provider.litellm]
-command = "/usr/local/bin/litellm-token"   # run via `sh -c`
-token_ttl_secs = 3600                      # optional: see below
-timeout_secs = 10                          # optional: command timeout (default 30)
-
-[model.proxied-claude]
-model = "claude-sonnet-4-5"
-base_url = "https://litellm.corp.example/v1"
-context_window = 200000
-auth_provider = "litellm"
+```json
+{
+  "models": {
+    "auth_providers": {
+      "litellm": {
+        "command": "/usr/local/bin/litellm-token",
+        "timeout_secs": 10,
+        "token_ttl_secs": 3600
+      }
+    },
+    "definitions": {
+      "proxied-claude": {
+        "auth_provider": "litellm",
+        "base_url": "https://litellm.corp.example/v1",
+        "context_window": 200000,
+        "model": "claude-sonnet-4-5"
+      }
+    }
+  }
+}
 ```
 
 **Contract** (same stdout contract as `auth_provider_command`; the `issuer` field is accepted but unused here, and `refresh_token`, when present, is handed back to the command on refresh):
@@ -1329,48 +1343,57 @@ Each feature section below documents its own config. This section covers the gen
 
 ### General Settings
 
-```toml
-[models]
-default = "grok-4.6"                   # model used for new sessions
-web_search = "grok-4.6"                # model used by the web_search tool
-
-[ui]
-max_thoughts_width = 120               # max column width for reasoning display
-
-[features]
-support_permission = false             # prompt before tool execution
-telemetry = false                      # anonymous usage telemetry (env: GROK_TELEMETRY_ENABLED)
-feedback = false                       # feedback system (env: GROK_FEEDBACK_ENABLED)
-lsp_tools = false                      # expose the lsp tool (see LSP Servers below)
-codebase_indexing = true               # code graph indexing (true, false, or glob patterns)
-
-[session]
-auto_compact_threshold_percent = 85    # auto-compact at this % of context window
-load_envrc = true                      # load .envrc environment variables into bash commands
-
-[tools]
-respect_gitignore = true               # filter gitignored files from tools (env: GROK_RESPECT_GITIGNORE)
-
-[toolset.bash]
-timeout_secs = 120.0                   # command timeout in seconds
-output_byte_limit = 65536              # max output size (64KB)
-
-[toolset.web_fetch]
-proxy_endpoint = "https://proxy.example.com"   # egress proxy URL (all requests routed through it)
-allowed_domains = ["docs.rs", "example.invalid"]           # override the built-in ~84-domain allowlist
+```json
+{
+  "features": {
+    "codebase_indexing": true,
+    "feedback": false,
+    "lsp_tools": false,
+    "support_permission": false,
+    "telemetry": false
+  },
+  "models": {
+    "default": "grok-4.6",
+    "web_search": "grok-4.6"
+  },
+  "session": {
+    "auto_compact_threshold_percent": 85,
+    "load_envrc": true
+  },
+  "tools": {
+    "bash": {
+      "output_byte_limit": 65536,
+      "timeout_secs": 120.0
+    },
+    "respect_gitignore": true,
+    "web_fetch": {
+      "allowed_domains": [
+        "docs.rs",
+        "example.invalid"
+      ],
+      "proxy_endpoint": "https://proxy.example.com"
+    }
+  },
+  "ui": {
+    "max_thoughts_width": 120
+  }
+}
 ```
 
 ### Telemetry
 
 Configure telemetry destinations and credentials. Empty values disable the corresponding sink. Env vars take precedence over config values. Builds from the public source tree carry no telemetry defaults: `events_url`, `events_api_key`, and `mixpanel_token` are unset and `mixpanel_enabled` is `false`, so nothing is sent unless you supply values here or via env.
 
-```toml
-[telemetry]
-events_url = "https://example.com/events"  # env: GROK_TELEMETRY_EVENTS_URL
-events_api_key = "..."                      # env: GROK_TELEMETRY_EVENTS_API_KEY
-mixpanel_token = "..."                      # env: GROK_TELEMETRY_MIXPANEL_TOKEN
-mixpanel_enabled = true                     # env: GROK_TELEMETRY_MIXPANEL_ENABLED
-trace_upload = true                         # env: GROK_TELEMETRY_TRACE_UPLOAD
+```json
+{
+  "telemetry": {
+    "events_api_key": "...",
+    "events_url": "https://example.com/events",
+    "mixpanel_enabled": true,
+    "mixpanel_token": "...",
+    "trace_upload": true
+  }
+}
 ```
 
 When building from source, defaults can also be baked into the binary at compile time by setting `GROK_TELEMETRY_BUILD_EVENTS_URL`, `GROK_TELEMETRY_BUILD_EVENTS_API_KEY`, and `GROK_TELEMETRY_BUILD_MIXPANEL_TOKEN` in the build environment (providing a Mixpanel token this way also enables Mixpanel by default). Config-file and runtime env values override build-time defaults.
@@ -1410,9 +1433,12 @@ GROK_LSP_TOOLS=1 grok
 
 Or enable it in config:
 
-```toml
-[features]
-lsp_tools = true
+```json
+{
+  "features": {
+    "lsp_tools": true
+  }
+}
 ```
 
 If LSP tools are enabled but no usable server config is found, Grok emits a non-fatal warning in logs and continues without the `lsp` tool. If config exists but every server fails to start, the tool may still be present and will fail on first use with a startup error.
@@ -1514,27 +1540,34 @@ Examples:
 
 A complete `config.toml` for an enterprise deployment with external auth, corporate proxy, and telemetry disabled:
 
-```toml
-[auth]
-auth_provider_command = "/usr/local/bin/my-company-auth-provider"
-auth_provider_label = "Acme Corp"
-auth_token_ttl = 3600               # if your provider outputs bare tokens
-
-[models]
-default = "company-grok"
-
-[model.company-grok]
-model = "grok-build"
-base_url = "https://grok-proxy.acme.com/"
-name = "Grok Build Latest (Proxy)"
-context_window = 256000
-
-[features]
-support_permission = false
-telemetry = false
-
-[toolset.bash]
-timeout_secs = 120.0
+```json
+{
+  "features": {
+    "support_permission": false,
+    "telemetry": false
+  },
+  "login": {
+    "auth_provider_command": "/usr/local/bin/my-company-auth-provider",
+    "auth_provider_label": "Acme Corp",
+    "auth_token_ttl": 3600
+  },
+  "models": {
+    "default": "company-grok",
+    "definitions": {
+      "company-grok": {
+        "base_url": "https://grok-proxy.acme.com/",
+        "context_window": 256000,
+        "model": "grok-build",
+        "name": "Grok Build Latest (Proxy)"
+      }
+    }
+  },
+  "tools": {
+    "bash": {
+      "timeout_secs": 120.0
+    }
+  }
+}
 ```
 
 With this config, `grok` runs your auth binary, stores the token, and routes inference through your corporate proxy. See [Authentication](#authentication) for full auth setup details.
@@ -1584,10 +1617,19 @@ Repo-scoped skills (Local and Repo) respect `.gitignore` and are filtered out if
 
 Add extra skill directories or exclude paths via `[skills]` in config.toml:
 
-```toml
-[skills]
-paths = ["~/my-team-skills"]          # additional directories to scan
-ignore = ["~/my-team-skills/wip"]     # paths to exclude
+```json
+{
+  "extensions": {
+    "skills": {
+      "ignore": [
+        "~/my-team-skills/wip"
+      ],
+      "paths": [
+        "~/my-team-skills"
+      ]
+    }
+  }
+}
 ```
 
 ### Creating a Skill
@@ -1657,11 +1699,14 @@ Grok discovers agent definitions from `.grok/agents/` (project), `~/.grok/agents
 3. `GROK_AGENT` env var
 4. Default `grok-build` agent
 
-```toml
-# ~/.grok/config.toml
-[agent]
-name = "my-custom-agent"             # Discovered by name
-# definition = "/path/to/agent.md"   # OR: explicit path
+```json
+{
+  "agents": {
+    "selection": {
+      "name": "my-custom-agent"
+    }
+  }
+}
 ```
 
 ```bash
@@ -1682,19 +1727,28 @@ Subagents spawn independent child sessions that handle tasks in parallel. Each c
 export GROK_SUBAGENTS=0              # Environment variable
 ```
 
-```toml
-# ~/.grok/config.toml
-[subagents]
-enabled = false
+```json
+{
+  "agents": {
+    "subagents": {
+      "enabled": false
+    }
+  }
+}
 ```
 
 ### Usage Frequency
 
 `usage_frequency` does not gate the tool. It tunes how strongly the system prompt and tool wording nudge the model toward spawning subagents: `explicit-only`, `very-rare`, `rare`, `default` (no added nudge, the default), `often`, or `very-often`.
 
-```toml
-[subagents]
-usage_frequency = "often"
+```json
+{
+  "agents": {
+    "subagents": {
+      "usage_frequency": "often"
+    }
+  }
+}
 ```
 
 ```bash
@@ -1705,13 +1759,20 @@ export GROK_SUBAGENTS_USAGE_FREQUENCY=explicit-only   # env var takes precedence
 
 Disable specific subagent types while keeping the system enabled, or route them to different models:
 
-```toml
-[subagents.toggle]
-explore = true                       # default — omitted agents are enabled
-plan = false                         # disable plan subagent
-
-[subagents.models]
-explore = "grok-build"              # route explore to a lighter model
+```json
+{
+  "agents": {
+    "subagents": {
+      "models": {
+        "explore": "grok-build"
+      },
+      "toggle": {
+        "explore": true,
+        "plan": false
+      }
+    }
+  }
+}
 ```
 
 By default a subagent inherits the parent session's model. Only an explicit
@@ -1723,16 +1784,26 @@ regardless of which model the parent is on.
 
 Roles define reusable capability/model defaults. Personas layer tone and behavior instructions onto the child prompt.
 
-```toml
-[subagents.roles.researcher]
-description = "Deep research agent"
-default_capability_mode = "read-only"
-model = "grok-build"
-prompt_file = ".grok/prompts/researcher.md"
-
-[subagents.personas.concise]
-instructions = "Be extremely concise. No filler words."
-# instructions_file = ".grok/personas/concise.md"  # or load from file
+```json
+{
+  "agents": {
+    "subagents": {
+      "personas": {
+        "concise": {
+          "instructions": "Be extremely concise. No filler words."
+        }
+      },
+      "roles": {
+        "researcher": {
+          "default_capability_mode": "read-only",
+          "description": "Deep research agent",
+          "model": "grok-build",
+          "prompt_file": ".grok/prompts/researcher.md"
+        }
+      }
+    }
+  }
+}
 ```
 
 Both are also discovered from `.grok/roles/*.toml` and `.grok/personas/*.toml` files respectively. If a requested persona is not found, the spawn fails (fail-closed).
@@ -1753,11 +1824,19 @@ Plugins extend Grok with additional tools, skills, and MCP servers from external
 
 ### Configuration
 
-```toml
-# ~/.grok/config.toml
-[plugins]
-paths = ["~/my-plugins/custom-tools"]       # additional plugin directories
-disabled = ["user/a1b2c3d4/noisy-plugin"]   # plugin IDs to skip
+```json
+{
+  "extensions": {
+    "plugins": {
+      "disabled": [
+        "user/a1b2c3d4/noisy-plugin"
+      ],
+      "paths": [
+        "~/my-plugins/custom-tools"
+      ]
+    }
+  }
+}
 ```
 
 Manage plugins at runtime with `/plugins list`, `/plugins reload`, or `/plugins trust <path>`.
@@ -1783,13 +1862,23 @@ distributed with your other configuration instead of as separate JSON files. Add
 a `[[hooks.<Event>]]` table to `config.toml` (your own), `managed_config.toml`, or
 `requirements.toml`:
 
-```toml
-[[hooks.PreToolUse]]
-matcher = "Bash|Write|Edit"
-  [[hooks.PreToolUse.hooks]]
-  type = "command"
-  command = "/opt/guard/pretooluse.sh"   # use an absolute path
-  timeout = 10
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/guard/pretooluse.sh",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|Write|Edit"
+      }
+    ]
+  }
+}
 ```
 
 The schema matches the JSON `hooks` object used in hook files. Hooks are read from
@@ -1834,19 +1923,26 @@ Add custom model endpoints to use alternative providers or self-hosted models. Y
 
 The name in the TOML header (`my-model` in `[model.my-model]`) is what appears in the model picker. The `model` field is the identifier sent to the API. If `model` is omitted, the header name is sent to the API directly.
 
-```toml
-[model.my-model]
-model = "model-id"                    # Model identifier sent to API
-base_url = "https://api.example.com/v1"  # OpenAI-compatible endpoint
-name = "Display Name"                 # Shown in model picker
-description = "Model description"     # Optional description
-api_key = "sk-..."                    # API key for this provider (optional)
-env_key = "OPENAI_API_KEY"            # Env var(s) holding the API key (string or array; first set wins)
-auth_provider = "corp-gateway"        # Named credential helper for rotating tokens (optional)
-temperature = 0.7                     # Sampling temperature (0.0-2.0)
-top_p = 0.95                          # Nucleus sampling parameter
-max_completion_tokens = 8192          # Max tokens per response
-context_window = 256000               # Total context window in tokens (for auto-compact)
+```json
+{
+  "models": {
+    "definitions": {
+      "my-model": {
+        "api_key": "sk-...",
+        "auth_provider": "corp-gateway",
+        "base_url": "https://api.example.com/v1",
+        "context_window": 256000,
+        "description": "Model description",
+        "env_key": "OPENAI_API_KEY",
+        "max_completion_tokens": 8192,
+        "model": "model-id",
+        "name": "Display Name",
+        "temperature": 0.7,
+        "top_p": 0.95
+      }
+    }
+  }
+}
 ```
 
 **Credential resolution order:** `api_key` → `env_key` → cached `auth_provider` token (terminal: a cache miss resolves to no credential, never the session token) → session token → `XAI_API_KEY`. See [Per-Model Auth Providers](#per-model-auth-providers).
@@ -1857,15 +1953,22 @@ The `context_window` parameter is used to calculate when auto-compact should tri
 
 You can override specific fields of built-in models without redefining everything. Only specify the fields you want to change:
 
-```toml
-# Override just the API key for a default model
-[model.grok-build]
-api_key = "my-api-key"
-
-# Override temperature and add a custom API key
-[model.grok-4.20-0309-reasoning]
-temperature = 0.5
-api_key = "sk-custom"
+```json
+{
+  "models": {
+    "definitions": {
+      "grok-4": {
+        "20-0309-reasoning": {
+          "api_key": "sk-custom",
+          "temperature": 0.5
+        }
+      },
+      "grok-build": {
+        "api_key": "my-api-key"
+      }
+    }
+  }
+}
 ```
 
 **How it works:** When you override a built-in model, Grok starts with the default configuration (including the correct `base_url` from your `[endpoints]` setting), then applies only the fields you specify. Unspecified fields inherit from the default.
@@ -1896,40 +1999,67 @@ api_key = "sk-custom"
 
 **OpenAI-compatible endpoint:**
 
-```toml
-[model.local-llama]
-model = "llama-3.1-70b"
-base_url = "http://localhost:8080/v1"
-name = "Local Llama"
-temperature = 0.8
+```json
+{
+  "models": {
+    "definitions": {
+      "local-llama": {
+        "base_url": "http://localhost:8080/v1",
+        "model": "llama-3.1-70b",
+        "name": "Local Llama",
+        "temperature": 0.8
+      }
+    }
+  }
+}
 ```
 
 **Ollama / LM Studio (local):**
 
-```toml
-[model_providers.ollama]
+```json
+{
+  "models": {
+    "providers": {
+      "ollama": {}
+    }
+  }
+}
 ```
 
 The provider id fills in the endpoint, the listing dialect and the pricing switch. Every model the runtime serves appears in `/model` with its real context window and a dot showing whether it is loaded in VRAM. Use `[model_providers.lmstudio]` for LM Studio. To pin Ollama's window or keep a model resident, add `api_backend = "ollama"` and an `extra_body` table — see the user guide's Custom Models chapter.
 
 **Together AI:**
 
-```toml
-[model.together-mixtral]
-model = "mistralai/Mixtral-8x7B-Instruct-v0.1"
-base_url = "https://api.together.xyz/v1"
-name = "Mixtral 8x7B"
-env_key = "TOGETHER_API_KEY"
+```json
+{
+  "models": {
+    "definitions": {
+      "together-mixtral": {
+        "base_url": "https://api.together.xyz/v1",
+        "env_key": "TOGETHER_API_KEY",
+        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "name": "Mixtral 8x7B"
+      }
+    }
+  }
+}
 ```
 
 **OpenAI:**
 
-```toml
-[model.gpt-4o]
-model = "gpt-4o"
-base_url = "https://api.openai.com/v1"
-name = "GPT-4o"
-env_key = "OPENAI_API_KEY"
+```json
+{
+  "models": {
+    "definitions": {
+      "gpt-4o": {
+        "base_url": "https://api.openai.com/v1",
+        "env_key": "OPENAI_API_KEY",
+        "model": "gpt-4o",
+        "name": "GPT-4o"
+      }
+    }
+  }
+}
 ```
 
 ### Using Custom Models
@@ -1976,13 +2106,19 @@ If your model list endpoint differs from `{base_url}/models`, set `GROK_MODELS_L
 
 **Combining with `[endpoints]` config:** You can also set endpoints in `~/.grok/config.toml`:
 
-```toml
-[endpoints]
-models_base_url = "https://api.acme.com/v1"
-
-# Override just the API key for a specific model
-[model.grok-build]
-api_key = "my-api-key"
+```json
+{
+  "endpoints": {
+    "models_base_url": "https://api.acme.com/v1"
+  },
+  "models": {
+    "definitions": {
+      "grok-build": {
+        "api_key": "my-api-key"
+      }
+    }
+  }
+}
 ```
 
 When using `[endpoints]` with partial model overrides, the `base_url` is inherited from the endpoints config — you don't need to specify it in each `[model.*]` section.
@@ -2033,11 +2169,21 @@ my-project/
 └── ...
 ```
 
-```toml
-# .grok/config.toml
-[mcp_servers.linear]
-command = "npx"
-args = ["-y", "mcp-remote", "https://mcp.linear.app/mcp"]
+```json
+{
+  "mcp": {
+    "servers": {
+      "linear": {
+        "args": [
+          "-y",
+          "mcp-remote",
+          "https://mcp.linear.app/mcp"
+        ],
+        "command": "npx"
+      }
+    }
+  }
+}
 ```
 
 If you also have a `linear` server in `~/.grok/config.toml`, the project version replaces it entirely.
@@ -2055,45 +2201,98 @@ MCP tools are namespaced with the server name:
 
 **Filesystem access:**
 
-```toml
-[mcp_servers.filesystem]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
+```json
+{
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/path/to/allowed/directory"
+        ],
+        "command": "npx"
+      }
+    }
+  }
+}
 ```
 
 **GitHub integration:**
 
-```toml
-[mcp_servers.github]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-github"]
-env = { GITHUB_PERSONAL_ACCESS_TOKEN = "ghp_xxxxxxxxxxxx" }
+```json
+{
+  "mcp": {
+    "servers": {
+      "github": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ],
+        "command": "npx",
+        "env": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_xxxxxxxxxxxx"
+        }
+      }
+    }
+  }
+}
 ```
 
 **Postgres database:**
 
-```toml
-[mcp_servers.postgres]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-postgres", "postgresql://user:pass@localhost/db"]
+```json
+{
+  "mcp": {
+    "servers": {
+      "postgres": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-postgres",
+          "postgresql://user:pass@localhost/db"
+        ],
+        "command": "npx"
+      }
+    }
+  }
+}
 ```
 
 **Custom server:**
 
-```toml
-[mcp_servers.my-tools]
-command = "/usr/local/bin/my-mcp-server"
-args = ["--config", "/etc/my-mcp.json"]
-startup_timeout_sec = 30
-tool_timeout_sec = 120
+```json
+{
+  "mcp": {
+    "servers": {
+      "my-tools": {
+        "args": [
+          "--config",
+          "/etc/my-mcp.json"
+        ],
+        "command": "/usr/local/bin/my-mcp-server",
+        "startup_timeout_sec": 30,
+        "tool_timeout_sec": 120
+      }
+    }
+  }
+}
 ```
 
 **Streamable HTTP with session id header:**
 
-```toml
-[mcp_servers.my-http-mcp]
-url = "http://localhost:5000/api/mcp"
-headers = { "x-session-id" = "{{session_id}}" }
+```json
+{
+  "mcp": {
+    "servers": {
+      "my-http-mcp": {
+        "headers": {
+          "x-session-id": "{{session_id}}"
+        },
+        "url": "http://localhost:5000/api/mcp"
+      }
+    }
+  }
+}
 ```
 
 ### Available MCP Servers
@@ -2259,21 +2458,24 @@ write-protected regardless of profile.
 
 Create `~/.grok/sandbox.toml` (global) or `.grok/sandbox.toml` (per-project):
 
-```toml
-[profiles.devbox]
-# Start from a built-in profile, then add overrides
-extends = "workspace"
-restrict_network = true
-
-# Paths the agent can read but NOT write/delete
-read_only = ["/data"]
-
-# Additional writable paths (literal directory grants — no globs;
-# trailing /** is treated as the parent directory)
-read_write = ["/tmp/scratch"]
-
-# Paths denied entirely
-deny = ["/data/shared-secrets"]
+```json
+{
+  "profiles": {
+    "devbox": {
+      "deny": [
+        "/data/shared-secrets"
+      ],
+      "extends": "workspace",
+      "read_only": [
+        "/data"
+      ],
+      "read_write": [
+        "/tmp/scratch"
+      ],
+      "restrict_network": true
+    }
+  }
+}
 ```
 
 Use it:
@@ -2668,10 +2870,14 @@ startup_timeout_sec = 30
 
 ### Command timeout
 
-```toml
-# Increase bash timeout in config.toml
-[toolset.bash]
-timeout_secs = 300.0
+```json
+{
+  "tools": {
+    "bash": {
+      "timeout_secs": 300.0
+    }
+  }
+}
 ```
 
 ### Inspecting session data
@@ -2696,9 +2902,12 @@ wc -l ~/.grok/sessions/<encoded-cwd>/<session-id>/chat_history.jsonl
 
 If auto-compact triggers too often, lower the threshold to compact earlier and preserve more headroom:
 
-```toml
-[session]
-auto_compact_threshold_percent = 70    # default is 85
+```json
+{
+  "session": {
+    "auto_compact_threshold_percent": 70
+  }
+}
 ```
 
 ---

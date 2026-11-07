@@ -38,11 +38,22 @@ Grok scans the Claude and Cursor skill directories by default. To stop scanning 
 
 Add directories, exclude paths, or disable individual skills via `[skills]` in `~/.grok/config.toml`:
 
-```toml
-[skills]
-paths = ["~/my-team-skills"]          # Additional directories to scan
-ignore = ["~/my-team-skills/wip"]     # Paths to exclude (hidden entirely)
-disabled = ["wip-skill"]              # Skill names to keep listed but inactive
+```json
+{
+  "extensions": {
+    "skills": {
+      "disabled": [
+        "wip-skill"
+      ],
+      "ignore": [
+        "~/my-team-skills/wip"
+      ],
+      "paths": [
+        "~/my-team-skills"
+      ]
+    }
+  }
+}
 ```
 
 Each entry in `paths` is a `SKILL.md` file or a directory that Grok walks recursively. `ignore` hides a skill completely; `disabled` keeps it in the list but excludes it from the system prompt and from invocation. `paths` and `ignore` take filesystem paths and support `~` expansion; `disabled` takes skill names.

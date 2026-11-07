@@ -206,25 +206,46 @@ Hooks can also live directly in your Grok config. As a result, a team can distri
 
 The TOML is structurally identical to the JSON hook object, so an existing hook transliterates directly:
 
-```toml
-[[hooks.PreToolUse]]
-matcher = "Bash|Write|Edit"
-hooks = [
-  { type = "command", command = "/opt/guard/pretooluse.sh", timeout = 10 },
-]
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/guard/pretooluse.sh",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|Write|Edit"
+      }
+    ]
+  }
+}
 ```
 
 Each matcher group is a `[[hooks.<Event>]]` entry with an optional `matcher` and an inner `hooks` array of handlers. The handler fields (`type`, `command`, `url`, `timeout`, `env`) and event names are exactly the same as the [JSON format](#the-hook-json-format).
 
 TOML offers equivalent notations for the inner handlers, and both parse to the same structure. The inline-table array shown above is recommended: it reads best for the common single-handler case. The nested array-of-tables form is also accepted:
 
-```toml
-[[hooks.PreToolUse]]
-matcher = "Bash|Write|Edit"
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = "/opt/guard/pretooluse.sh"
-timeout = 10
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "/opt/guard/pretooluse.sh",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|Write|Edit"
+      }
+    ]
+  }
+}
 ```
 
 Prefer the inline form to avoid repeating the `[[hooks.<Event>.hooks]]` header for each handler.
@@ -246,9 +267,12 @@ Hooks in `~/.grok/managed_config.toml` and `~/.grok/config.toml` are distributio
 
 An organization can restrict a machine to the hooks it enforces:
 
-```toml
-# /etc/grok/requirements.toml
-allow_managed_hooks_only = true
+```json
+{
+  "policy": {
+    "allow_managed_hooks_only": true
+  }
+}
 ```
 
 With this set:

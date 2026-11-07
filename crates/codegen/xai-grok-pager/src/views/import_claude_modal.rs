@@ -1,7 +1,7 @@
 //! Interactive modal for selectively importing Claude settings.
 //!
 //! Shown when the user runs `/import-claude` (in-session) or presses `i` on the welcome screen with new Claude settings detected.
-//! Users review each discovered item, toggle which to import, and confirm. Only checked items are written to `.grok/config.toml`.
+//! Users review each discovered item, toggle which to import, and confirm. Only checked items are written to `.grok/config.json`.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::buffer::Buffer;
@@ -702,7 +702,7 @@ fn build_rows(
     if !plan.global_items.is_empty() {
         let scope_start = flat_index;
         let scope_key = format!("scope:{:?}", Scope::Global);
-        let label = "Global  ~/.grok/config.toml".to_string();
+        let label = "Global  ~/.grok/config.json".to_string();
         // Placeholder header; flat_indices filled after children are pushed.
         let scope_header_pos = rows.len();
         rows.push(Row::ScopeHeader {

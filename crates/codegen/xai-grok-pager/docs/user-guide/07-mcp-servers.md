@@ -52,15 +52,29 @@ To distribute MCP servers to a team, or to restrict which servers users may run 
 
 Grok spawns a local process and communicates over stdin/stdout:
 
-```toml
-[mcp_servers.my-server]
-command = "/path/to/server"           # Server executable
-args = ["--flag", "value"]            # Command arguments
-env = { API_KEY = "sk-..." }          # Environment variables
-enabled = true                        # Enable or disable the server (default: true)
-startup_timeout_sec = 30              # Server startup timeout, seconds (default: 30)
-tool_timeout_sec = 6000               # Per-tool-call timeout fallback, seconds (default: 6000)
-tool_timeouts = { slow_op = 120 }     # Per-tool timeout overrides, seconds
+```json
+{
+  "mcp": {
+    "servers": {
+      "my-server": {
+        "args": [
+          "--flag",
+          "value"
+        ],
+        "command": "/path/to/server",
+        "enabled": true,
+        "env": {
+          "API_KEY": "sk-..."
+        },
+        "startup_timeout_sec": 30,
+        "tool_timeout_sec": 6000,
+        "tool_timeouts": {
+          "slow_op": 120
+        }
+      }
+    }
+  }
+}
 ```
 
 > **Global startup-timeout override:** instead of setting `startup_timeout_sec`
@@ -93,10 +107,19 @@ tool_timeouts = { slow_op = 120 }     # Per-tool timeout overrides, seconds
 
 For remote MCP servers accessible over HTTP:
 
-```toml
-[mcp_servers.remote-api]
-url = "https://mcp.example.com/api"
-headers = { "Authorization" = "Bearer token" }
+```json
+{
+  "mcp": {
+    "servers": {
+      "remote-api": {
+        "headers": {
+          "Authorization": "Bearer token"
+        },
+        "url": "https://mcp.example.com/api"
+      }
+    }
+  }
+}
 ```
 
 MCP data-plane requests (JSON-RPC and SSE) and the anonymous-access probe carry a
@@ -112,10 +135,19 @@ send the bare token `grok-cli` with no version unless the config supplies its ow
 
 ### Streamable HTTP with Session ID
 
-```toml
-[mcp_servers.my-streamable-server]
-url = "https://mcp.example.com/api/mcp"
-headers = { "x-mcp-session-id" = "{{session_id}}" }
+```json
+{
+  "mcp": {
+    "servers": {
+      "my-streamable-server": {
+        "headers": {
+          "x-mcp-session-id": "{{session_id}}"
+        },
+        "url": "https://mcp.example.com/api/mcp"
+      }
+    }
+  }
+}
 ```
 
 ---
@@ -186,11 +218,17 @@ my-project/
   ...
 ```
 
-```toml
-# .grok/config.toml
-[mcp_servers.linear]
-url = "https://mcp.linear.app/mcp"
-enabled = true
+```json
+{
+  "mcp": {
+    "servers": {
+      "linear": {
+        "enabled": true,
+        "url": "https://mcp.linear.app/mcp"
+      }
+    }
+  }
+}
 ```
 
 When a server exposes a native HTTP/SSE endpoint, prefer the `url` form over wrapping it in a stdio proxy such as `npx mcp-remote <url>`. Grok handles HTTP/SSE and OAuth directly, so the native form avoids an extra subprocess per session. It also registers Grok's own OAuth client with the provider.
@@ -337,62 +375,103 @@ Use the `url` form for hosted MCP servers and the `command` / `args` form for lo
 
 You must authenticate OAuth-based MCP servers before you can use them. Grok stores the resulting tokens under `~/.grok/mcp_credentials.json` as local plaintext with owner-only file permissions (`0600` on Unix). Prefer full-disk encryption on the host. After you edit `config.toml`, press `r` in the `/mcps` modal to refresh the server list.
 
-```toml
-[mcp_servers.linear]
-url = "https://mcp.linear.app/mcp"
-enabled = true
-
-[mcp_servers.sentry]
-url = "https://mcp.sentry.dev/mcp"
-enabled = true
-
-[mcp_servers.mixpanel]
-url = "https://mcp.mixpanel.com/mcp"
-enabled = true
+```json
+{
+  "mcp": {
+    "servers": {
+      "linear": {
+        "enabled": true,
+        "url": "https://mcp.linear.app/mcp"
+      },
+      "mixpanel": {
+        "enabled": true,
+        "url": "https://mcp.mixpanel.com/mcp"
+      },
+      "sentry": {
+        "enabled": true,
+        "url": "https://mcp.sentry.dev/mcp"
+      }
+    }
+  }
+}
 ```
 
 For internal or self-hosted servers that authenticate with a static bearer token rather than OAuth, set the `Authorization` header explicitly:
 
-```toml
-[mcp_servers.internal-tools]
-url = "https://mcp.internal.example.com/mcp"
-enabled = true
-
-[mcp_servers.internal-tools.headers]
-Authorization = "Bearer <token>"
+```json
+{
+  "mcp": {
+    "servers": {
+      "internal-tools": {
+        "enabled": true,
+        "headers": {
+          "Authorization": "Bearer <token>"
+        },
+        "url": "https://mcp.internal.example.com/mcp"
+      }
+    }
+  }
+}
 ```
 
 To avoid putting secrets in the config file, reference an environment variable with `${VAR}` (or `${VAR:-default}`). Grok expands string fields in `[mcp_servers.*]` — `url`, `command`, `args`, and the values in `env` and `headers` — at load time:
 
-```toml
-[mcp_servers.internal-tools]
-url = "https://mcp.internal.example.com/mcp"
-enabled = true
-headers = { "Authorization" = "Bearer ${INTERNAL_MCP_TOKEN}" }
+```json
+{
+  "mcp": {
+    "servers": {
+      "internal-tools": {
+        "enabled": true,
+        "headers": {
+          "Authorization": "Bearer ${INTERNAL_MCP_TOKEN}"
+        },
+        "url": "https://mcp.internal.example.com/mcp"
+      }
+    }
+  }
+}
 ```
 
 ### Local stdio
 
 Use stdio for tools that must run locally (filesystem access, local databases, in-house servers).
 
-```toml
-# Filesystem access scoped to a directory
-[mcp_servers.filesystem]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/directory"]
-
-# Local Postgres
-[mcp_servers.postgres]
-command = "npx"
-args = ["-y", "@modelcontextprotocol/server-postgres", "postgresql://user:pass@localhost/db"]
-
-# Custom server with a longer startup timeout and tuned per-tool timeouts
-[mcp_servers.my-tools]
-command = "/usr/local/bin/my-mcp-server"
-args = ["--config", "/etc/my-mcp.json"]
-startup_timeout_sec = 30
-tool_timeout_sec = 120
-tool_timeouts = { slow_analysis = 300, quick_lookup = 10 }
+```json
+{
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/path/to/allowed/directory"
+        ],
+        "command": "npx"
+      },
+      "my-tools": {
+        "args": [
+          "--config",
+          "/etc/my-mcp.json"
+        ],
+        "command": "/usr/local/bin/my-mcp-server",
+        "startup_timeout_sec": 30,
+        "tool_timeout_sec": 120,
+        "tool_timeouts": {
+          "quick_lookup": 10,
+          "slow_analysis": 300
+        }
+      },
+      "postgres": {
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-postgres",
+          "postgresql://user:pass@localhost/db"
+        ],
+        "command": "npx"
+      }
+    }
+  }
+}
 ```
 
 On Windows, npm installs launchers like `npx`, `npm`, `pnpm`, and `yarn` as `.cmd` batch shims (there is no `npx.exe`). Grok resolves a bare `command` such as `npx` to its real launcher path on `PATH` (honoring `PATHEXT`) before spawning, so these work without manually wrapping them in `cmd /c`. A `command` given as an absolute path or one containing a path separator is used as-is.

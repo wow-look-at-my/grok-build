@@ -34,10 +34,14 @@ grok --no-subagents                  # This session only
 export GROK_SUBAGENTS=0              # Environment variable
 ```
 
-```toml
-# ~/.grok/config.toml
-[subagents]
-enabled = false
+```json
+{
+  "agents": {
+    "subagents": {
+      "enabled": false
+    }
+  }
+}
 ```
 
 Only an explicit `enabled = false` turns subagents off. A `[subagents]` table that sets `max_depth`, `[subagents.models]`, or `[subagents.toggle]` without an `enabled` key keeps them on.
@@ -57,10 +61,14 @@ Only an explicit `enabled = false` turns subagents off. A `[subagents]` table th
 | `very-rare` | Reserve subagents for the rare, unmistakably independent case. |
 | `explicit-only` | Never spawn a subagent unless the user explicitly asks for one in the conversation. |
 
-```toml
-# ~/.grok/config.toml
-[subagents]
-usage_frequency = "often"
+```json
+{
+  "agents": {
+    "subagents": {
+      "usage_frequency": "often"
+    }
+  }
+}
 ```
 
 ```bash
@@ -103,10 +111,19 @@ A persona is a named behavioral overlay. Its instructions are injected into the 
 
 Define personas in `config.toml` or in `.toml` files:
 
-```toml
-[subagents.personas.researcher]
-instructions = "You are a thorough researcher. Always cite specific file paths."
-description = "Deep investigator."
+```json
+{
+  "agents": {
+    "subagents": {
+      "personas": {
+        "researcher": {
+          "description": "Deep investigator.",
+          "instructions": "You are a thorough researcher. Always cite specific file paths."
+        }
+      }
+    }
+  }
+}
 ```
 
 Grok Build discovers file-based personas from these locations, in priority order:
@@ -137,18 +154,33 @@ Manage personas in the Personas tab of the agents modal (`/personas`). Bundled p
 
 A persona can declare the inputs it expects and the outputs it produces. The parent agent reads these to know what context to supply and what artifacts to expect. This lets you chain personas, so one persona's output file becomes the next persona's input:
 
-```toml
-[[subagents.personas.reviewer.inputs]]
-name = "review_file"
-io_type = "file"
-required = true
-description = "Path to the code under review"
-
-[[subagents.personas.reviewer.outputs]]
-name = "summary_file"
-io_type = "file"
-required = false
-description = "Path to write review notes"
+```json
+{
+  "agents": {
+    "subagents": {
+      "personas": {
+        "reviewer": {
+          "inputs": [
+            {
+              "description": "Path to the code under review",
+              "io_type": "file",
+              "name": "review_file",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "description": "Path to write review notes",
+              "io_type": "file",
+              "name": "summary_file",
+              "required": false
+            }
+          ]
+        }
+      }
+    }
+  }
+}
 ```
 
 Each field has a `name`, an `io_type` (defaults to `file`), a `required` flag, and a `description`.
@@ -296,13 +328,20 @@ Grok Build manages worktrees through the `example.invalid/git/worktree/*` extens
 
 Disable specific agent types, or route them to a different model:
 
-```toml
-[subagents.toggle]
-explore = true                       # default -- omit to keep enabled
-plan = false                         # disable the plan subagent
-
-[subagents.models]
-explore = "grok-4.6"                 # route explore to a specific model
+```json
+{
+  "agents": {
+    "subagents": {
+      "models": {
+        "explore": "grok-4.6"
+      },
+      "toggle": {
+        "explore": true,
+        "plan": false
+      }
+    }
+  }
+}
 ```
 
 Per-type model overrides apply for any parent. Without an override, a subagent inherits the parent's model. Settings lists one row per spawnable type under Models. Those Settings include the types your workspace defines and those a plugin provides, and each row writes its own `[subagents.models].<type>` entry.
@@ -325,20 +364,37 @@ The row shows the value that applies after start. Toggling writes `[features] su
 
 Define custom roles with their own capability and model defaults:
 
-```toml
-[subagents.roles.researcher]
-description = "Deep research agent"
-default_capability_mode = "read-only"
-model = "grok-4.6"
-prompt_file = ".grok/prompts/researcher.md"
+```json
+{
+  "agents": {
+    "subagents": {
+      "roles": {
+        "researcher": {
+          "default_capability_mode": "read-only",
+          "description": "Deep research agent",
+          "model": "grok-4.6",
+          "prompt_file": ".grok/prompts/researcher.md"
+        }
+      }
+    }
+  }
+}
 ```
 
 Define custom personas with behavioral instructions:
 
-```toml
-[subagents.personas.concise]
-instructions = "Be concise. No filler words."
-# instructions_file = ".grok/personas/concise.md"  # or load from a file
+```json
+{
+  "agents": {
+    "subagents": {
+      "personas": {
+        "concise": {
+          "instructions": "Be concise. No filler words."
+        }
+      }
+    }
+  }
+}
 ```
 
 Grok Build also discovers roles from `.grok/roles/*.toml` and personas from `.grok/personas/*.toml`. Inline `config.toml` definitions take precedence over files.

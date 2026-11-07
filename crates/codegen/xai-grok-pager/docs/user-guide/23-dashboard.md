@@ -188,12 +188,21 @@ Prefixes (only inside search mode):
 
 Per-user preferences under `[dashboard]` in `~/.grok/config.toml`:
 
-```toml
-[dashboard]
-enabled = true
-grouping = "state"   # or "directory"
-pinned   = ["top:<session_id>"]
-reorder  = ["top:<session_id>"]
+```json
+{
+  "ui": {
+    "dashboard": {
+      "enabled": true,
+      "grouping": "state",
+      "pinned": [
+        "top:<session_id>"
+      ],
+      "reorder": [
+        "top:<session_id>"
+      ]
+    }
+  }
+}
 ```
 
 Pinned/reorder entries use **session id** (not a per-process agent slot), so they survive restarts.

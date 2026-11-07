@@ -104,8 +104,8 @@ fn configured_pending_cwd() -> tempfile::TempDir {
     let grok = dir.path().join(".grok");
     std::fs::create_dir_all(&grok).expect(".grok");
     std::fs::write(
-        grok.join("config.toml"),
-        "[mcp_servers.configured]\ncommand = \"false\"\n",
+        grok.join("config.json"),
+        r#"{"mcp": {"servers": {"configured": {"command": "false"}}}}"#,
     )
     .expect("mcp config");
     dir

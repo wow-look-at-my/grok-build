@@ -6,10 +6,19 @@ An optional row at the bottom of the pager, above the shortcuts bar, and disable
 
 ### Built-in
 
-```toml
-[ui.status_line]
-type = "builtin"
-items = ["cwd", "model", "context"]   # default when omitted
+```json
+{
+  "ui": {
+    "status_line": {
+      "items": [
+        "cwd",
+        "model",
+        "context"
+      ],
+      "type": "builtin"
+    }
+  }
+}
 ```
 
 This renders, for example, `grok-shell-status-line │ Grok 4.5 │ 12% ctx`. Items appear in the order you list them, and long ones are elided with `…`: the directory and session name at 40 columns, the model at 30.
@@ -27,10 +36,15 @@ This renders, for example, `grok-shell-status-line │ Grok 4.5 │ 12% ctx`. It
 
 Point `command` at a script. Grok pipes [JSON](#available-data) to it on stdin and shows its stdout. A `~/` prefix expands to your home directory.
 
-```toml
-[ui.status_line]
-type = "command"
-command = "~/.grok/statusline.sh"
+```json
+{
+  "ui": {
+    "status_line": {
+      "command": "~/.grok/statusline.sh",
+      "type": "command"
+    }
+  }
+}
 ```
 
 Field names and nesting follow the common status line convention, so a ported script usually needs a small edit rather than a rewrite. Anything the table below does not list is not sent.
@@ -63,11 +77,16 @@ Field names and nesting follow the common status line convention, so a ported sc
 
 Set `refresh_interval` on a `command` row and the script also re-runs on a timer, so an incident page or a CI status can reach the row while the session sits idle:
 
-```toml
-[ui.status_line]
-type = "command"
-command = "~/.grok/statusline.sh"
-refresh_interval = 300   # seconds
+```json
+{
+  "ui": {
+    "status_line": {
+      "command": "~/.grok/statusline.sh",
+      "refresh_interval": 300,
+      "type": "command"
+    }
+  }
+}
 ```
 
 - **The payload says why the script ran.** A run that answers the timer carries `"trigger": "refresh_interval"` — a state change landing while a timer fire is owed rides that run — and a run with no fire owed carries `"trigger": "state"`. Hit the network on `refresh_interval` and read a cache on `state`, or a busy turn — which re-runs the script continuously — becomes a request storm against whatever the script calls.

@@ -105,14 +105,23 @@ sources — handy for developing a marketplace from an existing checkout.
 
 Sources land in `~/.grok/config.toml`:
 
-```toml
-[[marketplace.sources]]
-name = "My Team Plugins"
-git = "https://github.com/my-org/plugins.git"
-
-[[marketplace.sources]]
-name = "Local Dev"
-path = "~/dev/my-plugins"
+```json
+{
+  "extensions": {
+    "marketplace": {
+      "sources": [
+        {
+          "git": "https://github.com/my-org/plugins.git",
+          "name": "My Team Plugins"
+        },
+        {
+          "name": "Local Dev",
+          "path": "~/dev/my-plugins"
+        }
+      ]
+    }
+  }
+}
 ```
 
 Or in `~/.grok/settings.json` / `~/.claude/settings.json`:

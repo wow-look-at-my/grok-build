@@ -56,7 +56,7 @@ const NO_INLINE_CITATIONS_RESPONSE_INCLUDE: &str = "no_inline_citations";
 /// One or more environment variable names that may hold a model API key.
 /// Serde `untagged`: accepts a string or an array in TOML/JSON.
 /// At resolve time the **first set, non-blank** value wins (e.g. SSH `AcceptEnv LC_*` forwarding of the Bottlerocket token).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum EnvKeys {
     One(String),
@@ -132,7 +132,7 @@ impl std::fmt::Display for EnvKeys {
     }
 }
 /// Configuration for API endpoints.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct EndpointsConfig {
     /// cli chat proxy base URL. `None` = unset, and every URL derived from it is blank.
@@ -989,7 +989,7 @@ pub(crate) fn resolve_enabled(
 pub(crate) use xai_grok_telemetry::config::env_telemetry_mode;
 pub use xai_grok_telemetry::config::{TelemetryConfig, TelemetryMode};
 /// Plugin system configuration from `[plugins]` section in config.toml.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PluginsConfig {
     /// Additional plugin directory paths to load.
     #[serde(default)]
@@ -1045,7 +1045,7 @@ impl PluginsConfig {
     }
 }
 /// Feedback submission configuration (`[feedback]` in config.toml).
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct FeedbackConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1053,7 +1053,7 @@ pub struct FeedbackConfig {
 }
 /// Self-reported feedback author identity (never used for authorization).
 /// Merged only from trusted config tiers, so a cloned repo can't inject the `command` escape hatch.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct FeedbackUserConfig {
     /// Sources tried in order for the name.
@@ -1070,13 +1070,13 @@ pub struct FeedbackUserConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct CompactionConfig {
     pub memory_flush: Option<crate::config::MemoryFlushSettings>,
     pub pruning: Option<crate::config::PruningSettings>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct CliConfig {
     /// No effect: the built-in updater is gone. The key is kept so old files load.
@@ -1112,13 +1112,13 @@ pub struct CliConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_picker_grouped: Option<bool>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct DiagnosticsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crash_handler: Option<bool>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ModelsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1229,7 +1229,7 @@ pub struct ModelsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_tool_calls: Option<bool>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct HarnessConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1247,7 +1247,7 @@ impl HarnessConfig {
         self.wait_for_uploads = self.wait_for_uploads.or(self.block_for_upload.take());
     }
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RelayConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1256,7 +1256,7 @@ pub struct RelayConfig {
 /// `[hub]` section from config.toml.
 /// Optional default Computer Hub URL for **workspace provider** exposure (`grok workspace` / leader `with_default_hub_url`).
 /// Does **not** enable agent-side harness/client connections or alter local session behavior.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct HubConfig {
     /// Hub WebSocket URL (`ws://` or `wss://`) used as the leader default for
@@ -1273,7 +1273,7 @@ impl HubConfig {
 pub use crate::agent::cursor_worker_config::CursorWorkerConfig;
 /// Deprecated `[worktree_pool]` section. The pre-warmed worktree pool was deleted (never wired into production).
 /// The section is still parsed so existing user configs don't trip unknown-key warnings.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct WorktreePoolConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1286,14 +1286,14 @@ pub struct WorktreePoolConfig {
     pub parallelism: Option<usize>,
 }
 /// `[worktree]` section from config.toml (auto-GC policy lives under `auto_gc`).
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct WorktreeConfigSection {
     #[serde(default)]
     pub auto_gc: crate::util::config::WorktreeAutoGcSettings,
 }
 /// `[sandbox]` section from config.toml.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SandboxSettingsConfig {
     /// "off", "workspace", "devbox", "read-only", "strict", or custom name.
@@ -1331,7 +1331,7 @@ impl SandboxSettingsConfig {
     }
 }
 /// `[marketplace]` section from config.toml (plugin marketplace sources).
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MarketplaceConfig {
     /// `[[marketplace.sources]]` entries.
@@ -1348,7 +1348,7 @@ pub struct MarketplaceConfig {
     pub default_skills_installs_purged: Option<toml::Value>,
 }
 /// A single `[[marketplace.sources]]` entry.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct MarketplaceSourceEntry {
     pub name: String,
     #[serde(default)]
@@ -1360,7 +1360,7 @@ pub struct MarketplaceSourceEntry {
 }
 /// `[storage]` section from config.toml.
 /// Read by `resolve_cleanup_ttl_days()` in `session/persistence.rs`.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct StorageConfig {
     /// Unset or `0` disables cleanup; there is no default TTL.
@@ -1369,7 +1369,7 @@ pub struct StorageConfig {
 pub use xai_grok_agent::prompt::paths::PathsConfig;
 /// `[permission]` known keys, declared for the unrecognized-key scan only; consumed out-of-band.
 /// Keys stay typed so a typo (e.g. `denny`) still warns.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct PermissionKnownKeys {
     /// Compact rule arrays (`parse_toml_permission_section`).
@@ -1382,7 +1382,7 @@ pub struct PermissionKnownKeys {
 /// `[shell_environment_policy]` known keys, for the unrecognized-key scan only.
 /// The value is parsed at spawn by [`crate::util::config::resolve_shell_env_policy`].
 /// `Option<toml::Value>` (no `deny_unknown_fields`) keeps a typo a warning, not a load failure, like [`PermissionKnownKeys`].
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ShellEnvironmentPolicyKnownKeys {
     pub inherit: Option<toml::Value>,
@@ -1750,7 +1750,7 @@ pub use xai_grok_shared::ui_config::{ContextualHints, UiConfig};
 /// Set in `config.toml` under `[agent]`: Priority (highest to lowest): ACP session-level `_meta.agentProfile`
 /// CLI `--agent-profile` flag `[agent]` config.toml section (this config) `GROK_AGENT` env var
 /// Default `grok-build` agent
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct AgentSelectionConfig {
     /// Name of a built-in or discovered agent definition.
@@ -1766,7 +1766,7 @@ pub struct AgentSelectionConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt_label: Option<String>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SessionConfig {
     /// Context window usage percentage (0-100) at which auto-compact is triggered. `None` means the user didn't set it.
@@ -1780,7 +1780,7 @@ pub struct SessionConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load_envrc: Option<bool>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct RepoChangesDedupConfig {
     pub enabled: bool,
@@ -4412,7 +4412,7 @@ fn is_default_model_pricing(p: &xai_grok_sampling_types::ModelPricing) -> bool {
 }
 
 /// `[pricing]` in config.toml.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct PricingConfig {
     /// Set false to keep the cost indicator off the network. A session then prices only the models config prices.
@@ -4494,7 +4494,7 @@ fn is_default_laziness_detector(cfg: &LazinessDetectorPerModelConfig) -> bool {
 /// A `[model.foo]` entry from config.toml, parsed directly from raw TOML (bypassing deep merge).
 /// Scalar fields are `Option` so absent means "inherit from defaults/prefetched".
 /// The collection fields (`extra_headers`, `reasoning_efforts`) merge only when non-empty and so cannot express "override to empty."
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ConfigModelOverride {
     pub model: Option<String>,
@@ -5121,7 +5121,7 @@ fn default_true() -> bool {
 }
 /// Codebase indexing setting for `[features] codebase_indexing`.
 /// Patterns are matched against the git root when available, otherwise the cwd, which allows explicitly indexing non-git directories.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum CodebaseIndexingSetting {
     Enabled(bool),
@@ -5199,7 +5199,7 @@ where
 /// `[goal]` section: the canonical home for `/goal` configuration.
 /// Field names mirror the remote `goal_*` keys with the prefix dropped, so config and remote stay 1:1.
 /// Per-key precedence is env > this config > remote > default.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct GoalConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5242,7 +5242,7 @@ pub struct GoalConfig {
     )]
     pub skeptic_models: Vec<crate::util::config::GoalRoleModel>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct WorkflowsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -5251,7 +5251,7 @@ pub struct WorkflowsConfig {
 /// `[auto_mode]` section: server-side configuration for Auto permission mode. ONE struct serves both the local `[auto_mode]` TOML table and the remote settings `auto_mode` JSON object, so the two stay 1:1.
 /// The remote object is coerced via `serde_json::from_value`. All fields are plain scalars/enums, so they deserialize cleanly from both formats (no custom tolerant deser needed). Unset fields stay `None` here.
 /// The wire fn applies the built-in defaults once auto mode is enabled (current model, `low` effort if the model supports it, `just_command` prompt). Precedence: local config > remote > those built-in defaults.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct AutoModeConfig {
     /// The Auto-mode gate.
@@ -5275,7 +5275,7 @@ pub struct AutoModeConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Features {
     /// when set, the agent may ask permission for tool executions
     #[serde(default)]
