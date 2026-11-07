@@ -142,7 +142,7 @@ By default, sending a prompt scrolls it to the top of the viewport so the respon
 
 #### Scrolling
 
-`[ui]` settings tune mouse-wheel and trackpad scrolling. All apply immediately and are editable from the settings pane (`/settings` → **Scroll speed** / **Scroll input** / **Scroll lines** / **Invert scroll**).
+`ui` settings tune mouse-wheel and trackpad scrolling. All apply immediately and are editable from the settings pane (`/settings` → **Scroll speed** / **Scroll input** / **Scroll lines** / **Invert scroll**).
 
 | Key | Values (default) | Behavior |
 |-----|------------------|----------|
@@ -165,17 +165,17 @@ Each setting also has an environment-variable override, applied on first load on
 
 #### Slow output
 
-Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate. When a model call stays too slow, Grok starts a backup of that call and keeps the slow one streaming. Whichever gets ahead is the answer, and a slow call that speeds back up cancels its backup. Tune it in `/settings` → **Slow output**, or in `[ui]`. A change applies to the next model call of every running session.
+Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate. When a model call stays too slow, Grok starts a backup of that call and keeps the slow one streaming. Whichever gets ahead is the answer, and a slow call that speeds back up cancels its backup. Tune it in `/settings` → **Slow output**, or in `ui`. A change applies to the next model call of every running session.
 
 The `N tok/s` counter beside the timers appears as soon as the measured rate settled, usually a few hundred milliseconds into the response. It shows that same rate the floor judges. And a stall brings it down rather than clearing it. This happens once it appears it stays for the rest of the model call: a speed-up or a slow-down changes the number. While the row waits for the model, after the call ends, and during a retry, there is no stream. The counter is hidden.
 
 | Key | Values (default) | Behavior |
 |-----|------------------|----------|
-| `min_output_tokens_per_sec` | `0`–`500` (`15`) | The floor. `0` turns detection off. `[model.<id>].min_output_tokens_per_sec` overrides it for one model. |
+| `min_output_tokens_per_sec` | `0`–`500` (`15`) | The floor. `0` turns detection off. `models.definitions.<id>.min_output_tokens_per_sec` overrides it for one model. |
 | `output_rate_sustained_secs` | `1`–`600` (`10`) | How long the rate must stay under the floor before a backup starts. |
 | `output_rate_window_secs` | `2`–`120` (`10`) | How many seconds of output the rate is averaged over. |
 | `output_rate_max_retries` | `0`–`5` (`2`) | How many backups one call can start. After that the response is kept at whatever rate it runs. `0` starts none. |
-| `ttft_timeout_secs` | `0`–`1800` (`120`) | Time-to-first-token limit. A call with no output this many seconds after it was sent is reissued, on the same retry budget. `0` turns it off. `[model_providers.<id>].ttft_timeout_secs` overrides it for a provider, and `[model.<id>].ttft_timeout_secs` for one model. |
+| `ttft_timeout_secs` | `0`–`1800` (`120`) | Time-to-first-token limit. A call with no output this many seconds after it was sent is reissued, on the same retry budget. `0` turns it off. `models.providers.<id>.ttft_timeout_secs` overrides it for a provider, and `models.definitions.<id>.ttft_timeout_secs` for one model. |
 
 ```json
 {
@@ -189,7 +189,7 @@ The `N tok/s` counter beside the timers appears as soon as the measured rate set
 }
 ```
 
-The older `[output_rate_floor]` table (`window_secs`, `max_retries`) still works. A `[ui]` key wins where both are set.
+The older `agents.output_rate_floor` object (`window_secs`, `max_retries`) still works. A `ui` key wins where both are set.
 
 ### Tool configuration
 
