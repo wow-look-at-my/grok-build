@@ -91,53 +91,6 @@ async fn auto_compact_top_row() {
     harness.quit().expect("clean quit");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore]
-async fn zz_probe_catalog_timing() {
-    let content = ContentController::start().await.expect("start content");
-    content.set_response(format!("{MOCK_RESPONSE_SENTINEL} startup probe."));
-    let binary = pager_binary().expect("resolve pager binary");
-    let mut harness =
-        PtyHarness::spawn_with_content(&binary, SHORT_ROWS, DEFAULT_COLS, &content, &[])
-            .expect("spawn pager with content");
-    harness
-        .wait_for_text("\u{276f}", WELCOME_TIMEOUT)
-        .expect("prompt marker");
-    harness
-        .inject_keys(format!("{PROMPT}\r").as_bytes())
-        .expect("submit");
-    let _ = harness.wait_for_text(MOCK_RESPONSE_SENTINEL, Duration::from_secs(30));
-    let log = std::fs::read_to_string(content.home().join(".grok/logs/unified.jsonl"))
-        .unwrap_or_default();
-    for line in log
-        .lines()
-        .filter(|l| l.contains("catalog") || l.contains("startup") || l.contains("session model"))
-    {
-        println!("PROBE {}", &line[..line.len().min(300)]);
-    }
-    let _ = harness.quit();
-    for entry in walkdir_list(&content.home().join(".grok")) {
-        println!("FILE {entry}");
-    }
-}
-
-fn walkdir_list(dir: &std::path::Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return out;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            out.extend(walkdir_list(&p));
-        } else {
-            let len = p.metadata().map(|m| m.len()).unwrap_or(0);
-            out.push(format!("{} {len}", p.display()));
-        }
-    }
-    out
-}
-
 /// **Auto-compact engages at startup, with no resize event.** Spawning already tiny (no resize event ever fires) must
 /// still land the status bar on the first row. Only the startup read of `crossterm::terminal::size()` into the initial
 /// appearance can have derived the compact flag.
