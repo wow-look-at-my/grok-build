@@ -82,7 +82,7 @@ impl BashToolConfig {
 }
 
 /// User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.
-/// That keeps the documented precedence (requirements > env > user > managed > remote). This struct exists so the keys are recognized in `config.toml` and round-trip through `AgentConfig`.
+/// That keeps the documented precedence (requirements > env > user > managed > remote). This struct exists so the keys are recognized in `config.json` and round-trip through `AgentConfig`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct AskUserQuestionToolConfig {
@@ -272,7 +272,7 @@ impl ShellToolsetConfig {
 // File toolset selection
 // ---------------------------------------------------------------------------
 
-/// Configurable in `config.json` under `[toolset.hashline]`:
+/// Configurable in `config.json` under `tools.hashline`:
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct HashlineSchemeConfig {

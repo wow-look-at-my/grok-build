@@ -48,7 +48,7 @@ impl VoiceConfig {
     pub fn stt_ws_url(&self) -> Result<String, VoiceError> {
         if self.api_base.trim().is_empty() {
             return Err(VoiceError::Config(
-                "voice has no URL: set [voice] api_base or [endpoints] xai_api_base_url".into(),
+                "voice has no URL: set `ui.voice.api_base` or `endpoints.xai_api_base_url`".into(),
             ));
         }
         let url = ws_url(&self.api_base, &self.stt_ws_path)?;

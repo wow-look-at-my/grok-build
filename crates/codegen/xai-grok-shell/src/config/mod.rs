@@ -45,8 +45,8 @@ fn resolve_standalone_memory_mode(
     MemoryConfig::resolve(false, false, config, remote).mode
 }
 /// Configuration for subagent (task tool) support.
-/// Parsed from the `[subagents]` section of `~/.grok/config.json` or `.grok/config.json`.
-/// Enabled by default; can be disabled via the `GROK_SUBAGENTS=0` env var or ``agents.subagents.enabled` = false` in config.json.
+/// Parsed from the `agents.subagents` object of `~/.grok/config.json` or `.grok/config.json`.
+/// Enabled by default; can be disabled via the `GROK_SUBAGENTS=0` env var or `agents.subagents.enabled` set to `false` in config.json.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SubagentsConfig {
@@ -70,7 +70,7 @@ pub struct SubagentsConfig {
     pub usage_frequency: Option<String>,
     /// Per-subagent model ID overrides.
     /// Keys are agent names, values are model IDs that must exist in the available models registry.
-    /// Parsed from `[subagents.models]` in config.json.
+    /// Parsed from `agents.subagents.models` in config.json.
     #[serde(default)]
     pub models: std::collections::HashMap<String, String>,
     /// Per-subagent enable/disable toggles.
@@ -472,7 +472,7 @@ impl SubagentsConfig {
         (project.roles, project.personas)
     }
 }
-/// Managed MCP connector fetching config (`[managed_mcps]` in config.json).
+/// Managed MCP connector fetching config (`mcp.managed` in config.json).
 ///
 /// See [`Self::resolve`] for full priority chain.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
@@ -559,7 +559,7 @@ impl Default for ModelOverrideConfig {
 pub enum PromptSuggestModelPin {
     /// `GROK_PROMPT_SUGGESTIONS_MODEL`: catalog-guarded explicit pin.
     Env(String),
-    /// ``models.prompt_suggestion`` in config.json, or the remote `prompt_suggestion_model` (remote settings); catalog-guarded.
+    /// `models.prompt_suggestion` in config.json, or the remote `prompt_suggestion_model` (remote settings); catalog-guarded.
     Pinned(String),
     /// No explicit pin: the client hint, then the built-in default apply (both catalog-guarded).
     #[default]
@@ -687,7 +687,7 @@ pub struct MediaGenToolsConfig {
     #[serde(default)]
     pub max_parallel_video_gen_calls: Option<i64>,
 }
-/// Tool behavior configuration (`[tools]` in config.json).
+/// Tool behavior configuration (`tools` in config.json).
 /// Controls cross-cutting tool behavior such as `.gitignore` filtering.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
@@ -1650,7 +1650,7 @@ pub fn apply_sandbox(
     }
 }
 pub use xai_grok_workspace::project_config::find_project_configs;
-/// Resolve the effective `[plugins]` config for a working directory the same way a session does at reload time: global/user config ([`load_effective_config`]), plus every ancestor project `.grok/config.json` ([`find_project_configs`], extending `paths` and `disabled`), plus the imported `enabledPlugins` merge.
+/// Resolve the effective `extensions.plugins` config for a working directory the same way a session does at reload time: global/user config ([`load_effective_config`]), plus every ancestor project `.grok/config.json` ([`find_project_configs`], extending `paths` and `disabled`), plus the imported `enabledPlugins` merge.
 /// All three must discover the same plugins for a given cwd.
 /// Centralizing it prevents the paths/disabled/discovered-command drift those callers would otherwise accumulate.
 pub(crate) fn resolve_effective_plugins_config(
@@ -1711,12 +1711,12 @@ fn plugins_list_add(
         .entry("plugins".to_string())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .ok_or("[plugins] is not a table")?;
+        .ok_or("`extensions.plugins` is not an object")?;
     let entries = plugins
         .entry(list.to_string())
         .or_insert_with(|| toml::Value::Array(vec![]))
         .as_array_mut()
-        .ok_or_else(|| format!("[plugins].{list} is not an array"))?;
+        .ok_or_else(|| format!("`extensions.plugins.{list}` is not an array"))?;
     if entries
         .iter()
         .any(|v| v.as_str().is_some_and(|s| s == value))
@@ -1778,14 +1778,14 @@ pub(crate) async fn run_set_plugin_enabled(plugin_id: String, enabled: bool) -> 
     })
     .await
 }
-/// Add a plugin path to `[plugins].paths` in `~/.grok/config.json`.
+/// Add a plugin path to `extensions.plugins.paths` in `~/.grok/config.json`.
 /// Deduplicates: if the path is already present, this is a no-op.
 pub(crate) fn add_plugin_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     update_config_toml_locked(&crate::util::grok_home::grok_home(), |table| {
         plugins_list_add(table, "paths", path)
     })
 }
-/// Remove a plugin path from `[plugins].paths` in `~/.grok/config.json`.
+/// Remove a plugin path from `extensions.plugins.paths` in `~/.grok/config.json`.
 ///
 /// If the path is not found, this is a no-op (returns Ok).
 pub(crate) fn remove_plugin_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1793,14 +1793,14 @@ pub(crate) fn remove_plugin_path(path: &str) -> Result<(), Box<dyn std::error::E
         Ok(plugins_list_remove(table, "paths", path))
     })
 }
-/// Add a plugin to `[plugins].disabled` in `~/.grok/config.json`.
+/// Add a plugin to `extensions.plugins.disabled` in `~/.grok/config.json`.
 /// Deduplicates: if already present, this is a no-op.
 pub fn add_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
     update_config_toml_locked(&crate::util::grok_home::grok_home(), |table| {
         plugins_list_add(table, "disabled", plugin_id)
     })
 }
-/// Remove a plugin from `[plugins].disabled` in `~/.grok/config.json`.
+/// Remove a plugin from `extensions.plugins.disabled` in `~/.grok/config.json`.
 ///
 /// If the plugin is not in the disabled list, this is a no-op.
 pub fn remove_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1813,7 +1813,7 @@ pub fn remove_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error:
 pub async fn run_add_dismissed_plugin_cta(plugin_id: String) -> Result<(), String> {
     config_write_blocking(move || add_dismissed_plugin_cta(&plugin_id)).await
 }
-/// Add a plugin to `[plugin_cta].dismissed` in `~/.grok/config.json`.
+/// Add a plugin to `plugin_cta.dismissed` in `~/.grok/config.json`.
 /// Creates the `[plugin_cta]` section and `dismissed` array if they don't exist.
 /// Deduplicates: if already present, this is a no-op.
 pub fn add_dismissed_plugin_cta(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1851,7 +1851,7 @@ pub fn add_dismissed_plugin_cta_to_file(
         Ok(true)
     })
 }
-/// All plugin ids listed in `[plugin_cta].dismissed` in `~/.grok/config.json`.
+/// All plugin ids listed in `plugin_cta.dismissed` in `~/.grok/config.json`.
 ///
 /// Read once (e.g. on catalog load) and cached so the matched-debounce recompute doesn't parse the config from disk on the UI thread.
 pub fn dismissed_plugin_ctas() -> std::collections::HashSet<String> {
@@ -1944,7 +1944,7 @@ pub(crate) fn auto_enable_plugins(names: &[String]) -> Vec<String> {
     }
     warnings
 }
-/// Add a plugin to `[plugins].enabled` in `~/.grok/config.json`.
+/// Add a plugin to `extensions.plugins.enabled` in `~/.grok/config.json`.
 /// Used for project-scope plugins that are disabled by default.
 /// Deduplicates: if already present, this is a no-op.
 pub fn add_enabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1952,7 +1952,7 @@ pub fn add_enabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Err
         plugins_list_add(table, "enabled", plugin_id)
     })
 }
-/// Remove a plugin from `[plugins].enabled` in `~/.grok/config.json`.
+/// Remove a plugin from `extensions.plugins.enabled` in `~/.grok/config.json`.
 pub fn remove_enabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
     update_config_toml_locked(&crate::util::grok_home::grok_home(), |table| {
         Ok(plugins_list_remove(table, "enabled", plugin_id))

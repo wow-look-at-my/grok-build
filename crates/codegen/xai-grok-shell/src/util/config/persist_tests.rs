@@ -485,7 +485,7 @@ fn dashboard_preview_writer_accepts_loader_syntax_and_preserves_other_fields() {
 fn dashboard_preview_writer_preserves_invalid_files_and_identifies_the_error() {
     for (input, operation) in [
         (r#"{"ui""#, "parse"),
-        (r#"{"ui": false}"#, "[ui] must be a table"),
+        (r#"{"ui": false}"#, "`ui` must be an object"),
     ] {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("config.json");

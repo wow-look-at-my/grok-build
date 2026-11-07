@@ -19,7 +19,7 @@ pub enum ConfigSource {
     User { path: PathBuf },
     /// Plugin-provided component.
     Plugin { plugin_name: String, path: PathBuf },
-    /// config.json `[mcp_servers.*]`, `[skills]`, etc. `path` is
+    /// config.json `mcp.servers.*`, `extensions.skills`, etc. `path` is
     /// domain-specific: the declaring config.json for MCP servers, the
     /// skill's own SKILL.md for `[skills].paths` skills.
     ConfigToml { path: PathBuf },

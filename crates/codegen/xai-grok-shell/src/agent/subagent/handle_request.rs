@@ -1346,7 +1346,7 @@ pub(crate) async fn run_shell_child(
         tracing::warn!(
             agent = %definition.name,
             "agent `memory:` scope is a legacy-memory feature; memory v2 is active, so this \
-             agent uses the session's shared v2 memory instead. Set `[memory_v2] enabled = false` \
+             agent uses the session's shared v2 memory instead. Set `memory.v2.enabled` to `false` \
              to keep a per-agent scope"
         );
     }

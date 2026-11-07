@@ -601,7 +601,7 @@ fn handle_reload_workflows(agent: &MvpAgent) -> ExtResult {
 // internal/reload_all_mcp_servers
 
 /// Reload MCP servers for ALL active sessions.
-/// Called by the config hot-reload watcher when `[mcp_servers]` changes in config.json.
+/// Called by the config hot-reload watcher when `mcp.servers` changes in config.json.
 async fn handle_reload_all_mcp_servers(agent: &MvpAgent) -> ExtResult {
     let session_ids = agent.resident_ids();
 
@@ -762,7 +762,7 @@ fn send_reload_to_residents(
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
 
-/// Re-resolve the agent model list from config.json. Called by the config hot-reload watcher when `[model.*]` or `[models]` changes.
+/// Re-resolve the agent model list from config.json. Called by the config hot-reload watcher when `models.definitions.*` or `models` changes.
 /// Re-reads config from disk, re-runs the `new_with_models()` resolution logic for user TOML config entries, and swaps the model list in-place.
 /// Prefetched (API) and default models are NOT re-fetched; only BYOK entries from config are updated.
 fn handle_reload_models(agent: &MvpAgent) -> ExtResult {

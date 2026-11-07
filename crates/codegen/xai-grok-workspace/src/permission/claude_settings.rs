@@ -434,7 +434,7 @@ pub fn load_claude_env_with_project(cwd: &Path, project_trusted: bool) -> HashMa
 
 // Phase 2 cutoff marker. Reader is local because gate consumers cannot depend on shell (cycle); caching omitted until this is a hotspot.
 
-/// True when the user marked Claude settings imported (`[claude_compat].imported` in config.json, or the test override).
+/// True when the user marked Claude settings imported (`claude_compat.imported` in config.json, or the test override).
 /// Public so callers that mirror this gate elsewhere use the same check.
 pub fn is_claude_import_marked() -> bool {
     // Test escape hatch: shell tests call `refresh_marker_cache(true)`, which lives in xai-grok-shell (inaccessible from here at runtime)

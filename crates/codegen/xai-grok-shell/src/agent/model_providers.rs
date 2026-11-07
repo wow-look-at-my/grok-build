@@ -257,7 +257,7 @@ pub(crate) fn parse_model_providers(
         warnings.push(ConfigWarning::model_provider_section(
             ConfigWarningKind::NotATable,
             format!(
-                "`model_providers` must be a table of [model_providers.<id>] entries, got {}; \
+                "`models.providers` must be an object of `<id>` entries, got {}; \
                  all model providers ignored",
                 section.type_str()
             ),

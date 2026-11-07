@@ -120,7 +120,7 @@ pub struct UiConfig {
     pub voice_capture_mode: Option<String>,
     /// Speech-to-text language preference for voice dictation. A Grok STT catalog code (`en`, `es`, `ja`, …; see xAI STT
     /// supported languages) or `auto` (system locale, resolved at connect). Written by the settings modal; unset leaves
-    /// `[voice].language` / default `en`. When set, overrides `[voice].language` for the session.
+    /// `ui.voice.language` / default `en`. When set, overrides `ui.voice.language` for the session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_stt_language: Option<String>,
     /// Whether the Ctrl+Space / F8 voice-dictation shortcut is active.

@@ -41,7 +41,7 @@ impl From<WorktreeType> for CreationMode {
     }
 }
 
-/// Returns `Some(type)` when ``cli.worktree_type`` is set to a valid value in config.json,
+/// Returns `Some(type)` when `cli.worktree_type` is set to a valid value in config.json,
 /// `None` when absent or the value type is wrong. Logs a warning for invalid strings.
 pub(crate) fn worktree_type_from_toml_opt(root: &TomlValue) -> Option<WorktreeType> {
     if let TomlValue::Table(table) = root
@@ -127,7 +127,7 @@ fn grove_worktree_from_toml_opt(root: &TomlValue) -> Option<bool> {
             if let Some(s) = v.as_str() {
                 return grove_from_str(s);
             }
-            tracing::warn!("Invalid [cli].{key} value: {v:?}, ignoring");
+            tracing::warn!("Invalid `cli.{key}` value: {v:?}, ignoring");
         }
     }
     if let Some(s) = cli.get("worktree_type").and_then(|v| v.as_str()) {
@@ -148,7 +148,7 @@ pub fn grove_enable_all_from_toml(root: &TomlValue) -> Option<bool> {
     if let Some(s) = v.as_str() {
         return grove_enable_all_from_str(s);
     }
-    tracing::warn!("Invalid [cli].grove value: {v:?}, ignoring");
+    tracing::warn!("Invalid `cli.grove` value: {v:?}, ignoring");
     None
 }
 

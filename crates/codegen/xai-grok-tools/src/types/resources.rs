@@ -546,7 +546,7 @@ impl std::fmt::Debug for GitignoreFilter {
 }
 /// Controls whether tools respect `.gitignore` patterns. Always seeded by `agent_rebuild`. When `true`, all tools block
 /// gitignored files. When `false`, `read_file` allows via `is_some_and` while `grep`/`list_dir`/`search_replace` also
-/// allow via `is_none_or`. Configured via ``tools.respect_gitignore` = true` in `config.json`.
+/// allow via `is_none_or`. Configured via `tools.respect_gitignore` set to `true` in `config.json`.
 #[derive(Debug, Clone, Copy)]
 pub struct RespectGitignore(pub bool);
 impl Default for RespectGitignore {

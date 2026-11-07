@@ -403,7 +403,7 @@ pub fn discover_plugins(
                 &mut candidates,
             );
         } else {
-            tracing::warn!(path = %dir.display(), "[plugins].paths entry is not a directory; skipping");
+            tracing::warn!(path = %dir.display(), "`extensions.plugins.paths` entry is not a directory; skipping");
         }
     }
 

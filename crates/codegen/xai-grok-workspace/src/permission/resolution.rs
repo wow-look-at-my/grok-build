@@ -179,7 +179,7 @@ fn extract_toml_permissions(
         }
         Err(e) => {
             let source = make_source();
-            warn!(error = %e, %source, "Failed to parse [permission]");
+            warn!(error = %e, %source, "Failed to parse `permission`");
             Vec::new()
         }
     }
@@ -206,7 +206,7 @@ fn load_requirements_permissions() -> Vec<Sourced<PermissionRule>> {
         .collect()
 }
 
-/// Load `[permission]` rules from `~/.grok/config.json` (lowest) then each `.grok/config.json` from repo root to `cwd`.
+/// Load `permission` rules from `~/.grok/config.json` (lowest) then each `.grok/config.json` from repo root to `cwd`.
 /// The walk matches [`crate::project_config::find_project_configs`] so detector and loader agree. Empty if no `[permission]` section.
 fn load_config_toml_permissions(cwd: &Path, project_trusted: bool) -> Vec<Sourced<PermissionRule>> {
     let mut rules = Vec::new();

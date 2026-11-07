@@ -134,7 +134,7 @@ pub(super) fn write_dashboard_preview(
             .entry("ui".to_owned())
             .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
             .as_table_mut()
-            .with_context(|| format!("{} [ui] must be a table", path.display()))?;
+            .with_context(|| format!("{} `ui` must be an object", path.display()))?;
         ui.insert("dashboard_preview".to_owned(), toml::Value::Boolean(value));
         Ok(())
     })
@@ -289,7 +289,7 @@ pub async fn set_feedback_trace_card(value: bool) -> Result<()> {
     .await
 }
 
-/// Persist ``models.definitions."<model_key>".context_window`` in the user `config.json`.
+/// Persist `models.definitions."<model_key>".context_window` in the user `config.json`.
 /// `None` removes the key, and a block left empty goes with it.
 pub async fn set_model_context_window(model_key: String, tokens: Option<u64>) -> Result<()> {
     if model_key.trim().is_empty() || model_key.len() > MAX_DEFAULT_MODEL_LEN {
@@ -317,7 +317,7 @@ pub(super) fn write_model_context_window(
 ) -> Result<()> {
     rewrite_user_config_table(path, "context window", write, |root| {
         apply_model_context_window(root, model_key, tokens)
-            .with_context(|| format!("{} [model] must be a table of tables", path.display()))
+            .with_context(|| format!("{} `models.definitions` must be an object of objects", path.display()))
     })
 }
 
@@ -350,17 +350,17 @@ pub(crate) fn apply_model_context_window(
         .entry("model".to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .context("[model] is not a table")?;
+        .context("`models.definitions` is not an object")?;
     let block = models
         .entry(model_key.to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .with_context(|| format!("[model.\"{model_key}\"] is not a table"))?;
+        .with_context(|| format!("`models.definitions.{model_key}` is not an object"))?;
     block.insert("context_window".to_owned(), toml::Value::Integer(value));
     Ok(())
 }
 
-/// Persist or remove a registry `[features]` key in the user `config.json`.
+/// Persist or remove a registry `features` key in the user `config.json`.
 /// `None` deletes the key so the remote and default tiers apply again.
 pub async fn set_feature_override(feature: Feature, value: Option<bool>) -> Result<()> {
     rewrite_user_config_locked(feature.path(), move |path| {
@@ -387,7 +387,7 @@ pub(super) fn write_feature_override(
                     .entry("features".to_owned())
                     .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
                     .as_table_mut()
-                    .with_context(|| format!("{} [features] must be a table", path.display()))?;
+                    .with_context(|| format!("{} `features` must be an object", path.display()))?;
                 features.insert(feature.key().to_owned(), toml::Value::Boolean(flag));
             }
             None => {
@@ -500,7 +500,7 @@ pub(crate) fn apply_model_group_model(
         .cloned()
         .map(toml::Value::try_into)
         .transpose()
-        .context("[model_groups] is invalid")?
+        .context("`models.groups` is invalid")?
         .unwrap_or_default();
     let groups = xai_grok_models::resolve_model_groups(&user).map_err(anyhow::Error::msg)?;
     let group = groups
@@ -529,11 +529,11 @@ pub(crate) fn apply_model_group_model(
         .entry("model_groups".to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .context("[model_groups] must be a table")?
+        .context("`models.groups` must be an object")?
         .entry(group_id.to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .with_context(|| format!("[model_groups.{group_id}] must be a table"))?;
+        .with_context(|| format!("`models.groups.{group_id}` must be an object"))?;
     table.insert("model".to_owned(), toml::Value::String(value.to_owned()));
     if let Some(models) = root.get_mut("models").and_then(toml::Value::as_table_mut) {
         for member in &group.members {
@@ -598,11 +598,11 @@ pub(crate) fn apply_subagent_model(
     root.entry("subagents".to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .context("[subagents] must be a table")?
+        .context("`agents.subagents` must be an object")?
         .entry("models".to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .context("[subagents.models] must be a table")?
+        .context("`agents.subagents.models` must be an object")?
         .insert(agent_type.to_owned(), toml::Value::String(value.to_owned()));
     Ok(())
 }

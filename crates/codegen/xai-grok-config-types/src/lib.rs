@@ -477,7 +477,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub active_agent_messages_enabled: Option<bool>,
     /// File toolset: `"standard"` or `"hashline"`.
-    /// This is the server-side default; local ``toolset.file_toolset`` in config.json takes precedence when set.
+    /// This is the server-side default; local `toolset.file_toolset` in config.json takes precedence when set.
     #[serde(default)]
     pub file_toolset: Option<String>,
     /// Per-chunk idle timeout in seconds for inference streaming.
@@ -491,7 +491,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub mcp_startup_timeout_secs: Option<u64>,
     /// Global default MCP tool-result inline cap (bytes), from remote settings `grok_build_settings.max_mcp_output_bytes`.
-    /// Requirements, env, and `config.json `mcp.max_output_bytes`` override it. The built-in default is 20_000.
+    /// Requirements, env, and `mcp.max_output_bytes` in config.json override it. The built-in default is 20_000.
     #[serde(default)]
     pub max_mcp_output_bytes: Option<u64>,
     /// When `Some(true)`, enable session registry hooks (register, update, finalize, memory upload).
@@ -663,7 +663,7 @@ pub struct RemoteSettings {
     pub slash_command_tags: Option<std::collections::BTreeMap<String, String>>,
     /// When present, controls the non-Git-repo warning at session start.
     /// It arrives as `non_git_warning` in `grok_build_settings`.
-    /// It takes precedence over ``features.non_git_warning`` in config.json.
+    /// It takes precedence over `features.non_git_warning` in config.json.
     /// `Some(true)` enables, `Some(false)` acts as a kill-switch, `None` falls back to local config.
     #[serde(default)]
     pub non_git_warning: Option<bool>,
@@ -686,7 +686,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub image_description_model: Option<String>,
     /// Server-side pin for the next-prompt suggestion model (tab-autocomplete ghost text), from the `grok_build_settings` remote settings flag.
-    /// It sits below env (`GROK_PROMPT_SUGGESTIONS_MODEL`) and ``models.prompt_suggestion`` in config.json.
+    /// It sits below env (`GROK_PROMPT_SUGGESTIONS_MODEL`) and `models.prompt_suggestion` in config.json.
     /// It sits above the client hint and the built-in `grok-4.6` default.
     /// When the effective model is not in the shell's model catalog the suggestion request is skipped entirely; the session model is never used instead.
     /// See `ModelOverrideConfig::resolve` and `handle_suggest_prompt`.
@@ -698,7 +698,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub campaigns: Vec<CampaignOverride>,
     /// When `Some(true)`, foreground commands that hit the default timeout are auto-backgrounded instead of killed.
-    /// It is the fallback when no local ``tools.bash.auto_background_on_timeout`` is set in config.json.
+    /// It is the fallback when no local `tools.bash.auto_background_on_timeout` is set in config.json.
     #[serde(default)]
     pub auto_background_on_timeout: Option<bool>,
     /// When `Some(false)`, foreground commands containing a background `&` operator are rejected.
@@ -715,7 +715,7 @@ pub struct RemoteSettings {
     pub ask_user_question_timeout_secs: Option<u64>,
     /// When `Some(true)`, a completed subagent's isolated worktree is snapshotted into a durable git ref and its directory deleted.
     /// Resume restores the worktree from the ref.
-    /// It is the fallback when no local ``features.subagent_worktree_snapshot`` is set in config.json; absent defaults to disabled.
+    /// It is the fallback when no local `features.subagent_worktree_snapshot` is set in config.json; absent defaults to disabled.
     #[serde(default)]
     pub subagent_worktree_snapshot_enabled: Option<bool>,
     /// Remote fallback for `[features] subagent_model_inheritance`; absent or null means off.
@@ -749,7 +749,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub contextual_hints: Option<ContextualHintsRemote>,
     /// Server-recommended worktree creation type.
-    /// It is the fallback when no local ``cli.worktree_type`` is set in config.json.
+    /// It is the fallback when no local `cli.worktree_type` is set in config.json.
     #[serde(default)]
     pub worktree_type: Option<String>,
     /// Grove-projected worktree strategy (`true` means grove-fuse or grove-nfs, `false` means copy).

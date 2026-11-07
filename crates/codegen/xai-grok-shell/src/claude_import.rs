@@ -460,7 +460,7 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
     xai_gix_status::discover::discover_workdir(cwd).unwrap_or_else(|| cwd.to_path_buf())
 }
 
-// Import Marker (Read Side) The marker ``claude_compat.imported` = true` in `~/.grok/config.json` is the signal that runtime fallback paths should stop reading `.claude/`.
+// Import Marker (Read Side) The marker `claude_compat.imported` set to `true` in `~/.grok/config.json` is the signal that runtime fallback paths should stop reading `.claude/`.
 // The reader lives here so the hook, path, and permission gates all consult the same cached marker The writer is `mark_claude_imported` below
 
 /// Cached result of [`is_claude_import_marked`]; see its doc for the caching rationale and trade-offs.
@@ -468,7 +468,7 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
 /// The fast path is a read lock and a cached `bool`, far below the cost of the uncached `read_to_string` and TOML parse.
 static MARKER_CACHE: std::sync::RwLock<Option<bool>> = std::sync::RwLock::new(None);
 
-/// Whether the current user has already imported Claude settings. Reads ``claude_compat.imported` = true` from `~/.grok/config.json` once per process and caches the result.
+/// Whether the current user has already imported Claude settings. Reads `claude_compat.imported` (`true`) from `~/.grok/config.json` once per process and caches the result.
 /// When the marker is set, runtime fallbacks that read `.claude/` should be skipped; the user has migrated to native config. Resilient: returns `false` on missing file, missing section, parse error, or any other failure.
 /// Trade-off: a user who manually flips the marker mid-session must restart to see the change, acceptable because reverting after import is rare. That variant logs one line so users can see the cutoff fired.
 pub(crate) fn is_claude_import_marked() -> bool {
@@ -723,7 +723,7 @@ fn merge_permissions(
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let perm_table = permission
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[permission] is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("`permission` is not an object"))?;
 
     let mut count = 0;
 
@@ -813,7 +813,7 @@ fn merge_env_vars(table: &mut TomlMap<String, TomlValue>, vars: &[(&str, &str)])
     let env_table = match env.as_table_mut() {
         Some(t) => t,
         None => {
-            warn!("[env] in config.json is not a table, skipping env import");
+            warn!("`env` in config.json is not an object, skipping env import");
             return 0;
         }
     };
@@ -838,7 +838,7 @@ fn merge_mcp_servers(
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let mcp_table = mcp
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[mcp_servers] is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("`mcp.servers` is not an object"))?;
 
     let mut count = 0;
     for (name, config) in servers {
@@ -865,7 +865,7 @@ fn merge_paths(
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let paths_table = paths
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[paths] is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("`extensions.paths` is not an object"))?;
 
     let arr = paths_table
         .entry(key)

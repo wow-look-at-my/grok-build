@@ -432,7 +432,7 @@ pub struct McpState {
     /// Monotonic source for [`UnreachableRetry::InFlight`] attempt tokens.
     unreachable_attempt_counter: u64,
     /// Per-server set of unqualified tool names that the user has disabled.
-    /// Persisted to `~/.grok/config.json` under `[mcp_servers.<name>].disabled_tools`.
+    /// Persisted to `~/.grok/config.json` under `mcp.servers.<name>.disabled_tools`.
     pub disabled_tools: HashMap<McpServerName, std::collections::HashSet<ToolName>>,
     /// Stashed registrations for disabled tools so they can be re-enabled without a full MCP re-init (no need to call `list_tools` again).
     pub disabled_tool_registrations: HashMap<String, McpToolRegistration>,
@@ -3549,7 +3549,7 @@ impl McpClient {
     }
 
     /// Resolve the timeout for a specific tool.
-    /// Precedence (highest to lowest): `_meta.mcpConfig.<server>.toolTimeoutsMs.<tool>`; `config.json [mcp_servers.<server>].tool_timeouts.<tool>`; `_meta.mcpConfig.<server>.toolTimeoutMs`; `config.json [mcp_servers.<server>].tool_timeout_sec`; Default (60s).
+    /// Precedence (highest to lowest): `_meta.mcpConfig.<server>.toolTimeoutsMs.<tool>`; `mcp.servers.<server>.tool_timeouts.<tool>` in config.json; `_meta.mcpConfig.<server>.toolTimeoutMs`; `mcp.servers.<server>.tool_timeout_sec` in config.json; Default (60s).
     /// Steps 1 and 2 are already merged into `self.tool_timeouts` at construction.
     pub fn tool_timeout_for(&self, tool_name: &str) -> u64 {
         self.tool_timeouts

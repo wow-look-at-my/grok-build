@@ -2386,7 +2386,7 @@ impl SessionActor {
             tracing::warn!(
                 model = %current_model_id,
                 available = ?config.config_models.keys().collect::<Vec<_>>(),
-                "Model not found in config.json [model.*]"
+                "Model not found in config.json `models.definitions.*`"
             );
             return None;
         };

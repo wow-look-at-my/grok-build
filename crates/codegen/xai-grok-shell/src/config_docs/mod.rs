@@ -155,7 +155,7 @@ fn strip_cell(s: &str) -> String {
     s.trim().trim_matches('`').trim().to_string()
 }
 
-/// Parse `| `key` | type | req | managed | details |` (config.toml) and the requirements-only `| key | type | default | details |` table.
+/// Parse `| `key` | type | req | managed | details |` (config.json) and the requirements-only `| key | type | default | details |` table.
 fn parse_tables(markdown: &str) -> (Vec<Row>, Vec<Row>) {
     let mut config = Vec::new();
     let mut requirements_only = Vec::new();

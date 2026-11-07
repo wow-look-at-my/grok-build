@@ -620,7 +620,7 @@ impl AgentBuilder {
         self.skills_config = config;
         self
     }
-    /// Inject `[toolset.bash]` overrides from config.json into bash tool params.
+    /// Inject `tools.bash` overrides from config.json into bash tool params.
     pub fn with_bash_params(mut self, params: serde_json::Map<String, serde_json::Value>) -> Self {
         self.bash_params_json = Some(params);
         self

@@ -1145,7 +1145,7 @@ pub fn maybe_reexec_into_jail() {
     if !request.enabled && !env_pathbox {
         return;
     }
-    // Read the `[jail]` defaults from this process's `$GROK_HOME`/`config.json` (release defaults when there is no `[jail]` section), then drive the real plan/service builders.
+    // Read the `jail` defaults from this process's `$GROK_HOME`/`config.json` (release defaults when there is no `jail` object), then drive the real plan/service builders.
     let defaults = JailDefaults::load(&crate::paths::grok_home());
     sweep_stale_session_dirs(&crate::paths::grok_home());
     let mut plan = match build_plan(&request, &defaults, argv) {

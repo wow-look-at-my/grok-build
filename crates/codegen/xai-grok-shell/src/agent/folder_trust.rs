@@ -1,7 +1,7 @@
 //! Folder-trust gate ("do you trust this folder?").
 //!
 //! Repo-local MCP / LSP servers, permission policy, and project instructions/skills are configured by files an attacker can ship inside a cloned repository.
-//! Those files include `.mcp.json`, project `.grok/config.json` (`[permission]` / `[mcp_servers]` / `[plugins].paths`), `.grok/lsp.json`, `AGENTS.md` / `CLAUDE.md`, and `.grok/skills`.
+//! Those files include `.mcp.json`, project `.grok/config.json` (`permission` / `mcp.servers` / `extensions.plugins.paths`), `.grok/lsp.json`, `AGENTS.md` / `CLAUDE.md`, and `.grok/skills`.
 //! `~/.claude.json` `projects.<cwd>` is another such source.
 //! Those configs contain commands, auto-approve rules, or agent instructions the CLI would otherwise honor automatically, a 1-click RCE / policy bypass.
 //! This module resolves a VS-Code-style trust decision ONCE per workspace, BEFORE any repo-local server is spawned.
@@ -346,13 +346,13 @@ fn compute_from_inputs(
     }
 }
 
-/// It MUST enumerate every project MCP source the loaders read. Name-based (not `ConfigSource`-based) ON PURPOSE. Sources: project `.grok/config.json [mcp_servers]` (NOT the user-tier global config).
+/// It MUST enumerate every project MCP source the loaders read. Name-based (not `ConfigSource`-based) ON PURPOSE. Sources: project `.grok/config.json` `mcp.servers` (NOT the user-tier global config).
 /// Also project `.mcp.json` (`cwd` up to the repo root, never `$HOME`), project `.cursor/mcp.json`, and `~/.claude.json projects.<cwd>.mcpServers`.
 /// Edge case: a name declared in BOTH a project config and the global `~/.grok/config.json` is dropped when untrusted. This is intended — untrusted project content must not influence the command spawned for a shared name.
 pub(crate) fn project_scoped_mcp_names(cwd: &Path) -> HashSet<String> {
     let mut names = HashSet::new();
 
-    // `.grok/config.json [mcp_servers]` entries tagged project (the loader's key is the display name, matching `mcp_server_name` of the merged server)
+    // `.grok/config.json` `mcp.servers` entries tagged project (the loader's key is the display name, matching `mcp_server_name` of the merged server)
     for (name, (_cfg, scope)) in crate::util::config::load_mcp_server_configs_with_project(cwd) {
         if scope == MCP_SCOPE_PROJECT {
             names.insert(name);

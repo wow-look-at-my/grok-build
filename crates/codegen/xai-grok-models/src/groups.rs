@@ -97,7 +97,7 @@ pub fn resolve_model_groups(
         for member in group.members.iter().flatten() {
             let Some(slot) = slot_by_id(member) else {
                 return Err(format!(
-                    "[model_groups.{group_id}] lists unknown model slot '{member}'. \
+                    "`models.groups.{group_id}` lists unknown model slot '{member}'. \
 					 Known slots: {}",
                     HARNESS_MODEL_SLOTS
                         .iter()
@@ -109,12 +109,12 @@ pub fn resolve_model_groups(
             if let Some(other) = claimed.insert(slot.id, group_id) {
                 if other == group_id {
                     return Err(format!(
-                        "[model_groups.{group_id}] lists '{member}' more than once"
+                        "`models.groups.{group_id}` lists '{member}' more than once"
                     ));
                 }
                 return Err(format!(
-                    "model slot '{member}' is in [model_groups.{other}] and \
-					 [model_groups.{group_id}]. A slot can be in one group only"
+                    "model slot '{member}' is in `models.groups.{other}` and \
+					 `models.groups.{group_id}`. A slot can be in one group only"
                 ));
             }
         }
@@ -227,7 +227,7 @@ fn validate_group_id(id: &str) -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "[model_groups.{id}]: a group id uses only a-z, 0-9, '_' and '-'"
+        "`models.groups.{id}`: a group id uses only a-z, 0-9, '_' and '-'"
     ))
 }
 

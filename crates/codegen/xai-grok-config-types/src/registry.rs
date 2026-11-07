@@ -63,7 +63,7 @@ pub struct FeatureSpec {
     pub default_enabled: bool,
     /// `None` where the key has no remote tier, so adding one is a deliberate edit.
     pub remote: Option<fn(&RemoteSettings) -> Option<bool>>,
-    // No managed tier: `config` is the loader's merge, where a user's config.toml already beats managed_config.toml
+    // No managed tier: `config` is the loader's merge, where a user's config.json already beats managed_config.toml
 }
 
 /// What each tier had to say about one feature.
@@ -357,7 +357,7 @@ impl Feature {
             | ConfigSource::ManagedConfig
             | ConfigSource::SystemManagedConfig
             | ConfigSource::EnvOverlay => {
-                format!("the {} key in config.toml or managed_config.toml", spec.key)
+                format!("the {} key in config.json or managed_config.toml", spec.key)
             }
             ConfigSource::Remote => "a remote setting".to_owned(),
             ConfigSource::Default => "the default".to_owned(),

@@ -409,7 +409,7 @@ fn unselect_models_without_a_url(catalog: &mut IndexMap<String, ModelEntry>) {
     if !unreachable.is_empty() {
         tracing::debug!(
             models = ?unreachable,
-            "these models have no URL and cannot be selected; set their base_url, or the [endpoints] URL they use"
+            "these models have no URL and cannot be selected; set their base_url, or the `endpoints` URL they use"
         );
     }
 }

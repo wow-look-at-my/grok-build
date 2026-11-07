@@ -66,7 +66,7 @@ fn value_it_cannot_read_is_named_and_the_ui_table_survives() {
         (r#"{"padding": "2"}"#, "ignored padding"),
         (r#"{"padding": 70000}"#, "ignored padding"),
         (r#"{"refresh_interval": "5m"}"#, "ignored refresh_interval"),
-        (r#""builtin""#, "must be a table"),
+        (r#""builtin""#, "must be an object"),
         (r#"{"command": "~/status_line.sh"}"#, "needs type"),
     ] {
         names_the_problem(ui(section), expect, section);
@@ -74,7 +74,7 @@ fn value_it_cannot_read_is_named_and_the_ui_table_survives() {
 
     for (section, expect) in [
         ("[status_line]\ntype = \"buitlin\"\n", "type = \"buitlin\""),
-        ("status_line = \"builtin\"\n", "must be a table"),
+        ("status_line = \"builtin\"\n", "must be an object"),
         ("[status_line]\npadding = 2\n", "needs type"),
     ] {
         names_the_problem(ui_toml(section), expect, section);
@@ -202,7 +202,7 @@ fn each_problem_is_reported_once_however_the_bad_values_interleave() {
     let ui = ui(r#"{"type": "builtin", "padding": "x", "items": [7, "brnach", 8]}"#).status_line;
     assert_eq!(
         ui.problem(),
-        Some("[ui.status_line] ignored items, items = \"brnach\", padding"),
+        Some("`ui.status_line` ignored items, items = \"brnach\", padding"),
         "one report per problem, in the order they were found"
     );
 }
@@ -337,7 +337,7 @@ fn refresh_interval_is_command_only_and_clamped() {
     assert!(
         builtin
             .problem()
-            .is_some_and(|p| p.contains("refresh_interval needs type = \"command\"")),
+            .is_some_and(|p| p.contains("refresh_interval` needs type \"command\"")),
         "a timer under builtin is reported rather than left looking like it refreshes"
     );
     assert!(

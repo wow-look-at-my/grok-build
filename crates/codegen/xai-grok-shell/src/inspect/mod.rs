@@ -807,7 +807,7 @@ fn list_hooks(
 ) -> Vec<HookEntry> {
     let all_on = xai_grok_tools::types::compat::CompatConfig::default();
     // Route through the same assembly as session startup
-    // Config-layer hooks (config.toml / managed_config.toml / requirements.toml) then appear in `/hooks` status alongside file hooks
+    // Config-layer hooks (config.json / managed_config.toml / requirements.toml) then appear in `/hooks` status alongside file hooks
     // Each carries its provenance name prefix
     let config_layers = xai_grok_config::hook_config_layers();
     let (registry, _errors) =
@@ -1172,7 +1172,7 @@ fn list_lsp_servers(
 }
 
 /// Locates the config files that contribute to the effective config, probing the locations `ConfigLayers::load` and `requirements_layers` use.
-/// Probed: system and user `managed_config.toml`, user `config.toml`, and user and system `requirements.toml`.
+/// Probed: system and user `managed_config.toml`, user `config.json`, and user and system `requirements.toml`.
 /// The macOS MDM managed-preferences layer has no file on disk, so it is sourced directly from `requirements_layers()` rather than a path probe. Only on-disk files (plus the synthetic MDM layer) are emitted. `note` distinguishes files that exist but contribute nothing after the real loader's processing (stripping, version overrides, fail_closed, etc).
 fn list_config_sources(cwd: &Path) -> ConfigSources {
     let mut layers: Vec<ConfigLayer> = vec![];
@@ -1203,7 +1203,7 @@ fn list_config_sources(cwd: &Path) -> ConfigSources {
 
     // User config.json (primary user layer; shown as (none) when absent)
     if let Some(home) = crate::config::user_grok_home() {
-        let p = home.join("config.toml");
+        let p = xai_grok_config::format::resolve_config_file(&home, xai_grok_config::CONFIG_STEM);
         if let Some((path_s, note)) = describe_config_file(&p) {
             layers.push(ConfigLayer {
                 role: "user".to_string(),

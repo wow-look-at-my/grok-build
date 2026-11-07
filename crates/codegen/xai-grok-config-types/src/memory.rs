@@ -464,7 +464,7 @@ impl MemorySearchConfig {
                 recency_decay = self.recency_decay,
                 converted_half_life_days = half_life,
                 "converting legacy recency_decay to temporal decay half-life; \
-                 consider migrating to [memory.search.temporal_decay]"
+                 consider migrating to `memory.search.temporal_decay`"
             );
             return Some(half_life);
         }

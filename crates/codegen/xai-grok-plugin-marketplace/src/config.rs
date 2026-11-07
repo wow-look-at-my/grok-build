@@ -29,7 +29,7 @@ struct RawSource {
 }
 
 /// Whether remote plugin installs/updates must pin a full commit sha.
-/// Tighten-only: either ``extensions.marketplace.require_sha` = true` in config.json or `GROK_MARKETPLACE_REQUIRE_SHA=1` enables it; neither can turn it off.
+/// Tighten-only: either `extensions.marketplace.require_sha` set to `true` in config.json or `GROK_MARKETPLACE_REQUIRE_SHA=1` enables it; neither can turn it off.
 /// Defaults off so existing unpinned catalogs keep installing.
 pub fn load_require_sha(config: &toml::Value) -> bool {
     env_require_sha()

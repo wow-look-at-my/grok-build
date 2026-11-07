@@ -35,7 +35,7 @@ pub struct Config {
     pub compat: CompatConfigToml,
     /// Management API key from `[endpoints]`.
     pub management_api_key: Option<String>,
-    /// Permission policy rules loaded from `[permission]` section in config.json.
+    /// Permission policy rules loaded from `permission` object in config.json.
     pub permission: Option<PermissionConfig>,
     pub diagnostics: crate::agent::config::DiagnosticsConfig,
     /// `[session]` section, round-tripped through `merge_section` so pager setters can persist session fields (e.g. auto-compact threshold).
@@ -571,7 +571,7 @@ pub(crate) fn collect_mcp_setup_configs(
 
 pub const MANAGED_GATEWAY_DISABLED_CONNECTORS_KEY: &str = "__managed_gateway_connectors";
 
-/// Persist `disabled_tools` for a server under `[disabled_mcp_tools]` in config.json.
+/// Persist `disabled_tools` for a server under `mcp.disabled_tools` in config.json.
 ///
 /// Uses a dedicated top-level section (not `[mcp_servers]`) to avoid creating incomplete server entries that fail to deserialize for managed servers.
 pub(crate) async fn save_mcp_disabled_tools(
@@ -589,7 +589,7 @@ pub(crate) async fn save_mcp_disabled_tools(
                 .entry("disabled_mcp_tools")
                 .or_insert_with(|| TomlValue::Table(TomlMap::new()))
                 .as_table_mut()
-                .ok_or_else(|| anyhow::anyhow!("disabled_mcp_tools is not a table"))?;
+                .ok_or_else(|| anyhow::anyhow!("`mcp.disabled_tools` is not an object"))?;
 
             if disabled_tools.is_empty() {
                 section.remove(&name);
@@ -725,7 +725,7 @@ fn apply_mcp_rmw(
     let before = root.clone();
     let table = root
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("config root is not an object"))?;
     if !f(table)? {
         return Ok(false);
     }
@@ -981,7 +981,7 @@ pub async fn save_mcp_server_config_at(
             .entry("mcp_servers")
             .or_insert_with(|| TomlValue::Table(TomlMap::new()))
             .as_table_mut()
-            .ok_or_else(|| anyhow::anyhow!("mcp_servers is not a table"))?;
+            .ok_or_else(|| anyhow::anyhow!("`mcp.servers` is not an object"))?;
         servers.insert(name.clone(), serialized);
 
         if let Some(arr) = table
@@ -1067,7 +1067,7 @@ pub async fn delete_mcp_server_config_at(
     Ok(wrote)
 }
 
-/// Load disabled_tools for all MCP servers from `[disabled_mcp_tools]` in config.json.
+/// Load disabled_tools for all MCP servers from `mcp.disabled_tools` in config.json.
 pub(crate) fn get_all_mcp_disabled_tools(
     _cwd: &std::path::Path,
 ) -> std::collections::HashMap<String, std::collections::HashSet<String>> {
@@ -1799,7 +1799,7 @@ pub fn use_leader_from_toml(root: &TomlValue) -> bool {
     use_leader_from_toml_opt(root).unwrap_or(false)
 }
 
-/// Returns `Some(true/false)` when ``cli.session_registry`` is set in config.json, `None` when absent (allowing remote settings fallback).
+/// Returns `Some(true/false)` when `cli.session_registry` is set in config.json, `None` when absent (allowing remote settings fallback).
 /// Local config takes precedence over remote settings.
 pub(crate) fn session_registry_from_toml_opt(root: &TomlValue) -> Option<bool> {
     if let TomlValue::Table(table) = root
@@ -1811,7 +1811,7 @@ pub(crate) fn session_registry_from_toml_opt(root: &TomlValue) -> Option<bool> {
     }
 }
 
-/// Overrides ``cli.session_registry``; usable before `~/.grok/config.json` exists.
+/// Overrides `cli.session_registry`; usable before `~/.grok/config.json` exists.
 pub const SESSION_REGISTRY_ENV_VAR: &str = "GROK_SESSION_REGISTRY";
 
 pub(crate) fn session_registry_from_env_opt() -> Option<bool> {
@@ -1823,7 +1823,7 @@ pub(crate) fn session_registry_from_env_opt() -> Option<bool> {
 pub enum RegistrySource {
     /// [`SESSION_REGISTRY_ENV_VAR`].
     Env,
-    /// ``cli.session_registry`` in config.json.
+    /// `cli.session_registry` in config.json.
     ConfigToml,
 }
 
@@ -1832,7 +1832,7 @@ impl RegistrySource {
     pub const fn label(self) -> &'static str {
         match self {
             RegistrySource::Env => SESSION_REGISTRY_ENV_VAR,
-            RegistrySource::ConfigToml => "[cli] session_registry",
+            RegistrySource::ConfigToml => "`cli.session_registry`",
         }
     }
 }

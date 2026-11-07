@@ -440,7 +440,7 @@ pub enum SessionCommand {
     },
     /// Re-read the output-rate floor from config.json for the session's current model.
     ReloadOutputRateFloor,
-    /// Re-read `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` from config.json.
+    /// Re-read `ui.thinking_summaries` and `ui.thinking_summary_history_*` from config.json.
     ReloadThinkingSummaries,
     /// Take the context window of the session's model from the rebuilt catalog.
     ReloadContextWindow,

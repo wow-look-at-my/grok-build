@@ -1,4 +1,4 @@
-//! `[cursor_worker]` section from config.json.
+//! `agents.cursor_worker` object from config.json.
 //! Always parsed so a build without worker support still accepts the table;
 //! only a leader compiled with it acts on the values. Re-exported from `agent::config`.
 

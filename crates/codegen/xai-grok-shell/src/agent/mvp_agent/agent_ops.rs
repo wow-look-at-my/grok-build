@@ -2393,7 +2393,7 @@ impl MvpAgent {
         {
             tracing::warn!(
                 session_base_url,
-                "web search is off: the default web search model is not on this session's endpoint; set [models] web_search to enable it"
+                "web search is off: the default web search model is not on this session's endpoint; set `models.web_search` to enable it"
             );
             return None;
         }
@@ -3920,7 +3920,7 @@ impl MvpAgent {
         })
     }
     /// Resolve the agent definition for a session. Priority (highest to lowest): Model `agent_type` if it names a strict harness. `acp_agent_profile` from ACP `_meta.agentProfile` (remote clients).
-    /// `agent_profile_path` from CLI `--agent-profile`. `agent_config` from config.json `[agent]`. `GROK_AGENT` env var. Built-in default agent. `GROK_AGENT` and an explicit ``agents.selection.name`` bypass the strict-harness step.
+    /// `agent_profile_path` from CLI `--agent-profile`. `agent_config` from config.json `agents.selection`. `GROK_AGENT` env var. Built-in default agent. `GROK_AGENT` and an explicit `agents.selection.name` bypass the strict-harness step.
     /// Strict-harness classification is structural; see [`xai_grok_agent::config::is_strict_harness_agent_type`]. Harness inheritance for a profile that pins its own model is applied by the caller via [`inherited_harness_template`], not here.
     pub fn resolve_agent_definition(
         cwd: &std::path::Path,
@@ -4579,7 +4579,7 @@ impl MvpAgent {
                     .tool_configs(&cfg.toolset.hashline)
                     .map_err(|e| {
                         acp::Error::invalid_params()
-                            .data(format!("invalid [toolset.hashline] config: {e}"))
+                            .data(format!("invalid `tools.hashline` config: {e}"))
                     })?;
                 agent_definition.override_file_tools(file_tools);
             }
