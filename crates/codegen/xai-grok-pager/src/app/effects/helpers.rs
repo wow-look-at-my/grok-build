@@ -1640,17 +1640,17 @@ pub(super) fn route_permission_mode_result(
         }
     }
 }
-/// Fire-and-forget blocking write of one `[hints]` value to config.toml.
+/// Fire-and-forget blocking write of one `ui.hints` value to config.json.
 /// `what` names the preference for log messages.
 pub(super) fn persist_hint(
     tasks: &mut JoinSet<TaskResult>,
     key: &'static str,
-    value: impl Into<toml_edit::Value> + Send + 'static,
+    value: impl Into<toml::Value> + Send + 'static,
     what: &'static str,
 ) {
     tasks
         .spawn(async move {
-            match xai_spawn::spawn_blocking(move || crate::config_toml_edit::set_hint(
+            match xai_spawn::spawn_blocking(move || crate::config_edit::set_hint(
                     key,
                     value,
                 ))

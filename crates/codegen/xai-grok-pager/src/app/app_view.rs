@@ -168,7 +168,7 @@ impl WorktreeMode {
     /// Resolve per-command worktree modes from a parsed TOML document.
     /// Returns `(new_session_worktree_mode, fork_worktree_mode)`.
     /// `/new`: `new_session_worktree_mode` key, else legacy `worktree_mode`, else `Never` (no popup).
-    pub fn resolve_from_hints(hints: Option<&toml_edit::Item>) -> (Self, Self) {
+    pub fn resolve_from_hints(hints: Option<&toml::Value>) -> (Self, Self) {
         let get_str = |key: &str| -> Option<Self> {
             hints
                 .and_then(|h| h.get(key))

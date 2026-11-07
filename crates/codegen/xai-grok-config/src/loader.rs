@@ -154,8 +154,18 @@ pub fn project_config_file_for_write(dir: &Path) -> std::io::Result<std::path::P
 /// The project config file in `<dir>/.grok`: `config.json`, or a legacy `config.toml` when only that exists.
 /// grok never renames a file in a project, so it reads a legacy project file in place and a warning names it.
 pub fn project_config_file(dir: &Path) -> std::path::PathBuf {
+    static WARNED: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
     let path = crate::format::resolve_config_file(&dir.join(".grok"), CONFIG_STEM);
-    if crate::format::ConfigFormat::of(&path) == crate::format::ConfigFormat::Toml {
+    if crate::format::ConfigFormat::of(&path) == crate::format::ConfigFormat::Toml
+        && path.is_file()
+        && WARNED.lock().is_ok_and(|mut seen| {
+            let first = !seen.contains(&path);
+            if first {
+                seen.push(path.clone());
+            }
+            first
+        })
+    {
         tracing::warn!(
             path = %path.display(),
             "this project uses a legacy TOML config; convert it to .grok/config.json (grok reads the TOML file until then)"

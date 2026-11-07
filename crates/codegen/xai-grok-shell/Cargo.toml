@@ -59,6 +59,7 @@ regex = { workspace = true }
 xai-grok-mcp = { workspace = true }
 xai-grok-net = { workspace = true }
 serde = { workspace = true }
+schemars = { workspace = true }
 serde_ignored = "0.1"
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }

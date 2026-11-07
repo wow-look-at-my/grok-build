@@ -87,11 +87,11 @@ to repeat yourself."
         }
         Some(MemoryDisabledReason::ConfigOptOut) => {
             "\
-**Memory is off** (`[memory] enabled = false` in `config.toml`). Press **t** to turn it on for \
+**Memory is off** (`memory.enabled` is `false` in `config.json`). Press **t** to turn it on for \
 this session.
 
-The toggle lasts for this session only; new sessions follow `config.toml`. Set `enabled = true` \
-there (or remove the line) to keep memory on. Anything already remembered is kept on disk."
+The toggle lasts for this session only; new sessions follow `config.json`. Set `memory.enabled` \
+to `true` there (or remove the member) to keep memory on. Anything already remembered is kept on disk."
         }
         Some(MemoryDisabledReason::ProcessDisabled) => {
             "\
@@ -2031,9 +2031,11 @@ fn format_modified(epoch_secs: Option<u64>, now_secs: u64) -> String {
 }
 
 fn load_fullscreen_pref() -> bool {
-    let path =
-        xai_grok_tools::util::grok_home::grok_home().join(xai_grok_config::USER_CONFIG_FILENAME);
-    let Some(doc) = crate::config_toml_edit::read_config_document_for_edit(&path) else {
+    let home = xai_grok_tools::util::grok_home::grok_home();
+    let Ok(path) = xai_grok_config::user_config_file(&home) else {
+        return false;
+    };
+    let Some(doc) = crate::config_edit::read_config_tree_for_edit(&path) else {
         return false;
     };
     doc.get("hints")
@@ -2812,7 +2814,7 @@ mod tests {
         let mut state = MemoryModalState::new(Vec::new())
             .with_enabled(false, Some(MemoryDisabledReason::ConfigOptOut));
         let text = render_full(&mut state);
-        assert!(text.contains("[memory] enabled = false"), "{text}");
+        assert!(text.contains("`memory.enabled` is `false`"), "{text}");
         assert!(text.contains("this session only"), "{text}");
         assert!(state.can_enable());
         let labels: Vec<&str> = build_shortcuts(&state).iter().map(|s| s.label).collect();

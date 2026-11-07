@@ -4228,20 +4228,19 @@ pub fn parse_row_state_token(s: &str) -> Option<RowState> {
     }
 }
 
-/// Read the persisted `[dashboard].enabled` flag (defaults to `true`).
+/// Read the persisted `ui.dashboard.enabled` flag (defaults to `true`).
 ///
 /// Lenient: any error or unparseable value returns `None`, which the caller interprets as "use the default".
 pub fn load_persisted_enabled() -> Option<bool> {
     let path = config_path()?;
-    let content = std::fs::read_to_string(&path).ok()?;
-    let doc: toml_edit::DocumentMut = content.parse().ok()?;
+    let doc = xai_grok_config::read_config_tree(&path).ok()?;
     doc.get("dashboard")
         .and_then(|d| d.get("enabled"))
         .and_then(|v| v.as_bool())
 }
 
-/// Load the full persisted dashboard from `~/.grok/config.toml`. Returns `None` only when the file
-/// is missing or completely unreadable. Malformed individual fields fall back to defaults silently.
+/// Load the full persisted dashboard from `~/.grok/config.json`. Returns `None` only when the file
+/// has no dashboard section or is completely unreadable. Malformed individual fields fall back to defaults silently.
 pub fn load_persisted() -> Option<PersistedDashboard> {
     let path = config_path()?;
     load_persisted_from_path(&path)
@@ -4250,8 +4249,7 @@ pub fn load_persisted() -> Option<PersistedDashboard> {
 /// Path-taking variant of [`load_persisted`] so the on-disk round-trip can be exercised in tests against a `tempfile::TempDir`.
 /// Falls back to defaults when the table or individual fields are malformed.
 pub fn load_persisted_from_path(path: &std::path::Path) -> Option<PersistedDashboard> {
-    let content = std::fs::read_to_string(path).ok()?;
-    let doc: toml_edit::DocumentMut = content.parse().ok()?;
+    let doc = xai_grok_config::read_config_tree(path).ok()?;
     let table = doc.get("dashboard")?;
     let enabled = table
         .get("enabled")
@@ -4296,85 +4294,70 @@ pub fn write_persisted_to_path(
     path: &std::path::Path,
     p: &PersistedDashboard,
 ) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut doc = match crate::config_toml_edit::read_config_document_for_edit(path) {
-        Some(d) => d,
-        None => {
-            // File exists but is unparseable
-            // Refuse to overwrite; doing so would erase every other table
+    let strings = |ids: &mut dyn Iterator<Item = String>| {
+        toml::Value::Array(ids.map(toml::Value::String).collect())
+    };
+    let edited = xai_grok_config::edit_config_tree(
+        path,
+        xai_grok_config::format::schema_ref_for(path),
+        |doc| {
+            let Some(root) = doc.as_table_mut() else {
+                return;
+            };
+            let dash = root
+                .entry("dashboard")
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let Some(t) = dash.as_table_mut() else {
+                return;
+            };
+            t.insert("enabled".into(), toml::Value::Boolean(p.enabled));
+            t.insert(
+                "grouping".into(),
+                toml::Value::String(
+                    match p.grouping {
+                        Grouping::State => "state",
+                        Grouping::Directory => "directory",
+                    }
+                    .to_string(),
+                ),
+            );
+            t.insert(
+                "pinned".into(),
+                strings(&mut p.pinned.iter().map(PersistedRowId::to_key)),
+            );
+            t.insert(
+                "reorder".into(),
+                strings(&mut p.reorder.iter().map(PersistedRowId::to_key)),
+            );
+            // Drop the stale onboarding table so old configs do not carry a dead key.
+            t.remove("onboarding");
+        },
+    );
+    match edited {
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            // The file does not parse. Writing would erase every other section.
             tracing::warn!(
                 path = %path.display(),
-                "refusing to persist dashboard: config.toml is non-empty and unparseable"
+                error = %e,
+                "refusing to persist dashboard: config.json is non-empty and unparseable"
             );
-            return Ok(());
+            Ok(())
         }
-    };
-    let dash = doc.entry("dashboard").or_insert(toml_edit::table());
-    let Some(t) = dash.as_table_mut() else {
-        return Ok(());
-    };
-    t.insert("enabled", toml_edit::value(p.enabled));
-    t.insert(
-        "grouping",
-        toml_edit::value(match p.grouping {
-            Grouping::State => "state",
-            Grouping::Directory => "directory",
-        }),
-    );
-    let mut pin_arr = toml_edit::Array::new();
-    for id in &p.pinned {
-        pin_arr.push(id.to_key());
+        other => other,
     }
-    t.insert("pinned", toml_edit::value(pin_arr));
-    let mut reorder_arr = toml_edit::Array::new();
-    for id in &p.reorder {
-        reorder_arr.push(id.to_key());
-    }
-    t.insert("reorder", toml_edit::value(reorder_arr));
-    // The onboarding hint was removed; drop the stale table so old configs don't carry a dead `[dashboard.onboarding]` key forever
-    t.remove("onboarding");
-    atomic_write(path, doc.to_string().as_bytes())
-}
-
-/// Atomic write via `<path>.dashboard.tmp.<pid>` then `rename`. Concurrent readers see either the
-/// old file or the new file, never a partial truncated copy that would parse as `None` and trigger
-/// the catastrophic clobber on the next writer.
-fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let pid = std::process::id();
-    let tmp = path.with_extension(format!("toml.dashboard.tmp.{pid}"));
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        // Ensure the bytes are physically on disk before the rename.
-        // Without this, the rename can complete and the file system can later observe the renamed inode pointing at zeroed data
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp, path)?;
-    // Parent directory fsync (defense in depth on unusual filesystems / network mounts)
-    if let Some(parent) = path.parent()
-        && let Ok(dir) = std::fs::File::open(parent)
-    {
-        // sync_all on a directory is allowed on Unix and is a no-op on platforms that don't support it
-        // Swallow errors: the rename succeeded, and the durability question is moot if the OS won't fsync the directory
-        let _ = dir.sync_all();
-    }
-    Ok(())
 }
 
 fn config_path() -> Option<PathBuf> {
     let home = xai_grok_shell::util::grok_home::grok_home();
-    Some(home.join(xai_grok_config::USER_CONFIG_FILENAME))
+    xai_grok_config::user_config_file(&home).ok()
 }
 
-/// Cap parsed entry count to keep a corrupted or malicious config.toml from ballooning allocations.
+/// Cap parsed entry count to keep a corrupted or malicious config.json from ballooning allocations.
 const MAX_PERSISTED_ENTRIES: usize = 256;
 /// Cap persist-key string length so a malformed entry doesn't carry around megabytes.
 const MAX_PERSIST_KEY_LEN: usize = 1024;
 
-fn parse_persist_keys(item: &toml_edit::Item) -> BTreeSet<PersistedRowId> {
+fn parse_persist_keys(item: &toml::Value) -> BTreeSet<PersistedRowId> {
     let Some(arr) = item.as_array() else {
         tracing::warn!("dashboard.pinned must be an array; ignoring");
         return BTreeSet::new();

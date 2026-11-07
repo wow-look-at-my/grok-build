@@ -1587,11 +1587,13 @@ fn is_hash_key(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('#')
         || (key.code == KeyCode::Char('3') && key.modifiers.contains(KeyModifiers::SHIFT))
 }
-/// Check `[features] remember_mode` in config.toml. Defaults to `false`.
+/// Check `features.remember_mode` in config.json. Defaults to `false`.
 fn remember_mode_enabled() -> bool {
-    let path =
-        xai_grok_tools::util::grok_home::grok_home().join(xai_grok_config::USER_CONFIG_FILENAME);
-    let Some(doc) = crate::config_toml_edit::read_config_document_for_edit(&path) else {
+    let home = xai_grok_tools::util::grok_home::grok_home();
+    let Ok(path) = xai_grok_config::user_config_file(&home) else {
+        return false;
+    };
+    let Some(doc) = crate::config_edit::read_config_tree_for_edit(&path) else {
         return false;
     };
     doc.get("features")

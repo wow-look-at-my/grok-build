@@ -1,55 +1,59 @@
-//! Load `config.toml` as a [`toml_edit::DocumentMut`] for in-place edits.
-//! A non-blank file that does not parse is left untouched (`None`).
+//! Load the JSON grok config as the internal `toml::Value` tree for edits.
 
 use std::path::Path;
 
+/// Read the config file at `path` as the internal tree. An absent or blank file is an empty table.
 #[must_use]
-pub(crate) fn read_config_document_for_edit(path: &Path) -> Option<toml_edit::DocumentMut> {
-    #[allow(clippy::manual_unwrap_or_default)]
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => String::new(),
-    };
-    match content.parse() {
-        Ok(d) => Some(d),
+pub(crate) fn read_config_tree_for_edit(path: &Path) -> Option<toml::Value> {
+    match xai_grok_config::read_config_tree(path) {
+        Ok(tree) => Some(tree),
         Err(e) => {
-            if content.trim().is_empty() {
-                return Some(toml_edit::DocumentMut::new());
-            }
             tracing::warn!(
                 path = %path.display(),
                 error = %e,
-                "config.toml is not valid TOML; refusing to overwrite"
+                "config is not valid; refusing to overwrite"
             );
             None
         }
     }
 }
 
-/// Set `[hints].<key>` to `value` in `~/.grok/config.toml`, preserving every other key and table. No-ops when the
+/// Set `hints.<key>` to `value` in the user config, preserving every other key. No-ops when the
 /// existing file is non-blank but unparseable, so a malformed config is never clobbered.
-pub(crate) fn set_hint(key: &str, value: impl Into<toml_edit::Value>) -> std::io::Result<()> {
-    let path =
-        xai_grok_tools::util::grok_home::grok_home().join(xai_grok_config::USER_CONFIG_FILENAME);
+pub(crate) fn set_hint(key: &str, value: impl Into<toml::Value>) -> std::io::Result<()> {
+    let home = xai_grok_tools::util::grok_home::grok_home();
+    let path = xai_grok_config::user_config_file(&home)?;
     set_hint_at(&path, key, value)
 }
 
 /// Core of [`set_hint`]; takes the path so tests can point it at a temp dir.
-fn set_hint_at(path: &Path, key: &str, value: impl Into<toml_edit::Value>) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+fn set_hint_at(path: &Path, key: &str, value: impl Into<toml::Value>) -> std::io::Result<()> {
+    let value = value.into();
+    let edited = xai_grok_config::edit_config_tree(
+        path,
+        xai_grok_config::format::schema_ref_for(path),
+        |tree| {
+            let Some(root) = tree.as_table_mut() else {
+                return;
+            };
+            let hints = root
+                .entry("hints")
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            if !hints.is_table() {
+                *hints = toml::Value::Table(toml::map::Map::new());
+            }
+            if let Some(table) = hints.as_table_mut() {
+                table.insert(key.to_string(), value);
+            }
+        },
+    );
+    match edited {
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            tracing::warn!(path = %path.display(), error = %e, "config is not valid; hint not saved");
+            Ok(())
+        }
+        other => other,
     }
-    let Some(mut doc) = read_config_document_for_edit(path) else {
-        return Ok(());
-    };
-    if let Some(table) = doc
-        .entry("hints")
-        .or_insert(toml_edit::table())
-        .as_table_mut()
-    {
-        table.insert(key, toml_edit::value(value));
-    }
-    std::fs::write(path, doc.to_string())
 }
 
 #[cfg(test)]
@@ -58,58 +62,67 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    fn config_path(dir: &Path) -> std::path::PathBuf {
+        dir.join(xai_grok_config::USER_CONFIG_FILENAME)
+    }
+
     #[test]
     fn merge_round_trip_preserves_sibling_tables() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join(xai_grok_config::USER_CONFIG_FILENAME);
+        let path = config_path(dir.path());
         fs::write(
             &path,
-            "[ui]\ncompact_mode = false\n\n[mcpServers]\nx = \"y\"\n",
+            r#"{"ui": {"compact_mode": false}, "mcp": {"servers": {"x": {"command": "y"}}}}"#,
         )
         .unwrap();
 
-        let mut doc = read_config_document_for_edit(&path).expect("parse");
-        if let Some(ui) = doc.get_mut("ui").and_then(|i| i.as_table_mut()) {
-            ui.insert("show_timestamps", toml_edit::value(false));
-        }
-        fs::write(&path, doc.to_string()).unwrap();
+        set_hint_at(&path, "memory_modal_fullscreen", true).unwrap();
 
-        let body = fs::read_to_string(&path).unwrap();
-        assert!(
-            body.contains("show_timestamps") && body.contains("mcpServers"),
-            "expected merged TOML, got:\n{body}"
+        let tree = read_config_tree_for_edit(&path).expect("parse");
+        assert_eq!(
+            tree.get("mcp_servers")
+                .and_then(|m| m.get("x"))
+                .and_then(|x| x.get("command"))
+                .and_then(|v| v.as_str()),
+            Some("y")
+        );
+        assert_eq!(
+            tree.get("ui")
+                .and_then(|u| u.get("compact_mode"))
+                .and_then(|v| v.as_bool()),
+            Some(false)
         );
     }
 
     #[test]
     fn nonempty_unparseable_returns_none_and_leaves_file() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join(xai_grok_config::USER_CONFIG_FILENAME);
-        let bad = "this is [not valid toml\n";
+        let path = config_path(dir.path());
+        let bad = "this is {not valid json\n";
         fs::write(&path, bad).unwrap();
 
-        assert!(read_config_document_for_edit(&path).is_none());
+        assert!(read_config_tree_for_edit(&path).is_none());
         assert_eq!(fs::read_to_string(&path).unwrap(), bad);
     }
 
     #[test]
-    fn missing_file_is_editable_empty_doc() {
+    fn missing_file_is_editable_empty_tree() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("absent.toml");
-        let doc = read_config_document_for_edit(&path).expect("editable");
-        assert!(!doc.contains_key("ui"));
+        let path = dir.path().join("absent.json");
+        let tree = read_config_tree_for_edit(&path).expect("editable");
+        assert!(tree.get("ui").is_none());
     }
 
     #[test]
-    fn blank_file_is_editable_empty_doc() {
+    fn blank_file_is_editable_empty_tree() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join(xai_grok_config::USER_CONFIG_FILENAME);
+        let path = config_path(dir.path());
         for blank in ["", "   \n", "\n\t  \n"] {
             fs::write(&path, blank).unwrap();
-            let doc = read_config_document_for_edit(&path)
-                .unwrap_or_else(|| panic!("blank {blank:?} must be an empty document"));
+            let tree = read_config_tree_for_edit(&path)
+                .unwrap_or_else(|| panic!("blank {blank:?} must be an empty tree"));
             assert!(
-                !doc.contains_key("ui"),
+                tree.get("ui").is_none(),
                 "blank {blank:?} must not be treated as unparseable"
             );
         }
@@ -118,28 +131,36 @@ mod tests {
     #[test]
     fn set_hint_at_round_trips_and_preserves_siblings() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join(xai_grok_config::USER_CONFIG_FILENAME);
-        fs::write(&path, "[ui]\ncompact_mode = false\n").unwrap();
+        let path = config_path(dir.path());
+        fs::write(&path, r#"{"ui": {"compact_mode": false}}"#).unwrap();
 
         set_hint_at(&path, "memory_modal_fullscreen", true).unwrap();
 
-        let doc = read_config_document_for_edit(&path).expect("reparse");
+        let tree = read_config_tree_for_edit(&path).expect("reparse");
         assert_eq!(
-            doc.get("hints")
+            tree.get("hints")
                 .and_then(|h| h.get("memory_modal_fullscreen"))
                 .and_then(|v| v.as_bool()),
             Some(true),
         );
-        assert!(
-            fs::read_to_string(&path).unwrap().contains("compact_mode"),
-            "sibling [ui] should be preserved"
+        let body = fs::read_to_string(&path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            json["ui"]["compact_mode"],
+            serde_json::Value::Bool(false),
+            "sibling ui key should be preserved"
+        );
+        assert_eq!(
+            json["ui"]["hints"]["memory_modal_fullscreen"],
+            serde_json::Value::Bool(true),
+            "hint lands under ui.hints in the JSON layout"
         );
     }
 
     #[test]
     fn set_hint_at_creates_missing_file() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("nested/config.toml");
+        let path = dir.path().join("nested/config.json");
         set_hint_at(&path, "memory_modal_fullscreen", true).unwrap();
         assert!(
             path.exists(),
@@ -148,58 +169,30 @@ mod tests {
     }
 
     #[test]
-    fn set_hint_write_then_read_back_round_trips() {
+    fn set_hint_writes_string_values() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join(xai_grok_config::USER_CONFIG_FILENAME);
-        fs::write(&path, "[ui]\ntheme = \"dark\"\n").unwrap();
+        let path = config_path(dir.path());
+        fs::write(&path, r#"{"ui": {"theme": "dark"}}"#).unwrap();
 
-        set_hint_at(&path, "memory_modal_fullscreen", true).unwrap();
+        set_hint_at(&path, "fork_worktree_mode", "always").unwrap();
 
-        let doc = read_config_document_for_edit(&path).expect("reparse");
-        let disabled = doc
-            .get("hints")
-            .and_then(|h| h.get("memory_modal_fullscreen"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        assert!(disabled, "should read back true after set_hint write");
+        let tree = read_config_tree_for_edit(&path).expect("reparse");
+        assert_eq!(
+            tree.get("hints")
+                .and_then(|h| h.get("fork_worktree_mode"))
+                .and_then(|v| v.as_str()),
+            Some("always"),
+        );
     }
 
     #[test]
     fn set_hint_at_leaves_unparseable_file_untouched() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join(xai_grok_config::USER_CONFIG_FILENAME);
-        let bad = "this is [not valid toml\n";
+        let path = config_path(dir.path());
+        let bad = "this is {not valid json\n";
         fs::write(&path, bad).unwrap();
 
-        // No-op (no write, no clobber) when the existing file cannot be parsed.
         set_hint_at(&path, "memory_modal_fullscreen", true).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), bad);
-    }
-
-    #[test]
-    fn ui_bool_round_trip() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join(xai_grok_config::USER_CONFIG_FILENAME);
-        fs::write(&path, "[ui]\ncompact_mode = false\n").unwrap();
-
-        let mut doc = read_config_document_for_edit(&path).expect("parse");
-        if let Some(ui) = doc.get_mut("ui").and_then(|i| i.as_table_mut()) {
-            ui.insert("show_timeline", toml_edit::value(true));
-        }
-        fs::write(&path, doc.to_string()).unwrap();
-
-        let doc2 = read_config_document_for_edit(&path).expect("reparse");
-        let enabled = doc2
-            .get("ui")
-            .and_then(|h| h.get("show_timeline"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        assert!(enabled, "expected show_timeline = true after round-trip");
-
-        let body = fs::read_to_string(&path).unwrap();
-        assert!(
-            body.contains("compact_mode"),
-            "sibling [ui] keys should be preserved"
-        );
     }
 }

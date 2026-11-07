@@ -143,6 +143,19 @@ pub fn internal_path_to_json(path: &str) -> String {
     path.to_string()
 }
 
+/// The internal dotted path for a JSON dotted path. Inverse of [`internal_path_to_json`].
+pub fn json_path_to_internal(path: &str) -> String {
+    let segs: Vec<&str> = path.split('.').collect();
+    for r in LAYOUT {
+        if segs.starts_with(r.json) {
+            let mut out: Vec<&str> = r.internal.to_vec();
+            out.extend(segs.iter().skip(r.json.len()));
+            return out.join(".");
+        }
+    }
+    path.to_string()
+}
+
 #[derive(Clone, Copy)]
 enum Direction {
     ToInternal,
