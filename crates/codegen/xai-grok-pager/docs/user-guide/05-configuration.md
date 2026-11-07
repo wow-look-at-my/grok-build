@@ -792,7 +792,7 @@ These are independent knobs (see [Monitoring Usage](24-monitoring-usage.md#relat
 - **`telemetry.trace_upload`** / `GROK_TELEMETRY_TRACE_UPLOAD` — session traces. Follows telemetry when unset.
 - **`telemetry.otel_*`** / `GROK_EXTERNAL_OTEL` — external OTEL to your own collector (below).
 
-When telemetry is on, enterprises running their own collector can redirect it or turn parts off under `[telemetry]`:
+When telemetry is on, enterprises running their own collector can redirect it or turn parts off under `telemetry`:
 
 ```json
 {
