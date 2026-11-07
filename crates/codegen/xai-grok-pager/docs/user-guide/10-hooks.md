@@ -84,7 +84,7 @@ Because hooks are unified under folder-trust, a `--trust` / `/hooks-trust` grant
 
 ## Hook Events
 
-Events fire at multiple cadences: once per session (`SessionStart`, `SessionEnd`), once per turn (`UserPromptSubmit`, `Stop`, `StopFailure`), and on every tool call inside the turn (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`).
+
 
 | Event | When it fires | Blocking? |
 |-------|---------------|-----------|
@@ -162,7 +162,7 @@ Each `.json` file can define hooks for multiple events:
 ### Key Fields
 
 - **Event name** (top-level key): any event listed in [Hook Events](#hook-events). Grok skips unrecognized event names so a shared Claude or Cursor settings file still loads.
-- **matcher** (optional): A regular expression that selects which invocations trigger the hook. What it tests depends on the event. The tool name on tool events (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`), the notification type on `Notification`, the subagent type on `SubagentStart`/`SubagentStop` (e.g. `explore`), the start source on `SessionStart` (`startup`, `resume`, …). This is the end reason on `SessionEnd`, the compaction trigger on `PreCompact`/`PostCompact` (`manual` or `auto`), the error type on `StopFailure` (`rate_limit`, `authentication_failed`, `invalid_request`, `server_error`, `max_output_tokens`, or `unknown`). This is the reason on `StopCancelled` (`user_interrupt`, `permission_rejected`, `permission_cancelled`, `max_turns`, `no_progress`, or `unknown`). A matcher on `Stop` or `UserPromptSubmit` is ignored with a warning (those events always fire). An empty or omitted matcher matches everything. A finish-thinking chime must set `matcher` to `idle_prompt` on `Notification` (any turn end, then sustained idle). `permission_prompt` fires only when a permission UI is actually waiting. The matcher tests the real tool name. MCP calls routed through the internal `use_tool` dispatcher appear as the qualified `server__tool` name (e.g. `linear__save_issue`), so match on that, not the dispatcher name.
+- **matcher** (optional): A regular expression that selects which invocations trigger the hook. What it tests depends on the event. A matcher on `Stop` or `UserPromptSubmit` is ignored with a warning (those events always fire). An empty or omitted matcher matches everything. A finish-thinking chime must set `matcher` to `idle_prompt` on `Notification` (any turn end, then sustained idle). `permission_prompt` fires only when a permission UI is actually waiting. The matcher tests the real tool name. MCP calls routed through the internal `use_tool` dispatcher appear as the qualified `server__tool` name (e.g. `linear__save_issue`), so match on that, not the dispatcher name.
 - **type**: `"command"` (run a script or shell one-liner) or `"http"` (POST the event to a URL).
 - **command**: Path to executable (relative to the JSON file) or inline shell command.
 - **timeout**: Seconds before killing the hook (default: 5, or 600 for `Stop`/`SubagentStop`/`PostToolUse` gates). All hook failures (timeouts, crashes, malformed output, missing required env vars) are fail-open: the failure is recorded for the UI scrollback but the tool call is not blocked. Only an explicit `deny` decision returned by the hook blocks a tool call.
@@ -189,7 +189,7 @@ When an event fires, Grok resolves it in multiple steps:
 
 1. **Select matching groups.** For that event, each matcher group whose `matcher` matches the event's field runs. The matcher tests the tool name on tool events, the notification type on `Notification`, and so on (see [Key Fields](#key-fields)). An empty or omitted matcher matches everything.
 2. **Run the handlers in order.** Handlers in the selected groups run in config order, each receiving the event as JSON on stdin, until one returns `deny` (which stops the chain). Handlers from different sources (global, project, plugin, config) are merged, and same handlers are deduplicated. Every handler sees the model's original tool input. A `PreToolUse` `updatedInput` is applied only after all handlers finish, so one handler cannot see another's rewrite (the last rewrite wins).
-3. **Apply the decision.** For a `PreToolUse` gate, the first `deny` blocks the call. Its reason is shown to the model, an `updatedInput` rewrites the tool input, and otherwise the call proceeds. For `Stop` and `SubagentStop`, a `block` keeps the agent working. For `PostToolUse` the tool has already run. As a result, nothing is blocked and every hook runs: a `block` reason. Any `additionalContext` are delivered to the model with the tool result, and an output replacement rewrites the model's copy of that result. Every other event is passive: its output is recorded but does not change control flow.
+3. **Apply the decision.** For a `PreToolUse` gate, the first `deny` blocks the call. Its reason is shown to the model, an `updatedInput` rewrites the tool input, and otherwise the call proceeds. For `PostToolUse` the tool has already run. As a result, nothing is blocked and every hook runs: a `block` reason. Any `additionalContext` are delivered to the model with the tool result, and an output replacement rewrites the model's copy of that result. Every other event is passive: its output is recorded but does not change control flow.
 4. **Fail open.** A handler that times out, crashes, or emits malformed output is recorded in the scrollback but never blocks the action. The exception is a `PreToolUse` `updatedInput` that fails the tool's schema: the rewrite cannot run safely. As a result, the call is blocked and reported as an invalid-input error. Otherwise only an explicit `deny` blocks a tool call.
 
 ---
@@ -225,7 +225,7 @@ The `hooks` object has the same structure as the JSON hook object, so an existin
 }
 ```
 
-Each matcher group is an entry in the `hooks.<Event>` array with an optional `matcher` and an inner `hooks` array of handlers. The handler fields (`type`, `command`, `url`, `timeout`, `env`) and event names are exactly the same as the [JSON format](#the-hook-json-format).
+Each matcher group is an entry in the `hooks.<Event>` array with an optional `matcher` and an inner `hooks` array of handlers.
 
 - **Additive across layers.** Every layer's hooks run. A lower-priority layer adds hooks but never replaces another layer's block. A hook defined identically in more than one layer is deduplicated, keeping the highest-authority copy.
 - **Provenance labels.** Config hooks appear in `/hooks` tagged by origin (`managed:`, `requirements/signed:`, `requirements/user:`, `user:`, and so on) so you can see which layer contributed each one.
@@ -283,7 +283,7 @@ The event is sent as JSON on **stdin** (for example, a `PreToolUse` event. The p
 }
 ```
 
-Every event carries the same common fields: `hookEventName`, `sessionId`, `cwd`, `workspaceRoot`, `timestamp`, `permissionMode` (`default`, `auto`, `plan`, or `bypassPermissions`), and `promptId` (the turn the event belongs to. Absent for session-scoped events), plus event-specific fields like `toolName` above. The `hook_event_name` (snake_case key) carries Claude's PascalCase value. `hookEventName` (camelCase key) carries grok's snake_case value.
+Absent for session-scoped events), plus event-specific fields like `toolName` above. The `hook_event_name` (snake_case key) carries Claude's PascalCase value. `hookEventName` (camelCase key) carries grok's snake_case value.
 
 ### Output (Blocking Hooks)
 
@@ -296,7 +296,7 @@ For `PreToolUse` hooks, write JSON to **stdout**:
 - **Rewrite the tool input**: `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {"command": "npm test"}}}`
 - **Tell the model something**: `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": "This repo builds with xb, not cargo"}}`
 
-The decision can be written as top-level `decision` or as `hookSpecificOutput.permissionDecision`. Both take `allow`, `deny`, `ask`, or `defer` (the legacy `approve` and `block` spellings also work), each with its own reason field — `reason` and `permissionDecisionReason`. The canonical `permissionDecision` decides when present. The top-level `decision` applies only when it is absent. The deny or ask message is `permissionDecisionReason` if present, otherwise `reason`. An `allow` means only "not blocked" — it does not auto-approve a call the user will otherwise be asked about.
+The decision can be written as top-level `decision` or as `hookSpecificOutput.permissionDecision`. The canonical `permissionDecision` decides when present. The top-level `decision` applies only when it is absent. The deny or ask message is `permissionDecisionReason` if present, otherwise `reason`. An `allow` means only "not blocked" — it does not auto-approve a call the user will otherwise be asked about.
 
 A decision value outside that set is a hook failure. This fails open unless the hook also exits 2, in which case the deny stands and carries the mistake in its reason.
 
@@ -360,7 +360,7 @@ Text over 10,000 characters is clipped, the same ceiling `Stop` feedback carries
 | `2` | Explicit deny (`PreToolUse`), block-stop with stderr as feedback (`Stop`/`SubagentStop`), or feedback to the model (`PostToolUse`). For `PreToolUse`, the first stderr line (capped) becomes the deny reason when the JSON carries none; `Stop`/`SubagentStop` and `PostToolUse` feed the full stderr to the model, and a JSON `reason` wins over it. |
 | Other | Fail-open — the failure is recorded (as `exit code N: <first stderr line>`) but nothing is blocked. For `PreToolUse`, a `deny` decision in stdout JSON is honored regardless of exit code. For `Stop`/`SubagentStop`, a valid decision JSON on stdout wins over the exit code; the exit code decides only when stdout has no usable JSON, in which case exit 2 blocks with stderr as the feedback. For `PostToolUse`, the tool has already run so nothing is blocked either way; the failure is still recorded, and the hook keeps its block reason but loses its `additionalContext` and its output replacement. |
 
-**`PostToolUse` a later exit is a behavior change.** It used to be an ordinary recorded failure that changed nothing. It now feeds the hook's stderr to the model. A logging hook written as `run_checker; exit $?` therefore hands the model whatever the checker printed when the checker exits 2 — `mypy`, `grep`, `pytest` and `argparse`. All use exit 2 for "no match" or "bad usage". End such a hook with an explicit `exit 0` to keep it silent.
+**`PostToolUse` a later exit is a behavior change.** It used to be an ordinary recorded failure that changed nothing. It now feeds the hook's stderr to the model. All use exit 2 for "no match" or "bad usage". End such a hook with an explicit `exit 0` to keep it silent.
 
 Write human-readable diagnostics to **stderr**: it is the hook's feedback channel. On failures the first stderr line appears in the scrollback entry and logs instead of a bare exit code.
 
@@ -379,17 +379,17 @@ The hook input includes `stopHookActive` and `lastAssistantMessage`. `stopHookAc
 
 It is sized to the same scale as the tool payload cap. After **8 continuations** (blocks or non-error feedback) in one turn the gate is overridden and the turn ends. Hooks are not consulted for that last, forced stop. The counter is per turn: the next user prompt starts fresh, so a long-running goal can span turns. Hook failures fail open: the agent stops normally.
 
-`Stop`, `SubagentStop`, and `PostToolUse` hooks default to a 600-second timeout. This is because these gates commonly run builds or test suites, and a timed-out hook fails open. As a result, the check does not block anyway. Every other event keeps the 5-second default. Set `timeout` explicitly when a gate needs more: `{ "type": "command", "command": "bin/verify.sh", "timeout": 1200 }`.
+This is because these gates commonly run builds or test suites, and a timed-out hook fails open. As a result, the check does not block anyway. Every other event keeps the 5-second default. Set `timeout` explicitly when a gate needs more: `{ "type": "command", "command": "bin/verify.sh", "timeout": 1200 }`.
 
 The gate runs only for genuine completions. A turn that was interrupted (Ctrl+C), refused, or cut off at the turn limit skips the Stop gate, though a Ctrl+C that lands. This is while a Stop hook is already running kills it mid-flight (see below). API-error turns fire `StopFailure`, and cancelled turns fire `StopCancelled`. A separate Stop also fires at session end (`reason: "channel_closed"` or `"shutdown"`). Its decision output is parsed but ignored, since there is no turn left to continue.
 
 A script that counts or gates on Stop fires must check `reason == "end_turn"` so the session-end fire does not skew it.
 
-`StopFailure` is observation-only (use it to log failures or send alerts. Output and exit code are ignored). Its input carries `error` (the classified type the matcher tests: `rate_limit`, `authentication_failed`, `invalid_request`, `server_error`, `max_output_tokens`, or `unknown` for anything the runtime cannot distinguish. Capacity errors classify as `rate_limit`), `errorDetails` (the raw error detail, when available, clipped at many characters. Absent for a refusal, whose explanation rides `lastAssistantMessage` alone), `lastAssistantMessage` (the rendered error text shown in the conversation. For this event it is the error string, not assistant output), and `subagentType` (the subagent's type when the turn ran inside one).
+`StopFailure` is observation-only (use it to log failures or send alerts. Output and exit code are ignored). Capacity errors classify as `rate_limit`), `errorDetails` (the raw error detail, when available, clipped at many characters. Absent for a refusal, whose explanation rides `lastAssistantMessage` alone), `lastAssistantMessage` (the rendered error text shown in the conversation. For this event it is the error string, not assistant output), and `subagentType` (the subagent's type when the turn ran inside one).
 
 `StopCancelled` is observation-only too. **It runs instead of `Stop` when the turn ends without completing**, the same way `StopFailure` runs instead of `Stop` on an API error.
 
-A turn reports **at most one** of the three, with one exception noted below. A `Stop` hook that ran to completion can still be followed by `StopCancelled` if the user interrupts during the gate. This is because by then the hook has already been told the turn ended. Every turn that runs the model and then ends, errors, or is cancelled reports one, except for the cases listed below.
+A turn reports **at most one** of the three, with one exception noted below. `StopCancelled` can still follow a `Stop` hook that ran to completion if the user interrupts during the gate. This is because by then the hook has already been told the turn ended. Every turn that runs the model and then ends, errors, or is cancelled reports one, except for the cases listed below.
 
 If your host must never miss an idle transition, listen for the `idle_prompt` `Notification` as well. It covers every exception in which the session is still alive, with one gap. This is a session whose only activity was a bash-mode command that ran to completion earns neither the report nor the ping. This is though interrupting one earns both. `SessionEnd` covers teardown. The `idle_prompt` ping fires about a minute after the session settles, needs at least one turn to ended.
 
@@ -418,9 +418,9 @@ Some turns report none of the three:
 
 `StopCancelled`'s input carries:
 
-- `reason`: the classified cause, and the value the matcher tests. `user_interrupt` (Ctrl+C, a client stop button, or a client `session/cancel`), `permission_rejected` (you declined a tool call), `permission_cancelled` (you dismissed the prompt), `max_turns`, `no_progress` (the agent bailed out after repeated no-op rounds), or `unknown` (a cancel the runtime can not classify, and the forward-compatible fallback). The matcher tests this field only, so a hook that wants every user-initiated stop matches the reasons it cares about and reads `cancelledBy`. This is from the payload. New reasons may be added over time, so treat an unrecognized value the way you treat `unknown`.
+- `reason`: the classified cause, and the value the matcher tests. The matcher tests this field only, so a hook that wants every user-initiated stop matches the reasons it cares about and reads `cancelledBy`. This is from the payload. New reasons may be added over time, so treat an unrecognized value the way you treat `unknown`.
 - `cancelledBy`: `user` for an interrupt, a declined tool call, or a dismissed prompt. `runtime` for everything the agent decided itself, such as `max_turns` and `no_progress`. `unknown` when `reason` is `unknown`, because a cancel the runtime can not classify cannot claim the user was uninvolved. Derived from `reason`, so a new reason classifies automatically. Values may be added here too: treat one you do not recognize the way you treat `unknown`. This is rather than assuming anything that is not `user` was the runtime.
-- `cancelTrigger`: the gesture, when the client named one, clipped at many characters, since a gesture name is a token. The bundled pager sends `esc`, `ctrl_c`, `mouse` (the on-screen stop button), or `dashboard_stop`. Another client may send any string. It is passed through verbatim. Every value here classifies as `user_interrupt`, including one that happens to spell an internal name such as `shutdown`. This is because a client asking to cancel is the user asking. Read `cancelledBy` from the payload rather than parsing this string. Omitted for a bare `session/cancel` and for every runtime-initiated reason.
+- `cancelTrigger`: the gesture, when the client named one, clipped at many characters, since a gesture name is a token. Another client may send any string. It is passed through verbatim. Every value here classifies as `user_interrupt`, including one that happens to spell an internal name such as `shutdown`. This is because a client asking to cancel is the user asking. Read `cancelledBy` from the payload rather than parsing this string. Omitted for a bare `session/cancel` and for every runtime-initiated reason.
 - `reasonDetails`: the same kind of detail `StopFailure` puts in `errorDetails`, when the runtime has one. For a declined tool call it is `<tool>: <why>`. Clipped at many characters, like `StopFailure`'s `errorDetails`.
 - `lastAssistantMessage`: whatever the turn had committed to the conversation at the interrupt, if any. A Ctrl+C during the final answer leaves the last committed text, or nothing if the turn never committed any. Clipped like the same field on `Stop` and `StopFailure`.
 - `subagentType`: the subagent's type when the turn ran inside one. As a result, a hook can tell a nested agent's stop from the session's. Absent in the main session.
@@ -431,7 +431,7 @@ The envelope's `timestamp` is stamped when the hook dispatches, not when the tur
 
 A "cancel-and-send" (typing a new message while a turn runs) does **not** fire `StopCancelled`, because the turn is being replaced, not stopped, and the agent stays busy. Inside a subagent, a `user_interrupt` does not fire either: it follows the parent's cancel, and the session-level signal is the useful one. A subagent's own `max_turns`, `no_progress`, or declined permission does fire. The matcher tests `reason` only, so a script that reports whether the session is idle must exit early when `subagentType` is present.
 
-A complete busy and idle indicator takes registrations. `UserPromptSubmit` marks the session busy. `Stop`, `StopFailure`, and `StopCancelled` settle it however the turn ended. The `idle_prompt` `Notification` is the backstop for the turns that report none of the three. Registering only `StopCancelled` leaves the host busy after every normal turn.
+A complete busy and idle indicator takes registrations. `UserPromptSubmit` marks the session busy. The `idle_prompt` `Notification` is the backstop for the turns that report none of the three. Registering only `StopCancelled` leaves the host busy after every normal turn.
 
 ```json
 {
@@ -460,7 +460,7 @@ What the scripts have to get right:
 
 Both scripts also run inside a subagent's own session. Every event either script reads carries `subagentType` there and omits it in the main session, so `[ -n "$subagentType" ] && exit 0` filters a child out of both halves. This matters most for a background subagent, which outlives the parent turn and will otherwise hold the host busy after the parent went idle.
 
-`Stop` input also carries `backgroundTasks` and `sessionCrons`. As a result, a hook can distinguish "session is done" from "session is paused waiting for background work to wake it back up". Both arrays are empty when nothing is in flight or scheduled. Each `backgroundTasks` entry describes one in-flight task: `id`, `type` (`shell`, `monitor`, or `subagent`), `status`, and (depending on the type) `command` (shell tasks only), `description` (a monitor's watched command line, or a subagent's task description), and `agentType` (subagents). Each `sessionCrons` entry describes one scheduled wakeup (`scheduler_create` or `/loop`): `id`, `schedule`, `recurring`, and `prompt`. The `schedule` value is a human-readable interval such as `every 5 minutes`.
+`Stop` input also carries `backgroundTasks` and `sessionCrons`. As a result, a hook can distinguish "session is done" from "session is paused waiting for background work to wake it back up". Both arrays are empty when nothing is in flight or scheduled. The `schedule` value is a human-readable interval such as `every 5 minutes`.
 
 Grok schedules are intervals, not cron expressions. Free-text entry fields are capped at many characters with an in-string `… [+N chars]` marker.
 
@@ -470,12 +470,12 @@ Inside a subagent, the gate fires as `SubagentStop` (agent-frontmatter `Stop` ho
 
 **Porting Claude Code stop hooks**: the output vocabulary (`decision`, `reason`, `continue`, `stopReason`, `additionalContext`) works unchanged. Check this list for what does not match Claude:
 
-- **camelCase input**: grok's stdin envelope uses camelCase keys throughout where Claude uses snake_case. A script reading `.stop_hook_active` or `.background_tasks[].agent_type` must switch to `.stopHookActive` and `.backgroundTasks[].agentType` (the `hook_event_name` snake_case key carries Claude's PascalCase value, e.g. `"Stop"`. The `hookEventName` camelCase key carries grok's snake_case value, e.g. `"stop"`). Hooks registered through the grok-agent-sdk convert both the top-level keys. The `backgroundTasks`/`sessionCrons` entry keys to snake_case, so the wire's `.backgroundTasks[].agentType` reads as `.background_tasks[].agent_type` in the SDK.
+- **camelCase input**: grok's stdin envelope uses camelCase keys throughout where Claude uses snake_case. The `hookEventName` camelCase key carries grok's snake_case value, e.g. `"stop"`). Hooks registered through the grok-agent-sdk convert both the top-level keys. The `backgroundTasks`/`sessionCrons` entry keys to snake_case, so the wire's `.backgroundTasks[].agentType` reads as `.background_tasks[].agent_type` in the SDK.
 - **`toolResult` field**: the `PostToolUse` tool output is `toolResult` (SDK: `tool_result`). Grok also emits a `tool_response` snake alias that copies `toolResult`, so a hook reading Claude's `.tool_response` works unchanged.
 - **`updatedToolOutput` carries grok's own output shape on built-in tools**: a `PostToolUse` replacement for a built-in tool is validated against the tool's output. This is as grok serializes it — the tagged object in that event's `toolResult`. So one written against another runtime's field names parses as the incorrect shape and is ignored. On an MCP tool there is no shape to enforce, so `updatedToolOutput` passes through like its `updatedMCPToolOutput` alias. See [PostToolUse Output](#posttooluse-output).
 - **Session-end fire**: an extra observe-only Stop fires at session end. Filter on `reason == "end_turn"` (see above).
 - **Interval schedules**: `sessionCrons[].schedule` is a human-readable interval, not a cron expression.
-- **Task types**: `backgroundTasks[].type` is only `shell`, `monitor`, or `subagent`. Claude's other labels (`workflow`, `teammate`, …) are not emitted.
+- Claude's other labels (`workflow`, `teammate`, …) are not emitted.
 - **StopFailure classes**: grok emits six (`rate_limit`, `authentication_failed`, `invalid_request`, `server_error`, `max_output_tokens`, `unknown`). Capacity errors (503/529) classify as `rate_limit`. A matcher on an error class grok does not emit never fires.
 - **Default timeout**: grok defaults observe hooks to a few seconds, which is shorter than most. Set `timeout` explicitly on an imported hook that does real work.
 - **`UserPromptSubmit` blocks, with one gap**: exit 2 and `decision: "block"` reject the prompt like Claude. A blocked prompt never enters the conversation history — but an allowing hook's stdout / `additionalContext` is discarded rather than added as context.
@@ -572,7 +572,7 @@ The full event envelope is POSTed as JSON.
 
 ### The Hooks Tab
 
-Press `Ctrl+L` on non–VS Code family terminals to open the Extensions modal (Plugins tab), or run `/hooks` (any terminal. Required on VS Code family where `Ctrl+L` is interject) to open it on the Hooks tab. In the **Hooks** tab:
+Press `Ctrl+L` on non–VS Code family terminals to open the Extensions modal (Plugins tab), or run `/hooks` (any terminal. Required on VS Code family where `Ctrl+L` is interject) to open it on the Hooks tab.
 
 | Key | Action |
 |-----|--------|
