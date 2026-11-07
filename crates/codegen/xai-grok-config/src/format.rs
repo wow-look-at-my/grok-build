@@ -318,12 +318,17 @@ pub fn to_config_json_string(
         }
         out.insert(k.clone(), v.clone());
     }
+    let value = serde_json::Value::Object(out);
     let mut buf = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"\t");
     let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
-    serde::Serialize::serialize(&serde_json::Value::Object(out), &mut ser)
-        .expect("serializing a serde_json::Value to a Vec cannot fail");
-    let mut text = String::from_utf8(buf).expect("serde_json writes UTF-8");
+    let mut text = match serde::Serialize::serialize(&value, &mut ser) {
+        Ok(()) => String::from_utf8_lossy(&buf).into_owned(),
+        Err(e) => {
+            tracing::error!(error = %e, "could not pretty-print a config document; writing it compact");
+            value.to_string()
+        }
+    };
     text.push('\n');
     text
 }
@@ -403,26 +408,6 @@ pub fn edit_json_document<T>(
 pub fn schema_ref_for(path: &Path) -> Option<&'static str> {
     let home = xai_dirs::resolve_grok_home()?;
     (path.parent() == Some(home.as_path())).then_some(USER_SCHEMA_REF)
-}
-
-/// Get a nested JSON object, creating each missing level. A non-object on the way is replaced by an object.
-pub fn json_object_at<'a>(
-    root: &'a mut serde_json::Map<String, serde_json::Value>,
-    path: &[&str],
-) -> &'a mut serde_json::Map<String, serde_json::Value> {
-    let mut cur = root;
-    for seg in path {
-        let slot = cur
-            .entry(seg.to_string())
-            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-        if !slot.is_object() {
-            *slot = serde_json::Value::Object(serde_json::Map::new());
-        }
-        cur = slot
-            .as_object_mut()
-            .expect("the slot was just made an object");
-    }
-    cur
 }
 
 /// The JSON path and the TOML path for the config file `stem` in `dir`.
