@@ -222,13 +222,13 @@ The older `agents.output_rate_floor` object (`window_secs`, `max_retries`) still
 }
 ```
 
-`allow_local` is off by default (SSRF fail-closed). Turn it on (or set `GROK_WEB_FETCH_ALLOW_LOCAL=1`) and `web_fetch` may reach **explicit** loopback hosts only — private, link-local, and cloud-metadata ranges stay blocked. Resolution: TOML > env > default off.
+`allow_local` is off by default (SSRF fail-closed). Turn it on (or set `GROK_WEB_FETCH_ALLOW_LOCAL=1`) and `web_fetch` may reach **explicit** loopback hosts only — private, link-local, and cloud-metadata ranges stay blocked. Resolution: config file > env > default off.
 
-`[toolset.web_search]` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**. If you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model.
+`tools.web_search` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**. If you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model.
 
 The model's own per-call `allowed_domains` is ignored when you set `allowed_domains` or `excluded_domains` here (so a blocklist is a real block). The model's per-call allowlist only applies when you configured nothing. Resolution: requirements → user `config.json` → managed → default (unset). Config is read at session start, so edit it before starting a session — changes do not apply mid-session.
 
-`[toolset.ask_user_question]` is honored across **requirements.toml**, **managed config**, and your user **`config.json`**. Precedence: requirements → env (`GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED` / `GROK_ASK_USER_QUESTION_TIMEOUT_SECS`) → user config → managed → defaults. Set `timeout_enabled = false` in your user config to disable the automatic questionnaire timeout for yourself. `timeout_secs` must be a positive integer. You can also toggle `timeout_enabled` from `/settings` → **Ask-Question timeout** (under Agent & Approval). Changes apply to newly started sessions.
+`tools.ask_user_question` is honored across **requirements.toml**, **managed config**, and your user **`config.json`**. Precedence: requirements → env (`GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED` / `GROK_ASK_USER_QUESTION_TIMEOUT_SECS`) → user config → managed → defaults. Set `"timeout_enabled": false` in your user config to disable the automatic questionnaire timeout for yourself. `timeout_secs` must be a positive integer. You can also toggle `timeout_enabled` from `/settings` → **Ask-Question timeout** (under Agent & Approval). Changes apply to newly started sessions.
 
 ### Authentication
 
@@ -286,7 +286,7 @@ Every slot also has a picker in the settings modal, under **Models**, or shares 
 
 Each slot takes an environment variable too, which wins over the config file. The name is the slot in upper case under `GROK_MODEL_`, so `goal_skeptic` reads `GROK_MODEL_GOAL_SKEPTIC`. The exception is `prompt_suggestion`, whose variable keeps its older name `GROK_PROMPT_SUGGESTIONS_MODEL`.
 
-Two older, narrower keys still win over their slot where you set them: `[auto_mode] classifier_model` over `permission_classifier`, and `[memory] flush_model` over `memory_flush`.
+Two older, narrower keys still win over their slot where you set them: `agents.auto_mode.classifier_model` over `permission_classifier`, and `memory.flush_model` over `memory_flush`.
 
 A slot naming a model your account cannot reach logs a warning and falls back to the session model, rather than failing the call.
 
@@ -302,7 +302,7 @@ Groups ship by default:
 | `dense_summarization` | Dense summarization model | `web_search`, `compaction`, `image_description` |
 | `query` | Query model | `side_note`, `todo_capture` |
 
-Change, unroll or add groups under `[model_groups.<id>]`. Each key is optional. On a default group, a key you leave out keeps its default value.
+Change, unroll or add groups under `models.groups.<id>`. Each key is optional. On a default group, a key you leave out keeps its default value.
 
 ```json
 {
