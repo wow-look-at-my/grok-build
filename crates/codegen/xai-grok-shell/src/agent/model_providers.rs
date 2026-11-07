@@ -75,7 +75,17 @@ pub struct ModelProviderConfig {
 }
 
 /// The shape of a provider's model listing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelsListDialect {
     /// `GET <base>/models` answering `{ "data": [...] }`.
@@ -96,7 +106,17 @@ impl ModelsListDialect {
 }
 
 /// Which of a local runtime's windows reaches the catalog.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextWindowSource {
     /// The window the loaded instance is running at.

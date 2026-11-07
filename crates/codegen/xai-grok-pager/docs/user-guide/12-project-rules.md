@@ -42,9 +42,9 @@ Grok also scans home-level rules, regardless of where it starts. These roots are
 | `$GROK_HOME/rules/` (default `~/.grok/rules/`) | Always scanned; applies to all projects |
 | `~/.claude/rules/` | Controlled by `compat.claude.rules` |
 | `~/.cursor/rules/` | Controlled by `compat.cursor.rules` |
-| Each entry of `[paths] extra_rule_dirs` | Any absolute directory you list in `config.json`; `~` is expanded |
+| Each entry of `extensions.paths.extra_rule_dirs` | Any absolute directory you list in `config.json`; `~` is expanded |
 
-Home rules load first, in the table order, followed by project files from repo root to the current directory. Files are alphabetical within each rules directory. To load rules from a directory that is not one of the built-in locations, list it under `[paths]`:
+Home rules load first, in the table order, followed by project files from repo root to the current directory. Files are alphabetical within each rules directory. To load rules from a directory that is not one of the built-in locations, list it under `extensions.paths`:
 
 ```json
 {
@@ -90,7 +90,7 @@ Each imported file keeps its own `## From:` path in the context. You can see whe
 
 Grok scans for project rules in this order:
 
-1. **Home rules**: `$GROK_HOME`, then enabled `~/.claude/` and `~/.cursor/` sources, then `[paths] extra_rule_dirs`
+1. **Home rules**: `$GROK_HOME`, then enabled `~/.claude/` and `~/.cursor/` sources, then `extensions.paths.extra_rule_dirs`
 2. **Repo rules**: If inside a git repo, every directory from the repo root down to the current working directory (inclusive)
 3. **CWD-only**: If not inside a git repo, only the current working directory
 

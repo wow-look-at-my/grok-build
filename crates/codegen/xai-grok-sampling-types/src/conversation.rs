@@ -1045,7 +1045,9 @@ pub fn reported_cost_ticks(raw: Option<i64>) -> Option<i64> {
 /// Per-token USD pricing for a model. That model is used to **derive** cost
 /// from token counts when a backend reports usage but no `cost_in_usd_ticks`
 /// on the wire (e.g. OpenAI-compatible / third-party endpoints).
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ModelPricing {
     /// USD per uncached input token (the portion of `prompt_tokens` that is neither a cache read nor a cache write).
     #[serde(default)]

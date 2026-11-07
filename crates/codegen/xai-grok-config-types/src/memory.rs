@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 /// changed for an already-running session. The resolver selects `V2` when no
 /// config says otherwise. `Legacy` is only the value of an unresolved,
 /// disabled [`MemoryConfig::default`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryMode {
     /// Existing summary, search, and Dream pipeline rooted at `memory/`.
@@ -23,7 +25,9 @@ pub enum MemoryMode {
 }
 
 /// Session-pinned memory-v2 rollout stage.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryV2Rollout {
     /// Disable every v2 read, capture, Dream, and write path.

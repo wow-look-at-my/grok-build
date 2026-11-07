@@ -15,7 +15,9 @@ use xai_grok_sampling_types::{
 use crate::attribution::SharedAttributionCallback;
 use crate::retry::{DEFAULT_MAX_RETRIES, RATE_LIMIT_RETRY_THRESHOLD};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthScheme {
     #[default]
@@ -26,7 +28,9 @@ pub enum AuthScheme {
 }
 
 /// Set by the shell: `Zstd` only toward the cli-chat-proxy that advertised it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum RequestCompression {
     #[default]
