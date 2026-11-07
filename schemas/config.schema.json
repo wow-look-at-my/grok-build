@@ -1,4 +1,5 @@
 {
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"title": "grok config",
 	"description": "The grok config file, `$GROK_HOME/config.json`.",
 	"type": "object",
