@@ -2749,7 +2749,7 @@ The agent persists all session updates automatically. Clients can reconnect and 
 | `GROK_MEMORY`                   | Enable (`1`) or disable (`0`) cross-session memory                                                       |
 | `GROK_AGENT`                    | Custom agent definition path or name (see [Agent Profiles](#agent-profiles))                             |
 | `GROK_WEB_FETCH`                | Enable (`1`) or disable (`0`) the `web_fetch` tool                                                       |
-| `GROK_WEB_FETCH_PROXY`          | Egress proxy URL for `web_fetch` requests (overridden by `[toolset.web_fetch] proxy_endpoint`)           |
+| `GROK_WEB_FETCH_PROXY`          | Egress proxy URL for `web_fetch` requests (overridden by `tools.web_fetch.proxy_endpoint`)           |
 | `GROK_RESPECT_GITIGNORE`        | Disable `.gitignore` filtering in tools when set to `0`                                                  |
 | `GROK_FEEDBACK_ENABLED`         | Enable (`1`) or disable (`0`) feedback system independently from telemetry                               |
 | `GROK_LOG_FILE`                 | Enable file logging by providing a file path (the value is used verbatim as the path)                    |
@@ -2876,9 +2876,7 @@ grok models
 # Test the server command manually
 npx -y @modelcontextprotocol/server-filesystem /path
 
-# Increase startup timeout in config
-[mcp_servers.filesystem]
-startup_timeout_sec = 30
+# Increase startup timeout in config.json: set mcp.servers.filesystem.startup_timeout_sec to 30
 ```
 
 ### Command timeout
