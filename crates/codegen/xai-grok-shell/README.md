@@ -1921,7 +1921,7 @@ Add custom model endpoints to use alternative providers or self-hosted models. Y
 
 ### Model Configuration
 
-The name in the TOML header (`my-model` in `[model.my-model]`) is what appears in the model picker. The `model` field is the identifier sent to the API. If `model` is omitted, the header name is sent to the API directly.
+The key under `models.definitions` (`my-model` in `models.definitions.my-model`) is what appears in the model picker. The `model` field is the identifier sent to the API. If `model` is omitted, the key is sent to the API directly.
 
 ```json
 {
