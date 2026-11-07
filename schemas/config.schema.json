@@ -2189,7 +2189,7 @@
 						"string",
 						"null"
 					],
-					"description": "Speech-to-text language preference for voice dictation. A Grok STT catalog code (`en`, `es`, `ja`, …; see xAI STT\nsupported languages) or `auto` (system locale, resolved at connect). Written by the settings modal; unset leaves\n`[voice].language` / default `en`. When set, overrides `[voice].language` for the session."
+					"description": "Speech-to-text language preference for voice dictation. A Grok STT catalog code (`en`, `es`, `ja`, …; see xAI STT\nsupported languages) or `auto` (system locale, resolved at connect). Written by the settings modal; unset leaves\n`ui.voice.language` / default `en`. When set, overrides `ui.voice.language` for the session."
 				},
 				"voice_keybind_enabled": {
 					"type": [
@@ -2597,7 +2597,7 @@
 					"default": null
 				}
 			},
-			"description": "User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.\nThat keeps the documented precedence (requirements > env > user > managed > remote). This struct exists so the keys are recognized in `config.toml` and round-trip through `AgentConfig`."
+			"description": "User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.\nThat keeps the documented precedence (requirements > env > user > managed > remote). This struct exists so the keys are recognized in `config.json` and round-trip through `AgentConfig`."
 		},
 		"AuthProviderConfig": {
 			"type": "object",
@@ -2775,7 +2775,7 @@
 						"boolean",
 						"null"
 					],
-					"description": "Whether to allow a background `&` operator in foreground commands (default: `true`).\nResolution: config.toml (this) > remote settings > `true`.",
+					"description": "Whether to allow a background `&` operator in foreground commands (default: `true`).\nResolution: config.json (this) > remote settings > `true`.",
 					"default": null
 				},
 				"login_shell_capture": {
@@ -4217,7 +4217,7 @@
 					"default": 8
 				}
 			},
-			"description": "Configurable in `config.toml` under `[toolset.hashline]`:"
+			"description": "Configurable in `config.json` under `tools.hashline`:"
 		},
 		"HubConfig": {
 			"type": "object",
@@ -4275,7 +4275,7 @@
 					"default": false
 				}
 			},
-			"description": "Managed MCP connector fetching config (`[managed_mcps]` in config.toml).\n\nSee [`Self::resolve`] for full priority chain."
+			"description": "Managed MCP connector fetching config (`mcp.managed` in config.json).\n\nSee [`Self::resolve`] for full priority chain."
 		},
 		"MarketplaceConfig": {
 			"type": "object",
@@ -6505,7 +6505,7 @@
 					"additionalProperties": {
 						"type": "string"
 					},
-					"description": "Per-subagent model ID overrides.\nKeys are agent names, values are model IDs that must exist in the available models registry.\nParsed from `[subagents.models]` in config.toml.",
+					"description": "Per-subagent model ID overrides.\nKeys are agent names, values are model IDs that must exist in the available models registry.\nParsed from `agents.subagents.models` in config.json.",
 					"default": {}
 				},
 				"toggle": {
@@ -6531,7 +6531,7 @@
 					"description": "Named persona/SOUL definitions."
 				}
 			},
-			"description": "Configuration for subagent (task tool) support.\nParsed from the `[subagents]` section of `~/.grok/config.toml` or `.grok/config.toml`.\nEnabled by default; can be disabled via the `GROK_SUBAGENTS=0` env var or `[subagents] enabled = false` in config.toml."
+			"description": "Configuration for subagent (task tool) support.\nParsed from the `agents.subagents` object of `~/.grok/config.json` or `.grok/config.json`.\nEnabled by default; can be disabled via the `GROK_SUBAGENTS=0` env var or `agents.subagents.enabled` set to `false` in config.json."
 		},
 		"TelemetryMode": {
 			"description": "`true`, `false`, or `\"session_metrics\"`. An unknown string is read as disabled.",
