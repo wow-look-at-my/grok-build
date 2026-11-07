@@ -1362,15 +1362,13 @@ mod tests {
         let after_grant = std::fs::read(&store_path).unwrap();
         // Marker a rewrite would drop.
         let mut marked = after_grant.clone();
-        marked.extend_from_slice(b"\n# keep-me\n");
+        marked.extend_from_slice(b"\n\n\n");
         std::fs::write(&store_path, &marked).unwrap();
 
         grant_folder_trust(tmp.path());
         let after_skip = std::fs::read(&store_path).unwrap();
-        assert!(
-            after_skip
-                .windows(b"# keep-me".len())
-                .any(|w| w == b"# keep-me"),
+        assert_eq!(
+            marked, after_skip,
             "already-trusted grant must not rewrite the store"
         );
         assert!(TrustStore::load().is_trusted(&key));
