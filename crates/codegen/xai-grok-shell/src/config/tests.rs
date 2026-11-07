@@ -4178,8 +4178,8 @@ fn resolve_effective_plugins_config_gates_project_paths_on_folder_trust() {
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
-            grok.join("config.toml"),
-            "[plugins]\npaths = [\"./proj-plugin\"]\ndisabled = [\"proj-bad\"]\n",
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": ["./proj-plugin"], "disabled": ["proj-bad"]}}}"#,
         )
         .unwrap();
     let cwd = repo.path();
@@ -4237,8 +4237,9 @@ fn discover_plugins_excludes_untrusted_configpath_plugin_end_to_end() {
     let grok = cwd.join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
-            grok.join("config.toml"),
-            format!("[plugins]\npaths = ['{}']\n", plugin_dir.display()),
+            grok.join("config.json"),
+            serde_json::json!({"extensions": {"plugins": {"paths": [plugin_dir.display().to_string()]}}})
+                .to_string(),
         )
         .unwrap();
     let trust_store = TrustStore::load_from(home.path().join("plugin-trust"));
@@ -4300,7 +4301,10 @@ fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
     gix::init(repo.path()).unwrap();
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
-    std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./proj-plugin\"]\n")
+    std::fs::write(
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": ["./proj-plugin"]}}}"#,
+        )
         .unwrap();
     let cwd = repo.path();
     let remote = crate::util::config::RemoteSettings {

@@ -1231,32 +1231,32 @@ mod tests {
     #[test]
     fn is_claude_import_marked_at_missing_section() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[ui]\ntheme = \"dark\"\n").unwrap();
-        std::fs::write(&path, "[other]\nkey = \"value\"\n").unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"ui": {"theme": "dark"}}"#).unwrap();
+        std::fs::write(&path, r#"{"other": {"key": "value"}}"#).unwrap();
         assert!(!is_claude_import_marked_at(&path));
     }
 
     #[test]
     fn is_claude_import_marked_at_explicit_false() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[claude_compat]\nimported = false\n").unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"claude_compat": {"imported": false}}"#).unwrap();
         assert!(!is_claude_import_marked_at(&path));
     }
 
     #[test]
     fn is_claude_import_marked_at_true() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[claude_compat]\nimported = true\n").unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"claude_compat": {"imported": true}}"#).unwrap();
         assert!(is_claude_import_marked_at(&path));
     }
 
     #[test]
     fn write_import_marker_creates_new_file() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sub").join("config.toml");
+        let path = dir.path().join("sub").join("config.json");
         write_import_marker(&path).unwrap();
         assert!(is_claude_import_marked_at(&path));
     }
@@ -1264,16 +1264,16 @@ mod tests {
     #[test]
     fn write_import_marker_preserves_existing_content() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+        let path = dir.path().join("config.json");
         std::fs::write(
             &path,
-            "[other]\nkey = \"value\"\n\n[mcp_servers.foo]\ncommand = \"x\"\n",
+            r#"{"other": {"key": "value"}, "mcp": {"servers": {"foo": {"command": "x"}}}}"#,
         )
         .unwrap();
         write_import_marker(&path).unwrap();
 
         let content = std::fs::read_to_string(&path).unwrap();
-        let parsed: TomlValue = toml::from_str(&content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(
             parsed
                 .get("other")
@@ -1283,7 +1283,8 @@ mod tests {
         );
         assert_eq!(
             parsed
-                .get("mcp_servers")
+                .get("mcp")
+                .and_then(|m| m.get("servers"))
                 .and_then(|m| m.get("foo"))
                 .and_then(|f| f.get("command"))
                 .and_then(|v| v.as_str()),
@@ -1301,7 +1302,7 @@ mod tests {
     #[test]
     fn write_import_marker_idempotent() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+        let path = dir.path().join("config.json");
         write_import_marker(&path).unwrap();
         write_import_marker(&path).unwrap();
         assert!(is_claude_import_marked_at(&path));
@@ -1952,7 +1953,7 @@ extra_rule_dirs = ["/c/rules"]
     #[test]
     fn apply_items_to_config_writes_path_entries() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+        let path = dir.path().join("config.json");
         let items = vec![
             ImportableItem::PathEntry {
                 kind: PathKind::Skill,
@@ -1967,7 +1968,8 @@ extra_rule_dirs = ["/c/rules"]
         assert_eq!(count, 2);
 
         let content = std::fs::read_to_string(&path).unwrap();
-        let parsed: TomlValue = toml::from_str(&content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let parsed = parsed.get("extensions").unwrap();
         assert_eq!(
             parsed
                 .get("paths")
