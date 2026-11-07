@@ -545,11 +545,11 @@ fn dashboard_preview_write_failure_preserves_existing_config() {
 fn dashboard_preview_writer_refuses_a_retargeted_symlink() {
     use std::os::unix::fs::symlink;
     let directory = tempfile::tempdir().unwrap();
-    let first = directory.path().join("first.toml");
-    let second = directory.path().join("second.toml");
-    let slot = directory.path().join("config.toml");
-    let first_content = "ui = { dashboard_preview = true, custom = 1 }";
-    let second_content = "ui = { dashboard_preview = true, custom = 2 }";
+    let first = directory.path().join("first.json");
+    let second = directory.path().join("second.json");
+    let slot = directory.path().join("config.json");
+    let first_content = r#"{"ui": {"dashboard_preview": true, "custom": 1}}"#;
+    let second_content = r#"{"ui": {"dashboard_preview": true, "custom": 2}}"#;
     std::fs::write(&first, first_content).unwrap();
     std::fs::write(&second, second_content).unwrap();
     symlink(&first, &slot).unwrap();
@@ -571,10 +571,10 @@ fn feature_override_writer_inserts_replaces_and_removes_the_key() {
     use crate::agent::config::Feature;
     let feature = Feature::SubagentModelInheritance;
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("config.toml");
-    std::fs::write(&path, "features = { web_fetch = true }\n").unwrap();
+    let path = directory.path().join("config.json");
+    std::fs::write(&path, r#"{"features": {"web_fetch": true}}"#).unwrap();
     let read_features = |path: &std::path::Path| -> Option<TomlValue> {
-        toml::from_str::<TomlValue>(&std::fs::read_to_string(path).unwrap())
+        xai_grok_config::load_toml_file(path)
             .unwrap()
             .get("features")
             .cloned()
@@ -607,15 +607,14 @@ fn feature_override_writer_inserts_replaces_and_removes_the_key() {
 #[test]
 fn model_context_window_write_round_trips_through_the_loader() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("config.toml");
+    let path = directory.path().join("config.json");
     std::fs::write(
         &path,
-        "[model.\"gw/big-one\"]\nname = \"Big\"\n\n[model.other]\ncontext_window = 9000\n",
+        r#"{"models": {"definitions": {"gw/big-one": {"name": "Big"}, "other": {"context_window": 9000}}}}"#,
     )
     .unwrap();
-    let read = |path: &std::path::Path| -> TomlValue {
-        toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-    };
+    let read =
+        |path: &std::path::Path| -> TomlValue { xai_grok_config::load_toml_file(path).unwrap() };
     let window_of = |key: &str| -> Option<u64> {
         let cfg = crate::agent::config::Config::new_from_toml_cfg(&read(&path)).unwrap();
         cfg.config_models.get(key).and_then(|m| m.context_window)
