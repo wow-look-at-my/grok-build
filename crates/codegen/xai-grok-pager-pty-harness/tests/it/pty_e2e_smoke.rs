@@ -38,6 +38,8 @@ mod quit_without_kitty_flags_sends_no_da1;
 mod renders_on_action;
 #[path = "pty_e2e/requirements_version_failure_exits_2_with_guidance.rs"]
 mod requirements_version_failure_exits_2_with_guidance;
+#[path = "pty_e2e/retry_reason_wraps_in_full.rs"]
+mod retry_reason_wraps_in_full;
 #[path = "pty_e2e/shift_selection_key_encodings.rs"]
 mod shift_selection_key_encodings;
 #[path = "pty_e2e/shift_tab_in_session_cycles_mode.rs"]
