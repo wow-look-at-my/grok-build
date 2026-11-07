@@ -68,7 +68,7 @@ pub struct FeaturesPersistConfig {
     pub feedback_trace_card: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct PrivacyConfig {
     /// Last banner dismiss (Accept/Customize), RFC 3339 UTC.
     /// When the remote `privacy_banner_reshow_days` is unset or 0, the banner never re-shows once this is set.

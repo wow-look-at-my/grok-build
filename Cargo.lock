@@ -11744,6 +11744,7 @@ version = "0.1.0"
 dependencies = [
  "fastrand",
  "regex",
+ "schemars",
  "serde",
  "serde_json",
  "shellexpand",
@@ -12603,6 +12604,7 @@ dependencies = [
  "xai-grok-test-support",
  "xai-grok-tools",
  "xai-grok-version",
+ "xai-grok-voice",
  "xai-grok-workspace",
  "xai-hooks-plugins-types",
  "xai-hunk-tracker",
@@ -12955,6 +12957,7 @@ dependencies = [
  "cpal",
  "futures-util",
  "parking_lot",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

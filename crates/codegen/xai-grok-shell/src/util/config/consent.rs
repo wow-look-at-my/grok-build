@@ -6,7 +6,7 @@ use anyhow::Result;
 
 use super::persist::update_config;
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct ConsentConfig {
     /// One entry per notice id, so two notices at once cannot overwrite each other's answers.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
@@ -14,7 +14,7 @@ pub struct ConsentConfig {
 }
 
 /// One notice's answer, under `[consent.answers.<notice id>]`.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct ConsentAnswer {
     /// Highest version answered for this notice on this machine.
     #[serde(default)]

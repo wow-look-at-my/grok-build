@@ -22,7 +22,7 @@ Open the session picker to reload a previous session from disk.
 
 Open the [Agent Dashboard](23-dashboard.md): live roster of top-level sessions in this pager (peek, reply, dispatch, pin, rename, stop, attach). Aliases: `/agents-dashboard`, `/sessions`.
 
-Not `/config-agents` (alias `/agents`), which manages agent *definitions* and personas. Disable with `GROK_AGENT_DASHBOARD=0` or `[dashboard].enabled = false`.
+Not `/config-agents` (alias `/agents`), which manages agent *definitions* and personas. Disable with `GROK_AGENT_DASHBOARD=0` or `ui.dashboard.enabled` set to `false`.
 
 ### `/compact [context]`
 
@@ -33,7 +33,7 @@ Compress conversation history to reclaim context-window space. Pass a note to te
 /compact keep the auth implementation details
 ```
 
-Grok also auto-compacts once the context window hits 85% (tune it with `[session] auto_compact_threshold_percent`).
+Grok also auto-compacts once the context window hits 85% (tune it with `session.auto_compact_threshold_percent`).
 
 ### `/context`
 

@@ -50,7 +50,7 @@ winget upgrade --id xAI.GrokBuild -e
 
 The WinGet package tracks the stable channel, and new releases can take a few days to reach it.
 
-To fetch a repository through Grove (NFS on macOS, FUSE on Linux), enable `grok clone` with `[clone] enabled = true` in Grove config, `GROK_CLONE=1`, or the enable-both convenience `GROK_GROVE=1` / `[cli] grove = true` in `~/.grok/config.json`:
+To fetch a repository through Grove (NFS on macOS, FUSE on Linux), enable `grok clone` with `clone.enabled` set to `true` in Grove config, `GROK_CLONE=1`, or the enable-both convenience `GROK_GROVE=1` / `cli.grove` set to `true` in `~/.grok/config.json`:
 
 ```bash
 grok clone <url> [dir]
