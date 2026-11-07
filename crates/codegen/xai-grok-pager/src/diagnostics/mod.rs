@@ -531,8 +531,8 @@ pub(crate) fn collect_notification_warnings_with_method(
             None,
         );
         warning.note = Some(format!(
-            "If the bell works for you, no change is needed. Otherwise, set `method` in \
-             `[ui.notifications]` in {} to a protocol your terminal supports. Set it to `none` \
+            "If the bell works for you, no change is needed. Otherwise, set \
+             `ui.notifications.method` in {} to a protocol your terminal supports. Set it to `none` \
              to turn off terminal notifications.",
             crate::util::display_user_grok_path(xai_grok_config::USER_CONFIG_FILENAME)
         ));
@@ -565,7 +565,7 @@ pub(crate) fn collect_notification_warnings_with_method(
         let mut warning = TerminalWarning::new(
             WarningCategory::FocusTrackingUnavailable,
             "This terminal may not report focus changes, so notifications set to `unfocused` may not appear",
-            Some("condition = \"always\" in [ui.notifications]"),
+            Some("\"ui.notifications.condition\": \"always\""),
             Some(&crate::util::display_user_grok_path(
                 xai_grok_config::USER_CONFIG_FILENAME,
             )),
