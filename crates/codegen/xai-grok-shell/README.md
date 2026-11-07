@@ -1422,7 +1422,7 @@ If the same server name appears in both places, the project config wins.
 
 Having an `lsp.json` file is enough for passive diagnostics. The model-visible `lsp` tool is exposed when both of these are true:
 
-- LSP tools are enabled (`GROK_LSP_TOOLS=1` or `[features] lsp_tools = true`)
+- LSP tools are enabled (`GROK_LSP_TOOLS=1` or `features.lsp_tools` set to `true`)
 - the merged LSP configuration is non-empty
 
 Enable the tool for one run:

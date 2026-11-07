@@ -2710,14 +2710,10 @@ enabled = true
     #[tokio::test]
     async fn clear_sticky_project_disabled_at_only_flips_false() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("config.toml");
+        let path = tmp.path().join("config.json");
         std::fs::write(
             &path,
-            r#"
-[mcp_servers.proj]
-command = "npx"
-enabled = false
-"#,
+            r#"{"mcp": {"servers": {"proj": {"command": "npx", "enabled": false}}}}"#,
         )
         .unwrap();
         assert!(
@@ -2726,7 +2722,7 @@ enabled = false
                 .unwrap()
         );
         let body = std::fs::read_to_string(&path).unwrap();
-        assert!(body.contains("enabled = true"), "{body}");
+        assert!(body.contains("\"enabled\": true"), "{body}");
         // Already true: no write.
         assert!(
             !clear_sticky_project_disabled_at(&path, "proj")
@@ -2744,14 +2740,9 @@ enabled = false
         std::fs::create_dir_all(nested.join(".grok")).unwrap();
         std::fs::create_dir_all(tmp.path().join(".grok")).unwrap();
 
-        let sticky = r#"
-# keep me
-[mcp_servers.svc]
-command = "npx"
-enabled = false
-"#;
-        let ancestor = tmp.path().join(".grok").join("config.toml");
-        let nearer = nested.join(".grok").join("config.toml");
+        let sticky = r#"{"ui": {"theme": "keep-me"}, "mcp": {"servers": {"svc": {"command": "npx", "enabled": false}}}}"#;
+        let ancestor = tmp.path().join(".grok").join("config.json");
+        let nearer = nested.join(".grok").join("config.json");
         std::fs::write(&ancestor, sticky).unwrap();
         std::fs::write(&nearer, sticky).unwrap();
 
@@ -2767,16 +2758,16 @@ enabled = false
 
         let nearer_body = std::fs::read_to_string(&nearer).unwrap();
         assert!(
-            nearer_body.contains("enabled = true"),
+            nearer_body.contains("\"enabled\": true"),
             "nearest should be unstuck: {nearer_body}"
         );
         assert!(
-            nearer_body.contains("# keep me"),
-            "toml_edit must preserve comments: {nearer_body}"
+            nearer_body.contains("keep-me"),
+            "unrelated fields must survive: {nearer_body}"
         );
         let ancestor_body = std::fs::read_to_string(&ancestor).unwrap();
         assert!(
-            ancestor_body.contains("enabled = false"),
+            ancestor_body.contains("\"enabled\": false"),
             "shadowed ancestor must stay sticky: {ancestor_body}"
         );
 
@@ -2785,12 +2776,12 @@ enabled = false
             .unwrap();
         let re_stuck = std::fs::read_to_string(&nearer).unwrap();
         assert!(
-            re_stuck.contains("enabled = false"),
+            re_stuck.contains("\"enabled\": false"),
             "re-stick must set enabled=false: {re_stuck}"
         );
         assert!(
-            re_stuck.contains("# keep me"),
-            "re-stick must preserve comments: {re_stuck}"
+            re_stuck.contains("keep-me"),
+            "re-stick must preserve unrelated fields: {re_stuck}"
         );
     }
 
