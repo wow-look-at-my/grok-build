@@ -446,21 +446,22 @@ fn merge_section_empty_struct_preserves_existing_section() {
 fn dashboard_preview_writer_accepts_loader_syntax_and_preserves_other_fields() {
     for input in [
         "",
-        "ui = { dashboard_preview = true, custom = 42, }",
+        r#"{"ui": {"dashboard_preview": true, "custom": 42}}"#,
         r#"
-ui = {
-    dashboard_preview = true,
-    custom = 42,
+{
+    "ui": {
+        "dashboard_preview": true,
+        "custom": 42
+    }
 }
 "#,
     ] {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("config.toml");
+        let path = directory.path().join("config.json");
         std::fs::write(&path, input).unwrap();
         for value in [false, true] {
             write_dashboard_preview(&path, value, atomic_write_follow_bound).unwrap();
-            let saved: toml::Value =
-                toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let saved = xai_grok_config::load_toml_file(&path).unwrap();
             assert_eq!(
                 saved
                     .get("ui")
@@ -482,9 +483,12 @@ ui = {
 }
 #[test]
 fn dashboard_preview_writer_preserves_invalid_files_and_identifies_the_error() {
-    for (input, operation) in [("[ui", "parse"), ("ui = false", "[ui] must be a table")] {
+    for (input, operation) in [
+        (r#"{"ui""#, "parse"),
+        (r#"{"ui": false}"#, "[ui] must be a table"),
+    ] {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("config.toml");
+        let path = directory.path().join("config.json");
         std::fs::write(&path, input).unwrap();
         let error = write_dashboard_preview(&path, false, atomic_write_follow_bound)
             .unwrap_err()
@@ -500,7 +504,7 @@ fn dashboard_preview_writer_preserves_invalid_files_and_identifies_the_error() {
 #[test]
 fn dashboard_preview_writer_read_error_names_the_path() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("config.toml");
+    let path = directory.path().join("config.json");
     std::fs::create_dir(&path).unwrap();
     let cause = read_follow_bound(&path).unwrap_err().to_string();
     let error = write_dashboard_preview(&path, false, atomic_write_follow_bound)
@@ -514,17 +518,17 @@ fn dashboard_preview_writer_read_error_names_the_path() {
 #[test]
 fn dashboard_preview_write_failure_preserves_existing_config() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("config.toml");
-    let input = "ui = { dashboard_preview = true }";
+    let path = directory.path().join("config.json");
+    let input = r#"{"ui": {"dashboard_preview": true}}"#;
     std::fs::write(&path, input).unwrap();
     let error = write_dashboard_preview(&path, false, |destination, _bound, content| {
         assert_eq!(destination, path);
-        let parsed: toml::Value = toml::from_str(content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(content).unwrap();
         assert_eq!(
             parsed
                 .get("ui")
                 .and_then(|ui| ui.get("dashboard_preview"))
-                .and_then(toml::Value::as_bool),
+                .and_then(serde_json::Value::as_bool),
             Some(false)
         );
         Err(std::io::Error::other("disk full"))

@@ -1776,7 +1776,7 @@ Disable specific subagent types while keeping the system enabled, or route them 
 ```
 
 By default a subagent inherits the parent session's model. Only an explicit
-per-agent pin overrides that: `[subagents.models].<agent>` (highest priority),
+per-agent pin overrides that: `agents.subagents.models.<agent>` (highest priority),
 then the agent definition's `model`. Both pins apply unconditionally,
 regardless of which model the parent is on.
 
