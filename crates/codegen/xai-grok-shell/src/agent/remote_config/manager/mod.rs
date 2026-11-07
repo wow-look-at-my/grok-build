@@ -1154,6 +1154,13 @@ impl ModelsManager {
                     timeout_secs = crate::http::STARTUP_AUTH_REFRESH_TIMEOUT.as_secs(),
                     "model catalog: auth refresh timed out; fetching without a fresh session"
                 );
+                xai_grok_telemetry::unified_log::warn(
+                    "model catalog: the auth refresh timed out",
+                    None,
+                    Some(serde_json::json!({
+                        "timeout_secs": crate::http::STARTUP_AUTH_REFRESH_TIMEOUT.as_secs(),
+                    })),
+                );
                 None
             }
         }
@@ -1250,6 +1257,14 @@ impl ModelsManager {
                 tracing::warn!(
                     timeout_secs = crate::http::STARTUP_FETCH_TIMEOUT.as_secs(),
                     "model catalog fetch timed out"
+                );
+                xai_grok_telemetry::unified_log::warn(
+                    "model catalog: the fetch timed out",
+                    None,
+                    Some(serde_json::json!({
+                        "timeout_secs": crate::http::STARTUP_FETCH_TIMEOUT.as_secs(),
+                        "has_auth": has_auth,
+                    })),
                 );
                 None
             }

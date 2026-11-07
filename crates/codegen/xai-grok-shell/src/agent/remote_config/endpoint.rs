@@ -5,7 +5,7 @@ use std::pin::Pin;
 
 use indexmap::IndexMap;
 
-use super::{ModelFetchAuth, prefetch_models_blocking};
+use super::{ModelFetchAuth, prefetch_models_async};
 use crate::agent::config::{self, ModelEntry};
 use xai_grok_login::GrokAuth;
 
@@ -42,9 +42,6 @@ pub(crate) async fn fetch_models_async(
     auth: Option<GrokAuth>,
     fetch_auth: ModelFetchAuth,
 ) -> Option<IndexMap<String, ModelEntry>> {
-    xai_spawn::spawn_blocking(move || {
-        prefetch_models_blocking(&endpoints, auth.as_ref(), fetch_auth)
-    })
-    .await
-    .unwrap_or(None)
+    // Keep this off spawn_blocking. A full blocking pool must not stall the catalog.
+    prefetch_models_async(&endpoints, auth.as_ref(), fetch_auth).await
 }
