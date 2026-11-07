@@ -44,7 +44,7 @@ Details worth knowing:
 
 ## Configuration
 
-MCP servers are configured in `~/.grok/config.json` under `[mcp_servers.<name>]` sections.
+MCP servers are configured in `~/.grok/config.json` under `mcp.servers.<name>`.
 
 To distribute MCP servers to a team, or to restrict which servers users may run (`allowedMcpServers` / `deniedMcpServers` in `requirements.toml` / `managed_config.toml`, with Claude `managed-settings.json` advisory for foreign-defined servers), see [Distribute across an organization](09-plugins.md#distribute-across-an-organization) in the Plugins guide.
 
@@ -94,9 +94,12 @@ Grok spawns a local process and communicates over stdin/stdout:
 >   (`.grok/config.json` anywhere on the cwd → git-root chain; the deepest
 >   file wins, and the repo value applies only once the folder is trusted):
 >
-> ```toml
-> [mcp]
-> max_output_bytes = 40000
+> ```json
+> {
+>   "mcp": {
+>     "max_output_bytes": 40000
+>   }
+> }
 > ```
 >
 > Precedence: requirements.toml > env > repo `.grok/config.json` >
@@ -180,7 +183,7 @@ grok mcp add --transport sse linear https://mcp.linear.app/sse
 # Remove a server
 grok mcp remove github
 
-# Enable or disable a local/TOML (or compat-sourced) server
+# Enable or disable a local (or compat-sourced) server
 grok mcp enable github
 grok mcp disable github
 
@@ -196,7 +199,7 @@ By default `grok mcp add` writes to `~/.grok/config.json` (`--scope user`). Use 
 
 `grok mcp remove` searches both scopes and exits 0 after removing the server. It exits 1 when the name is not found, or when the name is defined in both user and project scope — pass `--scope` to say which one to remove.
 
-`grok mcp enable` / `disable` persist the personal on/off state to user `~/.grok/config.json` (`disabled_mcp_servers`, and `[mcp_servers.<name>].enabled` when that entry exists). Scope:
+`grok mcp enable` / `disable` persist the personal on/off state to user `~/.grok/config.json` (`mcp.disabled_servers`, and `mcp.servers.<name>.enabled` when that entry exists). Scope:
 
 - **Known names:** user/project Grok TOML, names already on the disabled list, compat sources (`.mcp.json`, Claude, Cursor), and **plugin** MCP servers (same discovery as doctor/`/mcps`).
 - **Enable only:** if the cwd-nearest project definition has sticky `enabled = false`, that single key is cleared (comments preserved); disable never rewrites project configs.
@@ -522,9 +525,7 @@ If a child lists `search_tool` / `use_tool` but returns an empty catalog, check 
 npx -y @modelcontextprotocol/server-filesystem /path
 
 # Increase startup timeout
-# In config.json:
-[mcp_servers.filesystem]
-startup_timeout_sec = 30
+# In config.json, set mcp.servers.filesystem.startup_timeout_sec to 30
 ```
 
 For stdio servers, Grok captures the process's standard error to `~/.grok/logs/mcp/<server>.stderr.log`, truncated on each launch. Check this file when a server starts but fails to handshake:
