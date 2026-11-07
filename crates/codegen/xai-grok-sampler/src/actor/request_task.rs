@@ -22,6 +22,7 @@ use xai_grok_sampling_types::{
 };
 
 use crate::actor::state::ModelRejections;
+use crate::backend_detect::BackendProbe;
 
 use crate::actor::request_metadata::{
     CompletionState, SamplingResultWithMetrics, merge_signal_labels,
@@ -150,6 +151,7 @@ pub(crate) async fn run_request_task(
     // A fourth budget, for a stream that died mid-body.
     let mut stream_retry_count: u32 = 0;
     let output_observed = Arc::new(AtomicBool::new(false));
+    let mut backend_probe = BackendProbe::default();
 
     loop {
         sampling_span.record(
@@ -233,6 +235,13 @@ pub(crate) async fn run_request_task(
                         );
                     }
                 }
+                if backend_probe.switched() {
+                    crate::backend_detect::remember(
+                        &config.base_url,
+                        &config.model,
+                        client.api_backend(),
+                    );
+                }
                 // Record token usage on the sampling span alongside effort
                 if let Some(usage) = response.usage.as_ref() {
                     sampling_span.record("output_tokens", usage.completion_tokens);
@@ -287,6 +296,7 @@ pub(crate) async fn run_request_task(
                     &cancel_token,
                     &mut completion,
                     &rejections,
+                    &mut backend_probe,
                     &sampling_span,
                 )
                 .await
@@ -438,6 +448,7 @@ pub(crate) async fn run_request_task(
                     &cancel_token,
                     &mut completion,
                     &rejections,
+                    &mut backend_probe,
                     &sampling_span,
                 )
                 .await
@@ -471,6 +482,7 @@ pub(crate) async fn run_request_task(
                     &cancel_token,
                     &mut completion,
                     &rejections,
+                    &mut backend_probe,
                     &sampling_span,
                 )
                 .await
@@ -498,12 +510,19 @@ async fn apply_retry_decision(
     cancel_token: &CancellationToken,
     completion: &mut CompletionState,
     rejections: &ModelRejections,
+    backend_probe: &mut BackendProbe,
     parent: &tracing::Span,
 ) -> bool {
     let rate_limit_threshold = config
         .rate_limit_retry_threshold
         .unwrap_or(retry_policy.rate_limit_retry_threshold);
-    let decision = classify_error(err, *retry_count, max_retries, rate_limit_threshold);
+    let decision = match classify_error(err, *retry_count, max_retries, rate_limit_threshold) {
+        // A request that left its first backend moves on from any client error.
+        RetryDecision::Fatal(_) if max_retries > 0 && backend_probe.should_switch(err) => {
+            RetryDecision::RetryWithBackendSwitch
+        }
+        decision => decision,
+    };
 
     // Connection-reset / broken-pipe on body upload often means nginx rejected an oversized payload before responding 413
     // Strip images proactively before any retry of those errors so we don't burn budget re-uploading the same large body
@@ -640,6 +659,30 @@ async fn apply_retry_decision(
             emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
             true
         }
+        RetryDecision::RetryWithBackendSwitch => {
+            let current = client.api_backend();
+            let Some(next) = backend_probe.next(&current, err) else {
+                let reported = if backend_probe.switched() {
+                    backend_probe.exhausted_error(err)
+                } else {
+                    clone_error(err)
+                };
+                let terminal_event_queued = emit_failed(event_tx, request_id, &reported);
+                send_completion(completion, Err(reported), terminal_event_queued);
+                return false;
+            };
+            tracing::warn!(
+                model = %config.model,
+                from = ?current,
+                to = ?next,
+                reason = %err,
+                "model refused on this API backend; retrying the request on another"
+            );
+            *client = client.with_api_backend(next);
+            *retry_count += 1;
+            emit_retrying(event_tx, request_id, *retry_count, max_retries, err, None);
+            true
+        }
         RetryDecision::RetryWithMessagePropertyStrip => {
             // The provider's message schema rejected a property it does not
             // define.
@@ -696,7 +739,7 @@ async fn apply_retry_decision(
             http1_config.force_http1 = true;
             match SamplingClient::new(http1_config) {
                 Ok(fresh) => {
-                    *client = fresh;
+                    *client = fresh.with_api_backend(client.api_backend());
                     tracing::info!("rebuilt sampling client with HTTP/1.1 fallback for retry");
                 }
                 Err(rebuild_err) => {
@@ -2403,6 +2446,7 @@ mod tests {
             &cancel_token,
             &mut completion,
             &ModelRejections::default(),
+            &mut BackendProbe::default(),
             &tracing::Span::none(),
         )
         .await;
