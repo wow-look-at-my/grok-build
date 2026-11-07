@@ -131,9 +131,7 @@ from a fixed, audited attribute set.
 
 ## Config file
 
-Org defaults live under the existing `telemetry` section in `config.json`
-(env vars win). The keys are `otel_`-prefixed peers of the other
-`telemetry` settings:
+Org defaults live under the existing `telemetry` section in `config.json` (env vars win). The keys are `otel_`-prefixed peers of the other `telemetry` settings:
 
 ```json
 {
@@ -154,36 +152,16 @@ Org defaults live under the existing `telemetry` section in `config.json`
 }
 ```
 
-The config keys are `otel_*` under `telemetry`; the **env vars keep their
-standard OTEL names** (`GROK_EXTERNAL_OTEL`, `OTEL_*`) for ecosystem
-interop, so the two layers use deliberately different namespaces. The
-`otel_protocol` config key maps to `OTEL_EXPORTER_OTLP_PROTOCOL`. Env vars
-win over config file paths for CA and client identity.
+The config keys are `otel_*` under `telemetry`. The **env vars keep their standard OTEL names** (`GROK_EXTERNAL_OTEL`, `OTEL_*`) for ecosystem interop, so the layers use deliberately different namespaces. The `otel_protocol` config key maps to `OTEL_EXPORTER_OTLP_PROTOCOL`. Env vars win over config file paths for CA and client identity.
 
-There is deliberately no `headers` key: supply collector auth via
-`OTEL_EXPORTER_OTLP_HEADERS` so tokens are never stored on disk. Certificate
-and key config keys are **paths only** — never embed private key material
-in the config file.
+There is deliberately no `headers` key: supply collector auth via `OTEL_EXPORTER_OTLP_HEADERS` so tokens are never stored on disk. Certificate and key config keys are **paths only** — never embed private key material in the config file.
 
-Every **present** `telemetry.otel_*` key in signed `requirements.toml` is a
-**pin** (env cannot override it). `managed_config.toml` is not a lock — env
-still wins there. Pinning `otel_endpoint` strips developer generic and
-per-signal endpoint env **and unlisted user/managed file siblings** except
-endpoints you also list. Pinning client
-cert/key also strips developer endpoints and unlisted file siblings. Pinning CA (`otel_certificate`)
-does **not** strip endpoints. If requirements lists any of
-`otel_log_user_prompts` / `otel_log_tool_details` /
-`otel_log_assistant_responses` / `otel_log_tool_content` and omits a sibling, the omitted gate
-defaults **off** (do not rely on the prompts→responses fallback across that
-boundary).
+Every **present** `telemetry.otel_*` key in signed `requirements.toml` is a **pin** (env cannot override it). `managed_config.toml` is not a lock — env still wins there. Pinning `otel_endpoint` strips developer generic and per-signal endpoint env **and unlisted user/managed file siblings** except endpoints you also list. Pinning client cert/key also strips developer endpoints and unlisted file siblings. Pinning CA (`otel_certificate`) does **not** strip endpoints. If requirements lists any of `otel_log_user_prompts` / `otel_log_tool_details` / `otel_log_assistant_responses` / `otel_log_tool_content` and omits a sibling, the omitted gate defaults **off** (do not rely on the prompts→responses fallback across that boundary).
 
 The external stream exports **logs and metrics only** (no customer-facing
 traces exporter).
 
-Fleet enablement is one signed `requirements.toml` (destination, exporters,
-and content gates together). `user.email` is not a pin key — it follows
-OAuth/gateway identity. Headers stay in the process environment from the
-launcher after strip, never in this file.
+Fleet enablement is one signed `requirements.toml` (destination, exporters, and content gates together). `user.email` is not a pin key — it follows OAuth/gateway identity. Headers stay in the process environment from the launcher after strip, not in this file.
 
 ## Startup suppression (why nothing arrives for the first few seconds)
 
@@ -238,7 +216,7 @@ Identity attributes (`user.id`, and `organization.id` / `team.id` when known) ar
 | `grok_code.startup.phase_duration` | `ms` | `phase`, `outcome`, `auth_mode` |
 | `grok_code.startup.timeout` | `{timeout}` | `stuck_in`, `auth_mode` |
 
-`startup.total` measures process start to a usable session, recorded once per process. `outcome` = `timeout` or `error` means startup ended without one. `startup.interactive` records process start to the first frame the live loop confirmed written, once per process. `phase_duration` breaks the connect try down by step (`config_load`, `managed_policy`, `bootstrap`, `model_catalog`, `worker_spawn`, `leader_connect`, `acp_initialize`, `eager_auth`). Filter on its `outcome` (`ok` | `timeout` | `cancelled` | `error`) so truncated samples do not skew `ok` percentiles. The later `app_init` and `session_create` phases appear in the log timeline and the summary strings, not in this metric.
+`turn.ttft` is the time from turn start to the first token of any channel (reasoning, text, or a tool call) and `turn.ttfm`. The time from turn start to the first assistant text message (reasoning and tool calls excluded), one sample per turn on the same clock, so `ttft` never exceeds `ttfm`. A turn that produced no model output records no `ttft`. A reasoning-only or tool-only turn records `ttft` but no `ttfm`.
 
 `turn.ttft` is the time from turn start to the first token of any channel
 (reasoning, text, or a tool call) and `turn.ttfm` the time from turn start to the

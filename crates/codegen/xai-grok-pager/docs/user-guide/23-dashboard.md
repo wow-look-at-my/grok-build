@@ -123,7 +123,7 @@ There is no manual complete flag. Use `/exit` to leave a session without deletin
 
 The bottom textarea **always spawns a new session**. A selected row is the navigation cursor, not a reply target — open an agent to talk to it.
 
-- Free text → new top-level session seeded with the prompt. Text is never treated as a filter (even if it starts with `/`, `s:`, `a:`, or `#`). Filtering is `Ctrl+/` search mode. A leading `/` runs a pager-global slash command.
+- Free text → new top-level session seeded with the prompt. Filtering is `Ctrl+/` search mode. A leading `/` runs a pager-global slash command.
 - Empty input → open the selected row, or create a new agent when `+ New Agent` is focused.
 
 `/usage` opens the usage modal over the dashboard. The dashboard has no session, so the **Usage limit** tab shows your account allowance while the session tabs read "No active session". Open an agent for its context and token totals (`/context` and `/session-info` only work inside a session). `Esc` or `[✗]` closes it.
@@ -134,7 +134,7 @@ Empty or whitespace-only prompts are ignored. Prompts above 64 KiB are rejected 
 
 ### Focus: input bar ↔ overview list (`Tab`)
 
-Two focus areas: the **dispatch input** and the **overview list**. `Tab` toggles between them. The inactive input dims its border and hides its caret.
+`Tab` toggles between them. The inactive input dims its border and hides its caret.
 
 On open, focus defaults to the **overview list** when at least one agent exists (so `↑`/`↓` navigate immediately). With **no** agents, focus stays on the **dispatch input**. Either way, the cursor starts on `+ New Agent` (no agent row pre-selected).
 
@@ -178,7 +178,7 @@ On short terminals the panel may not fit. The dispatch box stays even with a row
 Prefixes (only inside search mode):
 
 - `a:<name>` — agent label (case-insensitive substring. Persona / role).
-- `s:<state>` — row state: `working`, `idle`, `completed`, `failed`, `needs-input`, `blocked` and synonyms (`busy`/`running`/`done`/etc.).
+
 - `#<text>` — substring match on `#<text>` (literal `#` in labels).
 - anything else — substring over label + working dir.
 

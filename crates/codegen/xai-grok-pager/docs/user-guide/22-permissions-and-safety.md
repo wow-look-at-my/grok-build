@@ -120,7 +120,7 @@ Organizations can prevent always-approve from being enabled via CLI, TUI, or `/a
 }
 ```
 
-Do not use `permission_mode` for this lock; that key is a switchable default. The legacy `ui.yolo` key set to `false` in `requirements.toml` also disables always-approve for compatibility.
+Do not use `permission_mode` for this lock. That key is a switchable default. The legacy `ui.yolo` key set to `false` in `requirements.toml` also disables always-approve for compatibility.
 
 Grok can still load Claude-style permission **rules** from managed settings; always-approve is locked with `requirements.toml` as shown above.
 
@@ -205,7 +205,7 @@ Permission rules can be global (all projects), project-scoped (one repository), 
 
 Notes on scoping:
 
-- Grok discovers a `.grok/config.json` at every directory level from the repository root down to your working directory, so a subdirectory can add rules on top of the repo root's.
+- Grok discovers a `.grok/config.json` at every directory level from the repository root down to your working directory. A subdirectory can add rules on top of the repo root's.
 - Rules from all scopes are merged into one rule set; `deny` > `ask` > `allow` applies across scopes, so a global `deny` cannot be overridden by a project `allow`.
 - Grok has no native `config.local.toml`. For personal, uncommitted rules in a project, use `.claude/settings.local.json`; Grok reads it directly (see [Claude Code Compatibility](#3-claude-code-compatibility-claudesettingsjson)).
 - Interactive "Always allow" decisions are stored outside the repository, scoped to the project (see [Interactive Approvals](#interactive-approvals-and-where-they-persist)).
@@ -297,7 +297,7 @@ Managed configuration deployed by your organization also contributes `permission
 
 Permission rules from every source are read once, when a session starts. Changes apply to the next session.
 
-The native `permission` section also accepts the compact `allow` / `deny` / `ask` string-array form, using the same rule strings as the `--allow` / `--deny` flags and `.claude/settings.json`:
+The native `permission` section also accepts the compact `allow` / `deny` / `ask` string-array form. Using the same rule strings as the `--allow` / `--deny` flags and `.claude/settings.json`:
 
 ```json
 {
@@ -606,7 +606,7 @@ Recommended combination for untrusted code:
 
 - Permission decisions appear in the transcript.
 - The `/always-approve` command toggles always-approve mode; other modes are set through `defaultMode` (see [How to set the mode](#how-to-set-the-mode)).
-- Permission prompts include per-command "Always allow" options that persist for the current project only (on by default; disable with `ui.remember_tool_approvals` set to `false`). See [Interactive Approvals](#interactive-approvals-and-where-they-persist).
+- Permission prompts include per-command "Always allow" options that persist for the current project only (on by default, disable with `ui.remember_tool_approvals` set to `false`). See [Interactive Approvals](#interactive-approvals-and-where-they-persist).
 - To manage hooks and plugins, run `/hooks` or `/plugins` (on most terminals, **Ctrl+L** also opens the Extensions modal; on VS Code, Cursor, Windsurf, and Zed, `Ctrl+L` is mid-turn interject instead). See [10-hooks.md](10-hooks.md).
 
 ---
