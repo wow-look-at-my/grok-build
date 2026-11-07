@@ -3889,11 +3889,8 @@ pub(crate) fn resolve_model_list(
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)
-            .filter(|(k, _)| {
-                cfg.config_models
-                    .get(k.as_str())
-                    .is_none_or(|block| block.context_window.is_none() || true)
-            })
+            // A window a `[model.<key>]` block pinned stays on that key, so a sibling that routes the same model id gets its own window.
+            .filter(|(_, e)| !e.info.context_window_pinned)
             .map(|(k, e)| (k.clone(), e.clone()))
             .collect();
         // api_backend inherits from a sibling with the same routing slug.
