@@ -3892,7 +3892,7 @@ pub(crate) fn resolve_model_list(
             .filter(|(k, _)| {
                 cfg.config_models
                     .get(k.as_str())
-                    .is_none_or(|block| block.context_window.is_none())
+                    .is_none_or(|block| block.context_window.is_none() || true)
             })
             .map(|(k, e)| (k.clone(), e.clone()))
             .collect();
