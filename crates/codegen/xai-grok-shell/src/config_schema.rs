@@ -6,6 +6,8 @@ use xai_grok_config::layout::{LAYOUT, PATCH_ARRAY_KEYS};
 use crate::agent::config::{Config, ConfigModelOverride};
 use crate::agent::model_providers::ModelProviderConfig;
 
+const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+
 /// The keys of a `version_overrides` element that gate it, not config.
 const VERSION_OVERRIDE_META: &[&str] = &["minimum_version", "maximum_version"];
 
@@ -80,10 +82,7 @@ pub fn config_json_schema() -> Value {
     sort_map(props);
 
     let mut out = Map::new();
-    out.insert(
-        "$schema".into(),
-        json!("https://json-schema.org/draft/2020-12/schema"),
-    );
+    out.insert("$schema".into(), json!(DIALECT));
     out.insert("title".into(), json!("grok config"));
     out.insert(
         "description".into(),
@@ -108,7 +107,8 @@ pub fn config_json_schema_text() -> String {
     let Value::Object(root) = config_json_schema() else {
         unreachable!("config_json_schema builds an object");
     };
-    xai_grok_config::format::to_config_json_string(&root, None)
+    // The writer drops a root `$schema` member and writes the one it is given first
+    xai_grok_config::format::to_config_json_string(&root, Some(DIALECT))
 }
 
 fn map_of(value: schemars::Schema) -> Value {

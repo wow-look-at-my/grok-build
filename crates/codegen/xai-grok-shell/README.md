@@ -1907,7 +1907,7 @@ Hooks in the other `$GROK_HOME` layers (`managed_config.toml`, `config.json`)
 remain convenience distribution, not an enforcement boundary: the user owns
 that directory and can edit or repoint it.
 
-`allow_managed_hooks_only = true` (also `allowManagedHooksOnly`) in any policy
+`policy.allow_managed_hooks_only` set to `true` (also `allowManagedHooksOnly`) in any policy
 layer is a tighten-only pin that skips every hook that is not managed policy:
 user, project, plugin, agent-frontmatter, and vendor-compat hooks are left out of
 dispatch and show `[disabled]` in the modal, and enabling them is refused.
