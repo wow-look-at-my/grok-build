@@ -60,7 +60,9 @@ Enterprise hosts can pin the **selectable** set — not only the default — in 
 }
 ```
 
-A fleet pin matches the **model id** (not a user-chosen catalog key), so a local `models.definitions.<name>` entry cannot widen the set. User-config `allowed_models` still matches catalog key or model id. Omit the key to leave user config standing. An empty array is unrestricted. A present-but-unreadable pin fail-closes (nothing selectable). A default or `-m` value outside the pinned set is rejected once the model catalog is fetched — contact your administrator; the list is not user-editable.
+A fleet pin matches the **model id** (not a user-chosen catalog key), so a local `models.definitions.<name>` entry cannot widen the set. User-config `allowed_models` still matches catalog key or model id. Omit the key to leave user config standing. An empty array is unrestricted. A present-but-unreadable pin fail-closes (nothing selectable). A default or `-m` value outside the pinned set is rejected once the model catalog is fetched — contact your administrator.
+
+The list is not user-editable.
 
 ### Config Default
 
@@ -145,7 +147,7 @@ The `context_window` value tells Grok when to trigger auto-compaction. When you 
 
 `max_request_bytes` is the largest request body your endpoint accepts. Grok evicts older inline images from the conversation to stay under it, so a session with many screenshots keeps working instead of being rejected. When you omit it, Grok picks the default for the `api_backend`: 30 MB for `messages`, and 50 MiB for `chat_completions` and `responses`. Set it only when your host enforces a different cap.
 
-The cap is a property of the endpoint, so it also works on a shared `models.providers.<id>` block, where every model pointing at that provider inherits it; a `max_request_bytes` on the model itself overrides the provider's value.
+The cap is a property of the endpoint. It also works on a shared `models.providers.<id>` block, where every model pointing at that provider inherits it. A `max_request_bytes` on the model itself overrides the provider's value.
 
 ```json
 {
@@ -174,7 +176,7 @@ The cap is a property of the endpoint, so it also works on a shared `models.prov
 
 ### Global Default Headers
 
-To apply the same headers to *every* model in the catalog -- built-in, prefetched from `/v1/models`, or custom -- set them once under the global `[models]` section instead of repeating them per model:
+Prefetched from `/v1/models`, or custom -- set them once under the global `models` section instead of repeating them per model:. Do this to apply the same headers to *every* model in the catalog -- built-in.
 
 ```json
 {
@@ -190,7 +192,7 @@ These act as a base for each model's inference requests. A per-model `models.def
 
 ### Global Default Values
 
-A few common per-model settings can also be set once under `[models]` as a default for *every* model. A per-model `models.definitions.<id>` value always wins. The global only fills in where a model (or the server's model list) left the field unset:
+A few common per-model settings can also be set once under `models` as a default for *every* model. A per-model `models.definitions.<id>` value always wins. The global only fills in where a model (or the server's model list) left the field unset:
 
 ```json
 {
@@ -340,7 +342,7 @@ A provider endpoint is not an xAI endpoint, so a model behind one never falls ba
 
 ### Global defaults vs provider defaults
 
-`[models]` (see [Global Default Values](#global-default-values)) covers *every* model in the catalog, including built-in and prefetched ones. `models.providers.<id>` covers only the models that name it. Precedence runs model → provider → `[models]` global → built-in default.
+`models` (see [Global Default Values](#global-default-values)) covers *every* model in the catalog, including built-in and prefetched ones. `models.providers.<id>` covers only the models that name it. Precedence runs model → provider → `models` global → built-in default.
 
 ### Autodetected Provider Models
 
@@ -409,7 +411,7 @@ A provider with a large catalog fills the picker. `favorite_models` is a list of
 
 `/model` lists every model, newest first. Favorites come first, each with a star. Batch routes (`:batch`) are not listed, because they cannot answer an interactive turn.
 
-The lists are joined: `[models].favorite_models` matches any model, and a provider's own list matches only that provider's models. A pattern matches the catalog key or the routing slug, case-sensitive.
+The lists are joined: `models.favorite_models` matches any model, and a provider's own list matches only that provider's models. A pattern matches the catalog key or the routing slug, case-sensitive.
 
 ---
 
