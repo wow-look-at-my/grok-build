@@ -100,14 +100,14 @@ async fn campaign_leader_mode_remote_dismiss_on_model_pick() {
     );
 
     // ── a later phase: the dismissal is durable and the pick is persisted.
-    let config = std::fs::read_to_string(grok_home.join("config.toml")).expect("read config.toml");
+    let config = std::fs::read_to_string(grok_home.join("config.json")).expect("read config.json");
     assert!(
-        config.contains(&format!("default = \"{CONFIG_MODEL}\"")),
-        "the user's pick must be persisted to config.toml:\n{config}"
+        config.contains(&format!("\"default\": \"{CONFIG_MODEL}\"")),
+        "the user's pick must be persisted to config.json:\n{config}"
     );
     assert!(
         !config.contains(CAMPAIGN_MODEL),
-        "the campaign value must never be written to config.toml:\n{config}"
+        "the campaign value must never be written to config.json:\n{config}"
     );
     assert!(
         dismissed(&state_path),
