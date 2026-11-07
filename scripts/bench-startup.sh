@@ -16,7 +16,8 @@ watchers times one watcher start per process, built from the crates' examples:
   fsnotify-<scenario>       FsEventSource::start on a scenario tree (xai-fsnotify watcher_startup)
   skills-scoped             SkillsFileWatcher::start_with_dirs on a .claude with a large worktrees/ tree
   skills-recursive-control  one recursive watch on the same .claude
-  options: --worktree-dirs N (default 6000), --debug (build the examples unoptimized)
+  options: --worktree-dirs N (default 6000), --debug (build the examples unoptimized),
+           --examples-dir DIR (use prebuilt examples there instead of building them)
 
 both: --runs N (default 20), --warmup N (default 2), --out DIR (default target/startup-bench)"
 
@@ -33,6 +34,7 @@ warmup=2
 out=$repo/target/startup-bench
 worktree_dirs=6000
 profile=release
+examples_dir=
 
 while [[ $# -gt 0 ]]; do
 	case $1 in
@@ -43,6 +45,7 @@ while [[ $# -gt 0 ]]; do
 	--out) out=$2; shift 2 ;;
 	--worktree-dirs) worktree_dirs=$2; shift 2 ;;
 	--debug) profile=debug; shift ;;
+	--examples-dir) examples_dir=$2; shift 2 ;;
 	-h | --help) echo "$usage"; exit 0 ;;
 	*) echo "unknown argument: $1" >&2; exit 2 ;;
 	esac
@@ -105,12 +108,16 @@ tui_boot() {
 }
 
 watchers_suite() {
-	local build_flags=()
-	[[ $profile == release ]] && build_flags+=(--release)
-	cargo build "${build_flags[@]}" -p xai-fsnotify --example watcher_startup
-	cargo build "${build_flags[@]}" -p xai-grok-shell --example skills_watcher_startup
-	local fsnotify=$repo/target/$profile/examples/watcher_startup
-	local skills=$repo/target/$profile/examples/skills_watcher_startup
+	if [[ -z $examples_dir ]]; then
+		local build_flags=()
+		[[ $profile == release ]] && build_flags+=(--release)
+		cargo build "${build_flags[@]}" -p xai-fsnotify --example watcher_startup
+		cargo build "${build_flags[@]}" -p xai-grok-shell --example skills_watcher_startup
+		examples_dir=$repo/target/$profile/examples
+	fi
+	local fsnotify=$examples_dir/watcher_startup
+	local skills=$examples_dir/skills_watcher_startup
+	[[ -x $fsnotify && -x $skills ]] || { echo "watcher_startup or skills_watcher_startup missing in $examples_dir" >&2; exit 1; }
 
 	local scenario dir
 	for scenario in $("$fsnotify" scenarios); do

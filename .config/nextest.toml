@@ -40,6 +40,8 @@ include = [
     { path = "debug/xai-grok-pager", relative-to = "target" },
     # The startup benchmark seeds its --continue boot with this.
     { path = "debug/startup-resume-seed", relative-to = "target" },
+    { path = "debug/examples/watcher_startup", relative-to = "target" },
+    { path = "debug/examples/skills_watcher_startup", relative-to = "target" },
 ]
 
 [test-groups]
