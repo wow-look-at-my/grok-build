@@ -105,6 +105,32 @@ pub fn env_telemetry_mode(name: &str) -> Option<TelemetryMode> {
 /// Parse `[telemetry] otel_timeout` / `otel_metric_export_interval`: docs say
 /// `number`, so TOML integers must not fail-close config load. Strings still
 /// work (`"10000"`). Stored as decimal strings to match the env-var overlay.
+fn ms_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "description": "Milliseconds, as an integer or a decimal string.",
+        "type": ["integer", "string"]
+    })
+}
+impl schemars::JsonSchema for TelemetryMode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TelemetryMode".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "`true`, `false`, or `\"session_metrics\"`. An unknown string is read as disabled.",
+            "anyOf": [
+                { "type": "boolean" },
+                {
+                    "type": "string",
+                    "enum": [
+                        "session_metrics", "session-metrics", "true", "false", "enabled", "disabled",
+                        "full", "on", "off", "yes", "no", "1", "0"
+                    ]
+                }
+            ]
+        })
+    }
+}
 fn deserialize_opt_ms_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
