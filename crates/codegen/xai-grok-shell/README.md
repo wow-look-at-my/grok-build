@@ -2569,7 +2569,7 @@ Grok automatically discovers configuration from Claude Code directories alongsid
 | **Marketplaces**  | `~/.claude/plugins/known_marketplaces.json`          | Plugin dirs from `installLocation` |
 | **MCP servers**   | `~/.claude.json`, `.mcp.json`                        | Loaded alongside `config.json`   |
 | **Project rules** | `CLAUDE.md`, `.claude/CLAUDE.md`                     | Loaded as project instructions   |
-| **Permissions**   | `.claude/settings.json`, `.claude/settings.local.json` | Fallback when no TOML config   |
+| **Permissions**   | `.claude/settings.json`, `.claude/settings.local.json` | Fallback when no native config |
 
 ### Plugin components
 
