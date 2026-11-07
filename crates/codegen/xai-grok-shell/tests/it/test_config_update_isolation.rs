@@ -21,7 +21,7 @@ fn test_home() -> &'static PathBuf {
 }
 
 /// The user's `config.json` as written on disk: its text and the typed config it parses to (no merge).
-fn read_user_config(home: &std::path::Path) -> (String, xai_grok_shell::agent::config::Config) {
+fn read_user_config(home: &std::path::Path) -> (String, xai_grok_shell::util::config::Config) {
     let path = home.join("config.json");
     let raw = fs::read_to_string(&path).unwrap();
     let tree = xai_grok_config::format::read_config_tree(&path).unwrap();
