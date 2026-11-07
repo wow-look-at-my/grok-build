@@ -2083,10 +2083,8 @@ grok models
 # Use in headless mode
 grok -p "Hello" -m my-model
 
-# Set as default
-# In config.json:
-[models]
-default = "my-model"
+# Set as default in config.json, under models.default:
+#   "models": { "default": "my-model" }
 ```
 
 ### Custom Models Endpoint

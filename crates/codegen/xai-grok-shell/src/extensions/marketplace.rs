@@ -775,7 +775,7 @@ async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome 
 
     // Run the write under the config write guard (SAVE_LOCK + init flock), off the reactor; an
     // unguarded add is exactly the read-modify-write race the guard prevents.
-    let config_path = xai_grok_config::grok_home().join("config.toml");
+    let config_path = user_config_path(&xai_grok_config::grok_home());
     let save_guard = match crate::util::config::lock_config_writes().await {
         Ok(guard) => guard,
         Err(e) => {
@@ -874,7 +874,7 @@ fn remove_source_locked(source_url_or_path: &str) -> xai_hooks_plugins_types::Ac
         }
     };
 
-    let config_path = grok_home.join("config.toml");
+    let config_path = user_config_path(&grok_home);
     match plugin::remove_marketplace_source_from_stores(&config_path, source_url_or_path) {
         Ok(plugin::MarketplaceSourceRemoval::NotFound) => {
             return ActionOutcome {
@@ -992,7 +992,7 @@ fn purge_default_skills_installs_impl(
         xai_grok_agent::plugins::install_registry::InstallError,
     >,
 ) {
-    let config_path = grok_home.join("config.toml");
+    let config_path = user_config_path(grok_home);
 
     if read_default_skills_installs_purged(&config_path) {
         return;
@@ -1101,7 +1101,7 @@ fn ensure_official_marketplace_source_with(
     grok_home: &std::path::Path,
     policy: &xai_grok_workspace::permission::resolution::MarketplacePolicy,
 ) {
-    let config_path = grok_home.join("config.toml");
+    let config_path = user_config_path(grok_home);
 
     if read_official_marketplace_auto_installed(&config_path) {
         return;
