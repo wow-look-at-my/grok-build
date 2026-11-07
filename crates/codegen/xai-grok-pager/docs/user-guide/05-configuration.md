@@ -97,7 +97,7 @@ Location: `~/.grok/config.json`. If the file is missing, Grok uses its built-in 
 
 ### Default agent
 
-Interactive `grok` uses `[agent]` in `config.json` when you do not pass `--plan`, `--ask-user`, or `--agent-profile`:
+Interactive `grok` uses `agents.selection` in `config.json` when you do not pass `--plan`, `--ask-user`, or `--agent-profile`:
 
 ```json
 {
@@ -113,7 +113,7 @@ Interactive `grok` uses `[agent]` in `config.json` when you do not pass `--plan`
 
 #### Default selected permission
 
-When the agent asks to run a command (or take some other tool action), the approval menu highlights one row by default. `[ui] default_selected_permission` sets which row that is on the **first** prompt of a session.
+When the agent asks to run a command (or take some other tool action), the approval menu highlights one row by default. `ui.default_selected_permission` sets which row that is on the **first** prompt of a session.
 
 | Value | Preselected row |
 |-------|-----------------|
@@ -132,13 +132,13 @@ When the agent asks to run a command (or take some other tool action), the appro
 
 After you answer the first prompt the cursor turns **sticky**: each later prompt preselects whatever you last confirmed (pick "No" once and subsequent prompts start on their reject row), carrying across edit / bash / MCP prompts. This is until you start. So this setting only picks the starting point.
 
-Values match case-insensitively. An unset or unrecognized value falls back to `always_allow_all_sessions`. The `allow_command_always` row is always scoped to the specific action being approved (command / tool / domain / edit-session), not a global allow-everything — that is what `always_allow_all_sessions` is for. Note the per-command "Always allow" rows appear while `[ui] remember_tool_approvals` is enabled (the default. Set it to `false` to hide them). See [22-permissions-and-safety.md](22-permissions-and-safety.md).
+Values match case-insensitively. An unset or unrecognized value falls back to `always_allow_all_sessions`. The `allow_command_always` row is always scoped to the specific action being approved (command / tool / domain / edit-session), not a global allow-everything — that is what `always_allow_all_sessions` is for. Note the per-command "Always allow" rows appear while `ui.remember_tool_approvals` is enabled (the default. Set it to `false` to hide them). See [22-permissions-and-safety.md](22-permissions-and-safety.md).
 
 You can also override this with `GROK_DEFAULT_SELECTED_PERMISSION`, which is handy for headless or agent test runs that must not mutate `config.json`. Precedence: env var → `config.json` → `always_allow_all_sessions`.
 
 #### Snap prompt to top on send
 
-By default, sending a prompt scrolls it to the top of the viewport so the response starts on a fresh page. Set `[ui] page_flip_on_send = false` (or toggle **Snap prompt to top on send** in `/settings` → Appearance) to leave the scroll position alone when you send. It takes effect on the next send — no restart.
+By default, sending a prompt scrolls it to the top of the viewport so the response starts on a fresh page. Set `ui.page_flip_on_send` to `false` (or toggle **Snap prompt to top on send** in `/settings` → Appearance) to leave the scroll position alone when you send. It takes effect on the next send — no restart.
 
 #### Scrolling
 
