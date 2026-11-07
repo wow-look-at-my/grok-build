@@ -119,14 +119,18 @@ watchers_suite() {
 	local skills=$examples_dir/skills_watcher_startup
 	[[ -x $fsnotify && -x $skills ]] || { echo "watcher_startup or skills_watcher_startup missing in $examples_dir" >&2; exit 1; }
 
+	# Each fixture is built once, before its timed runs.
 	local scenario dir
 	for scenario in $("$fsnotify" scenarios); do
 		dir=$sandbox/fsnotify-$scenario
-		bench "fsnotify-$scenario" --setup "rm -rf $dir && $fsnotify fixture $scenario $dir" "$fsnotify start $dir"
+		"$fsnotify" fixture "$scenario" "$dir"
+		bench "fsnotify-$scenario" "$fsnotify start $dir"
+		rm -rf "$dir"
 	done
 
 	dir=$sandbox/skills
-	bench skills-scoped --setup "rm -rf $dir && $skills fixture $worktree_dirs $dir" "$skills scoped $dir"
+	"$skills" fixture "$worktree_dirs" "$dir"
+	bench skills-scoped "$skills scoped $dir"
 	bench skills-recursive-control "$skills recursive-control $dir"
 }
 
