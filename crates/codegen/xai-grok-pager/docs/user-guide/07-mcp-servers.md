@@ -201,7 +201,7 @@ By default `grok mcp add` writes to `~/.grok/config.json` (`--scope user`). Use 
 
 `grok mcp enable` / `disable` persist the personal on/off state to user `~/.grok/config.json` (`mcp.disabled_servers`, and `mcp.servers.<name>.enabled` when that entry exists). Scope:
 
-- **Known names:** user/project Grok TOML, names already on the disabled list, compat sources (`.mcp.json`, Claude, Cursor), and **plugin** MCP servers (same discovery as doctor/`/mcps`).
+- **Known names:** user/project Grok config, names already on the disabled list, compat sources (`.mcp.json`, Claude, Cursor), and **plugin** MCP servers (same discovery as doctor/`/mcps`).
 - **Enable only:** if the cwd-nearest project definition has sticky `enabled = false`, that single key is cleared (comments preserved); disable never rewrites project configs.
 - **Not full `/mcps` parity:** gateway connectors (`managed_gateway:…`, stored under `disabled_mcp_tools.__managed_gateway_connectors`) stay Space-only in the TUI. Idempotent; unknown names exit 1.
 
@@ -246,7 +246,7 @@ Grok walks from the current directory up to the git repo root, loading `.grok/co
 
 If a project defines a server with the same name as a global one, the project version replaces it entirely (fields are not merged).
 
-Project-scoped files contribute `[mcp_servers]`, `[plugins]`, and `[permission]` entries. Grok reads most other config sections only from `~/.grok/config.json`.
+Grok reads most other config sections only from `~/.grok/config.json`.
 
 ---
 
@@ -273,7 +273,7 @@ A rejected tool is skipped. The log line is `Skipping MCP tool` with the reason.
 
 The **64-character** cap is a provider **function-name** budget. It applies to the meta-tools `search_tool` and `use_tool` themselves. It does **not** apply to catalog keys. A `server__tool` name longer than 64 characters stays in the catalog. The model still calls it through `use_tool` with that full name. Grok used to drop those tools at 64 characters. It no longer does.
 
-The server name in `[mcp_servers.<name>]` / `grok mcp add` is the catalog prefix. A name that starts with a digit is a valid TOML key. Catalog admission still rejects it (`InvalidServerName`). Rename the server so it starts with a letter or underscore.
+The server name in `mcp.servers.<name>` / `grok mcp add` is the catalog prefix. A name that starts with a digit is a valid JSON key. Catalog admission still rejects it (`InvalidServerName`). Rename the server so it starts with a letter or underscore.
 
 A server name that ends with `_` makes `server__tool` contain `___`. Admission skips that key (`InvalidOrAmbiguousQualifiedName`).
 
@@ -354,8 +354,8 @@ Grok loads MCP server configurations from multiple sources for compatibility:
 | Source | Format | Location | Configurable |
 |--------|--------|----------|-------------|
 | `config.json` | Native Grok config | `~/.grok/config.json`, `.grok/config.json` | Always on |
-| `.claude.json` | Claude Code format | `~/.claude.json` | `[compat.claude] mcps` |
-| `.cursor/mcp.json` | Cursor format | `~/.cursor/mcp.json`, `<project>/.cursor/mcp.json` | `[compat.cursor] mcps` |
+| `.claude.json` | Claude Code format | `~/.claude.json` | `extensions.compat.claude.mcps` |
+| `.cursor/mcp.json` | Cursor format | `~/.cursor/mcp.json`, `<project>/.cursor/mcp.json` | `extensions.compat.cursor.mcps` |
 | `.mcp.json` | MCP standard format | Project root (cwd to git root) | Loaded unless you have imported or dismissed the Claude import prompt (the import marker is set) |
 
 All sources are merged in priority order: config.json > Claude > Cursor > `.mcp.json`. Servers from higher-priority sources take precedence when names conflict.
