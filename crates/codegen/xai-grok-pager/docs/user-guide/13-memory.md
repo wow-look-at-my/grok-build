@@ -87,10 +87,10 @@ The toggle cannot override the process-wide force-disable (`--no-memory` or `GRO
 
 1. A process-wide force-disable (`--no-memory` compatibility flag or
    `GROK_MEMORY=0`) turns memory off.
-2. An explicit `[memory] enabled = false` in effective TOML turns memory off,
+2. An explicit `memory.enabled` set to `false` in the effective config turns memory off,
    including anything enabled by managed remote settings. The `/memory` `t`
    toggle can still turn it on for the current session.
-3. Otherwise memory is on, in v2 mode. `[memory_v2] enabled = false` selects the legacy pipeline, which then needs `GROK_MEMORY=1`, `[memory] enabled = true`, or a managed remote setting.
+3. Otherwise memory is on, in v2 mode. `memory.v2.enabled` set to `false` selects the legacy pipeline, which then needs `GROK_MEMORY=1`, `memory.enabled` set to `true`, or a managed remote setting.
 
 Staged-rollout and kill-switch controls for operators are documented in the
 internal hardening notes, not here.
