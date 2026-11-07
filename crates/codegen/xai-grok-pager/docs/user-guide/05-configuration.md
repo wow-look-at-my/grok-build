@@ -250,7 +250,7 @@ See [Authentication](02-authentication.md) for the full story.
 
 ### Harness model slots
 
-The harness sends requests to a model for many jobs beside your own turns. Each job is a slot in `[models]`. Set a slot and that job runs on the model you name. Leave it alone and the job inherits your session model, so it follows `/model`.
+The harness sends requests to a model for many jobs beside your own turns. Each job is a slot in `models`. Set a slot and that job runs on the model you name. Leave it alone and the job inherits your session model, so it follows `/model`.
 
 Every slot also has a picker in the settings modal, under **Models**, or shares its group's picker (see [Model groups](#model-groups)). A slot is read when a session starts. So a change applies to the next session.
 
@@ -329,7 +329,7 @@ Change, unroll or add groups under `models.groups.<id>`. Each key is optional. O
 
 A slot that your own group lists leaves the default group it was in. So `planning` above can take `recap` without an edit to `summarization`. Two of your groups that list the same slot, an unknown slot, or a group id with characters other than `a-z`, `0-9`. `_` and `-` stop the start with an error that names the problem.
 
-A slot reads its model in this order: the slot's environment variable, then its group's `model`, then its own `[models]` entry, then its default. A group with no `model` changes nothing, so each slot keeps its own entry and default. A pick on a group's settings row writes `models.groups.<id>.model` and removes the `[models]` entry of each slot in the group.
+A slot reads its model in this order: the slot's environment variable, then its group's `model`, then its own `models` entry, then its default. A group with no `model` changes nothing, so each slot keeps its own entry and default. A pick on a group's settings row writes `models.groups.<id>.model` and removes the `models` entry of each slot in the group.
 
 ### Custom models
 
@@ -525,7 +525,7 @@ Project workflows are discovered from `<repo-root>/.grok/workflows/`. User workf
 
 #### Which model runs the `/goal` roles
 
-Every `/goal` role has a slot in `[models]`. See [Harness model slots](#harness-model-slots). Reach for `goal_skeptic` when verification feels slow. It sets the model for every skeptic in the panel.
+Every `/goal` role has a slot in `models`. See [Harness model slots](#harness-model-slots). Reach for `goal_skeptic` when verification feels slow. It sets the model for every skeptic in the panel.
 
 `agents.goal` takes a second form of pin. That form carries an agent type beside the model. Use it when a role needs a different harness flavor:
 
@@ -544,7 +544,7 @@ Every `/goal` role has a slot in `[models]`. See [Harness model slots](#harness-
 }
 ```
 
-An `agents.goal` pin wins over the matching `[models]` slot. `follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
+An `agents.goal` pin wins over the matching `models` slot. `follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
 
 Each launch gets a session-unique display handle such as `deep-research-2`. That handle is what you see in the `/workflow runs` dashboard and pass to `/workflow pause`, `resume`, or `stop` — the internal run IDs never surface in commands. A numbered handle is not a reusable definition name. As a result, the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
 
@@ -1002,7 +1002,7 @@ The key ones. See the README for the complete list.
 |----------|-------------|
 | `GROK_CLI_CHAT_PROXY_BASE_URL` | API proxy base URL. No default: unset, nothing is sent to a proxy |
 | `GROK_XAI_API_BASE_URL` | xAI API base URL. No default |
-| `GROK_ALLOWED_ENDPOINTS` | Comma-separated endpoints a model request may reach, added to `[endpoints] allowed_endpoints` |
+| `GROK_ALLOWED_ENDPOINTS` | Comma-separated endpoints a model request may reach, added to `endpoints.allowed_endpoints` |
 
 ### Allowed endpoints
 
@@ -1045,7 +1045,7 @@ A model whose endpoint reports no cost (Anthropic, for one) is priced from `http
 }
 ```
 
-A `[model.<id>] pricing` table you write always wins over the catalog.
+A `models.definitions.<id>.pricing` object you write always wins over the catalog.
 
 ### Features
 
@@ -1055,7 +1055,7 @@ A `[model.<id>] pricing` table you write always wins over the catalog.
 | `GROK_SUBAGENTS` | Enable (`1`) or disable (`0`) subagents |
 | `GROK_WORKFLOWS` | Enable (`1`) or disable (`0`) background workflows |
 | `GROK_WEB_FETCH` | Enable (`1`) or disable (`0`) the web_fetch tool |
-| `GROK_WEB_FETCH_ALLOW_LOCAL` | Allow `web_fetch` to explicit loopback hosts only (`localhost` / `127.0.0.0/8` / `::1`). Same as `[toolset.web_fetch] allow_local`. Default off; private/metadata stay blocked. |
+| `GROK_WEB_FETCH_ALLOW_LOCAL` | Allow `web_fetch` to explicit loopback hosts only (`localhost` / `127.0.0.0/8` / `::1`). Same as `tools.web_fetch.allow_local`. Default off; private/metadata stay blocked. |
 | `GROK_AGENT` | Custom agent definition path or name |
 | `GROK_SANDBOX` | Sandbox profile (off, workspace, devbox, read-only, strict; or a custom profile name) |
 | `GROK_EXIT_TIMEOUT_SECS` | Seconds after a quit is requested before the process is force-exited if teardown hangs (default: 20, `0` disables; a hard exit follows 5s later) |
@@ -1072,7 +1072,7 @@ A `[model.<id>] pricing` table you write always wins over the catalog.
 | Variable | Description |
 |----------|-------------|
 | `GROK_HOME` | Override config directory (default: `~/.grok`) |
-| `GROK_RESPECT_GITIGNORE` | Force gitignore filtering on (`1`) or off (`0`); overrides `[tools] respect_gitignore` |
+| `GROK_RESPECT_GITIGNORE` | Force gitignore filtering on (`1`) or off (`0`); overrides `tools.respect_gitignore` |
 
 ### Telemetry
 
@@ -1123,7 +1123,7 @@ Some settings can be set per-project by placing files in `.grok/` inside your re
 
 | File | What it configures |
 |------|--------------------|
-| `.grok/config.json` | MCP servers, plugins, permission rules, and the `[mcp] max_output_bytes` tool-result cap (other sections load only from `~/.grok/config.json`) |
+| `.grok/config.json` | MCP servers, plugins, permission rules, and the `mcp.max_output_bytes` tool-result cap (other sections load only from `~/.grok/config.json`) |
 | `.grok/skills/` | Project-specific skills |
 | `.grok/hooks/` | Project-specific lifecycle hooks |
 | `.grok/agents/` | Project-specific agent definitions |
