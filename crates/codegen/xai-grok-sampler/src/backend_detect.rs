@@ -49,10 +49,15 @@ pub(crate) fn remember(base_url: &str, model: &str, backend: ApiBackend) {
 /// The backend a client built from `config` speaks: the detected one when a
 /// fallback found one, else the configured one.
 pub fn effective_api_backend(config: &SamplerConfig) -> ApiBackend {
-    if !CANDIDATES.contains(&config.api_backend) {
-        return config.api_backend.clone();
+    resolve_api_backend(&config.base_url, &config.model, &config.api_backend)
+}
+
+/// [`effective_api_backend`] for callers that hold the parts of a config.
+pub fn resolve_api_backend(base_url: &str, model: &str, configured: &ApiBackend) -> ApiBackend {
+    if !CANDIDATES.contains(configured) {
+        return configured.clone();
     }
-    detected_backend(&config.base_url, &config.model).unwrap_or_else(|| config.api_backend.clone())
+    detected_backend(base_url, model).unwrap_or_else(|| configured.clone())
 }
 
 /// Whether `err` says the request went to the wrong API for the model.
