@@ -2346,9 +2346,8 @@ export GROK_MEMORY=1
 grok
 
 # Config file (persists permanently)
-# ~/.grok/config.json
-[memory]
-enabled = true
+# ~/.grok/config.json: set memory.enabled to true
+#   "memory": { "enabled": true }
 ```
 
 ### What gets saved automatically
