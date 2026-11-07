@@ -2142,16 +2142,23 @@ Extend Grok's capabilities with [Model Context Protocol](https://modelcontextpro
 
 MCP servers are configured in `~/.grok/config.json`:
 
-```toml
-[mcp_servers.<name>]
-command = "/path/to/server"           # Server executable
-args = ["--flag", "value"]            # Command arguments
-env = { VAR = "value" }               # Environment variables
-headers = { "X-Header" = "value" }    # Optional HTTP headers (Streamable HTTP)
-enabled = true                        # Enable/disable (default: true)
-startup_timeout_sec = 30              # Init timeout (default: 30)
-tool_timeout_sec = 60                 # Tool call timeout (default: 60)
-tool_timeouts = { create_issue = 120, search = 30 }  # Per-tool timeout overrides (seconds)
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "<name>": {
+        "command": "/path/to/server",           // Server executable
+        "args": ["--flag", "value"],            // Command arguments
+        "env": { "VAR": "value" },              // Environment variables
+        "headers": { "X-Header": "value" },     // Optional HTTP headers (Streamable HTTP)
+        "enabled": true,                        // Enable/disable (default: true)
+        "startup_timeout_sec": 30,              // Init timeout (default: 30)
+        "tool_timeout_sec": 60,                 // Tool call timeout (default: 60)
+        "tool_timeouts": { "create_issue": 120, "search": 30 }  // Per-tool timeout overrides (seconds)
+      }
+    }
+  }
+}
 ```
 
 ### Project-Scoped MCP Servers
