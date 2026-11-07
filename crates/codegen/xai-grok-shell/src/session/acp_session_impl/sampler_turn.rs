@@ -449,7 +449,11 @@ impl SessionActor {
             .get_sampling_config()
             .await
             .is_some_and(|config| {
-                config.api_backend == xai_grok_sampling_types::ApiBackend::Messages
+                xai_grok_sampler::resolve_api_backend(
+                    &config.base_url,
+                    &config.model,
+                    &config.api_backend,
+                ) == xai_grok_sampling_types::ApiBackend::Messages
             })
     }
 

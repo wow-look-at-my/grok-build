@@ -10,6 +10,7 @@ macro_rules! own_process {
     };
 }
 
+mod backend_detect;
 mod cf_edge_error_message;
 mod prewarm;
 mod request_query_and_headers;
