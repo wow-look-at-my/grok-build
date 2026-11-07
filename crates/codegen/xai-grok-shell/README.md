@@ -1615,7 +1615,7 @@ Repo-scoped skills (Local and Repo) respect `.gitignore` and are filtered out if
 
 ### Configuration
 
-Add extra skill directories or exclude paths via `[skills]` in config.json:
+Add extra skill directories or exclude paths via `extensions.skills` in config.json:
 
 ```json
 {
@@ -1695,7 +1695,7 @@ Agent profiles control the system prompt, toolset, and behavior of a session. A 
 Grok discovers agent definitions from `.grok/agents/` (project), `~/.grok/agents/` (user), and built-in agents. Priority (highest wins):
 
 1. `--agent-profile <PATH>` CLI flag
-2. `[agent]` section in `config.json`
+2. `agents.selection` in `config.json`
 3. `GROK_AGENT` env var
 4. Default `grok-build` agent
 

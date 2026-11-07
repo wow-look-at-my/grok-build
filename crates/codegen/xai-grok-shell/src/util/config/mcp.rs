@@ -2790,15 +2790,10 @@ enabled = true
         // Hermetic: only touch a temp project path
         // Do not call save_mcp_server_enabled_in (that reads ambient config_path / grok_home)
         let project = tempfile::tempdir().unwrap();
-        let project_cfg = project.path().join("config.toml");
+        let project_cfg = project.path().join("config.json");
         std::fs::write(
             &project_cfg,
-            r#"
-# keep me
-[mcp_servers.svc]
-command = "true"
-enabled = false
-"#,
+            r#"{"ui": {"theme": "keep-me"}, "mcp": {"servers": {"svc": {"command": "true", "enabled": false}}}}"#,
         )
         .unwrap();
 
@@ -2806,8 +2801,8 @@ enabled = false
             .await
             .unwrap();
         let unstuck = std::fs::read_to_string(&project_cfg).unwrap();
-        assert!(unstuck.contains("enabled = true"), "{unstuck}");
-        assert!(unstuck.contains("# keep me"), "{unstuck}");
+        assert!(unstuck.contains("\"enabled\": true"), "{unstuck}");
+        assert!(unstuck.contains("keep-me"), "{unstuck}");
 
         // Project-only modified list: restore must re-stick without needing user tier.
         restore_mcp_server_enabled_after_enable("svc", std::slice::from_ref(&project_cfg))
@@ -2815,8 +2810,11 @@ enabled = false
             .unwrap();
 
         let project_body = std::fs::read_to_string(&project_cfg).unwrap();
-        assert!(project_body.contains("enabled = false"), "{project_body}");
-        assert!(project_body.contains("# keep me"), "{project_body}");
+        assert!(
+            project_body.contains("\"enabled\": false"),
+            "{project_body}"
+        );
+        assert!(project_body.contains("keep-me"), "{project_body}");
     }
 
     /// `grok mcp enable` must replace a project `.grok/config.toml` symlink,
@@ -2828,17 +2826,13 @@ enabled = false
         gix::init(tmp.path()).unwrap();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
-        let outside = tmp.path().join("outside.toml");
+        let outside = tmp.path().join("outside.json");
         std::fs::write(
             &outside,
-            r#"
-[mcp_servers.svc]
-command = "true"
-enabled = false
-"#,
+            r#"{"mcp": {"servers": {"svc": {"command": "true", "enabled": false}}}}"#,
         )
         .unwrap();
-        let project_cfg = grok.join("config.toml");
+        let project_cfg = grok.join("config.json");
         std::os::unix::fs::symlink(&outside, &project_cfg).unwrap();
 
         assert!(
@@ -2854,11 +2848,11 @@ enabled = false
             "project slot must become a regular file"
         );
         let body = std::fs::read_to_string(&project_cfg).unwrap();
-        assert!(body.contains("enabled = true"), "{body}");
+        assert!(body.contains("\"enabled\": true"), "{body}");
         assert!(
             std::fs::read_to_string(&outside)
                 .unwrap()
-                .contains("enabled = false"),
+                .contains("\"enabled\": false"),
             "external referent must stay sticky-disabled"
         );
     }
@@ -2870,15 +2864,19 @@ enabled = false
     async fn persist_mcp_toml_follows_user_config_symlink() {
         let home = tempfile::tempdir().unwrap();
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
-        let outside = home.path().join("dotfiles").join("config.toml");
+        let outside = home.path().join("dotfiles").join("config.json");
         std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
-        std::fs::write(&outside, "[mcp_servers.keep]\ncommand = \"true\"\n").unwrap();
-        let slot = home.path().join("config.toml");
+        std::fs::write(
+            &outside,
+            r#"{"mcp": {"servers": {"keep": {"command": "true"}}}}"#,
+        )
+        .unwrap();
+        let slot = home.path().join("config.json");
         std::os::unix::fs::symlink(&outside, &slot).unwrap();
 
         persist_mcp_toml(
             &config_path(),
-            "[mcp_servers.keep]\ncommand = \"true\"\nenabled = false\n",
+            r#"{"mcp": {"servers": {"keep": {"command": "true", "enabled": false}}}}"#,
         )
         .await
         .unwrap();
@@ -2893,7 +2891,7 @@ enabled = false
         assert!(
             std::fs::read_to_string(&outside)
                 .unwrap()
-                .contains("enabled = false")
+                .contains("\"enabled\": false")
         );
     }
 
@@ -2908,8 +2906,8 @@ enabled = false
     async fn save_mcp_server_config_at_refuses_unparseable() {
         let home = tempfile::tempdir().unwrap();
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
-        let slot = home.path().join("config.toml");
-        std::fs::write(&slot, "not = [valid\n").unwrap();
+        let slot = home.path().join("config.json");
+        std::fs::write(&slot, "{not valid\n").unwrap();
         let err = save_mcp_server_config_at(&config_path(), "svc", &test_stdio_server())
             .await
             .unwrap_err();
@@ -2919,7 +2917,7 @@ enabled = false
         );
         assert_eq!(
             std::fs::read_to_string(&slot).unwrap(),
-            "not = [valid\n",
+            "{not valid\n",
             "file must be left intact"
         );
     }
@@ -2931,10 +2929,10 @@ enabled = false
     async fn save_mcp_server_config_at_follows_user_symlink() {
         let home = tempfile::tempdir().unwrap();
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
-        let outside = home.path().join("dotfiles").join("config.toml");
+        let outside = home.path().join("dotfiles").join("config.json");
         std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
-        std::fs::write(&outside, "[mcp_servers.keep]\ncommand = \"true\"\n").unwrap();
-        let slot = home.path().join("config.toml");
+        std::fs::write(&outside, r#"{"mcp": {"servers": {"keep": {"command": "true"}}}}"#).unwrap();
+        let slot = home.path().join("config.json");
         std::os::unix::fs::symlink(&outside, &slot).unwrap();
 
         save_mcp_server_config_at(&config_path(), "svc", &test_stdio_server())
@@ -2948,8 +2946,8 @@ enabled = false
             "user slot must stay a symlink"
         );
         let body = std::fs::read_to_string(&outside).unwrap();
-        assert!(body.contains("[mcp_servers.svc]"), "{body}");
-        assert!(body.contains("[mcp_servers.keep]"), "{body}");
+        assert!(body.contains("\"svc\""), "{body}");
+        assert!(body.contains("\"keep\""), "{body}");
     }
 
     #[cfg(unix)]
@@ -2958,10 +2956,10 @@ enabled = false
     async fn save_mcp_disabled_tools_follows_user_symlink() {
         let home = tempfile::tempdir().unwrap();
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
-        let outside = home.path().join("dotfiles").join("config.toml");
+        let outside = home.path().join("dotfiles").join("config.json");
         std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
-        std::fs::write(&outside, "[mcp_servers.keep]\ncommand = \"true\"\n").unwrap();
-        let slot = home.path().join("config.toml");
+        std::fs::write(&outside, r#"{"mcp": {"servers": {"keep": {"command": "true"}}}}"#).unwrap();
+        let slot = home.path().join("config.json");
         std::os::unix::fs::symlink(&outside, &slot).unwrap();
 
         save_mcp_disabled_tools("keep", &["tool_a".to_string()])
@@ -2975,7 +2973,7 @@ enabled = false
             "user slot must stay a symlink"
         );
         let body = std::fs::read_to_string(&outside).unwrap();
-        assert!(body.contains("[mcp_servers.keep]"), "{body}");
+        assert!(body.contains("\"keep\""), "{body}");
         assert!(body.contains("disabled_mcp_tools"), "{body}");
         assert!(body.contains("tool_a"), "{body}");
     }
@@ -2986,8 +2984,8 @@ enabled = false
     async fn save_mcp_disabled_tools_refuses_unparseable() {
         let home = tempfile::tempdir().unwrap();
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
-        let slot = home.path().join("config.toml");
-        std::fs::write(&slot, "not = [valid\n").unwrap();
+        let slot = home.path().join("config.json");
+        std::fs::write(&slot, "{not valid\n").unwrap();
         let err = save_mcp_disabled_tools("svc", &["tool_a".to_string()])
             .await
             .unwrap_err();
@@ -2995,7 +2993,7 @@ enabled = false
             err.to_string().contains("unparseable"),
             "expected refuse, got {err}"
         );
-        assert_eq!(std::fs::read_to_string(&slot).unwrap(), "not = [valid\n");
+        assert_eq!(std::fs::read_to_string(&slot).unwrap(), "{not valid\n");
     }
 
     #[cfg(unix)]
@@ -3004,14 +3002,14 @@ enabled = false
     async fn delete_mcp_server_config_at_follows_user_symlink() {
         let home = tempfile::tempdir().unwrap();
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
-        let outside = home.path().join("dotfiles").join("config.toml");
+        let outside = home.path().join("dotfiles").join("config.json");
         std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
         std::fs::write(
             &outside,
-            "[mcp_servers.keep]\ncommand = \"true\"\n[mcp_servers.svc]\ncommand = \"true\"\n",
+            r#"{"mcp": {"servers": {"keep": {"command": "true"}, "svc": {"command": "true"}}}}"#,
         )
         .unwrap();
-        let slot = home.path().join("config.toml");
+        let slot = home.path().join("config.json");
         std::os::unix::fs::symlink(&outside, &slot).unwrap();
 
         assert!(
@@ -3027,8 +3025,8 @@ enabled = false
             "user slot must stay a symlink"
         );
         let body = std::fs::read_to_string(&outside).unwrap();
-        assert!(!body.contains("[mcp_servers.svc]"), "{body}");
-        assert!(body.contains("[mcp_servers.keep]"), "{body}");
+        assert!(!body.contains("\"svc\""), "{body}");
+        assert!(body.contains("\"keep\""), "{body}");
     }
 
     #[cfg(unix)]
@@ -3037,8 +3035,8 @@ enabled = false
     async fn delete_mcp_server_config_at_refuses_unparseable() {
         let home = tempfile::tempdir().unwrap();
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
-        let slot = home.path().join("config.toml");
-        std::fs::write(&slot, "not = [valid\n").unwrap();
+        let slot = home.path().join("config.json");
+        std::fs::write(&slot, "{not valid\n").unwrap();
         let err = delete_mcp_server_config_at(&config_path(), "svc")
             .await
             .unwrap_err();
@@ -3046,14 +3044,14 @@ enabled = false
             err.to_string().contains("unparseable"),
             "expected refuse, got {err}"
         );
-        assert_eq!(std::fs::read_to_string(&slot).unwrap(), "not = [valid\n");
+        assert_eq!(std::fs::read_to_string(&slot).unwrap(), "{not valid\n");
     }
 
     #[tokio::test]
     async fn write_toml_table_if_changed_refuses_unparseable() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("broken.toml");
-        std::fs::write(&path, "not = [valid\n").unwrap();
+        let path = tmp.path().join("broken.json");
+        std::fs::write(&path, "{not valid\n").unwrap();
         let err = write_toml_table_if_changed(&path, |_t| {})
             .await
             .unwrap_err();
@@ -3063,7 +3061,7 @@ enabled = false
         );
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "not = [valid\n",
+            "{not valid\n",
             "file must be left intact"
         );
     }
