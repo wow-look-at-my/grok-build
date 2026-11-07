@@ -56,8 +56,9 @@ async fn retry_reason_wraps_in_full() {
     .collect();
 
     let binary = pager_binary().expect("resolve pager binary");
-    let mut harness = PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, NARROW_COLS, &content)
-        .expect("spawn pager");
+    let mut harness =
+        PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, NARROW_COLS, &content, &[])
+            .expect("spawn pager");
     harness
         .wait_for_text(WELCOME_SCREEN_SENTINEL, WELCOME_TIMEOUT)
         .expect("welcome text");
