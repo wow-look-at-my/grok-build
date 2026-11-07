@@ -2931,7 +2931,11 @@ enabled = true
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
         let outside = home.path().join("dotfiles").join("config.json");
         std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
-        std::fs::write(&outside, r#"{"mcp": {"servers": {"keep": {"command": "true"}}}}"#).unwrap();
+        std::fs::write(
+            &outside,
+            r#"{"mcp": {"servers": {"keep": {"command": "true"}}}}"#,
+        )
+        .unwrap();
         let slot = home.path().join("config.json");
         std::os::unix::fs::symlink(&outside, &slot).unwrap();
 
@@ -2958,7 +2962,11 @@ enabled = true
         let _env = xai_grok_test_support::EnvGuard::set("GROK_HOME", home.path());
         let outside = home.path().join("dotfiles").join("config.json");
         std::fs::create_dir_all(outside.parent().unwrap()).unwrap();
-        std::fs::write(&outside, r#"{"mcp": {"servers": {"keep": {"command": "true"}}}}"#).unwrap();
+        std::fs::write(
+            &outside,
+            r#"{"mcp": {"servers": {"keep": {"command": "true"}}}}"#,
+        )
+        .unwrap();
         let slot = home.path().join("config.json");
         std::os::unix::fs::symlink(&outside, &slot).unwrap();
 
@@ -2974,7 +2982,7 @@ enabled = true
         );
         let body = std::fs::read_to_string(&outside).unwrap();
         assert!(body.contains("\"keep\""), "{body}");
-        assert!(body.contains("disabled_mcp_tools"), "{body}");
+        assert!(body.contains("\"disabled_tools\""), "{body}");
         assert!(body.contains("tool_a"), "{body}");
     }
 

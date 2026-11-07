@@ -655,7 +655,7 @@ fn to_plugin_entry(
     }
 }
 
-/// Add a new git or local-path marketplace source to `~/.grok/config.toml`.
+/// Add a new git or local-path marketplace source to `~/.grok/config.json`.
 async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome {
     use crate::plugin::{self, MarketplaceAddInput};
     use xai_hooks_plugins_types::{ActionOutcome, OutcomeStatus};
@@ -821,7 +821,7 @@ async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome 
     }
 }
 
-/// Remove a marketplace source from `~/.grok/config.toml` and uninstall all
+/// Remove a marketplace source from `~/.grok/config.json` and uninstall all
 /// plugins that were installed from it.
 async fn handle_remove_source(source_url_or_path: &str) -> xai_hooks_plugins_types::ActionOutcome {
     let src = source_url_or_path.to_string();
@@ -916,14 +916,15 @@ use crate::plugin::{
     OFFICIAL_MARKETPLACE_FLAG, set_marketplace_bool_flag, set_official_marketplace_auto_installed,
 };
 
+/// The user config file under `grok_home`. A legacy `config.toml` migrates to `config.json` first.
+fn user_config_path(grok_home: &std::path::Path) -> std::path::PathBuf {
+    xai_grok_config::user_config_file(grok_home)
+        .unwrap_or_else(|_| grok_home.join(xai_grok_config::USER_CONFIG_FILENAME))
+}
+
 fn read_marketplace_bool_flag(config_path: &std::path::Path, key: &str) -> bool {
-    let raw = match std::fs::read_to_string(config_path) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let parsed: toml::Value = match toml::from_str(&raw) {
-        Ok(v) => v,
-        Err(_) => return false,
+    let Ok(parsed) = xai_grok_config::load_toml_file(config_path) else {
+        return false;
     };
     parsed
         .get("marketplace")
@@ -968,7 +969,7 @@ fn read_default_skills_installs_purged(config_path: &std::path::Path) -> bool {
 }
 
 /// One-shot purge of legacy marketplace `default-skills` installs.
-/// Gated by the sticky `default_skills_installs_purged` flag in config.toml.
+/// Gated by the sticky `default_skills_installs_purged` flag in config.json.
 /// Best-effort: errors are logged and never block startup.
 pub(crate) fn purge_default_skills_installs(grok_home: &std::path::Path) {
     let install_dir =
@@ -1087,7 +1088,7 @@ fn purge_default_skills_installs_impl(
 }
 
 /// Auto-register the official xAI marketplace source on first run. Gated by the caller (`init_process`); see `Config::resolve_official_marketplace_auto_register`. No-op once `official_marketplace_auto_installed` is set.
-/// Under a process-wide flock it adds the source (or just sets the flag if it's already present in config.toml or a JSON store). Best-effort: errors are logged and never block startup.
+/// Under a process-wide flock it adds the source (or just sets the flag if it's already present in config.json or a JSON store). Best-effort: errors are logged and never block startup.
 pub(crate) fn ensure_official_marketplace_source(grok_home: &std::path::Path) {
     ensure_official_marketplace_source_with(
         grok_home,
@@ -1145,19 +1146,19 @@ fn ensure_official_marketplace_source_with(
     let raw = match crate::util::config::read_to_string_or_empty(&config_path) {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!(error = %e, "skipping official marketplace auto-register: cannot read config.toml");
+            tracing::warn!(error = %e, "skipping official marketplace auto-register: cannot read the user config");
             return;
         }
     };
-    let parsed: toml::Value = match toml::from_str(&raw) {
+    let parsed: toml::Value = match crate::util::config::parse_existing_config(&config_path, &raw) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!(error = %e, "skipping official marketplace auto-register: invalid config.toml");
+            tracing::warn!(error = %e, "skipping official marketplace auto-register: invalid user config");
             return;
         }
     };
 
-    // "Already present" means the official URL is in the config.toml sources or in a JSON store (settings.json, known_marketplaces.json) under grok_home
+    // "Already present" means the official URL is in the config.json sources or in a JSON store (settings.json, known_marketplaces.json) under grok_home
     // The scan is scoped to grok_home only (not ~/.claude) to keep tests hermetic
     // A user with the URL solely in ~/.claude gets one duplicate entry that the UI dedupes by URL
     let toml_sources = xai_grok_plugin_marketplace::load_sources(&parsed);

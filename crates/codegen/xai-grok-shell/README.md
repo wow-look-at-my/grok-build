@@ -2111,7 +2111,7 @@ Grok fetches the model list from `{GROK_MODELS_BASE_URL}/models` on startup and 
 
 If your model list endpoint differs from `{base_url}/models`, set `GROK_MODELS_LIST_URL` explicitly.
 
-**Combining with `[endpoints]` config:** You can also set endpoints in `~/.grok/config.json`:
+**Combining with `endpoints` config:** You can also set endpoints in `~/.grok/config.json`:
 
 ```json
 {
