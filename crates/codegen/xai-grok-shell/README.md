@@ -303,7 +303,7 @@ echo "{\"access_token\": \"$TOKEN\", \"expires_in\": 3600}"
 
 Exiting promptly on `GROK_AUTH_EXPIRED=1` is what makes the handover to the sign-in screen fast: a binary that blocks instead pays the whole refresh timeout on every start with an expired token.
 
-One case stays ambiguous, and only in **leader mode** (`--leader`, or `cli.use_leader` set to `true`; off by default): with no credential at all, the leader makes one extra attempt in the background just after startup, and that run has the variable unset, like a sign-in. A binary that mints without help (service account, keytab, mounted token) succeeds there and the session heals itself. One that must prompt just sits, up to the 300s sign-in ceiling — nothing waits on it, the sign-in screen is already up, and its stderr goes to `~/.grok/leader.log` rather than to the user.
+One case stays ambiguous, and only in **leader mode** (`--leader`, or `cli.use_leader` set to `true`. Off by default): with no credential at all, the leader makes one extra try in the background just after startup. That run has the variable unset, like a sign-in. A binary that mints without help (service account, keytab, mounted token) succeeds there and the session heals itself. One that must prompt just sits, up to the 300s sign-in ceiling — nothing waits on it. The sign-in screen is already up, and its stderr goes to `~/.grok/leader.log` rather than to the user.
 
 `GROK_AUTH_EXPIRED` is optional — if your binary ignores it, Grok still works. It just runs the same flow for both login and refresh, and a flow that prompts will be killed on the headless run before it can finish.
 
@@ -1337,7 +1337,7 @@ Grok implements the [Agent Client Protocol (ACP)](https://agentclientprotocol.co
 
 ## Configuration
 
-Grok reads configuration from `~/.grok/config.json`. If the file doesn't exist, Grok uses sensible defaults. You only need to specify values you want to override.
+Grok reads configuration from `~/.grok/config.json`. If the file does not exist, Grok uses sensible defaults. You only need to specify values you want to override.
 
 Each feature section below documents its own config. This section covers the general-purpose settings that don't have their own top-level section.
 
@@ -1739,7 +1739,7 @@ export GROK_SUBAGENTS=0              # Environment variable
 
 ### Usage Frequency
 
-`usage_frequency` does not gate the tool. It tunes how strongly the system prompt and tool wording nudge the model toward spawning subagents: `explicit-only`, `very-rare`, `rare`, `default` (no added nudge, the default), `often`, or `very-often`.
+`usage_frequency` does not gate the tool.
 
 ```json
 {
@@ -1775,10 +1775,7 @@ Disable specific subagent types while keeping the system enabled, or route them 
 }
 ```
 
-By default a subagent inherits the parent session's model. Only an explicit
-per-agent pin overrides that: `agents.subagents.models.<agent>` (highest priority),
-then the agent definition's `model`. Both pins apply unconditionally,
-regardless of which model the parent is on.
+By default a subagent inherits the parent session's model. Only an explicit per-agent pin overrides that: `agents.subagents.models.<agent>` (highest priority), then the agent definition's `model`. Both pins apply unconditionally, regardless of which model the parent is on.
 
 ### Roles and Personas
 
@@ -1857,10 +1854,7 @@ Grok discovers hooks from `.grok/hooks/` in the project directory. Manage them w
 
 ### Hooks in config files
 
-Hooks can also be defined directly in the config layers, so they can be
-distributed with your other configuration instead of as separate JSON files. Add
-a `hooks.<Event>` array to `config.json` (your own), `managed_config.toml`, or
-`requirements.toml`:
+Hooks can also be defined directly in the config layers. They can be distributed with your other configuration instead of as separate JSON files.
 
 ```json
 {
@@ -1891,9 +1885,7 @@ Hooks from two kinds of layer are enforced: they cannot be disabled from the
 hooks modal, the enable/disable APIs, or the `disabled-hooks` file, and a
 byte-identical copy in a lower layer cannot take over their provenance.
 
-- The **root-owned** system layers (`/etc/grok/requirements.json`,
-  `/etc/grok/managed_config.json`). Enforcement relies on OS file ownership, so
-  deploy these files root-owned (or via MDM).
+- The **root-owned** system layers (`/etc/grok/requirements.json`, `/etc/grok/managed_config.json`). Enforcement relies on OS file ownership, so deploy these files root-owned (or via MDM).
 - The **signed** `$GROK_HOME/requirements.toml` the deployment sync writes.
   Its hooks are enforced while the file's bytes match the server-signed
   envelope (`requirements/signed:` names); an edited copy, or one whose
@@ -1903,15 +1895,9 @@ byte-identical copy in a lower layer cannot take over their provenance.
   refuses the session on an edited copy or a missing signature (an unreadable
   file is a read error, not tampering, and still starts).
 
-Hooks in the other `$GROK_HOME` layers (`managed_config.toml`, `config.json`)
-remain convenience distribution, not an enforcement boundary: the user owns
-that directory and can edit or repoint it.
+Hooks in the other `$GROK_HOME` layers (`managed_config.toml`, `config.json`) remain convenience distribution, not an enforcement boundary: the user owns that directory and can edit or repoint it.
 
-`policy.allow_managed_hooks_only` set to `true` (also `allowManagedHooksOnly`) in any policy
-layer is a tighten-only pin that skips every hook that is not managed policy:
-user, project, plugin, agent-frontmatter, and vendor-compat hooks are left out of
-dispatch and show `[disabled]` in the modal, and enabling them is refused.
-ACP client-registered hooks are unaffected. A non-boolean value engages the pin.
+`policy.allow_managed_hooks_only` set to `true` (also `allowManagedHooksOnly`) in any policy layer is a tighten-only pin that skips every hook that is not managed policy. User, project, plugin, agent-frontmatter, and vendor-compat hooks are left out of dispatch and show `[disabled]` in the modal. Enabling them is refused. ACP client-registered hooks are unaffected. A non-boolean value engages the pin.
 
 ---
 
@@ -2163,7 +2149,7 @@ MCP servers are configured in `~/.grok/config.json`:
 
 ### Project-Scoped MCP Servers
 
-MCP servers can also be configured per-project in `.grok/config.json`. Grok walks from the current directory up to the git repo root, loading `.grok/config.json` at each level:
+MCP servers can also be configured per-project in `.grok/config.json`.
 
 | Location                        | Scope             | Priority |
 | ------------------------------- | ----------------- | -------- |
@@ -2200,7 +2186,7 @@ my-project/
 }
 ```
 
-If you also have a `linear` server in `~/.grok/config.json`, the project version replaces it entirely.
+If you also have a `linear` server in `~/.grok/config.json`, the project version replaces it fully.
 
 > **Note:** Only `mcp.servers` is supported in project-scoped `.grok/config.json`. Other config sections (models, etc.) are only read from `~/.grok/config.json`.
 
