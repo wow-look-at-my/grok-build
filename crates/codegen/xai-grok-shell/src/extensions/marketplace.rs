@@ -1306,7 +1306,7 @@ mod official_source_tests {
         .unwrap();
 
         let content = std::fs::read_to_string(&config_path).unwrap();
-        let new_content = crate::plugin::remove_toml_marketplace_block(
+        let new_content = crate::plugin::remove_marketplace_source_block(
             &content,
             "https://example.com/custom.git",
         )
@@ -1614,21 +1614,20 @@ mod default_skills_purge_tests {
     }
 
     #[test]
-    fn purged_flag_toml_preserves_other_content() {
-        let content =
-            "[ui]\ntheme = \"dark\"\n[marketplace]\nofficial_marketplace_auto_installed = true\n";
-        let out = crate::plugin::set_marketplace_bool_flag_in_toml(
+    fn purged_flag_text_preserves_other_content() {
+        let content = r#"{"ui": {"theme": "dark"}, "extensions": {"marketplace": {"official_marketplace_auto_installed": true}}}"#;
+        let out = crate::plugin::set_marketplace_bool_flag_in_text(
             content,
             "default_skills_installs_purged",
         )
         .unwrap();
-        assert!(out.contains("theme = \"dark\""), "{out}");
+        assert!(out.contains("\"theme\": \"dark\""), "{out}");
         assert!(
-            out.contains("official_marketplace_auto_installed = true"),
+            out.contains("\"official_marketplace_auto_installed\": true"),
             "{out}"
         );
         assert!(
-            out.contains("default_skills_installs_purged = true"),
+            out.contains("\"default_skills_installs_purged\": true"),
             "{out}"
         );
     }

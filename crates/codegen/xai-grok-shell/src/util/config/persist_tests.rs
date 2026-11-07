@@ -6,13 +6,14 @@ use super::super::settings_writes::{
 use super::*;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
-/// First-run `ensure` creates a 0-byte `$GROK_HOME/config.toml`.
+/// First-run `ensure` creates a 0-byte `$GROK_HOME/config.json`.
 /// Empty and whitespace-only files must parse as an empty table so the first settings write is not "refusing to overwrite unparseable".
 /// Non-empty garbage still refuses.
 #[test]
-fn parse_existing_config_toml_blank_is_empty_table_not_unparseable() {
+fn parse_existing_config_blank_is_empty_table_not_unparseable() {
+    let path = Path::new("config.json");
     for blank in ["", "   ", "\n", "\n\t  \n", " \r\n "] {
-        let v = parse_existing_config_toml(blank)
+        let v = parse_existing_config(path, blank)
             .unwrap_or_else(|e| panic!("blank {blank:?} must be an empty table, got {e}"));
         assert_eq!(
             v,
@@ -20,7 +21,7 @@ fn parse_existing_config_toml_blank_is_empty_table_not_unparseable() {
             "blank {blank:?} must be an empty table"
         );
     }
-    let parsed = parse_existing_config_toml("[ui]\nyolo = true\n").unwrap();
+    let parsed = parse_existing_config(path, r#"{"ui": {"yolo": true}}"#).unwrap();
     assert_eq!(
         parsed
             .get("ui")

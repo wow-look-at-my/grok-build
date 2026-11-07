@@ -131,9 +131,9 @@ from a fixed, audited attribute set.
 
 ## Config file
 
-Org defaults live under the existing `[telemetry]` table in `config.json`
+Org defaults live under the existing `telemetry` section in `config.json`
 (env vars win). The keys are `otel_`-prefixed peers of the other
-`[telemetry]` settings:
+`telemetry` settings:
 
 ```json
 {
@@ -154,7 +154,7 @@ Org defaults live under the existing `[telemetry]` table in `config.json`
 }
 ```
 
-The config keys are `otel_*` under `[telemetry]`; the **env vars keep their
+The config keys are `otel_*` under `telemetry`; the **env vars keep their
 standard OTEL names** (`GROK_EXTERNAL_OTEL`, `OTEL_*`) for ecosystem
 interop, so the two layers use deliberately different namespaces. The
 `otel_protocol` config key maps to `OTEL_EXPORTER_OTLP_PROTOCOL`. Env vars
@@ -163,9 +163,9 @@ win over config file paths for CA and client identity.
 There is deliberately no `headers` key: supply collector auth via
 `OTEL_EXPORTER_OTLP_HEADERS` so tokens are never stored on disk. Certificate
 and key config keys are **paths only** — never embed private key material
-in TOML.
+in the config file.
 
-Every **present** `[telemetry] otel_*` key in signed `requirements.toml` is a
+Every **present** `telemetry.otel_*` key in signed `requirements.toml` is a
 **pin** (env cannot override it). `managed_config.toml` is not a lock — env
 still wins there. Pinning `otel_endpoint` strips developer generic and
 per-signal endpoint env **and unlisted user/managed file siblings** except
@@ -183,7 +183,7 @@ traces exporter).
 Fleet enablement is one signed `requirements.toml` (destination, exporters,
 and content gates together). `user.email` is not a pin key — it follows
 OAuth/gateway identity. Headers stay in the process environment from the
-launcher after strip, never in this TOML.
+launcher after strip, never in this file.
 
 ## Startup suppression (why nothing arrives for the first few seconds)
 
@@ -194,8 +194,8 @@ setup that is well under a second and invisible.
 
 **The wait is bounded**, so a deployment that cannot reach xAI still exports:
 
-- If no fleet policy can apply at all — `[features] remote_fetch = false`, or
-  `[endpoints] cli_chat_proxy_base_url` points somewhere other than xAI — the
+- If no fleet policy can apply at all — `features.remote_fetch` is `false`, or
+  `endpoints.cli_chat_proxy_base_url` points somewhere other than xAI — the
   stream starts immediately, governed by your local configuration.
 - If the policy fetch fails or never completes (firewalled host, offline
   laptop), emission starts anyway once the attempt is exhausted, and in all

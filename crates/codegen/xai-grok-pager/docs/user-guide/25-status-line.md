@@ -1,6 +1,6 @@
 # Status Line
 
-An optional row at the bottom of the pager, above the shortcuts bar, and disabled by default. It shows live session context, such as the model, context-window usage, cost, directory, and git worktree, or the output of any script you configure. Opt in with `[ui.status_line]` in `~/.grok/config.json`.
+An optional row at the bottom of the pager, above the shortcuts bar, and disabled by default. It shows live session context, such as the model, context-window usage, cost, directory, and git worktree, or the output of any script you configure. Opt in with `ui.status_line` in `~/.grok/config.json`.
 
 ## Set up
 
