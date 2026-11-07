@@ -201,12 +201,24 @@ fn merge_project_profiles(config: &mut SandboxConfig, project: SandboxConfig) {
     }
 }
 
+/// Read `sandbox.json` in `dir`, or a legacy `sandbox.toml` when only that exists.
 fn load_config_file(path: &Path) -> Option<SandboxConfig> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let dir = path.parent()?;
+    let stem = path.file_stem()?.to_str()?;
+    let path = xai_grok_config::format::resolve_config_file(dir, stem);
+    let content = std::fs::read_to_string(&path).ok()?;
     if content.trim().is_empty() {
         return Some(SandboxConfig::default());
     }
-    match toml::from_str(&content) {
+    let parsed = match xai_grok_config::format::ConfigFormat::of(&path) {
+        xai_grok_config::format::ConfigFormat::Json => {
+            serde_json::from_str(&content).map_err(|e| e.to_string())
+        }
+        xai_grok_config::format::ConfigFormat::Toml => {
+            toml::from_str(&content).map_err(|e| e.to_string())
+        }
+    };
+    match parsed {
         Ok(config) => Some(config),
         Err(e) => {
             tracing::warn!(path = %path.display(), error = %e, "Failed to parse sandbox config");

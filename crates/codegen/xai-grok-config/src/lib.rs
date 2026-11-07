@@ -52,8 +52,8 @@ pub use env_overlay::{
     GROK_CONFIG_ENV, GROK_CONFIG_PATH_ENV, OverlaySource, ResolvedOverlay, resolved_env_overlay,
 };
 pub use format::{
-    CONFIG_SCHEMA_JSON, SCHEMA_FILENAME, edit_config_tree, ensure_schema_file, read_config_tree,
-    tree_to_config_json_string,
+    CONFIG_SCHEMA_JSON, SCHEMA_FILENAME, edit_config_tree, ensure_schema_file,
+    parse_config_for_edit, read_config_tree, render_config, tree_to_config_json_string,
 };
 #[cfg(unix)]
 pub use global_hook_sources::{
@@ -67,7 +67,8 @@ pub use loader::{
     deep_merge_toml, expand_env_vars_in_string, expand_env_vars_in_toml, hook_config_layers,
     hook_config_layers_at, load_config_file, load_from_disk, load_managed_config,
     load_system_managed_config, load_toml_file, managed_config_layers, managed_config_layers_at,
-    project_config_file, system_config_file, toml_error_detail, user_config_file,
+    prepare_user_config_dir, project_config_file, project_config_file_for_write,
+    system_config_file, toml_error_detail, user_config_file,
 };
 pub use macos_managed::MDM_REQUIREMENTS_SOURCE;
 pub use managed_cache::{

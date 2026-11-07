@@ -113,6 +113,54 @@ pub fn edit_config_tree<T>(
     })
 }
 
+/// Parse config file text for a read-modify-write: the internal tree. That text is with the file's `$schema` kept as a root key so [`render_config`]
+/// writes it back. Blank text is an empty table. A legacy TOML path is an error, since grok writes only JSON.
+pub fn parse_config_for_edit(path: &Path, text: &str) -> std::io::Result<toml::Value> {
+    refuse_legacy_write(path)?;
+    let doc = parse_json_document(path, text)?;
+    let schema = doc.get(SCHEMA_KEY).cloned();
+    let mut tree = json_document_to_internal(&doc).map_err(|detail| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("refusing to overwrite {}: {detail}", path.display()),
+        )
+    })?;
+    if let (Some(serde_json::Value::String(s)), Some(table)) = (schema, tree.as_table_mut()) {
+        table.insert(SCHEMA_KEY.to_string(), toml::Value::String(s));
+    }
+    Ok(tree)
+}
+
+/// Render an internal tree as the text of the JSON config file at `path`, in the JSON layout.
+/// The `$schema` comes from the tree's root key, else from [`schema_ref_for`].
+pub fn render_config(path: &Path, tree: &toml::Value) -> std::io::Result<String> {
+    refuse_legacy_write(path)?;
+    let mut tree = tree.clone();
+    let kept = tree
+        .as_table_mut()
+        .and_then(|t| t.remove(SCHEMA_KEY))
+        .and_then(|v| v.as_str().map(str::to_owned));
+    let schema = kept.as_deref().or_else(|| schema_ref_for(path));
+    Ok(to_config_json_string(
+        &internal_to_json_document(&tree),
+        schema,
+    ))
+}
+
+fn refuse_legacy_write(path: &Path) -> std::io::Result<()> {
+    if ConfigFormat::of(path) == ConfigFormat::Json {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!(
+            "refusing to write the legacy TOML config {}; grok writes JSON config files only. Convert it to {} first",
+            path.display(),
+            path.with_extension("json").display()
+        ),
+    ))
+}
+
 /// Read a JSON config file as the internal tree, without `$VAR` expansion or version overrides.
 /// Absent or blank is an empty table.
 pub fn read_config_tree(path: &Path) -> std::io::Result<toml::Value> {
@@ -339,7 +387,7 @@ pub fn edit_json_document<T>(
         std::fs::create_dir_all(parent)?;
     }
     let dest = crate::fs_atomic::bind_follow_destination(path)?;
-    let mut doc = read_json_document(&dest.path)?;
+    let mut doc = read_json_document(dest.as_path())?;
     // Keep the `$schema` the file already names when the caller gives none
     let existing_ref = doc
         .get(SCHEMA_KEY)

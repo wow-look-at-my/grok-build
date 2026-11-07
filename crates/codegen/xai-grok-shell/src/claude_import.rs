@@ -512,13 +512,8 @@ pub(crate) fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool 
 
 /// Testable variant of [`is_claude_import_marked`] that reads from the given path.
 pub(crate) fn is_claude_import_marked_at(config_path: &Path) -> bool {
-    let content = match std::fs::read_to_string(config_path) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let value: TomlValue = match toml::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return false,
+    let Ok(value) = xai_grok_config::read_config_tree(config_path) else {
+        return false;
     };
     value
         .get("claude_compat")
@@ -527,60 +522,51 @@ pub(crate) fn is_claude_import_marked_at(config_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Write `[claude_compat] imported = true` to `~/.grok/config.toml`.
-/// Uses the same atomic write pattern as `save_mcp_server_config` (write to `.tmp`, then rename).
-/// Creates the file and parent directory if missing. Existing content in the file is preserved.
-fn write_import_marker(config_path: &Path) -> anyhow::Result<()> {
-    // Report parse errors instead of silently discarding the file
-    // An atomic rewrite would otherwise drop unrelated sections ([model], [ui], etc.) and overwrite a hand-edited config that happens to have a trailing comma
-    // The user can fix the TOML and retry
-    let mut root: TomlValue = match std::fs::read_to_string(config_path) {
-        Ok(s) => toml::from_str(&s).map_err(|e| {
-            anyhow::anyhow!(
-                "refusing to write import marker: existing config at {} is \
-                 not valid TOML ({}). Fix the file (or move it aside) and \
-                 retry.",
-                config_path.display(),
-                e
-            )
-        })?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => TomlValue::Table(TomlMap::new()),
+/// Read a config file for an edit. Absent is an empty table.
+/// A file that does not parse is an error, so an atomic rewrite never drops unrelated sections of a hand-edited config.
+fn read_config_for_edit(config_path: &Path, what: &str) -> anyhow::Result<TomlValue> {
+    let text = match std::fs::read_to_string(config_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e.into()),
     };
+    xai_grok_config::parse_config_for_edit(config_path, &text).map_err(|e| {
+        anyhow::anyhow!("refusing to {what}: {e}. Fix the file (or move it aside) and retry.")
+    })
+}
+
+/// Atomically write an edited config tree as JSON.
+fn write_config_after_edit(config_path: &Path, root: &TomlValue) -> anyhow::Result<()> {
+    let text = xai_grok_config::render_config(config_path, root)?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    xai_grok_config::fs_atomic::write_atomically(config_path, &text, None)?;
+    Ok(())
+}
+
+/// Write `claude_compat.imported = true` to `~/.grok/config.json`.
+/// Creates the file and parent directory if missing. Existing content in the file is preserved.
+fn write_import_marker(config_path: &Path) -> anyhow::Result<()> {
+    let mut root = read_config_for_edit(config_path, "write the import marker")?;
     let table = root
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("config root is not an object"))?;
     let compat = table
         .entry("claude_compat")
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let compat_table = compat
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[claude_compat] is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("`claude_compat` is not an object"))?;
     compat_table.insert("imported".to_string(), TomlValue::Boolean(true));
-
-    let toml_str = toml::to_string_pretty(&root)?;
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp = config_path.with_extension("toml.tmp");
-    // Best-effort cleanup of the .tmp file if either write or rename fails
-    // A stale .tmp would otherwise survive next to the real config, and the next attempt would inherit a half-written file before the rename clobbers it
-    if let Err(e) = std::fs::write(&tmp, &toml_str) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    if let Err(e) = std::fs::rename(&tmp, config_path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    Ok(())
+    write_config_after_edit(config_path, &root)
 }
 
 /// Public entry point for the slash command: write the marker, log success, and seed the in-process cache so gate checks reflect it without restart.
 /// Called from `/import-claude` even when nothing was imported: the marker is the user's opt-in choice, not a side effect of having imported items.
 /// Re-entering a workspace with `.claude/` content must not re-engage the runtime fallbacks.
 pub fn mark_claude_imported() -> anyhow::Result<()> {
-    let path = crate::util::grok_home::grok_home().join("config.toml");
+    let path = xai_grok_config::user_config_file(&crate::util::grok_home::grok_home())?;
     write_import_marker(&path)?;
     refresh_marker_cache(true);
     Ok(())
@@ -594,7 +580,7 @@ pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> anyhow::Result<ImportResul
     let mut result = ImportResult::default();
 
     if !plan.global_items.is_empty() {
-        let global_path = crate::util::grok_home::grok_home().join("config.toml");
+        let global_path = xai_grok_config::user_config_file(&crate::util::grok_home::grok_home())?;
         let count = apply_items_to_config(&global_path, &plan.global_items)?;
         result.global_count = count;
         if count > 0 {
@@ -619,7 +605,7 @@ pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> anyhow::Result<ImportResul
 
     if !plan.project_items.is_empty() {
         let project_root = find_project_root(cwd);
-        let project_path = project_root.join(".grok").join("config.toml");
+        let project_path = xai_grok_config::project_config_file_for_write(&project_root)?;
         let count = apply_items_to_config(&project_path, &plan.project_items)?;
         result.project_count = count;
         if count > 0 {
@@ -666,20 +652,7 @@ impl ImportResult {
 
 /// Apply items to a single config.toml file using atomic write.
 fn apply_items_to_config(config_path: &Path, items: &[ImportableItem]) -> anyhow::Result<usize> {
-    // Read existing TOML, reporting parse errors instead of silently discarding the file
-    // An atomic rewrite would otherwise drop unrelated sections ([model], [ui], etc.) and overwrite a hand-edited config that happens to have a trailing comma
-    let mut root: TomlValue = match std::fs::read_to_string(config_path) {
-        Ok(s) => toml::from_str(&s).map_err(|e| {
-            anyhow::anyhow!(
-                "refusing to import: existing config at {} is not valid TOML \
-                 ({}). Fix the file (or move it aside) and retry.",
-                config_path.display(),
-                e
-            )
-        })?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => TomlValue::Table(TomlMap::new()),
-        Err(e) => return Err(e.into()),
-    };
+    let mut root = read_config_for_edit(config_path, "import")?;
 
     let table = root
         .as_table_mut()
@@ -728,18 +701,11 @@ fn apply_items_to_config(config_path: &Path, items: &[ImportableItem]) -> anyhow
     }
 
     if count > 0 {
-        // Atomic write: write to .tmp, then rename.
-        let toml_str = toml::to_string_pretty(&root)?;
-        let tmp = config_path.with_extension("toml.tmp");
-        if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&tmp, &toml_str)?;
-        std::fs::rename(&tmp, config_path)?;
+        write_config_after_edit(config_path, &root)?;
         info!(
             path = %config_path.display(),
             count,
-            "Wrote imported settings to config.toml"
+            "Wrote imported settings to the config file"
         );
     }
 

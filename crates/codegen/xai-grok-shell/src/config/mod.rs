@@ -1680,31 +1680,24 @@ pub(crate) fn resolve_effective_plugins_config(
     plugins_cfg
 }
 pub use xai_grok_config::{deep_merge_toml, expand_env_vars_in_string, expand_env_vars_in_toml};
-/// Locked read-modify-write of `~/.grok/config.toml`: the whole window runs under the config-init
+/// Locked read-modify-write of `~/.grok/config.json`: the whole window runs under the config-init
 /// flock and lands via atomic replace; unchanged configs skip the write.
 fn update_config_toml_locked(
     grok_home: &std::path::Path,
     mutate: impl FnOnce(&mut toml::value::Table) -> Result<bool, Box<dyn std::error::Error>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = grok_home.join("config.toml");
     let _flock = crate::util::config::acquire_init_lock(grok_home)?;
+    let config_path = xai_grok_config::user_config_file(grok_home)?;
     let (dest, content) = crate::util::config::read_follow_bound(&config_path)?;
-    let mut config: toml::Value = if content.is_empty() {
-        toml::Value::Table(toml::map::Map::new())
-    } else {
-        toml::from_str(&content).map_err(|e| format!("failed to parse config.toml: {e}"))?
-    };
+    let mut config = crate::util::config::parse_existing_config(dest.as_path(), &content)?;
     let table = config
         .as_table_mut()
-        .ok_or("config.toml root is not a table")?;
+        .ok_or("config.json root is not an object")?;
     if !mutate(table)? {
         return Ok(());
     }
-    crate::util::config::atomic_write_follow_bound(
-        &config_path,
-        &dest,
-        &toml::to_string_pretty(&config)?,
-    )?;
+    let text = crate::util::config::render_existing_config(dest.as_path(), &config)?;
+    crate::util::config::atomic_write_follow_bound(&config_path, &dest, &text)?;
     Ok(())
 }
 /// Append `value` to the `[plugins].<list>` string array (created if missing)

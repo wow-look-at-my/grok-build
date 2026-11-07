@@ -117,6 +117,40 @@ pub fn user_config_file(home: &Path) -> std::io::Result<std::path::PathBuf> {
     crate::format::migrate_legacy_config(home, CONFIG_STEM, Some(crate::format::USER_SCHEMA_REF))
 }
 
+/// Migrate the TOML files in `$GROK_HOME` to JSON and write the schema next
+/// to `config.json`. Call once at startup. A failure is logged, and the
+/// loaders then read a legacy file in place or report its error.
+pub fn prepare_user_config_dir() {
+    let Some(home) = resolve_grok_home() else {
+        return;
+    };
+    if !home.is_dir() {
+        return;
+    }
+    for (stem, schema_ref) in [
+        (CONFIG_STEM, Some(crate::format::USER_SCHEMA_REF)),
+        ("trusted_folders", None),
+        ("sandbox", None),
+    ] {
+        if let Err(e) = crate::format::migrate_legacy_config(&home, stem, schema_ref) {
+            tracing::error!(dir = %home.display(), stem, error = %e, "could not migrate a legacy TOML config to JSON; fix its syntax error");
+            eprintln!(
+                "grok: could not convert {}/{stem}.toml to JSON: {e}",
+                home.display()
+            );
+        }
+    }
+    if let Err(e) = crate::format::ensure_schema_file(&home) {
+        tracing::warn!(dir = %home.display(), error = %e, "could not write config.schema.json; editors cannot validate config.json");
+    }
+}
+
+/// The project config file to write in `<dir>/.grok`. A legacy `config.toml` is converted to `config.json` first,
+/// since the user asked grok to edit that project config.
+pub fn project_config_file_for_write(dir: &Path) -> std::io::Result<std::path::PathBuf> {
+    crate::format::migrate_legacy_config(&dir.join(".grok"), CONFIG_STEM, None)
+}
+
 /// The project config file in `<dir>/.grok`: `config.json`, or a legacy `config.toml` when only that exists.
 /// grok never renames a file in a project, so it reads a legacy project file in place and a warning names it.
 pub fn project_config_file(dir: &Path) -> std::path::PathBuf {

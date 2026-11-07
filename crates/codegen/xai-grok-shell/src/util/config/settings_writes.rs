@@ -166,19 +166,15 @@ fn rewrite_user_config_table(
     let (destination, content) = crate::util::config::persist::read_follow_bound(path)
         .map_err(|error| anyhow::anyhow!("read {} to save {what}: {error}", path.display()))?;
     let mut document =
-        crate::util::config::persist::parse_existing_config_toml(&content).map_err(|error| {
-            anyhow::anyhow!(
-                "parse {} to save {what}: {}",
-                path.display(),
-                xai_grok_config::toml_error_detail(&content, &error)
-            )
-        })?;
+        crate::util::config::persist::parse_existing_config(destination.as_path(), &content)
+            .map_err(|error| anyhow::anyhow!("parse {} to save {what}: {error}", path.display()))?;
     let root = document
         .as_table_mut()
-        .with_context(|| format!("{} must contain a TOML table", path.display()))?;
+        .with_context(|| format!("{} must contain a JSON object", path.display()))?;
     edit(root)?;
-    let content = toml::to_string_pretty(&document)
-        .map_err(|error| anyhow::anyhow!("serialize {} for {what}: {error}", path.display()))?;
+    let content =
+        crate::util::config::persist::render_existing_config(destination.as_path(), &document)
+            .map_err(|error| anyhow::anyhow!("serialize {} for {what}: {error}", path.display()))?;
     write(path, &destination, &content)
         .map_err(|error| anyhow::anyhow!("write {} to save {what}: {error}", path.display()))
 }

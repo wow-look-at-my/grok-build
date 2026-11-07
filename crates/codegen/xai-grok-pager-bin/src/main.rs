@@ -1831,6 +1831,7 @@ fn main() {
     });
     xai_grok_pager::memory_trace::start(xai_grok_pager::memory_trace::default_dir());
     raise_fd_limit();
+    xai_grok_config::prepare_user_config_dir();
     if let Err(e) = xai_grok_config::validate_requirements() {
         eprintln!("Couldn't start Grok: {e}");
         eprintln!();

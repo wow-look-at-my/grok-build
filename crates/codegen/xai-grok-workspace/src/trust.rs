@@ -1,14 +1,9 @@
 //! Folder-trust store ("do you trust this folder?").
 //!
-//! Persists per-folder trust decisions to `~/.grok/trusted_folders.toml`.
+//! Persists per-folder trust decisions to `~/.grok/trusted_folders.json`.
 //! This is the durable backing store for the VS-Code-style folder-trust gate that decides whether repo-local MCP / LSP servers may spawn.
 //! Those servers run arbitrary commands from repo-controlled config files.
 //!
-//! TOML shape:
-//! ```toml
-//! [folders."/abs/repo/root"]
-//! trusted = true
-//! decided_at = 1780000000
 //! ```
 //!
 //! A recorded grant covers that workspace key and descendants that still resolve to the same git root ([`workspace_key`]).
@@ -19,7 +14,7 @@
 //! The store is rooted at a fresh [`xai_dirs::resolve_grok_home`], never `grok_home()` or a cwd-relative `./.grok`.
 //! Home is `None` when `$GROK_HOME` and the user home are unset, or when the resolved home is relative.
 //! In that no-home environment [`TrustStore::load`] yields an empty store that trusts nothing and persists nothing.
-//! So a cloned repo can never ship a `./.grok/trusted_folders.toml` that self-trusts its own checkout (fail closed).
+//! So a cloned repo can never ship a `./.grok/trusted_folders.json` that self-trusts its own checkout (fail closed).
 
 use std::collections::BTreeMap;
 use std::io;
@@ -42,7 +37,7 @@ pub struct FolderTrust {
     pub decided_at: Option<i64>,
 }
 
-/// On-disk document shape for `trusted_folders.toml`.
+/// On-disk document shape for `trusted_folders.json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct TrustDocument {
     #[serde(default)]
@@ -353,10 +348,17 @@ impl TrustStore {
             }
             Err(e) => return Err(e),
         };
-        match toml::from_str::<TrustDocument>(&contents) {
-            Ok(doc) => Ok(StoreRead::Document(doc)),
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
-        }
+        let parsed = match xai_grok_config::format::ConfigFormat::of(path) {
+            xai_grok_config::format::ConfigFormat::Json => {
+                serde_json::from_str::<TrustDocument>(&contents)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            }
+            xai_grok_config::format::ConfigFormat::Toml => {
+                toml::from_str::<TrustDocument>(&contents)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            }
+        };
+        parsed.map(StoreRead::Document)
     }
 
     /// Write `doc` to `path` atomically (unique temp, fsync, rename) with owner-only (`0600`) permissions. Uses a unique temp file in the destination directory so concurrent writers never share a temp path.
@@ -372,8 +374,19 @@ impl TrustStore {
         })?;
         std::fs::create_dir_all(parent)?;
 
-        let body = toml::to_string_pretty(doc)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let value =
+            serde_json::to_value(doc).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let body = match value {
+            serde_json::Value::Object(map) => {
+                xai_grok_config::format::to_config_json_string(&map, None)
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "trust store document is not an object",
+                ));
+            }
+        };
         if let Some(result) = xai_grok_config::host_write::try_write(path, &body, Some(0o600)) {
             return result;
         }

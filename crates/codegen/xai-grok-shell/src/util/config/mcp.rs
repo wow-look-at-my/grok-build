@@ -628,7 +628,7 @@ pub async fn save_mcp_server_enabled_in(
         modified.push(user_path);
     }
 
-    // Enable-only: unstick the nearest (winning) project def with `enabled = false` via toml_edit (preserves comments/layout)
+    // Enable-only: unstick the nearest (winning) project def with `enabled = false`
     // Disable is personal (user `disabled_mcp_servers`) and must not dirty shared files
     if enabled && let Some(path) = nearest_project_mcp_definition(cwd, server_name) {
         match clear_sticky_project_disabled_at(&path, server_name).await {
@@ -665,7 +665,7 @@ pub(crate) async fn save_user_mcp_server_enabled(server_name: &str, enabled: boo
 }
 
 /// Undo a prior [`save_mcp_server_enabled_in`]`(…, true, …)` using the paths that call returned. Restores only the tiers that were written. Restores an **equivalent** disabled state, not necessarily the original encoding.
-/// User-tier restore always goes through [`save_user_mcp_server_enabled`]`(…, false)` (personal `disabled_mcp_servers`). Project-tier restore re-sticks `enabled = false` via toml_edit.
+/// User-tier restore always goes through [`save_user_mcp_server_enabled`]`(…, false)` (personal `disabled_mcp_servers`). Project-tier restore re-sticks `enabled = false`.
 /// A server disabled only via a sticky project field may therefore pick up a personal list entry if the user tier was also written during enable.
 pub(crate) async fn restore_mcp_server_enabled_after_enable(
     server_name: &str,
@@ -703,7 +703,7 @@ enum McpMissing {
 }
 
 fn parse_mcp_root(path: &std::path::Path, original: &str) -> Result<TomlValue> {
-    super::persist::parse_existing_config_toml(original).map_err(|parse_err| {
+    super::persist::parse_existing_config(path, original).map_err(|parse_err| {
         anyhow::anyhow!(
             "refusing to overwrite unparseable {}: {}; fix the syntax before retrying",
             path.display(),
@@ -720,19 +720,42 @@ fn apply_mcp_rmw(
     publish: impl FnOnce(&str) -> std::io::Result<()>,
 ) -> Result<bool> {
     let mut root = parse_mcp_root(path, original)?;
-    let before = toml::to_string_pretty(&root)?;
+    let before = root.clone();
     let table = root
         .as_table_mut()
         .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
     if !f(table)? {
         return Ok(false);
     }
-    let toml_str = toml::to_string_pretty(&root)?;
-    if skip_if_unchanged && before == toml_str {
+    if skip_if_unchanged && before == root {
         return Ok(false);
     }
-    publish(&toml_str).map_err(|e| anyhow::anyhow!("failed to write {}: {e}", path.display()))?;
+    let text = super::persist::render_existing_config(path, &root)?;
+    publish(&text).map_err(|e| anyhow::anyhow!("failed to write {}: {e}", path.display()))?;
     Ok(true)
+}
+
+/// The JSON file to write for a config at `path`. A legacy project `config.toml` converts to `config.json` first.
+fn writable_config_path(path: &std::path::Path) -> Result<PathBuf> {
+    if xai_grok_config::format::ConfigFormat::of(path)
+        == xai_grok_config::format::ConfigFormat::Json
+    {
+        return Ok(path.to_path_buf());
+    }
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem().and_then(|s| s.to_str())) else {
+        return Err(anyhow::anyhow!("cannot convert {} to JSON", path.display()));
+    };
+    let converted = xai_grok_config::format::migrate_legacy_config(dir, stem, None)
+        .map_err(|e| anyhow::anyhow!("convert {} to JSON before the edit: {e}", path.display()))?;
+    if xai_grok_config::format::ConfigFormat::of(&converted)
+        != xai_grok_config::format::ConfigFormat::Json
+    {
+        return Err(anyhow::anyhow!(
+            "could not write {}; convert it to JSON first",
+            path.with_extension("json").display()
+        ));
+    }
+    Ok(converted)
 }
 
 fn rmw_mcp_toml_user(
@@ -753,6 +776,10 @@ fn rmw_mcp_toml_project(
     f: impl FnOnce(&mut TomlMap<String, TomlValue>) -> Result<bool>,
     skip_if_unchanged: bool,
 ) -> Result<bool> {
+    if !path.exists() && matches!(missing, McpMissing::Skip) {
+        return Ok(false);
+    }
+    let path = &writable_config_path(path)?;
     let original = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => match missing {
@@ -839,86 +866,44 @@ async fn write_toml_table_if_changed(
     .await
 }
 
-/// Flip sticky project `enabled = false` to true with toml_edit (comments kept).
+/// Flip sticky project `enabled = false` to true.
 async fn clear_sticky_project_disabled_at(
     path: &std::path::Path,
     server_name: &str,
 ) -> Result<bool> {
-    let original = match tokio::fs::read_to_string(path).await {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => {
-            return Err(anyhow::anyhow!("failed to read {}: {e}", path.display()));
-        }
-    };
-    let mut doc: toml_edit::DocumentMut = original
-        .parse()
-        .map_err(|e| anyhow::anyhow!("refusing to rewrite unparseable {}: {e}", path.display()))?;
-
-    let Some(servers) = doc
-        .get_mut("mcp_servers")
-        .and_then(|item| item.as_table_like_mut())
-    else {
-        return Ok(false);
-    };
-    let Some(entry) = servers.get_mut(server_name) else {
-        return Ok(false);
-    };
-    let Some(server_table) = entry.as_table_like_mut() else {
-        return Ok(false);
-    };
-    if server_table.get("enabled").and_then(|v| v.as_bool()) != Some(false) {
-        return Ok(false);
-    }
-    server_table.insert("enabled", toml_edit::value(true));
-
-    let updated = doc.to_string();
-    if updated == original {
-        return Ok(false);
-    }
-    super::persist::atomic_replace_string(path, &updated)
-        .map_err(|e| anyhow::anyhow!("failed to write {}: {e}", path.display()))?;
-    Ok(true)
+    flip_sticky_project_enabled_at(path, server_name, false, true).await
 }
 
-/// Flip sticky project `enabled = true` to false with toml_edit (comments kept).
+/// Flip sticky project `enabled = true` to false.
 /// Inverse of [`clear_sticky_project_disabled_at`].
 async fn set_sticky_project_disabled_at(path: &std::path::Path, server_name: &str) -> Result<bool> {
-    let original = match tokio::fs::read_to_string(path).await {
-        Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => {
-            return Err(anyhow::anyhow!("failed to read {}: {e}", path.display()));
+    flip_sticky_project_enabled_at(path, server_name, true, false).await
+}
+
+/// Set `mcp_servers.<name>.enabled` to `to` in a project config when it is `from` now. Returns whether the file changed.
+async fn flip_sticky_project_enabled_at(
+    path: &std::path::Path,
+    server_name: &str,
+    from: bool,
+    to: bool,
+) -> Result<bool> {
+    let name = server_name.to_string();
+    rmw_mcp_toml(path, McpMissing::Skip, true, move |table| {
+        let Some(server) = table
+            .get_mut("mcp_servers")
+            .and_then(TomlValue::as_table_mut)
+            .and_then(|servers| servers.get_mut(&name))
+            .and_then(TomlValue::as_table_mut)
+        else {
+            return Ok(false);
+        };
+        if server.get("enabled").and_then(TomlValue::as_bool) != Some(from) {
+            return Ok(false);
         }
-    };
-    let mut doc: toml_edit::DocumentMut = original
-        .parse()
-        .map_err(|e| anyhow::anyhow!("refusing to rewrite unparseable {}: {e}", path.display()))?;
-
-    let Some(servers) = doc
-        .get_mut("mcp_servers")
-        .and_then(|item| item.as_table_like_mut())
-    else {
-        return Ok(false);
-    };
-    let Some(entry) = servers.get_mut(server_name) else {
-        return Ok(false);
-    };
-    let Some(server_table) = entry.as_table_like_mut() else {
-        return Ok(false);
-    };
-    if server_table.get("enabled").and_then(|v| v.as_bool()) != Some(true) {
-        return Ok(false);
-    }
-    server_table.insert("enabled", toml_edit::value(false));
-
-    let updated = doc.to_string();
-    if updated == original {
-        return Ok(false);
-    }
-    super::persist::atomic_replace_string(path, &updated)
-        .map_err(|e| anyhow::anyhow!("failed to write {}: {e}", path.display()))?;
-    Ok(true)
+        server.insert("enabled".to_string(), TomlValue::Boolean(to));
+        Ok(true)
+    })
+    .await
 }
 
 /// Update user `disabled_mcp_servers` and, if present, per-server `enabled`.
@@ -1758,19 +1743,28 @@ pub fn load_cli_plugin_registry(cwd: &std::path::Path) -> xai_grok_agent::plugin
 
 fn config_path() -> PathBuf {
     // Live `$GROK_HOME` first: `grok_home()` is OnceLock and misses EnvGuard/tests.
-    xai_dirs::resolve_grok_home()
-        .unwrap_or_else(crate::util::grok_home::grok_home)
-        .join("config.toml")
+    let home = xai_dirs::resolve_grok_home().unwrap_or_else(crate::util::grok_home::grok_home);
+    // A legacy `config.toml` migrates here; a broken one stays put, and the loader reports its error
+    match xai_grok_config::user_config_file(&home) {
+        Ok(path) => path,
+        Err(_) => home.join(xai_grok_config::USER_CONFIG_FILENAME),
+    }
 }
 
-/// Path to the user-level config file (`~/.grok/config.toml`).
+/// Path to the user-level config file (`~/.grok/config.json`).
 pub fn user_config_path() -> PathBuf {
     config_path()
 }
 
-/// Path to a project-level config file (`<dir>/.grok/config.toml`).
+/// Path to the project-level config file to read (`<dir>/.grok/config.json`, or a legacy `config.toml`).
 pub fn project_config_path(dir: &std::path::Path) -> PathBuf {
-    dir.join(".grok").join("config.toml")
+    xai_grok_config::project_config_file(dir)
+}
+
+/// Path to the project-level config file to write
+/// (`<dir>/.grok/config.json`).
+pub fn project_config_path_for_write(dir: &std::path::Path) -> std::io::Result<PathBuf> {
+    xai_grok_config::project_config_file_for_write(dir)
 }
 
 /// True when the config file at `path` defines `[mcp_servers.<name>]`.

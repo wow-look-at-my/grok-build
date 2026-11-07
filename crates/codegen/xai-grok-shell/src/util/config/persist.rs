@@ -6,15 +6,17 @@ use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 use xai_grok_agent::prompt::skills::SkillsConfig;
 use xai_grok_config::fs_atomic::BoundDest;
-/// Process-wide write lock for `~/.grok/config.toml`.
+/// Process-wide write lock for `~/.grok/config.json`.
 /// Serializes the read-modify-write in `save_config` so two rapid settings toggles can't interleave and clobber each other.
 static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-/// Blank (first-run 0-byte file) is an empty table; other unparseable TOML is an error so a silent fallback cannot drop unmodeled sections.
-pub(crate) fn parse_existing_config_toml(s: &str) -> Result<TomlValue, toml::de::Error> {
-    if s.trim().is_empty() {
-        return Ok(TomlValue::Table(TomlMap::new()));
-    }
-    toml::from_str(s)
+/// Blank (first-run 0-byte file) is an empty table; other unparseable JSON is
+/// an error so a silent fallback cannot drop unmodeled sections.
+pub(crate) fn parse_existing_config(path: &Path, s: &str) -> std::io::Result<TomlValue> {
+    xai_grok_config::parse_config_for_edit(path, s)
+}
+/// The JSON text for a tree from [`parse_existing_config`].
+pub(crate) fn render_existing_config(path: &Path, root: &TomlValue) -> std::io::Result<String> {
+    xai_grok_config::render_config(path, root)
 }
 /// Settings-save body. Caller must hold [`ConfigWriteGuard`].
 /// Re-resolve `dest` before publish. A retarget must not merge A onto B.
@@ -30,7 +32,7 @@ async fn save_config_locked(
 ) -> Result<()> {
     let dest = require_same_user_config_dest(slot, &dest)?;
     let mut root: TomlValue = match tokio::fs::read_to_string(dest.as_path()).await {
-        Ok(s) => match parse_existing_config_toml(&s) {
+        Ok(s) => match parse_existing_config(dest.as_path(), &s) {
             Ok(v) => v,
             Err(parse_err) => {
                 return Err(anyhow::anyhow!(
@@ -84,10 +86,10 @@ async fn save_config_locked(
             section_table.remove(*key);
         }
     }
-    let toml_str = toml::to_string_pretty(&root)?;
+    let text = render_existing_config(dest.as_path(), &root)?;
     let dest = require_same_user_config_dest(slot, &dest)?;
     guard
-        .run_blocking(move || atomic_write_resolved_string(&dest, &toml_str))
+        .run_blocking(move || atomic_write_resolved_string(&dest, &text))
         .await
         .map_err(|e| anyhow::anyhow!("config write task failed: {e}"))??;
     Ok(())
