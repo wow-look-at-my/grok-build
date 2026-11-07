@@ -103,6 +103,24 @@ fn overlay_confined_to_allowlist_drops_every_dangerous_table() {
 }
 
 #[test]
+fn json_overlay_uses_the_config_json_layout() {
+    let overlay = resolve_overlay(
+        Some(r#"{"tools": {"bash": {"login_shell_capture": false}}, "models": {"default": "m"}}"#),
+        None,
+    )
+    .expect("overlay");
+    assert_eq!(
+        overlay
+            .get("toolset")
+            .and_then(|t| t.get("bash"))
+            .and_then(|b| b.get("login_shell_capture"))
+            .and_then(toml::Value::as_bool),
+        Some(false)
+    );
+    assert!(overlay.get("tools").is_none());
+}
+
+#[test]
 fn overlay_narrows_toolset_to_soft_leaves() {
     // `[toolset]` is not soft wholesale: only the allowlisted leaves survive the real resolve path
     // The command-prefix, per-model sampler, and egress proxy sinks are dropped

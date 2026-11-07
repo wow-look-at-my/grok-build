@@ -4387,93 +4387,60 @@
 		},
 		"McpServerConfig": {
 			"type": "object",
-			"anyOf": [
-				{
-					"description": "A stdio server: grok runs `command` and talks to it over stdin and stdout.",
-					"type": "object",
-					"properties": {
-						"command": {
-							"type": "string"
-						},
-						"args": {
-							"type": "array",
-							"items": {
-								"type": "string"
-							}
-						},
-						"env": {
-							"type": "object",
-							"additionalProperties": {
-								"type": "string"
-							}
-						},
-						"cwd": {
-							"type": "string"
-						}
-					},
-					"required": [
-						"command"
-					]
-				},
-				{
-					"description": "A streamable HTTP server. `urlTemplate` and `url_template` are other spellings of `url`.",
-					"type": "object",
-					"properties": {
-						"url": {
-							"type": "string"
-						},
-						"urlTemplate": {
-							"type": "string"
-						},
-						"url_template": {
-							"type": "string"
-						},
-						"type": {
-							"type": "string"
-						},
-						"bearer_token_env_var": {
-							"description": "Name of the environment variable to read and set for `Authorization: Bearer <token>`.",
-							"type": "string"
-						},
-						"headers": {
-							"type": "object",
-							"additionalProperties": {
-								"type": "string"
-							}
-						},
-						"oauth_client_id": {
-							"type": "string"
-						},
-						"oauth_client_secret_env_var": {
-							"type": "string"
-						},
-						"oauth_scopes": {
-							"type": "array",
-							"items": {
-								"type": "string"
-							}
-						}
-					},
-					"anyOf": [
-						{
-							"required": [
-								"url"
-							]
-						},
-						{
-							"required": [
-								"urlTemplate"
-							]
-						},
-						{
-							"required": [
-								"url_template"
-							]
-						}
-					]
-				}
-			],
+			"description": "A stdio server sets `command`; a streamable HTTP server sets `url` (`urlTemplate` and `url_template` are other spellings).",
 			"properties": {
+				"command": {
+					"type": "string"
+				},
+				"args": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"env": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					}
+				},
+				"cwd": {
+					"type": "string"
+				},
+				"url": {
+					"type": "string"
+				},
+				"urlTemplate": {
+					"type": "string"
+				},
+				"url_template": {
+					"type": "string"
+				},
+				"type": {
+					"type": "string"
+				},
+				"bearer_token_env_var": {
+					"description": "Name of the environment variable to read and set for `Authorization: Bearer <token>`.",
+					"type": "string"
+				},
+				"headers": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					}
+				},
+				"oauth_client_id": {
+					"type": "string"
+				},
+				"oauth_client_secret_env_var": {
+					"type": "string"
+				},
+				"oauth_scopes": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
 				"enabled": {
 					"type": "boolean",
 					"default": true

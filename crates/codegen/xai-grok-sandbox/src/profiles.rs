@@ -561,10 +561,9 @@ impl ProfileName {
                 let profile_config = config.profiles.get(name).ok_or_else(|| {
                     anyhow::anyhow!(
                         "Custom sandbox profile '{name}' not found. \
-                         Define it in ~/.grok/sandbox.toml or .grok/sandbox.toml:\n\n\
-                         [profiles.{name}]\n\
-                         extends = \"workspace\"\n\
-                         read_only = [\"/data\"]\n"
+                         Define it in ~/.grok/sandbox.json or .grok/sandbox.json:\n\n\
+                         {{\"profiles\": {{\"{name}\": {{\"extends\": \"workspace\", \
+                         \"read_only\": [\"/data\"]}}}}}}\n"
                     )
                 })?;
 
