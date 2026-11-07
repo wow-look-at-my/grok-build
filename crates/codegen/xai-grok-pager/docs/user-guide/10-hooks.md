@@ -70,8 +70,8 @@ Hooks are discovered from several places (all are merged):
 | Project | `<project>/.claude/settings.json` (and `settings.local.json`) | Requires trust | Claude compatibility (configurable) |
 | Project | `<project>/.cursor/hooks.json` | Requires trust | Cursor compatibility (configurable) |
 | Config | `~/.grok/config.json` | Always | Your hooks alongside the rest of your config |
-| Config | `managed_config.toml` (`$GROK_HOME` and `/etc/grok`) | Always | Organization-distributed hooks (server-synced and on-device) |
-| Config | `requirements.toml` (signed cache, and `/etc/grok`) | Always | Organization-enforced hooks; see [Enforced hooks](#enforced-hooks) |
+| Config | `managed_config.toml` (`$GROK_HOME`) and `/etc/grok/managed_config.json` | Always | Organization-distributed hooks (server-synced and on-device) |
+| Config | `requirements.toml` (signed cache) and `/etc/grok/requirements.json` | Always | Organization-enforced hooks; see [Enforced hooks](#enforced-hooks) |
 | Plugin | Bundled inside installed plugins | Per-plugin | Shared team hooks |
 
 Config-file hooks live in the same TOML your organization already controls. See [Hooks in Config Files](#hooks-in-config-files) for the format. Default scans the compatible vendor hook sources. To disable scanning for a specific vendor, set `[compat.<vendor>] hooks = false` in `~/.grok/config.json` or the corresponding environment variable. See [Configuration](05-configuration.md#harness-compatibility) for details.
@@ -204,7 +204,7 @@ Hooks can also live directly in your Grok config. As a result, a team can distri
 | `managed_config.toml` (`$GROK_HOME`, `/etc/grok`) | Managed / system | Your organization |
 | `requirements.toml` (`$GROK_HOME` signed cache, `/etc/grok`) | Requirements | Your organization |
 
-The TOML is structurally identical to the JSON hook object, so an existing hook transliterates directly:
+The `hooks` object has the same structure as the JSON hook object, so an existing hook pastes in directly:
 
 ```json
 {
@@ -225,30 +225,7 @@ The TOML is structurally identical to the JSON hook object, so an existing hook 
 }
 ```
 
-Each matcher group is a `[[hooks.<Event>]]` entry with an optional `matcher` and an inner `hooks` array of handlers. The handler fields (`type`, `command`, `url`, `timeout`, `env`) and event names are exactly the same as the [JSON format](#the-hook-json-format).
-
-TOML offers equivalent notations for the inner handlers, and both parse to the same structure. The inline-table array shown above is recommended: it reads best for the common single-handler case. The nested array-of-tables form is also accepted:
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "command": "/opt/guard/pretooluse.sh",
-            "timeout": 10,
-            "type": "command"
-          }
-        ],
-        "matcher": "Bash|Write|Edit"
-      }
-    ]
-  }
-}
-```
-
-Prefer the inline form to avoid repeating the `[[hooks.<Event>.hooks]]` header for each handler.
+Each matcher group is an entry in the `hooks.<Event>` array with an optional `matcher` and an inner `hooks` array of handlers. The handler fields (`type`, `command`, `url`, `timeout`, `env`) and event names are exactly the same as the [JSON format](#the-hook-json-format).
 
 - **Additive across layers.** Every layer's hooks run. A lower-priority layer adds hooks but never replaces another layer's block. A hook defined identically in more than one layer is deduplicated, keeping the highest-authority copy.
 - **Provenance labels.** Config hooks appear in `/hooks` tagged by origin (`managed:`, `requirements/signed:`, `requirements/user:`, `user:`, and so on) so you can see which layer contributed each one.

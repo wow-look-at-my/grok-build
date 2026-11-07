@@ -11514,6 +11514,7 @@ dependencies = [
  "ignore",
  "minijinja",
  "regex",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -11542,6 +11543,7 @@ name = "xai-grok-announcements"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -11985,6 +11987,7 @@ dependencies = [
 name = "xai-grok-models"
 version = "0.1.0"
 dependencies = [
+ "schemars",
  "serde",
  "serde_json",
 ]

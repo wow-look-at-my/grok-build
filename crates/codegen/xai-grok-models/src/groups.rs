@@ -8,7 +8,7 @@ use crate::slots::{HARNESS_MODEL_SLOTS, slot_by_id};
 
 /// One `[model_groups.<id>]` table. Every field is optional. On a compiled
 /// group, a field that is not set keeps the compiled value.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ModelGroupConfig {
     /// Settings-modal row label.
