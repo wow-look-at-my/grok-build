@@ -1817,7 +1817,7 @@ pub async fn run_add_dismissed_plugin_cta(plugin_id: String) -> Result<(), Strin
 /// Creates the `[plugin_cta]` section and `dismissed` array if they don't exist.
 /// Deduplicates: if already present, this is a no-op.
 pub fn add_dismissed_plugin_cta(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
+    let config_path = crate::util::config::user_config_path();
     add_dismissed_plugin_cta_to_file(plugin_id, &config_path)
 }
 /// Add a dismissed plugin CTA to a specific config file (path-parameterized for tests); runs
@@ -1855,7 +1855,7 @@ pub fn add_dismissed_plugin_cta_to_file(
 ///
 /// Read once (e.g. on catalog load) and cached so the matched-debounce recompute doesn't parse the config from disk on the UI thread.
 pub fn dismissed_plugin_ctas() -> std::collections::HashSet<String> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
+    let config_path = crate::util::config::user_config_path();
     dismissed_plugin_ctas_in_file(&config_path)
 }
 /// Read the dismissed plugin CTA set from a specific config file (for tests).

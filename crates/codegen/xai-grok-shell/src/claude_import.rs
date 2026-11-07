@@ -475,7 +475,7 @@ pub(crate) fn is_claude_import_marked() -> bool {
     if let Some(v) = *MARKER_CACHE.read().expect("MARKER_CACHE poisoned") {
         return v;
     }
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
+    let config_path = crate::util::config::user_config_path();
     let v = is_claude_import_marked_at(&config_path);
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = Some(v);
     v

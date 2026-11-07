@@ -442,13 +442,12 @@ pub fn is_claude_import_marked() -> bool {
     if std::env::var("_GROK_CLAUDE_MARKER_OVERRIDE").as_deref() == Ok("1") {
         return true;
     }
-    let Some(config_path) = xai_grok_config::user_grok_home().map(|g| g.join("config.toml")) else {
+    let Some(config_path) = xai_grok_config::user_grok_home()
+        .map(|g| xai_grok_config::format::resolve_config_file(&g, xai_grok_config::CONFIG_STEM))
+    else {
         return false;
     };
-    let Ok(contents) = std::fs::read_to_string(&config_path) else {
-        return false;
-    };
-    let Ok(value) = toml::from_str::<toml::Value>(&contents) else {
+    let Ok(value) = xai_grok_config::load_toml_file(&config_path) else {
         return false;
     };
     value

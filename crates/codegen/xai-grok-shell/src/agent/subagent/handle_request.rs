@@ -539,7 +539,7 @@ pub(crate) async fn run_shell_child(
     match gate_subagent_type(&request.subagent_type, &ctx) {
         SubagentValidateTypeOutcome::Disabled => {
             let msg = format!(
-                "Subagent '{}' is disabled via [subagents.toggle] in config.toml",
+                "Subagent '{}' is disabled via agents.subagents.toggle in config.json",
                 request.subagent_type
             );
             return child_run_output(failure_result(&request, &msg), completion_data, None);

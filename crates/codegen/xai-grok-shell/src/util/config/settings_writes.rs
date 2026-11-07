@@ -19,9 +19,8 @@ const FOLLOW_UP_CACHE_STEER: u8 = 2;
 static FOLLOW_UP_STEER_CACHE: AtomicU8 = AtomicU8::new(FOLLOW_UP_CACHE_UNKNOWN);
 static FOLLOW_UP_STEER_MTIME_NS: AtomicU64 = AtomicU64::new(0);
 
-/// Nanoseconds since epoch for the user `config.toml` mtime, or 0 if missing.
 fn follow_up_config_mtime_ns() -> u64 {
-    let path = crate::util::grok_home::grok_home().join("config.toml");
+    let path = crate::util::config::user_config_path();
     std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()

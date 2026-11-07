@@ -19,6 +19,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
 xai-dirs = { workspace = true }
+xai-grok-config = { workspace = true }
 xai-grok-extra-ca = { workspace = true }
 xai-grok-net = { workspace = true }
 # Sanctioned TTY detach for the capture subprocesses (Linux system recorders,

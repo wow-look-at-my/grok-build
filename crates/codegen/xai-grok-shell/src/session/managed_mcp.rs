@@ -433,7 +433,7 @@ pub(crate) fn merge_managed_mcp_servers_sourced(
     let toml_claimed_names = crate::util::config::all_toml_mcp_server_names(cwd);
 
     let config_source = ConfigSource::ConfigToml {
-        path: xai_grok_tools::util::grok_home::grok_home().join("config.toml"),
+        path: crate::util::config::user_config_path(),
     };
 
     // Use the TOML-only loader so that entries from imported editor configs and .mcp.json are not pre-loaded with ConfigSource::ConfigToml

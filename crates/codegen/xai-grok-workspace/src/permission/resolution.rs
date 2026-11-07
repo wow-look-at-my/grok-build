@@ -211,9 +211,10 @@ fn load_requirements_permissions() -> Vec<Sourced<PermissionRule>> {
 fn load_config_toml_permissions(cwd: &Path, project_trusted: bool) -> Vec<Sourced<PermissionRule>> {
     let mut rules = Vec::new();
 
-    // Global `~/.grok/config.toml` first (lowest priority within this layer).
-    // Gated on user_grok_home() so a project's .grok/config.toml is never read as global permissions when neither GROK_HOME nor a home dir resolves
-    if let Some(global_path) = xai_grok_config::user_grok_home().map(|g| g.join("config.toml"))
+    // Global `~/.grok/config.json` first (lowest priority within this layer). Gated on user_grok_home() so a project's .grok config is never
+    // read as global permissions. This applies when neither GROK_HOME nor a home dir resolves
+    if let Some(global_path) = xai_grok_config::user_grok_home()
+        .map(|g| xai_grok_config::format::resolve_config_file(&g, xai_grok_config::CONFIG_STEM))
         && global_path.is_file()
     {
         match xai_grok_config::load_config_file(&global_path) {

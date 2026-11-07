@@ -121,7 +121,11 @@ impl ConfigFileWatcher {
             let mut batch_events: Vec<ConfigChangeEvent> = Vec::new();
             let live_dest = resolve_global_config_dest(&grok_home_buf);
             for event in events {
-                if event.path.file_name().and_then(|n| n.to_str()) == Some("config.toml")
+                if event
+                    .path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(is_config_file_name)
                     && event.path.parent() == Some(grok_home_buf.as_path())
                 {
                     saw_slot = true;
@@ -222,9 +226,15 @@ impl ConfigFileWatcher {
     }
 }
 
-/// Snapshot the follow dest of `$GROK_HOME/config.toml`. Canonicalize for notify path match.
+/// `config.json`, or the legacy `config.toml` that grok still reads until it migrates.
+fn is_config_file_name(name: &str) -> bool {
+    name == xai_grok_config::USER_CONFIG_FILENAME || name == "config.toml"
+}
+
+/// Snapshot the follow dest of the `$GROK_HOME` config file. Canonicalize for notify path match.
 fn resolve_global_config_dest(grok_home: &Path) -> Option<PathBuf> {
-    let slot = grok_home.join("config.toml");
+    let slot =
+        xai_grok_config::format::resolve_config_file(grok_home, xai_grok_config::CONFIG_STEM);
     xai_grok_config::fs_atomic::resolve_atomic_destination(&slot)
         .ok()
         .map(|p| dunce::canonicalize(&p).unwrap_or(p))
@@ -317,13 +327,13 @@ fn classify_watched_path(
     let parent = path.parent();
     match name {
         Some("auth.json") if parent == Some(grok_home) => Some(ConfigChangeEvent::AuthChanged),
-        Some("config.toml") if parent == Some(grok_home) => {
+        Some(n) if is_config_file_name(n) && parent == Some(grok_home) => {
             Some(ConfigChangeEvent::GlobalConfigChanged)
         }
         Some("models_cache.json") if parent == Some(grok_home) => {
             Some(ConfigChangeEvent::ModelsCacheChanged)
         }
-        Some("config.toml") => Some(ConfigChangeEvent::ProjectConfigChanged {
+        Some(n) if is_config_file_name(n) => Some(ConfigChangeEvent::ProjectConfigChanged {
             path: path.to_path_buf(),
         }),
         Some(".claude.json") if user_home.is_some_and(|h| parent_is_dir(parent, h)) => {
