@@ -2412,7 +2412,7 @@ grok memory stats
 
 ### Configuration reference
 
-Key options under `[memory]` in `~/.grok/config.json`:
+Key options under `memory` in `~/.grok/config.json`:
 
 | Key | Default | Description |
 |-----|---------|-------------|
