@@ -37,7 +37,7 @@ pub use conversations_client::{
     UpdateConversationBody,
 };
 pub(crate) use local_runtime::{fetch_local_listing_blocking, fetch_residency_blocking};
-pub(crate) use model_source::{ModelSource, active_model_source};
+pub(crate) use model_source::{ModelSource, active_model_source, fetch_active_models_async};
 pub use pull::{PullResult, pull_session_to_local};
 pub use skills_client::{
     BundledSkill, CHAT_PRODUCT_META_KEY, CHAT_PRODUCT_META_VALUE, ListBundledSkillsResponse,
