@@ -42,9 +42,22 @@ pub(crate) async fn fetch_models_async(
     auth: Option<GrokAuth>,
     fetch_auth: ModelFetchAuth,
 ) -> Option<IndexMap<String, ModelEntry>> {
+    let queued_at = std::time::Instant::now();
     xai_spawn::spawn_blocking(move || {
+        // The caller's timeout also counts the wait for a blocking-pool thread.
+        let queued = queued_at.elapsed();
+        if queued >= QUEUE_WAIT_WORTH_LOGGING {
+            xai_grok_telemetry::unified_log::warn(
+                "model catalog: the fetch waited for a blocking thread",
+                None,
+                Some(serde_json::json!({ "queued_ms": queued.as_millis() as u64 })),
+            );
+        }
         prefetch_models_blocking(&endpoints, auth.as_ref(), fetch_auth)
     })
     .await
     .unwrap_or(None)
 }
+
+/// A wait for a blocking-pool thread this long uses a large part of the fetch timeout.
+const QUEUE_WAIT_WORTH_LOGGING: std::time::Duration = std::time::Duration::from_millis(500);

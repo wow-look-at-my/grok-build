@@ -137,6 +137,11 @@ pub(in crate::agent::remote_config) fn fetch_models_uncommitted(
                 "models listing is empty: nothing to fall back on if a custom \
                  endpoint replaced the built-in defaults"
             );
+            xai_grok_telemetry::unified_log::warn(
+                "model catalog: the models listing is empty",
+                None,
+                Some(serde_json::json!({ "url": scope.origin })),
+            );
             ModelsPrefetch::Unavailable
         }
         Err(e) => {
@@ -145,6 +150,15 @@ pub(in crate::agent::remote_config) fn fetch_models_uncommitted(
                 error = ?e,
                 "models fetch failed: the model picker will be empty unless \
                  [model.*] entries are configured"
+            );
+            xai_grok_telemetry::unified_log::warn(
+                "model catalog: the models fetch failed",
+                None,
+                Some(serde_json::json!({
+                    "url": scope.origin,
+                    "error": e.to_string(),
+                    "elapsed_ms": (Utc::now() - fetched_at).num_milliseconds(),
+                })),
             );
             ModelsPrefetch::Unavailable
         }
