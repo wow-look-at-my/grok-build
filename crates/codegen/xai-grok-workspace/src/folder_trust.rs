@@ -197,7 +197,7 @@ impl fmt::Display for GrantRefuse {
             Self::Unreadable => write!(
                 f,
                 "Couldn't save folder trust: the trust store could not be read. \
-                 Fix or delete ~/.grok/trusted_folders.toml, then start Grok again and press y."
+                 Fix or delete ~/.grok/trusted_folders.json, then start Grok again and press y."
             ),
             Self::KeyMoved => write!(
                 f,
@@ -763,7 +763,11 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
-        std::fs::write(grok.join("config.toml"), "[mcp_servers.x]\ncommand=\"y\"\n").unwrap();
+        std::fs::write(
+            grok.join("config.json"),
+            r#"{"mcp": {"servers": {"x": {"command": "y"}}}}"#,
+        )
+        .unwrap();
         assert!(repo_configs_present(tmp.path()));
     }
 
@@ -1037,7 +1041,7 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
-        std::fs::write(grok.join("config.toml"), "[mcp_servers]\n").unwrap();
+        std::fs::write(grok.join("config.json"), r#"{"mcp": {"servers": {}}}"#).unwrap();
         assert!(!repo_configs_present(tmp.path()));
     }
 
@@ -1048,7 +1052,11 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
-        std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./x\"]\n").unwrap();
+        std::fs::write(
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": ["./x"]}}}"#,
+        )
+        .unwrap();
         assert!(repo_configs_present(tmp.path()));
     }
 
@@ -1058,7 +1066,11 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
-        std::fs::write(grok.join("config.toml"), "[plugins]\npaths = []\n").unwrap();
+        std::fs::write(
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": []}}}"#,
+        )
+        .unwrap();
         assert!(!repo_configs_present(tmp.path()));
     }
 
@@ -1071,8 +1083,8 @@ mod tests {
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(
-            grok.join("config.toml"),
-            "[permission]\nallow = [\"Bash(*)\"]\n",
+            grok.join("config.json"),
+            r#"{"permission": {"allow": ["Bash(*)"]}}"#,
         )
         .unwrap();
         assert!(repo_configs_present(tmp.path()));
@@ -1095,8 +1107,8 @@ mod tests {
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(
-            grok.join("config.toml"),
-            "[permission]\nallow = []\ndeny = []\n",
+            grok.join("config.json"),
+            r#"{"permission": {"allow": [], "deny": []}}"#,
         )
         .unwrap();
         assert!(!repo_configs_present(tmp.path()));
@@ -1109,7 +1121,11 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(grok.join("agents")).unwrap();
-        std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./x\"]\n").unwrap();
+        std::fs::write(
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": ["./x"]}}}"#,
+        )
+        .unwrap();
         let claude = tmp.path().join(".claude");
         std::fs::create_dir_all(&claude).unwrap();
         std::fs::write(claude.join("settings.json"), r#"{"env":{"X":"1"}}"#).unwrap();
@@ -1447,7 +1463,7 @@ mod tests {
         let text = unread.to_string();
         assert!(text.contains("trust store could not be read"), "{text}");
         assert!(
-            text.contains("Fix or delete ~/.grok/trusted_folders.toml"),
+            text.contains("Fix or delete ~/.grok/trusted_folders.json"),
             "{text}"
         );
         let no_home = GrantOutcome::Refused {

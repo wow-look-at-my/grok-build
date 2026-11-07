@@ -1,37 +1,39 @@
 # Configuration reference
 
-This file ships with the CLI and is extracted to `~/.grok/docs/user-guide/26-config-reference.md` on launch. It is the complete field list for `config.toml`, `managed_config.toml`, and `requirements.toml`. For conceptual guidance see [05-configuration.md](05-configuration.md).
+This file ships with the CLI and is extracted to `~/.grok/docs/user-guide/26-config-reference.md` on launch. It is the complete field list for `config.json`, managed config, and requirements. For conceptual guidance see [05-configuration.md](05-configuration.md).
 
 ## How to configure
 
-Three files configure Grok Build, and they are written by different people.
+Config files are JSON. `~/.grok/config.schema.json` (written by grok on launch) is the JSON Schema for them. `config.json` names it with `"$schema": "./config.schema.json"`, so an editor that reads JSON Schema completes and checks every key below. Each key is a dotted path: `mcp.servers.<name>.command` is `{"mcp": {"servers": {"<name>": {"command": ...}}}}`.
+
+Different people write kinds of file configure Grok Build, and they.
 
 | File | Who writes it | Where it lives | Use it to |
 | --- | --- | --- | --- |
-| `config.toml` | The developer | `~/.grok/config.toml`, and `.grok/config.toml` in a project | Set personal defaults. Anything here can be changed by the person using the machine. |
-| `managed_config.toml` | You, through the console or a deployment tool | `/etc/grok/managed_config.toml`, or `$GROK_HOME/managed_config.toml` | Ship a starting point to a fleet. A developer's own file overrides it. |
-| `requirements.toml` | You, signed | `/etc/grok/requirements.toml`, macOS device management, or `$GROK_HOME/requirements.toml` | Set values a developer cannot change. Keys marked `pin` below hold against every other file, the environment, and the command line. |
+| `config.json` | The developer | `~/.grok/config.json`, and `.grok/config.json` in a project | Set personal defaults. Anything here can be changed by the person using the machine. |
+| managed config | You, through the console or a deployment tool | `/etc/grok/managed_config.json`, or the console-synced `$GROK_HOME/managed_config.toml` | Ship a starting point to a fleet. A developer's own file overrides it. |
+| requirements | You, signed | `/etc/grok/requirements.json`, macOS device management, or the console-synced, signed `$GROK_HOME/requirements.toml` | Set values a developer cannot change. Keys marked `pin` below hold against every other file, the environment, and the command line. |
 
-Choose `managed_config.toml` for defaults you want people to be able to adjust, and `requirements.toml` for the ones you do not.
+Choose managed config for defaults you want people to be able to adjust, and requirements for the ones you do not. `xai_grok_config::layout::LAYOUT` maps each JSON section to its internal name. A legacy `/etc/grok/*.toml` file is still read when no `.json` file sits next to it.
 
 Grok Build also reads these layers, later rows winning except where a requirements pin or the Managed column says otherwise.
 
 1. Compiled defaults.
-2. `/etc/grok/managed_config.toml`, then `$GROK_HOME/managed_config.toml` (fleet defaults; console-synced).
-3. `$GROK_HOME/config.toml` (your settings; `/settings` writes here). Default `$GROK_HOME` is `~/.grok`.
-4. Project `.grok/config.toml`: only `[mcp_servers]`, `[plugins]`, `[permission]`, and `[mcp] max_output_bytes`.
+2. `/etc/grok/managed_config.json`, then `$GROK_HOME/managed_config.toml` (fleet defaults, console-synced).
+3. `$GROK_HOME/config.json` (your settings. `/settings` writes here). Default `$GROK_HOME` is `~/.grok`. A legacy `config.toml` there converts to `config.json` on launch and is kept as `config.toml.migrated`.
+
 5. `GROK_CONFIG` (inline JSON) or `GROK_CONFIG_PATH` (JSON or TOML file). Allowlisted keys only.
-6. `$GROK_HOME/requirements.toml`, then `/etc/grok/requirements.toml`, then macOS MDM `ai.x.grok`. Admin layer. Keys marked `pin` in the table cannot be overridden; keys marked `yes` are also valid in this file.
+6. `$GROK_HOME/requirements.toml`, then `/etc/grok/requirements.json`, then macOS MDM `ai.x.grok`. Admin layer. Keys marked `pin` in the table cannot be overridden. Keys marked `yes` are also valid in this file.
 7. `GROK_*` environment variables.
 8. CLI flags such as `--model`, `--sandbox`, `--yolo`.
 
 Run `grok inspect` or `grok inspect --json` to see which files and values won.
 
-## config.toml
+## config.json
 
-User-level configuration lives in `$GROK_HOME/config.toml` (default `~/.grok/config.toml`; Windows `%USERPROFILE%\.grok\config.toml`). Project-scoped overrides live in `.grok/config.toml` and only contribute `[mcp_servers]`, `[plugins]`, `[permission]`, and `[mcp] max_output_bytes`.
+User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/config.json`. Windows `%USERPROFILE%\.grok\config.json`).
 
-**Requirements** marks whether the same key can be set in `requirements.toml`: `pin` cannot be overridden (including env and CLI where the resolver honors the pin); `yes` is accepted in that file; `—` is not read from `requirements.toml`. **Managed** marks whether a fleet `managed_config.toml` value stands (`fleet`) or the user's file wins (`user`).
+**Requirements** marks whether the same key can be set in requirements: `pin` cannot be overridden (including env and CLI where the resolver honors the pin). `yes` is accepted in that file. `—` is not read from requirements. **Managed** marks whether a fleet managed-config value stands (`fleet`) or the user's file wins (`user`).
 
 ### `agents`
 
@@ -484,9 +486,9 @@ User-level configuration lives in `$GROK_HOME/config.toml` (default `~/.grok/con
 | --- | --- | --- | --- | --- |
 | `worktrees.auto_gc` | `table` | `yes` | `user` | Automatic worktree garbage collection policy. |
 
-## managed_config.toml
+## managed config
 
-`managed_config.toml` accepts every key in the tables above. It sets fleet defaults, so a developer's own `config.toml` overrides it. Use it for values you want people to be able to adjust, and `requirements.toml` for values they cannot.
+Managed config accepts every key in the tables above. It sets fleet defaults, so a developer's own `config.json` overrides it. Use it for values you want people to be able to adjust, and `requirements.toml` for values they cannot.
 
 One exception to that rule:
 
@@ -494,15 +496,15 @@ One exception to that rule:
 | --- | --- |
 | `features.remote_fetch` | The managed value wins over the developer's. |
 
-Grok Build reads `/etc/grok/managed_config.toml` first, then `$GROK_HOME/managed_config.toml`, which the console keeps in sync. Values in the second replace values in the first.
+Grok Build reads `/etc/grok/managed_config.json` first, then `$GROK_HOME/managed_config.toml`, which the console keeps in sync. Values in the second replace values in the first.
 
 The **Managed** column on the tables above is the per-key answer: `fleet` means the fleet value stands, `user` means the user's file wins, `—` means this file is ignored.
 
-## requirements.toml
+## requirements
 
-`requirements.toml` is an admin-enforced file. Locations: `$GROK_HOME/requirements.toml` (signed cache) then `/etc/grok/requirements.toml`, then macOS MDM `ai.x.grok`. The **Requirements** column on the `config.toml` tables lists every `config.toml` key this file accepts (`pin` or `yes`). Omitted keys stay unconstrained.
+Requirements are admin-enforced. Locations: `$GROK_HOME/requirements.toml` (signed cache) then `/etc/grok/requirements.json`, then macOS MDM `ai.x.grok`. The **Requirements** column on the `config.json` tables lists every key this file accepts (`pin` or `yes`). Omitted keys stay unconstrained.
 
-These keys exist only in `requirements.toml`:
+These keys exist only in requirements:
 
 | Key | Type / Values | Default | Details |
 | --- | --- | --- | --- |
@@ -510,17 +512,17 @@ These keys exist only in `requirements.toml`:
 | `features.image_edit` | `boolean` | — | Pin image_edit availability. Requirements only; a user-file entry is unrecognized and unset leaves the remotely configured default. |
 | `ui.disable_bypass_permissions_mode` | `boolean` | — | Lock always-approve off. The lock is enforced only from a requirements layer; true in user or managed files is ignored. |
 
-Policy pins such as `allow_managed_hooks_only` (see [Hooks](10-hooks.md#allow-only-managed-hooks)) and the MCP and marketplace lists (see [Plugins](09-plugins.md#restrict-which-mcp-servers-can-run)) are accepted in `requirements.toml` and `managed_config.toml` alike and only ever tighten.
+Policy pins such as `policy.allow_managed_hooks_only` (see [Hooks](10-hooks.md#allow-only-managed-hooks)) and the MCP and marketplace lists under `policy` (see [Plugins](09-plugins.md#restrict-which-mcp-servers-can-run)) are accepted in requirements. It managed config alike and only ever tighten.
 
-`[[hooks.<Event>]]` tables are accepted in every config file. Hooks from the signed requirements cache and the root-owned `/etc/grok` files are enforced; see [Hooks](10-hooks.md#enforced-hooks).
+`hooks.<Event>` arrays are accepted in every config file. Hooks from the signed requirements cache and the root-owned `/etc/grok` files are enforced. See [Hooks](10-hooks.md#enforced-hooks).
 
 ## What happens when a setting is refused
 
 | Situation | What Grok Build does |
 | --- | --- |
 | A developer sets a key you pinned | The pinned value applies. `grok inspect` lists the requirements file that contributed. |
-| A developer sets a key you shipped in `managed_config.toml` | Their value applies, except `features.remote_fetch`. Pin the key instead if it must hold. |
-| `requirements.toml` is missing or its signature does not verify | The pins do not apply, and Grok Build starts without them. Set `fail_closed = true` to refuse to start instead. |
+| A developer sets a key you shipped in managed config | Their value applies, except `features.remote_fetch`. Pin the key instead if it must hold. |
+| Requirements are missing or their signature does not verify | The pins do not apply, and Grok Build starts without them. Set `"fail_closed": true` to refuse to start instead. |
 | A pinned key names a value this version does not recognise | The key is ignored and the rest of the file still applies. |
 
 ## Check what is in effect

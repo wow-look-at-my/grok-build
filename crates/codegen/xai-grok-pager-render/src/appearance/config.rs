@@ -983,7 +983,7 @@ pub struct RawEditBlockConfig {
     pub indent_bg: bool,
     /// Show the +N/-M line summary in the collapsed header.
     /// Commented out (unset), it follows the `[ui] collapsed_edit_blocks`
-    /// flag in config.toml; uncomment to pin either way.
+    /// flag in config.json; uncomment to pin either way.
     pub line_summary: Option<bool>,
     /// Unset follows `[ui] collapsed_edit_blocks`. A true flag collapses even when this is true.
     /// An explicit false still collapses when the flag is off.
@@ -1262,8 +1262,8 @@ impl From<RawAppearanceConfig> for AppearanceConfig {
                 },
             },
             turn_status: TurnStatusConfig::default(),
-            show_timestamps: true, // runtime-only, loaded from config.toml via persist
-            // Single source: UiConfig::SHOW_TIMELINE_DEFAULT (loaded from config.toml via persist).
+            show_timestamps: true, // runtime-only, loaded from config.json via persist
+            // Single source: UiConfig::SHOW_TIMELINE_DEFAULT (loaded from config.json via persist).
             show_timeline: UiConfig::SHOW_TIMELINE_DEFAULT,
             disable_plugins: raw.disable_plugins,
             show_plan_chip: raw.show_plan_chip,

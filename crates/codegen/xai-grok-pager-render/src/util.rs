@@ -35,7 +35,7 @@ pub fn display_grok_home_prefix_for(home: &Path) -> String {
     }
 }
 
-/// User-facing path under [`grok_home()`], e.g. ``~/.grok/config.toml``.
+/// User-facing path under [`grok_home()`], e.g. ``~/.grok/config.json``.
 pub fn display_user_grok_path(relative: impl AsRef<Path>) -> String {
     display_user_grok_path_for(&grok_home(), relative)
 }
@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn display_user_grok_path_joins_relative() {
         let path = display_user_grok_path(xai_grok_config::USER_CONFIG_FILENAME);
-        assert!(path.ends_with("/config.toml") || path.ends_with("\\config.toml"));
+        assert!(path.ends_with("/config.json") || path.ends_with("\\config.json"));
         assert!(path.contains(".grok") || path.contains("$GROK_HOME"));
     }
 
@@ -415,7 +415,7 @@ mod tests {
         let custom = std::env::temp_dir().join("grok-home-display-regression");
         assert_eq!(
             display_user_grok_path_for(&custom, xai_grok_config::USER_CONFIG_FILENAME),
-            "$GROK_HOME/config.toml"
+            "$GROK_HOME/config.json"
         );
         assert_eq!(
             display_user_grok_path_for(&custom, xai_grok_config::SANDBOX_CONFIG_FILENAME),

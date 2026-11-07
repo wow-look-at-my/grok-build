@@ -10,7 +10,7 @@ use xai_grok_tools::registry::types::ToolConfig;
 pub const PRODUCTION_MAX_TIMEOUT_SECS: f64 = 36_000.0; // 10 hours
 
 /// User configurable settings for the built-in bash tool (`[toolset.bash]`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct BashToolConfig {
     pub timeout_secs: Option<f64>,
@@ -83,7 +83,7 @@ impl BashToolConfig {
 
 /// User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.
 /// That keeps the documented precedence (requirements > env > user > managed > remote). This struct exists so the keys are recognized in `config.toml` and round-trip through `AgentConfig`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct AskUserQuestionToolConfig {
     /// Whether the questionnaire timeout is enabled (default: `true`).
@@ -94,7 +94,7 @@ pub struct AskUserQuestionToolConfig {
 }
 
 /// User configurable settings for the web_fetch tool (`[toolset.web_fetch]`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct WebFetchToolConfig {
     /// When set, all HTTP requests are routed through this URL.
@@ -151,7 +151,7 @@ impl WebFetchToolConfig {
 
 /// This is the *shell-side* config that holds sampling-level settings (e.g., web search API key from the sampling client).
 /// It is distinct from `xai_grok_tools::registry::types::ToolsetConfig` which holds tool-implementation-level config (bash limits, web search mode).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ShellToolsetConfig {
     pub bash: BashToolConfig,
@@ -273,7 +273,7 @@ impl ShellToolsetConfig {
 // ---------------------------------------------------------------------------
 
 /// Configurable in `config.toml` under `[toolset.hashline]`:
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct HashlineSchemeConfig {
     /// Active scheme: `"chunk"` (default) or `"content_only"`.
@@ -317,7 +317,7 @@ impl HashlineSchemeConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FileToolset {
     /// Standard toolset: read_file, search_replace, grep.

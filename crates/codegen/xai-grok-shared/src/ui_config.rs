@@ -3,7 +3,7 @@ use xai_grok_config::DisplayRefreshSettings;
 
 use xai_grok_status_line::StatusLineConfig;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct UiConfig {
     pub max_thoughts_width: u16,
@@ -77,6 +77,7 @@ pub struct UiConfig {
         with = "xai_grok_config_types::retry_budget",
         skip_serializing_if = "Option::is_none"
     )]
+    #[schemars(schema_with = "xai_grok_config_types::retry_budget::json_schema")]
     pub output_rate_max_retries: Option<u32>,
     /// Reissue a model call that has produced no output this many seconds after the request was sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -147,6 +148,7 @@ pub struct UiConfig {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_keep_text_selection"
     )]
+    #[schemars(schema_with = "keep_text_selection_schema")]
     pub keep_text_selection: Option<String>,
     /// Legacy TTL ms; only `Some(0)` counts when `keep_text_selection` is unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -216,7 +218,7 @@ fn status_line_should_not_be_saved(status_line: &StatusLineConfig) -> bool {
 
 /// User-config opt-outs for the per-tip contextual hints, serialized as `[ui.contextual_hints]`.
 /// Per-field `None` means "inherit remote/default"; `Some(bool)` is a user-explicit choice (needed so the resolver can let it beat the remote tier).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ContextualHints {
     /// Undo tip (Ctrl+Z after a substantial draft wipe).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -260,6 +262,13 @@ impl ContextualHints {
 }
 
 const DEFAULT_MAX_THOUGHTS_WIDTH: u16 = 120;
+
+fn keep_text_selection_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "description": "In-app drag selection highlight: `flash` or `hold`. The legacy `true` is `hold` and `false` is `flash`.",
+        "type": ["string", "boolean"]
+    })
+}
 
 fn deserialize_keep_text_selection<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where

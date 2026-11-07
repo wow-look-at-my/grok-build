@@ -1677,7 +1677,7 @@ pub enum Effect {
     /// Persist memory modal fullscreen preference to `ui.hints` in config.json.
     PersistMemoryFullscreen { fullscreen: bool },
     /// Persist the dashboard's `ui.dashboard` configuration to `~/.grok/config.json`.
-    /// Multi-pager safe via `config_toml_edit::read_config_document_for_edit`, which loads, modifies, then writes the whole document.
+    /// Multi-pager safe via `config_edit::edit_config_tree`, which loads, modifies, then writes the whole document.
     /// Concurrent pagers may produce last-writer-wins behaviour but never corrupt the file.
     PersistDashboard(crate::views::dashboard::PersistedDashboard),
     /// Persist a per-command worktree mode preference to `ui.hints` in config.json.
