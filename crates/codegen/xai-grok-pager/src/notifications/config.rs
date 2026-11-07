@@ -7,7 +7,9 @@ pub struct NotificationConfig {
     pub condition: NotificationCondition,
     pub idle_threshold_secs: u64,
     pub events: Vec<NotificationEventKind>,
-    pub sleep_prevention: bool,
+    /// When the pager holds the system awake. The key `sleep_prevention` still reads, as a bool.
+    #[serde(alias = "sleep_prevention")]
+    pub keep_awake: KeepAwake,
     pub progress_bar: bool,
     /// Show an automatic "where was I" session recap when you return to the terminal after being away.
     /// Only applies when the shell has rolled out session recap (`sessionRecap` on ACP initialize or remote settings).
@@ -31,13 +33,75 @@ impl Default for NotificationConfig {
                 NotificationEventKind::TurnComplete,
                 NotificationEventKind::ApprovalRequired,
             ],
-            sleep_prevention: true,
+            keep_awake: KeepAwake::default(),
             progress_bar: true,
             session_recap: true,
             session_recap_threshold_secs: 30,
             title: TitleConfig::default(),
             hooks: Vec::new(),
         }
+    }
+}
+
+/// When to stop the system from idle-sleeping.
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KeepAwake {
+    Never,
+    /// While any session has a turn, an active goal, a background task, a live subagent or an active workflow.
+    #[default]
+    WhileRunning,
+    /// For as long as the pager runs.
+    Always,
+}
+
+impl KeepAwake {
+    pub const ALL: [Self; 3] = [Self::Never, Self::WhileRunning, Self::Always];
+
+    pub const fn as_canonical(self) -> &'static str {
+        match self {
+            Self::Never => "never",
+            Self::WhileRunning => "while_running",
+            Self::Always => "always",
+        }
+    }
+
+    pub fn from_canonical(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.as_canonical() == s)
+    }
+
+    /// Whether to hold the system awake, given whether any work runs now.
+    pub const fn wants_awake(self, running: bool) -> bool {
+        match self {
+            Self::Never => false,
+            Self::WhileRunning => running,
+            Self::Always => true,
+        }
+    }
+}
+
+/// Reads a mode name, or the bool of the old `sleep_prevention` key: `true` is `while_running`, `false` is `never`.
+impl<'de> Deserialize<'de> for KeepAwake {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = KeepAwake;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(r#""never", "while_running", "always", or a bool"#)
+            }
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<KeepAwake, E> {
+                Ok(if v {
+                    KeepAwake::WhileRunning
+                } else {
+                    KeepAwake::Never
+                })
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<KeepAwake, E> {
+                KeepAwake::from_canonical(v)
+                    .ok_or_else(|| E::invalid_value(serde::de::Unexpected::Str(v), &self))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
     }
 }
 
@@ -150,8 +214,10 @@ idle_threshold_secs = 3
 # Events that trigger notifications.
 # Options: turn_complete, approval_required, session_ready, task_complete, agent_error
 events = [\"turn_complete\", \"approval_required\"]
-# Prevent display sleep during agent turns (macOS/Linux).
-sleep_prevention = true
+# Keep the system awake: never|while_running|always (macOS/Linux).
+# \"while_running\" holds it while a turn, goal, background task, subagent or
+# workflow runs. \"always\" holds it while grok runs.
+keep_awake = \"while_running\"
 # Show a progress indicator in the terminal tab (OSC 9;4).
 progress_bar = true
 # Show an automatic \"where was I\" session recap when you return after being away.
@@ -194,7 +260,7 @@ mod tests {
                 NotificationEventKind::TurnComplete,
                 NotificationEventKind::AgentError,
             ],
-            sleep_prevention: false,
+            keep_awake: KeepAwake::Always,
             progress_bar: false,
             session_recap: false,
             session_recap_threshold_secs: 90,
@@ -230,7 +296,7 @@ mod tests {
                 NotificationEventKind::ApprovalRequired,
             ]
         );
-        assert!(parsed.sleep_prevention);
+        assert_eq!(parsed.keep_awake, KeepAwake::WhileRunning);
         assert!(parsed.progress_bar);
         assert!(parsed.session_recap);
         assert_eq!(parsed.session_recap_threshold_secs, 30);
@@ -250,8 +316,44 @@ mod tests {
         assert_eq!(parsed.idle_threshold_secs, 60);
         // The remaining fields keep their defaults
         assert_eq!(parsed.condition, NotificationCondition::Unfocused);
-        assert!(parsed.sleep_prevention);
+        assert_eq!(parsed.keep_awake, KeepAwake::WhileRunning);
         assert!(parsed.progress_bar);
+    }
+
+    #[test]
+    fn keep_awake_reads_every_mode() {
+        for mode in KeepAwake::ALL {
+            let toml_str = format!("keep_awake = \"{}\"", mode.as_canonical());
+            let parsed: NotificationConfig = toml::from_str(&toml_str).expect("deserialize");
+            assert_eq!(parsed.keep_awake, mode, "{toml_str}");
+        }
+    }
+
+    #[test]
+    fn keep_awake_reads_the_old_sleep_prevention_bool() {
+        for (toml_str, expected) in [
+            ("sleep_prevention = true", KeepAwake::WhileRunning),
+            ("sleep_prevention = false", KeepAwake::Never),
+            ("keep_awake = false", KeepAwake::Never),
+        ] {
+            let parsed: NotificationConfig = toml::from_str(toml_str).expect("deserialize");
+            assert_eq!(parsed.keep_awake, expected, "{toml_str}");
+        }
+    }
+
+    #[test]
+    fn keep_awake_rejects_an_unknown_mode() {
+        let err = toml::from_str::<NotificationConfig>("keep_awake = \"sometimes\"")
+            .expect_err("an unknown mode must not parse");
+        assert!(err.to_string().contains("while_running"), "{err}");
+    }
+
+    #[test]
+    fn keep_awake_wants_awake_per_mode() {
+        assert!(!KeepAwake::Never.wants_awake(true));
+        assert!(!KeepAwake::WhileRunning.wants_awake(false));
+        assert!(KeepAwake::WhileRunning.wants_awake(true));
+        assert!(KeepAwake::Always.wants_awake(false));
     }
 
     #[test]
@@ -342,8 +444,11 @@ mod tests {
             "template idle_threshold_secs does not match default"
         );
         assert!(
-            template.contains(&format!("sleep_prevention = {}", defaults.sleep_prevention)),
-            "template sleep_prevention does not match default"
+            template.contains(&format!(
+                "keep_awake = \"{}\"",
+                defaults.keep_awake.as_canonical()
+            )),
+            "template keep_awake does not match default"
         );
         assert!(
             template.contains(&format!("progress_bar = {}", defaults.progress_bar)),

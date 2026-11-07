@@ -12043,7 +12043,6 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
- "core-foundation",
  "crossterm",
  "dunce",
  "flate2",

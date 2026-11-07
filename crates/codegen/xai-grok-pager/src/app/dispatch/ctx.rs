@@ -120,18 +120,6 @@ pub(super) fn navigate_clearing_selection(app: &mut AppView, f: impl FnOnce(&mut
     });
 }
 
-/// Synchronize the sleep inhibitor with the aggregate agent state.
-/// Inhibits idle sleep when any agent is busy; releases when all are idle.
-/// Called after every `AgentState` transition in dispatch.
-pub(super) fn sync_sleep_inhibitor(app: &AppView) {
-    let any_busy = app.agents.values().any(|a| !a.session.state.is_idle());
-    if any_busy {
-        app.notification_service.sleep_inhibitor.inhibit();
-    } else {
-        app.notification_service.sleep_inhibitor.release();
-    }
-}
-
 pub(super) fn reseed_tip_for_new_session(app: &mut AppView) {
     if !matches!(app.active_view, ActiveView::Agent(_)) || app.tips.is_empty() {
         return;

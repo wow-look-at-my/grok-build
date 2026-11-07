@@ -176,10 +176,6 @@ nix = { workspace = true, features = ["signal"] }
 signal-hook = { workspace = true }
 libc = { workspace = true }
 
-# core-foundation: IOKit power assertions for sleep prevention (SleepInhibitor).
-[target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = { workspace = true }
-
 [dev-dependencies]
 xai-test-utils = { path = "../../common/xai-test-utils" }
 tokio = { workspace = true, features = ["test-util"] }

@@ -6,7 +6,7 @@ use super::auth::{
 use super::billing::dispatch_open_supergrok_url;
 use super::ctx::{
     active_agent_session_id, get_active_agent_mut, navigate_clearing_selection, open_url_or_show,
-    sync_sleep_inhibitor, with_active_agent, with_scrollback,
+    with_active_agent, with_scrollback,
 };
 use super::dashboard::{
     dispatch_dashboard_attach, dispatch_dashboard_begin_rename, dispatch_dashboard_change_location,
@@ -1627,7 +1627,7 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
     };
     restore_stash_where_the_draft_was_consumed(app);
     app.reconcile_foreign_resume_launch();
-    sync_sleep_inhibitor(app);
+    app.sync_keep_awake();
     effects
 }
 /// Show the image notices queued so far as one message on the visible surface; true when a surface

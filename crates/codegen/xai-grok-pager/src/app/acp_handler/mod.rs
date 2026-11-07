@@ -152,6 +152,7 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
     let migrate_effects = super::dispatch::migrate_local_rows_to_server_queue(app);
     app.pending_effects.extend(migrate_effects);
     let flushed = app.flush_image_notices_if_root();
+    app.sync_keep_awake();
     state_changed || flushed
 }
 fn handle_inner(msg: AcpClientMessage, app: &mut AppView) -> bool {

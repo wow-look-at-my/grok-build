@@ -2,6 +2,7 @@ use super::super::load::load_config_from_toml;
 use super::super::mcp::{McpConfig, parse_mcp_config_with_oauth};
 use super::super::settings_writes::{
     write_dashboard_preview, write_feature_override, write_model_context_window,
+    write_notifications_keep_awake,
 };
 use super::*;
 use toml::Value as TomlValue;
@@ -439,6 +440,51 @@ fn merge_section_empty_struct_preserves_existing_section() {
     assert_eq!(
         harness.get("another_key").and_then(|v| v.as_str()),
         Some("value"),
+    );
+}
+#[test]
+fn keep_awake_writer_replaces_sleep_prevention_and_keeps_other_notification_keys() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    std::fs::write(
+        &path,
+        "[ui]\ntheme = \"dark\"\n\n[ui.notifications]\nmethod = \"bel\"\nsleep_prevention = false\n",
+    )
+    .unwrap();
+    write_notifications_keep_awake(&path, "always", atomic_write_follow_bound).unwrap();
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let ui = saved.get("ui").unwrap();
+    let notifications = ui.get("notifications").unwrap();
+    assert_eq!(
+        notifications
+            .get("keep_awake")
+            .and_then(toml::Value::as_str),
+        Some("always")
+    );
+    assert!(
+        notifications.get("sleep_prevention").is_none(),
+        "both keys together fail the whole [ui.notifications] section"
+    );
+    assert_eq!(
+        notifications.get("method").and_then(toml::Value::as_str),
+        Some("bel")
+    );
+    assert_eq!(ui.get("theme").and_then(toml::Value::as_str), Some("dark"));
+}
+#[test]
+fn keep_awake_writer_creates_the_section_in_an_empty_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    std::fs::write(&path, "").unwrap();
+    write_notifications_keep_awake(&path, "never", atomic_write_follow_bound).unwrap();
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        saved
+            .get("ui")
+            .and_then(|ui| ui.get("notifications"))
+            .and_then(|n| n.get("keep_awake"))
+            .and_then(toml::Value::as_str),
+        Some("never")
     );
 }
 #[test]
