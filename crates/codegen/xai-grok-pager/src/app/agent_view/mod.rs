@@ -605,7 +605,7 @@ pub struct PluginCtaState {
     pub expects_mcp: bool,
     /// Post-install MCP-list re-probe counter, reset on each `AwaitingMcps` entry and bounded by the poll budget.
     pub mcp_attempt: u32,
-    /// Dismissed plugin ids, cached from `config.toml` on catalog load so the matched-debounce recompute never reads the config from disk.
+    /// Dismissed plugin ids, cached from `config.json` on catalog load so the matched-debounce recompute never reads the config from disk.
     pub dismissed: std::collections::HashSet<String>,
 }
 /// Follow-up suggestion chips for the latest assistant response

@@ -890,7 +890,7 @@ pub struct AppView {
     /// One-shot notice that a launch `--yolo` was pinned off; shown on the first agent view.
     pub yolo_launch_block_notice: Option<&'static str>,
     /// Require explicit plan approval via the plan viewer UI even in always-approve (YOLO) mode.
-    /// Loaded from `[ui] require_plan_approval` in config.toml at startup.
+    /// Loaded from `ui.require_plan_approval` in config.json at startup.
     pub require_plan_approval: bool,
     /// Enable plan mode for new sessions (`--plan`).
     /// Adds `enter_plan_mode`, `exit_plan_mode` tools; implies `ask_user`.
@@ -1037,7 +1037,7 @@ pub struct AppView {
     pub ask_user_question_timeout_enabled: Option<bool>,
     /// `[features].subagent_model_inheritance` as the settings modal shows it: the saved user key plus the tiers seeded at startup.
     pub subagent_model_inheritance: crate::settings::FeatureOverrideState,
-    /// Mirrors the `[model."<id>"] context_window` limits of the user `config.toml`, by model key.
+    /// Mirrors the `models.definitions."<id>".context_window` limits of the user `config.json`, by model key.
     pub model_context_limits: std::collections::BTreeMap<String, u64>,
     /// Whether ZDR users are allowed to use the product.
     /// Server-controlled via RemoteSettings (remote settings). Default `false` (blocked) during beta.
@@ -1097,7 +1097,7 @@ pub struct AppView {
     /// Where to return when leaving the dashboard. See [`DashboardReturn`].
     pub dashboard_return: Option<DashboardReturn>,
     /// Persisted dashboard configuration (pinned rows, reorderings, grouping).
-    /// Loaded once on startup from `~/.grok/config.toml`.
+    /// Loaded once on startup from `~/.grok/config.json`.
     /// `None` when the file/section is absent or contained malformed data; falls back to in-memory defaults.
     pub dashboard_persisted: Option<crate::views::dashboard::PersistedDashboard>,
     /// Per-platform key event normalizer.
@@ -1108,7 +1108,7 @@ pub struct AppView {
     /// When false (remote kill switch or `GROK_VOICE_MODE=0`) the STT pipeline is not started and session voice mode cannot turn on.
     /// Unit tests leave this false until they call [`Self::apply_voice_mode_enabled`].
     pub voice_mode_enabled: bool,
-    /// Session UI mode from `/voice` (this CLI process only, not in config.toml).
+    /// Session UI mode from `/voice` (this CLI process only, not in config.json).
     /// When true and the pipeline is up, the in-prompt dictation overlay can show and capture may start.
     /// Cleared on exit or when the remote flag turns off.
     pub voice_ui_active: bool,

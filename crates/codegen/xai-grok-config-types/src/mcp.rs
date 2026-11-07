@@ -63,6 +63,56 @@ pub enum McpServerTransportConfig {
     },
 }
 
+// Written by hand: the derived schema of the wire type marks every HTTP key optional, so it would accept any object
+impl schemars::JsonSchema for McpServerTransportConfig {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "McpServerTransportConfig".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let strings = serde_json::json!({ "type": "array", "items": { "type": "string" } });
+        let string_map =
+            serde_json::json!({ "type": "object", "additionalProperties": { "type": "string" } });
+        schemars::json_schema!({
+            "anyOf": [
+                {
+                    "description": "A stdio server: grok runs `command` and talks to it over stdin and stdout.",
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string" },
+                        "args": strings,
+                        "env": string_map,
+                        "cwd": { "type": "string" }
+                    },
+                    "required": ["command"]
+                },
+                {
+                    "description": "A streamable HTTP server. `urlTemplate` and `url_template` are other spellings of `url`.",
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string" },
+                        "urlTemplate": { "type": "string" },
+                        "url_template": { "type": "string" },
+                        "type": { "type": "string" },
+                        "bearer_token_env_var": {
+                            "description": "Name of the environment variable to read and set for `Authorization: Bearer <token>`.",
+                            "type": "string"
+                        },
+                        "headers": string_map,
+                        "oauth_client_id": { "type": "string" },
+                        "oauth_client_secret_env_var": { "type": "string" },
+                        "oauth_scopes": strings
+                    },
+                    "anyOf": [
+                        { "required": ["url"] },
+                        { "required": ["urlTemplate"] },
+                        { "required": ["url_template"] }
+                    ]
+                }
+            ]
+        })
+    }
+}
+
 impl McpServerTransportConfig {
     /// The keys the streamable-HTTP transport reads its URL under.
     pub const URL_KEYS: xai_tool_types::Aliases =
@@ -224,7 +274,7 @@ pub const KNOWN_MCP_SERVER_FIELDS: &[&str] = &[
     "url_template",
 ];
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct McpJsonOAuthBlock {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -239,7 +289,7 @@ pub struct McpJsonOAuthBlock {
 
 /// A server's setup prompt: the fields it asks for, and the answers already
 /// recorded under them.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(try_from = "McpSetupConfigWire")]
 pub struct McpSetupConfig {
     #[serde(default)]
@@ -256,7 +306,7 @@ impl McpSetupConfig {
 }
 
 /// `McpSetupConfig` with each answers-key spelling as its own field.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct McpSetupConfigWire {
     #[serde(default)]
     fields: Vec<McpSetupField>,
@@ -279,7 +329,7 @@ impl TryFrom<McpSetupConfigWire> for McpSetupConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct McpSetupField {
     pub id: String,
     pub label: String,
@@ -293,19 +343,19 @@ pub struct McpSetupField {
     pub options: Vec<McpSetupOption>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum McpSetupFieldType {
     Select,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct McpSetupOption {
     pub label: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 pub struct McpSetupDerivedValue {
     pub from: String,
     pub map: HashMap<String, String>,
@@ -355,7 +405,7 @@ pub enum McpSetupResolution {
     Invalid(String),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct McpServerConfig {
     #[serde(flatten)]
     pub transport: McpServerTransportConfig,

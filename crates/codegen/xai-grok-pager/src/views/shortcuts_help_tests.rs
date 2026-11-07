@@ -228,7 +228,7 @@ fn build_entries_groups_by_category() {
 
 #[test]
 fn mouse_reporting_shortcut_absent_by_default() {
-    // Opt-in via config.toml; default registry must not advertise it.
+    // Opt-in via config.json; default registry must not advertise it.
     let registry = ActionRegistry::defaults();
     assert!(registry.find(ActionId::ToggleMouseCapture).is_none());
     let entries = build_entries(&all_contexts(), &registry);

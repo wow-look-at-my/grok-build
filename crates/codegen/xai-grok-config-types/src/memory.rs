@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// changed for an already-running session. The resolver selects `V2` when no
 /// config says otherwise. `Legacy` is only the value of an unresolved,
 /// disabled [`MemoryConfig::default`].
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryMode {
     /// Existing summary, search, and Dream pipeline rooted at `memory/`.
@@ -23,7 +23,7 @@ pub enum MemoryMode {
 }
 
 /// Session-pinned memory-v2 rollout stage.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryV2Rollout {
     /// Disable every v2 read, capture, Dream, and write path.
@@ -88,7 +88,7 @@ impl MemoryMode {
 }
 
 /// Raw `[memory]` settings. Absence is preserved for per-field fallback.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemorySettings {
     pub enabled: Option<bool>,
@@ -104,7 +104,7 @@ pub struct MemorySettings {
 
 /// Raw top-level `[memory_v2]` enablement, rollout, kill-switch, and retention
 /// settings.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemoryV2Settings {
     /// Selects the memory-v2 implementation. Absent means on. False falls
@@ -181,14 +181,14 @@ impl MemoryV2Config {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemoryIndexSettings {
     pub max_chunk_chars: Option<usize>,
     pub chunk_overlap_chars: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemoryEmbeddingSettings {
     pub provider: Option<String>,
@@ -196,7 +196,7 @@ pub struct MemoryEmbeddingSettings {
     pub dimensions: Option<usize>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemorySearchSettings {
     pub max_results: Option<usize>,
@@ -209,14 +209,14 @@ pub struct MemorySearchSettings {
     pub source_weights: Option<std::collections::HashMap<String, f32>>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct TemporalDecaySettings {
     pub enabled: Option<bool>,
     pub half_life_days: Option<f64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MmrSettings {
     pub enabled: Option<bool>,
@@ -224,33 +224,33 @@ pub struct MmrSettings {
     pub lambda: Option<f64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemoryInitialInjectionSettings {
     pub enabled: Option<bool>,
     pub min_score: Option<f32>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemorySessionSettings {
     pub save_on_end: Option<bool>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemoryWatcherSettings {
     pub enabled: Option<bool>,
     pub stale_claim_secs: Option<i64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemoryGcSettings {
     pub max_age_days: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemoryDreamSettings {
     pub enabled: Option<bool>,
@@ -260,7 +260,7 @@ pub struct MemoryDreamSettings {
     pub check_interval_secs: Option<u64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MemoryFlushSettings {
     pub enabled: Option<bool>,
@@ -272,7 +272,7 @@ pub struct MemoryFlushSettings {
     pub semantic_dedup_threshold: Option<f64>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct PruningSettings {
     pub enabled: Option<bool>,

@@ -952,7 +952,9 @@ pub enum SearchSource {
 /// Per-model config for the `x-compaction-at` request header (a token count). The remote-config value is polymorphic:
 /// `true` enables the header with the value `context_window * auto_compact_threshold_percent / 100`. `false` (or absent)
 /// disables it; an integer `N` sends the constant `N`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(untagged)]
 pub enum CompactionAtTokens {
     Enabled(bool),
@@ -975,7 +977,9 @@ impl CompactionAtTokens {
 /// Per-model config for the `x-compactions-remaining` request header. `true` sends the dynamic value (1 on the
 /// uncompacted prefix, 0 once the session compacts). `false`/absent disables the header; an integer `N` sends the
 /// constant `N`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(untagged)]
 pub enum CompactionsRemaining {
     Dynamic(bool),
@@ -1003,7 +1007,9 @@ impl CompactionsRemaining {
     Eq,
     serde::Serialize,
     strum::AsRefStr,
-    strum::IntoStaticStr, schemars::JsonSchema)]
+    strum::IntoStaticStr,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "snake_case")]
 pub enum ReasoningEffort {
@@ -1102,7 +1108,9 @@ pub fn parse_canonical_effort_token(token: &str) -> Option<ReasoningEffort> {
     serde::Serialize,
     serde::Deserialize,
     strum::AsRefStr,
-    strum::IntoStaticStr, schemars::JsonSchema)]
+    strum::IntoStaticStr,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "snake_case")]
 pub enum ReasoningSummary {
@@ -1268,6 +1276,7 @@ pub const REASONING_EFFORTS_META_KEY: &str = "reasoningEfforts";
 /// A single selectable reasoning-effort option for a model.
 /// `id`/`label` are presentation and input; `value` is the canonical value sent on the wire.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[schemars(with = "RawReasoningEffortOption")]
 pub struct ReasoningEffortOption {
     pub id: String,
     pub value: ReasoningEffort,
@@ -1280,7 +1289,7 @@ pub struct ReasoningEffortOption {
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 enum RawReasoningEffortOption {
-    Bare(String),
+    Bare(#[schemars(with = "ReasoningEffort")] String),
     Full {
         value: ReasoningEffort,
         id: Option<String>,
@@ -1398,7 +1407,9 @@ pub fn reasoning_efforts_meta_value(opts: &[ReasoningEffortOption]) -> serde_jso
     serde_json::to_value(opts).unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiBackend {
     /// Use the Chat Completions API (/v1/chat/completions)
@@ -1470,7 +1481,9 @@ impl From<&str> for ConversationGroupId {
 
 /// Which optional message-level properties a Chat Completions target's schema
 /// accepts on replayed messages.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct ChatMessageProfile {
     /// Whether the target accepts `model_id` on replayed messages.
     pub accepts_model_id: bool,

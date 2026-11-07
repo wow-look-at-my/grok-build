@@ -110,7 +110,7 @@ See ~/.grok/README.md for more information.
     Workspace(WorkspaceMgmtArgs),
     /// Open the Agent Dashboard view at startup.
     /// The dashboard shows every session, top-level and subagents.
-    /// Disabled when `[dashboard].enabled = false` in `~/.grok/config.toml` or when the `GROK_AGENT_DASHBOARD=0` env var is set.
+    /// Disabled when `ui.dashboard.enabled` = `false` in `~/.grok/config.json` or when the `GROK_AGENT_DASHBOARD=0` env var is set.
     Dashboard,
 }
 /// Arguments for the `wrap` subcommand: the command to run, then its args.
@@ -254,7 +254,7 @@ pub struct AgentArgs {
     pub plugin_dirs: Vec<PathBuf>,
     /// Connect to a shared leader process instead of starting a new agent.
     /// Allows multiple clients to share one backend.
-    /// Defaults to [cli] use_leader in config.toml.
+    /// Defaults to cli.use_leader in config.json.
     #[arg(long, conflicts_with = "no_leader")]
     pub leader: bool,
     /// Start a new agent even when config enables leader mode.
@@ -705,7 +705,7 @@ pub struct PagerArgs {
     /// Highest precedence: overrides remote `todo_gate_enabled` and the built-in default (which is `false`).
     #[arg(long = "todo-gate", hide = true)]
     pub todo_gate: bool,
-    /// Set the installer field in config.toml.
+    /// Set the installer field in config.json.
     #[arg(long = "installer", value_name = "VALUE", hide = true)]
     pub installer: Option<String>,
     /// Run inline instead of using the terminal alternate screen.

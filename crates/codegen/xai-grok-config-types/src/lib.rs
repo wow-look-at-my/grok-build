@@ -69,7 +69,7 @@ impl TryFrom<CampaignOverrideWire> for CampaignOverride {
 /// Every field is `Option` with a per-field default, so a partial object parses and unknown future keys are ignored.
 /// Unset fields fall through per-field in `resolve_doom_loop_recovery`: env, then TOML, then remote, then default.
 /// The namespace is distinct from the removed legacy `doom_loop_*` keys.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct DoomLoopRecoverySettings {
     /// Send the `x-grok-doom-loop-check` header, parse the reported triggers, and resample confident loops.
@@ -81,13 +81,14 @@ pub struct DoomLoopRecoverySettings {
     pub max_threshold: Option<u32>,
     /// Resample budget per turn. `-1` or `"unlimited"` never runs out.
     #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "retry_budget::json_schema")]
     pub max_retries: Option<u32>,
     /// Detector window sent as the value of `x-grok-doom-loop-check` (honored in 512..=4096, otherwise 4096; absent uses the client default, 1024).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_tokens: Option<u32>,
 }
 /// Shared shape of the `[long_reasoning_reminder]` TOML table and the remote `long_reasoning_reminder` object; unset fields fall through per field.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct LongReasoningReminderSettings {
     /// Mid-turn reminder to reason briefly after a long hidden-reasoning call; default off.
@@ -103,7 +104,7 @@ pub struct LongReasoningReminderSettings {
 /// Advanced knobs for the output-rate floor: the `[output_rate_floor]` TOML
 /// table. Every field is `Option` so a partial table never fails the parse
 /// and each key falls through to the client default on its own.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct OutputRateFloorSettings {
     /// Trailing window the rate is measured over, in seconds.
@@ -111,6 +112,7 @@ pub struct OutputRateFloorSettings {
     pub window_secs: Option<u64>,
     /// Reissue budget per model call. `-1` or `"unlimited"` never runs out.
     #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "retry_budget::json_schema")]
     pub max_retries: Option<u32>,
 }
 
@@ -126,6 +128,20 @@ impl Serialize for WorktreeKindMaxAge {
             Self::Secs(n) => serializer.serialize_u64(*n),
             Self::Never => serializer.serialize_str("never"),
         }
+    }
+}
+impl schemars::JsonSchema for WorktreeKindMaxAge {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "WorktreeKindMaxAge".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Seconds, or \"never\".",
+            "anyOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "pattern": "^([Nn][Ee][Vv][Ee][Rr]|[0-9]+)$" }
+            ]
+        })
     }
 }
 impl<'de> Deserialize<'de> for WorktreeKindMaxAge {
@@ -165,7 +181,7 @@ impl<'de> Deserialize<'de> for WorktreeKindMaxAge {
 }
 /// Policy from the local `[worktree.auto_gc]` table or the remote `worktree_auto_gc` object.
 /// Each field deserializes tolerantly, so one bad key cannot drop a sibling kill-switch.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct WorktreeAutoGcSettings {
     /// `Some(false)` is a kill-switch; absent defaults to on (an env kill still applies).

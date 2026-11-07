@@ -131,7 +131,7 @@ pub struct AcpConnection {
 /// CLI flags that affect agent configuration, threaded from PagerArgs.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectFlags {
-    /// `--no-subagents`. Only an explicit flag reaches the CLI tier of the resolver; otherwise env, config.toml, and the default decide, exactly as in `grok agent stdio`.
+    /// `--no-subagents`. Only an explicit flag reaches the CLI tier of the resolver; otherwise env, config.json, and the default decide, exactly as in `grok agent stdio`.
     pub no_subagents: bool,
     /// CLI memory override set by a legacy compatibility flag.
     pub memory_enabled_override: Option<bool>,
@@ -141,7 +141,7 @@ pub struct ConnectFlags {
     /// Session-scoped `--todo-gate` override. Forces `ReminderPolicy.todo_gate.enabled = true` for this session.
     pub todo_gate: bool,
     /// Session-scoped `--laziness-debug-log <path>` override. Observation-only (no nudges). Prototype and eval use
-    /// only; not persisted to config.toml.
+    /// only; not persisted to config.json.
     pub laziness_debug_log: Option<std::path::PathBuf>,
     /// Storage mode override.
     pub storage_mode: Option<String>,

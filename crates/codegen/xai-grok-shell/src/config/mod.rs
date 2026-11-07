@@ -47,7 +47,7 @@ fn resolve_standalone_memory_mode(
 /// Configuration for subagent (task tool) support.
 /// Parsed from the `[subagents]` section of `~/.grok/config.toml` or `.grok/config.toml`.
 /// Enabled by default; can be disabled via the `GROK_SUBAGENTS=0` env var or `[subagents] enabled = false` in config.toml.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SubagentsConfig {
     /// Whether subagent support is enabled. Defaults to `true`, so a `[subagents]` table that only tunes limits, models, or toggles keeps subagents on.
@@ -475,7 +475,7 @@ impl SubagentsConfig {
 /// Managed MCP connector fetching config (`[managed_mcps]` in config.toml).
 ///
 /// See [`Self::resolve`] for full priority chain.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ManagedMcpsConfig {
     pub enabled: bool,
@@ -679,7 +679,7 @@ impl ModelOverrideConfig {
     }
 }
 /// Raw `[tools.media_gen]` counts; resolve via [`ToolsConfig::resolve_max_parallel_image_gen_calls`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MediaGenToolsConfig {
     #[serde(default)]
@@ -689,7 +689,7 @@ pub struct MediaGenToolsConfig {
 }
 /// Tool behavior configuration (`[tools]` in config.toml).
 /// Controls cross-cutting tool behavior such as `.gitignore` filtering.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ToolsConfig {
     /// When `true`, all tools (including `read_file`) filter gitignored files.

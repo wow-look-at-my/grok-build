@@ -285,7 +285,7 @@ pub struct PendingWrite {
 }
 
 /// A registry `[features]` row as the settings modal sees it.
-/// The user `config.toml` key is the only layer the modal writes; the other tiers are seeded once so the effective value can be re-resolved after a local write without re-reading disk.
+/// The user `config.json` key is the only layer the modal writes; the other tiers are seeded once so the effective value can be re-resolved after a local write without re-reading disk.
 #[derive(Debug, Clone, Copy)]
 pub struct FeatureOverrideState {
     pub feature: Feature,
@@ -437,7 +437,7 @@ pub struct PagerLocalSnapshot {
     pub subagent_model_inheritance: FeatureOverrideState,
     /// The catalog window of each model, by model id.
     pub model_windows: std::collections::BTreeMap<String, u64>,
-    /// Mirrors the `[model."<id>"] context_window` limits of the user `config.toml`, by model key.
+    /// Mirrors the `models.definitions."<id>".context_window` limits of the user `config.json`, by model key.
     pub context_limits: std::collections::BTreeMap<String, u64>,
 }
 

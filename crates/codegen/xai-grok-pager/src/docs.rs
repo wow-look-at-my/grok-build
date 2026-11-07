@@ -68,7 +68,7 @@ pub static USER_GUIDE: &[Doc] = &[
     guide!(
         "05-configuration.md",
         "Configuration",
-        "config.toml, pager.toml, environment variables, file locations"
+        "config.json, pager.toml, environment variables, file locations"
     ),
     guide!(
         "06-theming.md",
@@ -178,7 +178,7 @@ pub static USER_GUIDE: &[Doc] = &[
     guide!(
         "26-config-reference.md",
         "Configuration Reference",
-        "Field list for config.toml, managed_config.toml, and requirements.toml"
+        "Field list for config.json, managed_config.toml, and requirements.toml"
     ),
     // Direct include_str! so gazelle can put this file in compile_data.
     // `guide!` hides the path inside concat!($file) and gazelle cannot see it.

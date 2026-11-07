@@ -105,7 +105,7 @@ pub enum WarningCategory {
     TmuxExtendedKeysOff,
     /// The terminal is unrecognised and the notification protocol fell back to BEL (audible bell only).
     NotificationProtocolFallback,
-    /// The terminal does not reliably support CSI focus-tracking events, so `condition = "unfocused"` will never fire.
+    /// The terminal does not reliably support CSI focus-tracking events, so `ui.notifications.condition` set to `unfocused` will never fire.
     FocusTrackingUnavailable,
     /// WezTerm with the Kitty keyboard protocol inactive (its `enable_kitty_keyboard` option defaults to `false`).
     /// Shift+Enter is then byte-identical to Enter and can't insert newlines.
@@ -2345,7 +2345,7 @@ mod tests {
                 .remediation
                 .as_ref()
                 .is_some_and(|remediation| {
-                    remediation.fix.contains("condition = \"always\"")
+                    remediation.fix.contains("ui.notifications.condition")
                         && remediation.config_path.as_deref()
                             == Some(
                                 crate::util::display_user_grok_path(
