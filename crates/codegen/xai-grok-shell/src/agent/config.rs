@@ -1339,12 +1339,15 @@ pub struct MarketplaceConfig {
     pub sources: Vec<MarketplaceSourceEntry>,
     /// Written/read out-of-band by `extensions::marketplace`, opaque so a wrong-typed value can't fail load.
     #[serde(default)]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub official_marketplace_auto_installed: Option<toml::Value>,
     /// Read out-of-band by the pager (plugin-CTA marketplace override), opaque so a wrong-typed value can't fail load.
     #[serde(default)]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub plugin_cta_marketplace: Option<toml::Value>,
     /// Written/read out-of-band by `extensions::marketplace`, opaque so a wrong-typed value can't fail load.
     #[serde(default)]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub default_skills_installs_purged: Option<toml::Value>,
 }
 /// A single `[[marketplace.sources]]` entry.
@@ -1373,10 +1376,14 @@ pub use xai_grok_agent::prompt::paths::PathsConfig;
 #[serde(default)]
 pub struct PermissionKnownKeys {
     /// Compact rule arrays (`parse_toml_permission_section`).
+    #[schemars(with = "Option<Vec<String>>")]
     pub allow: Option<toml::Value>,
+    #[schemars(with = "Option<Vec<String>>")]
     pub deny: Option<toml::Value>,
+    #[schemars(with = "Option<Vec<String>>")]
     pub ask: Option<toml::Value>,
     /// Verbose `[[permission.rules]]` form.
+    #[schemars(with = "Option<Vec<serde_json::Map<String, serde_json::Value>>>")]
     pub rules: Option<toml::Value>,
 }
 /// `[shell_environment_policy]` known keys, for the unrecognized-key scan only.
@@ -1384,6 +1391,7 @@ pub struct PermissionKnownKeys {
 /// `Option<toml::Value>` (no `deny_unknown_fields`) keeps a typo a warning, not a load failure, like [`PermissionKnownKeys`].
 #[derive(Clone, Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
+#[schemars(with = "xai_grok_tools::util::ShellEnvironmentPolicy")]
 pub struct ShellEnvironmentPolicyKnownKeys {
     pub inherit: Option<toml::Value>,
     pub ignore_default_excludes: Option<toml::Value>,
@@ -1440,6 +1448,7 @@ pub struct Config {
     pub model_providers: IndexMap<String, ModelProviderConfig>,
     /// Written by the client via `config_toml_edit`; absorbed so it isn't flagged as an unrecognized key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub hints: Option<toml::Value>,
     #[serde(default)]
     pub ui: UiConfig,
@@ -1515,6 +1524,7 @@ pub struct Config {
     pub auth: Option<GrokComConfig>,
     /// `[desktop]` section: owned by grok-desktop (Electron app), opaque to the CLI agent.
     #[serde(default, skip_serializing)]
+    #[schemars(with = "Option<serde_json::Value>")]
     pub desktop: Option<toml::Value>,
     /// Top-level `announcements` array: consumed by `resolve_announcements`.
     #[serde(default, skip_serializing)]
@@ -4556,6 +4566,7 @@ pub struct ConfigModelOverride {
     pub ttft_timeout_secs: Option<u64>,
     /// Extra top-level fields merged into every request body for this model.
     #[serde(default)]
+    #[schemars(with = "IndexMap<String, serde_json::Value>")]
     pub extra_body: IndexMap<String, toml::Value>,
     /// Suppress the modelinfo price.
     pub pricing_lookup_enabled: Option<bool>,

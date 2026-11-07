@@ -12728,6 +12728,7 @@ name = "xai-grok-subagent-resolution"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
@@ -13003,6 +13004,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.24",
  "rustc-hash 2.1.1",
+ "schemars",
  "serde",
  "serde_json",
  "sha1 0.10.6",

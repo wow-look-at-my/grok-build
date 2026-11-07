@@ -74,7 +74,7 @@ Hooks are discovered from several places (all are merged):
 | Config | `requirements.toml` (signed cache) and `/etc/grok/requirements.json` | Always | Organization-enforced hooks; see [Enforced hooks](#enforced-hooks) |
 | Plugin | Bundled inside installed plugins | Per-plugin | Shared team hooks |
 
-Config-file hooks live in the same TOML your organization already controls. See [Hooks in Config Files](#hooks-in-config-files) for the format. Default scans the compatible vendor hook sources. To disable scanning for a specific vendor, set `[compat.<vendor>] hooks = false` in `~/.grok/config.json` or the corresponding environment variable. See [Configuration](05-configuration.md#harness-compatibility) for details.
+Config-file hooks live in the same config files your organization already controls. See [Hooks in Config Files](#hooks-in-config-files) for the format. Default scans the compatible vendor hook sources. To disable scanning for a specific vendor, set `extensions.compat.<vendor>.hooks` to `false` in `~/.grok/config.json` or the corresponding environment variable. See [Configuration](05-configuration.md#harness-compatibility) for details.
 
 **Trusting a project**: The first time you open a project with hooks, you must trust it before its project hooks will run. Until then they are silently skipped. Grant trust by running `/hooks-trust` (or launching with `--trust`). The decision is recorded in the unified folder-trust store (`~/.grok/trusted_folders.json`), the same gate that governs repo-local MCP/LSP servers. Global hooks in `~/.grok/hooks/` are always trusted and need no entry. This prevents untrusted repos from running arbitrary code.
 
@@ -196,13 +196,13 @@ When an event fires, Grok resolves it in multiple steps:
 
 ## Hooks in Config Files
 
-Hooks can also live directly in your Grok config. As a result, a team can distribute them with the rest of their configuration instead of shipping separate JSON files. The same `hooks` object is read from multiple TOML files:
+Hooks can also live directly in your Grok config. As a result, a team can distribute them with the rest of their configuration instead of shipping separate JSON files. The same `hooks` object is read from multiple config files:
 
 | File | Tier | Who sets it |
 |------|------|-------------|
 | `~/.grok/config.json` | User | You |
-| `managed_config.toml` (`$GROK_HOME`, `/etc/grok`) | Managed / system | Your organization |
-| `requirements.toml` (`$GROK_HOME` signed cache, `/etc/grok`) | Requirements | Your organization |
+| `managed_config.toml` (`$GROK_HOME`), `/etc/grok/managed_config.json` | Managed / system | Your organization |
+| `requirements.toml` (`$GROK_HOME` signed cache), `/etc/grok/requirements.json` | Requirements | Your organization |
 
 The `hooks` object has the same structure as the JSON hook object, so an existing hook pastes in directly:
 
@@ -235,7 +235,7 @@ Each matcher group is an entry in the `hooks.<Event>` array with an optional `ma
 
 Hooks from the config layers your organization controls are enforced. They carry a `[policy]` badge in `/hooks`, `Space` refuses to disable them, an entry in `~/.grok/disabled-hooks` does not skip them. This is their source cannot be removed. Layers qualify:
 
-- The root-owned system files `/etc/grok/requirements.toml` and `/etc/grok/managed_config.toml` (`requirements/system:` and `system_managed:` names).
+- The root-owned system files `/etc/grok/requirements.json` and `/etc/grok/managed_config.json` (`requirements/system:` and `system_managed:` names).
 - The `~/.grok/requirements.toml` that the deployment sync writes, while its bytes match the signed policy the server sent (`requirements/signed:` names). If the file is edited or its signature file is missing or unreadable, its hooks load as your own (`requirements/user:` names) and can be disabled again. An unreadable `requirements.toml` contributes no hooks. Organizations that need the file to stay intact set `fail_closed = true` in the same requirements. This refuses to start on an edited copy or a missing signature (an unreadable file is a read error and still starts). See [Configuration](26-config-reference.md#requirementstoml).
 
 Hooks in `~/.grok/managed_config.toml` and `~/.grok/config.json` are distribution, not enforcement: you can disable them.
@@ -254,7 +254,7 @@ An organization can restrict a machine to the hooks it enforces:
 
 With this set:
 
-- **What runs.** Only [enforced hooks](#enforced-hooks): the ones from the root-owned `/etc/grok/requirements.toml` and `/etc/grok/managed_config.toml`, and the ones in the synced `~/.grok/requirements.toml` while it matches its signature. An edited synced file loads as your own hooks, which the pin skips.
+- **What runs.** Only [enforced hooks](#enforced-hooks): the ones from the root-owned `/etc/grok/requirements.json` and `/etc/grok/managed_config.json`, and the ones in the synced `~/.grok/requirements.toml` while it matches its signature. An edited synced file loads as your own hooks, which the pin skips.
 - **What is skipped.** Every other hook, at dispatch: `~/.grok/hooks`, every `~/.grok/*.toml` file, project hooks, plugin hooks, agent frontmatter hooks, and the Claude and Cursor compatibility files. In `/hooks` they show `[disabled]`, and enabling them is refused ("Hooks outside managed policy are disabled by your organization."). `grok inspect` names the file that set the pin.
 - **What still runs.** Hooks the embedding client registers over ACP (an IDE or the desktop app), as under Claude Code's `allowManagedHooksOnly`. The pager's `[[ui.notifications.hooks]]` commands are a separate mechanism.
 - **Windows.** There is no root-owned layer (no `/etc/grok`), so only the signed synced `requirements.toml` hooks and ACP client hooks still run.
