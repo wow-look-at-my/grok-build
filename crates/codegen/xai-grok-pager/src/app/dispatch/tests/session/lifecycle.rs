@@ -1492,8 +1492,8 @@ fn trust_folder_quits_when_store_unreadable() {
     let home = tempfile::tempdir().expect("home tempdir");
     unsafe { std::env::set_var("GROK_HOME", home.path()) };
     simulate_release_build();
-    let store_path = home.path().join("trusted_folders.toml");
-    let before = b"[[[not-toml";
+    let store_path = home.path().join(xai_grok_config::TRUSTED_FOLDERS_FILENAME);
+    let before = b"{{{not-json";
     std::fs::write(&store_path, before).unwrap();
     let (_repo, workspace, mut app) = pending_trust_workspace();
     let effects = dispatch(Action::TrustFolder, &mut app);

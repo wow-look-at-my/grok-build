@@ -21,10 +21,16 @@ fn test_home() -> &'static PathBuf {
 }
 
 fn reset_config_files(home: &std::path::Path) {
-    for name in ["config.toml", "requirements.toml", "managed_config.toml"] {
+    for name in [
+        "config.json",
+        "config.toml",
+        "config.toml.migrated",
+        "requirements.toml",
+        "managed_config.toml",
+    ] {
         let path = home.join(name);
         // `remove_file` cannot clear a directory squat left by
-        // `update_config_refuses_unreadable_config_toml`; later `fs::write`
+        // `update_config_refuses_unreadable_config_json`; later `fs::write`
         // then fails with EISDIR.
         match fs::symlink_metadata(&path) {
             Ok(m) if m.is_dir() => {
@@ -204,24 +210,24 @@ async fn update_config_preserves_config_toml_symlink() {
     );
 }
 
-/// A present-but-unreadable `config.toml` (directory squat) must not be treated
+/// A present-but-unreadable `config.json` (directory squat) must not be treated
 /// as empty and rewritten — same class as an `ELOOP` symlink chain the kernel
 /// cannot `open`.
 #[tokio::test]
 #[serial]
 #[cfg(unix)]
-async fn update_config_refuses_unreadable_config_toml() {
+async fn update_config_refuses_unreadable_config_json() {
     let home = test_home();
     reset_config_files(home);
 
-    let squat = home.join("config.toml");
+    let squat = home.join("config.json");
     fs::create_dir(&squat).unwrap();
 
     let err = xai_grok_shell::util::config::update_config(|cfg| {
         cfg.ui.show_thinking_blocks = Some(true);
     })
     .await
-    .expect_err("unreadable config.toml must fail closed");
+    .expect_err("unreadable config.json must fail closed");
     let msg = err.to_string();
     assert!(
         msg.contains("unreadable") || msg.contains("Is a directory") || msg.contains("directory"),
