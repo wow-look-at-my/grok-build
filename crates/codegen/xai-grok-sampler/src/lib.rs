@@ -19,6 +19,7 @@
 
 pub mod actor;
 pub mod attribution;
+pub mod backend_detect;
 pub mod client;
 pub mod commands;
 pub mod config;
@@ -43,6 +44,9 @@ pub use actor::SamplerActor;
 pub use actor::request_task::CompletionResult;
 pub use attribution::{
     Auth401AttributionCallback, BEARER_SUFFIX_LEN, SamplingConsumer, SharedAttributionCallback,
+};
+pub use backend_detect::{
+    detected_backend, effective_api_backend, is_backend_mismatch, resolve_api_backend,
 };
 pub use client::{ApiBackend, SamplingClient, user_agent_string_for};
 pub use config::{

@@ -110,6 +110,9 @@ pub enum RetryDecision {
     /// Retry with the tool schemas in their fallback form.
     RetryWithToolSchemaFallback,
 
+    /// Retry the same request on another API backend: the model is not served on this ([`crate::backend_detect`]).
+    RetryWithBackendSwitch,
+
     /// Retry after marking the target reasoning-mandatory and remapping.
     RetryWithReasoningEffortRemap,
 
@@ -149,6 +152,11 @@ pub fn classify_error(
     // fail every turn on the same schema.
     if err.is_tool_schema_combinator_error() {
         return RetryDecision::RetryWithToolSchemaFallback;
+    }
+
+    // A wrong API for the model fails every attempt on it.
+    if crate::backend_detect::is_backend_mismatch(err) {
+        return RetryDecision::RetryWithBackendSwitch;
     }
 
     // Token overflows fail fast via the retry veto below; byte-coded rejections (413 or a byte-size code) strip images and retry
@@ -602,6 +610,23 @@ mod tests {
         assert!(matches!(
             classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
             RetryDecision::RetryWithToolSchemaFallback
+        ));
+    }
+
+    #[test]
+    fn classify_responses_only_model_switches_backend() {
+        let err = api_err(
+            StatusCode::NOT_FOUND,
+            "This model is only supported in v1/responses and not in v1/chat/completions.",
+        );
+        assert!(matches!(
+            classify_error(&err, 0, 5, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::RetryWithBackendSwitch
+        ));
+        // Observe-only callers never retry, a backend switch included.
+        assert!(matches!(
+            classify_error(&err, 0, 0, RATE_LIMIT_RETRY_THRESHOLD),
+            RetryDecision::Fatal(_)
         ));
     }
 
