@@ -3274,7 +3274,7 @@ mod tests {
         let home = tempfile::TempDir::new().unwrap();
         std::fs::write(
             home.path().join(xai_grok_config::USER_CONFIG_FILENAME),
-            r#"{"worktree": {"auto_gc": {"enabled": true, "max_age_secs": 86400}}}"#,
+            r#"{"worktrees": {"auto_gc": {"enabled": true, "max_age_secs": 86400}}}"#,
         )
         .unwrap();
         assert_eq!(

@@ -1863,10 +1863,7 @@ pub fn dismissed_plugin_ctas() -> std::collections::HashSet<String> {
 pub fn dismissed_plugin_ctas_in_file(
     config_path: &std::path::Path,
 ) -> std::collections::HashSet<String> {
-    let Ok(content) = std::fs::read_to_string(config_path) else {
-        return std::collections::HashSet::new();
-    };
-    let Ok(config) = toml::from_str::<toml::Value>(&content) else {
+    let Ok(config) = xai_grok_config::load_toml_file(config_path) else {
         return std::collections::HashSet::new();
     };
     config
