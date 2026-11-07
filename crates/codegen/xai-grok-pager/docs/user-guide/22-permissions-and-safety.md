@@ -293,11 +293,11 @@ Because `deny` always wins, you cannot combine these `allow` rules with a catch-
 
 Rules from the global `~/.grok/config.json` and every project `.grok/config.json` (from the repo root down to your working directory) are merged into one rule set, alongside any `.claude/settings.json` rules.
 
-Managed configuration deployed by your organization also contributes `[permission]` rules: the system `/etc/grok/managed_config.toml`, and a user-level copy that Grok maintains automatically at `~/.grok/managed_config.toml`. Managed rules merge like rules from any other source, with two properties specific to managed `allow` rules: your own `deny` and `ask` rules win over a managed `allow` (severity ordering), and a catch-all managed `allow` is ignored when always-approve is locked off. For rules that users cannot edit away, use the root-owned system `/etc/grok/requirements.toml`.
+Managed configuration deployed by your organization also contributes `permission` rules: the system `/etc/grok/managed_config.json`, and a user-level copy that Grok maintains automatically at `~/.grok/managed_config.toml`. Managed rules merge like rules from any other source, with multiple properties specific to managed `allow` rules. Your own `deny` and `ask` rules win over a managed `allow` (severity ordering). A catch-all managed `allow` is ignored when always-approve is locked off. For rules that users cannot edit away, use the root-owned system `/etc/grok/requirements.json`.
 
 Permission rules from every source are read once, when a session starts. Changes apply to the next session.
 
-The native `[permission]` section also accepts the compact `allow` / `deny` / `ask` string-array form, using the same rule strings as the `--allow` / `--deny` flags and `.claude/settings.json`:
+The native `permission` section also accepts the compact `allow` / `deny` / `ask` string-array form, using the same rule strings as the `--allow` / `--deny` flags and `.claude/settings.json`:
 
 ```json
 {
@@ -606,7 +606,7 @@ Recommended combination for untrusted code:
 
 - Permission decisions appear in the transcript.
 - The `/always-approve` command toggles always-approve mode; other modes are set through `defaultMode` (see [How to set the mode](#how-to-set-the-mode)).
-- Permission prompts include per-command "Always allow" options that persist for the current project only (on by default; disable with `[ui] remember_tool_approvals = false`). See [Interactive Approvals](#interactive-approvals-and-where-they-persist).
+- Permission prompts include per-command "Always allow" options that persist for the current project only (on by default; disable with `ui.remember_tool_approvals` set to `false`). See [Interactive Approvals](#interactive-approvals-and-where-they-persist).
 - To manage hooks and plugins, run `/hooks` or `/plugins` (on most terminals, **Ctrl+L** also opens the Extensions modal; on VS Code, Cursor, Windsurf, and Zed, `Ctrl+L` is mid-turn interject instead). See [10-hooks.md](10-hooks.md).
 
 ---
