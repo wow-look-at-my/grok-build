@@ -35,7 +35,7 @@ The theme paints no backgrounds at all: your messages render in bold instead of 
 
 Contrast is only as good as your terminal profile: a profile with a very dark bright-black slot will render faint dividers, since Grok derives everything from your palette rather than hard-coding colors.
 
-The theme is rolling out gradually. Until the rollout reaches your account it is hidden from `/theme` and `/settings`, its names do not parse, and a configured `theme = "terminal"` falls back to the default theme. Set `GROK_TERMINAL_THEME=1` (or `[features] terminal_theme = true` in `config.json`) to enable it locally ahead of the rollout.
+The theme rolls out gradually. Until the rollout reaches your account it is hidden from `/theme` and `/settings`, its names do not parse. A configured `"theme": "terminal"` falls back to the default theme. Set `GROK_TERMINAL_THEME=1` (or `"terminal_theme": true` under `features` in `config.json`) to enable it locally ahead of the rollout.
 
 ---
 
@@ -161,7 +161,7 @@ Toggle compact mode with the `/compact-mode` slash command. Compact mode:
 - Reduces horizontal padding to the minimum (1 column).
 - Reduces top padding in the prompt area and info blocks.
 
-The setting is persisted in `~/.grok/config.json` under `[ui].compact_mode` and survives restarts.
+The setting is persisted in `~/.grok/config.json` under `ui.compact_mode` and survives restarts.
 
 Use compact mode on small screens to maximize content area.
 

@@ -211,7 +211,7 @@ grok inspect --json   # Machine-readable report
 
 Grok tags any skill disabled via `extensions.skills.disabled` or from a disabled vendor surface with `[disabled]`.
 
-The report honors your `extensions.skills` config the same way a live session does: skills from `paths` are listed, skills under an `ignore` prefix are hidden, and skills named in `disabled` stay listed but tagged `[disabled]`.
+The report honors your `extensions.skills` config the same way a live session does. Skills from `paths` are listed, skills under an `ignore` prefix are hidden, and skills named in `disabled` stay listed but tagged `[disabled]`.
 
 The `--json` report includes the full detail for each skill: its `name`, `description`, `source` (with the path to the SKILL.md file), and `userInvocable` flag. Skills whose bare slash name is contested — by a built-in command or by another skill — also include `collidesWith` (the contested name) and `invocableAs` (the qualified command to type).
 
