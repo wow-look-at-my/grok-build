@@ -81,6 +81,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/harness-model-slot-notes.md](docs/harness-model-slot-notes.md) holds this section.
 
+## Keep-awake notes
+
+- `[ui.notifications].keep_awake` is `never` | `while_running` (default) | `always`. The old `sleep_prevention` bool still reads as an alias. A child process holds the lock: `caffeinate -i -w <pid>` on macOS, `systemd-inhibit --what=idle` on Linux (`notifications/sleep.rs`).
+- `AppView::sync_keep_awake` runs after every `dispatch` and every `acp_handler::handle`. A turn end arrives over ACP, so a sync only in `dispatch` holds the lock until the next keypress. "Running" is `AppView::has_running_work`: a turn or command, an active goal, a running background task, a live subagent or an active workflow.
+
 ## `/debug` feature notes
 
 - `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only `scroll`, `fps` and `log` are reserved. Everything else is free text. So a question must never come back as an "unknown option" error again.

@@ -482,6 +482,8 @@ pub enum Action {
     /// Set `[scrollback.scroll].respect_manual_folds`.
     /// PAGER-owned: live-applied via `AppView::set_appearance` and persisted to pager.toml via `Effect::PersistSetting`.
     SetRespectManualFolds(bool),
+    /// Set `[ui.notifications].keep_awake`.
+    SetKeepAwake(crate::notifications::KeepAwake),
     /// Set the canonical for `[ui].default_selected_permission`. Persists via `Effect::PersistSetting`.
     /// Payload is the registry's canonical string (`default` | `allow_once` | `allow_always` | `reject`).
     SetDefaultSelectedPermission(String),

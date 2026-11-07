@@ -1144,6 +1144,7 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
+    let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let result = {
         let Some(invocation) = parse_invocation(trimmed.as_str()) else {
             return vec![];
@@ -1232,6 +1233,7 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                     &app.models.available,
                 ),
                 context_limits: app.model_context_limits.clone(),
+                keep_awake: keep_awake_from_app,
             },
         };
         command.run_with_token(&mut ctx, invocation.token, invocation.args)

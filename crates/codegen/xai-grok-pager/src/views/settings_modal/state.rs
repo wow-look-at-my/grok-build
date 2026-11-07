@@ -1140,6 +1140,9 @@ pub(super) fn action_for_enum_commit(key: SettingKey, choice: &'static str) -> O
             _ => None,
         },
         "hunk_tracker_mode" => Some(Action::SetHunkTrackerMode(choice.to_string())),
+        "keep_awake" => {
+            crate::notifications::KeepAwake::from_canonical(choice).map(Action::SetKeepAwake)
+        }
         "voice_capture_mode" => Some(Action::SetVoiceCaptureMode(choice.to_string())),
         "voice_stt_language" => Some(Action::SetVoiceSttLanguage(choice.to_string())),
         "render_mermaid" => {

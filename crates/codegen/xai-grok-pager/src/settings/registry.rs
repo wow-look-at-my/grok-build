@@ -439,6 +439,8 @@ pub struct PagerLocalSnapshot {
     pub model_windows: std::collections::BTreeMap<String, u64>,
     /// Mirrors the `[model."<id>"] context_window` limits of the user `config.toml`, by model key.
     pub context_limits: std::collections::BTreeMap<String, u64>,
+    /// The live keep-awake mode of the pager's sleep inhibitor.
+    pub keep_awake: crate::notifications::KeepAwake,
 }
 
 impl Default for PagerLocalSnapshot {
@@ -465,6 +467,7 @@ impl Default for PagerLocalSnapshot {
             ),
             model_windows: std::collections::BTreeMap::new(),
             context_limits: std::collections::BTreeMap::new(),
+            keep_awake: crate::notifications::KeepAwake::default(),
         }
     }
 }
@@ -689,6 +692,7 @@ pub fn current_value_for(
         )),
         // PAGER: read from the snapshot
         "multiline_mode" => Some(SettingValue::Bool(pager.multiline_mode)),
+        "keep_awake" => Some(SettingValue::Enum(pager.keep_awake.as_canonical())),
         "scroll_speed" => Some(SettingValue::Int(pager.scroll_speed as i64)),
         // Live caches (like `group_tool_verbs`); scroll_lines shows the registry default 3 while unset (profile-default state)
         "scroll_mode" => Some(SettingValue::Enum(
@@ -1480,6 +1484,14 @@ mod tests {
                     assert_eq!(
                         *default, pager.multiline_mode,
                         "multiline_mode default drifts from PagerLocalSnapshot::default()"
+                    );
+                }
+                ("keep_awake", SettingKind::Enum { default, .. }) => {
+                    assert_eq!(*default, pager.keep_awake.as_canonical());
+                    assert_eq!(
+                        pager.keep_awake,
+                        crate::notifications::NotificationConfig::default().keep_awake,
+                        "keep_awake default drifts from NotificationConfig::default()"
                     );
                 }
                 ("respect_manual_folds", SettingKind::Bool { default }) => {
