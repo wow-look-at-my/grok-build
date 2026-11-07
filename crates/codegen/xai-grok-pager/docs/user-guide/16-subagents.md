@@ -44,7 +44,7 @@ export GROK_SUBAGENTS=0              # Environment variable
 }
 ```
 
-Only an explicit `enabled = false` turns subagents off. A `[subagents]` table that sets `max_depth`, `[subagents.models]`, or `[subagents.toggle]` without an `enabled` key keeps them on.
+Only an explicit `"enabled": false` turns subagents off.
 
 ---
 
@@ -217,7 +217,7 @@ When you run a subagent in the background, retrieve its result later with `get_c
 
 ### Sending messages to subagents
 
-The `send_subagent_message` tool is off by default. Enable it with `GROK_ACTIVE_AGENT_MESSAGES` or `[features] active_agent_messages`.
+The `send_subagent_message` tool is off by default. Enable it with `GROK_ACTIVE_AGENT_MESSAGES` or `features.active_agent_messages`.
 
 The root session can send a follow-up to a subagent it owns. When the flag is on, a granted child also receives the tool:
 
@@ -344,7 +344,7 @@ Disable specific agent types, or route them to a different model:
 }
 ```
 
-Per-type model overrides apply for any parent. Without an override, a subagent inherits the parent's model. Settings lists one row per spawnable type under Models. Those Settings include the types your workspace defines and those a plugin provides, and each row writes its own `[subagents.models].<type>` entry.
+Per-type model overrides apply for any parent. Without an override, a subagent inherits the parent's model. Settings lists one row per spawnable type under Models. Those Settings include the types your workspace defines and those a plugin provides, and each row writes its own `agents.subagents.models.<type>` entry.
 
 ### Model Selection by the Agent
 
