@@ -28,6 +28,41 @@ pub(crate) fn resolve_context_window(
         })
 }
 
+/// [`resolve_context_window`] restricted to one provider: a window that a
+/// `[model.<key>]` block pinned belongs to that key's route, so only. A
+/// sibling that sends its model to the same URL may take it. A window learned
+/// from a provider's model list describes the model id itself and stays
+/// available to every route. `entry` is the row that would take the window.
+pub(crate) fn resolve_context_window_on_route(
+    entry: &ModelEntry,
+    listing: &IndexMap<String, ModelEntry>,
+) -> std::num::NonZeroU64 {
+    let route_url = if entry.info.base_url.is_empty() {
+        entry.api_base_url.as_deref().unwrap_or_default()
+    } else {
+        entry.info.base_url.as_str()
+    };
+    let route = normalize_route_url(route_url);
+    let donatable = |donor: &ModelEntry| {
+        !donor.info.context_window_pinned
+            || std::iter::once(donor.info.base_url.as_str())
+                .chain(donor.api_base_url.as_deref())
+                .any(|url| normalize_route_url(url) == route)
+    };
+    let wanted = entry.info.model.as_str();
+    let mut donor = listing.get(wanted);
+    if donor.is_none_or(|found| !donatable(found)) {
+        donor = listing.values().find(|found| found.info.model == wanted && donatable(*found));
+    }
+    donor.map_or_else(
+        || {
+            std::num::NonZeroU64::new(crate::remote::DEFAULT_CONTEXT_WINDOW)
+                .expect("DEFAULT_CONTEXT_WINDOW is non-zero")
+        },
+        |donor| donor.info.context_window,
+    )
+}
+
 /// Resolve a model's context window directly from its **own** provider base
 /// (`/v1/models` at `api_base_url`, OpenAI-compatible), authenticated with
 /// the model's own API key. This closes the BYOK/custom-base gap that

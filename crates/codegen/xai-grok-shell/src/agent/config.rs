@@ -3883,14 +3883,11 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        // Entries that carry a real (non-default) context window. A limit the
-        // user set in `[model.<key>]` belongs to that key only. Another
-        // provider that sends the same model id must not inherit it.
+        // Entries that carry a real (non-default) context window. A limit the user set in `[model.<key>]` belongs to that key's provider route, so only a
+        // sibling on the same route inherits it.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)
-            // A window a `[model.<key>]` block pinned stays on that key, so a sibling that routes the same model id gets its own window.
-            .filter(|(_, e)| !e.info.context_window_pinned)
             .map(|(k, e)| (k.clone(), e.clone()))
             .collect();
         // api_backend inherits from a sibling with the same routing slug.
@@ -3921,8 +3918,8 @@ pub(crate) fn resolve_model_list(
         }
         for (key, entry) in resolved.iter_mut() {
             if !entry.info.context_window_pinned && entry.info.context_window.get() == default_cw {
-                let resolved_cw = crate::agent::remote_config::resolve_context_window(
-                    &entry.info.model,
+                let resolved_cw = crate::agent::remote_config::resolve_context_window_on_route(
+                    entry,
                     &cw_sources,
                 );
                 if resolved_cw.get() != default_cw {
@@ -3930,7 +3927,7 @@ pub(crate) fn resolve_model_list(
                         model = %entry.info.model,
                         from = default_cw,
                         to = resolved_cw.get(),
-                        "context_window resolved per exact slug from sibling model-listing entry"
+                        "context_window resolved per exact slug from sibling entry on the same route"
                     );
                     entry.info.context_window = resolved_cw;
                 }
