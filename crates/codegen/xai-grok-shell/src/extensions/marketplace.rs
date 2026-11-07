@@ -1430,16 +1430,16 @@ mod official_source_tests {
     fn pre_existing_official_source_just_sets_flag() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         // User added the official source manually (flag not set).
         std::fs::write(
             &config_path,
-            format!(
-                "[[marketplace.sources]]\nname = \"{}\"\ngit = \"{}\"\n",
-                xai_grok_plugin_marketplace::OFFICIAL_SOURCE_NAME,
-                xai_grok_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL,
-            ),
+            serde_json::json!({"extensions": {"marketplace": {"sources": [{
+                "name": xai_grok_plugin_marketplace::OFFICIAL_SOURCE_NAME,
+                "git": xai_grok_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL,
+            }]}}})
+            .to_string(),
         )
         .unwrap();
 
@@ -1467,10 +1467,10 @@ mod official_source_tests {
 
         ensure_official_marketplace_source(home);
 
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         assert!(
             read_sources(&config_path).is_empty(),
-            "must not append to config.toml when the source is already present in known_marketplaces.json"
+            "must not append to config.json when the source is already present in known_marketplaces.json"
         );
         assert!(
             read_flag(&config_path),
@@ -1493,10 +1493,10 @@ mod official_source_tests {
 
         ensure_official_marketplace_source(home);
 
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         assert!(
             read_sources(&config_path).is_empty(),
-            "must not append to config.toml when source is in extraKnownMarketplaces"
+            "must not append to config.json when source is in extraKnownMarketplaces"
         );
         assert!(read_flag(&config_path));
     }
@@ -1505,16 +1505,17 @@ mod official_source_tests {
     fn pre_existing_official_source_with_branch_just_sets_flag() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         // Official source pinned to a non-main branch: dedup must match URL alone.
         std::fs::write(
             &config_path,
-            format!(
-                "[[marketplace.sources]]\nname = \"{}\"\ngit = \"{}\"\nbranch = \"some-branch\"\n",
-                xai_grok_plugin_marketplace::OFFICIAL_SOURCE_NAME,
-                xai_grok_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL,
-            ),
+            serde_json::json!({"extensions": {"marketplace": {"sources": [{
+                "name": xai_grok_plugin_marketplace::OFFICIAL_SOURCE_NAME,
+                "git": xai_grok_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL,
+                "branch": "some-branch",
+            }]}}})
+            .to_string(),
         )
         .unwrap();
 
@@ -1525,20 +1526,20 @@ mod official_source_tests {
         assert!(
             std::fs::read_to_string(&config_path)
                 .unwrap()
-                .contains("branch = \"some-branch\""),
+                .contains("\"branch\": \"some-branch\""),
             "branch override must survive registration"
         );
         assert!(read_flag(&config_path));
     }
 
     #[test]
-    fn preserves_existing_user_sources_and_comments() {
+    fn preserves_existing_user_sources_and_fields() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         std::fs::write(
             &config_path,
-            "# my custom marketplaces\n[[marketplace.sources]]\nname = \"Local\"\npath = \"/tmp/mine\"\n",
+            r#"{"ui": {"theme": "dark"}, "extensions": {"marketplace": {"sources": [{"name": "Local", "path": "/tmp/mine"}]}}}"#,
         )
         .unwrap();
 
@@ -1546,8 +1547,8 @@ mod official_source_tests {
 
         let after = std::fs::read_to_string(&config_path).unwrap();
         assert!(
-            after.contains("# my custom marketplaces"),
-            "comments preserved"
+            after.contains("\"theme\": \"dark\""),
+            "other fields preserved"
         );
         assert!(after.contains("Local"), "existing source preserved");
         let sources = read_sources(&config_path);
@@ -1632,19 +1633,19 @@ mod default_skills_purge_tests {
     #[test]
     fn read_purged_flag_false_when_missing_or_wrong_type() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("config.toml");
+        let path = tmp.path().join("config.json");
         assert!(!read_default_skills_installs_purged(&path));
 
         std::fs::write(
             &path,
-            "[marketplace]\ndefault_skills_installs_purged = \"yes\"\n",
+            r#"{"extensions": {"marketplace": {"default_skills_installs_purged": "yes"}}}"#,
         )
         .unwrap();
         assert!(!read_default_skills_installs_purged(&path));
 
         std::fs::write(
             &path,
-            "[marketplace]\ndefault_skills_installs_purged = true\n",
+            r#"{"extensions": {"marketplace": {"default_skills_installs_purged": true}}}"#,
         )
         .unwrap();
         assert!(read_default_skills_installs_purged(&path));
@@ -1658,7 +1659,7 @@ mod default_skills_purge_tests {
         purge_default_skills_installs_impl(home, &install_dir, || {
             Ok(InstallRegistry::empty(install_dir.clone()))
         });
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         assert!(read_default_skills_installs_purged(&config_path));
 
         let after_first = std::fs::read_to_string(&config_path).unwrap();
@@ -1682,7 +1683,7 @@ mod default_skills_purge_tests {
         });
 
         assert!(!read_default_skills_installs_purged(
-            &home.join("config.toml")
+            &home.join("config.json")
         ));
     }
 
@@ -1723,7 +1724,7 @@ mod default_skills_purge_tests {
             "purge must not save an unlocked registry while the flock is held"
         );
         assert!(
-            !read_default_skills_installs_purged(&home.join("config.toml")),
+            !read_default_skills_installs_purged(&home.join("config.json")),
             "a skipped purge must not set the sticky flag"
         );
     }
@@ -1766,7 +1767,7 @@ mod default_skills_purge_tests {
         assert!(reloaded.get_repo("ds-aaaa").is_none());
         assert!(reloaded.get_repo("office-bbbb").is_some());
 
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         assert!(read_default_skills_installs_purged(&config_path));
 
         let after_first = std::fs::read_to_string(&config_path).unwrap();
