@@ -832,9 +832,9 @@ Listed `telemetry.otel_*` keys in signed `requirements.toml` **pin** over proces
 
 ### Removed keys
 
-Grok has no built-in updater. To update, run the installer again. These `[cli]` keys still load. As a result, an old `config.json` keeps working. However, they have no effect: `auto_update`, `channel`, `dismissed_version`, `npm_registry`, `minimum_version`, `maximum_version`, `required_minimum_version` and `required_maximum_version`. The `GROK_*_VERSION` environment overrides for those bounds are ignored too.
+Grok has no built-in updater. To update, run the installer again. These `cli` keys still load. As a result, an old `config.json` keeps working. The `GROK_*_VERSION` environment overrides for those bounds are ignored too.
 
-`[ui] screen_mode` also still loads and has no effect. Grok has one render mode. `[ui] alt_screen` decides whether it draws on the alternate screen.
+`ui.screen_mode` also still loads and has no effect. Grok has one render mode. `ui.alt_screen` decides whether it draws on the alternate screen.
 
 ### Enterprise deployment
 
@@ -898,7 +898,7 @@ mouse_hover = true                    # show hover highlight on the prompt widge
 show_prefix = true                    # show the prompt prefix character
 ```
 
-Compact mode is not persisted here — control it at runtime with `[ui] compact_mode` or the `/compact-mode` command.
+Compact mode is not persisted here — control it at runtime with `ui.compact_mode` or the `/compact-mode` command.
 
 ### Scrollback
 
