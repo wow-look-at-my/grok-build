@@ -2699,6 +2699,73 @@ fn resolve_catalog_key_last_slug_match_wins() {
     assert_eq!(key.0.as_ref(), "user-grok-build");
 }
 
+/// Providers serve `opus`. The user set a limit on `beta/opus`, so that
+/// block is configured and `resolve_catalog_key` prefers it for the bare id.
+/// A session on `alpha` must still find `alpha/opus`.
+#[test]
+fn resolve_route_catalog_key_picks_the_provider_on_the_session_url() {
+    let mut models = IndexMap::new();
+    let mut alpha = make_model_entry("opus");
+    alpha.info.base_url = "https://alpha.example/v1".to_owned();
+    alpha.info.model_provider = Some("alpha".to_owned());
+    models.insert("alpha/opus".to_string(), alpha);
+    let mut beta = make_model_entry("opus");
+    beta.info.base_url = "https://beta.example/v1".to_owned();
+    models.insert("beta/opus".to_string(), beta);
+
+    assert_eq!(
+        resolve_catalog_key(&models, &acp::ModelId::new("opus"))
+            .expect("bare id resolves")
+            .0
+            .as_ref(),
+        "beta/opus",
+        "the bare id alone picks the configured block"
+    );
+    for (url, want) in [
+        ("https://alpha.example/v1", "alpha/opus"),
+        ("https://ALPHA.example/v1/", "alpha/opus"),
+        ("https://beta.example/v1", "beta/opus"),
+    ] {
+        let key = resolve_route_catalog_key(&models, "opus", url).expect("route resolves");
+        assert_eq!(key.0.as_ref(), want, "{url}");
+    }
+    let key = resolve_route_catalog_key(&models, "opus", "https://elsewhere.example/v1")
+        .expect("an unknown URL falls back to the bare id");
+    assert_eq!(key.0.as_ref(), "beta/opus");
+}
+
+#[test]
+fn route_context_window_reads_the_session_providers_limit() {
+    let manager = test_manager();
+    let mut alpha = make_model_entry("opus");
+    alpha.info.base_url = "https://alpha.example/v1".to_owned();
+    alpha.info.model_provider = Some("alpha".to_owned());
+    alpha.info.context_window = std::num::NonZeroU64::new(1_000_000).unwrap();
+    let mut beta = make_model_entry("opus");
+    beta.info.base_url = "https://beta.example/v1".to_owned();
+    beta.info.context_window = std::num::NonZeroU64::new(350_000).unwrap();
+    beta.info.context_window_pinned = true;
+    {
+        let mut cat = manager.inner.catalog.write();
+        cat.models.insert("alpha/opus".to_string(), alpha);
+        cat.models.insert("beta/opus".to_string(), beta);
+    }
+
+    assert_eq!(
+        manager.route_context_window("opus", "https://alpha.example/v1"),
+        Some((std::num::NonZeroU64::new(1_000_000).unwrap(), false))
+    );
+    assert_eq!(
+        manager.pinned_route_context_window("opus", "https://alpha.example/v1"),
+        None,
+        "beta's limit must not pin alpha's session"
+    );
+    assert_eq!(
+        manager.pinned_route_context_window("opus", "https://beta.example/v1"),
+        std::num::NonZeroU64::new(350_000)
+    );
+}
+
 #[test]
 fn selectable_catalog_key_for_persisted_none_when_resolved_not_available() {
     let mut models = IndexMap::new();

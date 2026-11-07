@@ -315,6 +315,7 @@ Every one of those is the test doing its job. Making them pass there means weake
 - A `context_window` from a `[model.<id>]` block, a provider block or a listing sets `ModelInfo::context_window_pinned`. The sibling and provider lookups. The idle-resume refresh and the response-header upgrade never replace a pinned window, even when it equals a default value.
 - A block keyed by a listed model's own id (`[model."<provider>/<slug>"]`) claims that listing (`claiming_block`). Without the claim, `merge_additive_catalog` replaced the block with the listing.
 - A config reload sends `ReloadContextWindow` to every running session. Settings › "Context window limit" writes the value through `set_model_context_window` (`settings/context_limits.rs` in the pager).
+- A limit belongs to one catalog key. A session finds its entry by the id it sends AND the URL it sends to (`resolve_route_catalog_key`). After a limit on `beta/opus`, a bare `opus` lookup names beta's block for every provider. The sibling window pass never donates a block's own `context_window`. The chooser adds the provider to a shared model name (`row_labels`).
 
 ## `[model_providers.<id>]` notes
 

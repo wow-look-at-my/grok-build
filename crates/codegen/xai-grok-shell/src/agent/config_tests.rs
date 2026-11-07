@@ -2122,6 +2122,37 @@ fn parses_model_context_window() {
     let model = resolved.get("my-custom-model").expect("model should exist");
     assert_eq!(model.info.context_window, NonZeroU64::new(256_000).unwrap());
 }
+/// A limit belongs to the `[model.<key>]` block that sets it. Another provider
+/// that sends the same model id keeps its own window.
+#[test]
+fn a_context_window_limit_stays_on_its_own_provider() {
+    let raw_config: toml::Value = toml::from_str(
+        r#"
+            [model."alpha/opus"]
+            model = "opus"
+            base_url = "https://alpha.example/v1"
+
+            [model."beta/opus"]
+            model = "opus"
+            base_url = "https://beta.example/v1"
+            context_window = 350000
+            "#,
+    )
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+    let resolved = resolve_model_list(&cfg, None);
+    let window = |key: &str| {
+        let entry = resolved.get(key).expect("model should exist");
+        (
+            entry.info.context_window.get(),
+            entry.info.context_window_pinned,
+        )
+    };
+    assert_eq!(window("beta/opus"), (350_000, true));
+    let (alpha, alpha_pinned) = window("alpha/opus");
+    assert_ne!(alpha, 350_000, "beta's limit leaked to alpha");
+    assert!(!alpha_pinned);
+}
 #[test]
 fn sampling_config_context_window_from_entry_or_default() {
     let model = test_model_entry(

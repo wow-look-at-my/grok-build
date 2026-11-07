@@ -3883,10 +3883,17 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        // Entries that carry a real (non-default) context window.
+        // Entries that carry a real (non-default) context window. A limit the
+        // user set in `[model.<key>]` belongs to that key only. Another
+        // provider that sends the same model id must not inherit it.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)
+            .filter(|(k, _)| {
+                cfg.config_models
+                    .get(k.as_str())
+                    .is_none_or(|block| block.context_window.is_none())
+            })
             .map(|(k, e)| (k.clone(), e.clone()))
             .collect();
         // api_backend inherits from a sibling with the same routing slug.
