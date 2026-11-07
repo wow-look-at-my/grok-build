@@ -116,6 +116,26 @@ async fn zz_probe_catalog_timing() {
         println!("PROBE {}", &line[..line.len().min(300)]);
     }
     let _ = harness.quit();
+    for entry in walkdir_list(&content.home().join(".grok")) {
+        println!("FILE {entry}");
+    }
+}
+
+fn walkdir_list(dir: &std::path::Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walkdir_list(&p));
+        } else {
+            let len = p.metadata().map(|m| m.len()).unwrap_or(0);
+            out.push(format!("{} {len}", p.display()));
+        }
+    }
+    out
 }
 
 /// **Auto-compact engages at startup, with no resize event.** Spawning already tiny (no resize event ever fires) must
