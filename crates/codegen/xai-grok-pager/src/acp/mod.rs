@@ -131,7 +131,7 @@ pub struct AcpConnection {
 /// CLI flags that affect agent configuration, threaded from PagerArgs.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectFlags {
-    /// `--no-subagents`. Only an explicit flag reaches the CLI tier of the resolver; otherwise env, config.json, and the default decide, exactly as in `grok agent stdio`.
+    /// `--no-subagents`.
     pub no_subagents: bool,
     /// CLI memory override set by a legacy compatibility flag.
     pub memory_enabled_override: Option<bool>,

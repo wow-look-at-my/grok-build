@@ -1,4 +1,4 @@
-//! Merges native `.grok/config.json`, managed/enterprise settings, and `.claude` settings into the effective `PermissionConfig`.
+//! Merges native `.grok/config.json`, managed/enterprise settings, and
 //! Also holds the MCP-server and marketplace allowlists and the always-approve policy pin.
 
 use crate::permission::claude_settings::*;
@@ -448,7 +448,6 @@ struct ResolveInputs<'a> {
     managed: &'a ManagedSettings,
     managed_config_rules: Vec<Sourced<PermissionRule>>,
     /// Folder-trust verdict for `cwd`.
-    /// When false, project-tier `.claude/settings.json` / `.grok/config.json` permission rules are dropped (global/user/admin tiers still load).
     project_trusted: bool,
 }
 

@@ -285,7 +285,6 @@ pub struct PendingWrite {
 }
 
 /// A registry `[features]` row as the settings modal sees it.
-/// The user `config.json` key is the only layer the modal writes; the other tiers are seeded once so the effective value can be re-resolved after a local write without re-reading disk.
 #[derive(Debug, Clone, Copy)]
 pub struct FeatureOverrideState {
     pub feature: Feature,

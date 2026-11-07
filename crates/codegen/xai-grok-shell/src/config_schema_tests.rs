@@ -1,3 +1,5 @@
+// config_schema_tests.rs holds the config schema tests code.
+
 use super::*;
 
 const UPDATE_ENV: &str = "GROK_UPDATE_CONFIG_SCHEMA";

@@ -477,11 +477,9 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub active_agent_messages_enabled: Option<bool>,
     /// File toolset: `"standard"` or `"hashline"`.
-    /// This is the server-side default; local `toolset.file_toolset` in config.json takes precedence when set.
     #[serde(default)]
     pub file_toolset: Option<String>,
     /// Per-chunk idle timeout in seconds for inference streaming.
-    /// It is the fallback when no per-model `inference_idle_timeout_secs` is set in config.json.
     #[serde(default)]
     pub inference_idle_timeout_secs: Option<u64>,
     #[serde(default)]
@@ -491,7 +489,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub mcp_startup_timeout_secs: Option<u64>,
     /// Global default MCP tool-result inline cap (bytes), from remote settings `grok_build_settings.max_mcp_output_bytes`.
-    /// Requirements, env, and `mcp.max_output_bytes` in config.json override it. The built-in default is 20_000.
+    /// Requirements, env, and `mcp.max_output_bytes` in config.json override it.
     #[serde(default)]
     pub max_mcp_output_bytes: Option<u64>,
     /// When `Some(true)`, enable session registry hooks (register, update, finalize, memory upload).
@@ -698,7 +696,6 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub campaigns: Vec<CampaignOverride>,
     /// When `Some(true)`, foreground commands that hit the default timeout are auto-backgrounded instead of killed.
-    /// It is the fallback when no local `tools.bash.auto_background_on_timeout` is set in config.json.
     #[serde(default)]
     pub auto_background_on_timeout: Option<bool>,
     /// When `Some(false)`, foreground commands containing a background `&` operator are rejected.
@@ -749,7 +746,6 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub contextual_hints: Option<ContextualHintsRemote>,
     /// Server-recommended worktree creation type.
-    /// It is the fallback when no local `cli.worktree_type` is set in config.json.
     #[serde(default)]
     pub worktree_type: Option<String>,
     /// Grove-projected worktree strategy (`true` means grove-fuse or grove-nfs, `false` means copy).

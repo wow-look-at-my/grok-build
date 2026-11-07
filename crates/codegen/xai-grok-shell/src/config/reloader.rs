@@ -18,9 +18,9 @@ pub enum ConfigUpdate {
     Auth(Box<GrokAuth>),
     /// Auth scope was removed (user logged out).
     AuthCleared,
-    /// A **broadcast** MCP reload; it applies to every active session regardless of cwd. Fires for two cases: The global `mcp.servers` object in `~/.grok/config.json` changed. The user's home-level `~/.claude.json` changed.
+    /// A **broadcast** MCP reload; it applies to every active session regardless of cwd. Fires for cases: The global `mcp.servers` object in `~/.grok/config.json` changed. The user's home-level `~/.claude.json` changed.
     /// `load_claude_json_mcp_servers_as_configs` reads this file for every session, so the reload cannot be narrowed by cwd.
-    /// Project-scoped changes emit [`Self::ProjectMcpServersChanged`] instead so the reload can be narrowed to matching cwds. Those are `<cwd>/.grok/config.json`, `<cwd>/.mcp.json`, and the project-level `<cwd>/.claude.json`.
+    /// to matching cwds. Those are `<cwd>/.grok/config.json`, `<cwd>/.mcp.json`, and the project-level `<cwd>/.claude.json`.
     McpServersChanged,
     /// A **project-scoped** MCP config file changed (`<cwd>/.grok/config.json`, `<cwd>/.mcp.json`, or `<cwd>/.claude.json`). The agent should reload MCP only for sessions whose cwd matches `cwd` (or sits beneath it).
     /// Strictly additive to [`Self::McpServersChanged`]: the unit variant continues to fire for global-config edits. The two cases are split so per-project reloads don't thrash unrelated sessions.

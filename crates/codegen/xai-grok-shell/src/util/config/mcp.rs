@@ -967,7 +967,7 @@ pub(crate) async fn save_mcp_server_config(
 
 /// Upsert an MCP server entry in the config file at `path`.
 ///
-/// Same behavior as [`save_mcp_server_config`] but targets an explicit config file, e.g. a project-scoped `.grok/config.json`.
+/// project-scoped `.grok/config.json`.
 pub async fn save_mcp_server_config_at(
     path: &std::path::Path,
     server_name: &str,

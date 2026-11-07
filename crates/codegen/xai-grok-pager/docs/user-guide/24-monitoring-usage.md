@@ -172,7 +172,7 @@ setup that is well under a second and invisible.
 
 **The wait is bounded**, so a deployment that cannot reach xAI still exports:
 
-- If no fleet policy can apply at all — `features.remote_fetch` is `false`, or `endpoints.cli_chat_proxy_base_url` points somewhere other than xAI — the stream starts immediately, governed by your local configuration.
+- Or `endpoints.cli_chat_proxy_base_url` points somewhere other than xAI — the stream starts immediately, governed by your local configuration. This happens if no fleet policy can apply at all — `features.remote_fetch` is `false`.
 - If the policy fetch fails or never completes (firewalled host, offline
   laptop), emission starts anyway once the attempt is exhausted, and in all
   cases no later than 30 seconds after startup.

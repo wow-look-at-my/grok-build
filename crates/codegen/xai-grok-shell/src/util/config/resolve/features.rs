@@ -3,7 +3,7 @@ use toml::Value as TomlValue;
 
 /// Resolve whether ZDR users are allowed to use the product.
 ///
-/// Precedence: requirements > env > config.json > managed > remote settings > default (false).
+/// (false).
 pub fn resolve_zdr_access_enabled(
     requirements: Option<&TomlValue>,
     user: Option<&TomlValue>,

@@ -3,8 +3,8 @@
 //!
 //! Merge layers are applied in order, keyed by server NAME (two names sharing one URL are distinct servers).
 //! Later `insert()` beats earlier `or_insert()`:
-//!   - config.json    — seeds the map; `enabled = false` blocks lower layers
-//!   - Plugins        — `or_insert` (won't override config.json)
+//! - config.json — seeds the map; `enabled = false` blocks lower layers
+//! - Plugins — `or_insert` (won't override config.json)
 //!   - ~/.claude.json — `or_insert` (imported user/local MCP servers)
 //!   - `.mcp.json`    — `or_insert` (team baseline)
 //!   - Client         — `insert` (wins except servers rejected by a disabled
