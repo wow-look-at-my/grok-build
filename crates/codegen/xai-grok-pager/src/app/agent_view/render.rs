@@ -1065,7 +1065,7 @@ impl AgentView {
                 &self.resolve_turn_activity(),
                 AgentViewLayout::inner_width(area, layout_cfg, compact)
                     .saturating_sub(turn_status_pad_left),
-                area.height / 2,
+                u16::MAX,
             )
         };
         let prompt_gap = if appearance.prompt.compact
@@ -1126,6 +1126,18 @@ impl AgentView {
         if question_view_h > 0 {
             layout_params.prompt_height =
                 prompt_height.min(AgentViewLayout::rows_available_for_prompt(layout_params));
+        }
+        if turn_status_height > 1 {
+            // The retry error takes every scrollback row above the scrollback floor, and never a prompt row.
+            let probe = AgentViewLayout::compute(AgentViewLayoutParams {
+                turn_status_height: 1,
+                ..layout_params
+            });
+            let spare = probe
+                .scrollback
+                .height
+                .saturating_sub(agent::SCROLLBACK_MIN_ROWS);
+            layout_params.turn_status_height = turn_status_height.min(spare.saturating_add(1));
         }
         let mut layout = AgentViewLayout::compute(layout_params);
         let search_active =
