@@ -72,43 +72,28 @@ impl schemars::JsonSchema for McpServerTransportConfig {
         let strings = serde_json::json!({ "type": "array", "items": { "type": "string" } });
         let string_map =
             serde_json::json!({ "type": "object", "additionalProperties": { "type": "string" } });
+        // No member is required: one layer can set only `enabled` on a server that another layer defines
         schemars::json_schema!({
-            "anyOf": [
-                {
-                    "description": "A stdio server: grok runs `command` and talks to it over stdin and stdout.",
-                    "type": "object",
-                    "properties": {
-                        "command": { "type": "string" },
-                        "args": strings,
-                        "env": string_map,
-                        "cwd": { "type": "string" }
-                    },
-                    "required": ["command"]
+            "description": "A stdio server sets `command`; a streamable HTTP server sets `url` (`urlTemplate` and `url_template` are other spellings).",
+            "type": "object",
+            "properties": {
+                "command": { "type": "string" },
+                "args": strings,
+                "env": string_map,
+                "cwd": { "type": "string" },
+                "url": { "type": "string" },
+                "urlTemplate": { "type": "string" },
+                "url_template": { "type": "string" },
+                "type": { "type": "string" },
+                "bearer_token_env_var": {
+                    "description": "Name of the environment variable to read and set for `Authorization: Bearer <token>`.",
+                    "type": "string"
                 },
-                {
-                    "description": "A streamable HTTP server. `urlTemplate` and `url_template` are other spellings of `url`.",
-                    "type": "object",
-                    "properties": {
-                        "url": { "type": "string" },
-                        "urlTemplate": { "type": "string" },
-                        "url_template": { "type": "string" },
-                        "type": { "type": "string" },
-                        "bearer_token_env_var": {
-                            "description": "Name of the environment variable to read and set for `Authorization: Bearer <token>`.",
-                            "type": "string"
-                        },
-                        "headers": string_map,
-                        "oauth_client_id": { "type": "string" },
-                        "oauth_client_secret_env_var": { "type": "string" },
-                        "oauth_scopes": strings
-                    },
-                    "anyOf": [
-                        { "required": ["url"] },
-                        { "required": ["urlTemplate"] },
-                        { "required": ["url_template"] }
-                    ]
-                }
-            ]
+                "headers": string_map,
+                "oauth_client_id": { "type": "string" },
+                "oauth_client_secret_env_var": { "type": "string" },
+                "oauth_scopes": strings
+            }
         })
     }
 }

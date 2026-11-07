@@ -153,5 +153,20 @@ fn a_wrong_type_is_invalid() {
     let validator = validator();
     assert!(!validator.is_valid(&json!({ "ui": { "show_timestamps": "yes" } })));
     assert!(!validator.is_valid(&json!({ "tools": { "bash": { "timeout_secs": "long" } } })));
-    assert!(!validator.is_valid(&json!({ "mcp": { "servers": { "x": { "args": ["a"] } } } })));
+    assert!(!validator.is_valid(&json!({ "mcp": { "servers": { "x": { "command": 5 } } } })));
+}
+
+/// A layer can disable a server that another layer defines, so an entry with no transport is valid.
+#[test]
+fn an_mcp_server_override_without_a_transport_is_valid() {
+    let validator = validator();
+    let doc = json!({ "mcp": { "servers": { "x": { "enabled": false } } } });
+    assert!(
+        validator.is_valid(&doc),
+        "{:?}",
+        validator
+            .iter_errors(&doc)
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+    );
 }
