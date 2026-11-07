@@ -2,8 +2,7 @@
 
 #[allow(unused_imports)]
 use super::common::*;
-use xai_grok_pager_pty_harness::InferenceRequestMatcher;
-use xai_grok_pager_pty_harness::content::InferenceEndpoint;
+use xai_grok_pager_pty_harness::{InferenceEndpoint, InferenceRequestMatcher};
 
 const END_MARKER: &str = "ENDMARK";
 const NARROW_COLS: u16 = 80;
@@ -42,16 +41,19 @@ async fn retry_reason_wraps_in_full() {
     content.set_response(format!("{MOCK_RESPONSE_SENTINEL} done."));
     let reason = long_reason();
     // One failure per backend. The retry falls through to the default reply.
-    for endpoint in [
-        InferenceEndpoint::Responses,
-        InferenceEndpoint::ChatCompletions,
-    ] {
-        let _ = content.expect_response(
-            format!("retryable failure ({endpoint:?})"),
+    let _failures: Vec<_> = [
+        ("responses", InferenceEndpoint::Responses),
+        ("chat completions", InferenceEndpoint::ChatCompletions),
+    ]
+    .into_iter()
+    .map(|(name, endpoint)| {
+        content.expect_response(
+            format!("retryable failure ({name})"),
             InferenceRequestMatcher::foreground(endpoint),
             failure(&reason),
-        );
-    }
+        )
+    })
+    .collect();
 
     let binary = pager_binary().expect("resolve pager binary");
     let mut harness = PtyHarness::spawn_with_content(&binary, DEFAULT_ROWS, NARROW_COLS, &content)
