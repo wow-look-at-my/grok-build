@@ -3883,19 +3883,33 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        // Entries that carry a real (non-default) context window. A limit the
-        // user set in `[model.<key>]` belongs to that key only. Another
-        // provider that sends the same model id must not inherit it.
+        // Entries that carry a real (non-default) context window.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)
-            .filter(|(k, _)| {
-                cfg.config_models
-                    .get(k.as_str())
-                    .is_none_or(|block| block.context_window.is_none())
-            })
             .map(|(k, e)| (k.clone(), e.clone()))
             .collect();
+        // A `[model.<key>]` window reaches only entries on the same URL, not another provider.
+        let route_url = |url: &str| url.trim().trim_end_matches('/').to_ascii_lowercase();
+        let mut sources_by_url: std::collections::HashMap<String, IndexMap<String, ModelEntry>> =
+            std::collections::HashMap::new();
+        for entry in resolved.values() {
+            let url = route_url(&entry.info.base_url);
+            if sources_by_url.contains_key(&url) {
+                continue;
+            }
+            let donors = cw_sources
+                .iter()
+                .filter(|(key, donor)| {
+                    cfg.config_models
+                        .get(key.as_str())
+                        .is_none_or(|block| block.context_window.is_none())
+                        || route_url(&donor.info.base_url) == url
+                })
+                .map(|(key, donor)| (key.clone(), donor.clone()))
+                .collect();
+            sources_by_url.insert(url, donors);
+        }
         // api_backend inherits from a sibling with the same routing slug.
         let backend_donors: std::collections::HashMap<String, ApiBackend> = resolved
             .values()
@@ -3926,7 +3940,7 @@ pub(crate) fn resolve_model_list(
             if !entry.info.context_window_pinned && entry.info.context_window.get() == default_cw {
                 let resolved_cw = crate::agent::remote_config::resolve_context_window(
                     &entry.info.model,
-                    &cw_sources,
+                    &sources_by_url[&route_url(&entry.info.base_url)],
                 );
                 if resolved_cw.get() != default_cw {
                     tracing::debug!(
