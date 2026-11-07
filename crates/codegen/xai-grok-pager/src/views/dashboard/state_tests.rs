@@ -333,7 +333,7 @@ fn reanchor_selection_drops_to_none_when_previous_disappeared() {
 fn persisted_on_disk_round_trip() {
     use std::collections::BTreeSet;
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
+    let path = tmp.path().join("config.json");
     let mut pinned: BTreeSet<PersistedRowId> = BTreeSet::new();
     pinned.insert(PersistedRowId::TopLevel {
         session_id: "sess-3".into(),
@@ -361,16 +361,15 @@ fn persisted_on_disk_round_trip() {
 fn load_persisted_drops_stale_subagent_row_ids() {
     use std::collections::BTreeSet;
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
+    let path = tmp.path().join("config.json");
     std::fs::write(
         &path,
-        "\
-[dashboard]
-enabled = true
-grouping = \"state\"
-pinned = [\"top:sess-keep\", \"sub:parent:child\"]
-reorder = [\"sub:parent:child:with:colons\", \"top:sess-keep\"]
-",
+        r#"{"ui": {"dashboard": {
+	"enabled": true,
+	"grouping": "state",
+	"pinned": ["top:sess-keep", "sub:parent:child"],
+	"reorder": ["sub:parent:child:with:colons", "top:sess-keep"]
+}}}"#,
     )
     .unwrap();
     let loaded =
