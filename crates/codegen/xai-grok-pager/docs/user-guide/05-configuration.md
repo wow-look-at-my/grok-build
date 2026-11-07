@@ -455,7 +455,7 @@ MCP servers can also be set per-project in `.grok/config.json`. Every other sect
 
 ### Memory
 
-Persist knowledge across sessions. Memory is on by default and uses the v2 pipeline. An explicit `[memory] enabled = false` turns it off even when a managed remote setting enables it. Notes recorded by earlier versions are carried over automatically. See [13-memory.md](13-memory.md).
+Persist knowledge across sessions. Memory is on by default and uses the v2 pipeline. An explicit `memory.enabled` set to `false` turns it off even when a managed remote setting enables it. Notes recorded by earlier versions are carried over automatically. See [13-memory.md](13-memory.md).
 
 ```json
 {
@@ -503,7 +503,7 @@ Persist knowledge across sessions. Memory is on by default and uses the v2 pipel
 }
 ```
 
-To pin the model a subagent uses, set its entry under `[subagents.models]`. Settings has one row per spawnable type, including workspace and plugin agents, and each row writes that type's entry. `usage_frequency` does not gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating. See [Subagents and Personas](16-subagents.md#usage-frequency).
+To pin the model a subagent uses, set its entry under `agents.subagents.models`. Settings has one row per spawnable type, including workspace and plugin agents, and each row writes that type's entry. `usage_frequency` does not gate the tool -- it tunes how strongly the system prompt and tool wording nudge the model toward delegating. See [Subagents and Personas](16-subagents.md#usage-frequency).
 
 ### Goal mode and background workflows
 
@@ -527,7 +527,7 @@ Project workflows are discovered from `<repo-root>/.grok/workflows/`. User workf
 
 Every `/goal` role has a slot in `[models]`. See [Harness model slots](#harness-model-slots). Reach for `goal_skeptic` when verification feels slow. It sets the model for every skeptic in the panel.
 
-`[goal]` takes a second form of pin. That form carries an agent type beside the model. Use it when a role needs a different harness flavor:
+`agents.goal` takes a second form of pin. That form carries an agent type beside the model. Use it when a role needs a different harness flavor:
 
 ```json
 {
@@ -544,7 +544,7 @@ Every `/goal` role has a slot in `[models]`. See [Harness model slots](#harness-
 }
 ```
 
-A `[goal]` pin wins over the matching `[models]` slot. `follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
+An `agents.goal` pin wins over the matching `[models]` slot. `follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
 
 Each launch gets a session-unique display handle such as `deep-research-2`. That handle is what you see in the `/workflow runs` dashboard and pass to `/workflow pause`, `resume`, or `stop` — the internal run IDs never surface in commands. A numbered handle is not a reusable definition name. As a result, the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
 
@@ -601,7 +601,7 @@ For Claude and Cursor, `rules` and `agents` are independent. Turning off named i
 
 Each cell can be set via environment variable or `config.json`. See the environment-variables reference for the names. Resolution: env var > config.json > default (on).
 
-`grok inspect` reports cells that still need session-start resolution as `?` until a value is available. Cells with an explicit env or TOML value use that value. Affected discovery entries report `compatibilityStatus: "unresolved"` in JSON and `[compat unresolved]` in human output.
+`grok inspect` reports cells that still need session-start resolution as `?` until a value is available. Cells with an explicit env or config value use that value. Affected discovery entries report `compatibilityStatus: "unresolved"` in JSON and `[compat unresolved]` in human output.
 
 ### Plugins
 
