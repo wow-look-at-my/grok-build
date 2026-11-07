@@ -1086,8 +1086,9 @@ mod tests {
             .map(|y| row_text(&buf, y).trim().to_string())
             .collect::<Vec<_>>()
             .join(" ");
-        let words = |s: &str| s.split_whitespace().map(str::to_string).collect::<Vec<_>>();
-        assert_eq!(words(&shown), words(reason));
+        // A word wider than the row (the URL) is split, so compare the text with no whitespace.
+        let text = |s: &str| s.split_whitespace().collect::<String>();
+        assert_eq!(text(&shown), text(reason));
     }
 
     /// A reason with more rows than the cap marks the cut with `…`.
