@@ -236,7 +236,7 @@ If your binary outputs a bare token string (not JSON with `expires_in`), set `au
 
 The command runs through the platform shell — `sh -c` on macOS/Linux, `cmd /C` on Windows — so it can be a binary path. A script, or a pipeline.
 
-> **Windows:** write the path as a TOML *literal* string (single quotes) so backslashes survive: `auth_provider_command = 'C:\corp\grok-auth.exe'`. Inside a double-quoted TOML string `\t`, `\n`, `\r`, `\b` and `\f` are escape sequences, so `"C:\temp\auth.exe"` parses into a path containing a tab character and the provider fails to start — after which Grok falls back to browser login as if the setting were ignored.
+> **Windows:** write each backslash in the path twice, because JSON reads a backslash as an escape: `"auth_provider_command": "C:\\corp\\grok-auth.exe"`. In a JSON string `\t`, `\n`, `\r`, `\b` and `\f` are escape sequences, so `"C:\temp\auth.exe"` parses into a path containing a tab character and the provider fails to start — after which Grok falls back to browser login as if the setting were ignored.
 
 When `auth_provider_label` is set, the TUI welcome screen shows **"Login with Acme Corp"** instead of "Login with grok.invalid". In headless mode (`grok -p`), the label has no effect — stderr from your binary is printed directly to the terminal.
 
@@ -303,7 +303,7 @@ echo "{\"access_token\": \"$TOKEN\", \"expires_in\": 3600}"
 
 Exiting promptly on `GROK_AUTH_EXPIRED=1` is what makes the handover to the sign-in screen fast. A binary that blocks instead pays the whole refresh timeout on every start with an expired token.
 
-One case stays ambiguous, and only in **leader mode** (`--leader`, or `[cli] use_leader = true`. Off by default): with no credential at all, the leader makes one extra try in the background just after startup. That run has the variable unset, like a sign-in. A binary that mints without help (service account, keytab, mounted token) succeeds there and the session heals itself. One that must prompt just sits, up to the 300s sign-in ceiling — nothing waits on it. The sign-in screen is already up, and its stderr goes to `~/.grok/leader.log` rather than to the user.
+One case stays ambiguous, and only in **leader mode** (`--leader`, or `cli.use_leader` set to `true`. Off by default): with no credential at all, the leader makes one extra try in the background just after startup. That run has the variable unset, like a sign-in. A binary that mints without help (service account, keytab, mounted token) succeeds there and the session heals itself. One that must prompt just sits, up to the 300s sign-in ceiling — nothing waits on it. The sign-in screen is already up, and its stderr goes to `~/.grok/leader.log` rather than to the user.
 
 `GROK_AUTH_EXPIRED` is optional — if your binary ignores it, Grok still works. It just runs the same flow for both login and refresh. A flow that prompts will be killed on the headless run before it can finish.
 
@@ -1423,7 +1423,7 @@ If the same server name appears in both places, the project config wins.
 
 Having an `lsp.json` file is enough for passive diagnostics. The model-visible `lsp` tool is exposed when both of these are true:
 
-- LSP tools are enabled (`GROK_LSP_TOOLS=1` or `[features] lsp_tools = true`)
+- LSP tools are enabled (`GROK_LSP_TOOLS=1` or `features.lsp_tools` set to `true`)
 - the merged LSP configuration is non-empty
 
 Enable the tool for one run:
@@ -1607,7 +1607,7 @@ Repo-scoped skills (Local and Repo) respect `.gitignore` and are filtered out if
 
 ### Configuration
 
-Add extra skill directories or exclude paths via `[skills]` in config.json:
+Add extra skill directories or exclude paths via `extensions.skills` in config.json:
 
 ```json
 {
@@ -1687,7 +1687,7 @@ Agent profiles control the system prompt, toolset, and behavior of a session. A 
 Grok discovers agent definitions from `.grok/agents/` (project), `~/.grok/agents/` (user), and built-in agents. Priority (highest wins):
 
 1. `--agent-profile <PATH>` CLI flag
-2. `[agent]` section in `config.json`
+2. `agents.selection` in `config.json`
 3. `GROK_AGENT` env var
 4. Default `grok-build` agent
 
@@ -1767,7 +1767,7 @@ Disable specific subagent types while keeping the system enabled, or route them 
 }
 ```
 
-By default a subagent inherits the parent session's model. Only an explicit per-agent pin overrides that: `[subagents.models].<agent>` (highest priority), then the agent definition's `model`. Both pins apply unconditionally, regardless of which model the parent is on.
+By default a subagent inherits the parent session's model. Only an explicit per-agent pin overrides that: `agents.subagents.models.<agent>` (highest priority), then the agent definition's `model`. Both pins apply unconditionally, regardless of which model the parent is on.
 
 ### Roles and Personas
 
@@ -1846,7 +1846,7 @@ Grok discovers hooks from `.grok/hooks/` in the project directory. Manage them w
 
 ### Hooks in config files
 
-Hooks can also be defined directly in the config layers. They can be distributed with your other configuration instead of as separate JSON files. Add a `[[hooks.<Event>]]` table to `config.json` (your own), `managed_config.toml`, or `requirements.toml`:
+Hooks can also be defined directly in the config layers. They can be distributed with your other configuration instead of as separate JSON files.
 
 ```json
 {
@@ -1879,7 +1879,7 @@ Add custom model endpoints to use alternative providers or self-hosted models. Y
 
 ### Model Configuration
 
-The name in the TOML header (`my-model` in `[model.my-model]`) is what appears in the model picker. The `model` field is the identifier sent to the API. If `model` is omitted, the header name is sent to the API directly.
+The key under `models.definitions` (`my-model` in `models.definitions.my-model`) is what appears in the model picker. The `model` field is the identifier sent to the API. If `model` is omitted, the key is sent to the API directly.
 
 ```json
 {
@@ -1929,28 +1929,37 @@ You can override specific fields of built-in models without redefining everythin
 }
 ```
 
-**How it works:** When you override a built-in model, Grok starts with the default configuration (including the correct `base_url` from your `[endpoints]` setting), then applies only the fields you specify. Unspecified fields inherit from the default.
+**How it works:** When you override a built-in model, Grok starts with the default configuration (including the correct `base_url` from your `endpoints` setting), then applies only the fields you specify. Unspecified fields inherit from the default.
 
 **Priority order:**
-1. Your config (`[model.*]`) — highest priority
+1. Your config (`models.definitions.*`) — highest priority
 2. Prefetched models from remote `/v1/models`
 3. Hardcoded defaults — lowest priority
 
-**Web search model:** Set `[models] web_search`, `GROK_WEB_SEARCH_MODEL`, or `--web-search-model` to point the `web_search` tool at a different model. The target endpoint must support the Responses API and web search.
+The target endpoint must support the Responses API and web search.
 
-> **Overriding with a custom model:** Setting `[models] web_search` alone is not
+> **Overriding with a custom model:** Setting `models.web_search` alone is not
 > enough if the model isn't already in the catalog (built-in defaults or
-> `grok models` output). You also need a `[model.*]` entry so Grok knows
+> `grok models` output). You also need a `models.definitions.*` entry so Grok knows
 > how to reach it. Without both, web search is silently disabled.
 >
-> ```toml
-> [models]
-> web_search = "my-custom-model"       # 1. tell web search which model to use
->
-> [model.my-custom-model]              # 2. tell Grok how to reach it
-> model = "my-custom-model"
-> api_backend = "responses"            # required — web search uses the Responses API
-> base_url = "https://api.example.com/v1" # required unless a [model_providers] block or [endpoints] models_base_url supplies it
+> ```jsonc
+> {
+>   "models": {
+>     // 1. tell web search which model to use
+>     "web_search": "my-custom-model",
+>     "definitions": {
+>       // 2. tell Grok how to reach it
+>       "my-custom-model": {
+>         "model": "my-custom-model",
+>         // required: web search uses the Responses API
+>         "api_backend": "responses",
+>         // required unless a models.providers block or endpoints.models_base_url supplies it
+>         "base_url": "https://api.example.com/v1"
+>       }
+>     }
+>   }
+> }
 > ```
 
 ### Examples
@@ -1984,7 +1993,7 @@ You can override specific fields of built-in models without redefining everythin
 }
 ```
 
-The provider id fills in the endpoint, the listing dialect and the pricing switch. Every model the runtime serves appears in `/model` with its real context window and a dot showing whether it is loaded in VRAM. Use `[model_providers.lmstudio]` for LM Studio. To pin Ollama's window or keep a model resident, add `api_backend = "ollama"` and an `extra_body` table — see the user guide's Custom Models chapter.
+The provider id fills in the endpoint, the listing dialect and the pricing switch. Every model the runtime serves appears in `/model` with its real context window and a dot showing whether it is loaded in VRAM. Use `models.providers.lmstudio` for LM Studio. To pin Ollama's window or keep a model resident, add `"api_backend": "ollama"` and an `extra_body` object — see the user guide's Custom Models chapter.
 
 **Together AI:**
 
@@ -2032,10 +2041,8 @@ grok models
 # Use in headless mode
 grok -p "Hello" -m my-model
 
-# Set as default
-# In config.json:
-[models]
-default = "my-model"
+# Set as default in config.json, under models.default:
+#   "models": { "default": "my-model" }
 ```
 
 ### Custom Models Endpoint
@@ -2062,7 +2069,7 @@ Grok fetches the model list from `{GROK_MODELS_BASE_URL}/models` on startup and 
 
 If your model list endpoint differs from `{base_url}/models`, set `GROK_MODELS_LIST_URL` explicitly.
 
-**Combining with `[endpoints]` config:** You can also set endpoints in `~/.grok/config.json`:
+**Combining with `endpoints` config:** You can also set endpoints in `~/.grok/config.json`:
 
 ```json
 {

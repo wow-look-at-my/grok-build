@@ -28,7 +28,7 @@ The **`/resume-claude`** and **`/resume-cursor`** skills continue a recent sessi
 
 Run **`grok inspect`** in a repo to see every rules file, skill, and MCP
 server Grok picked up, tagged with where it came from. Each compat source
-can be toggled in `[compat.claude]` / `[compat.cursor]` config sections.
+can be toggled in `extensions.compat.claude` / `extensions.compat.cursor` config sections.
 
 And a few things you might have missed elsewhere: `/btw` asks a side
 question without interrupting the current task, and `/rewind` rewinds the
