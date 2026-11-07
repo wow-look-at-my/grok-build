@@ -30,8 +30,8 @@ fn parse_existing_config_blank_is_empty_table_not_unparseable() {
         Some(true)
     );
     assert!(
-        parse_existing_config_toml("this is [not valid toml\n").is_err(),
-        "non-empty unparseable TOML must still be refused"
+        parse_existing_config(path, "this is {not valid json\n").is_err(),
+        "non-empty unparseable JSON must still be refused"
     );
 }
 /// The `[toolset.ask_user_question]` settings write merges only that sub-table.

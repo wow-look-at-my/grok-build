@@ -3,14 +3,14 @@
 `grok clone` fetches a Git repository into a Grove content store and mounts a
 projected working tree (NFS on macOS, FUSE on Linux). Each invocation reads
 `GROK_CLONE` / `GROVE_CLONE` in this process, then grok enable-all
-(`GROK_GROVE` or `[cli] grove` in `~/.grok/config.json`), then `[clone] enabled`
+(`GROK_GROVE` or `cli.grove` in `~/.grok/config.json`), then `clone.enabled`
 authorize Clone IPC.
 
 This does **not** enable Grove for session / `-w` worktrees. Those use a
-separate gate (`GROK_WORKTREE_TYPE` and `[cli] grove_worktree` in
+separate gate (`GROK_WORKTREE_TYPE` and `cli.grove_worktree` in
 `~/.grok/config.json`; see [Configuration reference](26-config-reference.md)).
-`GROK_WORKTREE_TYPE` and `[cli] grove_worktree` do **not** enable `grok clone`.
-`GROK_CLONE` / `GROVE_CLONE` / `[clone] enabled` do **not** enable session /
+`GROK_WORKTREE_TYPE` and `cli.grove_worktree` do **not** enable `grok clone`.
+`GROK_CLONE` / `GROVE_CLONE` / `clone.enabled` do **not** enable session /
 `-w` Grove.
 
 To turn **both** surfaces on without touching the specific knobs:
@@ -74,7 +74,7 @@ The two are separate worlds:
 
 `grok clone` never reads `~/.grok/auth.json` for Git. Signing into Grok does not
 give the daemon a credential for the remote, and neither does
-`[clone] enabled = true`: that flag is a **product gate** deciding whether
+`clone.enabled` set to `true`: that flag is a **product gate** deciding whether
 `grok clone` runs at all, not authorization for GitHub.
 
 When Grove classifies a failure as a credential problem, the clone prints the
@@ -145,4 +145,4 @@ check is skipped, since that daemon may hold privileges this process does not.
 On Windows, clone mounts through ProjFS (Windows Projected File System),
 whether it is enabled. Build-output directories such as `target` and
 `node_modules` are redirected out of the projected tree as NTFS junctions
-(`[redirects] windows_junction`, on by default).
+(`redirects.windows_junction`, on by default).
