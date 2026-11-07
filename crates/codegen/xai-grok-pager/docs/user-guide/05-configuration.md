@@ -622,9 +622,9 @@ Each cell can be set via environment variable or `config.json`. See the environm
 
 ### Hints
 
-`[hints]` holds small persisted UI preferences: remembered answers and modal layout. Grok writes these for you as you use the TUI. However, you can edit or delete them by hand. Removing a key restores the default.
+`ui.hints` holds small persisted UI preferences: remembered answers and modal layout. Grok writes these for you as you use the TUI. However, you can edit or delete them by hand. Removing a key restores the default.
 
-`[hints]` is read from the **effective config merge**, with the usual precedence: system managed → user `managed_config.toml` → user `config.json` → user `requirements.toml` → system `requirements.toml`, higher layers winning. The TUI only ever **writes** these to your user `~/.grok/config.json`.
+`ui.hints` is read from the **effective config merge**, with the usual precedence: system `managed_config.json` → user `managed_config.toml` → user `config.json` → user `requirements.toml` → system `requirements.json`, higher layers winning. The TUI only ever **writes** these to your user `~/.grok/config.json`.
 
 ```json
 {
@@ -760,7 +760,7 @@ Run `/doctor` in the affected session. It shows the detected notification and fo
 
 ### Status line
 
-An optional row at the bottom of the full-screen pager, disabled by default. Opt in with `[ui.status_line]`:
+An optional row at the bottom of the full-screen pager, disabled by default. Opt in with `ui.status_line`:
 
 ```json
 {
@@ -787,10 +787,10 @@ Keyboard shortcuts are **not** configurable — all bindings are built in. See [
 
 These are independent knobs (see [Monitoring Usage](24-monitoring-usage.md#related-settings)):
 
-- **`[features] telemetry`** / `GROK_TELEMETRY_ENABLED` — the product-analytics master switch. `/privacy` does not change it.
+- **`features.telemetry`** / `GROK_TELEMETRY_ENABLED` — the product-analytics master switch. `/privacy` does not change it.
 - **Coding data, retention, and training** — the Settings row `/privacy` opens. Coding-data sharing, separate from telemetry.
-- **`[telemetry] trace_upload`** / `GROK_TELEMETRY_TRACE_UPLOAD` — session traces. Follows telemetry when unset.
-- **`[telemetry] otel_*`** / `GROK_EXTERNAL_OTEL` — external OTEL to your own collector (below).
+- **`telemetry.trace_upload`** / `GROK_TELEMETRY_TRACE_UPLOAD` — session traces. Follows telemetry when unset.
+- **`telemetry.otel_*`** / `GROK_EXTERNAL_OTEL` — external OTEL to your own collector (below).
 
 When telemetry is on, enterprises running their own collector can redirect it or turn parts off under `[telemetry]`:
 
