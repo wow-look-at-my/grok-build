@@ -441,7 +441,6 @@ pub enum Action {
     /// Open the prompt-history search panel on the active agent (composer as filter query). Dispatched by `/history`.
     OpenHistorySearch,
     /// Set how ` ```mermaid ` code blocks are rendered (auto/on/off).
-    /// SHELL-owned: updates the process-wide cache mirror and persists to `ui.render_mermaid` in config.json via `Effect::PersistSetting`.
     SetRenderMermaid(crate::appearance::RenderMermaid),
     /// Delegates to `set_vim_mode` so the new value is persisted to `ui.vim_mode` in config.json, the same path as the settings modal.
     /// Set vim-style scrollback keybindings. SHELL-owned: persisted to `ui.vim_mode` in config.json via `Effect::PersistSetting`.
@@ -988,8 +987,6 @@ pub struct SharedQueueTarget {
     pub expected_version: u64,
 }
 /// Persist-and-notify behavior for [`Effect::PersistPermissionMode`].
-/// Both variants write to `~/.grok/config.json` and route ACP
-/// `example.invalid/yolo_mode_changed` notifications.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionModePersist {
     /// Typed-setter path: on disk-write failure, revert in-memory state to the prior canonical (`&'static str`).
@@ -1680,7 +1677,7 @@ pub enum Effect {
     /// Multi-pager safe via `config_edit::edit_config_tree`, which loads, modifies, then writes the whole document.
     /// Concurrent pagers may produce last-writer-wins behaviour but never corrupt the file.
     PersistDashboard(crate::views::dashboard::PersistedDashboard),
-    /// Persist a per-command worktree mode preference to `ui.hints` in config.json.
+    /// Persist a per-command worktree mode preference to `ui.hints` in
     /// `config_key` is the TOML key under `[hints]` (`"new_session_worktree_mode"` or `"fork_worktree_mode"`).
     PersistWorktreeMode {
         mode: crate::app::app_view::WorktreeMode,

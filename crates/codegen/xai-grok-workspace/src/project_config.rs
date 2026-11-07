@@ -1,6 +1,4 @@
 //! Project config-file discovery: locating repo-local `.mcp.json` and `.grok/config.json` files by walking from `cwd` up to the git root.
-//!
-//! These pure repository and filesystem walks are shared by the shell's config loaders and the folder-trust gate's `repo_configs_present`.
 
 use std::path::{Path, PathBuf};
 

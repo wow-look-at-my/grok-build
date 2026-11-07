@@ -191,7 +191,6 @@ pub async fn set_follow_up_behavior(value: String) -> Result<()> {
 }
 
 /// Persist `[ui.contextual_hints].undo` via `update_config`.
-/// The nested struct stays out of `config.json` until a tip is toggled (`skip_serializing_if`).
 pub async fn set_contextual_hint_undo(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.contextual_hints.undo = Some(value)).await
 }
@@ -316,8 +315,12 @@ pub(super) fn write_model_context_window(
     write: impl FnOnce(&Path, &BoundDest, &str) -> std::io::Result<()>,
 ) -> Result<()> {
     rewrite_user_config_table(path, "context window", write, |root| {
-        apply_model_context_window(root, model_key, tokens)
-            .with_context(|| format!("{} `models.definitions` must be an object of objects", path.display()))
+        apply_model_context_window(root, model_key, tokens).with_context(|| {
+            format!(
+                "{} `models.definitions` must be an object of objects",
+                path.display()
+            )
+        })
     })
 }
 

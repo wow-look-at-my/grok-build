@@ -471,7 +471,7 @@ pub fn hook_config_layers_at(
     system_dir: Option<&Path>,
     user_home: Option<&Path>,
 ) -> Vec<HookConfigLayer> {
-    /// One candidate config-hook layer: which directory and file to read, the provenance to stamp on hooks found there,
+    /// One candidate config-hook layer. That layer is one which directory and
     /// and the provenance it is upgraded to when the file's bytes carry a signed attestation.
     struct LayerSpec<'a> {
         dir: Option<&'a Path>,
@@ -553,7 +553,7 @@ pub fn hook_config_layers_at(
             warn_unless_root_owned(&path);
         }
         // No `$VAR` expansion: a literal `${VAR}` must reach the hook runner, which does the single expansion (expanding here would double-expand)
-        // A syntax error is already logged with redacted detail by `parse_layer_source`
+        // which does the expansion (expanding here would double-expand).
         let Ok(mut value) = parse_layer_source(&path, &source) else {
             continue;
         };

@@ -26,7 +26,6 @@ pub struct BashToolConfig {
     /// `Some(0)` disables the short budget, so auto-backgrounding happens only at the model/default timeout.
     pub foreground_block_budget_ms: Option<u64>,
     /// Whether to allow a background `&` operator in foreground commands (default: `true`).
-    /// Resolution: config.json (this) > remote settings > `true`.
     pub allow_background_operator: Option<bool>,
     pub login_shell_capture: Option<bool>,
 }
@@ -82,7 +81,7 @@ impl BashToolConfig {
 }
 
 /// User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.
-/// That keeps the documented precedence (requirements > env > user > managed > remote). This struct exists so the keys are recognized in `config.json` and round-trip through `AgentConfig`.
+/// (`[toolset.ask_user_question]`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct AskUserQuestionToolConfig {

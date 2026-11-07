@@ -890,7 +890,6 @@ pub struct AppView {
     /// One-shot notice that a launch `--yolo` was pinned off; shown on the first agent view.
     pub yolo_launch_block_notice: Option<&'static str>,
     /// Require explicit plan approval via the plan viewer UI even in always-approve (YOLO) mode.
-    /// Loaded from `ui.require_plan_approval` in config.json at startup.
     pub require_plan_approval: bool,
     /// Enable plan mode for new sessions (`--plan`).
     /// Adds `enter_plan_mode`, `exit_plan_mode` tools; implies `ask_user`.

@@ -1785,7 +1785,7 @@ pub(crate) fn add_plugin_path(path: &str) -> Result<(), Box<dyn std::error::Erro
         plugins_list_add(table, "paths", path)
     })
 }
-/// Remove a plugin path from `extensions.plugins.paths` in `~/.grok/config.json`.
+/// Remove a plugin path from `extensions.plugins.paths`.
 ///
 /// If the path is not found, this is a no-op (returns Ok).
 pub(crate) fn remove_plugin_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1800,7 +1800,7 @@ pub fn add_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Er
         plugins_list_add(table, "disabled", plugin_id)
     })
 }
-/// Remove a plugin from `extensions.plugins.disabled` in `~/.grok/config.json`.
+/// Remove a plugin from `extensions.plugins.disabled`.
 ///
 /// If the plugin is not in the disabled list, this is a no-op.
 pub fn remove_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1821,7 +1821,7 @@ pub fn add_dismissed_plugin_cta(plugin_id: &str) -> Result<(), Box<dyn std::erro
     add_dismissed_plugin_cta_to_file(plugin_id, &config_path)
 }
 /// Add a dismissed plugin CTA to a specific config file (path-parameterized for tests); runs
-/// under the config-init flock with an atomic replace like every config.json writer.
+/// runs under the config-init flock with an atomic replace like every config.json writer.
 #[doc(hidden)]
 pub fn add_dismissed_plugin_cta_to_file(
     plugin_id: &str,

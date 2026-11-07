@@ -186,7 +186,7 @@ pub struct TurnStatusArgs<'a> {
 
 /// Render the turn status line into the given area.
 ///
-/// The caller allocates [`desired_height`] rows when `should_show()` returns true, and no rows when false.
+/// when false.
 pub fn render_turn_status(
     buf: &mut Buffer,
     area: Rect,

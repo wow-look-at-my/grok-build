@@ -107,7 +107,9 @@ fn auto_mode_config_from_toml(
     let table = v?.get("auto_mode")?.clone();
     table
         .try_into()
-        .map_err(|e| tracing::warn!(error = %e, "`agents.auto_mode`: dropped malformed local object"))
+        .map_err(
+            |e| tracing::warn!(error = %e, "`agents.auto_mode`: dropped malformed local object"),
+        )
         .ok()
 }
 

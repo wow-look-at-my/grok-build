@@ -86,7 +86,7 @@ impl FeatureSources {
     }
 }
 
-/// A layer of the config tier other than the user `config.json`, lowest first; the user file sits between `Managed`
+/// A layer of the config tier other than the user `config.json`, lowest and
 /// and `Campaign` in the effective merge, and the overlay is re-applied over campaign patches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeatureConfigLayer {
@@ -115,7 +115,7 @@ pub struct FeatureLayerValue {
     pub value: bool,
 }
 
-/// The config tier of one feature split around the user `config.json`, the one layer a settings surface can write.
+/// The config tier of one feature split around the user `config.json`, the `merged` is what `Config`
 /// `merged` is what `Config` latches; the split tells a writer whether its key would decide anything.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FeatureConfigLayers {

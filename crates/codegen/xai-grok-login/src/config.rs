@@ -286,7 +286,7 @@ fn env_flag_enabled(value: &str) -> bool {
     )
 }
 /// True when the admin has set `GROK_DISABLE_API_KEY_AUTH` to a truthy value in the process environment.
-/// It is read at call time and OR-ed into `api_key_auth_disabled()`, so a user-layer `config.json` cannot override the lockdown.
+/// in the process environment.
 fn env_lockdown_forced() -> bool {
     std::env::var("GROK_DISABLE_API_KEY_AUTH")
         .ok()
@@ -327,7 +327,7 @@ pub fn force_login_team_from_requirements_value(
 }
 /// Resolves the effective login-team pin by tier: `requirements` beats `env` beats `config`.
 /// `requirements` is the non-overridable `requirements.toml` / MDM pin.
-/// `env` (`GROK_FORCE_LOGIN_TEAM_ID`) wins over the merged user/managed `config.json`.
+/// / MDM pin.
 pub fn resolve_force_login_team(
     requirements: Option<ForceLoginTeam>,
     env: Option<ForceLoginTeam>,

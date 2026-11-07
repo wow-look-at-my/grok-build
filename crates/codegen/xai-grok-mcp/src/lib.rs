@@ -13,7 +13,7 @@
 //!    - [`credentials`]: on-disk `$GROK_HOME/mcp_credentials.json` store and the rmcp `CredentialStore` adapter.
 //!    - `auth_status`: decides auth for HTTP servers from what is on disk.
 //!    - [`oauth`]: browser-based OAuth flow with cross-process and in-process dedup.
-//!    - [`oauth_config`]: BYO OAuth config types parsed out of `config.json`.
+//! - [`oauth_config`]: BYO OAuth config types parsed out of `config.json`.
 //!    - [`servers`]: MCP transport layer (rmcp's `StreamableHttpClientTransport` and `TokioChildProcess`).
 //!      It also owns client lifecycle, tool invocation, error classification, and managed-MCP refresh.
 //!    - [`mcp_http_client`]: backoff wrapper around the HTTP client handed to rmcp's streamable-HTTP transport.

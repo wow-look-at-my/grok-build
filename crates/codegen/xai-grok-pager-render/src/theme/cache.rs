@@ -51,7 +51,7 @@ fn theme_kind_from_u8(byte: u8) -> ThemeKind {
 /// Uses `Mutex<Option<_>>` rather than `OnceLock` so the settings modal and the `/theme auto` command can invalidate it after changing mappings.
 static AUTO_THEME_CONFIG: Mutex<Option<AutoThemeConfig>> = Mutex::new(None);
 
-/// `dark_theme` and `light_theme` are the user-configured overrides read from `ui.auto_dark_theme` and `ui.auto_light_theme` in `config.json`.
+/// `dark_theme` and `light_theme` are the user-configured overrides read from
 /// When `None`, `to_theme_kind()` defaults to `GrokNight` / `GrokDay`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AutoThemeConfig {

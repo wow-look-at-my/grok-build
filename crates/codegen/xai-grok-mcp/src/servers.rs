@@ -432,7 +432,6 @@ pub struct McpState {
     /// Monotonic source for [`UnreachableRetry::InFlight`] attempt tokens.
     unreachable_attempt_counter: u64,
     /// Per-server set of unqualified tool names that the user has disabled.
-    /// Persisted to `~/.grok/config.json` under `mcp.servers.<name>.disabled_tools`.
     pub disabled_tools: HashMap<McpServerName, std::collections::HashSet<ToolName>>,
     /// Stashed registrations for disabled tools so they can be re-enabled without a full MCP re-init (no need to call `list_tools` again).
     pub disabled_tool_registrations: HashMap<String, McpToolRegistration>,
@@ -1183,7 +1182,6 @@ pub struct McpServerMetaConfig {
     #[serde(default)]
     pub tool_timeout_ms: Option<u64>,
     /// Per-tool timeout overrides in ms: `{ "create_issue": 120000, "search": 30000 }`.
-    /// Overrides config.json `tool_timeouts` (and `tool_timeout_sec`) for matching tools.
     #[serde(default)]
     pub tool_timeouts_ms: Option<HashMap<ToolName, u64>>,
     /// Also keep the raw base64 in tool-result text, in addition to the vision-token rendering.

@@ -4239,8 +4239,7 @@ pub fn load_persisted_enabled() -> Option<bool> {
         .and_then(|v| v.as_bool())
 }
 
-/// Load the full persisted dashboard from `~/.grok/config.json`. Returns `None` only when the file
-/// has no dashboard section or is completely unreadable. Malformed individual fields fall back to defaults silently.
+/// Load the full persisted dashboard from `~/.grok/config.json`.
 pub fn load_persisted() -> Option<PersistedDashboard> {
     let path = config_path()?;
     load_persisted_from_path(&path)

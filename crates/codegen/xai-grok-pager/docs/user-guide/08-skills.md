@@ -58,7 +58,7 @@ Add directories, exclude paths, or disable individual skills via `extensions.ski
 
 Each entry in `paths` is a `SKILL.md` file or a directory that Grok walks recursively. `ignore` hides a skill completely; `disabled` keeps it in the list but excludes it from the system prompt and from invocation. `paths` and `ignore` take filesystem paths and support `~` expansion; `disabled` takes skill names.
 
-`extensions.paths.extra_skill_dirs` is written by `/import-claude`. It does not inject skills. Put extra directories in `extensions.skills.paths`.
+`/import-claude` writes `extensions.paths.extra_skill_dirs`. It does not inject skills. Put extra directories in `extensions.skills.paths`.
 
 ---
 
