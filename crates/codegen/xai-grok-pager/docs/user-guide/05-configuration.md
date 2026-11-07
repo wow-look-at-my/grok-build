@@ -1,6 +1,6 @@
 # Configuration
 
-Grok reads settings from config files, environment variables, and CLI flags. This page covers the common options. The field list for `config.json`, `managed_config.toml`, and `requirements.toml` is [26-config-reference.md](26-config-reference.md) (extracted to `~/.grok/docs/user-guide/` on launch).
+Grok reads settings from config files, environment variables, and CLI flags. This page covers the common options.
 
 ---
 
@@ -25,7 +25,7 @@ Within the config-file tier, the layers merge lowest-to-highest: `managed_config
 A harness or ACP client that launches `grok agent stdio` can inject settings without writing a `config.json` or relocating `$GROK_HOME`:
 
 - **`GROK_CONFIG`**: an inline JSON object overlay.
-- **`GROK_CONFIG_PATH`**: an *additional* file overlay (not a replacement for `config.json`), a JSON or TOML file read by its extension (`.json` → JSON, else TOML). `GROK_CONFIG` wins if both are set. An empty `GROK_CONFIG` is treated as unset, and a malformed one logs a warning and falls through to `GROK_CONFIG_PATH`.
+- **`GROK_CONFIG_PATH`**: an *more* file overlay (not a replacement for `config.json`), a JSON or TOML file read by its extension (`.json` → JSON, else TOML). `GROK_CONFIG` wins if both are set. An empty `GROK_CONFIG` is treated as unset, and a malformed one logs a warning and falls through to `GROK_CONFIG_PATH`.
 
 The overlay is **deep-merged** on top of your `config.json` (it overrides only the keys it sets), placed above the user/managed layers but **below** `requirements.toml` / MDM. As a result, an enterprise pin still wins. A malformed blob is ignored with a warning. This mirrors `CODEX_CONFIG` from the `codex-acp` adapter (a JSON object merged into the session config). Grok is ACP-native. As a result, the overlay lives in the agent itself.
 
@@ -41,7 +41,7 @@ GROK_CONFIG='{"models": {"default_reasoning_effort": "high"}}' grok agent stdio
 
 ## config.json (main configuration)
 
-Location: `~/.grok/config.json`. If the file is missing, Grok uses its built-in defaults, so you only need to set the values you want to override.
+Location: `~/.grok/config.json`. If the file is missing, Grok uses its built-in defaults, so you only need to set the values you want to override. Grok writes `~/.grok/config.schema.json` on launch, and `config.json` names it with `"$schema": "./config.schema.json"` for editor completion. A legacy `~/.grok/config.toml` converts to `config.json` on first launch, and the original stays as `config.toml.migrated`. A legacy project `.grok/config.toml` is read in place with a warning and converts when Grok writes that project config.
 
 ### General settings
 
@@ -96,8 +96,6 @@ Location: `~/.grok/config.json`. If the file is missing, Grok uses its built-in 
 ```
 
 ### Default agent
-
-Interactive `grok` uses `agents.selection` in `config.json` when you do not pass `--plan`, `--ask-user`, or `--agent-profile`:
 
 ```json
 {
@@ -161,21 +159,13 @@ By default, sending a prompt scrolls it to the top of the viewport so the respon
 }
 ```
 
-Each setting also has an environment-variable override, applied on first load only (again, handy for headless / test runs): `GROK_SCROLL_SPEED`, `GROK_SCROLL_MODE`, `GROK_INVERT_SCROLL` (`1`/`true`/`0`/`false`), and `GROK_SCROLL_LINES`. Precedence: env var → `config.json` → default. Unrecognized values fall back to the default, and out-of-range numbers clamp.
+Precedence: env var → `config.json` → default. Unrecognized values fall back to the default, and out-of-range numbers clamp.
 
 #### Slow output
 
 Some inference engines drop to a crawl in the middle of a response. Grok watches the output rate. When a model call stays too slow, Grok starts a backup of that call and keeps the slow one streaming. Whichever gets ahead is the answer, and a slow call that speeds back up cancels its backup. Tune it in `/settings` → **Slow output**, or in `ui`. A change applies to the next model call of every running session.
 
 The `N tok/s` counter beside the timers appears as soon as the measured rate settled, usually a few hundred milliseconds into the response. It shows that same rate the floor judges. And a stall brings it down rather than clearing it. This happens once it appears it stays for the rest of the model call: a speed-up or a slow-down changes the number. While the row waits for the model, after the call ends, and during a retry, there is no stream. The counter is hidden.
-
-| Key | Values (default) | Behavior |
-|-----|------------------|----------|
-| `min_output_tokens_per_sec` | `0`–`500` (`15`) | The floor. `0` turns detection off. `models.definitions.<id>.min_output_tokens_per_sec` overrides it for one model. |
-| `output_rate_sustained_secs` | `1`–`600` (`10`) | How long the rate must stay under the floor before a backup starts. |
-| `output_rate_window_secs` | `2`–`120` (`10`) | How many seconds of output the rate is averaged over. |
-| `output_rate_max_retries` | `0`–`5` (`2`) | How many backups one call can start. After that the response is kept at whatever rate it runs. `0` starts none. |
-| `ttft_timeout_secs` | `0`–`1800` (`120`) | Time-to-first-token limit. A call with no output this many seconds after it was sent is reissued, on the same retry budget. `0` turns it off. `models.providers.<id>.ttft_timeout_secs` overrides it for a provider, and `models.definitions.<id>.ttft_timeout_secs` for one model. |
 
 ```json
 {
@@ -222,7 +212,7 @@ The older `agents.output_rate_floor` object (`window_secs`, `max_retries`) still
 }
 ```
 
-`allow_local` is off by default (SSRF fail-closed). Turn it on (or set `GROK_WEB_FETCH_ALLOW_LOCAL=1`) and `web_fetch` may reach **explicit** loopback hosts only — private, link-local, and cloud-metadata ranges stay blocked. Resolution: config file > env > default off.
+`allow_local` is off by default (SSRF fail-closed). Turn it on (or set `GROK_WEB_FETCH_ALLOW_LOCAL=1`) and `web_fetch` may reach **explicit** loopback hosts only. Private, link-local, and cloud-metadata ranges stay blocked. Resolution: config file > env > default off.
 
 `tools.web_search` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**. If you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model.
 
@@ -264,26 +254,6 @@ Every slot also has a picker in the settings modal, under **Models**, or shares 
 }
 ```
 
-| Slot | What it runs | Unset |
-| --- | --- | --- |
-| `web_search` | Web-search synthesis | Compiled default |
-| `image_description` | Transcribing images you attach | Compiled default |
-| `session_summary` | The session's title | Compiled default |
-| `prompt_suggestion` | Tab-autocomplete ghost text | Built-in small model |
-| `permission_classifier` | Approving tool calls in Auto mode | Session model |
-| `laziness_classifier` | Judging an idle turn | Session model |
-| `compaction` | Summarizing when the window fills | Session model |
-| `recap` | The "where was I" recap | Session model |
-| `turn_summary` | The one-line summary per turn | Session model |
-| `thinking_summary` | The short summary under a thinking block | Session model |
-| `side_note` | `/btw` | Session model |
-| `todo_capture` | `/todo` | Session model |
-| `memory_flush` | Writing long-term memory | Session model |
-| `goal_planner` | The `/goal` plan | Session model |
-| `goal_strategist` | A new angle on a stalled goal | Session model |
-| `goal_skeptic` | Every skeptic in the verification panel | Session model |
-| `goal_summarizer` | The closing summary of a goal | Session model |
-
 Each slot takes an environment variable too, which wins over the config file. The name is the slot in upper case under `GROK_MODEL_`, so `goal_skeptic` reads `GROK_MODEL_GOAL_SKEPTIC`. The exception is `prompt_suggestion`, whose variable keeps its older name `GROK_PROMPT_SUGGESTIONS_MODEL`.
 
 Two older, narrower keys still win over their slot where you set them: `agents.auto_mode.classifier_model` over `permission_classifier`, and `memory.flush_model` over `memory_flush`.
@@ -293,14 +263,6 @@ A slot naming a model your account cannot reach logs a warning and falls back to
 ### Model groups
 
 A model group is a set of slots that share one model and one settings row. A slot in a group has no row of its own. The settings modal shows the group's row in its place. A group with no slots does not show. A slot is in one group at most.
-
-Groups ship by default:
-
-| Group | Label | Slots |
-| --- | --- | --- |
-| `summarization` | Summarization model | `session_summary`, `prompt_suggestion`, `recap`, `turn_summary`, `thinking_summary`, `goal_summarizer` |
-| `dense_summarization` | Dense summarization model | `web_search`, `compaction`, `image_description` |
-| `query` | Query model | `side_note`, `todo_capture` |
 
 Change, unroll or add groups under `models.groups.<id>`. Each key is optional. On a default group, a key you leave out keeps its default value.
 
@@ -362,7 +324,7 @@ Add custom model endpoints to use alternative providers or self-hosted models. E
 }
 ```
 
-Credential resolution: `api_key` > `env_key` > signed-in session token > `XAI_API_KEY`. See [Custom Models](11-custom-models.md#request-query-parameters) for `query_params` and `env_http_headers`, and [Sandbox Mode](18-sandbox.md#shell-environment-policy) for `tools.shell_environment_policy`, which restricts the environment variables tool subprocesses inherit.
+Credential resolution: `api_key` > `env_key` > signed-in session token > `XAI_API_KEY`. See [Custom Models](11-custom-models.md#request-query-parameters) for `query_params` and `env_http_headers`, and [Sandbox Mode](18-sandbox.md#shell-environment-policy) for `tools.shell_environment_policy`. This restricts the environment variables tool subprocesses inherit.
 
 Several models behind one endpoint share a `models.providers.<id>` block instead of repeating the URL, the key, the backend and the headers on each one:
 
@@ -451,7 +413,7 @@ Remote (HTTP/SSE) servers receive a default `User-Agent: grok-cli/<version>` hea
 
 MCP servers can also be set per-project in `.grok/config.json`. Every other section loads only from `~/.grok/config.json`.
 
-`[permission]` rules are not overridden by priority — they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
+`permission` rules are not overridden by priority — they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
 
 ### Memory
 
@@ -546,7 +508,7 @@ Every `/goal` role has a slot in `models`. See [Harness model slots](#harness-mo
 
 An `agents.goal` pin wins over the matching `models` slot. `follow_remote_role_models` is off by default, so a server-side pin never replaces the model you selected. `use_current_model_only` is the kill switch: it overrides local pins too, even for a goal already in flight. Both read an env var as well (`GROK_GOAL_FOLLOW_REMOTE_ROLE_MODELS`, `GROK_GOAL_USE_CURRENT_MODEL_ONLY`).
 
-Each launch gets a session-unique display handle such as `deep-research-2`. That handle is what you see in the `/workflow runs` dashboard and pass to `/workflow pause`, `resume`, or `stop` — the internal run IDs never surface in commands. A numbered handle is not a reusable definition name. As a result, the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
+Each launch gets a session-unique display handle such as `deep-research-2`. A numbered handle is not a reusable definition name. As a result, the dashboard disables **save** until you pick a new unique `meta.name` and save the edited script yourself. See [Slash Commands](04-slash-commands.md) for examples.
 
 ### Skills
 
@@ -597,7 +559,7 @@ Control vendor compatibility for Cursor and Claude. Every cell defaults to `true
 }
 ```
 
-For Claude and Cursor, `rules` and `agents` are independent. Turning off named instruction files does not disable the home or project rules directory, and turning off rules does not disable named files. Claude's `agents` cell gates home-level `~/.claude/` named files and project `<dir>/.claude/CLAUDE*.md`. Generic top-level `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` stay recognized. Project rule paths are scanned at every directory from the repo root down to the current one.
+For Claude and Cursor, `rules` and `agents` are independent. Turning off named instruction files does not disable the home or project rules directory, and turning off rules does not disable named files. Claude's `agents` cell gates home-level `~/.claude/` named files and project `<dir>/.claude/CLAUDE*.md`. Project rule paths are scanned at every directory from the repo root down to the current one.
 
 Each cell can be set via environment variable or `config.json`. See the environment-variables reference for the names. Resolution: env var > config.json > default (on).
 
@@ -777,7 +739,7 @@ An optional row at the bottom of the full-screen pager, disabled by default. Opt
 }
 ```
 
-The other keys are `items` (which built-in segments to show, in order), `command`, `padding`, and `refresh_interval` (in seconds. Re-runs a `command` row on a timer, so an incident page or a CI status reaches an idle session). The [Status Line guide](25-status-line.md) documents all of them, along with the JSON contract a `command` script reads on stdin and an example script.
+Re-runs a `command` row on a timer, so an incident page or a CI status reaches an idle session). The [Status Line guide](25-status-line.md) documents all of them, along with the JSON contract a `command` script reads on stdin and an example script.
 
 ### Keyboard shortcuts
 
@@ -1020,13 +982,6 @@ Grok sends a model request only to an endpoint you list. This covers chat and co
   }
 }
 ```
-
-| Entry | Allows |
-|-------|--------|
-| `api.example.com` | Any port and path on this host |
-| `localhost:11434` | This host and port only |
-| `*.corp.example` | Every subdomain of `corp.example` |
-| `https://gateway.example.com/v1` | This scheme, host, port and path prefix |
 
 A refused request is never sent. Its error names the entry to add. Grok has one built-in endpoint: the pricing catalog. Every other model, tool or service with no URL you configured has no URL at all. The bash tool is not affected: a `curl` it runs goes where you point it.
 
