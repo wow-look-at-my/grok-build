@@ -832,7 +832,7 @@ fn reject_subagent_type(
         }
         SubagentValidateTypeOutcome::Disabled => {
             Err(xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Subagent '{subagent_type}' is disabled via [subagents.toggle] in config.toml"
+                "Subagent '{subagent_type}' is disabled via [subagents.toggle] in config.json"
             )))
         }
         SubagentValidateTypeOutcome::NotAllowed { allowed } => {

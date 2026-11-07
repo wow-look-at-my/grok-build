@@ -1,7 +1,7 @@
 //! `grok inspect`: configuration introspection.
 //!
 //! Shows everything Grok discovers in the current directory.
-//! That covers project instructions, permissions, hooks, skills, agents, plugins, MCP servers, LSP config, and config.toml sources.
+//! That covers project instructions, permissions, hooks, skills, agents, plugins, MCP servers, LSP config, and config.json sources.
 //! Supports `--json` for machine output.
 
 mod compat;
@@ -1201,7 +1201,7 @@ fn list_config_sources(cwd: &Path) -> ConfigSources {
         }
     }
 
-    // User config.toml (primary user layer; shown as (none) when absent)
+    // User config.json (primary user layer; shown as (none) when absent)
     if let Some(home) = crate::config::user_grok_home() {
         let p = home.join("config.toml");
         if let Some((path_s, note)) = describe_config_file(&p) {

@@ -248,7 +248,7 @@ pub struct ContextualHints {
 
 impl ContextualHints {
     /// True when no tip has a user-explicit value (all inherit).
-    /// Lets the section stay absent from `config.toml` until the user toggles a tip.
+    /// Lets the section stay absent from `config.json` until the user toggles a tip.
     pub fn is_default(&self) -> bool {
         self.undo.is_none()
             && self.plan_mode.is_none()

@@ -1094,7 +1094,7 @@ fn resolve_inference_idle_timeout_secs(
     let remote = remote_settings.and_then(|s| s.inference_idle_timeout_secs);
     per_model.or(remote).unwrap_or(600).max(10)
 }
-/// Resolve the subagent 429 wait-attempt budget: env, then config.toml (per-model), then remote, then default.
+/// Resolve the subagent 429 wait-attempt budget: env, then config.json (per-model), then remote, then default.
 pub(crate) fn resolve_subagent_rate_limit_max_attempts(
     config_toml: Option<u32>,
     remote: Option<u32>,

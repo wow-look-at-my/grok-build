@@ -288,7 +288,7 @@ pub enum HookProvenance {
     SignedRequirements,
     /// `$GROK_HOME/requirements.toml` without a signed attestation (user-writable).
     UserRequirements,
-    /// `$GROK_HOME/config.toml`.
+    /// `$GROK_HOME/config.json`.
     User,
     /// A JSON hook file (the hooks directory, a vendor settings file, or a configured hooks path).
     File,

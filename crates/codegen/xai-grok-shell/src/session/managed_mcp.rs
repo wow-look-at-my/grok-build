@@ -3,8 +3,8 @@
 //!
 //! Merge layers are applied in order, keyed by server NAME (two names sharing one URL are distinct servers).
 //! Later `insert()` beats earlier `or_insert()`:
-//!   - config.toml    — seeds the map; `enabled = false` blocks lower layers
-//!   - Plugins        — `or_insert` (won't override config.toml)
+//!   - config.json    — seeds the map; `enabled = false` blocks lower layers
+//!   - Plugins        — `or_insert` (won't override config.json)
 //!   - ~/.claude.json — `or_insert` (imported user/local MCP servers)
 //!   - `.mcp.json`    — `or_insert` (team baseline)
 //!   - Client         — `insert` (wins except servers rejected by a disabled
@@ -219,7 +219,7 @@ fn merge_managed_mcp_servers_with_policy_from(
     apply_mcp_server_policy(merged, &disabled, ms)
 }
 
-/// Classify what defined a server for policy scoping: config.toml and plugin servers are
+/// Classify what defined a server for policy scoping: config.json and plugin servers are
 /// grok-native, the rest foreign; `project_names` reclassifies collisions foreign (fail closed).
 pub(crate) fn mcp_subject(
     server: &acp::McpServer,

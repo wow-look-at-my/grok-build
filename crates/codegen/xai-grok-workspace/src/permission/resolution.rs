@@ -1,4 +1,4 @@
-//! Merges native `.grok/config.toml`, managed/enterprise settings, and `.claude` settings into the effective `PermissionConfig`.
+//! Merges native `.grok/config.json`, managed/enterprise settings, and `.claude` settings into the effective `PermissionConfig`.
 //! Also holds the MCP-server and marketplace allowlists and the always-approve policy pin.
 
 use crate::permission::claude_settings::*;
@@ -206,7 +206,7 @@ fn load_requirements_permissions() -> Vec<Sourced<PermissionRule>> {
         .collect()
 }
 
-/// Load `[permission]` rules from `~/.grok/config.toml` (lowest) then each `.grok/config.toml` from repo root to `cwd`.
+/// Load `[permission]` rules from `~/.grok/config.json` (lowest) then each `.grok/config.json` from repo root to `cwd`.
 /// The walk matches [`crate::project_config::find_project_configs`] so detector and loader agree. Empty if no `[permission]` section.
 fn load_config_toml_permissions(cwd: &Path, project_trusted: bool) -> Vec<Sourced<PermissionRule>> {
     let mut rules = Vec::new();
@@ -224,13 +224,13 @@ fn load_config_toml_permissions(cwd: &Path, project_trusted: bool) -> Vec<Source
                 }
             })),
             Err(e) => {
-                warn!(path = %global_path.display(), error = %e, "Failed to load global config.toml")
+                warn!(path = %global_path.display(), error = %e, "Failed to load global config.json")
             }
         }
     }
 
     // Project-scoped configs walking from git root down to cwd, gated on trust.
-    // An untrusted clone must not contribute allow/deny/ask rules via `.grok/config.toml` (same gate as project `.claude/settings.json`)
+    // An untrusted clone must not contribute allow/deny/ask rules via `.grok/config.json` (same gate as project `.claude/settings.json`)
     if project_trusted {
         for path in crate::project_config::find_project_configs(cwd) {
             match xai_grok_config::load_config_file(&path) {
@@ -238,7 +238,7 @@ fn load_config_toml_permissions(cwd: &Path, project_trusted: bool) -> Vec<Source
                     RequirementSource::Config { path: path.clone() }
                 })),
                 Err(e) => {
-                    warn!(path = %path.display(), error = %e, "Failed to load project config.toml")
+                    warn!(path = %path.display(), error = %e, "Failed to load project config.json")
                 }
             }
         }
@@ -448,7 +448,7 @@ struct ResolveInputs<'a> {
     managed: &'a ManagedSettings,
     managed_config_rules: Vec<Sourced<PermissionRule>>,
     /// Folder-trust verdict for `cwd`.
-    /// When false, project-tier `.claude/settings.json` / `.grok/config.toml` permission rules are dropped (global/user/admin tiers still load).
+    /// When false, project-tier `.claude/settings.json` / `.grok/config.json` permission rules are dropped (global/user/admin tiers still load).
     project_trusted: bool,
 }
 
@@ -926,7 +926,7 @@ fn resolve_yolo_policy_block<'a>(
             return lock(path, YoloPinReason::DisableBypassPermissionsMode);
         }
         // Back-compat alias: `[ui] yolo = false` in requirements.toml still pins (pre-rename configs)
-        // A config.toml `yolo` is unaffected (not read here)
+        // A config.json `yolo` is unaffected (not read here)
         if requirements_lock_bool(ui, "yolo", path) == Some(false) {
             return lock(path, YoloPinReason::LegacyYoloFalse);
         }

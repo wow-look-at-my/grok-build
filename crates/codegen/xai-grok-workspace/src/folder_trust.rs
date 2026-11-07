@@ -466,7 +466,7 @@ pub fn repo_config_kinds(cwd: &Path) -> Vec<&'static str> {
     collect_repo_config_kinds(cwd, false)
 }
 
-/// Whether a project `.grok/config.toml` `[permission]` value would contribute rules to the permission resolver.
+/// Whether a project `.grok/config.json` `[permission]` value would contribute rules to the permission resolver.
 /// Mirrors the shapes `permission::resolution` loads: non-empty `allow`/`deny`/`ask` arrays, or a non-empty verbose `rules` array.
 /// Empty arrays and empty tables do not gate (same as an empty `[mcp_servers]` or `[plugins].paths`).
 fn config_toml_permission_contributes(permission_value: &TomlValue) -> bool {
@@ -523,7 +523,7 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     if !crate::project_config::find_mcp_json_files_in(&chain.dirs).is_empty() {
         hit!("mcp");
     }
-    // Project `.grok/config.toml` markers: a non-empty `[mcp_servers]` table or `[plugins].paths` array, or a contributing `[permission]` section
+    // Project `.grok/config.json` markers: a non-empty `[mcp_servers]` table or `[plugins].paths` array, or a contributing `[permission]` section
     // `[plugins].paths` loads as auto-trusted ConfigPath plugins; `[permission]` allow/deny/ask rules auto-approve or block tools
     // A clone whose ONLY repo-local config is either must still be gated (else it resolves Trusted and the loader runs ungated)
     for path in crate::project_config::find_project_configs_in(&chain.dirs) {

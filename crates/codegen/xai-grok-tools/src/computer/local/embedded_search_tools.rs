@@ -4,7 +4,7 @@
 //! config helper `xai-grok-shell::util::config::resolve_search_tools_enabled`
 //! (requirements > env `GROK_TOOLS_FIND_BFS` / `GROK_TOOLS_GREP_UGREP` (+
 //! `GROK_FIND_BFS` / `GROK_GREP_UGREP` aliases, `DISABLE_EMBEDDED_SEARCH_TOOLS`
-//! master) > `[toolset.bash]` config.toml > managed > default), baked into the
+//! master) > `[toolset.bash]` config.json > managed > default), baked into the
 //! `LocalTerminalBackend` as a [`SearchShadowConfig`] and passed to
 //! [`search_injection`] per command. The enable state lives on the backend (not
 //! a process-global): a subagent that reuses the parent's backend inherits the

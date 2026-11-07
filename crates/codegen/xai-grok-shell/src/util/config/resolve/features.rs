@@ -69,7 +69,7 @@ pub fn resolve_remote_fetch_enabled() -> bool {
 
 pub const REMOTE_FETCH_CONFIG_PATH: &str = "features.remote_fetch";
 
-/// Keys whose dedicated resolver walks managed before user `config.toml`.
+/// Keys whose dedicated resolver walks managed before user `config.json`.
 /// The effective merge lets the user file win for every other key.
 pub const MANAGED_WINS_OVER_USER: &[&str] = &[REMOTE_FETCH_CONFIG_PATH];
 
@@ -108,7 +108,7 @@ fn remote_fetch_enabled_from_layers(layers: &crate::config::ConfigLayers) -> boo
 
 /// Err-arm fallback for [`resolve_remote_fetch_enabled`]: walks the independently loadable policy tiers in Ok-arm walk order.
 /// Merged requirements come first (`load_merged_requirements` merges user, system, MDM with last-wins, matching the walk), then the managed tiers. A root-owned or synced managed-only pin thus survives a corrupt user layer.
-/// The user `config.toml` tier stays fail-open: it is a preference, not deployment policy.
+/// The user `config.json` tier stays fail-open: it is a preference, not deployment policy.
 fn remote_fetch_enabled_from_policy_layers(
     merged_requirements: Option<&TomlValue>,
     managed: Option<&TomlValue>,

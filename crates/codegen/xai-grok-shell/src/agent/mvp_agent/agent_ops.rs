@@ -452,7 +452,7 @@ impl MvpAgent {
     }
     /// Inputs for a registry build scoped to `cwd`: a fresh real-remote trust verdict, then
     /// `[plugins]` from disk. Self-free so callers can run it on a blocking thread.
-    /// `cfg.plugins` is boot-time state that `config.toml` edits never refresh, so a snapshot built
+    /// `cfg.plugins` is boot-time state that `config.json` edits never refresh, so a snapshot built
     /// from it reports stale `enabled` flags to session-less `example.invalid/plugins/list` / `example.invalid/skills/list`.
     /// Order is load-bearing: the disk read consults the folder-trust gate, whose cold-key backstop
     /// resolves remote-less and records a durable verdict that would make an org kill-switch
@@ -2505,7 +2505,7 @@ impl MvpAgent {
         } else if tui_mode && relay_config_enabled && !has_xai_auth {
             tracing::info!("[grok] Relay sync: DISABLED (no auth - run 'grok login' first)");
         } else if tui_mode && !relay_config_enabled {
-            tracing::debug!("Relay sync: DISABLED (not configured in config.toml or env)");
+            tracing::debug!("Relay sync: DISABLED (not configured in config.json or env)");
         } else {
             tracing::debug!("Relay sync: DISABLED (not in TUI mode)");
         }
@@ -3920,7 +3920,7 @@ impl MvpAgent {
         })
     }
     /// Resolve the agent definition for a session. Priority (highest to lowest): Model `agent_type` if it names a strict harness. `acp_agent_profile` from ACP `_meta.agentProfile` (remote clients).
-    /// `agent_profile_path` from CLI `--agent-profile`. `agent_config` from config.toml `[agent]`. `GROK_AGENT` env var. Built-in default agent. `GROK_AGENT` and an explicit `[agent] name` bypass the strict-harness step.
+    /// `agent_profile_path` from CLI `--agent-profile`. `agent_config` from config.json `[agent]`. `GROK_AGENT` env var. Built-in default agent. `GROK_AGENT` and an explicit ``agents.selection.name`` bypass the strict-harness step.
     /// Strict-harness classification is structural; see [`xai_grok_agent::config::is_strict_harness_agent_type`]. Harness inheritance for a profile that pins its own model is applied by the caller via [`inherited_harness_template`], not here.
     pub fn resolve_agent_definition(
         cwd: &std::path::Path,
@@ -3977,7 +3977,7 @@ impl MvpAgent {
                     tracing::info!(
                         agent_name = %def.name,
                         path = %path.display(),
-                        "Using agent definition from config.toml [agent] definition"
+                        "Using agent definition from config.json `agents.selection.definition`"
                     );
                     return def;
                 }
@@ -3985,7 +3985,7 @@ impl MvpAgent {
                     tracing::warn!(
                         path = %path.display(),
                         error = %e,
-                        "Failed to load agent definition from config.toml [agent] definition, \
+                        "Failed to load agent definition from config.json `agents.selection.definition`, \
                          falling through to next source"
                     );
                 }
@@ -3994,7 +3994,7 @@ impl MvpAgent {
         if let Some(ref name) = agent_config.name {
             tracing::info!(
                 agent_name = %name,
-                "Resolving agent definition from config.toml [agent] name"
+                "Resolving agent definition from config.json `agents.selection.name`"
             );
             if let Some(def) = xai_grok_agent::discovery::by_name_in_cwd(name, cwd) {
                 return def;

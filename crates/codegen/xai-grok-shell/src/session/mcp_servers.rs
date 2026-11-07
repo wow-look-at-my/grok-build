@@ -129,8 +129,8 @@ pub(crate) async fn build_pending_clients(
         ctx,
     )
     .await;
-    // Re-resolve SDK (ACP) config.toml overrides for THIS init, matching HTTP/stdio, so a mid-session config change applies on the next init
-    // The overrides are resolved outside the lock (resolution reads config.toml), then handed to the pure, under-lock builder
+    // Re-resolve SDK (ACP) config.json overrides for THIS init, matching HTTP/stdio, so a mid-session config change applies on the next init
+    // The overrides are resolved outside the lock (resolution reads config.json), then handed to the pure, under-lock builder
     let acp_overrides: HashMap<String, inner::McpClientTimeoutOverrides> = {
         let names = mcp_state.lock().await.pending_acp_server_names();
         names

@@ -1,6 +1,6 @@
 use super::mcp::*;
 use toml::Value as TomlValue;
-/// Resolve a bool from an optional env var, then config.toml `[section] key`, then false.
+/// Resolve a bool from an optional env var, then config.json `[section] key`, then false.
 fn toml_bool_sync(env_var: Option<&str>, section: &str, key: &str) -> bool {
     if let Some(var) = env_var
         && let Some(val) = crate::agent::config::env_bool(var)
@@ -74,7 +74,7 @@ pub fn load_config_from_toml(root: &TomlValue) -> Config {
     {
         tracing::warn!(
             "`[toolset] use_concise` is deprecated and no longer has any effect. \
-             Set `use_concise = true` on individual model entries in config.toml instead."
+             Set `use_concise = true` on individual model entries in config.json instead."
         );
     }
     let management_api_key = table

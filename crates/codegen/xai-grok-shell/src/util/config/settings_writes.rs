@@ -12,7 +12,7 @@ use xai_grok_config::fs_atomic::BoundDest;
 // All route through `update_config`, then `merge_section`, then `save_config` ---------------------------------------------------------------------------
 
 // Process-wide cache for `[ui].follow_up_behavior == "steer"`. The shell agent is a separate process from the pager, so an in-process atomic updated in the pager never reaches the turn loop
-// Key the cache on config.toml mtime instead A live settings write invalidates on the next safe-point drain (cheap stat; full parse only when the file changed) 0 = unknown, 1 = queue, 2 = steer.
+// Key the cache on config.json mtime instead A live settings write invalidates on the next safe-point drain (cheap stat; full parse only when the file changed) 0 = unknown, 1 = queue, 2 = steer.
 const FOLLOW_UP_CACHE_UNKNOWN: u8 = 0;
 const FOLLOW_UP_CACHE_QUEUE: u8 = 1;
 const FOLLOW_UP_CACHE_STEER: u8 = 2;
@@ -42,14 +42,14 @@ pub fn set_follow_up_steer_cache(steer: bool) {
     FOLLOW_UP_STEER_MTIME_NS.store(follow_up_config_mtime_ns(), Ordering::Relaxed);
 }
 
-/// Whether Steer is enabled in this process. Hits disk only when the cache is cold or the `config.toml` mtime has changed since the last resolve.
+/// Whether Steer is enabled in this process. Hits disk only when the cache is cold or the `config.json` mtime has changed since the last resolve.
 /// That lets the pager toggle Follow-up behavior live without restarting the shell agent. A failed effective-config load does not pin Queue: the previous cache is kept, or a cold failure returns false for this call only.
 /// The cold failure writes neither QUEUE nor the mtime.
 pub async fn follow_up_steer_enabled() -> bool {
     let mtime = follow_up_config_mtime_ns();
     let cached_mtime = FOLLOW_UP_STEER_MTIME_NS.load(Ordering::Relaxed);
     let cached = FOLLOW_UP_STEER_CACHE.load(Ordering::Relaxed);
-    // A missing `config.toml` reads as the first mtime. That is a stable state too, so the cache holds until the file appears.
+    // A missing `config.json` reads as the first mtime. That is a stable state too, so the cache holds until the file appears.
     if cached != FOLLOW_UP_CACHE_UNKNOWN && mtime == cached_mtime {
         return cached == FOLLOW_UP_CACHE_STEER;
     }
@@ -140,7 +140,7 @@ pub(super) fn write_dashboard_preview(
     })
 }
 
-/// Run a raw-table rewrite of the user `config.toml` under the config write guard.
+/// Run a raw-table rewrite of the user `config.json` under the config write guard.
 /// For keys `update_config` cannot express (a deletion, or a table `save_config_locked` does not merge).
 async fn rewrite_user_config_locked(
     what: &'static str,
@@ -148,7 +148,7 @@ async fn rewrite_user_config_locked(
 ) -> Result<()> {
     let guard = crate::util::config::persist::lock_config_writes()
         .await
-        .map_err(|error| anyhow::anyhow!("lock config.toml to save {what}: {error}"))?;
+        .map_err(|error| anyhow::anyhow!("lock config.json to save {what}: {error}"))?;
     guard
         .run_blocking(move || rewrite(&crate::util::config::mcp::user_config_path()))
         .await
@@ -191,7 +191,7 @@ pub async fn set_follow_up_behavior(value: String) -> Result<()> {
 }
 
 /// Persist `[ui.contextual_hints].undo` via `update_config`.
-/// The nested struct stays out of `config.toml` until a tip is toggled (`skip_serializing_if`).
+/// The nested struct stays out of `config.json` until a tip is toggled (`skip_serializing_if`).
 pub async fn set_contextual_hint_undo(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.contextual_hints.undo = Some(value)).await
 }
@@ -289,7 +289,7 @@ pub async fn set_feedback_trace_card(value: bool) -> Result<()> {
     .await
 }
 
-/// Persist `[model."<model_key>"] context_window` in the user `config.toml`.
+/// Persist ``models.definitions."<model_key>".context_window`` in the user `config.json`.
 /// `None` removes the key, and a block left empty goes with it.
 pub async fn set_model_context_window(model_key: String, tokens: Option<u64>) -> Result<()> {
     if model_key.trim().is_empty() || model_key.len() > MAX_DEFAULT_MODEL_LEN {
@@ -360,7 +360,7 @@ pub(crate) fn apply_model_context_window(
     Ok(())
 }
 
-/// Persist or remove a registry `[features]` key in the user `config.toml`.
+/// Persist or remove a registry `[features]` key in the user `config.json`.
 /// `None` deletes the key so the remote and default tiers apply again.
 pub async fn set_feature_override(feature: Feature, value: Option<bool>) -> Result<()> {
     rewrite_user_config_locked(feature.path(), move |path| {

@@ -46,7 +46,7 @@ pub const TELEMETRY_OTEL_KEYS: &[&str] = &[
     "telemetry.otel_log_tool_content",
 ];
 
-/// Keys that the pager and `load_from_disk()` read from the user `config.toml` only.
+/// Keys that the pager and `load_from_disk()` read from the user `config.json` only.
 const USER_ONLY_KEYS: &[&str] = &["features.remember_mode", "privacy.privacy_banner_acked"];
 
 /// The nested GrokComConfig, OAuth2, and OIDC leaf keys that enterprise deployments write today.

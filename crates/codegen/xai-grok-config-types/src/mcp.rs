@@ -703,7 +703,7 @@ impl McpServerConfig {
     }
 }
 
-/// Configuration for relay session sharing, set in config.toml under the `[relay]` section.
+/// Configuration for relay session sharing, set in config.json under the `[relay]` section.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RelaySyncConfig {
     pub enabled: Option<bool>,

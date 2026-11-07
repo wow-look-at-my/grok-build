@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Permission policy configuration loaded from `[permission]` section in config.toml.
+/// Permission policy configuration loaded from `[permission]` section in config.json.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct PermissionConfig {

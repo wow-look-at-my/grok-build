@@ -33,7 +33,7 @@ pub fn resolve_atomic_destination(path: &Path) -> io::Result<PathBuf> {
 }
 
 /// Like [`resolve_atomic_destination`], but a leaf symlink is left in place so
-/// `rename` replaces that inode (project `.grok/config.toml`, managed slots).
+/// `rename` replaces that inode (project `.grok/config.json`, managed slots).
 pub fn resolve_atomic_slot(path: &Path) -> io::Result<PathBuf> {
     resolve_destination(path, LeafSymlink::Replace)
 }
@@ -1266,7 +1266,7 @@ fn refuse_changed_destination_inode(dest: &Path, bound: Option<FileId>) -> io::R
 /// `mode` (unix only) is applied at temp-file creation, so the final file never exists with looser permissions.
 ///
 /// Parent-directory symlinks are followed. A leaf file-symlink is replaced (managed slots).
-/// User `config.toml` and `pager.toml` follow via [`resolve_atomic_destination`].
+/// User `config.json` and `pager.toml` follow via [`resolve_atomic_destination`].
 pub fn write_atomically(
     final_path: &Path,
     contents: &str,

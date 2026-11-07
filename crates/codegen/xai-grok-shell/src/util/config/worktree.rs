@@ -41,7 +41,7 @@ impl From<WorktreeType> for CreationMode {
     }
 }
 
-/// Returns `Some(type)` when `[cli] worktree_type` is set to a valid value in config.toml,
+/// Returns `Some(type)` when ``cli.worktree_type`` is set to a valid value in config.json,
 /// `None` when absent or the value type is wrong. Logs a warning for invalid strings.
 pub(crate) fn worktree_type_from_toml_opt(root: &TomlValue) -> Option<WorktreeType> {
     if let TomlValue::Table(table) = root

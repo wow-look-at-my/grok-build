@@ -411,7 +411,7 @@ pub struct JailPlan {
     pub grok_home_links: Vec<PathBuf>,
 }
 
-/// Resolve a request into a plan. Every path must exist: a missing bind is a hole the caller cannot see. `defaults` is the config layer (see [`JailDefaults`]) that supplies the per-path access where the command line is silent. The runtime caller loads it via [`JailDefaults::load`], tests pass an explicit value so they never depend on the host's `config.toml`. The working directory is bound read-write by default, so a jail built with the pathbox marker (`--sandbox=pathbox`). Otherwise, a path flag can write in the cwd without an explicit `--rw .`. The effective cwd access is the LAST user mount that contains the cwd (`defaults.cwd` when none does). The effective cwd access also is that single cwd mount is placed at the FRONT of `plan.mounts`. Front-placement plus the effective access is what lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`. The Seatbelt profile emits no stale write-allow for the cwd and bwrap binds it read-only. `parse_jail_args` is untouched — the default is a plan-level injection, not a flag.
+/// Resolve a request into a plan. Every path must exist: a missing bind is a hole the caller cannot see. `defaults` is the config layer (see [`JailDefaults`]) that supplies the per-path access where the command line is silent. The runtime caller loads it via [`JailDefaults::load`], tests pass an explicit value so they never depend on the host's `config.json`. The working directory is bound read-write by default, so a jail built with the pathbox marker (`--sandbox=pathbox`). Otherwise, a path flag can write in the cwd without an explicit `--rw .`. The effective cwd access is the LAST user mount that contains the cwd (`defaults.cwd` when none does). The effective cwd access also is that single cwd mount is placed at the FRONT of `plan.mounts`. Front-placement plus the effective access is what lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`. The Seatbelt profile emits no stale write-allow for the cwd and bwrap binds it read-only. `parse_jail_args` is untouched — the default is a plan-level injection, not a flag.
 pub fn build_plan(
     request: &JailRequest,
     defaults: &JailDefaults,
@@ -1145,7 +1145,7 @@ pub fn maybe_reexec_into_jail() {
     if !request.enabled && !env_pathbox {
         return;
     }
-    // Read the `[jail]` defaults from this process's `$GROK_HOME`/`config.toml` (release defaults when there is no `[jail]` section), then drive the real plan/service builders.
+    // Read the `[jail]` defaults from this process's `$GROK_HOME`/`config.json` (release defaults when there is no `[jail]` section), then drive the real plan/service builders.
     let defaults = JailDefaults::load(&crate::paths::grok_home());
     sweep_stale_session_dirs(&crate::paths::grok_home());
     let mut plan = match build_plan(&request, &defaults, argv) {

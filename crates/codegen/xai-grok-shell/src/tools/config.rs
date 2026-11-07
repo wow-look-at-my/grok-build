@@ -5,7 +5,7 @@ use xai_grok_tools::implementations::grok_build;
 use xai_grok_tools::registry::types::ToolConfig;
 
 /// The tool-server binary defaults to a 5-minute foreground ceiling (`DEFAULT_MAX_TIMEOUT_MS`).
-/// Production opts *up* to 10h by sending this explicitly, overridable via config.toml.
+/// Production opts *up* to 10h by sending this explicitly, overridable via config.json.
 /// This bounds only foreground commands; background tasks are always unbounded.
 pub const PRODUCTION_MAX_TIMEOUT_SECS: f64 = 36_000.0; // 10 hours
 
@@ -26,7 +26,7 @@ pub struct BashToolConfig {
     /// `Some(0)` disables the short budget, so auto-backgrounding happens only at the model/default timeout.
     pub foreground_block_budget_ms: Option<u64>,
     /// Whether to allow a background `&` operator in foreground commands (default: `true`).
-    /// Resolution: config.toml (this) > remote settings > `true`.
+    /// Resolution: config.json (this) > remote settings > `true`.
     pub allow_background_operator: Option<bool>,
     pub login_shell_capture: Option<bool>,
 }
@@ -45,7 +45,7 @@ impl BashToolConfig {
     }
 
     /// `remote_auto_bg` is the remote settings fallback for `auto_background_on_timeout`.
-    /// Resolution: local config.toml > remote fallback > `true`.
+    /// Resolution: local config.json > remote fallback > `true`.
     pub(crate) fn to_bash_params_json(
         &self,
         remote_auto_bg: Option<bool>,
@@ -55,7 +55,7 @@ impl BashToolConfig {
         if let Some(t) = self.timeout_secs {
             map.insert("timeout_secs".into(), t.into());
         }
-        // Production grok-build opts up to 10h by sending it explicitly (overridable via config.toml)
+        // Production grok-build opts up to 10h by sending it explicitly (overridable via config.json)
         let max_timeout_secs = self.max_timeout_secs.unwrap_or(PRODUCTION_MAX_TIMEOUT_SECS);
         map.insert("max_timeout_secs".into(), max_timeout_secs.into());
         if let Some(limit) = self.output_byte_limit {
@@ -272,7 +272,7 @@ impl ShellToolsetConfig {
 // File toolset selection
 // ---------------------------------------------------------------------------
 
-/// Configurable in `config.toml` under `[toolset.hashline]`:
+/// Configurable in `config.json` under `[toolset.hashline]`:
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct HashlineSchemeConfig {

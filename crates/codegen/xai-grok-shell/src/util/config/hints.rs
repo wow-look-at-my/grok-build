@@ -3,7 +3,7 @@ use crate::agent::config::ContextualHints;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 
-/// Persisted worktree preference for `/new` and `/fork` (`[hints]` in config.toml).
+/// Persisted worktree preference for `/new` and `/fork` (`[hints]` in config.json).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WorktreeHintMode {
     /// Always show the popup.

@@ -1,4 +1,4 @@
-//! Parse marketplace sources from `~/.grok/config.toml`.
+//! Parse marketplace sources from `~/.grok/config.json`.
 //!
 //! Expected format:
 //! ```toml
@@ -29,7 +29,7 @@ struct RawSource {
 }
 
 /// Whether remote plugin installs/updates must pin a full commit sha.
-/// Tighten-only: either `[marketplace] require_sha = true` in config.toml or `GROK_MARKETPLACE_REQUIRE_SHA=1` enables it; neither can turn it off.
+/// Tighten-only: either ``extensions.marketplace.require_sha` = true` in config.json or `GROK_MARKETPLACE_REQUIRE_SHA=1` enables it; neither can turn it off.
 /// Defaults off so existing unpinned catalogs keep installing.
 pub fn load_require_sha(config: &toml::Value) -> bool {
     env_require_sha()
@@ -204,7 +204,7 @@ pub fn load_extra_sources_from_settings_in(
     roots: &[PathBuf],
 ) -> Vec<MarketplaceSource> {
     let mut sources = Vec::new();
-    // Seed seen_urls with URLs already in config.toml sources to avoid duplicates.
+    // Seed seen_urls with URLs already in config.json sources to avoid duplicates.
     let mut seen_urls: std::collections::HashSet<String> = existing
         .iter()
         .filter_map(|s| match &s.kind {

@@ -1323,10 +1323,10 @@ pub fn remove_marketplace_source_block(content: &str, source_identity: &str) -> 
 /// Where [`remove_marketplace_source_from_stores`] found and removed a source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarketplaceSourceRemoval {
-    /// Removed from `config.toml` (the official flag folded into the write).
+    /// Removed from `config.json` (the official flag folded into the write).
     ConfigToml,
     /// Removed from a settings/known_marketplaces JSON store (the official
-    /// flag written to `config.toml` separately, best-effort).
+    /// flag written to `config.json` separately, best-effort).
     JsonStore,
     /// Not present in any store.
     NotFound,

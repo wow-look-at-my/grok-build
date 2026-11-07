@@ -1,4 +1,4 @@
-// Scans Claude settings and generates TOML patches for .grok/config.toml.
+// Scans Claude settings and generates TOML patches for .grok/config.json.
 //
 // This module reuses the existing discovery and parsing functions from claude_compat.rs and util/config.rs
 // It does NOT modify the runtime Claude compat layer; that continues to work as before
@@ -22,9 +22,9 @@ use xai_grok_workspace::permission::types::{PatternMode, PermissionRule, RuleAct
 /// Scope for an import operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportScope {
-    /// User-level: writes to `~/.grok/config.toml`.
+    /// User-level: writes to `~/.grok/config.json`.
     Global,
-    /// Project-level: writes to `<repo>/.grok/config.toml`.
+    /// Project-level: writes to `<repo>/.grok/config.json`.
     Project,
 }
 
@@ -63,9 +63,9 @@ pub enum ImportableItem {
 /// A plan describing what would be imported and where.
 #[derive(Debug, Clone, Default)]
 pub struct ImportPlan {
-    /// Items to write to `~/.grok/config.toml`.
+    /// Items to write to `~/.grok/config.json`.
     pub global_items: Vec<ImportableItem>,
-    /// Items to write to `<repo>/.grok/config.toml`.
+    /// Items to write to `<repo>/.grok/config.json`.
     pub project_items: Vec<ImportableItem>,
 }
 
@@ -89,13 +89,13 @@ impl ImportPlan {
         let mut out = String::from("Found Claude settings to import:\n");
 
         if !self.global_items.is_empty() {
-            out.push_str("\nGlobal (~/.grok/config.toml):\n");
+            out.push_str("\nGlobal (~/.grok/config.json):\n");
             out.push_str(&format_item_summary(&self.global_items));
         }
 
         if !self.project_items.is_empty() {
             out.push_str(&format!(
-                "\nProject ({}/.grok/config.toml):\n",
+                "\nProject ({}/.grok/config.json):\n",
                 find_project_root(cwd).display()
             ));
             out.push_str(&format_item_summary(&self.project_items));
@@ -165,7 +165,7 @@ fn format_item_summary(items: &[ImportableItem]) -> String {
         out.push_str(&format!("  - {} environment variable(s)\n", envs.len()));
         for (key, value) in &envs {
             // Redact the value: even keys like FOO_KEY can hide secrets (API tokens, credentials)
-            // The raw value still flows into the on-disk config.toml for actual use; only the human-facing summary suppresses it
+            // The raw value still flows into the on-disk config.json for actual use; only the human-facing summary suppresses it
             // The length hint lets the user recognise their setting without exposing the contents in terminals, screenshots, or CI logs
             out.push_str(&format!(
                 "      {} = <redacted, {} chars>\n",
@@ -460,7 +460,7 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
     xai_gix_status::discover::discover_workdir(cwd).unwrap_or_else(|| cwd.to_path_buf())
 }
 
-// Import Marker (Read Side) The marker `[claude_compat] imported = true` in `~/.grok/config.toml` is the signal that runtime fallback paths should stop reading `.claude/`.
+// Import Marker (Read Side) The marker ``claude_compat.imported` = true` in `~/.grok/config.json` is the signal that runtime fallback paths should stop reading `.claude/`.
 // The reader lives here so the hook, path, and permission gates all consult the same cached marker The writer is `mark_claude_imported` below
 
 /// Cached result of [`is_claude_import_marked`]; see its doc for the caching rationale and trade-offs.
@@ -468,7 +468,7 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
 /// The fast path is a read lock and a cached `bool`, far below the cost of the uncached `read_to_string` and TOML parse.
 static MARKER_CACHE: std::sync::RwLock<Option<bool>> = std::sync::RwLock::new(None);
 
-/// Whether the current user has already imported Claude settings. Reads `[claude_compat] imported = true` from `~/.grok/config.toml` once per process and caches the result.
+/// Whether the current user has already imported Claude settings. Reads ``claude_compat.imported` = true` from `~/.grok/config.json` once per process and caches the result.
 /// When the marker is set, runtime fallbacks that read `.claude/` should be skipped; the user has migrated to native config. Resilient: returns `false` on missing file, missing section, parse error, or any other failure.
 /// Trade-off: a user who manually flips the marker mid-session must restart to see the change, acceptable because reverting after import is rare. That variant logs one line so users can see the cutoff fired.
 pub(crate) fn is_claude_import_marked() -> bool {
@@ -503,7 +503,7 @@ pub(crate) fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool 
         LOGGED.get_or_init(|| {
             info!(
                 first_gate = gate_name,
-                "Claude compat disabled (marker set in config.toml)"
+                "Claude compat disabled (marker set in config.json)"
             );
         });
     }
@@ -575,7 +575,7 @@ pub fn mark_claude_imported() -> anyhow::Result<()> {
 
 /// Apply an import plan by writing TOML patches to the appropriate config files. This is additive-only: existing entries are never removed.
 /// New permission rules are appended; new env vars and MCP servers are added without overwriting existing keys or names.
-/// Project items are written to `<repo_root>/.grok/config.toml` (found by repository discovery), not `cwd/.grok/config.toml`. This avoids creating config files in unexpected subdirectories.
+/// Project items are written to `<repo_root>/.grok/config.json` (found by repository discovery), not `cwd/.grok/config.json`. This avoids creating config files in unexpected subdirectories.
 pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> anyhow::Result<ImportResult> {
     let mut result = ImportResult::default();
 
@@ -650,7 +650,7 @@ impl ImportResult {
     }
 }
 
-/// Apply items to a single config.toml file using atomic write.
+/// Apply items to a single config.json file using atomic write.
 fn apply_items_to_config(config_path: &Path, items: &[ImportableItem]) -> anyhow::Result<usize> {
     let mut root = read_config_for_edit(config_path, "import")?;
 
@@ -672,7 +672,7 @@ fn apply_items_to_config(config_path: &Path, items: &[ImportableItem]) -> anyhow
             ImportableItem::Permission(rule) => permissions.push(rule),
             ImportableItem::EnvVar { key, value } => env_vars.push((key, value)),
             ImportableItem::McpServer { name, config } => mcp_servers.push((name, config)),
-            // Hooks are written to .grok/hooks/ JSON files in apply_hooks_to_dir, not into config.toml
+            // Hooks are written to .grok/hooks/ JSON files in apply_hooks_to_dir, not into config.json
             ImportableItem::Hook { .. } => {}
             ImportableItem::PathEntry { kind, path } => match kind {
                 PathKind::Skill => skill_dirs.push(path.as_str()),
@@ -813,7 +813,7 @@ fn merge_env_vars(table: &mut TomlMap<String, TomlValue>, vars: &[(&str, &str)])
     let env_table = match env.as_table_mut() {
         Some(t) => t,
         None => {
-            warn!("[env] in config.toml is not a table, skipping env import");
+            warn!("[env] in config.json is not a table, skipping env import");
             return 0;
         }
     };

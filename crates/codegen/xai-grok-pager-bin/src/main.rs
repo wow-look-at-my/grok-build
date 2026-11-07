@@ -675,7 +675,7 @@ async fn spawn_and_connect_leader(
     if !use_leader {
         anyhow::bail!(
             "`{}` requires leader mode ({}).\n\
-             Enable it with `[cli] use_leader = true` in ~/.grok/config.toml, or pass --leader.",
+             Enable it with ``cli.use_leader` = true` in ~/.grok/config.json, or pass --leader.",
             door.name,
             door.leader_mode_reason
         );
@@ -1612,7 +1612,7 @@ fn flag_dashboard_at_startup_if_requested(args: &mut PagerArgs) -> Result<()> {
     if !xai_grok_pager::views::dashboard::dashboard_enabled() {
         anyhow::bail!(
             "the Agent Dashboard is disabled. Enable it by removing \
-             `[dashboard] enabled = false` from ~/.grok/config.toml and \
+             ``ui.dashboard.enabled` = false` from ~/.grok/config.json and \
              unsetting GROK_AGENT_DASHBOARD=0."
         );
     }

@@ -310,7 +310,7 @@ pub(crate) fn session_token_auth_gate(
 pub const AUTH_ERROR_SESSION_EXPIRED: &str =
     "Session expired. Run `grok login` to re-authenticate.";
 
-pub const AUTH_ERROR_API_KEY: &str = "Authentication failed. Run `grok login`, set XAI_API_KEY, or add api_key to ~/.grok/config.toml.";
+pub const AUTH_ERROR_API_KEY: &str = "Authentication failed. Run `grok login`, set XAI_API_KEY, or add api_key to ~/.grok/config.json.";
 
 /// Next ACP method id when `cached_token` cannot proceed (missing / expired / legacy WebLogin), or `None` when fallthrough is forbidden.
 /// Unpinned: prefer non-interactive `xai.api_key` when advertiseable, else interactive `grok.invalid`. Pinned `oidc`: **no** fallthrough to api_key; return `None` so the caller fails auth.
@@ -330,7 +330,7 @@ pub(crate) fn method_id_after_cached_token_unavailable(
 }
 
 /// Error when `preferred_method=api_key` but no key/BYOK credentials exist.
-pub const PREFERRED_API_KEY_UNAVAILABLE: &str = "preferred_method=api_key but no API key is configured (set XAI_API_KEY or model api_key/env_key in config.toml).";
+pub const PREFERRED_API_KEY_UNAVAILABLE: &str = "preferred_method=api_key but no API key is configured (set XAI_API_KEY or model api_key/env_key in config.json).";
 
 /// Error when `preferred_method=oidc` but the session path cannot proceed.
 pub const PREFERRED_OIDC_UNAVAILABLE: &str =
@@ -344,7 +344,7 @@ pub(crate) fn xai_api_key_auth_method() -> acp::AuthMethod {
             "xai.api_key".to_string(),
         )
         .description(Some(format!(
-            "{XAI_API_KEY_ENV_VAR} or api_key/env_key in config.toml"
+            "{XAI_API_KEY_ENV_VAR} or api_key/env_key in config.json"
         ))),
     )
 }

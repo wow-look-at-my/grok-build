@@ -94,7 +94,7 @@ async fn save_config_locked(
         .map_err(|e| anyhow::anyhow!("config write task failed: {e}"))??;
     Ok(())
 }
-/// Guard for a user `config.toml` read-modify-write: [`SAVE_LOCK`] plus the config-init flock —
+/// Guard for a user `config.json` read-modify-write: [`SAVE_LOCK`] plus the config-init flock —
 /// without the flock leg, a SAVE_LOCK writer and a flock writer silently drop each other's edits.
 #[must_use]
 pub(crate) struct ConfigWriteGuard {
@@ -116,7 +116,7 @@ impl ConfigWriteGuard {
         .await
     }
 }
-/// Acquire the user `config.toml` write guard (SAVE_LOCK ⊃ init flock) on the blocking pool;
+/// Acquire the user `config.json` write guard (SAVE_LOCK ⊃ init flock) on the blocking pool;
 /// fails closed — callers must not fall back to an unguarded write.
 /// `SAVE_LOCK` moves into that task so a cancelled await cannot release it while flock is still being acquired.
 pub(crate) async fn lock_config_writes() -> std::io::Result<ConfigWriteGuard> {
@@ -133,7 +133,7 @@ pub(crate) async fn lock_config_writes() -> std::io::Result<ConfigWriteGuard> {
     .map_err(|e| std::io::Error::other(format!("config lock task failed: {e}")))?
 }
 /// Exclusive advisory `flock` on `<grok_home>/.config-init.lock`, retried briefly, serializing
-/// `config.toml` read-modify-writes; only `WouldBlock` retries, and the file is never removed.
+/// `config.json` read-modify-writes; only `WouldBlock` retries, and the file is never removed.
 pub fn acquire_init_lock(grok_home: &std::path::Path) -> std::io::Result<std::fs::File> {
     use fs2::FileExt;
     let _ = std::fs::create_dir_all(grok_home);
@@ -222,7 +222,7 @@ pub fn atomic_write_follow_bound(
     atomic_write_resolved_string(&dest, content)
 }
 /// Atomic write via temp file then `rename`. Follows a leaf symlink.
-/// Project `.grok/config.toml` must use [`atomic_replace_string`].
+/// Project `.grok/config.json` must use [`atomic_replace_string`].
 /// User-config RMW must bind dest before load ([`read_follow_bound`] + [`atomic_write_follow_bound`]).
 pub fn atomic_write_string(path: &std::path::Path, content: &str) -> std::io::Result<()> {
     atomic_write_string_inner(path, content, true)
@@ -231,7 +231,7 @@ pub fn atomic_write_string(path: &std::path::Path, content: &str) -> std::io::Re
 pub fn atomic_replace_string(path: &std::path::Path, content: &str) -> std::io::Result<()> {
     atomic_write_string_inner(path, content, false)
 }
-/// Follow-leaf bind + read. Caller already classified `path` as user `config.toml`.
+/// Follow-leaf bind + read. Caller already classified `path` as user `config.json`.
 pub fn read_follow_leaf(path: &std::path::Path) -> std::io::Result<(BoundDest, String)> {
     let dest = xai_grok_config::fs_atomic::bind_follow_destination(path)?;
     let content = read_to_string_or_empty(dest.as_path())?;
