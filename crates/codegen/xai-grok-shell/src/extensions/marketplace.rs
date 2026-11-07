@@ -1205,16 +1205,14 @@ mod official_source_tests {
     fn read_sources(
         config_path: &std::path::Path,
     ) -> Vec<xai_grok_plugin_marketplace::MarketplaceSource> {
-        let raw = std::fs::read_to_string(config_path).unwrap_or_default();
-        let parsed: toml::Value =
-            toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(Default::default()));
+        let parsed = xai_grok_config::load_toml_file(config_path)
+            .unwrap_or_else(|_| toml::Value::Table(Default::default()));
         xai_grok_plugin_marketplace::load_sources(&parsed)
     }
 
     fn read_flag(config_path: &std::path::Path) -> bool {
-        let raw = std::fs::read_to_string(config_path).unwrap_or_default();
-        let parsed: toml::Value =
-            toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(Default::default()));
+        let parsed = xai_grok_config::load_toml_file(config_path)
+            .unwrap_or_else(|_| toml::Value::Table(Default::default()));
         parsed
             .get("marketplace")
             .and_then(|m| m.get("official_marketplace_auto_installed"))
@@ -1236,7 +1234,7 @@ mod official_source_tests {
     #[test]
     fn add_marketplace_source_local_path_writes_path_entry() {
         let tmp = tempfile::tempdir().unwrap();
-        let config_path = tmp.path().join("config.toml");
+        let config_path = tmp.path().join("config.json");
         let dir = tmp.path().join("my-plugins");
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -1257,7 +1255,7 @@ mod official_source_tests {
         ));
         // The path must not be mangled into a git URL.
         let raw = std::fs::read_to_string(&config_path).unwrap();
-        assert!(!raw.contains("git ="), "{raw}");
+        assert!(!raw.contains("\"git\""), "{raw}");
     }
 
     /// Pins add-source dedup: a respelled URL (`.git`, host case) of a
@@ -1265,7 +1263,7 @@ mod official_source_tests {
     #[test]
     fn add_marketplace_source_dedupes_respelled_git_url() {
         let tmp = tempfile::tempdir().unwrap();
-        let config_path = tmp.path().join("config.toml");
+        let config_path = tmp.path().join("config.json");
 
         let original = crate::plugin::MarketplaceAddInput::GitUrl(
             "https://github.com/org/repo.git".to_string(),
@@ -1296,12 +1294,11 @@ mod official_source_tests {
         // Regression: removing the last (non-official) source must not wipe the sticky flag, or a gated startup would re-add the removed official source
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         std::fs::write(
             &config_path,
-            "[marketplace]\nofficial_marketplace_auto_installed = true\n\n\
-             [[marketplace.sources]]\nname = \"custom\"\ngit = \"https://example.com/custom.git\"\n",
+            r#"{"extensions": {"marketplace": {"official_marketplace_auto_installed": true, "sources": [{"name": "custom", "git": "https://example.com/custom.git"}]}}}"#,
         )
         .unwrap();
 
@@ -1335,8 +1332,8 @@ mod official_source_tests {
 
         ensure_official_marketplace_source(home);
 
-        let config_path = home.join("config.toml");
-        assert!(config_path.exists(), "config.toml should be created");
+        let config_path = home.join("config.json");
+        assert!(config_path.exists(), "config.json should be created");
 
         let sources = read_sources(&config_path);
         assert_eq!(sources.len(), 1);
@@ -1360,7 +1357,7 @@ mod official_source_tests {
     fn policy_blocked_first_run_skips_register_and_retries_after_lift() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         let blocked = crate::plugin::test_fixtures::marketplace_allowlist(&[
             "https://github.com/corp/approved.git",
@@ -1393,10 +1390,10 @@ mod official_source_tests {
         let home = tmp.path();
 
         ensure_official_marketplace_source(home);
-        let after_first = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        let after_first = std::fs::read_to_string(home.join("config.json")).unwrap();
 
         ensure_official_marketplace_source(home);
-        let after_second = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        let after_second = std::fs::read_to_string(home.join("config.json")).unwrap();
 
         assert_eq!(
             after_first, after_second,
@@ -1408,7 +1405,7 @@ mod official_source_tests {
     fn removed_source_stays_removed_across_restarts() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         ensure_official_marketplace_source(home);
         assert_eq!(read_sources(&config_path).len(), 1);
@@ -1416,7 +1413,7 @@ mod official_source_tests {
         // Simulate removal: drop the source block, keep the flag.
         std::fs::write(
             &config_path,
-            "[marketplace]\nofficial_marketplace_auto_installed = true\n",
+            r#"{"extensions": {"marketplace": {"official_marketplace_auto_installed": true}}}"#,
         )
         .unwrap();
 
