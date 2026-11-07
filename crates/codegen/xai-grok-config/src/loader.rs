@@ -8,24 +8,15 @@ use crate::paths::{system_config_dir, user_grok_home};
 use crate::version_overrides::{self, apply_version_overrides};
 use xai_dirs::resolve_grok_home;
 
-/// Parse TOML source already read from `path` (which only labels the error). Empty source is an empty table.
-fn parse_toml_source(path: &Path, source: &str) -> std::io::Result<toml::Value> {
-    if source.trim().is_empty() {
-        return Ok(toml::Value::Table(toml::map::Map::new()));
-    }
-    toml::from_str::<toml::Value>(source).map_err(|e| {
-        // The detail is built from the span, never from Display: Display echoes the offending source line, which may carry a secret
-        // Safe to log and to return to a client
-        let detail = toml_error_detail(source, &e);
-        tracing::error!(file = %path.display(), "config toml has syntax errors: {detail}");
-        std::io::Error::other(detail)
-    })
+/// Parse config source already read from `path`. The extension selects JSON or legacy TOML. Empty source is an empty table.
+fn parse_layer_source(path: &Path, source: &str) -> std::io::Result<toml::Value> {
+    crate::format::parse_config_source(path, source)
 }
 
-/// Load and parse a TOML file, expanding `$VAR` references. Empty table if absent.
+/// Load and parse a config file (JSON, or legacy TOML by extension), expanding `$VAR` references. Empty table if absent.
 pub fn load_toml_file(path: &Path) -> std::io::Result<toml::Value> {
     let mut v = match std::fs::read_to_string(path) {
-        Ok(s) => parse_toml_source(path, &s)?,
+        Ok(s) => parse_layer_source(path, &s)?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             toml::Value::Table(toml::map::Map::new())
         }
@@ -82,25 +73,68 @@ pub fn load_config_file(path: &Path) -> std::io::Result<toml::Value> {
 
 pub fn load_from_disk() -> std::io::Result<toml::Value> {
     // Live `$GROK_HOME`: `user_grok_home()` / `grok_home()` are OnceLock and miss
-    // EnvGuard/tests (same reason user `config.toml` persist resolves live). A
+    // EnvGuard/tests (same reason user config persist resolves live). A
     // stale cache would read a different file than the last settings write.
-    load_user_config_layer(resolve_grok_home().as_deref(), USER_CONFIG_FILENAME)
+    match resolve_grok_home() {
+        Some(home) => load_config_file(&user_config_file(&home)?),
+        None => Ok(toml::Value::Table(toml::map::Map::new())),
+    }
 }
 
-/// User config filename (`$GROK_HOME/config.toml`), shared by the loaders here.
-pub const USER_CONFIG_FILENAME: &str = "config.toml";
+/// User config filename (`$GROK_HOME/config.json`).
+pub const USER_CONFIG_FILENAME: &str = "config.json";
 
-/// Managed config filename, shared by the loaders in this module.
+/// The stem of the user config and the project config (`config.json`, legacy `config.toml`).
+pub const CONFIG_STEM: &str = "config";
+
+/// The server-synced managed config cache in `$GROK_HOME`. The server signs these TOML bytes, so the file stays TOML.
 pub const MANAGED_CONFIG_FILENAME: &str = "managed_config.toml";
 
-/// Requirements (cloud-cache) filename, synced from the server alongside the managed config.
+/// The server-synced requirements cache in `$GROK_HOME`. The server signs these TOML bytes, so the file stays TOML.
 pub const REQUIREMENTS_FILENAME: &str = "requirements.toml";
 
-/// Unsigned folder-trust store (`$GROK_HOME/trusted_folders.toml`).
-pub const TRUSTED_FOLDERS_FILENAME: &str = "trusted_folders.toml";
+/// The stem of the admin-written managed config in the system dir (`/etc/grok/managed_config.json`, legacy `.toml`).
+pub const SYSTEM_MANAGED_CONFIG_STEM: &str = "managed_config";
 
-/// User-global sandbox profile definitions (`$GROK_HOME/sandbox.toml`).
-pub const SANDBOX_CONFIG_FILENAME: &str = "sandbox.toml";
+/// The stem of the admin-written requirements in the system dir (`/etc/grok/requirements.json`, legacy `.toml`).
+pub const SYSTEM_REQUIREMENTS_STEM: &str = "requirements";
+
+/// Unsigned folder-trust store (`$GROK_HOME/trusted_folders.json`).
+pub const TRUSTED_FOLDERS_FILENAME: &str = "trusted_folders.json";
+
+/// User-global sandbox profile definitions (`$GROK_HOME/sandbox.json`).
+pub const SANDBOX_CONFIG_FILENAME: &str = "sandbox.json";
+
+/// Every legacy TOML name that a JSON config file in `$GROK_HOME` or `.grok/`
+/// replaced.
+pub const LEGACY_CONFIG_FILENAMES: &[&str] =
+    &["config.toml", "trusted_folders.toml", "sandbox.toml"];
+
+/// The user config file in `home`, after a one-time migration of a legacy
+/// `config.toml`. It returns the file only when the migration could not write
+/// the JSON file.
+pub fn user_config_file(home: &Path) -> std::io::Result<std::path::PathBuf> {
+    crate::format::migrate_legacy_config(home, CONFIG_STEM, Some(crate::format::USER_SCHEMA_REF))
+}
+
+/// The project config file in `<dir>/.grok`: `config.json`, or a legacy `config.toml` when only that exists.
+/// grok never renames a file in a project, so it reads a legacy project file in place and a warning names it.
+pub fn project_config_file(dir: &Path) -> std::path::PathBuf {
+    let path = crate::format::resolve_config_file(&dir.join(".grok"), CONFIG_STEM);
+    if crate::format::ConfigFormat::of(&path) == crate::format::ConfigFormat::Toml {
+        tracing::warn!(
+            path = %path.display(),
+            "this project uses a legacy TOML config; convert it to .grok/config.json (grok reads the TOML file until then)"
+        );
+    }
+    path
+}
+
+/// The admin-written config `stem` in the system dir: the JSON file, or the
+/// TOML file when only that exists.
+pub fn system_config_file(dir: &Path, stem: &str) -> std::path::PathBuf {
+    crate::format::resolve_config_file(dir, stem)
+}
 
 /// Legacy project-hook trust list (`$GROK_HOME/trusted-hook-projects`).
 /// Migrated into [`TRUSTED_FOLDERS_FILENAME`] on the next unsandboxed start.
@@ -125,7 +159,7 @@ fn load_user_config_layer(home: Option<&Path>, filename: &str) -> std::io::Resul
 
 pub fn load_system_managed_config() -> std::io::Result<toml::Value> {
     let mut v = match system_config_dir() {
-        Some(dir) => load_toml_file(&dir.join(MANAGED_CONFIG_FILENAME))?,
+        Some(dir) => load_toml_file(&system_config_file(&dir, SYSTEM_MANAGED_CONFIG_STEM))?,
         None => toml::Value::Table(toml::map::Map::new()),
     };
     apply_version_overrides_with_registered(&mut v)?;
@@ -155,7 +189,13 @@ pub fn managed_config_layers_at(
 ) -> Vec<ManagedConfigLayer> {
     let mut layers = Vec::new();
     for (dir, is_system) in [(system_dir, true), (user_home, false)] {
-        let Some(path) = dir.map(|d| d.join(MANAGED_CONFIG_FILENAME)) else {
+        let Some(path) = dir.map(|d| {
+            if is_system {
+                system_config_file(d, SYSTEM_MANAGED_CONFIG_STEM)
+            } else {
+                d.join(MANAGED_CONFIG_FILENAME)
+            }
+        }) else {
             continue;
         };
         if !path.is_file() {
@@ -385,11 +425,11 @@ pub fn hook_config_layers_at(
     system_dir: Option<&Path>,
     user_home: Option<&Path>,
 ) -> Vec<HookConfigLayer> {
-    /// One candidate config-hook layer: which directory and filename to read, the provenance to stamp on hooks found there,
+    /// One candidate config-hook layer: which directory and file to read, the provenance to stamp on hooks found there,
     /// and the provenance it is upgraded to when the file's bytes carry a signed attestation.
     struct LayerSpec<'a> {
         dir: Option<&'a Path>,
-        filename: &'a str,
+        locate: fn(&Path) -> std::path::PathBuf,
         provenance: HookProvenance,
         signed_upgrade: Option<HookProvenance>,
     }
@@ -400,31 +440,31 @@ pub fn hook_config_layers_at(
     let specs = [
         LayerSpec {
             dir: system_dir,
-            filename: REQUIREMENTS_FILENAME,
+            locate: |d| system_config_file(d, SYSTEM_REQUIREMENTS_STEM),
             provenance: HookProvenance::Requirements,
             signed_upgrade: None,
         },
         LayerSpec {
             dir: user_home,
-            filename: REQUIREMENTS_FILENAME,
+            locate: |d| d.join(REQUIREMENTS_FILENAME),
             provenance: HookProvenance::UserRequirements,
             signed_upgrade: Some(HookProvenance::SignedRequirements),
         },
         LayerSpec {
             dir: user_home,
-            filename: USER_CONFIG_FILENAME,
+            locate: |d| crate::format::resolve_config_file(d, CONFIG_STEM),
             provenance: HookProvenance::User,
             signed_upgrade: None,
         },
         LayerSpec {
             dir: user_home,
-            filename: MANAGED_CONFIG_FILENAME,
+            locate: |d| d.join(MANAGED_CONFIG_FILENAME),
             provenance: HookProvenance::Managed,
             signed_upgrade: None,
         },
         LayerSpec {
             dir: system_dir,
-            filename: MANAGED_CONFIG_FILENAME,
+            locate: |d| system_config_file(d, SYSTEM_MANAGED_CONFIG_STEM),
             provenance: HookProvenance::SystemManaged,
             signed_upgrade: None,
         },
@@ -433,7 +473,7 @@ pub fn hook_config_layers_at(
     let mut layers = Vec::new();
     for LayerSpec {
         dir,
-        filename,
+        locate,
         provenance,
         signed_upgrade,
     } in specs
@@ -441,7 +481,7 @@ pub fn hook_config_layers_at(
         let Some(dir) = dir else {
             continue;
         };
-        let path = dir.join(filename);
+        let path = locate(dir);
         if !path.is_file() {
             continue;
         }
@@ -467,8 +507,8 @@ pub fn hook_config_layers_at(
             warn_unless_root_owned(&path);
         }
         // No `$VAR` expansion: a literal `${VAR}` must reach the hook runner, which does the single expansion (expanding here would double-expand)
-        // A syntax error is already logged with redacted detail by `parse_toml_source`
-        let Ok(mut value) = parse_toml_source(&path, &source) else {
+        // A syntax error is already logged with redacted detail by `parse_layer_source`
+        let Ok(mut value) = parse_layer_source(&path, &source) else {
             continue;
         };
         // Apply `[[version_overrides]]` (parity with `load_config_file`); deep-merge only, no `$VAR` expansion, so the layer stays unexpanded
