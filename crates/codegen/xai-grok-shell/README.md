@@ -1891,8 +1891,8 @@ Hooks from two kinds of layer are enforced: they cannot be disabled from the
 hooks modal, the enable/disable APIs, or the `disabled-hooks` file, and a
 byte-identical copy in a lower layer cannot take over their provenance.
 
-- The **root-owned** system layers (`/etc/grok/requirements.toml`,
-  `/etc/grok/managed_config.toml`). Enforcement relies on OS file ownership, so
+- The **root-owned** system layers (`/etc/grok/requirements.json`,
+  `/etc/grok/managed_config.json`). Enforcement relies on OS file ownership, so
   deploy these files root-owned (or via MDM).
 - The **signed** `$GROK_HOME/requirements.toml` the deployment sync writes.
   Its hooks are enforced while the file's bytes match the server-signed
