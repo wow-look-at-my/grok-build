@@ -292,14 +292,14 @@ Grok picks up changes to `~/.grok/auth.json` automatically. If you update creden
 
 Grok resolves credentials for each request in this order, highest to lowest:
 
-1. **Per-model `api_key` or `env_key`** -- set under `[model.<name>]` in `config.toml`. Wins whenever present.
+1. **Per-model `api_key` or `env_key`** -- set under `[model.<name>]` in `config.json`. Wins whenever present.
 2. **Active session token** -- obtained through browser, OIDC/OAuth2, or external-provider login and stored in `~/.grok/auth.json`.
 3. **`XAI_API_KEY`** -- fallback when no session token is active.
 
 When more than one login flow is configured, Grok populates the session token from the first available source, highest to lowest:
 
 1. **External auth provider** (`auth_provider_command`)
-2. **Enterprise OIDC** -- when OIDC is configured, through `[grok_com_config.oidc]` in `config.toml` or the `GROK_OIDC_ISSUER` and `GROK_OIDC_CLIENT_ID` environment variables
+2. **Enterprise OIDC** -- when OIDC is configured, through `[grok_com_config.oidc]` in `config.json` or the `GROK_OIDC_ISSUER` and `GROK_OIDC_CLIENT_ID` environment variables
 3. **SpaceXAI OAuth2 browser login** -- the default
 
 During a session, the active method handles all mid-session refreshes.
@@ -320,8 +320,8 @@ which `/privacy` opens — does not change these config knobs:
 
 | Setting | How to set it |
 |---------|---------------|
-| `[features] telemetry` | `config.toml` or `GROK_TELEMETRY_ENABLED` |
-| `[telemetry] trace_upload` | `config.toml` or `GROK_TELEMETRY_TRACE_UPLOAD` |
+| `[features] telemetry` | `config.json` or `GROK_TELEMETRY_ENABLED` |
+| `[telemetry] trace_upload` | `config.json` or `GROK_TELEMETRY_TRACE_UPLOAD` |
 | External OpenTelemetry | `GROK_EXTERNAL_OTEL` / `[telemetry] otel_*`. See [Monitoring Usage](24-monitoring-usage.md). |
 
 On team accounts, only a team admin can change coding-data sharing. Team admins can also enable or disable Zero Data Retention (ZDR) for their team. See [How to enable ZDR](https://docs.example.invalid/developers/faq/security#how-to-enable-zdr). When ZDR is on, coding-data sharing cannot be changed at all — the settings row shows `ZDR` in place of the value. ZDR does not turn off external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).

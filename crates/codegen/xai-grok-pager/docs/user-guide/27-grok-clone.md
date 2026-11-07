@@ -3,12 +3,12 @@
 `grok clone` fetches a Git repository into a Grove content store and mounts a
 projected working tree (NFS on macOS, FUSE on Linux). Each invocation reads
 `GROK_CLONE` / `GROVE_CLONE` in this process, then grok enable-all
-(`GROK_GROVE` or `[cli] grove` in `~/.grok/config.toml`), then `[clone] enabled`
+(`GROK_GROVE` or `[cli] grove` in `~/.grok/config.json`), then `[clone] enabled`
 authorize Clone IPC.
 
 This does **not** enable Grove for session / `-w` worktrees. Those use a
 separate gate (`GROK_WORKTREE_TYPE` and `[cli] grove_worktree` in
-`~/.grok/config.toml`; see [Configuration reference](26-config-reference.md)).
+`~/.grok/config.json`; see [Configuration reference](26-config-reference.md)).
 `GROK_WORKTREE_TYPE` and `[cli] grove_worktree` do **not** enable `grok clone`.
 `GROK_CLONE` / `GROVE_CLONE` / `[clone] enabled` do **not** enable session /
 `-w` Grove.
@@ -17,7 +17,7 @@ To turn **both** surfaces on without touching the specific knobs:
 
 ```bash
 export GROK_GROVE=1
-# or in ~/.grok/config.toml:
+# or in ~/.grok/config.json:
 # [cli]
 # grove = true
 ```

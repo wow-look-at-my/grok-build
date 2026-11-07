@@ -163,7 +163,7 @@ Open a preview of the current saved plan. Aliases: `/show-plan`, `/plan-view`.
 Browse, view, and manage saved memories. Alias: `/mem`. Inside the modal, `t`
 turns memory on or off for the session, `x` deletes the selected note, and `s`
 shows content-free queue, lease, retention, and pinned-rollout diagnostics.
-The `t` toggle is session-scoped: it does not edit `config.toml`, and new
+The `t` toggle is session-scoped: it does not edit `config.json`, and new
 sessions follow the config again. It cannot override `--no-memory` or
 `GROK_MEMORY=0`.
 

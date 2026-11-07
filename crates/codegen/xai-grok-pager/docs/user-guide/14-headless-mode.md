@@ -606,7 +606,7 @@ Grok stores data in `~/.grok` (override with `GROK_HOME`; see [Environment Varia
 
 | Path                     | Contents                              |
 | ------------------------ | ------------------------------------- |
-| `config.toml`            | User configuration                    |
+| `config.json`            | User configuration                    |
 | `auth.json`              | Cached OAuth2/API credentials         |
 | `sessions/`              | Session transcripts (SQLite)          |
 | `memory/`                | Cross-session memory store            |

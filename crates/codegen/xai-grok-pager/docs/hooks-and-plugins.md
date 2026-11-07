@@ -77,7 +77,7 @@ Plugin hooks automatically receive `GROK_PLUGIN_ROOT` and `GROK_PLUGIN_DATA` env
 Browse and install plugins from configured marketplace sources.
 
 Sources are loaded from:
-1. **config.toml** — `[[marketplace.sources]]` entries
+1. **config.json** — `[[marketplace.sources]]` entries
 2. **settings.json** — `extraKnownMarketplaces` from `~/.grok/settings.json` or `~/.claude/settings.json`
 
 Each source shows its plugins with:
@@ -103,7 +103,7 @@ with a git URL, a GitHub shorthand (`owner/repo`), or a local directory path
 (`/absolute`, `~/dir`, or `./relative`). Local paths are stored as `path`
 sources — handy for developing a marketplace from an existing checkout.
 
-Sources land in `~/.grok/config.toml`:
+Sources land in `~/.grok/config.json`:
 
 ```json
 {

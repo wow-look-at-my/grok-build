@@ -64,7 +64,7 @@ A fleet pin matches the **model id** (not a user-chosen catalog key), so a local
 
 ### Config Default
 
-Set a persistent default in `~/.grok/config.toml`:
+Set a persistent default in `~/.grok/config.json`:
 
 ```json
 {
@@ -94,7 +94,7 @@ To send provider-specific authentication or version headers -- for example, Anth
 
 ## Configuring Custom Models
 
-Add custom model endpoints in `~/.grok/config.toml` under `[model.<name>]` sections:
+Add custom model endpoints in `~/.grok/config.json` under `[model.<name>]` sections:
 
 ```json
 {
@@ -239,7 +239,7 @@ A key that also appears in the `base_url` query string is overridden (last value
 
 ### Environment-Variable Headers
 
-`env_http_headers` maps a request header to the name of an environment variable that supplies its value, so a per-request secret never has to be written into `config.toml`:
+`env_http_headers` maps a request header to the name of an environment variable that supplies its value, so a per-request secret never has to be written into `config.json`:
 
 ```json
 {
@@ -807,7 +807,7 @@ grok models
 # Use in headless mode
 grok -p "Hello" -m my-model
 
-# Set as default in config.toml:
+# Set as default in config.json:
 [models]
 default = "my-model"
 ```
@@ -852,7 +852,7 @@ A complete config for an enterprise deployment with custom models:
 # List available models
 grok models
 
-# Check config.toml for typos in [model.*] sections
+# Check config.json for typos in [model.*] sections
 ```
 
 ### Connection Errors

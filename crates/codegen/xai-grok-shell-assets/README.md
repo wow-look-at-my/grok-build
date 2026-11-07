@@ -240,7 +240,7 @@ The command runs through the platform shell — `sh -c` on macOS/Linux, `cmd /C`
 
 When `auth_provider_label` is set, the TUI welcome screen shows **"Login with Acme Corp"** instead of "Login with grok.invalid". In headless mode (`grok -p`), the label has no effect — stderr from your binary is printed directly to the terminal.
 
-> **Enterprise setup:** For a complete enterprise `config.toml` combining external auth, corporate proxy, and telemetry settings, see [Enterprise Deployment](#enterprise-deployment) in the Configuration section.
+> **Enterprise setup:** For a complete enterprise `config.json` combining external auth, corporate proxy, and telemetry settings, see [Enterprise Deployment](#enterprise-deployment) in the Configuration section.
 
 #### Example: Device Code Flow Provider
 
@@ -397,7 +397,7 @@ Common log messages:
 
 **Interaction with other credentials:** a literal `api_key`/`env_key` on the model wins over its `auth_provider`. Provider-backed models are BYOK: your xAI session token is never sent to their endpoints. A failing provider command fails the request rather than falling back to the session token.
 
-**Security:** provider commands execute code. They are honored only from trusted config layers (`~/.grok/config.toml`, managed config, requirements). A project's `.grok/config.toml` can never define one. Whatever layer sets a model's `base_url` decides where that model's minted token is sent. `base_url` (unlike the provider table) is not stripped from remote or campaign patches, the same as for a static `env_key`. Keep provider tables and the model `base_url` in layers you trust.
+**Security:** provider commands execute code. They are honored only from trusted config layers (`~/.grok/config.json`, managed config, requirements). A project's `.grok/config.json` can never define one. Whatever layer sets a model's `base_url` decides where that model's minted token is sent. `base_url` (unlike the provider table) is not stripped from remote or campaign patches, the same as for a static `env_key`. Keep provider tables and the model `base_url` in layers you trust.
 
 The command inherits Grok's environment (so it sees `PATH`, `HOME`, and any other secrets there), but Grok's own first-party credentials (`XAI_API_KEY` and related keys) are removed so a BYOK helper never receives them. Write helpers that read only what they need, and prefer the `GROK_AUTH_PROVIDER_*` handback for the prior credential.
 
@@ -1338,7 +1338,7 @@ Grok implements the [Agent Client Protocol (ACP)](https://agentclientprotocol.co
 
 ## Configuration
 
-Grok reads configuration from `~/.grok/config.toml`. If the file does not exist, Grok uses sensible defaults. You only need to specify values you want to override.
+Grok reads configuration from `~/.grok/config.json`. If the file does not exist, Grok uses sensible defaults. You only need to specify values you want to override.
 
 Each feature section below documents its own config. This section covers the general-purpose settings that do not have their own top-level section.
 
@@ -1530,7 +1530,7 @@ Examples:
 
 ### Enterprise Deployment
 
-A complete `config.toml` for an enterprise deployment with external auth, corporate proxy, and telemetry disabled:
+A complete `config.json` for an enterprise deployment with external auth, corporate proxy, and telemetry disabled:
 
 ```json
 {
@@ -1607,7 +1607,7 @@ Repo-scoped skills (Local and Repo) respect `.gitignore` and are filtered out if
 
 ### Configuration
 
-Add extra skill directories or exclude paths via `[skills]` in config.toml:
+Add extra skill directories or exclude paths via `[skills]` in config.json:
 
 ```json
 {
@@ -1687,7 +1687,7 @@ Agent profiles control the system prompt, toolset, and behavior of a session. A 
 Grok discovers agent definitions from `.grok/agents/` (project), `~/.grok/agents/` (user), and built-in agents. Priority (highest wins):
 
 1. `--agent-profile <PATH>` CLI flag
-2. `[agent]` section in `config.toml`
+2. `[agent]` section in `config.json`
 3. `GROK_AGENT` env var
 4. Default `grok-build` agent
 
@@ -1744,7 +1744,7 @@ export GROK_SUBAGENTS=0              # Environment variable
 ```
 
 ```bash
-export GROK_SUBAGENTS_USAGE_FREQUENCY=explicit-only   # env var takes precedence over config.toml
+export GROK_SUBAGENTS_USAGE_FREQUENCY=explicit-only   # env var takes precedence over config.json
 ```
 
 ### Toggles and Model Overrides
@@ -1846,7 +1846,7 @@ Grok discovers hooks from `.grok/hooks/` in the project directory. Manage them w
 
 ### Hooks in config files
 
-Hooks can also be defined directly in the config layers. They can be distributed with your other configuration instead of as separate JSON files. Add a `[[hooks.<Event>]]` table to `config.toml` (your own), `managed_config.toml`, or `requirements.toml`:
+Hooks can also be defined directly in the config layers. They can be distributed with your other configuration instead of as separate JSON files. Add a `[[hooks.<Event>]]` table to `config.json` (your own), `managed_config.toml`, or `requirements.toml`:
 
 ```json
 {
@@ -2033,7 +2033,7 @@ grok models
 grok -p "Hello" -m my-model
 
 # Set as default
-# In config.toml:
+# In config.json:
 [models]
 default = "my-model"
 ```
@@ -2062,7 +2062,7 @@ Grok fetches the model list from `{GROK_MODELS_BASE_URL}/models` on startup and 
 
 If your model list endpoint differs from `{base_url}/models`, set `GROK_MODELS_LIST_URL` explicitly.
 
-**Combining with `[endpoints]` config:** You can also set endpoints in `~/.grok/config.toml`:
+**Combining with `[endpoints]` config:** You can also set endpoints in `~/.grok/config.json`:
 
 ```json
 {
@@ -2091,7 +2091,7 @@ Extend Grok's capabilities with [Model Context Protocol](https://modelcontextpro
 
 ### Configuration
 
-MCP servers are configured in `~/.grok/config.toml`:
+MCP servers are configured in `~/.grok/config.json`:
 
 ```toml
 [mcp_servers.<name>]
@@ -2107,22 +2107,22 @@ tool_timeouts = { create_issue = 120, search = 30 }  # Per-tool timeout override
 
 ### Project-Scoped MCP Servers
 
-MCP servers can also be configured per-project in `.grok/config.toml`. Grok walks from the current directory up to the git repo root, loading `.grok/config.toml` at each level:
+MCP servers can also be configured per-project in `.grok/config.json`. Grok walks from the current directory up to the git repo root, loading `.grok/config.json` at each level:
 
 | Location                        | Scope             | Priority |
 | ------------------------------- | ----------------- | -------- |
-| `~/.grok/config.toml`           | All projects      | Lowest   |
-| `<repo-root>/.grok/config.toml` | This repository   | ↑        |
-| `<cwd>/.grok/config.toml`       | Current directory | Highest  |
+| `~/.grok/config.json`           | All projects      | Lowest   |
+| `<repo-root>/.grok/config.json` | This repository   | ↑        |
+| `<cwd>/.grok/config.json`       | Current directory | Highest  |
 
 If a project defines a server with the same name as a global one, the project version **replaces** it fully (fields are not merged — omitted fields get defaults, not the global values). Servers defined only in the global config are unaffected.
 
-**Example:** commit a `.grok/config.toml` in your repo to share MCP servers across the team:
+**Example:** commit a `.grok/config.json` in your repo to share MCP servers across the team:
 
 ```
 my-project/
 ├── .grok/
-│   └── config.toml
+│   └── config.json
 ├── src/
 └── ...
 ```
@@ -2144,9 +2144,9 @@ my-project/
 }
 ```
 
-If you also have a `linear` server in `~/.grok/config.toml`, the project version replaces it fully.
+If you also have a `linear` server in `~/.grok/config.json`, the project version replaces it fully.
 
-> **Note:** Only `[mcp_servers]` is supported in project-scoped `.grok/config.toml`. Other config sections (models, etc.) are only read from `~/.grok/config.toml`.
+> **Note:** Only `[mcp_servers]` is supported in project-scoped `.grok/config.json`. Other config sections (models, etc.) are only read from `~/.grok/config.json`.
 
 ### Tool Naming
 
@@ -2293,7 +2293,7 @@ export GROK_MEMORY=1
 grok
 
 # Config file (persists permanently)
-# ~/.grok/config.toml
+# ~/.grok/config.json
 [memory]
 enabled = true
 ```
@@ -2357,7 +2357,7 @@ grok memory stats
 
 ### Configuration reference
 
-Key options under `[memory]` in `~/.grok/config.toml`:
+Key options under `[memory]` in `~/.grok/config.json`:
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -2410,7 +2410,7 @@ Sensitive paths (`~/.ssh/`, `~/.aws/`, `~/.gnupg/`, `~/.grok/auth/`) are always 
 
 ### Custom Profiles
 
-Create `~/.grok/sandbox.toml` (global) or `.grok/sandbox.toml` (per-project):
+Create `~/.grok/sandbox.json` (global) or `.grok/sandbox.json` (per-project):
 
 ```json
 {
@@ -2475,7 +2475,7 @@ The output shows all loaded configuration organized by type:
 - **Skills** — from `.grok/skills/`, `~/.grok/skills/`, plugins, and config paths
 - **Agents** — built-in, user-defined, and plugin-provided subagents
 - **Plugins** — discovered plugins with what each provides (skills, agents, hooks, MCPs)
-- **MCP Servers** — from `config.toml`, plugins, `~/.claude.json`, and `.mcp.json`
+- **MCP Servers** — from `config.json`, plugins, `~/.claude.json`, and `.mcp.json`
 - **LSP Servers** — language servers from `lsp.json` and plugins
 - **Hooks** — project and plugin hooks
 - **Permissions, Config Sources** — which config files are active
@@ -2497,7 +2497,7 @@ Grok automatically discovers configuration from Claude Code directories alongsid
 | **Plugins**       | `.claude/plugins/`, `~/.claude/plugins/`             | Discovered with all components   |
 | **Installed plugins** | `~/.claude/plugins/installed_plugins.json`        | Each `installPath` is loaded     |
 | **Marketplaces**  | `~/.claude/plugins/known_marketplaces.json`          | Plugin dirs from `installLocation` |
-| **MCP servers**   | `~/.claude.json`, `.mcp.json`                        | Loaded alongside `config.toml`   |
+| **MCP servers**   | `~/.claude.json`, `.mcp.json`                        | Loaded alongside `config.json`   |
 | **Project rules** | `CLAUDE.md`, `.claude/CLAUDE.md`                     | Loaded as project instructions   |
 | **Permissions**   | `.claude/settings.json`, `.claude/settings.local.json` | Fallback when no TOML config   |
 
@@ -2641,14 +2641,14 @@ The agent persists all session updates automatically. Clients can reconnect and 
 
 | Path                  | Description                                         |
 | --------------------- | --------------------------------------------------- |
-| `~/.grok/config.toml` | Configuration file                                  |
+| `~/.grok/config.json` | Configuration file                                  |
 | `~/.grok/sessions/`   | Persisted sessions (organized by working directory) |
 | `~/.grok/auth.json`   | Authentication credentials (auto-managed)           |
 | `~/.grok/memory/`     | Cross-session memory files and index                |
 | `~/.grok/skills/`     | User-scoped skill definitions                       |
 | `~/.grok/plugins/`    | User-scoped plugins                                 |
 | `~/.grok/agents/`     | User-scoped agent definitions                       |
-| `.grok/config.toml`   | Project-scoped config (MCP servers)                 |
+| `.grok/config.json`   | Project-scoped config (MCP servers)                 |
 | `.grok/skills/`       | Project-scoped skill definitions                    |
 | `.grok/plugins/`      | Project-scoped plugins                              |
 | `.grok/agents/`       | Project-scoped agent definitions                    |
@@ -2797,7 +2797,7 @@ grep "auth:" /tmp/grok-auth.log
 # List available models
 grok models
 
-# Check config.toml for typos in [model.*] sections
+# Check config.json for typos in [model.*] sections
 ```
 
 ### MCP server not starting

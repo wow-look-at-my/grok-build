@@ -29,7 +29,7 @@ List, refresh, and remove sources with `grok plugin marketplace list`, `grok plu
 
 You can also declare sources in config so they are always present.
 
-### In config.toml
+### In config.json
 
 Each source needs a `name` and either a `git` URL (with an optional `branch`) or a local `path`:
 
@@ -135,7 +135,7 @@ In the **Workflows** tab (open it directly with `/workflows`, or `Tab` from the 
 
 ### Turn plugins on or off in config
 
-Set these in `~/.grok/config.toml`:
+Set these in `~/.grok/config.json`:
 
 ```json
 {
@@ -266,7 +266,7 @@ To install it for everyone automatically instead of person by person, see [Distr
 Admins control plugins, marketplaces, and MCP servers through grok's TOML layers plus an optional Claude policy file:
 
 - **`managed_config.toml` / `requirements.toml`** (and macOS MDM) are **native** policy. Put allowlists, denylists, and pins here when grok should enforce them on every server and marketplace, including ones defined in the user's own config or by plugins. `requirements.toml` / MDM is the tamper-resistant tier; user-writable `~/.grok` copies are self-imposed only.
-- **Claude `managed-settings.json`** is **advisory**. Its MCP and marketplace restrictions bind **foreign** subjects only — project files (`.grok/config.toml`, `.mcp.json`), imported Claude configs, CLI overrides, and client-injected servers. They never bind grok-native subjects (user/system `config.toml`, plugin-provided definitions, admin pins). **Adding** a marketplace or installing a new source is always treated as foreign, so an advisory strict list still refuses unlisted `marketplace add` / `plugin install` sources.
+- **Claude `managed-settings.json`** is **advisory**. Its MCP and marketplace restrictions bind **foreign** subjects only — project files (`.grok/config.json`, `.mcp.json`), imported Claude configs, CLI overrides, and client-injected servers. They never bind grok-native subjects (user/system `config.json`, plugin-provided definitions, admin pins). **Adding** a marketplace or installing a new source is always treated as foreign, so an advisory strict list still refuses unlisted `marketplace add` / `plugin install` sources.
 
 Layers combine **strictest-wins**: any deny wins, every restricted source must allow, and boolean pins only tighten (`false` sticks; a later `true` cannot unpin). CamelCase Claude keys and snake_case grok keys are both accepted in TOML.
 

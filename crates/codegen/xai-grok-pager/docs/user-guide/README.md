@@ -14,7 +14,7 @@ Start here. These guides cover what you need on your first day.
 | 2 | [Authentication](02-authentication.md) | Browser login, API keys, OIDC/SSO, external auth providers, and device-code flow |
 | 3 | [Keyboard Shortcuts](03-keyboard-shortcuts.md) | Reference for every key binding and mouse action in the TUI |
 | 4 | [Slash Commands](04-slash-commands.md) | Every `/` command, including goals, deep research, and workflow run management |
-| 5 | [Configuration](05-configuration.md) | `config.toml`, `pager.toml`, environment variables, and file locations |
+| 5 | [Configuration](05-configuration.md) | `config.json`, `pager.toml`, environment variables, and file locations |
 
 ---
 
@@ -54,4 +54,4 @@ Automate, script, and integrate Grok Build with other systems.
 | 24 | [Monitoring Usage (External OpenTelemetry)](24-monitoring-usage.md) | Customer OTEL export |
 | 25 | [File Copy/Move and Git Deletion Safety](25-file-and-git-safety.md) | Relocate with cp/git mv; commit then git rm; no history-hiding amend |
 | 25 | [Status Line](25-status-line.md) | The bottom status row: built-in segments, command scripts, and the stdin JSON contract |
-| 26 | [Configuration Reference](26-config-reference.md) | Field list for `config.toml`, `managed_config.toml`, and `requirements.toml` |
+| 26 | [Configuration Reference](26-config-reference.md) | Field list for `config.json`, `managed_config.toml`, and `requirements.toml` |

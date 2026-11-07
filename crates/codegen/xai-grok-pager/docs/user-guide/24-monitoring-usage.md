@@ -131,7 +131,7 @@ from a fixed, audited attribute set.
 
 ## Config file
 
-Org defaults live under the existing `[telemetry]` table in `config.toml`
+Org defaults live under the existing `[telemetry]` table in `config.json`
 (env vars win). The keys are `otel_`-prefixed peers of the other
 `[telemetry]` settings:
 

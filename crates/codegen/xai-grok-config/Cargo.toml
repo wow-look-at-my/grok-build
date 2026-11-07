@@ -14,6 +14,7 @@ prod-mc-cli-chat-proxy-types = { path = "../../../prod/mc/cli-chat-proxy-types" 
 ring = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
+schemars = { workspace = true }
 serde_json = { workspace = true }
 shellexpand = "3.1"
 strum = { workspace = true }

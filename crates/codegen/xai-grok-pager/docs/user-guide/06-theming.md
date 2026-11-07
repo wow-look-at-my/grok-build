@@ -35,7 +35,7 @@ The theme paints no backgrounds at all: your messages render in bold instead of 
 
 Contrast is only as good as your terminal profile: a profile with a very dark bright-black slot will render faint dividers, since Grok derives everything from your palette rather than hard-coding colors.
 
-The theme is rolling out gradually. Until the rollout reaches your account it is hidden from `/theme` and `/settings`, its names do not parse, and a configured `theme = "terminal"` falls back to the default theme. Set `GROK_TERMINAL_THEME=1` (or `[features] terminal_theme = true` in `config.toml`) to enable it locally ahead of the rollout.
+The theme is rolling out gradually. Until the rollout reaches your account it is hidden from `/theme` and `/settings`, its names do not parse, and a configured `theme = "terminal"` falls back to the default theme. Set `GROK_TERMINAL_THEME=1` (or `[features] terminal_theme = true` in `config.json`) to enable it locally ahead of the rollout.
 
 ---
 
@@ -55,7 +55,7 @@ Submitting `/theme` on its own -- without choosing from the picker -- cycles to 
 
 ### Via Config File
 
-Set the theme in `~/.grok/config.toml`:
+Set the theme in `~/.grok/config.json`:
 
 ```json
 {
@@ -104,7 +104,7 @@ By default, dark mode maps to **GrokNight** and light mode maps to **GrokDay**. 
 
 Once running, Grok polls desktop APIs and env hints every 5 seconds. Toggling your OS between light and dark mode on a local desktop takes effect within seconds without restarting. Over SSH the wrap-stamped env is fixed for that hop.
 
-You can also set `GROK_THEME` (or `LC_GROK_THEME`) to force a theme or `auto` without editing `config.toml`.
+You can also set `GROK_THEME` (or `LC_GROK_THEME`) to force a theme or `auto` without editing `config.json`.
 
 ### Via the Settings Pane
 
@@ -161,7 +161,7 @@ Toggle compact mode with the `/compact-mode` slash command. Compact mode:
 - Reduces horizontal padding to the minimum (1 column).
 - Reduces top padding in the prompt area and info blocks.
 
-The setting is persisted in `~/.grok/config.toml` under `[ui].compact_mode` and survives restarts.
+The setting is persisted in `~/.grok/config.json` under `[ui].compact_mode` and survives restarts.
 
 Use compact mode on small screens to maximize content area.
 

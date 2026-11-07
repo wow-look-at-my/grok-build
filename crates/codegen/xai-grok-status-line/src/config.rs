@@ -15,9 +15,10 @@ pub enum ResolvedStatusLine<'a> {
     Command { command: &'a str },
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, schemars::JsonSchema)]
 pub struct StatusLineConfig {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "status_line_type_schema")]
     kind: Option<StatusLineType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     command: Option<String>,
@@ -31,6 +32,13 @@ pub struct StatusLineConfig {
     parse_problem: Option<String>,
     #[serde(skip)]
     unknown_keys: Vec<String>,
+}
+
+fn status_line_type_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "string",
+        "enum": ["builtin", "command", "disabled", "off", "none", "hidden"]
+    })
 }
 
 /// `eq` destructures `Self` so a new field is a compile error rather than a field the comparison silently skips.
@@ -282,6 +290,7 @@ impl StatusLineConfig {
     strum::EnumString,
     strum::IntoStaticStr,
     strum::VariantArray,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
@@ -319,6 +328,7 @@ impl StatusLineType {
     strum::EnumString,
     strum::IntoStaticStr,
     strum::VariantArray,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case", ascii_case_insensitive)]

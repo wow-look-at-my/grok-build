@@ -42,7 +42,7 @@ Grok also scans home-level rules, regardless of where it starts. These roots are
 | `$GROK_HOME/rules/` (default `~/.grok/rules/`) | Always scanned; applies to all projects |
 | `~/.claude/rules/` | Controlled by `compat.claude.rules` |
 | `~/.cursor/rules/` | Controlled by `compat.cursor.rules` |
-| Each entry of `[paths] extra_rule_dirs` | Any absolute directory you list in `config.toml`; `~` is expanded |
+| Each entry of `[paths] extra_rule_dirs` | Any absolute directory you list in `config.json`; `~` is expanded |
 
 Home rules load first, in the table order, followed by project files from repo root to the current directory. Files are alphabetical within each rules directory. To load rules from a directory that is not one of the built-in locations, list it under `[paths]`:
 
@@ -236,7 +236,7 @@ Beyond AGENTS.md files, the `.grok/` directory in your project root can contain 
 
 | Path | Purpose |
 |------|---------|
-| `.grok/config.toml` | Project-scoped MCP servers, plugins, and permission rules (other settings load only from `~/.grok/config.toml`) |
+| `.grok/config.json` | Project-scoped MCP servers, plugins, and permission rules (other settings load only from `~/.grok/config.json`) |
 | `.grok/skills/` | Project-scoped skill definitions |
 | `.grok/plugins/` | Project-scoped plugins |
 | `.grok/agents/` | Project-scoped agent definitions |

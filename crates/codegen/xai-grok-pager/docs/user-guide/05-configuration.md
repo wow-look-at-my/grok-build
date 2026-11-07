@@ -1,6 +1,6 @@
 # Configuration
 
-Grok reads settings from config files, environment variables, and CLI flags. This page covers the common options. The field list for `config.toml`, `managed_config.toml`, and `requirements.toml` is [26-config-reference.md](26-config-reference.md) (extracted to `~/.grok/docs/user-guide/` on launch).
+Grok reads settings from config files, environment variables, and CLI flags. This page covers the common options. The field list for `config.json`, `managed_config.toml`, and `requirements.toml` is [26-config-reference.md](26-config-reference.md) (extracted to `~/.grok/docs/user-guide/` on launch).
 
 ---
 
@@ -11,23 +11,23 @@ Settings resolve highest-priority first:
 1. **CLI flags** (e.g. `--yolo`, `--model`, `--sandbox`)
 2. **Environment variables** (e.g. `XAI_API_KEY`, `GROK_MEMORY`)
 3. **`requirements.toml` / MDM** (org-enforced. Clamps every config layer below, including the overlay)
-4. **`GROK_CONFIG` / `GROK_CONFIG_PATH` overlay** (above `config.toml` and managed, below `requirements.toml` / MDM)
-5. **config.toml** (`~/.grok/config.toml`)
-6. **`managed_config.toml`** (org-deployed defaults. Below `config.toml`)
+4. **`GROK_CONFIG` / `GROK_CONFIG_PATH` overlay** (above `config.json` and managed, below `requirements.toml` / MDM)
+5. **config.json** (`~/.grok/config.json`)
+6. **`managed_config.toml`** (org-deployed defaults. Below `config.json`)
 7. **Built-in defaults**
 
-Within the config-file tier, the layers merge lowest-to-highest: `managed_config.toml` → `config.toml` → `GROK_CONFIG` overlay → `requirements.toml` / MDM. So `requirements.toml` and MDM clamp **both** your `config.toml` and the overlay.
+Within the config-file tier, the layers merge lowest-to-highest: `managed_config.toml` → `config.json` → `GROK_CONFIG` overlay → `requirements.toml` / MDM. So `requirements.toml` and MDM clamp **both** your `config.json` and the overlay.
 
 `GROK_CONFIG` / `GROK_CONFIG_PATH` (tier 4) are config **overlays**: a merged config layer, not direct-setting environment variables like `XAI_API_KEY` (tier 2). They set config keys (subject to the allowlist below), so read them as part of the config-file tier rather than the env-var tier.
 
 ### Injecting config with `GROK_CONFIG`
 
-A harness or ACP client that launches `grok agent stdio` can inject settings without writing a `config.toml` or relocating `$GROK_HOME`:
+A harness or ACP client that launches `grok agent stdio` can inject settings without writing a `config.json` or relocating `$GROK_HOME`:
 
 - **`GROK_CONFIG`**: an inline JSON object overlay.
-- **`GROK_CONFIG_PATH`**: an *additional* file overlay (not a replacement for `config.toml`), a JSON or TOML file read by its extension (`.json` → JSON, else TOML). `GROK_CONFIG` wins if both are set. An empty `GROK_CONFIG` is treated as unset, and a malformed one logs a warning and falls through to `GROK_CONFIG_PATH`.
+- **`GROK_CONFIG_PATH`**: an *additional* file overlay (not a replacement for `config.json`), a JSON or TOML file read by its extension (`.json` → JSON, else TOML). `GROK_CONFIG` wins if both are set. An empty `GROK_CONFIG` is treated as unset, and a malformed one logs a warning and falls through to `GROK_CONFIG_PATH`.
 
-The overlay is **deep-merged** on top of your `config.toml` (it overrides only the keys it sets), placed above the user/managed layers but **below** `requirements.toml` / MDM. As a result, an enterprise pin still wins. A malformed blob is ignored with a warning. This mirrors `CODEX_CONFIG` from the `codex-acp` adapter (a JSON object merged into the session config). Grok is ACP-native. As a result, the overlay lives in the agent itself.
+The overlay is **deep-merged** on top of your `config.json` (it overrides only the keys it sets), placed above the user/managed layers but **below** `requirements.toml` / MDM. As a result, an enterprise pin still wins. A malformed blob is ignored with a warning. This mirrors `CODEX_CONFIG` from the `codex-acp` adapter (a JSON object merged into the session config). Grok is ACP-native. As a result, the overlay lives in the agent itself.
 
 It only affects settings read from the merged config. It is **not** a permission-escalation path. The overlay is confined, fail-closed, to an **allowlist** of soft settings (`models`, `features`, a narrowed `toolset`, and a `shell_environment_policy` limited to its filter fields, which select among env names the launcher already controls and cannot inject an env value into tool subprocesses). Every other table is dropped at the choke point. As a result, the overlay cannot spawn commands, set auth policy, redirect network traffic, elevate trust, or add a discovery source. Even on the allowlisted settings, a specific set of security gates read the raw disk layers rather than the overlay.
 
@@ -39,9 +39,9 @@ GROK_CONFIG='{"models": {"default_reasoning_effort": "high"}}' grok agent stdio
 
 ---
 
-## config.toml (main configuration)
+## config.json (main configuration)
 
-Location: `~/.grok/config.toml`. If the file is missing, Grok uses its built-in defaults, so you only need to set the values you want to override.
+Location: `~/.grok/config.json`. If the file is missing, Grok uses its built-in defaults, so you only need to set the values you want to override.
 
 ### General settings
 
@@ -97,7 +97,7 @@ Location: `~/.grok/config.toml`. If the file is missing, Grok uses its built-in 
 
 ### Default agent
 
-Interactive `grok` uses `[agent]` in `config.toml` when you do not pass `--plan`, `--ask-user`, or `--agent-profile`:
+Interactive `grok` uses `[agent]` in `config.json` when you do not pass `--plan`, `--ask-user`, or `--agent-profile`:
 
 ```json
 {
@@ -134,7 +134,7 @@ After you answer the first prompt the cursor turns **sticky**: each later prompt
 
 Values match case-insensitively. An unset or unrecognized value falls back to `always_allow_all_sessions`. The `allow_command_always` row is always scoped to the specific action being approved (command / tool / domain / edit-session), not a global allow-everything — that is what `always_allow_all_sessions` is for. Note the per-command "Always allow" rows appear while `[ui] remember_tool_approvals` is enabled (the default. Set it to `false` to hide them). See [22-permissions-and-safety.md](22-permissions-and-safety.md).
 
-You can also override this with `GROK_DEFAULT_SELECTED_PERMISSION`, which is handy for headless or agent test runs that must not mutate `config.toml`. Precedence: env var → `config.toml` → `always_allow_all_sessions`.
+You can also override this with `GROK_DEFAULT_SELECTED_PERMISSION`, which is handy for headless or agent test runs that must not mutate `config.json`. Precedence: env var → `config.json` → `always_allow_all_sessions`.
 
 #### Snap prompt to top on send
 
@@ -161,7 +161,7 @@ By default, sending a prompt scrolls it to the top of the viewport so the respon
 }
 ```
 
-Each setting also has an environment-variable override, applied on first load only (again, handy for headless / test runs): `GROK_SCROLL_SPEED`, `GROK_SCROLL_MODE`, `GROK_INVERT_SCROLL` (`1`/`true`/`0`/`false`), and `GROK_SCROLL_LINES`. Precedence: env var → `config.toml` → default. Unrecognized values fall back to the default, and out-of-range numbers clamp.
+Each setting also has an environment-variable override, applied on first load only (again, handy for headless / test runs): `GROK_SCROLL_SPEED`, `GROK_SCROLL_MODE`, `GROK_INVERT_SCROLL` (`1`/`true`/`0`/`false`), and `GROK_SCROLL_LINES`. Precedence: env var → `config.json` → default. Unrecognized values fall back to the default, and out-of-range numbers clamp.
 
 #### Slow output
 
@@ -226,9 +226,9 @@ The older `[output_rate_floor]` table (`window_secs`, `max_retries`) still works
 
 `[toolset.web_search]` constrains the `web_search` tool's domains — the allowlist/blocklist the search itself runs under (not a post-filter). `allowed_domains` and `excluded_domains` are **mutually exclusive**. If you set both, the allowlist wins and the blocklist is dropped with a warning. An empty or absent list is unbounded. This applies to both the backend-hosted search (models with server-side search) and the client-side fallback. A configured policy is **authoritative**: it cannot be bypassed by the model.
 
-The model's own per-call `allowed_domains` is ignored when you set `allowed_domains` or `excluded_domains` here (so a blocklist is a real block). The model's per-call allowlist only applies when you configured nothing. Resolution: requirements → user `config.toml` → managed → default (unset). Config is read at session start, so edit it before starting a session — changes do not apply mid-session.
+The model's own per-call `allowed_domains` is ignored when you set `allowed_domains` or `excluded_domains` here (so a blocklist is a real block). The model's per-call allowlist only applies when you configured nothing. Resolution: requirements → user `config.json` → managed → default (unset). Config is read at session start, so edit it before starting a session — changes do not apply mid-session.
 
-`[toolset.ask_user_question]` is honored across **requirements.toml**, **managed config**, and your user **`config.toml`**. Precedence: requirements → env (`GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED` / `GROK_ASK_USER_QUESTION_TIMEOUT_SECS`) → user config → managed → defaults. Set `timeout_enabled = false` in your user config to disable the automatic questionnaire timeout for yourself. `timeout_secs` must be a positive integer. You can also toggle `timeout_enabled` from `/settings` → **Ask-Question timeout** (under Agent & Approval). Changes apply to newly started sessions.
+`[toolset.ask_user_question]` is honored across **requirements.toml**, **managed config**, and your user **`config.json`**. Precedence: requirements → env (`GROK_ASK_USER_QUESTION_TIMEOUT_ENABLED` / `GROK_ASK_USER_QUESTION_TIMEOUT_SECS`) → user config → managed → defaults. Set `timeout_enabled = false` in your user config to disable the automatic questionnaire timeout for yourself. `timeout_secs` must be a positive integer. You can also toggle `timeout_enabled` from `/settings` → **Ask-Question timeout** (under Agent & Approval). Changes apply to newly started sessions.
 
 ### Authentication
 
@@ -449,9 +449,9 @@ Configure external tool integrations over the Model Context Protocol.
 
 Remote (HTTP/SSE) servers receive a default `User-Agent: grok-cli/<version>` header. A valid `User-Agent` entry in `headers` overrides it (Figma servers receive bare `grok-cli`). See [MCP servers](07-mcp-servers.md) for details.
 
-MCP servers can also be set per-project in `.grok/config.toml`. Project-scoped config contributes `[mcp_servers]`, `[plugins]`, and `[permission]` rules. Every other section loads only from `~/.grok/config.toml`.
+MCP servers can also be set per-project in `.grok/config.json`. Project-scoped config contributes `[mcp_servers]`, `[plugins]`, and `[permission]` rules. Every other section loads only from `~/.grok/config.json`.
 
-Priority for `[mcp_servers]` and `[plugins]`: `.grok/config.toml` (current dir) > `<repo-root>/.grok/config.toml` > `~/.grok/config.toml`. `[permission]` rules are not overridden by priority — they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
+Priority for `[mcp_servers]` and `[plugins]`: `.grok/config.json` (current dir) > `<repo-root>/.grok/config.json` > `~/.grok/config.json`. `[permission]` rules are not overridden by priority — they merge across all files with `deny` > `ask` > `allow` (see [22-permissions-and-safety.md](22-permissions-and-safety.md)).
 
 ### Memory
 
@@ -599,7 +599,7 @@ Control vendor compatibility for Cursor and Claude. Every cell defaults to `true
 
 For Claude and Cursor, `rules` and `agents` are independent. Turning off named instruction files does not disable the home or project rules directory, and turning off rules does not disable named files. Claude's `agents` cell gates home-level `~/.claude/` named files and project `<dir>/.claude/CLAUDE*.md`. Generic top-level `Claude.md`, `CLAUDE.md`, and `CLAUDE.local.md` stay recognized. Project rule paths are scanned at every directory from the repo root down to the current one.
 
-Each cell can be set via environment variable or `config.toml`. See the environment-variables reference for the names. Resolution: env var > config.toml > default (on).
+Each cell can be set via environment variable or `config.json`. See the environment-variables reference for the names. Resolution: env var > config.json > default (on).
 
 `grok inspect` reports cells that still need session-start resolution as `?` until a value is available. Cells with an explicit env or TOML value use that value. Affected discovery entries report `compatibilityStatus: "unresolved"` in JSON and `[compat unresolved]` in human output.
 
@@ -624,7 +624,7 @@ Each cell can be set via environment variable or `config.toml`. See the environm
 
 `[hints]` holds small persisted UI preferences: remembered answers and modal layout. Grok writes these for you as you use the TUI. However, you can edit or delete them by hand. Removing a key restores the default.
 
-`[hints]` is read from the **effective config merge**, with the usual precedence: system managed → user `managed_config.toml` → user `config.toml` → user `requirements.toml` → system `requirements.toml`, higher layers winning. The TUI only ever **writes** these to your user `~/.grok/config.toml`.
+`[hints]` is read from the **effective config merge**, with the usual precedence: system managed → user `managed_config.toml` → user `config.json` → user `requirements.toml` → system `requirements.toml`, higher layers winning. The TUI only ever **writes** these to your user `~/.grok/config.json`.
 
 ```json
 {
@@ -832,7 +832,7 @@ Listed `[telemetry] otel_*` keys in signed `requirements.toml` **pin** over proc
 
 ### Removed keys
 
-Grok has no built-in updater. To update, run the installer again. These `[cli]` keys still load. As a result, an old `config.toml` keeps working. However, they have no effect: `auto_update`, `channel`, `dismissed_version`, `npm_registry`, `minimum_version`, `maximum_version`, `required_minimum_version` and `required_maximum_version`. The `GROK_*_VERSION` environment overrides for those bounds are ignored too.
+Grok has no built-in updater. To update, run the installer again. These `[cli]` keys still load. As a result, an old `config.json` keeps working. However, they have no effect: `auto_update`, `channel`, `dismissed_version`, `npm_registry`, `minimum_version`, `maximum_version`, `required_minimum_version` and `required_maximum_version`. The `GROK_*_VERSION` environment overrides for those bounds are ignored too.
 
 `[ui] screen_mode` also still loads and has no effect. Grok has one render mode. `[ui] alt_screen` decides whether it draws on the alternate screen.
 
@@ -1090,7 +1090,7 @@ A `[model.<id>] pricing` table you write always wins over the catalog.
 
 | Path | Description |
 |------|-------------|
-| `~/.grok/config.toml` | Main configuration file |
+| `~/.grok/config.json` | Main configuration file |
 | `~/.grok/pager.toml` | TUI appearance configuration |
 | `~/.grok/auth.json` | Authentication credentials (auto-managed) |
 | `~/.grok/sessions/` | Persisted sessions (organized by working directory) |
@@ -1100,20 +1100,20 @@ A `[model.<id>] pricing` table you write always wins over the catalog.
 | `~/.grok/agents/` | User-scoped agent definitions |
 | `~/.grok/lsp.json` | LSP server configuration (user-scoped) |
 | `~/.grok/logs/` | Internal log files (e.g. `unified.jsonl`, MCP server logs) |
-| `.grok/config.toml` | Project-scoped MCP servers, plugins, and permission rules |
+| `.grok/config.json` | Project-scoped MCP servers, plugins, and permission rules |
 | `.grok/skills/` | Project-scoped skill definitions |
 | `.grok/plugins/` | Project-scoped plugins |
 | `.grok/agents/` | Project-scoped agent definitions |
 | `.grok/hooks/` | Project-scoped hooks |
 | `.grok/lsp.json` | LSP server configuration |
 
-### How Grok saves `config.toml`
+### How Grok saves `config.json`
 
-Writes to **`~/.grok/config.toml`** (`/settings` and other user-config saves) follow a leaf symlink. The atomic rename writes the referent (a file in your dotfiles repo). The link stays a link. If the link dangls, the write creates the referent as a regular file.
+Writes to **`~/.grok/config.json`** (`/settings` and other user-config saves) follow a leaf symlink. The atomic rename writes the referent (a file in your dotfiles repo). The link stays a link. If the link dangls, the write creates the referent as a regular file.
 
-Writes to a **project** `.grok/config.toml` (MCP / plugin / permission edits) **replace** a leaf symlink with a regular file. That keeps a later save from following the link out of the repository.
+Writes to a **project** `.grok/config.json` (MCP / plugin / permission edits) **replace** a leaf symlink with a regular file. That keeps a later save from following the link out of the repository.
 
-A user `config.toml` that cannot be parsed is not overwritten. Fix the syntax (or restore a backup) and save again.
+A user `config.json` that cannot be parsed is not overwritten. Fix the syntax (or restore a backup) and save again.
 
 ---
 
@@ -1123,12 +1123,12 @@ Some settings can be set per-project by placing files in `.grok/` inside your re
 
 | File | What it configures |
 |------|--------------------|
-| `.grok/config.toml` | MCP servers, plugins, permission rules, and the `[mcp] max_output_bytes` tool-result cap (other sections load only from `~/.grok/config.toml`) |
+| `.grok/config.json` | MCP servers, plugins, permission rules, and the `[mcp] max_output_bytes` tool-result cap (other sections load only from `~/.grok/config.json`) |
 | `.grok/skills/` | Project-specific skills |
 | `.grok/hooks/` | Project-specific lifecycle hooks |
 | `.grok/agents/` | Project-specific agent definitions |
 | `.grok/lsp.json` | LSP server configuration |
-| `.grok/sandbox.toml` | Custom sandbox profiles |
+| `.grok/sandbox.json` | Custom sandbox profiles |
 | `AGENTS.md` | Project instructions (system prompt) |
 
 Project-scoped MCP servers override global ones with the same name (full replacement, not a merge).

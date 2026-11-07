@@ -50,7 +50,7 @@ winget upgrade --id xAI.GrokBuild -e
 
 The WinGet package tracks the stable channel, and new releases can take a few days to reach it.
 
-To fetch a repository through Grove (NFS on macOS, FUSE on Linux), enable `grok clone` with `[clone] enabled = true` in Grove config, `GROK_CLONE=1`, or the enable-both convenience `GROK_GROVE=1` / `[cli] grove = true` in `~/.grok/config.toml`:
+To fetch a repository through Grove (NFS on macOS, FUSE on Linux), enable `grok clone` with `[clone] enabled = true` in Grove config, `GROK_CLONE=1`, or the enable-both convenience `GROK_GROVE=1` / `[cli] grove = true` in `~/.grok/config.json`:
 
 ```bash
 grok clone <url> [dir]
@@ -257,4 +257,4 @@ Deeper files take precedence. Grok also reads `CLAUDE.md` files for compatibilit
 | [Authentication](02-authentication.md) | Browser login, API keys, OIDC, external auth, device code flow |
 | [Keyboard Shortcuts](03-keyboard-shortcuts.md) | Complete reference for all key bindings |
 | [Slash Commands](04-slash-commands.md) | All available `/` commands |
-| [Configuration](05-configuration.md) | config.toml, pager.toml, environment variables |
+| [Configuration](05-configuration.md) | config.json, pager.toml, environment variables |
