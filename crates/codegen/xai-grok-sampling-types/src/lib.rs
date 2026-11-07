@@ -12,6 +12,7 @@
 #![deny(clippy::indexing_slicing)]
 #![allow(clippy::unwrap_used)]
 
+pub mod backend_mismatch;
 pub mod conversation;
 pub mod doom_loop;
 pub mod error;

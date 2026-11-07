@@ -986,6 +986,7 @@ impl SamplingClient {
         }
         xai_grok_extra_ca::endpoint_allowlist::check(&config.base_url)
             .map_err(|refusal| SamplingError::EndpointNotAllowed(refusal.to_string()))?;
+        let api_backend = crate::backend_detect::effective_api_backend(&config);
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         // The key is sent as an `Auth`; check here that it is a valid header value.
@@ -1139,7 +1140,7 @@ impl SamplingClient {
             temperature: config.temperature,
             top_p: config.top_p,
             context_window: config.context_window,
-            api_backend: config.api_backend,
+            api_backend,
             auth_scheme: config.auth_scheme,
             request_compression: config.request_compression,
             stream_tool_calls: config.stream_tool_calls,
@@ -2849,7 +2850,66 @@ impl SamplingClient {
     }
 
     /// [`Self::conversation_collect`] with a caller-chosen idle timeout, for short side calls (autocomplete, memory notes) that must give up fast.
+    /// A backend-mismatch error sends the request again on the other backends ([`crate::backend_detect`]).
     pub async fn conversation_collect_with_idle_timeout(
+        &self,
+        request: ConversationRequest,
+        idle_timeout: std::time::Duration,
+    ) -> Result<ConversationResponse> {
+        let model = request
+            .model
+            .clone()
+            .unwrap_or_else(|| self.defaults.model.clone());
+        let mut probe = crate::backend_detect::BackendProbe::default();
+        let mut client = self.clone();
+        loop {
+            let err = match client
+                .collect_on_backend(request.clone(), idle_timeout)
+                .await
+            {
+                Ok(response) => {
+                    if probe.switched() {
+                        crate::backend_detect::remember(
+                            &self.base_url,
+                            &model,
+                            client.api_backend(),
+                        );
+                    }
+                    return Ok(response);
+                }
+                Err(err) => err,
+            };
+            if !probe.should_switch(&err) {
+                return Err(err);
+            }
+            let current = client.api_backend();
+            let Some(next) = probe.next(&current, &err) else {
+                return Err(if probe.switched() {
+                    probe.exhausted_error(&err)
+                } else {
+                    err
+                });
+            };
+            tracing::warn!(
+                model = %model,
+                from = ?current,
+                to = ?next,
+                error = %err,
+                "model refused on this API backend; sending the side call on another"
+            );
+            client = self.with_api_backend(next);
+        }
+    }
+
+    /// This client with requests sent on `backend`. Ollama's native API has
+    /// its own path root, so the fallback never moves to or from it.
+    pub(crate) fn with_api_backend(&self, backend: ApiBackend) -> Self {
+        let mut client = self.clone();
+        client.defaults.api_backend = backend;
+        client
+    }
+
+    async fn collect_on_backend(
         &self,
         request: ConversationRequest,
         idle_timeout: std::time::Duration,
