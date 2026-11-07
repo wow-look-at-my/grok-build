@@ -2205,6 +2205,7 @@ fn defaults_round_trip_through_registry() {
             "group_tool_verbs" => SettingValue::Bool(true),
             "collapsed_edit_blocks" => SettingValue::Bool(false),
             "respect_manual_folds" => SettingValue::Bool(false),
+            "keep_awake" => SettingValue::Enum("while_running"),
             // Per-tip contextual-hint children default ON (inherit resolves to true)
             "contextual_hints.undo" => SettingValue::Bool(true),
             "contextual_hints.plan_mode" => SettingValue::Bool(true),
