@@ -377,7 +377,7 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 
 ## Configuration Reference
 
-### Core Settings (`[memory]`)
+### Core Settings (`memory`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -385,7 +385,7 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `session.save_on_end` | `true` | Write metadata summary on session end |
 | `watcher.enabled` | `true` | Watch `~/.grok/memory/` for external edits and reindex |
 
-### Index Settings (`[memory.index]`)
+### Index Settings (`memory.index`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
