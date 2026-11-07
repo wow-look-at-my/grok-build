@@ -121,7 +121,7 @@ where
         Some(IntOrString::Str(s)) => Some(s),
     })
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default, try_from = "TelemetryConfigWire")]
 pub struct TelemetryConfig {
     /// Declared for `serde_ignored`. Actual toggle is `[features] telemetry`.
@@ -183,7 +183,7 @@ impl TelemetryConfig {
 /// instead of tripping serde's duplicate-field check. This table can arrive
 /// from a remote campaign patch. This is merged into the same value the config
 /// is read from and is not limited to any field set.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 struct TelemetryConfigWire {
     enabled: Option<bool>,
@@ -206,8 +206,10 @@ struct TelemetryConfigWire {
     otel_log_assistant_responses: Option<bool>,
     otel_log_tool_content: Option<bool>,
     #[serde(deserialize_with = "deserialize_opt_ms_string")]
+    #[schemars(schema_with = "ms_schema")]
     otel_timeout: Option<String>,
     #[serde(deserialize_with = "deserialize_opt_ms_string")]
+    #[schemars(schema_with = "ms_schema")]
     otel_metric_export_interval: Option<String>,
     otel_logs_endpoint: Option<String>,
     otel_metrics_endpoint: Option<String>,
