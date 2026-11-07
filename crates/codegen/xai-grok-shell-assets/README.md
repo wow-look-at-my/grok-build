@@ -2086,7 +2086,7 @@ If your model list endpoint differs from `{base_url}/models`, set `GROK_MODELS_L
 }
 ```
 
-When using `[endpoints]` with partial model overrides, the `base_url` is inherited from the endpoints config. You do not need to specify it in each `[model.*]` section.
+When using `endpoints` with partial model overrides, the `base_url` is inherited from the endpoints config. You do not need to specify it in each `models.definitions.*` entry.
 
 **Auth behavior:** When `models_base_url` is set, Grok uses API key auth (`Authorization: Bearer`) instead of session auth. `grok login` is not required — only the API key.
 
