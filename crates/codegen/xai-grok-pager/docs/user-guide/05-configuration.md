@@ -828,7 +828,7 @@ The same `telemetry` section also configures the **external OpenTelemetry stream
 }
 ```
 
-Listed `[telemetry] otel_*` keys in signed `requirements.toml` **pin** over process env (destination lock). `managed_config.toml` does not. There is no `headers` key — collector tokens stay in `OTEL_EXPORTER_OTLP_HEADERS`. See [Monitoring & Usage](24-monitoring-usage.md).
+Listed `telemetry.otel_*` keys in signed `requirements.toml` **pin** over process env (destination lock). `managed_config.toml` does not. There is no `headers` key — collector tokens stay in `OTEL_EXPORTER_OTLP_HEADERS`. See [Monitoring & Usage](24-monitoring-usage.md).
 
 ### Removed keys
 
