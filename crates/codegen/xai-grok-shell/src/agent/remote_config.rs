@@ -18,8 +18,8 @@ pub(crate) mod task_model_policy;
 
 pub(in crate::agent::remote_config) use cache::ModelsCacheManager;
 pub(crate) use endpoint::{HttpModelsEndpoint, ModelsEndpoint};
-pub(crate) use fetch::prefetch_models_blocking;
 pub(in crate::agent::remote_config) use fetch::{ModelsPrefetch, fetch_models_uncommitted};
+pub(crate) use fetch::{prefetch_models_async, prefetch_models_blocking};
 pub(crate) use manager::ModelsManager;
 pub(crate) use metrics::{DegradedStartCause, record_degraded_start};
 pub(in crate::agent::remote_config) use model_fetch_auth::ModelsCacheScope;

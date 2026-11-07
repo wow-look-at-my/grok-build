@@ -15,3 +15,13 @@ pub(crate) fn active_model_source(
 ) -> impl ModelSource {
     oai::OaiModelSource::new(endpoints, fetch_auth)
 }
+/// [`active_model_source`]'s fetch, on the async client.
+pub(crate) async fn fetch_active_models_async(
+    endpoints: &EndpointsConfig,
+    fetch_auth: ModelFetchAuth,
+    auth: Option<&GrokAuth>,
+) -> Result<FetchModelsResult, BackendError> {
+    oai::OaiModelSource::new(endpoints, fetch_auth)
+        .fetch_async(auth)
+        .await
+}
