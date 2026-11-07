@@ -108,7 +108,8 @@ fn a_full_json_layout_config_is_valid() {
         },
         "agents": {
             "subagents": { "enabled": true, "max_depth": 2, "models": { "explore": "grok-4" } },
-            "goal": { "enabled": true }
+            "goal": { "enabled": true },
+            "doom_loop_recovery": { "max_retries": "unlimited" }
         },
         "hooks": {
             "Stop": [
@@ -121,7 +122,6 @@ fn a_full_json_layout_config_is_valid() {
             "allow_managed_hooks_only": false
         },
         "features": { "web_fetch": false, "codebase_indexing": ["src/**", "!target/**"] },
-        "doom_loop_recovery": { "max_retries": "unlimited" },
         "version_overrides": [
             { "minimum_version": "1.0.0", "ui": { "theme": "light" } }
         ],

@@ -1859,7 +1859,7 @@ Grok discovers hooks from `.grok/hooks/` in the project directory. Manage them w
 
 Hooks can also be defined directly in the config layers, so they can be
 distributed with your other configuration instead of as separate JSON files. Add
-a `[[hooks.<Event>]]` table to `config.json` (your own), `managed_config.toml`, or
+a `hooks.<Event>` array to `config.json` (your own), `managed_config.toml`, or
 `requirements.toml`:
 
 ```json
