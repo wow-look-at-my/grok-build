@@ -2814,7 +2814,10 @@ mod tests {
         let mut state = MemoryModalState::new(Vec::new())
             .with_enabled(false, Some(MemoryDisabledReason::ConfigOptOut));
         let text = render_full(&mut state);
-        assert!(text.contains("`memory.enabled` is `false`"), "{text}");
+        assert!(
+            text.contains("memory.enabled is false in config.json"),
+            "{text}"
+        );
         assert!(text.contains("this session only"), "{text}");
         assert!(state.can_enable());
         let labels: Vec<&str> = build_shortcuts(&state).iter().map(|s| s.label).collect();
