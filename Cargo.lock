@@ -11599,6 +11599,7 @@ dependencies = [
  "dunce",
  "prod-mc-cli-chat-proxy-types",
  "ring",
+ "schemars",
  "semver",
  "serde",
  "serde_json",
@@ -12712,6 +12713,7 @@ dependencies = [
 name = "xai-grok-status-line"
 version = "0.1.0"
 dependencies = [
+ "schemars",
  "serde",
  "serde_json",
  "strum 0.27.2",
@@ -12759,6 +12761,7 @@ dependencies = [
  "prost",
  "rcgen",
  "rustls",
+ "schemars",
  "sentry",
  "serde",
  "serde_json",
