@@ -52,7 +52,9 @@ pub(crate) fn resolve_context_window_on_route(
     let wanted = entry.info.model.as_str();
     let mut donor = listing.get(wanted);
     if donor.is_none_or(|found| !donatable(found)) {
-        donor = listing.values().find(|found| found.info.model == wanted && donatable(*found));
+        donor = listing
+            .values()
+            .find(|found| found.info.model == wanted && donatable(*found));
     }
     donor.map_or_else(
         || {
