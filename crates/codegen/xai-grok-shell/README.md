@@ -1978,7 +1978,7 @@ You can override specific fields of built-in models without redefining everythin
 2. Prefetched models from remote `/v1/models`
 3. Hardcoded defaults — lowest priority
 
-**Web search model:** Set `[models] web_search`, `GROK_WEB_SEARCH_MODEL`, or `--web-search-model` to point the `web_search` tool at a different model. The target endpoint must support the Responses API and web search.
+The target endpoint must support the Responses API and web search.
 
 > **Overriding with a custom model:** Setting `[models] web_search` alone is not
 > enough if the model isn't already in the catalog (built-in defaults or
