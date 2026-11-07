@@ -383,15 +383,14 @@ fn load_persisted_drops_stale_subagent_row_ids() {
     assert_eq!(loaded.reorder, vec![keep]);
 }
 
-/// The onboarding hint was removed — a stale `[dashboard.onboarding]`
-/// table left by an older version is dropped on the next write.
+/// A stale `ui.dashboard.onboarding` table left by an older version is dropped on the next write.
 #[test]
 fn persisted_write_drops_stale_onboarding_table() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
+    let path = tmp.path().join("config.json");
     std::fs::write(
         &path,
-        "[dashboard]\nenabled = true\n\n[dashboard.onboarding]\ndismissed = true\n",
+        r#"{"ui": {"dashboard": {"enabled": true, "onboarding": {"dismissed": true}}}}"#,
     )
     .unwrap();
     write_persisted_to_path(&path, &PersistedDashboard::defaults()).unwrap();
