@@ -16,9 +16,9 @@ See the [MCP specification](https://modelcontextprotocol.io) for protocol detail
 
 ## MCP servers under a sandbox profile
 
-A stdio MCP server is frequently launched through a **package runner** — `uvx kagimcp`, `npx -y some-server`, `bunx`. The runner downloads the package into a cache of its own. This happens before the server starts, and every one of those caches defaults under your home directory (`~/.cache/uv`, `~/.npm`, `~/.bun/install`).
+The runner downloads the package into a cache of its own.
 
-No write-confining sandbox profile grants your home directory. `workspace`, `read-only` and `strict` allow writes only to the working directory, `~/.grok/` and the temp dirs. So under any of them the runner cannot create its cache, exits during startup, and the MCP client reports only a closed pipe:
+No write-confining sandbox profile grants your home directory. So under any of them the runner cannot create its cache, exits during startup, and the MCP client reports only a closed pipe:
 
 ```text
 error: Failed to initialize cache at `/Users/you/.cache/uv`
@@ -195,7 +195,7 @@ grok mcp doctor --json        # Machine-readable output
 
 The transport defaults to `stdio`; pass `--transport http` or `--transport sse` for remote servers.
 
-By default `grok mcp add` writes to `~/.grok/config.json` (`--scope user`). Use `--scope project` to write to `.grok/config.json` in the current directory instead, which can be committed and shared with your team (see [Project-Scoped MCP Servers](#project-scoped-mcp-servers)). Header and environment variable values are stored verbatim, so reference secrets as `${VAR}` instead of pasting them into a committed project config (see [Example Configurations](#example-configurations)). `grok mcp list` shows servers from both scopes, marking project-scoped ones with `(project)` and disabled ones with `(disabled)`.
+By default `grok mcp add` writes to `~/.grok/config.json` (`--scope user`). Use `--scope project` to write to `.grok/config.json` in the current directory instead. That `--scope project` can be committed and shared with your team (see [Project-Scoped MCP Servers](#project-scoped-mcp-servers)). Header and environment variable values are stored verbatim. Reference secrets as `${VAR}` instead of pasting them into a committed project config (see [Example Configurations](#example-configurations)). `grok mcp list` shows servers from both scopes, marking project-scoped ones with `(project)` and disabled ones with `(disabled)`.
 
 `grok mcp remove` searches both scopes and exits 0 after removing the server. It exits 1 when the name is not found, or when the name is defined in both user and project scope — pass `--scope` to say which one to remove.
 
@@ -211,7 +211,7 @@ Breaking changes from earlier releases: `--env` now takes one `KEY=value` per fl
 
 ## Project-Scoped MCP Servers
 
-MCP servers can be configured per-project by placing a `.grok/config.json` in your repository:
+Placing a `.grok/config.json` in your repository can configure MCP servers:
 
 ```
 my-project/
@@ -360,7 +360,7 @@ Grok loads MCP server configurations from multiple sources for compatibility:
 
 All sources are merged in priority order: config.json > Claude > Cursor > `.mcp.json`. Servers from higher-priority sources take precedence when names conflict.
 
-The Claude and Cursor MCP sources are scanned by default. To disable scanning for a specific vendor, set `[compat.<vendor>] mcps = false` in `~/.grok/config.json` or the corresponding environment variable (`GROK_CURSOR_MCPS_ENABLED`, `GROK_CLAUDE_MCPS_ENABLED`). See [Configuration](05-configuration.md#harness-compatibility) for details. Use `grok inspect` to see which MCP servers were loaded and their vendor origin (`[cursor]`, `[claude]`).
+By default, the Claude and Cursor MCP sources are scanned. To disable scanning for a specific vendor, set `extensions.compat.<vendor>.mcps` to `false` in `~/.grok/config.json` or the corresponding environment variable (`GROK_CURSOR_MCPS_ENABLED`, `GROK_CLAUDE_MCPS_ENABLED`). See [Configuration](05-configuration.md#harness-compatibility) for details. Use `grok inspect` to see which MCP servers were loaded and their vendor origin (`[cursor]`, `[claude]`).
 
 ---
 
@@ -417,7 +417,7 @@ For internal or self-hosted servers that authenticate with a static bearer token
 }
 ```
 
-To avoid putting secrets in the config file, reference an environment variable with `${VAR}` (or `${VAR:-default}`). Grok expands string fields in `[mcp_servers.*]` — `url`, `command`, `args`, and the values in `env` and `headers` — at load time:
+To avoid putting secrets in the config file, reference an environment variable with `${VAR}` (or `${VAR:-default}`).
 
 ```json
 {
@@ -504,7 +504,7 @@ See the [MCP Server Registry](https://github.com/modelcontextprotocol/servers) f
 
 ## Subagents and MCP
 
-When the same server name appears in both `config.json` / `.mcp.json` and the active agent’s `mcpServers` frontmatter, **agent.md wins** (including HTTP headers). The overlay is re-applied on config hot-reload, plugin reload, and agent switch so a disk rematerialize cannot restore the toml headers. Switching agents replaces the overlay with the new seat only: servers the new agent omits are dropped, and an agent with no `mcpServers` clears the prior overlay.
+When the same server name appears in both `config.json` / `.mcp.json` and the active agent’s `mcpServers` frontmatter, **agent.md wins** (including HTTP headers). The overlay is re-applied on config hot-reload, plugin reload, and agent switch so a disk rematerialize cannot restore the config headers. Switching agents replaces the overlay with the new seat only. Switching agents servers the new agent omits are dropped, and an agent with no `mcpServers` clears the prior overlay.
 
 Subagents inherit the parent session’s connected MCP servers by default, including plugin-sourced agents. Use agent frontmatter `mcpInheritance` to restrict that set (`all`, `none`, `named`, or `except`). Details are in [Subagents — MCP inheritance](16-subagents.md#mcp-inheritance).
 
@@ -536,7 +536,7 @@ tail -f ~/.grok/logs/mcp/filesystem.stderr.log
 
 ### Blocked by organization policy
 
-If native TOML policy or Claude `managed-settings.json` sets `deniedMcpServers`, a nonempty `allowedMcpServers`, or `allowManagedMcpServersOnly`, Grok drops non-matching servers at merge time and logs `MCP server blocked by managed settings policy`. Native grok layers bind every server; the Claude file binds foreign-defined servers only. `grok inspect` shows the lists, lockdown scope, and each remaining server. Details and examples: [Restrict which MCP servers can run](09-plugins.md#restrict-which-mcp-servers-can-run).
+If native config policy or Claude `managed-settings.json` sets `deniedMcpServers`, a nonempty `allowedMcpServers`, or `allowManagedMcpServersOnly`, Grok drops non-matching servers at merge time and logs `MCP server blocked by managed settings policy`. Native grok layers bind every server. The Claude file binds foreign-defined servers only. `grok inspect` shows the lists, lockdown scope, and each remaining server. Details and examples: [Restrict which MCP servers can run](09-plugins.md#restrict-which-mcp-servers-can-run).
 
 ### A listed tool never appears
 

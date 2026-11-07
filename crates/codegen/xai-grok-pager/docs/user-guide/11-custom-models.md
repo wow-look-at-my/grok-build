@@ -42,7 +42,7 @@ Or use the alias:
 
 Press `Ctrl+M` from the scrollback pane to open the model picker. It lists all available models, both built-in and custom, and lets you switch with a single keystroke. With the prompt focused, `Ctrl+M` toggles multiline input instead -- use `/model` to switch without leaving the prompt.
 
-Provider catalogs are combined rather than replaced. For example, models autodetected from a `[model_providers.<id>]` block appear alongside Grok and custom models with qualified IDs such as `ollama/llama3`. Refreshing or signing out of one provider does not erase models owned by another provider.
+Provider catalogs are combined rather than replaced. For example, models autodetected from a `models.providers.<id>` block appear alongside Grok and custom models with qualified IDs such as `ollama/llama3`. Refreshing or signing out of one provider does not erase models owned by another provider.
 
 ### Fleet allowlist (`requirements.toml`)
 
@@ -60,7 +60,7 @@ Enterprise hosts can pin the **selectable** set — not only the default — in 
 }
 ```
 
-A fleet pin matches the **model id** (not a user-chosen catalog key), so a local `[model.<name>]` entry cannot widen the set. User-config `allowed_models` still matches catalog key or model id. Omit the key to leave user config standing. An empty array is unrestricted. A present-but-unreadable pin fail-closes (nothing selectable). A default or `-m` value outside the pinned set is rejected once the model catalog is fetched — contact your administrator; the list is not user-editable.
+A fleet pin matches the **model id** (not a user-chosen catalog key), so a local `models.definitions.<name>` entry cannot widen the set. User-config `allowed_models` still matches catalog key or model id. Omit the key to leave user config standing. An empty array is unrestricted. A present-but-unreadable pin fail-closes (nothing selectable). A default or `-m` value outside the pinned set is rejected once the model catalog is fetched — contact your administrator; the list is not user-editable.
 
 ### Config Default
 
@@ -78,7 +78,7 @@ Set a persistent default in `~/.grok/config.json`:
 
 ## Supported API Backends
 
-Grok supports three API backends. Set `api_backend` in your `[model.*]` config to choose which protocol the model uses:
+Grok supports API backends. Set `api_backend` in your `models.definitions.*` config to choose which protocol the model uses:
 
 | Value | API | Default |
 |-------|-----|---------|
@@ -94,7 +94,7 @@ To send provider-specific authentication or version headers -- for example, Anth
 
 ## Configuring Custom Models
 
-Add custom model endpoints in `~/.grok/config.json` under `[model.<name>]` sections:
+Add custom model endpoints in `~/.grok/config.json` under `models.definitions.<name>` sections:
 
 ```json
 {
@@ -145,7 +145,7 @@ The `context_window` value tells Grok when to trigger auto-compaction. When you 
 
 `max_request_bytes` is the largest request body your endpoint accepts. Grok evicts older inline images from the conversation to stay under it, so a session with many screenshots keeps working instead of being rejected. When you omit it, Grok picks the default for the `api_backend`: 30 MB for `messages`, and 50 MiB for `chat_completions` and `responses`. Set it only when your host enforces a different cap.
 
-The cap is a property of the endpoint, so it also works on a shared `[model_providers.<id>]` block, where every model pointing at that provider inherits it; a `max_request_bytes` on the model itself overrides the provider's value.
+The cap is a property of the endpoint, so it also works on a shared `models.providers.<id>` block, where every model pointing at that provider inherits it; a `max_request_bytes` on the model itself overrides the provider's value.
 
 ```json
 {
@@ -186,11 +186,11 @@ To apply the same headers to *every* model in the catalog -- built-in, prefetche
 }
 ```
 
-These act as a base for each model's inference requests. A per-model `[model.<id>].extra_headers` entry overrides the global default **per key** (matched case-insensitively): a key set on the model wins, while any global-only keys are still inherited by that model. Like the per-model field, they ride on that model's inference calls -- not on separate services such as image generation or video generation -- which makes them handy for attribution tags (for example, cost tracking) without re-declaring them whenever a new model appears.
+These act as a base for each model's inference requests. A per-model `models.definitions.<id>.extra_headers` entry overrides the global default **per key** (matched case-insensitively). A key set on the model wins, while any global-only keys are still inherited by that model. Like the per-model field, they ride on that model's inference calls -- not on separate services such as image generation or video generation. Which makes them handy for attribution tags (for example, cost tracking) without re-declaring them when a new model appears.
 
 ### Global Default Values
 
-A few common per-model settings can also be set once under `[models]` as a default for *every* model. A per-model `[model.<id>]` value always wins; the global only fills in where a model (or the server's model list) left the field unset:
+A few common per-model settings can also be set once under `[models]` as a default for *every* model. A per-model `models.definitions.<id>` value always wins. The global only fills in where a model (or the server's model list) left the field unset:
 
 ```json
 {
@@ -207,11 +207,11 @@ A few common per-model settings can also be set once under `[models]` as a defau
 }
 ```
 
-This is a small, fixed set of environment-wide knobs. Settings that identify a specific model (`model`, `base_url`, `api_key`, `context_window`, ...) cannot be defaulted this way, and a few settings with their own dedicated configuration -- auto-compaction (`[session]`), the system-prompt label (`[agent]`), and reasoning effort (`[models].default_reasoning_effort`) -- keep their existing homes.
+This is a small, fixed set of environment-wide knobs.
 
 `rate_limit_retry_threshold` and `subagent_rate_limit_max_attempts` select different 429 retry paths for subagents. Configuring `rate_limit_retry_threshold` makes the sampler own those retries and disables the separate subagent wait loop, including its 150-second cumulative wait budget and wait telemetry. `subagent_rate_limit_max_attempts` applies only when the sampler threshold is unset.
 
-> **Note on `stream_tool_calls`:** this one affects request *shape*, not just sampling. A few endpoints (some BYOK providers) expect it left unset; if a global `stream_tool_calls = true` causes problems for such a model, opt that model out with `stream_tool_calls = false` in its `[model.<id>]` block.
+> **Note on `stream_tool_calls`:** this one affects request *shape*, not just sampling. A few endpoints (some BYOK providers) expect it left unset; if a global `"stream_tool_calls": true` causes problems for such a model, opt that model out with `"stream_tool_calls": false` in its `models.definitions.<id>` block.
 
 ### Request Query Parameters
 
@@ -239,7 +239,7 @@ A key that also appears in the `base_url` query string is overridden (last value
 
 ### Environment-Variable Headers
 
-`env_http_headers` maps a request header to the name of an environment variable that supplies its value, so a per-request secret never has to be written into `config.json`:
+`env_http_headers` maps a request header to the name of an environment variable that supplies its value. A per-request secret never has to be written into `config.json`:
 
 ```json
 {
@@ -259,15 +259,15 @@ A key that also appears in the `base_url` query string is overridden (last value
 
 Grok reads each variable when it builds the client for a session and places the value in the request headers only, never on disk. A header is skipped when its variable is unset or blank, and a resolved value overrides an `extra_headers` entry of the same name. Use `extra_headers` for a static value and `env_http_headers` for one that comes from the environment.
 
-Both fields also work on a shared `[model_providers.<id>]` block -- see [Provider Defaults](#provider-defaults).
+Both fields also work on a shared `models.providers.<id>` block -- see [Provider Defaults](#provider-defaults).
 
 ---
 
 ## Provider Defaults
 
-Most of a `[model.<id>]` block is not about the model at all. The endpoint, the API key, the wire format and the headers belong to the *provider*. Repeating them on every model is how one rotated key turns into a dozen edits.
+Most of a `models.definitions.<id>` block is not about the model at all. The endpoint, the API key, the wire format and the headers belong to the *provider*. Repeating them on every model is how one rotated key turns into a dozen edits.
 
-Put them in a `[model_providers.<id>]` block once, and point each model at it with `model_provider = "<id>"`:
+Put them in a `models.providers.<id>` block once, and point each model at it with `"model_provider": "<id>"`:
 
 ```json
 {
@@ -303,35 +303,20 @@ Put them in a `[model_providers.<id>]` block once, and point each model at it wi
 
 Both models reach the gateway with the same URL, key, backend and headers. Neither restates one.
 
-### What a provider can set
-
-Everything except what identifies a single model (`model`, `name`, `description`):
-
-| Group | Fields |
-|-------|--------|
-| Endpoint | `base_url`, `api_base_url`, `query_params` |
-| Credentials | `api_key`, `env_key`, `auth_provider`, `[model_providers.<id>.auth]` |
-| Wire format | `api_backend`, `strict_message_schema`, `stream_tool_calls` |
-| Headers | `extra_headers`, `env_http_headers` |
-| Sampling | `temperature`, `top_p`, `max_completion_tokens`, `context_window` |
-| Reasoning | `reasoning_effort`, `supports_reasoning_effort`, `reasoning_efforts` |
-| Behavior | `max_retries`, `inference_idle_timeout_secs`, `min_output_tokens_per_sec`, `ttft_timeout_secs`, `supports_backend_search`, `use_concise`, `agent_type`, `show_model_fingerprint`, `compactions_remaining`, `compaction_at_tokens` |
-| Catalog | `hidden`, `supported_in_api`, `pricing` |
-
 ### How inheritance resolves
 
 A model's own value always wins. The provider only fills in what the model left unset.
 
-- **Scalar fields** (`base_url`, `api_backend`, `temperature`, ...) inherit when the model omits the field. An explicit `false` or `0` on the model is a value, not an omission.
-- **Table fields** (`extra_headers`, `query_params`, `env_http_headers`) inherit **per key**. A model that sets one header of its own still gets every other header from the provider. Header names match case-insensitively, so a model's `x-tenant` shadows the provider's `X-Tenant` rather than riding beside it.
-- **Credentials inherit as a set.** Set any of `api_key`, `env_key` or `auth_provider` on a model, and that model inherits none of the provider's. Half a credential from each side is never what you meant.
+- An explicit `false` or `0` on the model is a value, not an omission.
+- A model that sets one header of its own still gets every other header from the provider. Header names match case-insensitively, so a model's `x-tenant` shadows the provider's `X-Tenant` rather than riding beside it.
+- **Credentials inherit as a set.** Half a credential from each side is never what you meant.
 - A model naming a provider that does not exist warns and falls back to its own fields. It never sends your Grok sign-in token.
-- **A URL is never invented.** A model you add takes its URL from its own `base_url`, its provider's `base_url`, or `[endpoints] models_base_url`. With none of them, the model has no URL. Grok logs an error at startup and refuses every request to that model. The error tells you to set `base_url`.
-- **A URL must also be allowed.** Grok sends nothing to a host missing from `[endpoints] allowed_endpoints`. See [Allowed endpoints](05-configuration.md#allowed-endpoints).
+- **A URL is never invented.** A model you add takes its URL from its own `base_url`, its provider's `base_url`, or `endpoints.models_base_url`. With none of them, the model has no URL. Grok logs an error at startup and refuses every request to that model. The error tells you to set `base_url`.
+- **A URL must also be allowed.** Grok sends nothing to a host missing from `endpoints.allowed_endpoints`. See [Allowed endpoints](05-configuration.md#allowed-endpoints).
 
 ### Credential helpers
 
-A provider can mint tokens with a credential helper in place of a static key. Name an existing `[auth_provider.<name>]` block, or declare one inline:
+A provider can mint tokens with a credential helper in place of a static key. Name an existing `models.auth_providers.<name>` block, or declare one inline:
 
 ```json
 {
@@ -355,11 +340,11 @@ A provider endpoint is not an xAI endpoint, so a model behind one never falls ba
 
 ### Global defaults vs provider defaults
 
-`[models]` (see [Global Default Values](#global-default-values)) covers *every* model in the catalog, including built-in and prefetched ones. `[model_providers.<id>]` covers only the models that name it. Precedence runs model → provider → `[models]` global → built-in default.
+`[models]` (see [Global Default Values](#global-default-values)) covers *every* model in the catalog, including built-in and prefetched ones. `models.providers.<id>` covers only the models that name it. Precedence runs model → provider → `[models]` global → built-in default.
 
 ### Autodetected Provider Models
 
-A `[model_providers.<id>]` block declares a base URL. Grok asks that base what models it serves, at `<base_url>/models`, and adds every model it names to the catalog. You write no `[model.<id>]` block per model:
+A `models.providers.<id>` block declares a base URL. Grok asks that base what models it serves, at `<base_url>/models`, and adds every model it names to the catalog. You write no `models.definitions.<id>` block per model:
 
 ```json
 {
@@ -374,7 +359,7 @@ A `[model_providers.<id>]` block declares a base URL. Grok asks that base what m
 }
 ```
 
-Each autodetected model is keyed `<provider id>/<model slug>`, for example `gateway/claude-sonnet-4-6`. The key is qualified so a slug that several providers serve stays one entry per provider, and so your own `[model.<id>]` block is never shadowed. Every autodetected model inherits the provider's connection and credential fields, exactly as a model that names `model_provider` does.
+Each autodetected model is keyed `<provider id>/<model slug>`, for example `gateway/claude-sonnet-4-6`. The key is qualified so a slug that several providers serve stays one entry per provider, and so your own `models.definitions.<id>` block is never shadowed. Every autodetected model inherits the provider's connection and credential fields, exactly as a model that names `model_provider` does.
 
 Discovery runs in the background at startup, so a slow provider never delays the session. A provider that cannot be reached contributes no models and never fails the others. Its models appear in the picker as soon as its listing answers.
 
@@ -432,22 +417,26 @@ The lists are joined: `[models].favorite_models` matches any model, and a provid
 
 You can override specific fields of built-in models without redefining everything. Only specify the fields you want to change:
 
-```toml
-# Override only the API key for a default model
-[model.grok-4.6]
-api_key = "my-api-key"
-
-# Override temperature and add a custom API key
-[model.grok-4.6]
-temperature = 0.5
-api_key = "sk-custom"
+```json
+{
+  "models": {
+    "definitions": {
+      "grok-4.6": {
+        "temperature": 0.5,
+        "api_key": "sk-custom"
+      }
+    }
+  }
+}
 ```
+
+The `grok-4.6` entry above overrides the temperature and the API key. A block with only `api_key` overrides only the key.
 
 When you override a built-in model, Grok starts with the default configuration (including the correct `base_url`), then applies only the fields you specify. Unspecified fields inherit from the default.
 
 ### Priority Order
 
-1. Your config (`[model.*]`) -- highest priority
+1. Your config (`models.definitions.*`) -- highest priority
 2. Prefetched models from remote `/v1/models`
 3. Hardcoded defaults -- lowest priority
 
@@ -634,7 +623,7 @@ The green dot beside a model in `/model` means it is resident in VRAM. A dim dot
 
 #### Pinning the window and keeping the model warm
 
-Ollama's OpenAI-compatible endpoint cannot carry `num_ctx`, `keep_alive` or `truncate` at all — they are not fields on that request. To set them, use the native backend:
+To set them, use the native backend:
 
 ```json
 {
@@ -670,7 +659,7 @@ LM Studio's compatible endpoint does accept extra body fields. It needs no backe
 }
 ```
 
-`extra_body` also works on a single `[model.<id>]` block, and a model's own value wins over its provider's key by key.
+`extra_body` also works on a single `models.definitions.<id>` block, and a model's own value wins over its provider's key by key.
 
 Make sure the runtime runs (`ollama serve`, or LM Studio's server tab) and the model is pulled (`ollama pull qwen3-coder:30b`).
 
@@ -751,7 +740,7 @@ grok
 }
 ```
 
-When you use `[endpoints]` with partial model overrides, Grok inherits the `base_url` from the endpoints config, so you do not need to specify it in each `[model.*]` section.
+When you use `endpoints` with partial model overrides, Grok inherits the `base_url` from the endpoints config. You do not need to specify it in each `models.definitions.*` section.
 
 ### Auth Behavior
 
@@ -777,7 +766,7 @@ Or via environment variable:
 export GROK_WEB_SEARCH_MODEL="grok-4.5"
 ```
 
-If you point web search at a custom model, you also need a `[model.*]` entry so Grok can reach it. Server-side ("backend") web search runs only when the model sets `supports_backend_search = true` (and the build enables backend search); it does not depend on `api_backend`:
+If you point web search at a custom model, you also need a `models.definitions.*` entry so Grok can reach it. Server-side ("backend") web search runs only when the model sets `"supports_backend_search": true` (and the build enables backend search). It does not depend on `api_backend`:
 
 ```json
 {
@@ -807,9 +796,8 @@ grok models
 # Use in headless mode
 grok -p "Hello" -m my-model
 
-# Set as default in config.json:
-[models]
-default = "my-model"
+# Set as default in config.json, under models.default:
+#   "models": { "default": "my-model" }
 ```
 
 ---
@@ -852,7 +840,7 @@ A complete config for an enterprise deployment with custom models:
 # List available models
 grok models
 
-# Check config.json for typos in [model.*] sections
+# Check config.json for typos in models.definitions.* sections
 ```
 
 ### Connection Errors

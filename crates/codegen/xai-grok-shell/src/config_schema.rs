@@ -35,13 +35,13 @@ pub fn config_json_schema() -> Value {
     extra.insert(
         "privacy".into(),
         generator
-            .subschema_for::<crate::util::config::mcp::PrivacyConfig>()
+            .subschema_for::<crate::util::config::PrivacyConfig>()
             .to_value(),
     );
     extra.insert(
         "consent".into(),
         generator
-            .subschema_for::<crate::util::config::consent::ConsentConfig>()
+            .subschema_for::<crate::util::config::ConsentConfig>()
             .to_value(),
     );
     let root = generator.into_root_schema_for::<Config>().to_value();
@@ -417,6 +417,7 @@ fn collect_variant_refs(value: &Value, out: &mut std::collections::BTreeSet<Stri
             for (key, child) in obj {
                 if (key == "anyOf" || key == "oneOf")
                     && let Value::Array(members) = child
+                    && members.iter().filter(|m| !is_null_schema(m)).count() > 1
                 {
                     for member in members {
                         if let Some(name) = member
@@ -434,6 +435,10 @@ fn collect_variant_refs(value: &Value, out: &mut std::collections::BTreeSet<Stri
         Value::Array(items) => items.iter().for_each(|v| collect_variant_refs(v, out)),
         _ => {}
     }
+}
+
+fn is_null_schema(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some("null")
 }
 
 fn strip_required(obj: &mut Map<String, Value>) {
