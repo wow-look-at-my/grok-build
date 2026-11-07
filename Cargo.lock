@@ -12457,6 +12457,7 @@ dependencies = [
  "parking_lot",
  "prod-mc-cli-chat-proxy-types",
  "regex",
+ "schemars",
  "serde",
  "serde_json",
  "tempfile",
