@@ -826,16 +826,37 @@ A complete config for enterprise use:
 
 ---
 
-## pager.toml (appearance configuration)
+## pager.json (appearance configuration)
 
-Location: `~/.grok/pager.toml`. This controls the TUI's look and feel. Changes apply on restart.
+Location: `~/.grok/pager.json`. This controls the TUI's look and feel. Changes apply on restart.
+
+grok writes `~/.grok/pager.schema.json` at startup. When `pager.json` does not exist, grok creates it with only its `"$schema"` member. An editor that reads JSON Schema then shows every key, its default and its description. Every member is optional. An absent or `null` member keeps the built-in default.
+
+A legacy `~/.grok/pager.toml` converts to `pager.json` at startup, and the original is kept as `pager.toml.migrated`. A `pager.toml` that does not parse stays where it is, and grok reports the error. When both files exist, grok reads `pager.json` and logs a warning about the TOML file.
+
+A full file with the default values of the sections below:
+
+```json
+{
+  "$schema": "./pager.schema.json",
+  "terminal": {
+    "alt_screen": "auto"
+  },
+  "animation": {
+    "fps": 30,
+    "wave_rows": 32
+  },
+  "prompt": {
+    "collapse_unfocused": true,
+    "mouse_hover": true,
+    "show_prefix": true
+  }
+}
+```
 
 ### Terminal
 
-```toml
-[terminal]
-alt_screen = "auto"                   # fullscreen mode: "auto", "always", "never"
-```
+`terminal.alt_screen` sets the fullscreen mode:
 
 - `auto` (default): use the alternate screen when the terminal supports it.
 - `always`: always use the alternate screen.
@@ -843,58 +864,54 @@ alt_screen = "auto"                   # fullscreen mode: "auto", "always", "neve
 
 ### Animation
 
-```toml
-[animation]
-fps = 30                              # animation frame rate (ticks per second)
-wave_rows = 32                        # rows per wave cycle for accent animation
-```
+`animation.fps` is the frame rate in ticks per second. `animation.wave_rows` is the number of rows in one wave of the accent animation.
 
 ### Prompt
 
-```toml
-[prompt]
-collapse_unfocused = true             # collapse prompt when scrollback is focused
-mouse_hover = true                    # show hover highlight on the prompt widget
-show_prefix = true                    # show the prompt prefix character
-```
+`prompt.collapse_unfocused` collapses the prompt while the scrollback focus. `prompt.mouse_hover` highlights the prompt under the mouse. `prompt.show_prefix` draws the prompt prefix character.
 
 Compact mode is not persisted here — control it at runtime with `ui.compact_mode` or the `/compact-mode` command.
 
 ### Scrollback
 
-```toml
-[scrollback.layout]
-outer_vpad = 1                        # vertical padding
-outer_hpad_left = 2                   # left horizontal padding
-outer_hpad_right = 2                  # right horizontal padding
-block_pad_left = 2                    # padding inside block, left of content
-block_pad_right = 2                   # padding inside block, right of content
-
-[scrollback.scrollbar]
-enabled = true                        # show scrollbar
-gap_left = 0                          # gap between content and scrollbar
-gap_right = 0                         # gap between scrollbar and screen edge
-
-[scrollback.scroll]
-margin = 0                            # minimum context lines above/below selection
-min_page_fraction = 0                 # minimum scroll as % of viewport (0-100)
-follow_indicator = "center"           # ▼/▲ scroll indicators: "center" or "none"
-follow_auto_select = true             # auto-select latest entry in follow mode
-follow_by_overscroll = true           # scrolling past bottom engages follow mode
-anchor_on_fold = true                 # keep block position when folding
-respect_manual_folds = true           # opt-in (default: false): keep manually folded blocks as-is during streaming/finish; expanding while following stops auto-scroll
-
-[scrollback.display]
-sticky_headers = true                 # pin user prompts as sticky headers
-tab_width = 4                         # spaces per tab character
-expandable_indicator = true           # show expand indicator on foldable entries
-expandable_indicator_running = true   # show indicator on running entries
-expandable_indicator_char = "›"       # character for the expand indicator (default: "›")
-selection_buttons = false             # show copy/view buttons on selection
-line_under_last_entry = false         # horizontal line below last entry
-group_selection_split = true          # split selection box for expanded blocks
-highlight_overlays_border = false     # highlight extends over selection box border
-dim_accent = 0.5                      # dimming factor for collapsed accents (0.0-1.0)
+```json
+{
+  "scrollback": {
+    "layout": {
+      "outer_vpad": 1,
+      "outer_hpad_left": 2,
+      "outer_hpad_right": 2,
+      "block_pad_left": 2,
+      "block_pad_right": 2
+    },
+    "scrollbar": {
+      "enabled": true,
+      "gap_left": 0,
+      "gap_right": 0
+    },
+    "scroll": {
+      "margin": 0,
+      "min_page_fraction": 0,
+      "follow_indicator": "center",
+      "follow_auto_select": true,
+      "follow_by_overscroll": true,
+      "anchor_on_fold": true,
+      "respect_manual_folds": true
+    },
+    "display": {
+      "sticky_headers": true,
+      "tab_width": 4,
+      "expandable_indicator": true,
+      "expandable_indicator_running": true,
+      "expandable_indicator_char": "›",
+      "selection_buttons": false,
+      "line_under_last_entry": false,
+      "group_selection_split": true,
+      "highlight_overlays_border": false,
+      "dim_accent": 0.5
+    }
+  }
+}
 ```
 
 `respect_manual_folds` is off by default. Turn it on and a block you fold by hand is pinned: streaming updates. Finish events (a thinking block ending, say) leave its fold state alone, and expanding a block while follow-mode tails new content stops the auto-scroll. As a result, the view stays put. Follow resumes via `Shift+G`, `j` at the last entry, scrolling past the bottom, or sending a new prompt. `Shift+E` clears all pins.
@@ -903,25 +920,33 @@ dim_accent = 0.5                      # dimming factor for collapsed accents (0.
 
 ### Block configuration
 
-```toml
-[scrollback.blocks.edit]
-indent = true                         # indent diff content
-vpad = false                          # vertical padding
-# expanded_by_default = true          # Unset follows Collapsed edit blocks. When that setting is on,
-                                      # edits start collapsed even if this line is true.
-dual_line_numbers = false             # two-column line numbers (old + new)
-# line_summary = false                # show +N/-M in the collapsed header; unset follows the same flag
-hunk_separator = "…"                  # separator between diff hunks (default: "…")
-
-[scrollback.blocks.prompt]
-vpad = true                           # vertical padding
-show_prefix = true                    # show prompt prefix character
-min_lines = 2                         # minimum content lines in sticky mode
-
-[scrollback.blocks.thinking]
-animate = true                        # animated accent while thinking
-truncated_lines = 3                   # lines in truncated mode
+```json
+{
+  "scrollback": {
+    "blocks": {
+      "edit": {
+        "indent": true,
+        "vpad": false,
+        "expanded_by_default": null,
+        "dual_line_numbers": false,
+        "line_summary": null,
+        "hunk_separator": "…"
+      },
+      "prompt": {
+        "vpad": true,
+        "show_prefix": true,
+        "min_lines": 2
+      },
+      "thinking": {
+        "animate": true,
+        "truncated_lines": 3
+      }
+    }
+  }
+}
 ```
+
+`pager.schema.json` describes each key. Edit keys need a note. `edit.expanded_by_default` unset (`null`) follows the Collapsed edit blocks setting, and when that setting is on, edits start collapsed even when this key is `true`. `edit.line_summary` shows +N/-M in the collapsed header, and unset follows the same setting.
 
 ### Plugins
 

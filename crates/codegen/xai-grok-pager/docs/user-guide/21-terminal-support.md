@@ -166,7 +166,7 @@ check.
 
 Zellij and tmux control mode can limit the alternate screen. Grok normally uses
 inline mode in those environments. Run `/doctor` to see the detected condition.
-You can configure `[terminal] alt_screen` in `~/.grok/pager.toml`, or run
+You can configure `terminal.alt_screen` in `~/.grok/pager.json`, or run
 `grok --no-alt-screen` to confirm inline mode works.
 
 ### Zellij keybindings interfere with Grok
@@ -256,14 +256,19 @@ terminals, Terminal.app, Konsole, mlterm, and others). Grok Build therefore
 **does not** reorder RTL by default.
 
 If Arabic or Persian in **scrollback** (or list content) reads backwards,
-enable app-side reordering in `~/.grok/pager.toml` (or project config):
+enable app-side reordering in `~/.grok/pager.json`:
 
-```toml
-[scrollback.display]
-rtl_bidi = true
+```json
+{
+  "scrollback": {
+    "display": {
+      "rtl_bidi": true
+    }
+  }
+}
 ```
 
-The setting reloads with appearance config (no full restart required). If text
+The setting applies when Grok restarts. If text
 looks correct with the default and becomes wrong after enabling this, turn it
 back off — your terminal is already handling bidi.
 

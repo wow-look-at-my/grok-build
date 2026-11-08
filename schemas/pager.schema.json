@@ -1,1 +1,1018 @@
-{}
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "grok pager appearance",
+	"description": "The grok TUI appearance file, `$GROK_HOME/pager.json`. Every member is optional. An absent or `null` member keeps the built-in default.",
+	"type": "object",
+	"properties": {
+		"terminal": {
+			"$ref": "#/$defs/RawTerminalConfig",
+			"description": "Terminal behavior settings (fullscreen policy).",
+			"default": {
+				"alt_screen": "auto",
+				"minimal": false,
+				"minimal_live_rows": null,
+				"minimal_max_commit_rows": null,
+				"minimal_collapse_thinking": false
+			}
+		},
+		"animation": {
+			"$ref": "#/$defs/RawAnimationConfig",
+			"description": "Animation settings.",
+			"default": {
+				"fps": 30,
+				"wave_rows": 32,
+				"show_fps": false
+			}
+		},
+		"prompt": {
+			"$ref": "#/$defs/RawPromptViewConfig",
+			"description": "Prompt input view settings (collapse, hover).",
+			"default": {
+				"collapse_unfocused": true,
+				"mouse_hover": true,
+				"show_prefix": true
+			}
+		},
+		"scrollback": {
+			"$ref": "#/$defs/RawScrollbackConfig",
+			"description": "Scrollback pane settings (layout, scrollbar, scroll, blocks).",
+			"default": {
+				"layout": {
+					"outer_vpad": 1,
+					"outer_hpad_left": 2,
+					"outer_hpad_right": 2,
+					"block_pad_left": 2,
+					"block_pad_right": 2
+				},
+				"scrollbar": {
+					"enabled": true,
+					"gap_left": 0,
+					"gap_right": 0,
+					"scrollbar_bg": "none",
+					"scrollbar_fg": "none"
+				},
+				"scroll": {
+					"margin": 0,
+					"min_page_fraction": 0,
+					"follow_indicator": "center",
+					"follow_auto_select": true,
+					"follow_by_overscroll": true,
+					"anchor_on_fold": true,
+					"respect_manual_folds": false
+				},
+				"blocks": {
+					"edit": {
+						"indent": true,
+						"vpad": false,
+						"bg": "none",
+						"accent_bg": false,
+						"accent": "none",
+						"gutter_bg": false,
+						"indent_bg": false,
+						"line_summary": null,
+						"expanded_by_default": null,
+						"hunk_separator": "…",
+						"dual_line_numbers": false
+					},
+					"prompt": {
+						"vpad": true,
+						"bg": "light",
+						"accent_bg": false,
+						"min_lines": 2,
+						"show_prefix": true
+					},
+					"thinking": {
+						"accent": "none",
+						"accent_enabled": true,
+						"bg_blend": 70,
+						"truncated_lines": 3,
+						"animate": true,
+						"header": true,
+						"header_bright": false
+					},
+					"tool": {
+						"muted_collapsed": true,
+						"dim_details": true,
+						"bullet": "diamond"
+					},
+					"list_dir": {
+						"terminal_bg": true
+					},
+					"execute": {
+						"first_lines": 2,
+						"last_lines": 3,
+						"accent_enabled": true,
+						"running_accent": "none",
+						"header_style": "label",
+						"muted_command_collapsed": true
+					}
+				},
+				"display": {
+					"line_under_last_entry": false,
+					"collapsed_accent_char": null,
+					"dim_accent": 0.5,
+					"group_selection_split": true,
+					"highlight_overlays_border": false,
+					"expandable_indicator": true,
+					"expandable_indicator_running": true,
+					"expandable_indicator_char": "›",
+					"selection_buttons": false,
+					"sticky_headers": true,
+					"tab_width": 4,
+					"group_max_visible": 10,
+					"rtl_bidi": false
+				}
+			}
+		},
+		"disable_plugins": {
+			"type": "boolean",
+			"description": "Disable hooks & plugins UI (/hooks and /plugins commands, scrollback annotations).\nDefaults to false (plugins enabled).",
+			"default": false
+		},
+		"show_plan_chip": {
+			"type": "boolean",
+			"description": "Always show the \"plan\" chip in the status bar when plan content is\navailable, even after the user exits plan mode.\nDefaults to false (chip hidden once plan mode ends).",
+			"default": false
+		},
+		"$schema": {
+			"description": "The schema of this file.",
+			"type": "string"
+		}
+	},
+	"additionalProperties": false,
+	"$defs": {
+		"RawTerminalConfig": {
+			"type": "object",
+			"properties": {
+				"alt_screen": {
+					"$ref": "#/$defs/RawAltScreenMode",
+					"description": "\"auto\" (default): fullscreen except tmux control mode and Zellij. \"always\" / \"never\" force the choice.",
+					"default": "auto"
+				},
+				"minimal": {
+					"type": "boolean",
+					"description": "Experimental scrollback-native rendering mode. Finalized blocks are\nprinted into the terminal's native scrollback. Default false.",
+					"default": false
+				},
+				"minimal_live_rows": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Pinned live-region height (rows) for minimal mode. Default 10.",
+					"default": null
+				},
+				"minimal_max_commit_rows": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Maximum rows for a single committed block in minimal mode. Default 2000.",
+					"default": null
+				},
+				"minimal_collapse_thinking": {
+					"type": "boolean",
+					"description": "Opt out of minimal's full reasoning body (K9). Collapsed header only; body stays reachable via expand/transcript.",
+					"default": false
+				}
+			},
+			"description": "Fullscreen (alternate screen) policy and related terminal settings.",
+			"additionalProperties": false
+		},
+		"RawAltScreenMode": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "auto",
+					"description": "Automatic: fullscreen in healthy environments, inline in degraded ones."
+				},
+				{
+					"type": "string",
+					"const": "always",
+					"description": "Always enter the alternate screen."
+				},
+				{
+					"type": "string",
+					"const": "never",
+					"description": "Never enter the alternate screen."
+				}
+			]
+		},
+		"RawAnimationConfig": {
+			"type": "object",
+			"properties": {
+				"fps": {
+					"type": "integer",
+					"format": "uint8",
+					"minimum": 0,
+					"maximum": 255,
+					"description": "Animation frame rate (ticks per second).\nHigher = smoother but more CPU. Range: 1-60. Default: 30.",
+					"default": 30
+				},
+				"wave_rows": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Rows per wave cycle for accent line animation.\nLower = faster wave, higher = slower/smoother wave. Default: 32.",
+					"default": 32
+				},
+				"show_fps": {
+					"type": "boolean",
+					"description": "Show an FPS counter overlay in the top-right corner.\nRequires a debug build. Also enabled by GROK_FPS=1 env var. Default: false.",
+					"default": false
+				}
+			},
+			"description": "Animation configuration.",
+			"additionalProperties": false
+		},
+		"RawPromptViewConfig": {
+			"type": "object",
+			"properties": {
+				"collapse_unfocused": {
+					"type": "boolean",
+					"description": "When true, the prompt collapses to its minimum height (single-line)\nwhen focus is in the scrollback pane. Expands back when focused.",
+					"default": true
+				},
+				"mouse_hover": {
+					"type": "boolean",
+					"description": "Show hover highlight box when mousing over the prompt widget.",
+					"default": true
+				},
+				"show_prefix": {
+					"type": "boolean",
+					"description": "Show the ❯ prefix character in the prompt editor.",
+					"default": true
+				}
+			},
+			"description": "Prompt editor widget, not the user prompt block in scrollback.",
+			"additionalProperties": false
+		},
+		"RawScrollbackConfig": {
+			"type": "object",
+			"properties": {
+				"layout": {
+					"$ref": "#/$defs/RawLayoutConfig",
+					"description": "Layout settings (padding, spacing).",
+					"default": {
+						"outer_vpad": 1,
+						"outer_hpad_left": 2,
+						"outer_hpad_right": 2,
+						"block_pad_left": 2,
+						"block_pad_right": 2
+					}
+				},
+				"scrollbar": {
+					"$ref": "#/$defs/RawScrollbarConfig",
+					"description": "Scrollbar settings.",
+					"default": {
+						"enabled": true,
+						"gap_left": 0,
+						"gap_right": 0,
+						"scrollbar_bg": "none",
+						"scrollbar_fg": "none"
+					}
+				},
+				"scroll": {
+					"$ref": "#/$defs/RawScrollConfig",
+					"description": "Scroll behavior settings.",
+					"default": {
+						"margin": 0,
+						"min_page_fraction": 0,
+						"follow_indicator": "center",
+						"follow_auto_select": true,
+						"follow_by_overscroll": true,
+						"anchor_on_fold": true,
+						"respect_manual_folds": false
+					}
+				},
+				"blocks": {
+					"$ref": "#/$defs/RawBlocksConfig",
+					"description": "Block rendering settings.",
+					"default": {
+						"edit": {
+							"indent": true,
+							"vpad": false,
+							"bg": "none",
+							"accent_bg": false,
+							"accent": "none",
+							"gutter_bg": false,
+							"indent_bg": false,
+							"line_summary": null,
+							"expanded_by_default": null,
+							"hunk_separator": "…",
+							"dual_line_numbers": false
+						},
+						"prompt": {
+							"vpad": true,
+							"bg": "light",
+							"accent_bg": false,
+							"min_lines": 2,
+							"show_prefix": true
+						},
+						"thinking": {
+							"accent": "none",
+							"accent_enabled": true,
+							"bg_blend": 70,
+							"truncated_lines": 3,
+							"animate": true,
+							"header": true,
+							"header_bright": false
+						},
+						"tool": {
+							"muted_collapsed": true,
+							"dim_details": true,
+							"bullet": "diamond"
+						},
+						"list_dir": {
+							"terminal_bg": true
+						},
+						"execute": {
+							"first_lines": 2,
+							"last_lines": 3,
+							"accent_enabled": true,
+							"running_accent": "none",
+							"header_style": "label",
+							"muted_command_collapsed": true
+						}
+					}
+				},
+				"display": {
+					"$ref": "#/$defs/RawScrollbackDisplayConfig",
+					"description": "Miscellaneous display options.",
+					"default": {
+						"line_under_last_entry": false,
+						"collapsed_accent_char": null,
+						"dim_accent": 0.5,
+						"group_selection_split": true,
+						"highlight_overlays_border": false,
+						"expandable_indicator": true,
+						"expandable_indicator_running": true,
+						"expandable_indicator_char": "›",
+						"selection_buttons": false,
+						"sticky_headers": true,
+						"tab_width": 4,
+						"group_max_visible": 10,
+						"rtl_bidi": false
+					}
+				}
+			},
+			"description": "Scrollback pane configuration.",
+			"additionalProperties": false
+		},
+		"RawLayoutConfig": {
+			"type": "object",
+			"properties": {
+				"outer_vpad": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Vertical padding (top/bottom) for outer viewport.",
+					"default": 1
+				},
+				"outer_hpad_left": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Left horizontal padding for outer viewport (min 1).",
+					"default": 2
+				},
+				"outer_hpad_right": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Right horizontal padding for outer viewport (min 1).",
+					"default": 2
+				},
+				"block_pad_left": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Padding after accent line, before content.",
+					"default": 2
+				},
+				"block_pad_right": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Padding after content, at right edge.",
+					"default": 2
+				}
+			},
+			"description": "Layout configuration.",
+			"additionalProperties": false
+		},
+		"RawScrollbarConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Whether scrollbar is enabled.",
+					"default": true
+				},
+				"gap_left": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Gap between content/selection edge and scrollbar track.\n0 = adjacent to content, 1+ = space between.\nNote: Content width is clamped to outer_hpad boundaries.",
+					"default": 0
+				},
+				"gap_right": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Gap between scrollbar track and screen edge.\n0 = scrollbar at screen edge (uses outer_hpad_right if available).",
+					"default": 0
+				},
+				"scrollbar_bg": {
+					"$ref": "#/$defs/Color",
+					"description": "Override scrollbar background color.\nUse \"none\" to use theme default, or a color value.",
+					"default": "none"
+				},
+				"scrollbar_fg": {
+					"$ref": "#/$defs/Color",
+					"description": "Override scrollbar foreground/thumb color.\nUse \"none\" to use theme default, or a color value.",
+					"default": "none"
+				}
+			},
+			"description": "Scrollbar configuration.",
+			"additionalProperties": false
+		},
+		"Color": {
+			"description": "A color: \"none\" for the theme default, a hex string (\"#7aa2f7\" or \"#f7f\"), an RGB array ([122, 162, 247]), or a color name. Names are case-insensitive: BG, BG_BASE, BG_LIGHT, BG_HIGHLIGHT, BG_DARK, BG_TERMINAL, BG_NIGHT, BG_VISUAL, BG_SEARCH, BLUE, BLUE0, BLUE1, BLUE2, BLUE5, BLUE6, BLUE7, CYAN, GREEN, GREEN1, GREEN2, YELLOW, ORANGE, RED, RED1, MAGENTA, PURPLE, MAGENTA2, TEAL, HINT, FG, TEXT, TEXT_PRIMARY, FG_DARK, TEXT_SECONDARY, FG_GUTTER, COMMENT, MUTED, TEXT_MUTED, DARK3, DARK5, TOOL, ERROR, SUCCESS, WARNING, INFO, BLACK, WHITE, GRAY, GREY.",
+			"anyOf": [
+				{
+					"type": "string"
+				},
+				{
+					"type": "array",
+					"items": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 255
+					},
+					"minItems": 3,
+					"maxItems": 3
+				}
+			]
+		},
+		"RawScrollConfig": {
+			"type": "object",
+			"properties": {
+				"margin": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Minimum lines of context to keep above/below selected entry.\nWhen navigating, ensure at least this many lines of adjacent entries\nremain visible. 0 = scroll to edge (default).",
+					"default": 0
+				},
+				"min_page_fraction": {
+					"type": "integer",
+					"format": "uint8",
+					"minimum": 0,
+					"maximum": 255,
+					"description": "Minimum scroll as percentage of viewport height (0-100).\nIf a scroll would be less than this percentage, scroll by this amount instead.\n0 = minimal scroll (default), 25 = quarter page, 100 = full page.",
+					"default": 0
+				},
+				"follow_indicator": {
+					"$ref": "#/$defs/RawFollowIndicator",
+					"description": "Scroll indicators: the ▼ below scrollback and the ▲ under the sticky\nprompt header. \"none\" = hidden, \"center\" = centered arrows.",
+					"default": "center"
+				},
+				"follow_auto_select": {
+					"type": "boolean",
+					"description": "When follow mode scrolls to new content, auto-select the latest entry.",
+					"default": true
+				},
+				"follow_by_overscroll": {
+					"type": "boolean",
+					"description": "Scrolling past the bottom (j, Ctrl-D, page-down, mousewheel) engages follow mode.",
+					"default": true
+				},
+				"anchor_on_fold": {
+					"type": "boolean",
+					"description": "Anchor scroll on fold: keep the toggled block's header at the same screen y. Default: true.",
+					"default": true
+				},
+				"respect_manual_folds": {
+					"type": "boolean",
+					"description": "Opt-in: keep manually folded blocks as-is during streaming and when they finish,\nand stop auto-scroll when a fold expands a block while following. Default: false.",
+					"default": false
+				}
+			},
+			"description": "Scroll behavior configuration.",
+			"additionalProperties": false
+		},
+		"RawFollowIndicator": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "none",
+					"description": "No scroll indicators."
+				},
+				{
+					"type": "string",
+					"const": "center",
+					"description": "Show ▼ centered below scrollback and ▲ under the sticky prompt header."
+				}
+			]
+		},
+		"RawBlocksConfig": {
+			"type": "object",
+			"properties": {
+				"edit": {
+					"$ref": "#/$defs/RawEditBlockConfig",
+					"description": "Edit block settings.",
+					"default": {
+						"indent": true,
+						"vpad": false,
+						"bg": "none",
+						"accent_bg": false,
+						"accent": "none",
+						"gutter_bg": false,
+						"indent_bg": false,
+						"line_summary": null,
+						"expanded_by_default": null,
+						"hunk_separator": "…",
+						"dual_line_numbers": false
+					}
+				},
+				"prompt": {
+					"$ref": "#/$defs/RawPromptConfig",
+					"description": "User prompt block settings.",
+					"default": {
+						"vpad": true,
+						"bg": "light",
+						"accent_bg": false,
+						"min_lines": 2,
+						"show_prefix": true
+					}
+				},
+				"thinking": {
+					"$ref": "#/$defs/RawThinkingConfig",
+					"description": "Thinking/reasoning block settings.",
+					"default": {
+						"accent": "none",
+						"accent_enabled": true,
+						"bg_blend": 70,
+						"truncated_lines": 3,
+						"animate": true,
+						"header": true,
+						"header_bright": false
+					}
+				},
+				"tool": {
+					"$ref": "#/$defs/RawToolConfig",
+					"description": "Tool call block settings (Read, Search, ListDir, etc).",
+					"default": {
+						"muted_collapsed": true,
+						"dim_details": true,
+						"bullet": "diamond"
+					}
+				},
+				"list_dir": {
+					"$ref": "#/$defs/RawListDirConfig",
+					"description": "ListDir block settings.",
+					"default": {
+						"terminal_bg": true
+					}
+				},
+				"execute": {
+					"$ref": "#/$defs/RawExecuteConfig",
+					"description": "Execute tool call settings.",
+					"default": {
+						"first_lines": 2,
+						"last_lines": 3,
+						"accent_enabled": true,
+						"running_accent": "none",
+						"header_style": "label",
+						"muted_command_collapsed": true
+					}
+				}
+			},
+			"description": "Configuration for all block types.",
+			"additionalProperties": false
+		},
+		"RawEditBlockConfig": {
+			"type": "object",
+			"properties": {
+				"indent": {
+					"type": "boolean",
+					"description": "Whether to apply 2-char indent before line numbers.",
+					"default": true
+				},
+				"vpad": {
+					"type": "boolean",
+					"description": "Whether to apply vertical padding.",
+					"default": false
+				},
+				"bg": {
+					"$ref": "#/$defs/RawBlockBackground",
+					"description": "Block background: \"none\", \"dark\", or \"light\".",
+					"default": "none"
+				},
+				"accent_bg": {
+					"type": "boolean",
+					"description": "Whether to show background behind accent.",
+					"default": false
+				},
+				"accent": {
+					"$ref": "#/$defs/Color",
+					"description": "Vertical-line accent. \"none\" disables. Accepts RGB, hex, or a named color.",
+					"default": "none"
+				},
+				"gutter_bg": {
+					"type": "boolean",
+					"description": "Whether diff line background extends to include gutter (line numbers).",
+					"default": false
+				},
+				"indent_bg": {
+					"type": "boolean",
+					"description": "Whether to skip indent columns in diff line background (keep them clean).\ntrue = skip indent, false = include indent in background.",
+					"default": false
+				},
+				"line_summary": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Show the +N/-M line summary in the collapsed header.\nUnset or `null`, it follows `ui.collapsed_edit_blocks` in config.json.\nA value pins it either way.",
+					"default": null
+				},
+				"expanded_by_default": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Unset follows `ui.collapsed_edit_blocks`. A true flag collapses even when this is true.\nAn explicit false still collapses when the flag is off.",
+					"default": null
+				},
+				"hunk_separator": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Separator between diff hunks. Options: \"…\" (default), \"───\", \"⋯\", \"\" (none).",
+					"default": "…"
+				},
+				"dual_line_numbers": {
+					"type": "boolean",
+					"description": "Show two line-number columns (old + new) like GitHub's unified diff.\nWhen false (default), show a single column with the new-file line number.",
+					"default": false
+				}
+			},
+			"description": "Configuration for EditBlock rendering.",
+			"additionalProperties": false
+		},
+		"RawBlockBackground": {
+			"type": "string",
+			"enum": [
+				"none",
+				"dark",
+				"light"
+			]
+		},
+		"RawPromptConfig": {
+			"type": "object",
+			"properties": {
+				"vpad": {
+					"type": "boolean",
+					"description": "Whether to apply vertical padding (blank lines above/below).",
+					"default": true
+				},
+				"bg": {
+					"$ref": "#/$defs/RawBlockBackground",
+					"description": "Block background: \"none\", \"dark\", or \"light\".",
+					"default": "light"
+				},
+				"accent_bg": {
+					"type": "boolean",
+					"description": "Whether accent column gets block's background.",
+					"default": false
+				},
+				"min_lines": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Minimum content lines to show in truncated/sticky header mode.\nThis is the number of actual content lines, not including vpad.",
+					"default": 2
+				},
+				"show_prefix": {
+					"type": "boolean",
+					"description": "Show the ❯ prefix character before the prompt text.",
+					"default": true
+				}
+			},
+			"description": "User prompt block in scrollback, not the prompt editor widget.",
+			"additionalProperties": false
+		},
+		"RawThinkingConfig": {
+			"type": "object",
+			"properties": {
+				"accent": {
+					"$ref": "#/$defs/Color",
+					"description": "Accent color for the vertical line.\nUse \"default\" (or \"none\") for theme default, or a named/hex/RGB color.",
+					"default": "none"
+				},
+				"accent_enabled": {
+					"type": "boolean",
+					"description": "Whether accent line is shown. Set to false to hide accent in all modes.",
+					"default": true
+				},
+				"bg_blend": {
+					"type": "integer",
+					"format": "uint8",
+					"minimum": 0,
+					"maximum": 255,
+					"description": "Blend factor for markdown colors with background (0-100).\nLower values = more faded. 70 = 70% original color, 30% background.",
+					"default": 70
+				},
+				"truncated_lines": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Number of visual lines to show at start and end in truncated mode.\nIf content exceeds this, shows first N lines, ellipsis, last N lines.",
+					"default": 3
+				},
+				"animate": {
+					"type": "boolean",
+					"description": "Whether the accent line animates (traveling wave) while thinking is active.\nWhen false, the accent line is static.",
+					"default": true
+				},
+				"header": {
+					"type": "boolean",
+					"description": "Show header line in truncated/expanded modes.\nWhen true: \"Thinking...\" (running) or \"Thought for Xs\" (done) appears\nas the first line above thinking content, with accent line and bullet.",
+					"default": true
+				},
+				"header_bright": {
+					"type": "boolean",
+					"description": "When true, header uses brighter styling in non-collapsed modes (like tool titles).\nRespects muted_collapsed when collapsed. When false, header is always dim gray.",
+					"default": false
+				}
+			},
+			"description": "Configuration for thinking/reasoning block rendering.",
+			"additionalProperties": false
+		},
+		"RawToolConfig": {
+			"type": "object",
+			"properties": {
+				"muted_collapsed": {
+					"type": "boolean",
+					"description": "When true, collapsed tool calls render entirely in muted gray.\nWhen false, collapsed tool calls show normal colors.",
+					"default": true
+				},
+				"dim_details": {
+					"type": "boolean",
+					"description": "When true, parenthetical details use the dimmest gray (gray_dim):\nRead \"(1-50)\", Search \"(N matches)\", Edit \"(N edits)\", Thinking \"for Xs\".\nWhen false, they use the normal muted gray.",
+					"default": true
+				},
+				"bullet": {
+					"$ref": "#/$defs/RawToolBullet",
+					"description": "Bullet/icon before tool call headers.\n\"none\", \"dot\" (·), \"small-circle\" (•), \"circle\" (●),\n\"small-triangle\" (▸), \"triangle\" (▶), \"diamond\" (◆).",
+					"default": "diamond"
+				}
+			},
+			"description": "Configuration for tool call blocks.",
+			"additionalProperties": false
+		},
+		"RawToolBullet": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "none",
+					"description": "No bullet."
+				},
+				{
+					"type": "string",
+					"const": "dot",
+					"description": "`·` (middle dot, smallest)."
+				},
+				{
+					"type": "string",
+					"const": "small-circle",
+					"description": "`•` (bullet, between dot and circle)."
+				},
+				{
+					"type": "string",
+					"const": "circle",
+					"description": "`●` (filled circle)."
+				},
+				{
+					"type": "string",
+					"const": "small-triangle",
+					"description": "`▸` (right-pointing small triangle)."
+				},
+				{
+					"type": "string",
+					"const": "triangle",
+					"description": "`▶` (right-pointing triangle)."
+				},
+				{
+					"type": "string",
+					"const": "diamond",
+					"description": "`◆` (filled diamond)."
+				}
+			]
+		},
+		"RawListDirConfig": {
+			"type": "object",
+			"properties": {
+				"terminal_bg": {
+					"type": "boolean",
+					"description": "When true, output has terminal-style dark background.\nWhen false, output has no background.",
+					"default": true
+				}
+			},
+			"description": "Configuration for ListDir block.",
+			"additionalProperties": false
+		},
+		"RawExecuteConfig": {
+			"type": "object",
+			"properties": {
+				"first_lines": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Number of output lines to show at the start in truncated mode.\nIn truncated mode: first_lines, then \"…\", then last_lines.",
+					"default": 2
+				},
+				"last_lines": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Number of output lines to show at the end in truncated mode.",
+					"default": 3
+				},
+				"accent_enabled": {
+					"type": "boolean",
+					"description": "Whether accent line is shown. Set to false to hide all accents\n(running/success/error).",
+					"default": true
+				},
+				"running_accent": {
+					"$ref": "#/$defs/Color",
+					"description": "Accent color for running execute blocks (animated wave).\nDefault: MAGENTA. Use named colors, hex, or RGB array.",
+					"default": "none"
+				},
+				"header_style": {
+					"$ref": "#/$defs/RawExecuteHeaderStyle",
+					"description": "Header display style: \"shell\" = `$ command` (default), \"label\" = `Run command`.\nShell style shows a dim `$` prompt. Label style shows bold \"Run\" like Edit/Search.",
+					"default": "label"
+				},
+				"muted_command_collapsed": {
+					"type": "boolean",
+					"description": "When true, command text is muted/uncolored when collapsed.\nWhen false, command text keeps its color when collapsed.",
+					"default": true
+				}
+			},
+			"description": "Configuration for Execute tool call block.",
+			"additionalProperties": false
+		},
+		"RawExecuteHeaderStyle": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "shell",
+					"description": "Shell style: `$ command` (default)."
+				},
+				{
+					"type": "string",
+					"const": "label",
+					"description": "Label style: `Run command` (like Edit/Search blocks)."
+				}
+			]
+		},
+		"RawScrollbackDisplayConfig": {
+			"type": "object",
+			"properties": {
+				"line_under_last_entry": {
+					"type": "boolean",
+					"description": "Render a subtle horizontal line below the last entry (\"end of content\" marker).",
+					"default": false
+				},
+				"collapsed_accent_char": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Accent character for collapsed groupable blocks. Default: \"❙\" (\"|\" on the Windows console).",
+					"default": null
+				},
+				"dim_accent": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"description": "Blend factor for dimmed accents on collapsed groupable blocks (0.0–1.0). Default: 0.5.",
+					"default": 0.5
+				},
+				"group_selection_split": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Group selection box mode. true = \"split\" (Mode B), false = \"always\" (Mode A). Default: true.",
+					"default": true
+				},
+				"highlight_overlays_border": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Whether active-block highlight overlays selection box borders. Default: false.",
+					"default": false
+				},
+				"expandable_indicator": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Show expand indicator (e.g., \"›\") on selected foldable collapsed entries. Default: true.",
+					"default": true
+				},
+				"expandable_indicator_running": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Show expand indicator on running entries in their minimum fold mode. Default: true.",
+					"default": true
+				},
+				"expandable_indicator_char": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Character for the expand indicator. Default: \"›\".",
+					"default": "›"
+				},
+				"selection_buttons": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Show ⧉/↗ buttons on the selection box. Default: false.",
+					"default": false
+				},
+				"sticky_headers": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Pin user prompts as sticky headers when scrolled past. Default: true.",
+					"default": true
+				},
+				"tab_width": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint8",
+					"minimum": 0,
+					"maximum": 255,
+					"description": "Number of spaces to use when expanding tab characters (\\t) in content.\nTabs in model output are replaced with this many spaces before rendering.\nDefault: 4. Set to 0 to pass through tabs unchanged.",
+					"default": 4
+				},
+				"group_max_visible": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"description": "Maximum visible entries in a consecutive group of collapsed tool/thinking blocks.\nOlder entries are hidden behind a compact header. 0 = disable. Default: 10.",
+					"default": 10
+				},
+				"rtl_bidi": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "App-side RTL bidi reordering for scrollback. Default false (terminals often\nalready reorder; enabling both double-flips Arabic/Persian).",
+					"default": false
+				}
+			},
+			"description": "Scrollback display options.",
+			"additionalProperties": false
+		}
+	}
+}

@@ -179,101 +179,176 @@ Grok selects the matching file automatically when you switch themes. The `.tmThe
 
 ---
 
-## Deep Customization with pager.toml
+## Deep Customization with pager.json
 
-For fine-grained control over the TUI appearance, create `~/.grok/pager.toml`. This file controls scrollback layout, block styling, animations, and more. All settings have defaults; specify only the values you override. (Dev builds generate this file as a template with every default commented out — uncomment a line to override it; commented values keep tracking future defaults.)
+For fine-grained control over the TUI appearance, edit `~/.grok/pager.json`. This file controls scrollback layout, block styling, animations, and more. All settings have defaults. Specify only the values you override. An absent or `null` member keeps the default.
+
+grok writes `~/.grok/pager.schema.json` at startup and creates `pager.json` with only its `"$schema"` member when the file does not exist. An editor that reads JSON Schema then completes every key and shows its default and its description, so a default you do not write keeps. Those keeps track future releases. A legacy `pager.toml` converts to `pager.json` at startup (see [Configuration](05-configuration.md#pagerjson-appearance-configuration)).
+
+The blocks below are parts of one file. A whole file looks like this:
+
+```json
+{
+  "$schema": "./pager.schema.json",
+  "animation": {
+    "fps": 60
+  },
+  "scrollback": {
+    "blocks": {
+      "tool": {
+        "bullet": "small-triangle"
+      }
+    }
+  }
+}
+```
 
 ### Layout
 
-Control viewport padding and block spacing:
+Control viewport padding and block spacing. The left and right margins are at least 1. `block_pad_left` is the padding between the accent line and the content.
 
-```toml
-[scrollback.layout]
-outer_vpad = 1          # Vertical padding (top/bottom) for the viewport
-outer_hpad_left = 2     # Left margin (minimum: 1)
-outer_hpad_right = 2    # Right margin (minimum: 1)
-block_pad_left = 2      # Padding between accent line and content
-block_pad_right = 2     # Padding after content at right edge
+```json
+{
+  "scrollback": {
+    "layout": {
+      "outer_vpad": 1,
+      "outer_hpad_left": 2,
+      "outer_hpad_right": 2,
+      "block_pad_left": 2,
+      "block_pad_right": 2
+    }
+  }
+}
 ```
 
 ### Scrollbar
 
-```toml
-[scrollback.scrollbar]
-enabled = true          # Show/hide the scrollbar
-gap_left = 0            # Gap between content and scrollbar (0 = adjacent)
-gap_right = 0           # Gap between scrollbar and screen edge (0 = at edge)
-# scrollbar_bg = "none" # Override background color (or "none" for theme default)
-# scrollbar_fg = "none" # Override thumb color (or "none" for theme default)
+A gap of 0 puts the scrollbar next to the content or at the screen edge.
+
+```json
+{
+  "scrollback": {
+    "scrollbar": {
+      "enabled": true,
+      "gap_left": 0,
+      "gap_right": 0,
+      "scrollbar_bg": "none",
+      "scrollbar_fg": "none"
+    }
+  }
+}
 ```
 
 ### Scroll Behavior
 
-```toml
-[scrollback.scroll]
-margin = 0                  # Context lines above/below selected entry (0 = edge)
-min_page_fraction = 0       # Minimum scroll as % of viewport (0-100)
-follow_indicator = "center" # "center" = show the ▼/▲ scroll arrows, "none" = hidden
-follow_auto_select = true   # Auto-select latest entry when following
-follow_by_overscroll = true # Scrolling past bottom engages follow mode
-anchor_on_fold = true       # Keep block header at same screen position when folding
+```json
+{
+  "scrollback": {
+    "scroll": {
+      "margin": 0,
+      "min_page_fraction": 0,
+      "follow_indicator": "center",
+      "follow_auto_select": true,
+      "follow_by_overscroll": true,
+      "anchor_on_fold": true
+    }
+  }
+}
 ```
 
 ### Display Options
 
-```toml
-[scrollback.display]
-sticky_headers = true              # Pin user prompts as headers when scrolled past
-tab_width = 4                      # Spaces per tab character (0 = pass through)
-expandable_indicator = true        # Show "›" on foldable collapsed entries
-expandable_indicator_char = "›"    # Character to use (default: "›")
-collapsed_accent_char = "❙"        # Accent for collapsed groupable blocks (falls back to "|" on the legacy Windows console)
-dim_accent = 0.5                   # Blend factor for dimmed accents (0.0-1.0)
-line_under_last_entry = false      # Horizontal line below last entry
-selection_buttons = false          # Show copy/view buttons on selection box
+`tab_width` no passes tabs through. `collapsed_accent_char` falls back to `"|"` on the legacy Windows console. `dim_accent` is a blend factor from 0.0 to 1.0.
+
+```json
+{
+  "scrollback": {
+    "display": {
+      "sticky_headers": true,
+      "tab_width": 4,
+      "expandable_indicator": true,
+      "expandable_indicator_char": "›",
+      "collapsed_accent_char": "❙",
+      "dim_accent": 0.5,
+      "line_under_last_entry": false,
+      "selection_buttons": false
+    }
+  }
+}
 ```
 
 ### Animation
 
-```toml
-[animation]
-fps = 30           # Frame rate (1-60). Higher = smoother, more CPU
-wave_rows = 32     # Rows per wave cycle for accent animation
+`fps` is the frame rate, from 1 to 60. A higher rate is smoother and uses more CPU.
+
+```json
+{
+  "animation": {
+    "fps": 30,
+    "wave_rows": 32
+  }
+}
 ```
 
 ### Block Styling: Edit Diffs
 
-```toml
-[scrollback.blocks.edit]
-indent = true                   # Indent diff content
-vpad = false                    # Vertical padding around diffs
-# expanded_by_default = true    # Unset follows Collapsed edit blocks. When that setting is on,
-                                # edits start collapsed even if this line is true.
-hunk_separator = "…"            # Separator between hunks ("…", "───", "⋯", or "" for none)
-dual_line_numbers = false       # Two-column line numbers (old + new, like GitHub)
-# line_summary = false          # Show +N/-M in the collapsed header; unset follows the same flag
-# bg = "none"                   # Block background ("none", "light", "dark")
+`expanded_by_default` unset (`null`) follows the Collapsed edit blocks setting. When that setting is on, edits start collapsed even when this key is `true`. `line_summary` shows +N/-M in the collapsed header, and unset follows the same setting.
+
+```json
+{
+  "scrollback": {
+    "blocks": {
+      "edit": {
+        "indent": true,
+        "vpad": false,
+        "expanded_by_default": null,
+        "hunk_separator": "…",
+        "dual_line_numbers": false,
+        "line_summary": null,
+        "bg": "none"
+      }
+    }
+  }
+}
 ```
 
 ### Block Styling: Thinking/Reasoning
 
-```toml
-[scrollback.blocks.thinking]
-accent_enabled = true       # Show accent line for thinking blocks
-animate = true              # Animate accent line while thinking
-truncated_lines = 3         # Lines to show in truncated mode
-bg_blend = 70               # Markdown-color blend with background (0-100)
-header = true               # Show "Thinking..." header
-header_bright = false       # Bright header style (vs dim/muted)
+`bg_blend` blends the markdown colors with the background (0-100). `header` shows the "Thinking..." header, and `header_bright` gives it the bright style.
+
+```json
+{
+  "scrollback": {
+    "blocks": {
+      "thinking": {
+        "accent_enabled": true,
+        "animate": true,
+        "truncated_lines": 3,
+        "bg_blend": 70,
+        "header": true,
+        "header_bright": false
+      }
+    }
+  }
+}
 ```
 
 ### Block Styling: Tool Calls
 
-```toml
-[scrollback.blocks.tool]
-muted_collapsed = true     # Gray out collapsed tool calls
-dim_details = true          # Dim parenthetical details (line counts, match counts)
-bullet = "diamond"          # Bullet style before tool headers
+`muted_collapsed` grays out collapsed tool calls. `dim_details` dims the details in parentheses, such as line counts and match counts.
+
+```json
+{
+  "scrollback": {
+    "blocks": {
+      "tool": {
+        "muted_collapsed": true,
+        "dim_details": true,
+        "bullet": "diamond"
+      }
+    }
+  }
+}
 ```
 
 Available bullet styles:
@@ -290,39 +365,63 @@ Available bullet styles:
 
 ### Block Styling: Execute (Shell Commands)
 
-```toml
-[scrollback.blocks.execute]
-first_lines = 2                   # Output lines shown at start in truncated mode
-last_lines = 3                    # Output lines shown at end in truncated mode
-accent_enabled = true             # Show accent line (animated while running)
-header_style = "label"            # "shell" ($ prefix) or "label" (Run prefix)
-muted_command_collapsed = true    # Mute command text when collapsed
+`first_lines` and `last_lines` are the output lines shown at the start and at the end in truncated mode. `header_style` is `"shell"` for a `$` prefix or `"label"` for a Run prefix.
+
+```json
+{
+  "scrollback": {
+    "blocks": {
+      "execute": {
+        "first_lines": 2,
+        "last_lines": 3,
+        "accent_enabled": true,
+        "header_style": "label",
+        "muted_command_collapsed": true
+      }
+    }
+  }
+}
 ```
 
 ### Block Styling: User Prompts (Scrollback)
 
-```toml
-[scrollback.blocks.prompt]
-vpad = true            # Vertical padding
-bg = "light"           # Background ("none", "light", "dark")
-show_prefix = true     # Show the prompt prefix character
-min_lines = 2          # Minimum content lines in truncated/sticky mode
+`min_lines` is the minimum content lines in truncated and sticky mode.
+
+```json
+{
+  "scrollback": {
+    "blocks": {
+      "prompt": {
+        "vpad": true,
+        "bg": "light",
+        "show_prefix": true,
+        "min_lines": 2
+      }
+    }
+  }
+}
 ```
 
 ### Prompt Input Widget
 
-```toml
-[prompt]
-collapse_unfocused = true    # Collapse when scrollback is focused
-mouse_hover = true           # Show hover highlight on mouse over
-show_prefix = true           # Show the prompt prefix character
+```json
+{
+  "prompt": {
+    "collapse_unfocused": true,
+    "mouse_hover": true,
+    "show_prefix": true
+  }
+}
 ```
 
 ### Terminal Behavior
 
-```toml
-[terminal]
-alt_screen = "auto"    # "auto", "always", or "never"
+```json
+{
+  "terminal": {
+    "alt_screen": "auto"
+  }
+}
 ```
 
 Alt-screen policies:

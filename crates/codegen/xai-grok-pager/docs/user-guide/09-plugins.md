@@ -426,7 +426,7 @@ You can also set `GROK_MARKETPLACE_REQUIRE_SHA=1`. Both only tighten the policy;
 
 ### Turn off the plugins UI
 
-To hide the plugins and hooks interface, set this in `pager.toml`:
+To hide the plugins and hooks interface, set this in `pager.json`:
 
 ```json
 {
