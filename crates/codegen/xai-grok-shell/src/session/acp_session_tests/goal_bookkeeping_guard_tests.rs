@@ -120,6 +120,121 @@ async fn an_active_goal_reads_its_plan_but_not_its_record() {
         .await;
 }
 
+/// An MCP server whose one tool answers with a JSON payload far over the inline limit.
+struct LargeResultServer;
+
+const LARGE_RESULT_TAIL: &str = "end of the large mcp result";
+
+#[async_trait::async_trait]
+impl xai_grok_tools::types::resources::ManagedGatewayToolCaller for LargeResultServer {
+    async fn call_tool(
+        &self,
+        _call_id: &str,
+        _arguments: serde_json::Value,
+        _: &str,
+    ) -> Result<
+        xai_grok_tools::types::resources::ManagedGatewayToolCallResponse,
+        xai_tool_runtime::ToolError,
+    > {
+        let mut items: Vec<String> = (0..800)
+            .map(|i| format!("item number {i} of the large result"))
+            .collect();
+        items.push(LARGE_RESULT_TAIL.to_owned());
+        let text = serde_json::to_string_pretty(&serde_json::json!({ "items": items }))
+            .expect("serialize the large result");
+        Ok(
+            xai_grok_tools::types::resources::ManagedGatewayToolCallResponse {
+                result: serde_json::json!({"content":[{"type":"text","text":text}]}),
+                connectors_needing_reauth: vec![],
+            },
+        )
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_active_goal_reads_a_large_mcp_result_dump() {
+    use xai_grok_tools::implementations::use_tool::UseTool;
+    use xai_grok_tools::types::resources::{
+        ManagedGatewayToolCatalog, ManagedGatewayToolClient, ManagedGatewayToolSource,
+        SessionFolder,
+    };
+
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let actor = guard_actor(dir.path(), None).await;
+            *actor.agent.borrow_mut() = test_agent_with_tools(vec![
+                ToolConfig::for_tool::<ReadFileTool>(),
+                ToolConfig::for_tool::<UseTool>(),
+            ])
+            .await;
+            let resources = actor.tool_bridge_handle().shared_resources().await;
+            {
+                let mut resources = resources.lock().await;
+                resources.insert(SessionFolder(dir.path().to_path_buf()));
+                resources.insert(ManagedGatewayToolCatalog(std::collections::HashMap::from(
+                    [(
+                        "fixture__search".to_owned(),
+                        ManagedGatewayToolSource {
+                            connector_id: "fixture".to_owned(),
+                            connector_name: "fixture".to_owned(),
+                            tool_id: "search".to_owned(),
+                            tool_name: "search".to_owned(),
+                            call_id: "fixture.search".to_owned(),
+                        },
+                    )],
+                )));
+                resources.insert(ManagedGatewayToolClient(Arc::new(LargeResultServer)));
+            }
+            actor
+                .workspace_ops
+                .bind_local_session(
+                    &actor.session_id_string(),
+                    actor.tool_context.cwd.as_path().to_path_buf(),
+                    actor.tool_context.hunk_tracker_handle.clone(),
+                    actor.tool_bridge_handle().toolset(),
+                    None,
+                )
+                .expect("bind_local_session");
+
+            let mcp_call = crate::sampling::types::ToolCallResponse {
+                id: "mcp".to_owned(),
+                kind: "function".to_owned(),
+                function: crate::sampling::types::ToolCallFunction::new(
+                    "use_tool",
+                    serde_json::json!({"tool_name":"fixture__search","tool_input":{}}).to_string(),
+                ),
+                vendor: Default::default(),
+            };
+            actor
+                .execute_tool_calls(vec![mcp_call], None)
+                .await
+                .expect("the MCP call must not fail the turn");
+            let preview = tool_result_text(&actor, "mcp").await;
+            assert!(preview.contains("[MCP output truncated:"), "{preview}");
+            assert!(!preview.contains(LARGE_RESULT_TAIL), "{preview}");
+            let dump_path = preview
+                .split("Full output written to: ")
+                .nth(1)
+                .and_then(|rest| rest.split(".json").next())
+                .map(|stem| format!("{stem}.json"))
+                .unwrap_or_else(|| panic!("no dump path in {preview}"));
+            assert!(
+                dump_path.starts_with(dir.path().to_str().unwrap()),
+                "the dump is in the session dir: {dump_path}"
+            );
+
+            let dump = read_once(&actor, "dump", &dump_path).await;
+            assert!(
+                !dump.contains("Refused"),
+                "the MCP dump must be readable: {dump}"
+            );
+            assert!(dump.contains(LARGE_RESULT_TAIL), "{dump}");
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_goal_verifier_cannot_read_the_main_session_record() {
     let local = tokio::task::LocalSet::new();
