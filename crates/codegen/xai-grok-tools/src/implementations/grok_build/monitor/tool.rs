@@ -110,7 +110,7 @@ impl xai_tool_runtime::Tool for MonitorTool {
 
         // Output file lives in the session folder alongside bash terminal logs.
         let output_file = session_folder
-            .join("terminal")
+            .join(crate::session_output_dirs::TERMINAL_OUTPUT_DIR)
             .join(format!("monitor-{}.log", ctx.call_id.as_str()));
         let bg_handle = terminal
             .run_background(crate::computer::types::TerminalRunRequest {
