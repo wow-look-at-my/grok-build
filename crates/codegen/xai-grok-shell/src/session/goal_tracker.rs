@@ -302,10 +302,10 @@ fn copy_no_follow(src: &std::path::Path, dest: &std::path::Path) -> std::io::Res
     Ok(())
 }
 
-/// Parse `(attempt, skeptic_idx)` out of a per-skeptic report file name (`goal-classifier-{vid}-{attempt}-skeptic-{idx}.md`); `None` otherwise.
+/// Parse `(attempt, skeptic_idx)` out of a per-skeptic verdict file name (`goal-verdict-{vid}-{attempt}-{idx}.json`); `None` otherwise.
 fn parse_skeptic_report_order(name: &str) -> Option<(u32, u32)> {
-    let stem = name.strip_suffix(".md")?;
-    let (head, idx) = stem.rsplit_once("-skeptic-")?;
+    let stem = name.strip_prefix("goal-verdict-")?.strip_suffix(".json")?;
+    let (head, idx) = stem.rsplit_once('-')?;
     let (_, attempt) = head.rsplit_once('-')?;
     Some((attempt.parse().ok()?, idx.parse().ok()?))
 }
@@ -338,13 +338,14 @@ fn append_skeptic_reports(scratch_root: &std::path::Path, dest: &std::path::Path
     let mut budget = crate::session::goal_classifier::GOAL_VERIFIER_PANEL_MAX_BYTES as u64;
     for (_, report) in reports {
         let name = report.file_name().unwrap_or_default().to_string_lossy();
-        let header = format!("\n\n---\n## Inlined skeptic report: {name}\n\n");
+        let header = format!("\n\n---\n## Inlined skeptic verdict: {name}\n\n");
         let Ok(len) = std::fs::symlink_metadata(&report).map(|m| m.len()) else {
             continue;
         };
         if header.len() as u64 + len > budget {
-            let _ = out
-                .write_all(b"\n\n---\n(remaining skeptic reports elided: rescue budget reached)\n");
+            let _ = out.write_all(
+                b"\n\n---\n(remaining skeptic verdicts elided: rescue budget reached)\n",
+            );
             return;
         }
         let Ok(body) = std::fs::read_to_string(&report) else {
@@ -772,7 +773,7 @@ impl GoalTracker {
         self.goal_dir().join("strategy.md")
     }
 
-    /// Per-skeptic reports are inlined below it ([`append_skeptic_reports`]) to keep it self-contained.
+    /// Per-skeptic verdict files are inlined below it ([`append_skeptic_reports`]) to keep it self-contained.
     /// `..` components are rejected (`starts_with` is lexical).
     /// The path is stamped only after a move from the verified root succeeds; otherwise it is left unchanged.
     fn rescue_classifier_details(&mut self) {
