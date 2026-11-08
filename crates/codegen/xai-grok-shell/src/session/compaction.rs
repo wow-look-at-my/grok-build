@@ -32,6 +32,18 @@ use xai_chat_state::compaction_utils::{
 use xai_grok_sampling_types::{ApiBackend, ConversationItem};
 /// Prefix on the early-guard failure payloads below; the user-facing normalizer strips it (the renderer prepends its own headline).
 const COMPACTION_FAILED_GUARD_PREFIX: &str = "Compaction failed: ";
+/// The harness model slot of every compaction summary. It is a member of the `dense_summarization` group.
+pub(crate) const COMPACTION_SLOT: &str = "compaction";
+/// The summary needs none of the thinking. It stays only where it buys a prompt-cache hit: the same model.
+/// That hit is on a backend that takes a block it did not mint as text.
+fn strips_reasoning_for_summary(
+    client: &xai_grok_sampler::SamplingClient,
+    session_model: &str,
+    summary_model: &str,
+) -> bool {
+    client.api_backend() == ApiBackend::Messages
+        || !xai_grok_sampling_types::same_model(session_model, summary_model)
+}
 /// Human-readable "next fire" for a scheduled loop in the compaction reminder.
 fn format_loop_next_fire(
     next: chrono::DateTime<chrono::Utc>,
@@ -132,18 +144,35 @@ impl SessionActor {
         let agent = self.agent.borrow();
         agent.compaction_policy().two_pass_enabled
     }
+    /// The client and config of every compaction summary: `/compact`, auto-compaction and both two-pass passes.
+    /// The `compaction` slot is in the `dense_summarization` group, so the group's model wins here.
+    /// A pinned slot brings its own backend, window and credentials. An unpinned slot keeps the session's.
+    pub(crate) async fn compaction_sampler(
+        &self,
+    ) -> Result<
+        (
+            xai_grok_sampler::SamplingClient,
+            xai_grok_sampler::SamplerConfig,
+        ),
+        acp::Error,
+    > {
+        if let Some(pair) = self.resolve_slot_sampler(COMPACTION_SLOT).await {
+            return Ok(pair);
+        }
+        Ok((
+            self.prepare_chat_completion(false).await?,
+            self.reconstruct_full_config().await,
+        ))
+    }
     /// The prompt is already embedded, so this bypasses the single-pass sampler and calls `generate_session_compact` directly.
     /// Agent `RefCell` borrows are only taken for synchronous snapshots (never held across `.await`).
     /// A long-lived borrow would race with turn/compact/cancel and panic on double-borrow.
-    async fn two_pass_sample(&self, history: Vec<ConversationItem>) -> Option<CompactOutput> {
-        let sampling_config = self.reconstruct_full_config().await;
-        let client = match self.prepare_chat_completion(false).await {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(error = %e, "two_pass: failed to prepare sampling client");
-                return None;
-            }
-        };
+    async fn two_pass_sample(
+        &self,
+        history: Vec<ConversationItem>,
+        client: xai_grok_sampler::SamplingClient,
+        sampling_config: &xai_grok_sampler::SamplerConfig,
+    ) -> Option<CompactOutput> {
         let tool_defs = self.prepare_tool_definitions().await;
         let tools = self.turn_base_tool_specs(&tool_defs);
         let compaction_tool_tokens = xai_chat_state::estimate_tool_specs_tokens(&tools);
@@ -161,7 +190,7 @@ impl SessionActor {
             hosted_tools,
             client,
             self.session_info.id.clone(),
-            &sampling_config,
+            sampling_config,
             self.inference_idle_timeout,
             wall_clock_budget_secs,
             self.compaction.tool_choice,
@@ -250,18 +279,21 @@ impl SessionActor {
         if split.prefix.is_empty() || split.tail.is_empty() {
             return PrefireOutcome::EmptySplit.into();
         }
-        let sampling_cfg = self.chat_state_handle.get_sampling_config().await;
-        let strips = sampling_cfg
-            .as_ref()
-            .map(|c| {
-                xai_grok_sampler::resolve_api_backend(&c.base_url, &c.model, &c.api_backend)
-                    == ApiBackend::Messages
-            })
-            .unwrap_or(false);
-        let model_slug = sampling_cfg
-            .as_ref()
+        let (client, sampling_config) = match self.compaction_sampler().await {
+            Ok(pair) => pair,
+            Err(e) => {
+                tracing::warn!(error = %e, "two_pass: failed to prepare the compaction sampler");
+                return PrefireOutcome::SampleFailed.into();
+            }
+        };
+        let session_model = self
+            .chat_state_handle
+            .get_sampling_config()
+            .await
             .map(|c| c.model.to_string())
             .unwrap_or_default();
+        let strips = strips_reasoning_for_summary(&client, &session_model, &sampling_config.model);
+        let model_slug = sampling_config.model.to_string();
         let prefix_prepared = apply_turn_image_budget_and_prune(
             &self.chat_state_handle,
             prepare_conversation_for_verbatim_summarization(split.prefix.to_vec(), strips),
@@ -274,7 +306,9 @@ impl SessionActor {
         let prompt = build_compaction_prompt(None, false);
         let pass1_history = build_two_pass_pass1_history(&prefix_prepared, &prompt);
         let started = std::time::Instant::now();
-        let out = self.two_pass_sample(pass1_history).await;
+        let out = self
+            .two_pass_sample(pass1_history, client, &sampling_config)
+            .await;
         let pass1_latency_ms = started.elapsed().as_millis() as u64;
         let attempted = |outcome: PrefireOutcome, note1_chars: Option<usize>| PrefirePass1Run {
             outcome,
@@ -317,6 +351,8 @@ impl SessionActor {
         &self,
         user_context: Option<&str>,
         strips_reasoning: bool,
+        client: xai_grok_sampler::SamplingClient,
+        sampling_config: &xai_grok_sampler::SamplerConfig,
     ) -> Option<CompactOutput> {
         if !self.two_pass_active() {
             return None;
@@ -339,12 +375,7 @@ impl SessionActor {
         }
         let cache = self.compaction.prefire.take()?;
         let live = self.chat_state_handle.get_conversation().await;
-        let model_slug = self
-            .chat_state_handle
-            .get_sampling_config()
-            .await
-            .map(|c| c.model.to_string())
-            .unwrap_or_default();
+        let model_slug = sampling_config.model.to_string();
         let Some((prefix, tail)) = live.split_at_checked(cache.prefix_len) else {
             tracing::Span::current().record("compaction_prefire_stale", true);
             tracing::info!(
@@ -370,7 +401,9 @@ impl SessionActor {
         let pass2_history =
             build_two_pass_pass2_history(prefix, &prepared_tail, &cache.note1, &prompt);
         let started = std::time::Instant::now();
-        let mut out = self.two_pass_sample(pass2_history).await?;
+        let mut out = self
+            .two_pass_sample(pass2_history, client, sampling_config)
+            .await?;
         if is_degenerate_summary(&out.content) {
             tracing::Span::current().record("compaction_prefire_stale", true);
             tracing::info!(
@@ -1082,21 +1115,11 @@ impl SessionActor {
             span.record("compaction_trigger", trigger_str);
         }
         let model_id = sampling_config.map(|c| c.model).unwrap_or_default();
-        // A pinned `[models] compaction` brings its own client AND config:
-        // the backend and the window belong to the model, not to the
-        // session. An unpinned slot keeps both as they were.
-        let (sampling_client, sampling_config) = match self.resolve_slot_sampler("compaction").await
-        {
-            Some((client, cfg)) => (client, cfg),
-            None => (
-                self.prepare_chat_completion(false).await?,
-                self.reconstruct_full_config().await,
-            ),
-        };
-        // The summary needs none of the thinking. It stays only where it buys a prompt-cache hit: the same model. That hit is on a backend that
-        // takes a block it did not mint as text.
-        let summary_strips_reasoning = sampling_client.api_backend() == ApiBackend::Messages
-            || !xai_grok_sampling_types::same_model(&model_id, &sampling_config.model);
+        let (sampling_client, sampling_config) = self.compaction_sampler().await?;
+        let summary_strips_reasoning =
+            strips_reasoning_for_summary(&sampling_client, &model_id, &sampling_config.model);
+        // The compaction model reads the input, so its window sizes the input budgets.
+        let summary_window = sampling_config.context_window;
         let compaction = xai_grok_telemetry::events::CompactionScope::begin(
             xai_grok_telemetry::events::CompactionBeginParams {
                 trigger,
@@ -1225,7 +1248,7 @@ impl SessionActor {
         if lossy_input {
             simplified_messages = xai_chat_state::compaction_utils::fit_conversation_to_budget(
                 simplified_messages,
-                lossy_input_budget(context_window, compaction_tool_tokens),
+                lossy_input_budget(summary_window, compaction_tool_tokens),
             );
         }
         tracing::info!(
@@ -1233,7 +1256,7 @@ impl SessionActor {
             tool_tokens = compaction_tool_tokens,
             "Running compact with model '{}' (slot pinned: {})",
             &sampling_config.model,
-            self.harness_model("compaction").is_some()
+            self.harness_model(COMPACTION_SLOT).is_some()
         );
         let mut last_error: Option<acp::Error> = None;
         let mut last_failure_outcome = CompactionOutcome::Failed;
@@ -1242,7 +1265,7 @@ impl SessionActor {
             let (turns, stage) = start_verbatim_compact_turns(
                 simplified_messages,
                 compaction_tool_tokens,
-                context_window,
+                summary_window,
             );
             simplified_messages = turns;
             stage
@@ -1265,7 +1288,7 @@ impl SessionActor {
             compaction_tools.clone(),
             compaction_hosted_tools.clone(),
             compaction_tool_tokens,
-            sampling_client,
+            sampling_client.clone(),
             self.session_info.id.clone(),
             sampling_config.clone(),
             self.inference_idle_timeout,
@@ -1292,7 +1315,12 @@ impl SessionActor {
         // The wire builders leave another model's thinking behind on their own.
         let mut thinking_stage = xai_grok_sampling_types::ThinkingReplay::Native;
         let two_pass_output = self
-            .try_two_pass_pass2_apply(user_context.as_deref(), summary_strips_reasoning)
+            .try_two_pass_pass2_apply(
+                user_context.as_deref(),
+                summary_strips_reasoning,
+                sampling_client,
+                &sampling_config,
+            )
             .await;
         let two_pass_used = two_pass_output.is_some();
         let mut compact_summary: Option<String> =
@@ -1386,7 +1414,7 @@ impl SessionActor {
                                         .await;
                                     xai_chat_state::compaction_utils::fit_conversation_to_budget(
                                         pruned,
-                                        fitted_input_budget(context_window, compaction_tool_tokens),
+                                        fitted_input_budget(summary_window, compaction_tool_tokens),
                                     )
                                 }
                                 CompactInputStage::Lossy => {
@@ -1394,7 +1422,7 @@ impl SessionActor {
                                         xai_chat_state::compaction_utils::prepare_conversation_for_summarization(
                                             conv,
                                         ),
-                                        lossy_input_budget(context_window, compaction_tool_tokens),
+                                        lossy_input_budget(summary_window, compaction_tool_tokens),
                                     )
                                 }
                                 CompactInputStage::Verbatim => {
