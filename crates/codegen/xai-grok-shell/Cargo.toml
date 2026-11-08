@@ -248,10 +248,6 @@ harness = false
 required-features = ["test-support"]
 
 [[bench]]
-name = "skills_watcher_startup"
-harness = false
-
-[[bench]]
 name = "child_replay_lookup"
 harness = false
 
