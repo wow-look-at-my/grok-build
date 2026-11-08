@@ -257,4 +257,4 @@ Deeper files take precedence. Grok also reads `CLAUDE.md` files for compatibilit
 | [Authentication](02-authentication.md) | Browser login, API keys, OIDC, external auth, device code flow |
 | [Keyboard Shortcuts](03-keyboard-shortcuts.md) | Complete reference for all key bindings |
 | [Slash Commands](04-slash-commands.md) | All available `/` commands |
-| [Configuration](05-configuration.md) | config.json, pager.toml, environment variables |
+| [Configuration](05-configuration.md) | config.json, pager.json, environment variables |

@@ -183,7 +183,7 @@ Grok selects the matching file automatically when you switch themes. The `.tmThe
 
 For fine-grained control over the TUI appearance, edit `~/.grok/pager.json`. This file controls scrollback layout, block styling, animations, and more. All settings have defaults. Specify only the values you override. An absent or `null` member keeps the default.
 
-grok writes `~/.grok/pager.schema.json` at startup and creates `pager.json` with only its `"$schema"` member when the file does not exist. An editor that reads JSON Schema then completes every key and shows its default and its description, so a default you do not write keeps. Those keeps track future releases. A legacy `pager.toml` converts to `pager.json` at startup (see [Configuration](05-configuration.md#pagerjson-appearance-configuration)).
+grok writes `~/.grok/pager.schema.json` at startup and creates `pager.json` with only its `"$schema"` member when the file does not exist. An editor that reads JSON Schema then completes every key and shows its default and its description. A key that you leave out follows the default of each new release. A legacy `pager.toml` converts to `pager.json` at startup (see [Configuration](05-configuration.md#pagerjson-appearance-configuration)).
 
 The blocks below are parts of one file. A whole file looks like this:
 

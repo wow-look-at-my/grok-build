@@ -14,7 +14,7 @@ Start here. These guides cover what you need on your first day.
 | 2 | [Authentication](02-authentication.md) | Browser login, API keys, OIDC/SSO, external auth providers, and device-code flow |
 | 3 | [Keyboard Shortcuts](03-keyboard-shortcuts.md) | Reference for every key binding and mouse action in the TUI |
 | 4 | [Slash Commands](04-slash-commands.md) | Every `/` command, including goals, deep research, and workflow run management |
-| 5 | [Configuration](05-configuration.md) | `config.json`, `pager.toml`, environment variables, and file locations |
+| 5 | [Configuration](05-configuration.md) | `config.json`, `pager.json`, environment variables, and file locations |
 
 ---
 
@@ -24,7 +24,7 @@ Customize and extend Grok Build.
 
 | # | Document | Description |
 |---|----------|-------------|
-| 6 | [Theming and Appearance](06-theming.md) | Themes, the `/theme` command, `pager.toml`, and color-support detection |
+| 6 | [Theming and Appearance](06-theming.md) | Themes, the `/theme` command, `pager.json`, and color-support detection |
 | 7 | [MCP Servers](07-mcp-servers.md) | External tool integrations through the Model Context Protocol |
 | 8 | [Skills](08-skills.md) | Reusable prompt packages in the SKILL.md format |
 | 9 | [Plugins](09-plugins.md) | Bundle and share skills, commands, agents, hooks, and MCP servers; install from, author, and govern marketplaces (organization controls) |

@@ -1143,7 +1143,7 @@ pub struct RawExecuteConfig {
     /// Accent color for running execute blocks (animated wave).
     /// Default: MAGENTA. Use named colors, hex, or RGB array.
     pub running_accent: OptionalColor,
-    /// Header display style: "shell" = `$ command` (default), "label" = `Run command`.
+    /// Header display style: "shell" = `$ command`, "label" = `Run command` (default).
     /// Shell style shows a dim `$` prompt. Label style shows bold "Run" like Edit/Search.
     pub header_style: RawExecuteHeaderStyle,
     /// When true, command text is muted/uncolored when collapsed.
@@ -1167,7 +1167,7 @@ impl Default for RawExecuteConfig {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RawExecuteHeaderStyle {
-    /// Shell style: `$ command` (default).
+    /// Shell style: `$ command`.
     #[default]
     Shell,
     /// Label style: `Run command` (like Edit/Search blocks).

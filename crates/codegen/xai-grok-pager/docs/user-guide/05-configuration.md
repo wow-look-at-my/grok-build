@@ -1069,7 +1069,8 @@ A `models.definitions.<id>.pricing` object you write always wins over the catalo
 | Path | Description |
 |------|-------------|
 | `~/.grok/config.json` | Main configuration file |
-| `~/.grok/pager.toml` | TUI appearance configuration |
+| `~/.grok/pager.json` | TUI appearance configuration |
+| `~/.grok/pager.schema.json` | JSON Schema of `pager.json`, written at startup |
 | `~/.grok/auth.json` | Authentication credentials (auto-managed) |
 | `~/.grok/sessions/` | Persisted sessions (organized by working directory) |
 | `~/.grok/memory/` | Cross-session memory files and index |
