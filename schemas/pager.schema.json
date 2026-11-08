@@ -873,7 +873,7 @@
 				},
 				"header_style": {
 					"$ref": "#/$defs/RawExecuteHeaderStyle",
-					"description": "Header display style: \"shell\" = `$ command` (default), \"label\" = `Run command`.\nShell style shows a dim `$` prompt. Label style shows bold \"Run\" like Edit/Search.",
+					"description": "Header display style: \"shell\" = `$ command`, \"label\" = `Run command` (default).\nShell style shows a dim `$` prompt. Label style shows bold \"Run\" like Edit/Search.",
 					"default": "label"
 				},
 				"muted_command_collapsed": {
@@ -890,7 +890,7 @@
 				{
 					"type": "string",
 					"const": "shell",
-					"description": "Shell style: `$ command` (default)."
+					"description": "Shell style: `$ command`."
 				},
 				{
 					"type": "string",

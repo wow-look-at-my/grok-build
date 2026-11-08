@@ -1747,14 +1747,14 @@ static PAGER_SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub fn persist_respect_manual_folds(enabled: bool) -> std::io::Result<()> {
     use std::io::{Error, ErrorKind};
 
-    let Some(home) = xai_grok_config::user_grok_home() else {
+    if xai_grok_config::user_grok_home().is_none() {
         return Err(Error::new(
             ErrorKind::NotFound,
             "no user grok home resolved; refusing to write a cwd-relative pager.json \
              that startup would never read",
         ));
-    };
-    persist_respect_manual_folds_in(&home, enabled)
+    }
+    persist_respect_manual_folds_in(&crate::util::grok_home(), enabled)
 }
 
 fn persist_respect_manual_folds_in(home: &std::path::Path, enabled: bool) -> std::io::Result<()> {
