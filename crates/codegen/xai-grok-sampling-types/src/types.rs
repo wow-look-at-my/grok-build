@@ -1286,6 +1286,52 @@ pub struct ReasoningEffortOption {
     pub default: bool,
 }
 
+impl ReasoningEffort {
+    /// How much reasoning the level asks for, weakest at a set value.
+    pub const fn strength(self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Minimal => 1,
+            Self::Low => 2,
+            Self::Medium => 3,
+            Self::High => 4,
+            Self::Xhigh => 5,
+            Self::Max => 6,
+        }
+    }
+}
+
+/// Put a menu in one order, strongest first, whatever order the provider sent.
+/// The sort is stable, so options with the same value keep their order.
+pub fn order_effort_options(options: &mut [ReasoningEffortOption]) {
+    options.sort_by_key(|option| std::cmp::Reverse(option.value.strength()));
+}
+
+/// The tiers [`default_reasoning_effort`] tries, in order, on a menu that marks
+/// no default.
+const DEFAULT_EFFORT_LADDER: [ReasoningEffort; 6] = [
+    ReasoningEffort::Medium,
+    ReasoningEffort::High,
+    ReasoningEffort::Low,
+    ReasoningEffort::Xhigh,
+    ReasoningEffort::Max,
+    ReasoningEffort::Minimal,
+];
+
+/// The level a menu defaults to when nothing chose one: the option it marks as
+/// default, else medium, else the nearest tier it offers. It is never `none`
+/// unless `none` is all the menu offers. Only an explicit choice turns
+/// reasoning off. `None` for an empty menu.
+pub fn default_reasoning_effort(options: &[ReasoningEffortOption]) -> Option<ReasoningEffort> {
+    let offers = |effort: ReasoningEffort| options.iter().any(|option| option.value == effort);
+    options
+        .iter()
+        .find(|option| option.default && option.value != ReasoningEffort::None)
+        .map(|option| option.value)
+        .or_else(|| DEFAULT_EFFORT_LADDER.into_iter().find(|tier| offers(*tier)))
+        .or_else(|| options.first().map(|option| option.value))
+}
+
 /// Deserialization shape accepting either a bare canonical value string (`"xhigh"`) or a table with `value` required and everything else optional.
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]

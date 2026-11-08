@@ -11,17 +11,6 @@ pub(crate) enum ReasoningNeed {
     Default,
 }
 
-/// The tiers [`ReasoningNeed::Default`] tries, in order, on a menu that marks
-/// no default.
-const DEFAULT_LADDER: [ReasoningEffort; 6] = [
-    ReasoningEffort::Medium,
-    ReasoningEffort::High,
-    ReasoningEffort::Low,
-    ReasoningEffort::Xhigh,
-    ReasoningEffort::Max,
-    ReasoningEffort::Minimal,
-];
-
 /// The effort a model that publishes no tiers is asked for by default.
 const UNLISTED_DEFAULT_EFFORT: ReasoningEffort = ReasoningEffort::Medium;
 
@@ -82,18 +71,10 @@ pub(crate) fn resolve_reasoning_effort(
         }
         (ReasoningNeed::Off, EffortSupport::Unlisted) => UNLISTED_MODEL_EFFORT,
         // The default never turns reasoning off: only an explicit `none` does.
-        (ReasoningNeed::Default, EffortSupport::Menu(menu)) => menu
-            .iter()
-            .find(|option| option.default && option.value != ReasoningEffort::None)
-            .map(|option| option.value)
-            .or_else(|| {
-                DEFAULT_LADDER
-                    .iter()
-                    .copied()
-                    .find(|tier| menu.iter().any(|option| option.value == *tier))
-            })
-            .or_else(|| lowest_enabled(menu))
-            .unwrap_or(ReasoningEffort::None),
+        (ReasoningNeed::Default, EffortSupport::Menu(menu)) => {
+            xai_grok_sampling_types::default_reasoning_effort(menu)
+                .unwrap_or(UNLISTED_DEFAULT_EFFORT)
+        }
         (ReasoningNeed::Default, EffortSupport::Unlisted) => UNLISTED_DEFAULT_EFFORT,
     }
 }
