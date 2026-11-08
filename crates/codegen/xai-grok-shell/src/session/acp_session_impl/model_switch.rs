@@ -30,7 +30,10 @@ impl SessionActor {
         let Some(mut cfg) = self.chat_state_handle.get_sampling_config().await else {
             return;
         };
-        let Some((window, _)) = self.models_manager.model_context_window(&cfg.model) else {
+        let Some((window, _)) = self
+            .models_manager
+            .route_context_window(&cfg.model, &cfg.base_url)
+        else {
             tracing::warn!(
                 session_id = %self.session_info.id.0,
                 model = %cfg.model,
@@ -235,7 +238,8 @@ impl SessionActor {
             .notifications
             .persistence_tx
             .send(PersistenceMsg::CurrentModel {
-                model_id: model_id.clone(),
+                model_id: self
+                    .persisted_model_id(&sampling_config.model, &sampling_config.base_url),
                 agent: crate::session::persistence::PersistedAgent::Named(agent_name),
                 reasoning_effort: Some(sampling_config.reasoning_effort),
             });
@@ -316,14 +320,15 @@ impl SessionActor {
         let Some(mut cfg) = self.chat_state_handle.get_sampling_config().await else {
             return Err(acp::Error::internal_error().data("session has no sampling config"));
         };
+        let catalog_key = self.persisted_model_id(&cfg.model, &cfg.base_url);
         if !self
             .models_manager
-            .model_supports_reasoning_effort(&cfg.model)
+            .model_supports_reasoning_effort(&catalog_key.0)
         {
             return Err(acp::Error::invalid_params()
                 .data("the session's current model does not support reasoning effort"));
         }
-        if let Some(routed) = self.models_manager.model_for_effort(&cfg.model, effort) {
+        if let Some(routed) = self.models_manager.model_for_effort(&catalog_key.0, effort) {
             cfg.model = routed;
         }
         cfg.reasoning_effort = Some(effort);
@@ -334,12 +339,21 @@ impl SessionActor {
             .notifications
             .persistence_tx
             .send(PersistenceMsg::CurrentModel {
-                model_id: model_id.clone(),
+                model_id: catalog_key,
                 agent: crate::session::persistence::PersistedAgent::Named(agent_name),
                 reasoning_effort: Some(Some(effort)),
             });
         self.emit_status_snapshot_detached();
         Ok(model_id)
+    }
+
+    /// The catalog key of the entry this session sends to, which a resume
+    /// restores. The id the session sends can name several providers' entries.
+    /// A route that no entry has keeps that id.
+    fn persisted_model_id(&self, model: &str, base_url: &str) -> acp::ModelId {
+        self.models_manager
+            .route_catalog_key(model, base_url)
+            .unwrap_or_else(|| acp::ModelId::new(model))
     }
     /// Handle [`SessionCommand::FlattenHistory`]. Rewrites the conversation
     /// so nothing in it belongs to the model that produced it. A history

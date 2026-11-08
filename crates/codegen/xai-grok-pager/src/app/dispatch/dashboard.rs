@@ -1231,6 +1231,10 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 model_windows: crate::settings::context_limits::catalog_windows(
                     &app.models.available,
                 ),
+                model_routes: crate::settings::context_limits::catalog_routes(
+                    &app.models.available,
+                ),
+                current_model_id: app.models.current.as_ref().map(|id| id.0.to_string()),
                 context_limits: app.model_context_limits.clone(),
             },
         };
