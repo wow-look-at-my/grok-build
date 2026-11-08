@@ -801,10 +801,15 @@ impl SettingsModalState {
         let choices = context_limits::choices(&self.pager_snapshot);
         let current_id = self
             .pager_snapshot
-            .current_model_name
-            .as_deref()
-            .and_then(|name| self.pager_snapshot.resolve_model_name(name))
-            .map(|id| id.0.to_string())
+            .current_model_id
+            .clone()
+            .or_else(|| {
+                self.pager_snapshot
+                    .current_model_name
+                    .as_deref()
+                    .and_then(|name| self.pager_snapshot.resolve_model_name(name))
+                    .map(|id| id.0.to_string())
+            })
             .unwrap_or_default();
         let choices_idx = choices
             .iter()
@@ -817,13 +822,7 @@ impl SettingsModalState {
 
     /// Open the limit editor for `model_id`, chosen in the context limit chooser.
     pub(super) fn enter_context_limit_editor(&mut self, key: SettingKey, model_id: String) {
-        let label = self
-            .pager_snapshot
-            .available_models
-            .iter()
-            .find(|(_, id)| id.0.as_ref() == model_id)
-            .map(|(name, id)| crate::settings::registry::model_choice_label(name, id))
-            .unwrap_or_else(|| model_id.clone());
+        let label = context_limits::row_label(&self.pager_snapshot, &model_id);
         let limit = self.pager_snapshot.context_limits.get(&model_id).copied();
         let target = ContextLimitTarget {
             window: self.pager_snapshot.model_windows.get(&model_id).copied(),

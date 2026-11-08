@@ -416,7 +416,7 @@ impl SessionActor {
         let base_url = &current_config.base_url;
         let window_pinned = self
             .models_manager
-            .pinned_context_window(current_model)
+            .pinned_route_context_window(current_model, base_url)
             .is_some();
         // BYOK / custom-provider base (e.g. `https://gateway.pazer.ai/v1`).
         // The cli-chat-proxy `/models-v2` listing below will never contain it.
@@ -596,7 +596,7 @@ impl SessionActor {
             && self.compaction.context_window_override.is_none()
             && self
                 .models_manager
-                .pinned_context_window(&current_config.model)
+                .pinned_route_context_window(&current_config.model, &current_config.base_url)
                 .is_none()
         {
             if new_cw < current_config.context_window {

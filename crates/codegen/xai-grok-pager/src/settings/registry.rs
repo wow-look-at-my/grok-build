@@ -437,6 +437,10 @@ pub struct PagerLocalSnapshot {
     pub subagent_model_inheritance: FeatureOverrideState,
     /// The catalog window of each model, by model id.
     pub model_windows: std::collections::BTreeMap<String, u64>,
+    /// The provider or endpoint host of each model, by model id.
+    pub model_routes: std::collections::BTreeMap<String, String>,
+    /// The id of the selected model. Several models can share its name.
+    pub current_model_id: Option<String>,
     /// Mirrors the `[model."<id>"] context_window` limits of the user `config.toml`, by model key.
     pub context_limits: std::collections::BTreeMap<String, u64>,
     /// The live keep-awake mode of the pager's sleep inhibitor.
@@ -466,6 +470,8 @@ impl Default for PagerLocalSnapshot {
                 Feature::SubagentModelInheritance,
             ),
             model_windows: std::collections::BTreeMap::new(),
+            model_routes: std::collections::BTreeMap::new(),
+            current_model_id: None,
             context_limits: std::collections::BTreeMap::new(),
             keep_awake: crate::notifications::KeepAwake::default(),
         }

@@ -166,7 +166,7 @@ pub(crate) async fn apply(
         (
             crate::util::config::resolve_auto_compact_threshold_percent(
                 &cfg,
-                model_sampling.model.as_str(),
+                model_id.0.as_ref(),
                 Some(model.info()),
             ),
             crate::util::config::resolve_system_prompt_label(
