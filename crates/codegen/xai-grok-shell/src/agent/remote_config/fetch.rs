@@ -180,7 +180,7 @@ fn prefetch_from_result(
                 url = %scope.origin,
                 error = ?e,
                 "models fetch failed: the model picker will be empty unless \
-                 [model.*] entries are configured"
+                 `models.definitions.*` entries are configured"
             );
             xai_grok_telemetry::unified_log::warn(
                 "model catalog: the models fetch failed",

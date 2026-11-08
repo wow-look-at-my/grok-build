@@ -3,7 +3,7 @@ use toml::Value as TomlValue;
 use xai_grok_tools::implementations::grok_build::ask_user_question;
 
 /// Resolve whether the bash-harness shadows that swap `find` for `bfs` and `grep` for `ugrep` are enabled.
-/// Precedence (highest first): `requirements.toml` (org policy, wins outright) > a truthy `DISABLE_EMBEDDED_SEARCH_TOOLS` master (forces off) > env > `config.toml` `[toolset.bash]` > `managed_config.toml` > default-on.
+/// Precedence (highest first): `requirements.toml` (org policy, wins outright) > a truthy `DISABLE_EMBEDDED_SEARCH_TOOLS` master (forces off) > env > `config.json` `tools.bash` > `managed_config.toml` > default-on.
 /// Pass the **merged** requirements ([`crate::config::load_merged_requirements`]) so an org policy in any requirements layer — not only `~/.grok/requirements.toml` — is honored. Returns `(find_bfs, grep_ugrep)`, which the caller bakes into a [`xai_grok_tools::computer::local::SearchShadowConfig`] on the local terminal backend.
 pub(crate) fn resolve_search_tools_enabled(
     requirements: Option<&TomlValue>,
@@ -116,7 +116,7 @@ struct LoginShellCaptureTiers<'a> {
     remote: Option<bool>,
 }
 
-/// Precedence (highest first): requirements/MDM (clamp, via [`crate::config::load_merged_requirements`]) > `GROK_LOGIN_ENV` env > `GROK_CONFIG` overlay > user `config.toml` > managed layers > remote > default `true`.
+/// Precedence (highest first): requirements/MDM (clamp, via [`crate::config::load_merged_requirements`]) > `GROK_LOGIN_ENV` env > `GROK_CONFIG` overlay > user `config.json` > managed layers > remote > default `true`.
 /// `login_shell_capture` is a soft key, so the overlay is merged just above user config, mirroring its place in the disk merge.
 /// That lets a `GROK_CONFIG` toggle reach it while requirements/MDM still clamp the value.
 fn resolve_login_shell_capture_tiers(tiers: LoginShellCaptureTiers<'_>) -> bool {

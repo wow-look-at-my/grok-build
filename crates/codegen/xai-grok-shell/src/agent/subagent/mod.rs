@@ -296,9 +296,9 @@ pub(crate) struct SubagentSpawnContext {
     pub parent_max_turns: Option<usize>,
     /// All available models for resolving model IDs from overrides.
     pub available_models: indexmap::IndexMap<String, crate::agent::config::ModelEntry>,
-    /// Per-subagent model ID overrides from config.toml `[subagents.models]`.
+    /// Per-subagent model ID overrides from config.json `agents.subagents.models`.
     pub subagent_model_overrides: std::collections::HashMap<String, String>,
-    /// Per-subagent enable/disable toggles from config.toml `[subagents.toggle]`.
+    /// Per-subagent enable/disable toggles from config.json `agents.subagents.toggle`.
     /// Omitted agents default to enabled (`true`).
     pub subagent_toggle: std::collections::HashMap<String, bool>,
     /// Whether web search is force-disabled via `--disable-web-search`.

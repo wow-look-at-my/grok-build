@@ -3441,7 +3441,7 @@ fn resolve_cleanup_ttl_days() -> Option<u32> {
             if ttl.is_none() {
                 tracing::info!(
                     target: "xai_grok_shell::session::persistence",
-                    "SESSION_CLEANUP_SKIPPED: no positive [storage] cleanup_ttl_days"
+                    "SESSION_CLEANUP_SKIPPED: no positive `session.storage.cleanup_ttl_days`"
                 );
             }
             ttl

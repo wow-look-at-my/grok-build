@@ -343,7 +343,7 @@ fn install_source_missing_error(
 }
 
 /// Both marketplace source lists, loaded once per pipeline invocation (each load re-reads
-/// config.toml, managed pins, and the JSON stores).
+/// config.json, managed pins, and the JSON stores).
 pub(crate) struct MarketplaceSourceLists {
     /// Allowlist-surviving sources (the resolvable set).
     filtered: Vec<MarketplaceSource>,

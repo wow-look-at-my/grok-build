@@ -177,7 +177,7 @@ fn row_that_cannot_resolve_paints_the_problem_verbatim() {
 
     // A warning segment, not dim text: the row is chrome, and this is the one thing in it the user has to notice
     let problem = StatusLineDisplay::Segments(vec![StatusSegment::warn(
-        "[ui.status_line] type = \"command\" needs command = \"…\"",
+        "`ui.status_line.type` \"command\" needs `command`",
     )]);
     assert_eq!(app.status_line.display().as_deref(), Some(&problem));
 }

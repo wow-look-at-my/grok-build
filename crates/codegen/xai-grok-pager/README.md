@@ -23,7 +23,7 @@ src/
 │   └── ...              # Scrollback, status bar, panes, etc.
 ├── scrollback/          # Message history rendering
 ├── slash/               # Slash command registry and built-in commands
-├── appearance/          # Theme and pager.toml config
+├── appearance/          # Theme and pager.json config
 ├── acp/                 # Agent Communication Protocol client state
 └── render/              # Low-level rendering helpers (color, wrapping, etc.)
 ```

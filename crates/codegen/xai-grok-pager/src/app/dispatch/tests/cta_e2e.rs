@@ -2042,7 +2042,7 @@ mod cta_e2e {
     #[test]
     fn dismissed_plugin_suppressed_on_next_recompute() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let config_path = tmp.path().join("config.toml");
+        let config_path = tmp.path().join("config.json");
         let candidates = vec![figma_candidate()];
 
         let dismissed = xai_grok_shell::config::dismissed_plugin_ctas_in_file(&config_path);

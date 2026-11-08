@@ -51,7 +51,7 @@ fn load() -> Vec<xai_grok_models::ModelGroup> {
             tracing::error!(
                 target: "settings",
                 %error,
-                "[model_groups] is invalid; the settings modal shows the compiled groups"
+                "`models.groups` is invalid; the settings modal shows the compiled groups"
             );
             xai_grok_models::resolve_model_groups(&BTreeMap::new())
                 .expect("the compiled groups are valid")
@@ -72,7 +72,7 @@ fn user_groups() -> BTreeMap<String, xai_grok_models::ModelGroupConfig> {
             tracing::error!(
                 target: "settings",
                 %error,
-                "[model_groups] does not parse; the settings modal shows the compiled groups"
+                "`models.groups` does not parse; the settings modal shows the compiled groups"
             );
             BTreeMap::new()
         }

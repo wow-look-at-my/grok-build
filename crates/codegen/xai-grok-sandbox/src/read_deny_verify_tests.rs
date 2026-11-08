@@ -3,7 +3,7 @@ use crate::ProfileName;
 use crate::test_util::skip_if_host_hook_write_deny_unresolvable;
 use std::path::PathBuf;
 
-fn temp_workspace(tag: &str, toml_body: &str) -> PathBuf {
+fn temp_workspace(tag: &str, json_body: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -13,7 +13,7 @@ fn temp_workspace(tag: &str, toml_body: &str) -> PathBuf {
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
         grok.join(xai_grok_config::SANDBOX_CONFIG_FILENAME),
-        toml_body,
+        json_body,
     )
     .unwrap();
     ws
@@ -22,7 +22,7 @@ fn temp_workspace(tag: &str, toml_body: &str) -> PathBuf {
 fn temp_workspace_with_secret_deny(tag: &str) -> PathBuf {
     temp_workspace(
         tag,
-        "[profiles.readdeny]\nextends = \"workspace\"\ndeny = [\"secret.pem\"]\n",
+        r#"{"profiles": {"readdeny": {"extends": "workspace", "deny": ["secret.pem"]}}}"#,
     )
 }
 
@@ -185,7 +185,7 @@ fn data_mount_entry_requires_exact_read_only_mountpoint() {
 fn empty_deny_set_fails_without_sentinel_mount() {
     let ws = temp_workspace(
         "empty",
-        "[profiles.netempty]\nextends = \"devbox\"\nrestrict_network = true\n",
+        r#"{"profiles": {"netempty": {"extends": "devbox", "restrict_network": true}}}"#,
     );
     let err = verify_read_deny_enforced(&ProfileName::Custom("netempty".to_string()), &ws)
         .expect_err("empty deny set must not pass without the sentinel mount");
@@ -255,8 +255,7 @@ fn user_socket_deny_stays_strict_without_restrict_network() {
     }
     let ws = temp_workspace(
         "user-sock",
-        "[profiles.socknorestrict]\nextends = \"workspace\"\nrestrict_network = false\n\
-         deny = [\"/var/run/docker.sock\"]\n",
+        r#"{"profiles": {"socknorestrict": {"extends": "workspace", "restrict_network": false, "deny": ["/var/run/docker.sock"]}}}"#,
     );
     let err =
         verify_resolved_read_deny_masks(&ProfileName::Custom("socknorestrict".to_string()), &ws)

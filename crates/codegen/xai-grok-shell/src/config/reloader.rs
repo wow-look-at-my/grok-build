@@ -18,11 +18,11 @@ pub enum ConfigUpdate {
     Auth(Box<GrokAuth>),
     /// Auth scope was removed (user logged out).
     AuthCleared,
-    /// A **broadcast** MCP reload; it applies to every active session regardless of cwd. Fires for two cases: The global `[mcp_servers]` table in `~/.grok/config.toml` changed. The user's home-level `~/.claude.json` changed.
+    /// A **broadcast** MCP reload; it applies to every active session regardless of cwd. Fires for cases: The global `mcp.servers` object in `~/.grok/config.json` changed. The user's home-level `~/.claude.json` changed.
     /// `load_claude_json_mcp_servers_as_configs` reads this file for every session, so the reload cannot be narrowed by cwd.
-    /// Project-scoped changes emit [`Self::ProjectMcpServersChanged`] instead so the reload can be narrowed to matching cwds. Those are `<cwd>/.grok/config.toml`, `<cwd>/.mcp.json`, and the project-level `<cwd>/.claude.json`.
+    /// to matching cwds. Those are `<cwd>/.grok/config.json`, `<cwd>/.mcp.json`, and the project-level `<cwd>/.claude.json`.
     McpServersChanged,
-    /// A **project-scoped** MCP config file changed (`<cwd>/.grok/config.toml`, `<cwd>/.mcp.json`, or `<cwd>/.claude.json`). The agent should reload MCP only for sessions whose cwd matches `cwd` (or sits beneath it).
+    /// A **project-scoped** MCP config file changed (`<cwd>/.grok/config.json`, `<cwd>/.mcp.json`, or `<cwd>/.claude.json`). The agent should reload MCP only for sessions whose cwd matches `cwd` (or sits beneath it).
     /// Strictly additive to [`Self::McpServersChanged`]: the unit variant continues to fire for global-config edits. The two cases are split so per-project reloads don't thrash unrelated sessions.
     ProjectMcpServersChanged {
         /// The project root whose `.grok/`, `.mcp.json`, or `.claude.json` file was edited.
@@ -36,7 +36,7 @@ pub enum ConfigUpdate {
     /// Updated `[compat]` vendor-compatibility config.
     /// It is applied on the next agent (re)build, which re-resolves `compat_resolved`.
     Compat(Box<xai_grok_tools::types::compat::CompatConfigToml>),
-    /// The `[model.*]`, `[models]` or `[model_groups]` tables in config.toml changed.
+    /// The `models.definitions.*`, `models` or `models.groups` objects in config.json changed.
     /// The agent should re-resolve its model list (BYOK models added/removed, default or surprise changed).
     ModelsChanged,
     /// `~/.grok/models_cache.json` was rewritten on disk (possibly by another grok process sharing the home dir). The agent should consult the cache via `ModelsManager::reload_from_disk_cache`.
@@ -197,7 +197,7 @@ impl ConfigReloader {
             }
 
             // Fan out one `ProjectMcpServersChanged { cwd }` per affected project root
-            // The legacy unit `McpServersChanged` above stays for global-config edits; both variants can fire in the same tick (e.g. `~/.grok/config.toml` AND `<cwd>/.mcp.json` edited together).
+            // The legacy unit `McpServersChanged` above stays for global-config edits; both variants can fire in the same tick (e.g. `~/.grok/config.json` AND `<cwd>/.mcp.json` edited together).
             for cwd in project_cwds {
                 // Skip the dispatch when the project config bytes are unchanged (the watcher fires on mtime-only touches)
                 // On any uncertainty we dispatch; see `hash_project_mcp_config`
@@ -270,12 +270,12 @@ impl ConfigReloader {
         let new_global = match crate::config::load_from_disk() {
             Ok(v) => v,
             Err(e) => {
-                error!(error = %e, "failed to parse config.toml, keeping last-known-good");
+                error!(error = %e, "failed to parse config.json, keeping last-known-good");
                 return Ok(());
             }
         };
 
-        // MCP servers: compare the [mcp_servers] table in the **global** config (`~/.grok/config.toml`) via toml::Value. Project- scoped changes (`<cwd>/.grok/config.toml`, `<cwd>/.mcp.json`) go out separately as `ConfigUpdate::ProjectMcpServersChanged { cwd }`
+        // MCP servers: compare the `mcp.servers` object in the **global** config (`~/.grok/config.json`) via toml::Value. Project- scoped changes (`<cwd>/.grok/config.json`, `<cwd>/.mcp.json`) go out separately as `ConfigUpdate::ProjectMcpServersChanged { cwd }`
         // That per-cwd dispatch (see `collect_project_cwds`) keeps them from sweeping unrelated sessions
         let old_mcp_table = self.last_global_config.get("mcp_servers");
         let new_mcp_table = new_global.get("mcp_servers");
@@ -432,7 +432,7 @@ fn collect_project_cwds(batch: &[ConfigChangeEvent]) -> Vec<PathBuf> {
     for evt in batch {
         let cwd = match evt {
             ConfigChangeEvent::ProjectConfigChanged { path } => {
-                // <cwd>/.grok/config.toml yields <cwd>
+                // <cwd>/.grok/config.json yields <cwd>
                 path.parent()
                     .and_then(|p| p.parent())
                     .map(|p| p.to_path_buf())
@@ -453,7 +453,7 @@ fn collect_project_cwds(batch: &[ConfigChangeEvent]) -> Vec<PathBuf> {
 }
 
 /// Content hash of the cwd-dependent MCP config files a `ProjectMcpServersChanged { cwd }` reload re-reads.
-/// It walks ancestors up to the git root as the loaders do: `find_project_configs` for `.grok/config.toml`, `find_mcp_json_files` for `.mcp.json`.
+/// It walks ancestors up to the git root as the loaders do: `find_project_configs` for `.grok/config.json`, `find_mcp_json_files` for `.mcp.json`.
 /// That keeps the hash from drifting from the set the merge actually reads; `<cwd>/.claude.json` (watched at the project root) is hashed too. Returns `None` on a non-`NotFound` read error so the caller dispatches rather than risk suppressing a real edit.
 fn hash_project_mcp_config(cwd: &Path) -> Option<u64> {
     let mut paths = crate::config::find_project_configs(cwd);

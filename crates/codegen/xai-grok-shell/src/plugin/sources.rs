@@ -1,4 +1,4 @@
-//! The marketplace SOURCE model: loading configured sources (config.toml + settings JSON +
+//! The marketplace SOURCE model: loading configured sources (config.json + settings JSON +
 //! managed pins) and filtering them through the managed `marketplace_allowlist`.
 
 use std::path::Path;
@@ -8,7 +8,7 @@ use xai_grok_plugin_marketplace::{
 };
 use xai_grok_workspace::permission::resolution::PolicySubjectOrigin;
 
-/// Marketplace sources from config.toml + settings JSON + managed
+/// Marketplace sources from config.json + settings JSON + managed
 /// `extraKnownMarketplaces` pins. Unfiltered.
 pub fn load_marketplace_sources() -> Vec<MarketplaceSource> {
     load_marketplace_sources_with_origin()
@@ -18,7 +18,7 @@ pub fn load_marketplace_sources() -> Vec<MarketplaceSource> {
 }
 
 /// [`load_marketplace_sources`] with each source origin-classified for advisory scoping:
-/// config.toml, admin pins, and `~/.grok` are grok-native; `~/.claude` sources are foreign.
+/// config.json, admin pins, and `~/.grok` are grok-native; `~/.claude` sources are foreign.
 fn load_marketplace_sources_with_origin() -> Vec<(MarketplaceSource, PolicySubjectOrigin)> {
     let config = crate::config::load_effective_config()
         .ok()

@@ -22,7 +22,7 @@ fn coerce_auto_mode_json(value: serde_json::Value) -> Option<crate::agent::confi
     match serde_json::from_value(value) {
         Ok(cfg) => Some(cfg),
         Err(e) => {
-            tracing::warn!(error = %e, "[auto_mode]: dropped malformed remote payload");
+            tracing::warn!(error = %e, "`agents.auto_mode`: dropped malformed remote payload");
             None
         }
     }
@@ -107,7 +107,9 @@ fn auto_mode_config_from_toml(
     let table = v?.get("auto_mode")?.clone();
     table
         .try_into()
-        .map_err(|e| tracing::warn!(error = %e, "[auto_mode]: dropped malformed local table"))
+        .map_err(
+            |e| tracing::warn!(error = %e, "`agents.auto_mode`: dropped malformed local object"),
+        )
         .ok()
 }
 
@@ -203,7 +205,7 @@ pub(crate) fn auto_mode_classify_timeout(
             bounded_ms = bounded,
             min_ms = AUTO_MODE_CLASSIFY_TIMEOUT_MIN_MS,
             max_ms = AUTO_MODE_CLASSIFY_TIMEOUT_MAX_MS,
-            "[auto_mode] classify_timeout_ms outside supported range; clamped"
+            "`agents.auto_mode.classify_timeout_ms` outside supported range; clamped"
         );
     }
     std::time::Duration::from_millis(bounded)

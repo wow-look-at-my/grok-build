@@ -1,0 +1,6880 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "grok config",
+	"description": "The grok config file, `$GROK_HOME/config.json`.",
+	"type": "object",
+	"properties": {
+		"$schema": {
+			"description": "The schema of this file.",
+			"type": "string"
+		},
+		"agents": {
+			"type": "object",
+			"properties": {
+				"selection": {
+					"$ref": "#/$defs/AgentSelectionConfig",
+					"description": "Set in `config.toml` under `[agent]` to choose which agent definition is used for all sessions (unless overridden by CLI flag or ACP meta).",
+					"default": {}
+				},
+				"subagents": {
+					"$ref": "#/$defs/SubagentsConfig",
+					"writeOnly": true
+				},
+				"goal": {
+					"$ref": "#/$defs/GoalConfig",
+					"description": "`[goal]` section: canonical `/goal` configuration. See [`GoalConfig`].",
+					"default": {}
+				},
+				"auto_mode": {
+					"$ref": "#/$defs/AutoModeConfig",
+					"description": "`[auto_mode]` section: Auto permission-mode configuration. See [`AutoModeConfig`].",
+					"default": {}
+				},
+				"default_auto_mode": {
+					"type": "boolean",
+					"description": "Start sessions in auto permission mode (classifier) when no per-session override."
+				},
+				"workflows": {
+					"$ref": "#/$defs/WorkflowsConfig",
+					"default": {}
+				},
+				"prompt_suggestions": {
+					"$ref": "#/$defs/PromptSuggestConfig",
+					"description": "Declared so documented sampling keys are not reported as unrecognized.",
+					"default": {
+						"enabled": null,
+						"max_output_tokens": null,
+						"temperature": null,
+						"reasoning_effort": null
+					}
+				},
+				"doom_loop_recovery": {
+					"$ref": "#/$defs/DoomLoopRecoverySettings",
+					"description": "`[doom_loop_recovery]` section: the shared settings struct.\nONE type serves this TOML table and the remote settings `doom_loop_recovery` object.\nSee [`crate::util::config::DoomLoopRecoverySettings`].",
+					"default": {}
+				},
+				"long_reasoning_reminder": {
+					"$ref": "#/$defs/LongReasoningReminderSettings",
+					"description": "One type serves this TOML table and the remote `long_reasoning_reminder` object.",
+					"default": {}
+				},
+				"output_rate_floor": {
+					"$ref": "#/$defs/OutputRateFloorSettings",
+					"description": "`[output_rate_floor]` section: the session-wide output tokens/sec floor and its timing.",
+					"default": {}
+				},
+				"cursor_worker": {
+					"$ref": "#/$defs/CursorWorkerConfig",
+					"writeOnly": true
+				}
+			}
+		},
+		"announcements": {
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/RemoteAnnouncement"
+			},
+			"description": "Top-level `announcements` array: consumed by `resolve_announcements`.",
+			"writeOnly": true
+		},
+		"campaigns": {
+			"description": "Named campaign patches. The deployment publishes these.",
+			"type": "array",
+			"items": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"campaign_id": {
+						"description": "Another spelling of `id`.",
+						"type": "string"
+					},
+					"agents": {
+						"$ref": "#/properties/agents"
+					},
+					"announcements": {
+						"$ref": "#/properties/announcements"
+					},
+					"claude_compat": {
+						"$ref": "#/properties/claude_compat"
+					},
+					"cli": {
+						"$ref": "#/properties/cli"
+					},
+					"desktop": {
+						"$ref": "#/properties/desktop"
+					},
+					"endpoints": {
+						"$ref": "#/properties/endpoints"
+					},
+					"extensions": {
+						"$ref": "#/properties/extensions"
+					},
+					"fail_closed": {
+						"$ref": "#/properties/fail_closed"
+					},
+					"features": {
+						"$ref": "#/properties/features"
+					},
+					"hooks": {
+						"$ref": "#/properties/hooks"
+					},
+					"login": {
+						"$ref": "#/properties/login"
+					},
+					"mcp": {
+						"$ref": "#/properties/mcp"
+					},
+					"memory": {
+						"$ref": "#/properties/memory"
+					},
+					"models": {
+						"$ref": "#/properties/models"
+					},
+					"permission": {
+						"$ref": "#/properties/permission"
+					},
+					"policy": {
+						"$ref": "#/properties/policy"
+					},
+					"privacy": {
+						"$ref": "#/properties/privacy"
+					},
+					"sandbox": {
+						"$ref": "#/properties/sandbox"
+					},
+					"session": {
+						"$ref": "#/properties/session"
+					},
+					"telemetry": {
+						"$ref": "#/properties/telemetry"
+					},
+					"tools": {
+						"$ref": "#/properties/tools"
+					},
+					"ui": {
+						"$ref": "#/properties/ui"
+					},
+					"worktrees": {
+						"$ref": "#/properties/worktrees"
+					}
+				},
+				"additionalProperties": false
+			}
+		},
+		"claude_compat": {
+			"type": "object",
+			"properties": {
+				"imported": {
+					"type": "boolean"
+				}
+			}
+		},
+		"cli": {
+			"writeOnly": true,
+			"type": "object",
+			"properties": {
+				"auto_update": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "No effect: the built-in updater is gone. The key is kept so old files load."
+				},
+				"dismissed_version": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"installer": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"npm_registry": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"channel": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"use_leader": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"show_tips": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"worktree_type": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"session_registry": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"minimum_version": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "No effect: the updater that read this and the keys below is gone.\n(Unrelated to `version_overrides[].maximum_version`, which gates config patches.)"
+				},
+				"maximum_version": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"required_minimum_version": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"required_maximum_version": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"session_picker_grouped": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Group sessions by repo in the picker and CLI listings."
+				},
+				"grove": {
+					"description": "`true`, `false`, or a mode: `grove`, `grove-fuse`, `grove-nfs`, `nfs`, `all`, `copy`, `on`, `off`, `1`, `0`.",
+					"type": [
+						"boolean",
+						"string"
+					]
+				},
+				"grove_worktree": {
+					"description": "`true`, `false`, or a mode: `grove`, `grove-fuse`, `grove-nfs`, `nfs`, `all`, `copy`, `on`, `off`, `1`, `0`.",
+					"type": [
+						"boolean",
+						"string"
+					]
+				},
+				"nfs_worktree": {
+					"description": "Another spelling of `grove_worktree`.",
+					"type": [
+						"boolean",
+						"string"
+					]
+				}
+			}
+		},
+		"desktop": {
+			"description": "`[desktop]` section: owned by grok-desktop (Electron app), opaque to the CLI agent.",
+			"writeOnly": true
+		},
+		"endpoints": {
+			"$ref": "#/$defs/EndpointsConfig",
+			"default": {
+				"xai_api_base_url": ""
+			}
+		},
+		"extensions": {
+			"type": "object",
+			"properties": {
+				"skills": {
+					"$ref": "#/$defs/SkillsConfig",
+					"default": {
+						"paths": [],
+						"ignore": [],
+						"disabled": [],
+						"server_skill_dirs": [],
+						"bundled_skill_dirs": []
+					}
+				},
+				"plugins": {
+					"$ref": "#/$defs/PluginsConfig",
+					"default": {
+						"paths": [],
+						"disabled": [],
+						"enabled": []
+					}
+				},
+				"marketplace": {
+					"$ref": "#/$defs/MarketplaceConfig",
+					"description": "`[marketplace]`: also read by `xai_grok_plugin_marketplace::load_sources()`.",
+					"writeOnly": true
+				},
+				"paths": {
+					"$ref": "#/$defs/PathsConfig",
+					"default": {
+						"extra_skill_dirs": [],
+						"extra_rule_dirs": []
+					}
+				},
+				"compat": {
+					"$ref": "#/$defs/CompatConfigToml",
+					"description": "Raw `[compat]` vendor-compatibility config (per-vendor, per-surface toggles).\nResolved into [`Config::compat_resolved`] by `resolve_runtime_fields`.",
+					"default": {
+						"cursor": {
+							"skills": null,
+							"rules": null,
+							"agents": null,
+							"mcps": null,
+							"hooks": null,
+							"sessions": null
+						},
+						"claude": {
+							"skills": null,
+							"rules": null,
+							"agents": null,
+							"mcps": null,
+							"hooks": null,
+							"sessions": null
+						}
+					}
+				}
+			}
+		},
+		"fail_closed": {
+			"description": "Requirements files only: refuse to start when the managed requirements cannot be read.",
+			"type": "boolean"
+		},
+		"features": {
+			"$ref": "#/$defs/Features"
+		},
+		"hooks": {
+			"description": "Hook commands by event name. Each event holds a list of matcher groups.",
+			"type": "object",
+			"properties": {
+				"SessionStart": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"UserPromptSubmit": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"PreToolUse": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"PostToolUse": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"PostToolUseFailure": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"PermissionDenied": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"Stop": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"StopFailure": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"StopCancelled": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"Notification": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"SubagentStart": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"SubagentStop": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"SubagentEnd": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"PreCompact": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"PostCompact": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				},
+				"SessionEnd": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MatcherGroup"
+					}
+				}
+			},
+			"additionalProperties": {
+				"type": "array",
+				"items": {
+					"$ref": "#/$defs/MatcherGroup"
+				}
+			}
+		},
+		"login": {
+			"type": "object",
+			"properties": {
+				"grok_ws_origin": {
+					"type": "string",
+					"default": "https://grok.invalid"
+				},
+				"grok_ws_url": {
+					"type": "string",
+					"default": "wss://code.grok.invalid/ws/code-agent"
+				},
+				"token_header": {
+					"type": "string",
+					"default": "xai-grok-cli"
+				},
+				"oidc": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/OidcAuthConfig"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "OIDC config for customer-provided IdPs. See [`OidcAuthConfig`]."
+				},
+				"oauth2": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/OAuth2ProviderConfig"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "OAuth2 provider config. When set, it is preferred over the legacy relay flow."
+				},
+				"auth_provider_command": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "External auth provider command; stdout carries the token, stderr the user-facing output, and exit 0 means success."
+				},
+				"auth_provider_label": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Login button label (env: `GROK_AUTH_PROVIDER_LABEL`)."
+				},
+				"auth_token_ttl": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Token TTL in seconds for external auth providers that output bare tokens without `expires_in`.\nSynthesizes `expires_at` so proactive refresh works. Env: `GROK_AUTH_TOKEN_TTL`."
+				},
+				"disable_api_key_auth": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Admin kill switch: when `Some(true)`, the `xai.api_key` auth method is neither advertised nor accepted.\n`XAI_API_KEY` and per-model credentials then can't bypass the deployment's IdP login. Env: `GROK_DISABLE_API_KEY_AUTH`."
+				},
+				"force_login_team_uuid": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ForceLoginTeam"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Restricts login to a specific team: the login token's team principal must equal this.\nAlso settable via `GROK_FORCE_LOGIN_TEAM_ID`; see `resolve_force_login_team` for how the tiers resolve."
+				},
+				"preferred_method": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/PreferredAuthMethod"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "See [`PreferredAuthMethod`]."
+				},
+				"login_device_flow": {
+					"description": "Log in with the device flow.",
+					"type": "boolean"
+				}
+			}
+		},
+		"mcp": {
+			"type": "object",
+			"properties": {
+				"max_output_bytes": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"startup_timeout_sec": {
+					"type": "integer",
+					"minimum": 1
+				},
+				"servers": {
+					"type": "object",
+					"additionalProperties": {
+						"$ref": "#/$defs/McpServerConfig"
+					},
+					"writeOnly": true
+				},
+				"disabled_servers": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"writeOnly": true
+				},
+				"disabled_tools": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"writeOnly": true
+				},
+				"managed": {
+					"$ref": "#/$defs/ManagedMcpsConfig",
+					"writeOnly": true
+				}
+			}
+		},
+		"memory": {
+			"writeOnly": true,
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"index": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemoryIndexSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"embedding": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemoryEmbeddingSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"search": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemorySearchSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"initial_injection": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemoryInitialInjectionSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"session": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemorySessionSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"watcher": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemoryWatcherSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"gc": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemoryGcSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"dream": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemoryDreamSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"v2": {
+					"$ref": "#/$defs/MemoryV2Settings",
+					"writeOnly": true
+				}
+			},
+			"description": "Raw `[memory]` settings. Absence is preserved for per-field fallback."
+		},
+		"models": {
+			"writeOnly": true,
+			"type": "object",
+			"properties": {
+				"default": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"default_reasoning_effort": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ReasoningEffort"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Persisted effort for the default model; applied in `resolve_model_catalog`."
+				},
+				"web_search": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"session_summary": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"image_description": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Vision model used to transcribe user-supplied images via a separate endpoint."
+				},
+				"prompt_suggestion": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Model pin for next-prompt suggestions (tab-autocomplete ghost text).\nWhen unset: the remote pin, then the client hint / built-in `grok-4.6` default with the catalog guard; see `ModelOverrideConfig::resolve`."
+				},
+				"permission_classifier": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Auto permission mode's tool-call classifier."
+				},
+				"laziness_classifier": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Idle-turn laziness classifier."
+				},
+				"compaction": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Context-window compaction summarizer."
+				},
+				"recap": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`/resume`-style \"where was I\" recap."
+				},
+				"turn_summary": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Per-turn one-line summary."
+				},
+				"thinking_summary": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Short summary of a long thinking block."
+				},
+				"side_note": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`/btw` side note."
+				},
+				"todo_capture": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`/todo` capture agent."
+				},
+				"memory_flush": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Long-term memory flush turn."
+				},
+				"goal_planner": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`/goal` planner role. `[goal] planner_model` carries a model plus an agent type and wins where it is set."
+				},
+				"goal_strategist": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`/goal` strategist role; `[goal] strategist_model` wins where set."
+				},
+				"goal_skeptic": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Every adversarial skeptic in the goal-verification panel; `[goal] skeptic_models` wins where set."
+				},
+				"goal_summarizer": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`/goal` closing summary role."
+				},
+				"allowed_models": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"description": "Restricts which models are user-selectable for normal chat (picker, `/model`, `-m`).\nNon-matching models stay in the catalog but are never shown, defaulted to, or selectable.\nSpecial/internal models (web_search, image_description, subagents) are exempt. User-config globs (`*`, `?`, `[...]`) match the catalog key or model id, case-sensitive. Empty = no restriction; an excluded explicit `default`/`-m` is rejected once the model catalog is fetched. Fleet pins live on [`Requirements::allowed_models`] and replace this list."
+				},
+				"hidden_models": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"description": "Force `hidden = true` on these model IDs (still usable via `-m`)."
+				},
+				"disabled_models": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"description": "Remove these model IDs from the catalog entirely. Wins over `hidden_models`."
+				},
+				"favorite_models": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"description": "Globs that mark a model as a favorite, joined with every `[model_providers.<id>].favorite_models` list."
+				},
+				"force_reasoning_effort_models": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"description": "Force `supports_reasoning_effort = true` on these models."
+				},
+				"agent_type": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Fallback `agent_type` for models without a per-model override."
+				},
+				"extra_headers": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "Global default request headers applied to every model.\nA per-model `[model.<id>].extra_headers` entry overrides per key (case-insensitive)."
+				},
+				"temperature": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"description": "Global default values applied to every model that leaves the field unset; a per-model `[model.<id>]` value always wins.\nA deliberately small, allow-listed subset of the per-model fields (only `Option` ones, so \"unset\" is unambiguous)."
+				},
+				"top_p": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float"
+				},
+				"max_completion_tokens": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"max_retries": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"rate_limit_retry_threshold": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"inference_idle_timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0
+				},
+				"subagent_rate_limit_max_attempts": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"stream_tool_calls": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"providers": {
+					"type": "object",
+					"additionalProperties": {
+						"$ref": "#/$defs/ModelProviderConfig"
+					}
+				},
+				"definitions": {
+					"type": "object",
+					"additionalProperties": {
+						"$ref": "#/$defs/ConfigModelOverride"
+					}
+				},
+				"groups": {
+					"type": "object",
+					"additionalProperties": {
+						"$ref": "#/$defs/ModelGroupConfig"
+					},
+					"description": "`[model_groups.<id>]`: slots that share one model. See `xai_grok_models::groups`.",
+					"writeOnly": true
+				},
+				"auth_providers": {
+					"type": "object",
+					"additionalProperties": {
+						"$ref": "#/$defs/AuthProviderConfig"
+					}
+				},
+				"pricing": {
+					"$ref": "#/$defs/PricingConfig",
+					"description": "`[pricing]` section: the catalog consulted for a model whose endpoint reports no cost. See [`PricingConfig`].",
+					"default": {
+						"lookup_enabled": true,
+						"catalog_url": "https://modelinfo.pazer.ai"
+					}
+				}
+			}
+		},
+		"permission": {
+			"$ref": "#/$defs/PermissionKnownKeys",
+			"description": "`[permission]`: consumed out-of-band; see [`PermissionKnownKeys`].",
+			"writeOnly": true
+		},
+		"policy": {
+			"type": "object",
+			"properties": {
+				"allowed_mcp_servers": {
+					"description": "Admin policy: the MCP servers that may run.",
+					"type": "array",
+					"items": {
+						"description": "One MCP server rule. It matches by URL, by command, by argv or by name.",
+						"type": "object",
+						"properties": {
+							"serverUrl": {
+								"type": "string"
+							},
+							"server_url": {
+								"type": "string"
+							},
+							"command": {
+								"type": "string"
+							},
+							"serverCommand": {
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"server_command": {
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"serverName": {
+								"type": "string"
+							},
+							"server_name": {
+								"type": "string"
+							}
+						}
+					}
+				},
+				"denied_mcp_servers": {
+					"description": "Admin policy: the MCP servers that may not run.",
+					"type": "array",
+					"items": {
+						"description": "One MCP server rule. It matches by URL, by command, by argv or by name.",
+						"type": "object",
+						"properties": {
+							"serverUrl": {
+								"type": "string"
+							},
+							"server_url": {
+								"type": "string"
+							},
+							"command": {
+								"type": "string"
+							},
+							"serverCommand": {
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"server_command": {
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"serverName": {
+								"type": "string"
+							},
+							"server_name": {
+								"type": "string"
+							}
+						}
+					}
+				},
+				"allow_managed_mcp_servers_only": {
+					"description": "Admin policy: run only the MCP servers that managed config defines.",
+					"type": "boolean"
+				},
+				"allow_managed_hooks_only": {
+					"description": "Admin policy: run only the hooks that managed config defines.",
+					"type": "boolean"
+				},
+				"enable_all_project_mcp_servers": {
+					"description": "Admin policy: enable every MCP server that a project config defines.",
+					"type": "boolean"
+				},
+				"plugin_auto_update": {
+					"description": "Admin policy: update plugins automatically.",
+					"type": "boolean"
+				},
+				"strict_known_marketplaces": {
+					"description": "Admin policy: the only plugin marketplaces allowed.",
+					"type": "array",
+					"items": {
+						"description": "A marketplace source: `{\"source\": \"git\", \"url\"}`, `{\"source\": \"github\", \"repo\"}` or `{\"source\": \"local\", \"path\"}`. `ref` or `branch` names a git ref.",
+						"type": "object",
+						"properties": {
+							"source": {
+								"type": "string",
+								"enum": [
+									"git",
+									"github",
+									"local"
+								]
+							},
+							"url": {
+								"type": "string"
+							},
+							"repo": {
+								"type": "string"
+							},
+							"path": {
+								"type": "string"
+							},
+							"ref": {
+								"type": "string"
+							},
+							"branch": {
+								"type": "string"
+							}
+						}
+					}
+				},
+				"extra_known_marketplaces": {
+					"description": "Admin policy: plugin marketplaces to register, by name.",
+					"type": "object",
+					"additionalProperties": {
+						"type": "object",
+						"properties": {
+							"source": {
+								"description": "A marketplace source: `{\"source\": \"git\", \"url\"}`, `{\"source\": \"github\", \"repo\"}` or `{\"source\": \"local\", \"path\"}`. `ref` or `branch` names a git ref.",
+								"type": "object",
+								"properties": {
+									"source": {
+										"type": "string",
+										"enum": [
+											"git",
+											"github",
+											"local"
+										]
+									},
+									"url": {
+										"type": "string"
+									},
+									"repo": {
+										"type": "string"
+									},
+									"path": {
+										"type": "string"
+									},
+									"ref": {
+										"type": "string"
+									},
+									"branch": {
+										"type": "string"
+									}
+								}
+							},
+							"autoUpdate": {
+								"type": "boolean"
+							},
+							"auto_update": {
+								"type": "boolean"
+							}
+						}
+					}
+				}
+			}
+		},
+		"privacy": {
+			"type": "object",
+			"properties": {
+				"privacy_banner_acked": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Last banner dismiss (Accept/Customize), RFC 3339 UTC.\nWhen the remote `privacy_banner_reshow_days` is unset or 0, the banner never re-shows once this is set."
+				},
+				"consent": {
+					"$ref": "#/$defs/ConsentConfig"
+				}
+			}
+		},
+		"sandbox": {
+			"$ref": "#/$defs/SandboxSettingsConfig",
+			"writeOnly": true
+		},
+		"session": {
+			"default": {},
+			"type": "object",
+			"properties": {
+				"auto_compact_threshold_percent": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint8",
+					"minimum": 0,
+					"maximum": 255,
+					"description": "Context window usage percentage (0-100) at which auto-compact is triggered. `None` means the user didn't set it.\nThe resolver in `crate::util::config::resolve_auto_compact_threshold_percent` falls through to remote tiers and then the hardcoded default 85.\nRead this field via the resolver, not directly, to honor the full precedence chain (env, per-model, remote, default)."
+				},
+				"load_envrc": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "When enabled, the session will parse .envrc in the workspace directory and inject the environment variables into bash commands.\nDefaults to `true` when unset.\n`Option<bool>` so `None` round-trips as absent on disk (managed config wins over default)."
+				},
+				"compaction": {
+					"$ref": "#/$defs/CompactionConfig",
+					"writeOnly": true
+				},
+				"repo_changes_dedup": {
+					"$ref": "#/$defs/RepoChangesDedupConfig",
+					"default": {
+						"enabled": true,
+						"include_inline_fallback": false,
+						"max_inline_bytes": 0,
+						"dedup_untracked": true,
+						"dedup_binary": true,
+						"untracked_max_bytes": 0,
+						"untracked_exclude_globs": []
+					}
+				},
+				"storage": {
+					"$ref": "#/$defs/StorageConfig",
+					"description": "`[storage]`: also read by `resolve_cleanup_ttl_days()`.",
+					"writeOnly": true
+				},
+				"harness": {
+					"$ref": "#/$defs/HarnessConfig",
+					"writeOnly": true
+				},
+				"relay": {
+					"$ref": "#/$defs/RelayConfig",
+					"writeOnly": true
+				},
+				"hub": {
+					"$ref": "#/$defs/HubConfig",
+					"writeOnly": true
+				}
+			}
+		},
+		"telemetry": {
+			"default": {
+				"enabled": null,
+				"events_url": null,
+				"events_api_key": null,
+				"mixpanel_token": null,
+				"mixpanel_enabled": false,
+				"trace_upload": null,
+				"otel_enabled": null,
+				"otel_metrics_exporter": null,
+				"otel_logs_exporter": null,
+				"otel_endpoint": null,
+				"otel_protocol": null,
+				"otel_certificate": null,
+				"otel_client_certificate": null,
+				"otel_client_key": null,
+				"otel_log_user_prompts": null,
+				"otel_log_tool_details": null,
+				"otel_log_assistant_responses": null,
+				"otel_log_tool_content": null,
+				"otel_timeout": null,
+				"otel_metric_export_interval": null,
+				"otel_logs_endpoint": null,
+				"otel_metrics_endpoint": null,
+				"otel_logs_protocol": null,
+				"otel_metrics_protocol": null,
+				"otel_logs_certificate": null,
+				"otel_metrics_certificate": null,
+				"otel_logs_client_certificate": null,
+				"otel_logs_client_key": null,
+				"otel_metrics_client_certificate": null,
+				"otel_metrics_client_key": null,
+				"otel_metrics_include_session_id": null
+			},
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"events_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"events_api_key": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"mixpanel_token": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"mixpanel_enabled": {
+					"type": "boolean",
+					"default": false
+				},
+				"trace_upload": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"otel_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"otel_metrics_exporter": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_logs_exporter": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_endpoint": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_protocol": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_transport": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_certificate": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_client_certificate": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_client_key": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_log_user_prompts": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"otel_log_tool_details": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"otel_log_assistant_responses": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"otel_log_tool_content": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"otel_timeout": {
+					"description": "Milliseconds, as an integer or a decimal string.",
+					"type": [
+						"integer",
+						"string"
+					],
+					"default": null
+				},
+				"otel_metric_export_interval": {
+					"description": "Milliseconds, as an integer or a decimal string.",
+					"type": [
+						"integer",
+						"string"
+					],
+					"default": null
+				},
+				"otel_logs_endpoint": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_metrics_endpoint": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_logs_protocol": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_metrics_protocol": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_logs_certificate": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_metrics_certificate": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_logs_client_certificate": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_logs_client_key": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_metrics_client_certificate": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_metrics_client_key": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"otel_metrics_include_session_id": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"feedback": {
+					"$ref": "#/$defs/FeedbackConfig",
+					"default": {}
+				},
+				"diagnostics": {
+					"$ref": "#/$defs/DiagnosticsConfig",
+					"description": "`[diagnostics]`: crash handler toggle (`load_crash_handler_enabled_sync`).",
+					"writeOnly": true
+				}
+			},
+			"description": "`TelemetryConfig` with each transport-key spelling as its own field, so a\ntable naming both folds under [`TelemetryConfig::OTEL_PROTOCOL_KEYS`]\ninstead of tripping serde's duplicate-field check. This table can arrive\nfrom a remote campaign patch. This is merged into the same value the config\nis read from and is not limited to any field set."
+		},
+		"tools": {
+			"writeOnly": true,
+			"description": "`[tools]`: also read by `ToolsConfig::resolve()`.",
+			"type": "object",
+			"properties": {
+				"respect_gitignore": {
+					"type": "boolean",
+					"description": "When `true`, all tools (including `read_file`) filter gitignored files.\nWhen `false` (default), each tool picks its own default.",
+					"default": false
+				},
+				"disable_zdr_incompatible_tools": {
+					"type": "boolean",
+					"description": "Restrict tools whose xAI API requires server-side artifact storage (currently just the video tools).\nWithout a valid `[tools.zdr_video_output_s3]` bucket they stay advertised but return setup guidance at call time.\nIntended for ZDR-bound teams via `~/.grok/managed_config.toml`. Defaults to `false`.",
+					"default": false
+				},
+				"zdr_video_output_s3": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ZdrVideoOutputS3Config"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Optional S3 bucket config for ZDR video output. When present (and valid), video tools presign an upload URL and pass it to the API.\nThe generated video then lands in a team-owned bucket instead of being downloaded locally. Only effective when `disable_zdr_incompatible_tools` is `true`. Populated from `[tools.zdr_video_output_s3]` in config."
+				},
+				"media_gen": {
+					"$ref": "#/$defs/MediaGenToolsConfig"
+				},
+				"bash": {
+					"$ref": "#/$defs/BashToolConfig",
+					"default": {
+						"timeout_secs": null,
+						"max_timeout_secs": null,
+						"output_byte_limit": null,
+						"cmd_prefix": null,
+						"auto_background_on_timeout": null,
+						"foreground_block_budget_ms": null,
+						"allow_background_operator": null,
+						"login_shell_capture": null
+					}
+				},
+				"web_search": {
+					"default": {
+						"api_key": null,
+						"base_url": "",
+						"mtls_cert_dir": null,
+						"model": "grok-4.6",
+						"max_completion_tokens": 8192,
+						"temperature": 0.10000000149011612,
+						"top_p": 0.949999988079071,
+						"api_backend": "chat_completions",
+						"auth_scheme": "bearer",
+						"request_compression": "none",
+						"extra_headers": {},
+						"extra_response_includes": [],
+						"query_params": {},
+						"env_http_headers": {},
+						"extra_body": {},
+						"context_window": 256000,
+						"max_request_bytes": null,
+						"force_http1": false,
+						"max_retries": null,
+						"rate_limit_retry_threshold": null,
+						"stream_tool_calls": false,
+						"idle_timeout_secs": null,
+						"reasoning_effort": null,
+						"reasoning_summary": null,
+						"chat_message_profile": {
+							"accepts_model_id": true,
+							"accepts_reasoning_content": true,
+							"accepts_reasoning": true
+						},
+						"origin_client": null,
+						"client_identifier": null,
+						"deployment_id": null,
+						"user_id": null,
+						"conversation_group_id": null,
+						"client_version": null,
+						"supports_backend_search": false,
+						"compactions_remaining": null,
+						"compaction_at_tokens": null,
+						"doom_loop_recovery": null,
+						"output_rate_floor": null
+					},
+					"type": "object",
+					"properties": {
+						"api_key": {
+							"type": [
+								"string",
+								"null"
+							]
+						},
+						"base_url": {
+							"type": "string"
+						},
+						"mtls_cert_dir": {
+							"type": [
+								"string",
+								"null"
+							],
+							"description": "Resolved local directory for this model's mTLS client identity.",
+							"default": null
+						},
+						"model": {
+							"type": "string"
+						},
+						"max_completion_tokens": {
+							"type": [
+								"integer",
+								"null"
+							],
+							"format": "uint32",
+							"minimum": 0
+						},
+						"temperature": {
+							"type": [
+								"number",
+								"null"
+							],
+							"format": "float"
+						},
+						"top_p": {
+							"type": [
+								"number",
+								"null"
+							],
+							"format": "float"
+						},
+						"api_backend": {
+							"$ref": "#/$defs/ApiBackend"
+						},
+						"auth_scheme": {
+							"$ref": "#/$defs/AuthScheme",
+							"default": "bearer"
+						},
+						"request_compression": {
+							"$ref": "#/$defs/RequestCompression",
+							"default": "none"
+						},
+						"extra_headers": {
+							"type": "object",
+							"additionalProperties": {
+								"type": "string"
+							},
+							"description": "Extra request headers applied verbatim. The sampler never inspects the URL to derive headers.\nCallers (the session) inject proxy auth and other access headers here before constructing the config."
+						},
+						"extra_response_includes": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							},
+							"description": "Additional Responses API `include` values not represented by the typed client.",
+							"default": []
+						},
+						"query_params": {
+							"type": "object",
+							"additionalProperties": {
+								"type": "string"
+							},
+							"description": "Query parameters folded into every request URL (percent-encoded).",
+							"default": {}
+						},
+						"env_http_headers": {
+							"type": "object",
+							"additionalProperties": {
+								"type": "string"
+							},
+							"description": "Header name to environment variable, resolved into request headers at client build and never persisted.",
+							"default": {}
+						},
+						"extra_body": {
+							"type": "object",
+							"additionalProperties": true,
+							"description": "Extra top-level fields merged into every request body.",
+							"default": {}
+						},
+						"context_window": {
+							"type": "integer",
+							"format": "uint64",
+							"minimum": 0,
+							"description": "Total context window size in tokens. The session reads it for its compaction decisions."
+						},
+						"max_request_bytes": {
+							"type": [
+								"integer",
+								"null"
+							],
+							"format": "uint64",
+							"minimum": 1,
+							"description": "Provider request-body cap, already defaulted from `api_backend` by model resolution; `None` budgets to 50 MiB.",
+							"default": null
+						},
+						"force_http1": {
+							"type": "boolean"
+						},
+						"max_retries": {
+							"type": [
+								"integer",
+								"null"
+							],
+							"format": "uint32",
+							"minimum": 0
+						},
+						"rate_limit_retry_threshold": {
+							"type": [
+								"integer",
+								"null"
+							],
+							"format": "uint32",
+							"minimum": 0,
+							"description": "Total-attempt ceiling for rate-limited requests.\n`None` keeps the actor's [`RetryPolicy::rate_limit_retry_threshold`].",
+							"default": null
+						},
+						"stream_tool_calls": {
+							"type": "boolean"
+						},
+						"idle_timeout_secs": {
+							"type": [
+								"integer",
+								"null"
+							],
+							"format": "uint64",
+							"minimum": 0
+						},
+						"reasoning_effort": {
+							"anyOf": [
+								{
+									"$ref": "#/$defs/ReasoningEffort"
+								},
+								{
+									"type": "null"
+								}
+							]
+						},
+						"reasoning_summary": {
+							"anyOf": [
+								{
+									"$ref": "#/$defs/ReasoningSummary"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Overrides the Responses API `reasoning.summary` the request builder sets; `None` leaves it as built.",
+							"default": null
+						},
+						"chat_message_profile": {
+							"$ref": "#/$defs/ChatMessageProfile",
+							"description": "Which optional message properties this target's Chat Completions schema accepts.",
+							"default": {
+								"accepts_model_id": true,
+								"accepts_reasoning_content": true,
+								"accepts_reasoning": true
+							}
+						},
+						"origin_client": {
+							"anyOf": [
+								{
+									"$ref": "#/$defs/OriginClientInfo"
+								},
+								{
+									"type": "null"
+								}
+							]
+						},
+						"client_identifier": {
+							"type": [
+								"string",
+								"null"
+							]
+						},
+						"deployment_id": {
+							"type": [
+								"string",
+								"null"
+							]
+						},
+						"user_id": {
+							"type": [
+								"string",
+								"null"
+							]
+						},
+						"conversation_group_id": {
+							"anyOf": [
+								{
+									"$ref": "#/$defs/ConversationGroupId"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Stable root conversation identifier emitted as `x-grok-conv-group-id`.",
+							"default": null
+						},
+						"client_version": {
+							"type": [
+								"string",
+								"null"
+							]
+						},
+						"supports_backend_search": {
+							"type": "boolean",
+							"default": false
+						},
+						"compactions_remaining": {
+							"anyOf": [
+								{
+									"$ref": "#/$defs/CompactionsRemaining"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Per-model config for the `x-compactions-remaining` header; `None` disables it.",
+							"default": null
+						},
+						"compaction_at_tokens": {
+							"anyOf": [
+								{
+									"$ref": "#/$defs/CompactionAtTokens"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Per-model config for the `x-compaction-at` header; `None` disables it.",
+							"default": null
+						},
+						"doom_loop_recovery": {
+							"anyOf": [
+								{
+									"$ref": "#/$defs/DoomLoopRecoveryPolicy"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Server-side doom-loop check policy; `None` disables it.\nIt also absorbs the reported trigger events (unlike environment headers in [`Self::extra_headers`], this gates the client's decode behavior).",
+							"default": null
+						},
+						"output_rate_floor": {
+							"anyOf": [
+								{
+									"$ref": "#/$defs/OutputRateFloorPolicy"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Floor on the model's output tokens/sec; `None` (or an unarmed policy) leaves the stream ungated.",
+							"default": null
+						},
+						"allowed_domains": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						},
+						"excluded_domains": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						}
+					},
+					"description": "All knobs that control a single sampling request.\nAuth is selected separately via `auth_scheme`, while `api_backend` controls only the request/response protocol shape."
+				},
+				"web_fetch": {
+					"$ref": "#/$defs/WebFetchToolConfig",
+					"default": {
+						"proxy_endpoint": null,
+						"allowed_domains": null,
+						"allow_local": null
+					}
+				},
+				"ask_user_question": {
+					"$ref": "#/$defs/AskUserQuestionToolConfig",
+					"default": {
+						"timeout_enabled": null,
+						"timeout_secs": null
+					}
+				},
+				"file_toolset": {
+					"$ref": "#/$defs/FileToolset",
+					"description": "Which file-operation toolset to use: `\"standard\"` (default) or `\"hashline\"`.",
+					"default": "standard"
+				},
+				"hashline": {
+					"$ref": "#/$defs/HashlineSchemeConfig",
+					"description": "Only used when `file_toolset = \"hashline\"`.",
+					"default": {
+						"scheme": "chunk",
+						"hash_len": 3,
+						"chunk_size": 8
+					}
+				},
+				"disable_web_search": {
+					"type": "boolean",
+					"description": "Whether web search is force-disabled via `--disable-web-search` CLI flag.\nWhen true, the web search tool is never added to the agent toolset regardless of available credentials.",
+					"default": false
+				},
+				"path_not_found_hints": {
+					"type": "boolean",
+					"description": "Whether to enrich path-not-found errors with CWD reminders, \"dropped repo folder\" correction, and similar-name suggestions. Default `false`. Enabled via remote settings.\nSerialized to `config.json` on GCS so traces can distinguish which sessions had path-not-found hints active.",
+					"default": false
+				},
+				"shell_environment_policy": {
+					"$ref": "#/$defs/ShellEnvironmentPolicyKnownKeys",
+					"description": "Validation only; the value is parsed at spawn by `resolve_shell_env_policy`.",
+					"writeOnly": true
+				}
+			}
+		},
+		"ui": {
+			"default": {
+				"max_thoughts_width": 120,
+				"yolo": false,
+				"compact_mode": false
+			},
+			"type": "object",
+			"properties": {
+				"max_thoughts_width": {
+					"type": "integer",
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535,
+					"default": 120
+				},
+				"theme": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"yolo": {
+					"type": "boolean",
+					"description": "YOLO mode. Read by `util::config`, declared here for `serde_ignored`.",
+					"default": false
+				},
+				"ui_theme": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "UI theme alias. Read by `util::config`, declared here for `serde_ignored`."
+				},
+				"compact_mode": {
+					"type": "boolean",
+					"description": "Read by pager, declared here for `serde_ignored`.",
+					"default": false
+				},
+				"permission_mode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Read by `load_permission_mode()`. Declared for `serde_ignored`."
+				},
+				"approval_mode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Legacy name for `permission_mode`. Declared for `serde_ignored`."
+				},
+				"default_selected_permission": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Which permission option the cursor preselects on the first permission prompt of a session. One of `allow_once`,\n`allow_always`, or `reject`. After the first prompt, the cursor sticks to the user's last-used option kind. When\nunset, the first prompt preselects the \"Always allow on all sessions\" (enable-always-approve) row."
+				},
+				"show_timestamps": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Written by the pager's appearance persist module."
+				},
+				"show_timeline": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Timeline sidebar (per-turn tick rail in place of the scrollbar).\n`None` means off (client default; opt-in). Written by the pager's settings modal."
+				},
+				"dashboard_preview": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "The dashboard preview includes the selected session's reply panel. Unset means on."
+				},
+				"page_flip_on_send": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Snap a just-sent prompt to the viewport top. `None` means on (default).\nWritten by the pager's settings modal."
+				},
+				"confirm_before_rewind": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Ask before rewinding conversation history. `None` means on (default).\nWritten by the pager's settings modal / rewind \"Yes, and don't ask again\"."
+				},
+				"stop_gate_unfinished_todos": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Gate the model's turn end on unfinished todos."
+				},
+				"stop_gate_ci_failing": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Gate the model's turn end on red CI for the branch it pushed."
+				},
+				"min_output_tokens_per_sec": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Reissue a model call whose output rate stays under this many tokens."
+				},
+				"output_rate_sustained_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "How long the rate must stay under the floor before the request is reissued. `None` = 10 seconds."
+				},
+				"output_rate_window_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Trailing window the output rate is averaged over. `None` = 10 seconds."
+				},
+				"output_rate_max_retries": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -1,
+							"maximum": 4294967294
+						},
+						{
+							"type": "string",
+							"enum": [
+								"unlimited"
+							]
+						}
+					],
+					"description": "How many times one model."
+				},
+				"ttft_timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Reissue a model call that has produced no output this many seconds after the request was sent."
+				},
+				"max_parallel_requests": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "The most model requests this process sends at once."
+				},
+				"auto_dark_theme": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Theme to use when the OS is in dark mode. Written by the pager's theme persist module."
+				},
+				"auto_light_theme": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Theme to use when the OS is in light mode. Written by the pager's theme persist module."
+				},
+				"scroll_speed": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint8",
+					"minimum": 0,
+					"maximum": 255,
+					"description": "Mouse-wheel and trackpad scroll speed multiplier (1 to 100)."
+				},
+				"scroll_mode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Force scroll input classification (`auto` | `wheel` | `trackpad`).\nWritten by the pager's settings modal; unset defaults to `auto`."
+				},
+				"invert_scroll": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Invert vertical scroll direction (\"natural\" scrolling)."
+				},
+				"scroll_lines": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint8",
+					"minimum": 0,
+					"maximum": 255,
+					"description": "Lines per scroll tick, applied to BOTH wheel and trackpad pricing (1 to 10).\nUnset keeps the per-terminal scroll profile's values."
+				},
+				"render_mermaid": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "How ` ```mermaid ` code blocks are rendered (`auto` | `on` | `off`).\nWritten by the pager's settings modal."
+				},
+				"hunk_tracker_mode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Hunk-tracker mode the pager advertises to the agent (`agent_only` | `all_dirty` | `off`).\nWritten by the pager's settings modal; read at connect time (CLI `--hunk-tracker-mode` / `GROK_HUNK_TRACKER` override it).\nUnset defaults to `off`, which disables hunk tracking entirely."
+				},
+				"voice_capture_mode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Voice capture chord behavior: `toggle` or `hold` (hold-to-talk; needs a Kitty-protocol terminal, else falls back to toggle).\nWritten by the settings modal; unset defaults to `hold`."
+				},
+				"voice_stt_language": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Speech-to-text language preference for voice dictation. A Grok STT catalog code (`en`, `es`, `ja`, …; see xAI STT\nsupported languages) or `auto` (system locale, resolved at connect). Written by the settings modal; unset leaves\n`ui.voice.language` / default `en`. When set, overrides `ui.voice.language` for the session."
+				},
+				"voice_keybind_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Whether the Ctrl+Space / F8 voice-dictation shortcut is active.\nWritten by the settings modal; unset defaults to `true` (shortcut on).\nWhen `false` the chord is ignored; `/voice` still starts dictation."
+				},
+				"mouse_reporting_toggle": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "When `true`, registers `Ctrl+R` (while scrollback is focused) to toggle terminal mouse reporting (mouse capture). That\nhands selection back to the terminal for native click-drag copy/paste. Opt-in only; unset/false leaves mouse reporting\nalways on with no toggle shortcut. The prompt keeps `Ctrl+R` for history search; focus scrollback (Esc/Tab) first."
+				},
+				"cancel_subagents_on_turn_cancel": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "When cancelling a parent turn with running subagents: `always_stop` stops them without prompting, `always_continue` leaves them running.\nUnset/`ask` shows the cancel-turn picker.\nWritten by the pager when the user picks \"Always stop\" / \"Always continue\"."
+				},
+				"remember_tool_approvals": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "User knob for the `remember_tool_approvals` gate: per-tool \"Always allow …\" prompt options (resolver default: on).\nWritten by the settings modal; requirements/env/managed/remote settings also feed the gate."
+				},
+				"keep_text_selection": {
+					"description": "In-app drag selection highlight: `flash` | `hold` (legacy bool accepted).",
+					"type": [
+						"string",
+						"boolean"
+					]
+				},
+				"selection_highlight_duration_ms": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Legacy TTL ms; only `Some(0)` counts when `keep_text_selection` is unset."
+				},
+				"show_thinking_blocks": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Show agent thinking/reasoning blocks in the TUI scrollback.\n`None` means on (client default). Written by the pager's settings modal."
+				},
+				"thinking_summaries": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Summarize each thinking block and show the summary under its collapsed header."
+				},
+				"thinking_summary_history_window_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "How far back, in seconds."
+				},
+				"thinking_summary_history_min_count": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Include at least this many of the most recent summaries even when they are older than the window above."
+				},
+				"group_tool_verbs": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Fold runs of consecutive non-destructive tool calls (reads, searches."
+				},
+				"collapsed_edit_blocks": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Show Edit tool calls as a collapsed one-line `+N/-M` diffstat summary by default (expand for the diff).\n`None` means off (client default). Written by the pager's settings modal."
+				},
+				"prompt_suggestions": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Next-prompt suggestions (tab autocomplete ghost text) after each turn.\n`None` means on (client default).\nWritten by the pager's settings modal; the `GROK_PROMPT_SUGGESTIONS` env var overrides at runtime."
+				},
+				"cursor_blink": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Startup cursor style: `None` (default) inherits the terminal's own style.\n`Some(true)` forces the legacy blinking block, `Some(false)` a steady block.\nConfig-file-only knob (no /settings row)."
+				},
+				"screen_mode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`\"fullscreen\"` | `\"minimal\"`; unset uses the product default, fullscreen."
+				},
+				"double_click_action": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Retired hidden opt-in for terminal-like double/triple-click word/line selection. Superseded by `keep_text_selection =\n\"word_select\"`. Still read only when `keep_text_selection` is unset; Settings clears this on write. `\"word_select\"` |\nunset."
+				},
+				"contextual_hints": {
+					"$ref": "#/$defs/ContextualHints",
+					"description": "Per-tip contextual-hint opt-outs (`[ui.contextual_hints]`).\nEach `None` inherits the remote/default (on); `Some` is a user-explicit choice that beats the remote tier.\nSkipped on the wire when untouched so the section only appears once a user toggles a tip."
+				},
+				"combine_queued_prompts": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Combine consecutive queued follow-ups into one turn. `None` means off."
+				},
+				"follow_up_behavior": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Mid-turn follow-up routing: `\"queue\"` (default) or `\"steer\"`. `None` behaves as queue.\nSteer promotes server-queued follow-ups as interjections at the next tool or model safe point."
+				},
+				"display_refresh": {
+					"$ref": "#/$defs/DisplayRefreshSettings",
+					"description": "Display-refresh probe and auto-cadence (`[ui.display_refresh]`).\nPer-field `None` inherits remote/default; skipped when untouched."
+				},
+				"status_line": {
+					"$ref": "#/$defs/StatusLineConfig",
+					"description": "`[ui.status_line]`. Disabled by default."
+				},
+				"dashboard": {
+					"description": "The agent dashboard.",
+					"type": "object",
+					"properties": {
+						"enabled": {
+							"type": "boolean"
+						},
+						"grouping": {
+							"type": "string",
+							"enum": [
+								"state",
+								"directory"
+							]
+						},
+						"pinned": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						},
+						"reorder": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						}
+					}
+				},
+				"tips": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/TipsOverride"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "`[tips]` section: consumed by `merge_tips`.",
+					"writeOnly": true
+				},
+				"hints": {
+					"description": "Written by the client via `config_toml_edit`; absorbed so it isn't flagged as an unrecognized key."
+				},
+				"slash_command_tags": {
+					"description": "A tag for each slash command, by command name.",
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					}
+				},
+				"voice": {
+					"$ref": "#/$defs/VoiceConfig"
+				}
+			}
+		},
+		"version_overrides": {
+			"description": "Patches that apply only to the grok versions from `minimum_version` up to `maximum_version`.",
+			"type": "array",
+			"items": {
+				"type": "object",
+				"properties": {
+					"minimum_version": {
+						"description": "A semver version.",
+						"type": "string"
+					},
+					"maximum_version": {
+						"description": "A semver version.",
+						"type": "string"
+					},
+					"agents": {
+						"$ref": "#/properties/agents"
+					},
+					"announcements": {
+						"$ref": "#/properties/announcements"
+					},
+					"claude_compat": {
+						"$ref": "#/properties/claude_compat"
+					},
+					"cli": {
+						"$ref": "#/properties/cli"
+					},
+					"desktop": {
+						"$ref": "#/properties/desktop"
+					},
+					"endpoints": {
+						"$ref": "#/properties/endpoints"
+					},
+					"extensions": {
+						"$ref": "#/properties/extensions"
+					},
+					"fail_closed": {
+						"$ref": "#/properties/fail_closed"
+					},
+					"features": {
+						"$ref": "#/properties/features"
+					},
+					"hooks": {
+						"$ref": "#/properties/hooks"
+					},
+					"login": {
+						"$ref": "#/properties/login"
+					},
+					"mcp": {
+						"$ref": "#/properties/mcp"
+					},
+					"memory": {
+						"$ref": "#/properties/memory"
+					},
+					"models": {
+						"$ref": "#/properties/models"
+					},
+					"permission": {
+						"$ref": "#/properties/permission"
+					},
+					"policy": {
+						"$ref": "#/properties/policy"
+					},
+					"privacy": {
+						"$ref": "#/properties/privacy"
+					},
+					"sandbox": {
+						"$ref": "#/properties/sandbox"
+					},
+					"session": {
+						"$ref": "#/properties/session"
+					},
+					"telemetry": {
+						"$ref": "#/properties/telemetry"
+					},
+					"tools": {
+						"$ref": "#/properties/tools"
+					},
+					"ui": {
+						"$ref": "#/properties/ui"
+					},
+					"worktrees": {
+						"$ref": "#/properties/worktrees"
+					}
+				},
+				"additionalProperties": false
+			}
+		},
+		"worktrees": {
+			"type": "object",
+			"properties": {
+				"pool": {
+					"$ref": "#/$defs/WorktreePoolConfig",
+					"writeOnly": true
+				},
+				"auto_gc": {
+					"$ref": "#/$defs/WorktreeAutoGcSettings",
+					"default": {}
+				}
+			},
+			"default": {
+				"auto_gc": {}
+			},
+			"description": "`[worktree]` section (currently `[worktree.auto_gc]` only)."
+		}
+	},
+	"additionalProperties": false,
+	"$defs": {
+		"AgentSelectionConfig": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Name of a built-in or discovered agent definition.\nLooked up via `xai_grok_agent::discovery::by_name_in_cwd()`.\nExamples: \"grok-build\", \"browser-use\", or a custom agent name."
+				},
+				"definition": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Path to an agent definition file (.md with YAML frontmatter).\nSupports environment variable expansion (e.g., `$HOME/.grok/agents/my-agent.md`)."
+				},
+				"system_prompt_label": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Global system-prompt identity label. Per-model override wins."
+				}
+			},
+			"description": "Set in `config.toml` under `[agent]`: Priority (highest to lowest): ACP session-level `_meta.agentProfile`\nCLI `--agent-profile` flag `[agent]` config.toml section (this config) `GROK_AGENT` env var\nDefault `grok-build` agent"
+		},
+		"AnnouncementCta": {
+			"type": "object",
+			"properties": {
+				"label": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"caption": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				}
+			},
+			"description": "Optional call-to-action on an announcement (clients render it as a clickable link/button).\nThe server only emits it with both fields non-empty and the url https; parsing here stays tolerant like the parent struct.\n`caption` is optional dim helper text after the button; absent means none."
+		},
+		"ApiBackend": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "chat_completions",
+					"description": "Use the Chat Completions API (/v1/chat/completions)"
+				},
+				{
+					"type": "string",
+					"const": "responses",
+					"description": "Use the Responses API (/v1/responses)"
+				},
+				{
+					"type": "string",
+					"const": "messages",
+					"description": "Use the Anthropic Messages API (/v1/messages)"
+				},
+				{
+					"type": "string",
+					"const": "ollama",
+					"description": "Use Ollama's native chat API (/api/chat)."
+				}
+			]
+		},
+		"AskUserQuestionToolConfig": {
+			"type": "object",
+			"properties": {
+				"timeout_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Whether the questionnaire timeout is enabled (default: `true`).\n`false` waits forever for answers.",
+					"default": null
+				},
+				"timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Wait budget in seconds when the timer is enabled (positive integer; default: 1800 / 30 minutes).",
+					"default": null
+				}
+			},
+			"description": "User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.\n(`[toolset.ask_user_question]`)."
+		},
+		"AuthProviderConfig": {
+			"type": "object",
+			"properties": {
+				"command": {
+					"type": "string",
+					"description": "Command to run; without `args` it uses the platform shell, with `args` it execs directly.",
+					"default": ""
+				},
+				"args": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"description": "Command arguments; when set (even empty) the command execs directly.",
+					"default": null
+				},
+				"token_ttl_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Fallback token lifetime used when the output carries no `expires_in`.",
+					"default": null
+				},
+				"timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Max seconds to wait for the command (default 30, clamped to 1..=600).",
+					"default": null
+				},
+				"cwd": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Working directory for the command; a leading `~` expands to home.",
+					"default": null
+				}
+			},
+			"description": "One named `[auth_provider.<name>]` table, honored only from the trusted config layers (`parse_auth_providers`).\nA new field here needs a `parse_auth_providers` warning decision."
+		},
+		"AuthScheme": {
+			"oneOf": [
+				{
+					"type": "string",
+					"enum": [
+						"bearer",
+						"x_api_key"
+					]
+				},
+				{
+					"type": "string",
+					"const": "none",
+					"description": "Do not attach authentication headers."
+				}
+			]
+		},
+		"AutoModeConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "The Auto-mode gate.\nLowest-precedence layer of the gate chain (env and local `[auto_mode] enabled` config win over this remote value)."
+				},
+				"prompt_type": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ClassifierPromptType"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "How much context the classifier prompt includes.\n`None` means the wire fn's built-in default (`just_command`)."
+				},
+				"classifier_model": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Routing slug for a dedicated classifier model.\n`None` inherits the session model.\nResolved via `resolve_aux_model_sampling_config`."
+				},
+				"classify_timeout_ms": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Classifier side-query duration in milliseconds; resolved with bounded defaults."
+				},
+				"reasoning_effort": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ReasoningEffort"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Classifier reasoning effort. Applies on BOTH the routed-model path and the inherited session-model path.\n`None` means the wire fn's built-in default (`low` if the effective model supports reasoning effort, else unset)."
+				}
+			},
+			"description": "`[auto_mode]` section: server-side configuration for Auto permission mode. ONE struct serves both the local `[auto_mode]` TOML table and the remote settings `auto_mode` JSON object, so the two stay 1:1.\nThe remote object is coerced via `serde_json::from_value`. All fields are plain scalars/enums, so they deserialize cleanly from both formats (no custom tolerant deser needed). Unset fields stay `None` here.\nThe wire fn applies the built-in defaults once auto mode is enabled (current model, `low` effort if the model supports it, `just_command` prompt). Precedence: local config > remote > those built-in defaults."
+		},
+		"BashToolConfig": {
+			"type": "object",
+			"properties": {
+				"timeout_secs": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "double",
+					"default": null
+				},
+				"max_timeout_secs": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "double",
+					"description": "Foreground ceiling for model-provided command timeouts (seconds).\nWhen `None`, `to_bash_params_json` emits the production default ([`PRODUCTION_MAX_TIMEOUT_SECS`], 10h).",
+					"default": null
+				},
+				"output_byte_limit": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"cmd_prefix": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"auto_background_on_timeout": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Whether to auto-background a command when it times out (default: `true`).",
+					"default": null
+				},
+				"foreground_block_budget_ms": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "How long a command may block the foreground before auto-backgrounding, in milliseconds, when `auto_background_on_timeout` is on.\n`None` uses the server default of 15s.\n`Some(0)` disables the short budget, so auto-backgrounding happens only at the model/default timeout.",
+					"default": null
+				},
+				"allow_background_operator": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Whether to allow a background `&` operator in foreground commands (default: `true`).",
+					"default": null
+				},
+				"login_shell_capture": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				}
+			},
+			"description": "User configurable settings for the built-in bash tool (`[toolset.bash]`)."
+		},
+		"ChatMessageProfile": {
+			"type": "object",
+			"properties": {
+				"accepts_model_id": {
+					"type": "boolean",
+					"description": "Whether the target accepts `model_id` on replayed messages."
+				},
+				"accepts_reasoning_content": {
+					"type": "boolean",
+					"description": "Whether the target accepts `reasoning_content` on replayed messages."
+				},
+				"accepts_reasoning": {
+					"type": "boolean",
+					"description": "Whether the target accepts `reasoning` on replayed messages. Ollama reads only that name.",
+					"default": false
+				}
+			},
+			"description": "Which optional message-level properties a Chat Completions target's schema\naccepts on replayed messages."
+		},
+		"ClassifierPromptType": {
+			"type": "string",
+			"enum": [
+				"full",
+				"no_user_tool_prefix",
+				"bare_instructions",
+				"just_command"
+			],
+			"description": "How much context [`build_classifier_messages`] includes (decreasing order).\nAlso the type of the `[auto_mode] prompt_type` config field; the shell reads it straight off the resolved config.\nSerde wire values are the snake_case variant names.\nOperator-facing meaning of each variant:\n- `full`: system, AGENTS.md, transcript, proposed action, and the JSON instruction.\n- `no_user_tool_prefix`: drops the conversation transcript (the `User:` / tool-call turns); keeps AGENTS.md.\n- `bare_instructions`: system, proposed action, and the JSON instruction (no AGENTS.md, no transcript).\n- `just_command`: system and the command to judge only (json_schema still enforces the output shape)."
+		},
+		"CodebaseIndexingSetting": {
+			"anyOf": [
+				{
+					"type": "boolean"
+				},
+				{
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			],
+			"description": "Codebase indexing setting for `[features] codebase_indexing`.\nPatterns are matched against the git root when available, otherwise the cwd, which allows explicitly indexing non-git directories."
+		},
+		"CompactionAtTokens": {
+			"anyOf": [
+				{
+					"type": "boolean"
+				},
+				{
+					"type": "integer",
+					"format": "uint64",
+					"minimum": 0
+				}
+			],
+			"description": "Per-model config for the `x-compaction-at` request header (a token count). The remote-config value is polymorphic:\n`true` enables the header with the value `context_window * auto_compact_threshold_percent / 100`. `false` (or absent)\ndisables it; an integer `N` sends the constant `N`."
+		},
+		"CompactionConfig": {
+			"type": "object",
+			"properties": {
+				"memory_flush": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemoryFlushSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"pruning": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/PruningSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				}
+			}
+		},
+		"CompactionsRemaining": {
+			"anyOf": [
+				{
+					"type": "boolean"
+				},
+				{
+					"type": "integer",
+					"format": "uint8",
+					"minimum": 0,
+					"maximum": 255
+				}
+			],
+			"description": "Per-model config for the `x-compactions-remaining` request header. `true` sends the dynamic value (1 on the\nuncompacted prefix, 0 once the session compacts). `false`/absent disables the header; an integer `N` sends the\nconstant `N`."
+		},
+		"CompatConfigToml": {
+			"type": "object",
+			"properties": {
+				"cursor": {
+					"$ref": "#/$defs/VendorCompatToml",
+					"default": {
+						"skills": null,
+						"rules": null,
+						"agents": null,
+						"mcps": null,
+						"hooks": null,
+						"sessions": null
+					}
+				},
+				"claude": {
+					"$ref": "#/$defs/VendorCompatToml",
+					"default": {
+						"skills": null,
+						"rules": null,
+						"agents": null,
+						"mcps": null,
+						"hooks": null,
+						"sessions": null
+					}
+				}
+			},
+			"description": "Raw `[compat]` TOML section."
+		},
+		"ConfigModelOverride": {
+			"type": "object",
+			"properties": {
+				"model": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"model_family": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"mtls_cert_dir": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Directory containing this model's mTLS client certificate and private key.\nRequires one HTTPS `base_url`; an alternate `api_base_url` is rejected.",
+					"default": null
+				},
+				"name": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"description": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"api_key": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"env_key": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/EnvKeys"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Env var name(s) for the provider key: string or array in config.toml.",
+					"default": null
+				},
+				"auth_provider": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Name of a `[auth_provider.<name>]` credential helper that mints this model's bearer token.\nStatic `api_key` / `env_key` win when both are set.",
+					"default": null
+				},
+				"model_provider": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"api_base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"max_completion_tokens": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"default": null
+				},
+				"temperature": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				},
+				"top_p": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				},
+				"api_backend": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ApiBackend"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"extra_headers": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"default": {}
+				},
+				"query_params": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"default": {}
+				},
+				"env_http_headers": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"default": {}
+				},
+				"context_window": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"max_request_bytes": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 1,
+					"default": null
+				},
+				"auto_compact_threshold_percent": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint8",
+					"minimum": 0,
+					"maximum": 255,
+					"description": "Per-model auto-compact threshold override (0-100) from `[model.<id>]`.\nRead directly by `resolve_auto_compact_threshold_percent`.\nIntentionally NOT merged into `ModelInfo.auto_compact_threshold_percent` so the resolver can keep user-per-model distinct from GB-per-model.",
+					"default": null
+				},
+				"system_prompt_label": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Per-model system-prompt identity; not merged into `ModelInfo` (tiered resolve).",
+					"default": null
+				},
+				"use_concise": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"agent_type": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"inference_idle_timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"max_retries": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"default": null
+				},
+				"rate_limit_retry_threshold": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"default": null
+				},
+				"subagent_rate_limit_max_attempts": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"default": null
+				},
+				"hidden": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"supported_in_api": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"reasoning_effort": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ReasoningEffort"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"supports_reasoning_effort": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"reasoning_efforts": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ReasoningEffortOption"
+					},
+					"default": []
+				},
+				"supports_backend_search": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"compactions_remaining": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/CompactionsRemaining"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Aliases must be registered in `config_model_override_parse::ALIASES`; serde rejects a table that contains both spellings otherwise.",
+					"default": null
+				},
+				"compaction_at_tokens": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/CompactionAtTokens"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"show_model_fingerprint": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"stream_tool_calls": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"strict_message_schema": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Opt this model into strict message-schema handling: omit `model_id`/`reasoning_content` from replayed Chat Completions messages for providers that reject unknown message properties.",
+					"default": null
+				},
+				"pricing": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ModelPricing"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"min_output_tokens_per_sec": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "double",
+					"default": null
+				},
+				"ttft_timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"extra_body": {
+					"type": "object",
+					"additionalProperties": true,
+					"description": "Extra top-level fields merged into every request body for this model.",
+					"default": {}
+				},
+				"pricing_lookup_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Suppress the modelinfo price.",
+					"default": null
+				},
+				"reasoning_summary": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ReasoningSummary"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				}
+			},
+			"description": "A `[model.foo]` entry from config.toml, parsed directly from raw TOML (bypassing deep merge).\nScalar fields are `Option` so absent means \"inherit from defaults/prefetched\".\nThe collection fields (`extra_headers`, `reasoning_efforts`) merge only when non-empty and so cannot express \"override to empty.\""
+		},
+		"ConsentAnswer": {
+			"type": "object",
+			"properties": {
+				"version": {
+					"type": "integer",
+					"format": "int32",
+					"description": "Highest version answered for this notice on this machine.",
+					"default": 0
+				},
+				"account": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Account the answer belongs to, so a second user on this machine is still asked."
+				},
+				"acked": {
+					"type": "boolean",
+					"description": "`true` once the server accepted the record; the local answer is what gates the prompt."
+				}
+			},
+			"description": "One notice's answer, under `[consent.answers.<notice id>]`."
+		},
+		"ConsentConfig": {
+			"type": "object",
+			"properties": {
+				"answers": {
+					"type": "object",
+					"additionalProperties": {
+						"$ref": "#/$defs/ConsentAnswer"
+					},
+					"description": "One entry per notice id, so two notices at once cannot overwrite each other's answers."
+				}
+			}
+		},
+		"ContextWindowSource": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "loaded",
+					"description": "The window the loaded instance is running at."
+				},
+				{
+					"type": "string",
+					"const": "max",
+					"description": "The model's own maximum, whatever it is loaded at."
+				}
+			],
+			"description": "Which of a local runtime's windows reaches the catalog."
+		},
+		"ContextualHints": {
+			"type": "object",
+			"properties": {
+				"undo": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Undo tip (Ctrl+Z after a substantial draft wipe)."
+				},
+				"plan_mode": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Plan-mode nudge (typing a planning keyword)."
+				},
+				"image_input": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Clipboard-image input tip."
+				},
+				"send_now": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Send-now tip after queuing a mid-turn follow-up."
+				},
+				"small_screen": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Small-screen tip (`/compact-mode` hint on smallish terminals)."
+				},
+				"word_select": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Word-select tip after double-clicking scrollback while Text selection is still fold/nav (`flash` / `hold`)."
+				},
+				"export_copy": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Export/copy tip after three nearby drag-copies."
+				},
+				"ssh_wrap": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "SSH wrap session-load tip (recommend `grok wrap ssh` when the session runs over SSH without an OSC 52 sink)."
+				}
+			},
+			"description": "User-config opt-outs for the per-tip contextual hints, serialized as `[ui.contextual_hints]`.\nPer-field `None` means \"inherit remote/default\"; `Some(bool)` is a user-explicit choice (needed so the resolver can let it beat the remote tier)."
+		},
+		"ConversationGroupId": {
+			"type": "string",
+			"description": "Stable identifier shared by every model request in one root conversation tree."
+		},
+		"CursorWorkerConfig": {
+			"type": "object",
+			"properties": {
+				"auto_start": {
+					"type": "boolean",
+					"description": "Register the worker when the leader starts.",
+					"default": false
+				},
+				"name": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Display name for this worker; the hostname when `None`."
+				},
+				"worker_dirs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Absolute repository directories offered to claimed agents; the first is the registered\nworking directory.",
+					"default": []
+				},
+				"max_agents": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Cap on concurrently claimed agents; `None` is uncapped."
+				},
+				"any_repo": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Also register the any-repo door, which clones whatever repository a claimed agent brings.\nOpt-in: only `Some(true)` plans it, alone or beside the bound door. `None` and\n`Some(false)` never plan it."
+				},
+				"hub_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Hub base URL for the worker session; derived from the leader's hub URL when `None`."
+				},
+				"rewrite_shell_output": {
+					"type": "boolean",
+					"description": "Rewrite worktree and snapshot paths in shell output back to the registered directory.",
+					"default": true
+				}
+			}
+		},
+		"DiagnosticsConfig": {
+			"type": "object",
+			"properties": {
+				"crash_handler": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				}
+			}
+		},
+		"DisplayRefreshSettings": {
+			"type": "object",
+			"properties": {
+				"probe_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Probe the primary display's Hz once per process. `Some(false)` is a kill-switch."
+				},
+				"auto_cadence_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Derive paint/scroll cadence from a successful in-band probe (default off)."
+				},
+				"floor_ms": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Lower clamp for auto-derived ms (default 8)."
+				},
+				"ceiling_ms": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Upper clamp for auto-derived ms (default 16)."
+				},
+				"min_hz": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Minimum accepted probe Hz for auto-cadence (default 55)."
+				},
+				"max_hz": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Maximum accepted probe Hz for auto-cadence (default 165)."
+				}
+			},
+			"additionalProperties": true,
+			"description": "Display-refresh probe and auto-cadence settings: one struct for local `[ui.display_refresh]`, remote `display_refresh`, and `UiConfig`.\nEach field deserializes tolerantly (wrong types become `None`); unknown keys land in [`Self::extra`] so a settings save cannot drop future knobs.\n`resolve_display_refresh` resolves it.\nClient defaults: probe on, auto on, floor 8 ms, ceiling 16 ms, Hz band 55 to 240."
+		},
+		"DoomLoopRecoveryPolicy": {
+			"type": "object",
+			"properties": {
+				"max_threshold": {
+					"type": "integer",
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Act only on `tail_repetition:{t}@thinking` triggers with `t` at or below this value.\nLower thresholds indicate tighter, more confident loops.",
+					"default": 64
+				},
+				"max_retries": {
+					"type": "integer",
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Resample budget per turn before accepting the response as-is.",
+					"default": 2
+				},
+				"window_tokens": {
+					"type": "integer",
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Detector window sent as the value of [`DOOM_LOOP_CHECK_HEADER`].",
+					"default": 1024
+				}
+			},
+			"description": "The resolver returns `None` when the check is disabled: absence IS the off state, so there is no separate enabled flag\nto keep in sync. When present on `SamplerConfig`, the sampler both sends the opt-in request header and parses the\nreported triggers. The tunables are consumed by the recovery decision logic."
+		},
+		"DoomLoopRecoverySettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Send the `x-grok-doom-loop-check` header, parse the reported triggers, and resample confident loops.\n`Some(false)` is a kill-switch; absent uses the client default (on)."
+				},
+				"max_threshold": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Highest `tail_repetition` threshold considered confident."
+				},
+				"max_retries": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -1,
+							"maximum": 4294967294
+						},
+						{
+							"type": "string",
+							"enum": [
+								"unlimited"
+							]
+						}
+					],
+					"description": "Resample budget per turn. `-1` or `\"unlimited\"` never runs out."
+				},
+				"window_tokens": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Detector window sent as the value of `x-grok-doom-loop-check` (honored in 512..=4096, otherwise 4096; absent uses the client default, 1024)."
+				}
+			},
+			"description": "Doom-loop recovery settings: one struct serves both the local `[doom_loop_recovery]` TOML table and the remote `doom_loop_recovery` JSON object.\nEvery field is `Option` with a per-field default, so a partial object parses and unknown future keys are ignored.\nUnset fields fall through per-field in `resolve_doom_loop_recovery`: env, then TOML, then remote, then default.\nThe namespace is distinct from the removed legacy `doom_loop_*` keys."
+		},
+		"EndpointsConfig": {
+			"type": "object",
+			"properties": {
+				"cli_chat_proxy_base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "cli chat proxy base URL. `None` = unset, and every URL derived from it is blank."
+				},
+				"xai_api_base_url": {
+					"type": "string",
+					"description": "Base URL for the public xAI API. Blank unless configured.",
+					"default": ""
+				},
+				"allowed_endpoints": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "The only endpoints a model request may reach. Empty allows none. `GROK_ALLOWED_ENDPOINTS` adds to it."
+				},
+				"alpha_test_key": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Optional extra access-header value."
+				},
+				"models_base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `GROK_MODELS_BASE_URL`. Enables custom endpoint mode.\nList URL defaults to `{models_base_url}/models`."
+				},
+				"models_list_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `GROK_MODELS_LIST_URL`. Overrides the default `{base}/models` list URL."
+				},
+				"feedback_base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `GROK_FEEDBACK_BASE_URL`. Where feedback submissions go."
+				},
+				"trace_upload_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `GROK_TRACE_UPLOAD_URL`. Where trace uploads go."
+				},
+				"managed_config_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `GROK_MANAGED_CONFIG_URL`. Override the managed config endpoint.\nDefaults to `{proxy_url()}/deployment/config`."
+				},
+				"otel_exporter_otlp_endpoint": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `OTEL_EXPORTER_OTLP_ENDPOINT`. OTLP collector base; `/v1/traces` is appended.\nLegacy repoint of the INTERNAL trace pipeline, deprecated in favor of `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`.\nIgnored by the internal pipeline when `GROK_EXTERNAL_OTEL` is set (the standard `OTEL_*` vars then route the external stream only)."
+				},
+				"otel_exporter_otlp_traces_endpoint": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`.\nFull traces endpoint, used verbatim; overrides `otel_exporter_otlp_endpoint`.\nSame legacy/deprecation semantics as `otel_exporter_otlp_endpoint`."
+				},
+				"otel_exporter_otlp_headers": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `OTEL_EXPORTER_OTLP_HEADERS`. `k=v,k2=v2`; merged onto export headers.\nSame legacy/deprecation semantics as `otel_exporter_otlp_endpoint`."
+				},
+				"grok_internal_otlp_traces_endpoint": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`. Full INTERNAL traces endpoint, used verbatim.\nDev/debug repoint of the internal span firehose (replaces the legacy `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` behavior).\nUsed by local-ic-testing / internal dev flows. Wins over the legacy `OTEL_*` vars."
+				},
+				"grok_internal_otlp_headers": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `GROK_INTERNAL_OTLP_HEADERS`.\n`k=v,k2=v2` extra headers for the internal export (debug).\nWins over the legacy `OTEL_EXPORTER_OTLP_HEADERS`."
+				},
+				"otel_traces_exporter": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Env: `OTEL_TRACES_EXPORTER`. `otlp` (default) or `none` to disable spans."
+				},
+				"otel_traces_export_interval": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Env: `OTEL_BSP_SCHEDULE_DELAY` (OTel) or `OTEL_TRACES_EXPORT_INTERVAL` (Claude alias).\nBatch flush interval (ms)."
+				},
+				"otel_exporter_otlp_timeout": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Env: `OTEL_EXPORTER_OTLP_TIMEOUT`. Export HTTP timeout (ms)."
+				},
+				"management_api_key": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Read by `load_management_api_key_sync()`. Declared for `serde_ignored`."
+				}
+			},
+			"description": "Configuration for API endpoints."
+		},
+		"EnvKeys": {
+			"anyOf": [
+				{
+					"type": "string"
+				},
+				{
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			],
+			"description": "One or more environment variable names that may hold a model API key.\nSerde `untagged`: accepts a string or an array in TOML/JSON.\nAt resolve time the **first set, non-blank** value wins (e.g. SSH `AcceptEnv LC_*` forwarding of the Bottlerocket token)."
+		},
+		"Features": {
+			"type": "object",
+			"properties": {
+				"support_permission": {
+					"type": "boolean",
+					"description": "when set, the agent may ask permission for tool executions",
+					"default": false
+				},
+				"telemetry": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/TelemetryMode"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "`None` defers to remote settings / default (off)."
+				},
+				"codebase_indexing": {
+					"$ref": "#/$defs/CodebaseIndexingSetting",
+					"description": "Codebase graph indexing for go-to-definition/references.\nAccepts: true | false | [\"glob\", \"!negative-glob\", ...]\nDefault: true (index any git repo). Patterns can explicitly match non-git directories.",
+					"default": true
+				},
+				"non_git_warning": {
+					"type": "boolean",
+					"description": "Show a blocking warning when Grok starts outside a Git repository. Default: false. Used as the local fallback when the `non_git_warning` remote settings flag in `grok_build_settings` is absent.\nWhen the remote flag is present it takes precedence: `Some(false)` from remote settings overrides `true` here.",
+					"default": false
+				},
+				"managed_config": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Managed config fetching (managed_config.toml and requirements.toml).\n`None` defers to env / default (true)."
+				},
+				"title_refresh": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Early-session auto-title refresh. `None` defers to `resolve_title_refresh`."
+				},
+				"image_gen": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "`image_gen` / `/imagine`. `None` defers to env / remote / default (`true`)."
+				},
+				"video_gen": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Video tools / `/imagine-video`. `None` defers to env / remote / default (`true`)."
+				},
+				"image_gen_model_override": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`image_gen` Imagine model override.\n`None`/empty defers to remote settings (`image_gen_model_override`) / env / default (`grok-imagine-image-quality`)."
+				},
+				"image_edit_model_override": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"compaction_mode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`summary` | `transcript` | `segments` (default).\n`None` defers to CLI / env (`GROK_COMPACTION_MODE`).\nParsed via `CompactionMode::parse`."
+				},
+				"compaction_detail": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`none` | `minimal` | `balanced` | `verbose` (default).\n`None` defers to env (`GROK_COMPACTION_DETAIL`).\nThe `segments` verbatim detail level."
+				},
+				"compaction_tool_choice": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"mcp_liveness_watchers": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Per-`Ready`-client transport-liveness pollers and the session-actor `StatusDispatcher`. When `true` (default), each successfully-handshaken MCP client gets a poller.\nThe poller detects rmcp service-loop termination and pushes `example.invalid/mcp/server_status` updates to the client.\nWhen `false`, neither watchers nor the dispatcher are spawned, useful as an emergency kill switch for the rollout. `None` defers to env / default (true). Not read through this struct: the live resolver re-reads the `[features]` key out-of-band from raw TOML in `util::config::resolve::mcp`. Declared so `serde_ignored` does not report it as an unrecognized key."
+				},
+				"mcp_auto_restart": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Bounded stdio auto-restart task. When `true`, the session-actor `StatusDispatcher` reacts to `TransportClosed` / `HandshakeFailed` events on stdio MCP servers.\nIt schedules up to 3 respawn attempts with `[1s, 4s, 16s]` backoff. HTTP / HttpAuth servers are NOT auto-restarted (their existing `reset_transport` path covers the recovery).\nNot read through this struct: the live resolver re-reads the `[features]` key out-of-band from raw TOML in `util::config::resolve::mcp`. Declared so `serde_ignored` does not report it as an unrecognized key."
+				},
+				"turn_transient_retry": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Transient turn-retry kill switch (`None` means on).\nThe resolver reads raw TOML; declared only so `serde_ignored` allows the key."
+				},
+				"mcp_push_server_status": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Pager-side subscription to the `example.invalid/mcp/server_status` push. Not read through this struct. The pager-side gate (`acp_handler::push_server_status_enabled`) uses an **env-only** OnceLock cache.\nThe `[features]` key itself is honoured out-of-band, re-read from raw TOML in `util::config::resolve::mcp`. This field is declared so `serde_ignored` does not report the key as unrecognized.\nPractical consequence: setting `[features] mcp_push_server_status = false` in `~/.grok/config.toml` will NOT disable the pager's subscription on a freshly-launched process. To disable the pager subscription, set `GROK_MCP_PUSH_SERVER_STATUS=0` in the env before launch."
+				},
+				"mcp_recursive_config_watch": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Whether the leader's `ConfigFileWatcher` adds the two narrow non-recursive watches for `<cwd>/` and `<cwd>/.grok/`. The only way to pick up a project-config edit is then the user-triggered refresh button.\nThe watches are **always non-recursive**; the name follows the convention for the rollout-gate flag. The name is a documented misnomer: it gates the existence of the **cwd** watches, NOT their recursion mode.\nNot read through this struct: the live resolver re-reads the `[features]` key out-of-band from raw TOML in `util::config::resolve::mcp`. Declared so `serde_ignored` does not report it as an unrecognized key."
+				},
+				"session_search": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_SESSION_SEARCH`."
+				},
+				"lsp_tools": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_LSP_TOOLS`."
+				},
+				"web_fetch": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_WEB_FETCH`."
+				},
+				"session_recap": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_SESSION_RECAP`."
+				},
+				"ask_user_question": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_ASK_USER_QUESTION`."
+				},
+				"voice_mode": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_VOICE_MODE`."
+				},
+				"write_file": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_WRITE_FILE`."
+				},
+				"feedback": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_FEEDBACK_ENABLED`."
+				},
+				"feedback_trace_card": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_FEEDBACK_TRACE_CARD`."
+				},
+				"turn_summary": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_TURN_SUMMARY`."
+				},
+				"cancel_rewind": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_CANCEL_REWIND`."
+				},
+				"compaction_verbatim_input": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_COMPACTION_VERBATIM_INPUT`."
+				},
+				"two_pass_compaction": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_TWO_PASS_COMPACTION`."
+				},
+				"backend_tools": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_BACKEND_SEARCH`."
+				},
+				"auto_wake": {
+					"type": "boolean",
+					"description": "Default on. Environment: `GROK_AUTO_WAKE`."
+				},
+				"subagent_worktree_snapshot": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_SUBAGENT_WORKTREE_SNAPSHOT`."
+				},
+				"subagent_model_inheritance": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_SUBAGENT_MODEL_INHERITANCE`."
+				},
+				"active_agent_messages": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_ACTIVE_AGENT_MESSAGES`."
+				},
+				"dock": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_DOCK`."
+				},
+				"terminal_theme": {
+					"type": "boolean",
+					"description": "Default off. Environment: `GROK_TERMINAL_THEME`."
+				},
+				"campaigns": {
+					"type": "boolean"
+				},
+				"remember_mode": {
+					"type": "boolean"
+				},
+				"remote_fetch": {
+					"type": "boolean"
+				},
+				"zdr_access_enabled": {
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": true
+		},
+		"FeedbackConfig": {
+			"type": "object",
+			"properties": {
+				"user": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/FeedbackUserConfig"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"description": "Feedback submission configuration (`[feedback]` in config.toml)."
+		},
+		"FeedbackUserConfig": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Sources tried in order for the name.\n`os_user` yields the OS user name; any other entry is a literal (`$VAR` expanded at load).",
+					"default": []
+				},
+				"email": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Sources tried in order for the email.\n`git_email` yields the global git email; any other entry is a literal (`$VAR` expanded at load) needing `@`.",
+					"default": []
+				},
+				"email_domain": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Fallback domain for `<name>@<domain>` when no `email` source resolves."
+				},
+				"command": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Optional `sh -c` script printing `{\"name\",\"email\"}` JSON; its fields win over the lists above, with per-field fallback.\nTrusted config tiers only."
+				}
+			},
+			"description": "Self-reported feedback author identity (never used for authorization).\nMerged only from trusted config tiers, so a cloned repo can't inject the `command` escape hatch."
+		},
+		"FileToolset": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "standard",
+					"description": "Standard toolset: read_file, search_replace, grep."
+				},
+				{
+					"type": "string",
+					"const": "hashline",
+					"description": "Hashline toolset: hashline_read, hashline_edit, hashline_grep."
+				}
+			]
+		},
+		"ForceLoginTeam": {
+			"anyOf": [
+				{
+					"type": "string",
+					"description": "The only allowed team."
+				},
+				{
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Allowed teams; an empty list fails closed."
+				}
+			],
+			"description": "Team login restriction. TOML string or array; an empty array fails closed."
+		},
+		"GoalConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"classifier_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"planner_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"summary_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"use_current_model_only": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"follow_remote_role_models": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Opt in to remote-pushed role model pins."
+				},
+				"verifier_count": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"classifier_max_runs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"strategist_every": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"reverify_after": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0
+				},
+				"planner_model": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/GoalRoleModel"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"strategist_model": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/GoalRoleModel"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"skeptic_models": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/GoalRoleModel"
+					}
+				}
+			},
+			"description": "`[goal]` section: the canonical home for `/goal` configuration.\nField names mirror the remote `goal_*` keys with the prefix dropped, so config and remote stay 1:1.\nPer-key precedence is env > this config > remote > default."
+		},
+		"GoalRoleModel": {
+			"type": "object",
+			"properties": {
+				"model": {
+					"type": "string",
+					"description": "Model id, e.g. \"grok-4\". It resolves against available models at spawn time; unknown or unauthorized fails open to the current model."
+				},
+				"agent_type": {
+					"type": "string",
+					"description": "Harness `agent_type` (e.g. \"cursor\", \"grok-build-plan\") whose `AgentDefinition` decides the role subagent's harness flavor.\nThe flavor (system prompt and cursor-vs-grok-build toolset) applies regardless of the session or parent agent.\nIt is resolved by name (project/plugin/builtin lookup, then re-flavored by the subagent toolset resolver).\nThe main session's env/ACP/strict-harness precedence chain plays no part.\nIt is not a subagent type: the role always spawns `general-purpose`, so the harness only re-flavors that toolset.\nAn `agent_type` that doesn't resolve, or whose role toolset can't satisfy the role, fails open to the session model and harness before commit.\nOne that resolves to a strict harness whose flavor the subagent system can't represent fails open the same way."
+				}
+			},
+			"description": "A model and the harness whose system prompt and toolset flavor that model must run against.\nThe pair is the atomic configurable unit because a model is only guaranteed to work with a compatible harness (cursor vs grok-build)."
+		},
+		"HarnessConfig": {
+			"type": "object",
+			"properties": {
+				"wait_for_uploads": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"block_for_upload": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Deprecated; a real field, not a serde alias, because an alias rejects configs setting both keys."
+				},
+				"upload_flush_timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Budget (seconds) for the turn-end upload flush when `wait_for_uploads` is active.\nDefault 60."
+				}
+			}
+		},
+		"HashlineSchemeConfig": {
+			"type": "object",
+			"properties": {
+				"scheme": {
+					"type": "string",
+					"description": "Active scheme: `\"chunk\"` (default) or `\"content_only\"`.",
+					"default": "chunk"
+				},
+				"hash_len": {
+					"type": "integer",
+					"format": "uint",
+					"minimum": 0,
+					"description": "Anchor hash length in characters (1-4).",
+					"default": 3
+				},
+				"chunk_size": {
+					"type": "integer",
+					"format": "uint",
+					"minimum": 0,
+					"description": "Chunk size for the chunk scheme.",
+					"default": 8
+				}
+			},
+			"description": "Configurable in `config.json` under `tools.hashline`:"
+		},
+		"HubConfig": {
+			"type": "object",
+			"properties": {
+				"url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Hub WebSocket URL (`ws://` or `wss://`) used as the leader default for\n`grok workspace start` when the CLI does not pass `--hub-url`."
+				}
+			},
+			"description": "`[hub]` section from config.toml.\nOptional default Computer Hub URL for **workspace provider** exposure (`grok workspace` / leader `with_default_hub_url`).\nDoes **not** enable agent-side harness/client connections or alter local session behavior."
+		},
+		"LongReasoningReminderSettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Mid-turn reminder to reason briefly after a long hidden-reasoning call; default off."
+				},
+				"tokens": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Reasoning tokens in one model call that count as a long step; absent uses the client default (1000)."
+				},
+				"delay": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Model calls to wait after the long step before the reminder is injected; absent uses the client default (1)."
+				}
+			},
+			"description": "Shared shape of the `[long_reasoning_reminder]` TOML table and the remote `long_reasoning_reminder` object; unset fields fall through per field."
+		},
+		"ManagedMcpsConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"default": true
+				},
+				"gateway_tools_enabled": {
+					"type": "boolean",
+					"default": false
+				}
+			},
+			"description": "Managed MCP connector fetching config (`mcp.managed` in config.json).\n\nSee [`Self::resolve`] for full priority chain."
+		},
+		"MarketplaceConfig": {
+			"type": "object",
+			"properties": {
+				"sources": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/MarketplaceSourceEntry"
+					},
+					"description": "`[[marketplace.sources]]` entries."
+				},
+				"official_marketplace_auto_installed": {
+					"description": "Written/read out-of-band by `extensions::marketplace`, opaque so a wrong-typed value can't fail load.",
+					"default": null
+				},
+				"plugin_cta_marketplace": {
+					"description": "Read out-of-band by the pager (plugin-CTA marketplace override), opaque so a wrong-typed value can't fail load.",
+					"default": null
+				},
+				"default_skills_installs_purged": {
+					"description": "Written/read out-of-band by `extensions::marketplace`, opaque so a wrong-typed value can't fail load.",
+					"default": null
+				}
+			},
+			"description": "`[marketplace]` section from config.toml (plugin marketplace sources)."
+		},
+		"MarketplaceSourceEntry": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"path": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"git": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"branch": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				}
+			},
+			"description": "A single `[[marketplace.sources]]` entry."
+		},
+		"MatcherGroup": {
+			"type": "object",
+			"properties": {
+				"matcher": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"hooks": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/RawHandler"
+					}
+				}
+			}
+		},
+		"McpJsonOAuthBlock": {
+			"type": "object",
+			"properties": {
+				"clientId": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"clientSecretEnvVar": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"scopes": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					}
+				},
+				"callbackPort": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535
+				}
+			}
+		},
+		"McpServerConfig": {
+			"type": "object",
+			"description": "A stdio server sets `command`; a streamable HTTP server sets `url` (`urlTemplate` and `url_template` are other spellings).",
+			"properties": {
+				"command": {
+					"type": "string"
+				},
+				"args": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"env": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					}
+				},
+				"cwd": {
+					"type": "string"
+				},
+				"url": {
+					"type": "string"
+				},
+				"urlTemplate": {
+					"type": "string"
+				},
+				"url_template": {
+					"type": "string"
+				},
+				"type": {
+					"type": "string"
+				},
+				"bearer_token_env_var": {
+					"description": "Name of the environment variable to read and set for `Authorization: Bearer <token>`.",
+					"type": "string"
+				},
+				"headers": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					}
+				},
+				"oauth_client_id": {
+					"type": "string"
+				},
+				"oauth_client_secret_env_var": {
+					"type": "string"
+				},
+				"oauth_scopes": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"enabled": {
+					"type": "boolean",
+					"default": true
+				},
+				"oauth": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/McpJsonOAuthBlock"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"setup": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/McpSetupConfig"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"startup_timeout_sec": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0
+				},
+				"tool_timeout_sec": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0
+				},
+				"tool_timeouts": {
+					"type": [
+						"object",
+						"null"
+					],
+					"additionalProperties": {
+						"type": "integer",
+						"format": "uint64",
+						"minimum": 0
+					},
+					"description": "Per-tool timeout overrides in seconds: `{ \"create_issue\" = 120, \"search\" = 30 }`.\nTools not listed here fall back to `tool_timeout_sec`."
+				},
+				"expose_image_base64": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Also keep the raw base64 in tool-result text so agents can forward bytes via path-based tools (`base64 -d > /tmp/x.png && send_file ...`).\nIt roughly doubles the tokens per image. `_meta.mcpConfig.<server>.exposeImageBase64` overrides it."
+				}
+			}
+		},
+		"McpSetupConfig": {
+			"type": "object",
+			"properties": {
+				"fields": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/McpSetupField"
+					},
+					"default": []
+				},
+				"variables": {
+					"type": [
+						"object",
+						"null"
+					],
+					"additionalProperties": {
+						"$ref": "#/$defs/McpSetupDerivedValue"
+					},
+					"default": null
+				},
+				"values": {
+					"type": [
+						"object",
+						"null"
+					],
+					"additionalProperties": {
+						"$ref": "#/$defs/McpSetupDerivedValue"
+					},
+					"default": null
+				}
+			},
+			"description": "A server's setup prompt: the fields it asks for, and the answers already\nrecorded under them."
+		},
+		"McpSetupDerivedValue": {
+			"type": "object",
+			"properties": {
+				"from": {
+					"type": "string"
+				},
+				"map": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					}
+				}
+			}
+		},
+		"McpSetupField": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string"
+				},
+				"label": {
+					"type": "string"
+				},
+				"type": {
+					"$ref": "#/$defs/McpSetupFieldType"
+				},
+				"options": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/McpSetupOption"
+					},
+					"default": []
+				},
+				"default": {
+					"type": [
+						"string",
+						"null"
+					]
+				}
+			}
+		},
+		"McpSetupFieldType": {
+			"type": "string",
+			"enum": [
+				"select"
+			]
+		},
+		"McpSetupOption": {
+			"type": "object",
+			"properties": {
+				"label": {
+					"type": "string"
+				},
+				"value": {
+					"type": "string"
+				}
+			}
+		},
+		"MediaGenToolsConfig": {
+			"type": "object",
+			"properties": {
+				"max_parallel_image_gen_calls": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "int64",
+					"default": null
+				},
+				"max_parallel_video_gen_calls": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "int64",
+					"default": null
+				}
+			},
+			"description": "Raw `[tools.media_gen]` counts; resolve via [`ToolsConfig::resolve_max_parallel_image_gen_calls`]."
+		},
+		"MemoryDreamSettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"min_hours": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"min_sessions": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"stale_lock_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"check_interval_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				}
+			}
+		},
+		"MemoryEmbeddingSettings": {
+			"type": "object",
+			"properties": {
+				"provider": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"model": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"dimensions": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				}
+			}
+		},
+		"MemoryFlushSettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"soft_threshold_tokens": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"flush_model": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"max_flush_write_chars": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"idle_timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"semantic_dedup_threshold": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "double",
+					"default": null
+				}
+			}
+		},
+		"MemoryGcSettings": {
+			"type": "object",
+			"properties": {
+				"max_age_days": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				}
+			}
+		},
+		"MemoryIndexSettings": {
+			"type": "object",
+			"properties": {
+				"max_chunk_chars": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"chunk_overlap_chars": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				}
+			}
+		},
+		"MemoryInitialInjectionSettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"min_score": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				}
+			}
+		},
+		"MemorySearchSettings": {
+			"type": "object",
+			"properties": {
+				"max_results": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"min_score": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				},
+				"vector_weight": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				},
+				"text_weight": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				},
+				"recency_decay": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				},
+				"temporal_decay": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/TemporalDecaySettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"mmr": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MmrSettings"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"source_weights": {
+					"type": [
+						"object",
+						"null"
+					],
+					"additionalProperties": {
+						"type": "number",
+						"format": "float"
+					},
+					"default": null
+				}
+			}
+		},
+		"MemorySessionSettings": {
+			"type": "object",
+			"properties": {
+				"save_on_end": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				}
+			}
+		},
+		"MemoryV2Rollout": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "off",
+					"description": "Disable every v2 read, capture, Dream, and write path."
+				},
+				{
+					"type": "string",
+					"const": "record_only",
+					"description": "Persist extracted observations without exposing them in manifests or Dream."
+				},
+				{
+					"type": "string",
+					"const": "shadow",
+					"description": "Evaluate capture and Dream plans without committing curated topic changes."
+				},
+				{
+					"type": "string",
+					"const": "active",
+					"description": "Enable the complete v2 pipeline."
+				}
+			],
+			"description": "Session-pinned memory-v2 rollout stage."
+		},
+		"MemoryV2Settings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Selects the memory-v2 implementation. Absent means on. False falls\nthrough to legacy memory enablement.",
+					"default": null
+				},
+				"capture_status_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Emit capture lifecycle notifications to the user interface. Intended\nonly for debugging; telemetry and tracing are always recorded.",
+					"default": null
+				},
+				"rollout": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/MemoryV2Rollout"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"capture_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"automatic_dream_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"manual_dream_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"file_writes_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"archived_retention_days": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"job_retention_days": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				}
+			},
+			"description": "Raw top-level `[memory_v2]` enablement, rollout, kill-switch, and retention\nsettings."
+		},
+		"MemoryWatcherSettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"stale_claim_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "int64",
+					"default": null
+				}
+			}
+		},
+		"MmrSettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"lambda": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "double",
+					"default": null
+				}
+			}
+		},
+		"ModelGroupConfig": {
+			"type": "object",
+			"properties": {
+				"label": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Settings-modal row label."
+				},
+				"description": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Settings-modal row description."
+				},
+				"members": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"description": "Slot ids in the group. `members = []` unrolls a compiled group."
+				},
+				"model": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "The model every member uses. Unset means each member falls back on its own."
+				}
+			},
+			"description": "One `[model_groups.<id>]` table. Every field is optional. On a compiled\ngroup, a field that is not set keeps the compiled value."
+		},
+		"ModelPricing": {
+			"type": "object",
+			"properties": {
+				"input_per_token_usd": {
+					"type": "number",
+					"format": "double",
+					"description": "USD per uncached input token (the portion of `prompt_tokens` that is neither a cache read nor a cache write).",
+					"default": 0.0
+				},
+				"output_per_token_usd": {
+					"type": "number",
+					"format": "double",
+					"description": "USD per output token (`completion_tokens`, which includes reasoning).",
+					"default": 0.0
+				},
+				"cached_read_per_token_usd": {
+					"type": "number",
+					"format": "double",
+					"description": "USD per cached-read input token (the `cached_prompt_tokens` subset of `prompt_tokens`).",
+					"default": 0.0
+				},
+				"cache_creation_per_token_usd": {
+					"type": "number",
+					"format": "double",
+					"description": "USD per cache-creation input token (the `cache_creation_prompt_tokens` subset of `prompt_tokens`).",
+					"default": 0.0
+				}
+			},
+			"description": "Per-token USD pricing for a model. That model is used to **derive** cost\nfrom token counts when a backend reports usage but no `cost_in_usd_ticks`\non the wire (e.g. OpenAI-compatible / third-party endpoints)."
+		},
+		"ModelProviderConfig": {
+			"type": "object",
+			"properties": {
+				"base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"api_base_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"env_key": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/EnvKeys"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"api_key": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"api_backend": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ApiBackend"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"extra_headers": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "Static request headers.",
+					"default": {}
+				},
+				"query_params": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "Query parameters folded into every request URL; inherited per key.",
+					"default": {}
+				},
+				"env_http_headers": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "Header name to environment variable; inherited per key, resolved at client build.",
+					"default": {}
+				},
+				"auth_provider": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"auth": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/AuthProviderConfig"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"context_window": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"temperature": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				},
+				"top_p": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				},
+				"max_completion_tokens": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"default": null
+				},
+				"max_retries": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"default": null
+				},
+				"inference_idle_timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"stream_tool_calls": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"strict_message_schema": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"reasoning_effort": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ReasoningEffort"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"supports_reasoning_effort": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"reasoning_efforts": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ReasoningEffortOption"
+					},
+					"default": []
+				},
+				"supports_backend_search": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"show_model_fingerprint": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"use_concise": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"agent_type": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"hidden": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"supported_in_api": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"compactions_remaining": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/CompactionsRemaining"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"compaction_at_tokens": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/CompactionAtTokens"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"pricing": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ModelPricing"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"min_output_tokens_per_sec": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "double",
+					"default": null
+				},
+				"ttft_timeout_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"default": null
+				},
+				"models_autodetect": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Ask this provider for its model list. Default on.",
+					"default": null
+				},
+				"models_list_url": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Listing URL for the discovery above. Unset asks `<base_url>/models`.",
+					"default": null
+				},
+				"favorite_models": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Globs that mark a discovered or configured model of this provider as a favorite.",
+					"default": []
+				},
+				"models_list_dialect": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ModelsListDialect"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Which shape this provider's model listing has. The default reads an OpenAI `{data: [...]}` body.",
+					"default": null
+				},
+				"context_window_source": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ContextWindowSource"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"description": "Which window a local dialect reports: the one the runner is LOADED at, or the model's maximum.",
+					"default": null
+				},
+				"pricing_lookup_enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Suppress the modelinfo price lookup for this provider's models.",
+					"default": null
+				},
+				"extra_body": {
+					"type": "object",
+					"additionalProperties": true,
+					"description": "Extra top-level fields merged into every request body this provider serves.",
+					"default": {}
+				},
+				"max_request_bytes": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 1,
+					"description": "Request-body cap of this endpoint; inherited by models that set none of their own.",
+					"default": null
+				}
+			},
+			"description": "A `[model_providers.<id>]` block: the settings every model behind one\nendpoint shares. A `[model.<id>]` that names the provider with\n`model_provider = \"<id>\"` inherits each field it leaves unset, so an\nendpoint, a credential. A wire format or a header set is written once.\nEvery field here is also a `[model.<id>]` field, and the model's own value\nalways wins. What is NOT here is what identifies one model: `model`,\n`name`, `description`."
+		},
+		"ModelsListDialect": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "openai",
+					"description": "`GET <base>/models` answering `{ \"data\": [...] }`."
+				},
+				{
+					"type": "string",
+					"const": "ollama",
+					"description": "`GET <host>/api/tags`, with `POST <host>/api/show` per model for the window and capabilities and `GET <host>/api/ps` for residency."
+				},
+				{
+					"type": "string",
+					"const": "lmstudio",
+					"description": "`GET <host>/api/v1/models`, which carries all of them in one answer."
+				}
+			],
+			"description": "The shape of a provider's model listing."
+		},
+		"OAuth2ProviderConfig": {
+			"type": "object",
+			"properties": {
+				"issuer": {
+					"type": "string"
+				},
+				"client_id": {
+					"type": "string"
+				},
+				"scopes": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"openid",
+						"profile",
+						"email",
+						"offline_access",
+						"grok-cli:access",
+						"api:access",
+						"conversations:read",
+						"conversations:write",
+						"workspaces:read",
+						"workspaces:write"
+					]
+				},
+				"principal_type": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"principal_id": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"referrer": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Client-supplied referrer so analytics can attribute OAuth usage."
+				}
+			},
+			"description": "OAuth2 provider configuration (`GROK_OAUTH2_ISSUER` / `GROK_OAUTH2_CLIENT_ID`).\n\nUses the standard OAuth 2.1 authorization code flow with PKCE via [`OidcAuthConfig`]."
+		},
+		"OidcAuthConfig": {
+			"type": "object",
+			"properties": {
+				"issuer": {
+					"type": "string"
+				},
+				"client_id": {
+					"type": "string"
+				},
+				"scopes": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [
+						"openid",
+						"profile",
+						"email",
+						"offline_access",
+						"api:access"
+					]
+				},
+				"audience": {
+					"type": [
+						"string",
+						"null"
+					]
+				}
+			},
+			"description": "Customer OIDC Identity Provider configuration (`[grok_com_config.oidc]`)."
+		},
+		"OriginClientInfo": {
+			"type": "object",
+			"properties": {
+				"product": {
+					"type": "string"
+				},
+				"version": {
+					"type": [
+						"string",
+						"null"
+					]
+				}
+			},
+			"description": "Identity of the client that originated the request, used for User-Agent rendering.\nThe shell layer composes this with platform info into a final UA string."
+		},
+		"OutputRateFloorPolicy": {
+			"type": "object",
+			"properties": {
+				"min_tokens_per_sec": {
+					"type": "number",
+					"format": "double",
+					"description": "Reissue below this many output tokens per second. Zero disables the gate.",
+					"default": 0.0
+				},
+				"window_secs": {
+					"type": "integer",
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Trailing window the rate is measured over.",
+					"default": 10
+				},
+				"sustained_secs": {
+					"type": "integer",
+					"format": "uint64",
+					"minimum": 0,
+					"description": "How long the measured rate must stay under the floor before the request is reissued.",
+					"default": 10
+				},
+				"max_retries": {
+					"type": "integer",
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Reissue budget per model call before the response is accepted at whatever rate it runs at.",
+					"default": 2
+				},
+				"ttft_timeout_secs": {
+					"type": "integer",
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Reissue an attempt that has produced no output this many seconds after the request was sent.",
+					"default": 0
+				}
+			},
+			"description": "A floor on output tokens/sec. A response whose rate stays under it for\n`sustained_secs` is abandoned and reissued."
+		},
+		"OutputRateFloorSettings": {
+			"type": "object",
+			"properties": {
+				"window_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Trailing window the rate is measured over, in seconds."
+				},
+				"max_retries": {
+					"anyOf": [
+						{
+							"type": "integer",
+							"minimum": -1,
+							"maximum": 4294967294
+						},
+						{
+							"type": "string",
+							"enum": [
+								"unlimited"
+							]
+						}
+					],
+					"description": "Reissue budget per model call. `-1` or `\"unlimited\"` never runs out."
+				}
+			},
+			"description": "Advanced knobs for the output-rate floor: the `[output_rate_floor]` TOML\ntable. Every field is `Option` so a partial table never fails the parse\nand each key falls through to the client default on its own."
+		},
+		"PathsConfig": {
+			"type": "object",
+			"properties": {
+				"extra_skill_dirs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Additional directories to scan for skills (each contains `<skill>/SKILL.md`).\n`/import-claude` writes this. `list_skills_with_plugins` does not read it.\nExtra injection dirs belong in `[skills] paths`. ACP `example.invalid/skills/list` may\nstill show these dirs as source folders.",
+					"default": []
+				},
+				"extra_rule_dirs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Additional directories to scan for rules (each contains `*.md`).",
+					"default": []
+				}
+			},
+			"description": "Example:\n```toml\n[paths]\nextra_skill_dirs = [\"~/.claude/skills\", \"/path/to/.claude/skills\"]\nextra_rule_dirs = [\"~/.claude/rules\"]\n```"
+		},
+		"PermissionKnownKeys": {
+			"type": "object",
+			"properties": {
+				"allow": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"description": "Compact rule arrays (`parse_toml_permission_section`).",
+					"default": null
+				},
+				"deny": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"default": null
+				},
+				"ask": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"default": null
+				},
+				"rules": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "object",
+						"additionalProperties": true
+					},
+					"description": "Verbose `[[permission.rules]]` form.",
+					"default": null
+				}
+			},
+			"description": "`[permission]` known keys, declared for the unrecognized-key scan only; consumed out-of-band.\nKeys stay typed so a typo (e.g. `denny`) still warns."
+		},
+		"PersonaIOField": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"name": {
+					"type": "string",
+					"description": "Short identifier (e.g. \"review_file\", \"summary_file\")."
+				},
+				"io_type": {
+					"type": "string",
+					"description": "What kind of artifact: \"file\", \"text\", etc.",
+					"default": "file"
+				},
+				"description": {
+					"type": "string",
+					"description": "Human-readable description shown in the task tool help."
+				}
+			},
+			"description": "A declared input or output for a persona.\n\nEnables the parent agent to discover what a persona needs (inputs) and produces (outputs) without hardcoding the persona's protocol."
+		},
+		"PluginsConfig": {
+			"type": "object",
+			"properties": {
+				"paths": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Additional plugin directory paths to load.",
+					"default": []
+				},
+				"disabled": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Plugin IDs or names to disable.\nDisabled plugins are discovered but their components are not loaded into the session.",
+					"default": []
+				},
+				"enabled": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Plugin IDs or names to explicitly enable.\nUsed for project-scope plugins, which are disabled by default; adding a plugin here overrides that default.",
+					"default": []
+				}
+			},
+			"description": "Plugin system configuration from `[plugins]` section in config.toml."
+		},
+		"PreferredAuthMethod": {
+			"oneOf": [
+				{
+					"type": "string",
+					"const": "api_key",
+					"description": "`XAI_API_KEY` / auth.json `xai::api_key` / per-model BYOK (`xai.api_key`)."
+				},
+				{
+					"type": "string",
+					"const": "oidc",
+					"description": "OIDC / OAuth2 session (`cached_token`, interactive `grok.invalid` / `oidc`, including devbox-minted OIDC)."
+				}
+			],
+			"description": "Pins automatic auth to one method via `[auth] preferred_method`.\nWhen the pinned method is unavailable, auth fails rather than falling back; unset keeps the multi-method fallback.\nOnly the config file can set this, not remote settings or env."
+		},
+		"PricingConfig": {
+			"type": "object",
+			"properties": {
+				"lookup_enabled": {
+					"type": "boolean",
+					"description": "Set false to keep the cost indicator off the network. A session then prices only the models config prices.",
+					"default": true
+				},
+				"catalog_url": {
+					"type": "string",
+					"description": "Base URL of the catalog. The per-model document is read from `<catalog_url>/v1/models/<model id>`.",
+					"default": "https://modelinfo.pazer.ai"
+				}
+			},
+			"description": "`[pricing]` in config.toml."
+		},
+		"PromptSuggestConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"max_output_tokens": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"default": null
+				},
+				"temperature": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "float",
+					"default": null
+				},
+				"reasoning_effort": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/ReasoningEffort"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				}
+			}
+		},
+		"PruningSettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"keep_last_n_turns": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"soft_trim_threshold": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"soft_trim_head": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"soft_trim_tail": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				},
+				"hard_clear_age_turns": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0,
+					"default": null
+				}
+			}
+		},
+		"RawHandler": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string"
+				},
+				"command": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"url": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"timeout": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Seconds (converted to milliseconds internally)."
+				},
+				"env": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "Extra env vars, merged into [`HookSpec::extra_env`].",
+					"default": {}
+				}
+			}
+		},
+		"ReasoningEffort": {
+			"type": "string",
+			"enum": [
+				"none",
+				"minimal",
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max"
+			],
+			"description": "`None`/`Minimal` are omitted on the Anthropic Messages API."
+		},
+		"ReasoningEffortOption": {
+			"anyOf": [
+				{
+					"$ref": "#/$defs/ReasoningEffort"
+				},
+				{
+					"type": "object",
+					"properties": {
+						"value": {
+							"$ref": "#/$defs/ReasoningEffort"
+						},
+						"id": {
+							"type": [
+								"string",
+								"null"
+							]
+						},
+						"label": {
+							"type": [
+								"string",
+								"null"
+							]
+						},
+						"description": {
+							"type": [
+								"string",
+								"null"
+							]
+						},
+						"default": {
+							"type": "boolean",
+							"default": false
+						}
+					},
+					"required": [
+						"value"
+					]
+				}
+			],
+			"description": "A single selectable reasoning-effort option for a model.\n`id`/`label` are presentation and input; `value` is the canonical value sent on the wire."
+		},
+		"ReasoningSummary": {
+			"type": "string",
+			"enum": [
+				"none",
+				"auto",
+				"concise",
+				"detailed"
+			],
+			"description": "The `reasoning.summary` requested on the Responses API.\n`None` omits the field, for gateways that reject it (AWS Bedrock Mantle returns 400 for it as of 2026-09)."
+		},
+		"RelayConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				}
+			}
+		},
+		"RemoteAnnouncement": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"message": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"severity": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"title": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"cta": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/AnnouncementCta"
+						},
+						{
+							"type": "null"
+						}
+					],
+					"default": null
+				},
+				"updated_at": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"expires_at": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null
+				},
+				"dismissible": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"persistent": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				}
+			},
+			"description": "Announcement from remote settings or local override."
+		},
+		"RepoChangesDedupConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"default": true
+				},
+				"include_inline_fallback": {
+					"type": "boolean",
+					"description": "Include inline content even when references exist.",
+					"default": false
+				},
+				"max_inline_bytes": {
+					"type": "integer",
+					"format": "uint",
+					"minimum": 0,
+					"description": "Omit inline content larger than this (0 means no limit).",
+					"default": 0
+				},
+				"dedup_untracked": {
+					"type": "boolean",
+					"default": true
+				},
+				"dedup_binary": {
+					"type": "boolean",
+					"default": true
+				},
+				"untracked_max_bytes": {
+					"type": "integer",
+					"format": "uint",
+					"minimum": 0,
+					"description": "Skip untracked files larger than this (0 means no limit).",
+					"default": 0
+				},
+				"untracked_exclude_globs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": []
+				}
+			}
+		},
+		"RequestCompression": {
+			"type": "string",
+			"enum": [
+				"none",
+				"zstd"
+			],
+			"description": "Set by the shell: `Zstd` only toward the cli-chat-proxy that advertised it."
+		},
+		"S3AccessCredentials": {
+			"type": "object",
+			"properties": {
+				"access_key_id": {
+					"type": "string"
+				},
+				"secret_access_key": {
+					"type": "string"
+				}
+			}
+		},
+		"SandboxSettingsConfig": {
+			"type": "object",
+			"properties": {
+				"profile": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "\"off\", \"workspace\", \"devbox\", \"read-only\", \"strict\", or custom name."
+				},
+				"auto_allow_bash": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Skip bash permission prompts when sandbox is active."
+				}
+			},
+			"description": "`[sandbox]` section from config.toml."
+		},
+		"ShellEnvironmentPolicyInherit": {
+			"oneOf": [
+				{
+					"type": "string",
+					"enum": [
+						"all",
+						"none"
+					]
+				},
+				{
+					"type": "string",
+					"const": "core",
+					"description": "Core platform variables only (PATH, HOME, SHELL, ...)."
+				}
+			]
+		},
+		"ShellEnvironmentPolicyKnownKeys": {
+			"type": "object",
+			"properties": {
+				"inherit": {
+					"$ref": "#/$defs/ShellEnvironmentPolicyInherit"
+				},
+				"ignore_default_excludes": {
+					"type": "boolean",
+					"description": "Skip the built-in secret excludes (default `true`).",
+					"default": true
+				},
+				"exclude": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"set": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "Values inserted into the base environment before `include_only` filtering\n(an unmatched name is then dropped). These seed the base; request env\nlayered at spawn can still override them.",
+					"default": {}
+				},
+				"include_only": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"description": "`[shell_environment_policy]` known keys, for the unrecognized-key scan only.\nThe value is parsed at spawn by [`crate::util::config::resolve_shell_env_policy`].\n`Option<toml::Value>` (no `deny_unknown_fields`) keeps a typo a warning, not a load failure, like [`PermissionKnownKeys`]."
+		},
+		"SkillsConfig": {
+			"type": "object",
+			"properties": {
+				"paths": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Additional skill locations to load.\nEach entry is a `SKILL.md` file or a directory walked recursively.\nSupports `~` expansion.",
+					"default": []
+				},
+				"ignore": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Path prefixes to exclude.\nAny skill whose resolved path starts with one of these entries is filtered out.\nSupports `~` expansion.",
+					"default": []
+				},
+				"disabled": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Skill names that are disabled.\nDisabled skills remain in the list (unlike `ignore` which hides them entirely).\nThey are excluded from the system prompt and skill tool invocation.",
+					"default": []
+				},
+				"server_skill_dirs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Skill dirs the launcher injects after syncing from the server (tagged `Server` scope).",
+					"default": []
+				},
+				"bundled_skill_dirs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Skill dirs the launcher injects for skills bundled with the platform (tagged `Bundled` scope).",
+					"default": []
+				}
+			}
+		},
+		"StatusLineConfig": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"type": "string",
+					"enum": [
+						"builtin",
+						"command",
+						"disabled",
+						"off",
+						"none",
+						"hidden"
+					]
+				},
+				"command": {
+					"type": [
+						"string",
+						"null"
+					]
+				},
+				"items": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"$ref": "#/$defs/StatusLineItem"
+					}
+				},
+				"padding": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint16",
+					"minimum": 0,
+					"maximum": 65535
+				},
+				"refresh_interval": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0
+				}
+			}
+		},
+		"StatusLineItem": {
+			"type": "string",
+			"enum": [
+				"cwd",
+				"model",
+				"context",
+				"cost",
+				"turn-timer",
+				"session-name"
+			]
+		},
+		"StorageConfig": {
+			"type": "object",
+			"properties": {
+				"cleanup_ttl_days": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint32",
+					"minimum": 0,
+					"description": "Unset or `0` disables cleanup; there is no default TTL.",
+					"default": null
+				}
+			},
+			"description": "`[storage]` section from config.toml.\nRead by `resolve_cleanup_ttl_days()` in `session/persistence.rs`."
+		},
+		"SubagentPersona": {
+			"type": "object",
+			"properties": {
+				"instructions": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Inline instruction text applied as a persona layer.",
+					"default": null
+				},
+				"description": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Optional short description shown in persona summaries.\nAn empty or missing value falls back to the first paragraph of `instructions`.",
+					"default": null
+				},
+				"instructions_file": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Path to an instruction file (relative to workspace root).\nContent is loaded at spawn time and merged with `instructions`.\nIf both are set, `instructions` is prepended before file content.",
+					"default": null
+				},
+				"inputs": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PersonaIOField"
+					},
+					"description": "Declared inputs this persona expects.\nThe parent agent reads these to know what file paths or context to provide in the prompt.",
+					"default": []
+				},
+				"outputs": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PersonaIOField"
+					},
+					"description": "Declared outputs this persona produces.\nThe parent agent reads these to know what artifacts to expect and pass to the next agent.",
+					"default": []
+				},
+				"default_isolation": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Default isolation mode when this persona is used.",
+					"default": null
+				},
+				"model": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Model override when this persona is used.",
+					"default": null
+				},
+				"reasoning_effort": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Default reasoning effort for this persona (e.g. \"low\", \"medium\", \"high\").",
+					"default": null
+				}
+			},
+			"description": "A named persona/SOUL definition controlling tone, style, and behavior. Personas are referenced by name via the\n`persona` field in the task tool. Their instructions are prepended to the child's prompt as a `<persona>` XML block."
+		},
+		"SubagentRole": {
+			"type": "object",
+			"properties": {
+				"description": {
+					"type": "string",
+					"description": "Human-readable description of what this role does.",
+					"default": ""
+				},
+				"default_capability_mode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Default capability mode for agents using this role.\nOne of: \"read-only\", \"read-write\", \"execute\", \"all\".\nThis is a config default, not an argument the model passes at spawn; `general-purpose` stays `all`.",
+					"default": null
+				},
+				"model": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Model override for this role.\nIf set, agents using this role default to this model unless the spawn-time `model` override is provided.",
+					"default": null
+				},
+				"reasoning_effort": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Default reasoning effort for this role (e.g. \"low\", \"medium\", \"high\").\nCan be overridden per-spawn via `reasoning_effort` in the task tool.",
+					"default": null
+				},
+				"prompt_file": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Path to a prompt/instruction file (relative to workspace root).\nContent is loaded at spawn time and prepended to the child's prompt as a `<role-instructions>` block.",
+					"default": null
+				},
+				"default_isolation": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "Default isolation mode (\"none\" or \"worktree\").",
+					"default": null
+				}
+			},
+			"description": "A declarative subagent role definition from config. Roles provide named presets that callers can reference via the\n`subagent_type` field in the task tool. Each role can specify a default capability mode, model override, and custom\nprompt."
+		},
+		"SubagentsConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Whether subagent support is enabled. Defaults to `true`, so a `[subagents]` table that only tunes limits, models, or toggles keeps subagents on.",
+					"default": true
+				},
+				"max_depth": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "int64",
+					"description": "Raw `[subagents] max_depth` (i64 so out-of-range parses; clamped to at least 1 at resolve).",
+					"default": null
+				},
+				"max_concurrent": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "int64",
+					"default": null
+				},
+				"sampling_limit": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "int64",
+					"description": "Concurrent subagent turn-sampling limit. See [`Self::resolve_sampling_limit`].",
+					"default": null
+				},
+				"limit_behavior": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "`\"queue\"` or `\"fail\"`.",
+					"default": null
+				},
+				"workflow_max_concurrent": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "int64",
+					"default": null
+				},
+				"usage_frequency": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "How strongly system-prompt/tool wording nudges the model toward spawning subagents.",
+					"default": null
+				},
+				"models": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					},
+					"description": "Per-subagent model ID overrides.\nKeys are agent names, values are model IDs that must exist in the available models registry.\nParsed from `agents.subagents.models` in config.json.",
+					"default": {}
+				},
+				"toggle": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "boolean"
+					},
+					"description": "Per-subagent enable/disable toggles.\nKeys are agent names, values are booleans.\nOmitted agents default to enabled (`true`).",
+					"default": {}
+				},
+				"roles": {
+					"type": "object",
+					"additionalProperties": {
+						"$ref": "#/$defs/SubagentRole"
+					},
+					"description": "Declarative subagent role definitions."
+				},
+				"personas": {
+					"type": "object",
+					"additionalProperties": {
+						"$ref": "#/$defs/SubagentPersona"
+					},
+					"description": "Named persona/SOUL definitions."
+				}
+			},
+			"description": "Configuration for subagent (task tool) support.\nParsed from the `agents.subagents` object of `~/.grok/config.json` or `.grok/config.json`.\nEnabled by default; can be disabled via the `GROK_SUBAGENTS=0` env var or `agents.subagents.enabled` set to `false` in config.json."
+		},
+		"TelemetryMode": {
+			"description": "`true`, `false`, or `\"session_metrics\"`. An unknown string is read as disabled.",
+			"anyOf": [
+				{
+					"type": "boolean"
+				},
+				{
+					"type": "string",
+					"enum": [
+						"session_metrics",
+						"session-metrics",
+						"true",
+						"false",
+						"enabled",
+						"disabled",
+						"full",
+						"on",
+						"off",
+						"yes",
+						"no",
+						"1",
+						"0"
+					]
+				}
+			]
+		},
+		"TemporalDecaySettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null
+				},
+				"half_life_days": {
+					"type": [
+						"number",
+						"null"
+					],
+					"format": "double",
+					"default": null
+				}
+			}
+		},
+		"TipsOverride": {
+			"type": "object",
+			"properties": {
+				"tips": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": []
+				},
+				"exclude_default": {
+					"type": "boolean",
+					"description": "When true, drop remote/default tips entirely.",
+					"default": false
+				}
+			},
+			"description": "Local `[tips]` config section."
+		},
+		"VendorCompatToml": {
+			"type": "object",
+			"properties": {
+				"skills": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"rules": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"agents": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"mcps": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"hooks": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"sessions": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				}
+			},
+			"description": "Raw per-vendor compat cells parsed from `[compat.<vendor>]` TOML.\n\nResolution order is env override, this value, remote flag, default ON."
+		},
+		"VoiceConfig": {
+			"type": "object",
+			"properties": {
+				"api_base": {
+					"type": "string",
+					"description": "HTTPS API root (or bare host).\nBases may end in `/v1` or `/xai/v1`; the default STT path de-duplicates a leading `v1/` so both become `…/v1/stt`.",
+					"default": ""
+				},
+				"stt_ws_path": {
+					"type": "string",
+					"default": "/v1/stt"
+				},
+				"language": {
+					"type": "string",
+					"description": "Preferred STT language (catalog code or `\"auto\"`). [`crate::language_for_api`] resolves it at connect time.",
+					"default": "en"
+				},
+				"sample_rate": {
+					"type": "integer",
+					"format": "uint32",
+					"minimum": 0,
+					"default": 16000
+				},
+				"stt_endpointing_ms": {
+					"type": "integer",
+					"format": "uint32",
+					"minimum": 0,
+					"default": 400
+				},
+				"stt_interim_results": {
+					"type": "boolean",
+					"default": true
+				}
+			},
+			"description": "Prefer https `api_base` (same shape as chat). [`Self::stt_ws_url`] derives `wss://`. When `[voice].api_base` is unset,\ninherits `[endpoints].xai_api_base_url` so enterprise proxies need no second knob."
+		},
+		"WebFetchToolConfig": {
+			"type": "object",
+			"properties": {
+				"proxy_endpoint": {
+					"type": [
+						"string",
+						"null"
+					],
+					"description": "When set, all HTTP requests are routed through this URL.\nResolution: TOML > `GROK_WEB_FETCH_PROXY` env > remote settings > None.",
+					"default": null
+				},
+				"allowed_domains": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"description": "When set, it overrides the built-in default allowlist.\nAn explicit empty list blocks all fetches.\nResolution: TOML > remote settings > built-in defaults.",
+					"default": null
+				},
+				"allow_local": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Allow fetches to explicit loopback hosts only (`localhost` / `127.0.0.0/8` / `::1`).\nPrivate and metadata ranges stay blocked.\nResolution: TOML > `GROK_WEB_FETCH_ALLOW_LOCAL` env > false.",
+					"default": null
+				}
+			},
+			"description": "User configurable settings for the web_fetch tool (`[toolset.web_fetch]`)."
+		},
+		"WorkflowsConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				}
+			}
+		},
+		"WorktreeAutoGcSettings": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "`Some(false)` is a kill-switch; absent defaults to on (an env kill still applies)."
+				},
+				"max_age_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Age cutoff in seconds, on platforms where expiring by age is allowed; the resolver clamps it."
+				},
+				"min_interval_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Minimum seconds between successful auto-GC runs; the resolver clamps it."
+				},
+				"dry_run": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "When set, counts worktrees old enough to delete without deleting them."
+				},
+				"include_orphan_snapshots": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Only has an effect on Linux."
+				},
+				"max_age_by_kind": {
+					"type": [
+						"object",
+						"null"
+					],
+					"additionalProperties": {
+						"$ref": "#/$defs/WorktreeKindMaxAge"
+					},
+					"description": "Per-kind max ages (`session`, `ab`, `pool`, `fork`, `manual`, `subagent`), each seconds or `\"never\"`.\nAbsent keys use the defaults; the client default keeps `manual` at never.\nRemote may set `manual` to a finite TTL, and local TOML can restore `\"never\"`.\nUnknown kind keys are ignored at resolve time."
+				},
+				"include_rebuild": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"description": "Also rebuild discovery and scrub grok's stale `.git/worktrees/` entries (default off)."
+				},
+				"rebuild_min_interval_secs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint64",
+					"minimum": 0,
+					"description": "Seconds between rebuilds, throttled independently of GC; absent means 24h. It is clamped like `min_interval_secs`."
+				}
+			},
+			"description": "Policy from the local `[worktree.auto_gc]` table or the remote `worktree_auto_gc` object.\nEach field deserializes tolerantly, so one bad key cannot drop a sibling kill-switch."
+		},
+		"WorktreeKindMaxAge": {
+			"description": "Seconds, or \"never\".",
+			"anyOf": [
+				{
+					"type": "integer",
+					"minimum": 0
+				},
+				{
+					"type": "string",
+					"pattern": "^([Nn][Ee][Vv][Ee][Rr]|[0-9]+)$"
+				}
+			]
+		},
+		"WorktreePoolConfig": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"pool_size": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0
+				},
+				"file_count_threshold": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0
+				},
+				"parallelism": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"format": "uint",
+					"minimum": 0
+				}
+			},
+			"description": "Deprecated `[worktree_pool]` section. The pre-warmed worktree pool was deleted (never wired into production).\nThe section is still parsed so existing user configs don't trip unknown-key warnings."
+		},
+		"ZdrVideoOutputS3Config": {
+			"type": "object",
+			"properties": {
+				"bucket": {
+					"type": "string"
+				},
+				"endpoint": {
+					"type": "string"
+				},
+				"region": {
+					"type": "string"
+				},
+				"key_prefix": {
+					"type": "string",
+					"default": "grok-videos/"
+				},
+				"expires_secs": {
+					"type": "integer",
+					"format": "uint64",
+					"minimum": 0,
+					"default": 900
+				},
+				"read_write": {
+					"$ref": "#/$defs/S3AccessCredentials"
+				},
+				"read_only": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/S3AccessCredentials"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			}
+		}
+	}
+}

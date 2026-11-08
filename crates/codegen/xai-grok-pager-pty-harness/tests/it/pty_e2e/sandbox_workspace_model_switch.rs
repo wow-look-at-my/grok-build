@@ -2,8 +2,8 @@
 #[allow(unused_imports)]
 use super::common::*;
 
-/// **Settings changed under `--sandbox=workspace` save to `config.toml`.**
-/// `workspace` write-denies `$GROK_HOME/config.toml` for this process, so grok
+/// **Settings changed under `--sandbox=workspace` save to `config.json`.**
+/// `workspace` write-denies `$GROK_HOME/config.json` for this process, so grok
 /// writes it through the unsandboxed host worker that started before
 /// confinement. `/model` must switch live, on the wire and on disk, and a
 /// permission-mode change must save too. See docs/user-guide/18-sandbox.md,
@@ -88,14 +88,14 @@ async fn sandbox_workspace_model_switch_switches_on_wire_and_persists() {
         "the request after the switch must carry the switched model\nbodies: {bodies:#?}"
     );
 
-    let config_path = content.sandbox().grok_home().join("config.toml");
+    let config_path = content.sandbox().grok_home().join("config.json");
     wait_for_config(&config_path, "model-b");
 
     // A setting that grants capability saves the same way: grok writes its own config.
     harness
         .inject_keys(b"/always-approve\r")
         .expect("type always-approve");
-    wait_for_config(&config_path, "permission_mode = \"always-approve\"");
+    wait_for_config(&config_path, "\"permission_mode\": \"always-approve\"");
     assert!(
         !harness.contains_text("Could not save"),
         "workspace confinement must not fail the permission-mode persist\nscreen:\n{}",
@@ -105,7 +105,7 @@ async fn sandbox_workspace_model_switch_switches_on_wire_and_persists() {
     harness.quit().expect("clean quit");
 }
 
-/// Wait until `config.toml` holds `needle`, which only the host worker can write there.
+/// Wait until `config.json` holds `needle`, which only the host worker can write there.
 fn wait_for_config(config_path: &std::path::Path, needle: &str) {
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -115,7 +115,7 @@ fn wait_for_config(config_path: &std::path::Path, needle: &str) {
         }
         assert!(
             Instant::now() < deadline,
-            "`{needle}` must reach config.toml through the host worker\nconfig.toml:\n{config}"
+            "`{needle}` must reach config.json through the host worker\nconfig.json:\n{config}"
         );
         std::thread::sleep(Duration::from_millis(100));
     }

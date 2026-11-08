@@ -4,7 +4,7 @@
 //! persistent or shared agent state but are not part of the per-turn prompt
 //! lifecycle:
 //!
-//! - `example.invalid/session/rename` rename a session locally and remote - `example.invalid/session/delete` delete a session locally and remote - `example.invalid/session/update_mcp_servers` mid-session MCP server swap. This also covers `example.invalid/session/add_local_workspace` mid-session local workspace add-only (chat). `example.invalid/session/fork` fork a session into a new one - `example.invalid/internal/reload_all_mcp_servers` config hot-reload, all sessions. `example.invalid/internal/reload_project_mcp_servers` config hot-reload, cwd-scoped - `example.invalid/internal/reload_skills` skills file watcher fan-out. `example.invalid/internal/reload_models` model list hot-reload from config.toml - `example.invalid/internal/reload_models_cache` model catalog hot-reload from disk cache. `example.invalid/internal/reload_output_rate_floor` output-rate floor hot-reload, all sessions - `example.invalid/internal/reload_thinking_summaries` thinking-summary settings hot-reload, all sessions. `example.invalid/internal/auth_cleared` auth hot-clear cleanup - `example.invalid/plugins/reload` rebuild shared plugin registry - `example.invalid/commands/list` list slash commands
+//! - `example.invalid/session/rename` rename a session locally and remote - `example.invalid/session/delete` delete a session locally and remote - `example.invalid/session/update_mcp_servers` mid-session MCP server swap. This also covers `example.invalid/session/add_local_workspace` mid-session local workspace add-only (chat). `example.invalid/session/fork` fork a session into a new one - `example.invalid/internal/reload_all_mcp_servers` config hot-reload, all sessions. `example.invalid/internal/reload_project_mcp_servers` config hot-reload, cwd-scoped - `example.invalid/internal/reload_skills` skills file watcher fan-out. `example.invalid/internal/reload_models` model list hot-reload from config.json - `example.invalid/internal/reload_models_cache` model catalog hot-reload from disk cache. `example.invalid/internal/reload_output_rate_floor` output-rate floor hot-reload, all sessions - `example.invalid/internal/reload_thinking_summaries` thinking-summary settings hot-reload, all sessions. `example.invalid/internal/auth_cleared` auth hot-clear cleanup - `example.invalid/plugins/reload` rebuild shared plugin registry - `example.invalid/commands/list` list slash commands
 
 use std::path::Path;
 use std::sync::Arc;
@@ -601,7 +601,7 @@ fn handle_reload_workflows(agent: &MvpAgent) -> ExtResult {
 // internal/reload_all_mcp_servers
 
 /// Reload MCP servers for ALL active sessions.
-/// Called by the config hot-reload watcher when `[mcp_servers]` changes in config.toml.
+/// Called by the config hot-reload watcher when `mcp.servers` changes in config.json.
 async fn handle_reload_all_mcp_servers(agent: &MvpAgent) -> ExtResult {
     let session_ids = agent.resident_ids();
 
@@ -619,7 +619,7 @@ async fn handle_reload_all_mcp_servers(agent: &MvpAgent) -> ExtResult {
         let cwd = std::path::PathBuf::from(&handle.info.cwd);
         let compat = agent.cfg.borrow().compat_resolved;
         // Re-seed the merge with the session's original client-provided MCP servers (e.g. a client session binding injected at `session/new`).
-        // `merge_managed_mcp_servers` already re-reads every disk source (config.toml, plugins, ~/.claude.json, ~/.cursor/mcp.json, .mcp.json) So passing `load_mcp_servers()` output here was redundant
+        // `merge_managed_mcp_servers` already re-reads every disk source (config.json, plugins, ~/.claude.json, ~/.cursor/mcp.json, .mcp.json) So passing `load_mcp_servers()` output here was redundant
         // It also silently dropped client servers that exist in no on-disk config, tearing them down on every config hot-reload
         if crate::session::managed_mcp::merge_and_send_managed_mcp_update(
             &handle.cmd_tx,
@@ -645,8 +645,8 @@ async fn handle_reload_all_mcp_servers(agent: &MvpAgent) -> ExtResult {
 // internal/reload_project_mcp_servers
 
 /// Reload MCP servers for sessions whose `cwd` matches (or sits beneath) the project root passed in `params.cwd`.
-/// Called by the config hot-reload watcher when `<cwd>/.grok/config.toml`, `<cwd>/.mcp.json`, or `<cwd>/.claude.json` changes. Sessions in unrelated cwds are intentionally NOT touched.
-/// That is the whole point of [`crate::config::reloader::ConfigUpdate::ProjectMcpServersChanged`] being a per-cwd variant. The legacy [`handle_reload_all_mcp_servers`] is still the fan-out for global `~/.grok/config.toml` edits.
+/// Called by the config hot-reload watcher when `<cwd>/.grok/config.json`, `<cwd>/.mcp.json`, or `<cwd>/.claude.json` changes. Sessions in unrelated cwds are intentionally NOT touched.
+/// That is the whole point of [`crate::config::reloader::ConfigUpdate::ProjectMcpServersChanged`] being a per-cwd variant. The legacy [`handle_reload_all_mcp_servers`] is still the fan-out for global `~/.grok/config.json` edits.
 async fn handle_reload_project_mcp_servers(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     #[derive(Deserialize)]
     struct Params {
@@ -762,7 +762,7 @@ fn send_reload_to_residents(
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
 
-/// Re-resolve the agent model list from config.toml. Called by the config hot-reload watcher when `[model.*]` or `[models]` changes.
+/// Re-resolve the agent model list from config.json. Called by the config hot-reload watcher when `models.definitions.*` or `models` changes.
 /// Re-reads config from disk, re-runs the `new_with_models()` resolution logic for user TOML config entries, and swaps the model list in-place.
 /// Prefetched (API) and default models are NOT re-fetched; only BYOK entries from config are updated.
 fn handle_reload_models(agent: &MvpAgent) -> ExtResult {
@@ -804,7 +804,7 @@ fn handle_reload_models(agent: &MvpAgent) -> ExtResult {
     crate::session::harness_models::mark_all_stale();
 
     let count = agent.models_manager.models().len();
-    tracing::info!(count, "model list reloaded from config.toml");
+    tracing::info!(count, "model list reloaded from config.json");
     // The return only reports a count. A failed send is already logged.
     let _ = send_reload_to_residents(agent, "context window", || {
         SessionCommand::ReloadContextWindow
@@ -818,7 +818,7 @@ fn handle_reload_models(agent: &MvpAgent) -> ExtResult {
 
 /// Hot-reload the model catalog from `~/.grok/models_cache.json` after an external write detected by the config watcher.
 /// Routed through the agent's ACP stream (injected by the `ConfigUpdate::ModelsCacheChanged` arm in `agent/app.rs`).
-/// It is not applied directly on the manager from the config-update task: stream requests are processed in order. When `config.toml` and `models_cache.json` change in the same watcher batch, this runs strictly after `reload_models`' `apply_config`. That avoids rebuilding the catalog and notifying clients mid-flight, before the new config was accepted or rejected.
+/// It is not applied directly on the manager from the config-update task: stream requests are processed in order. When `config.json` and `models_cache.json` change in the same watcher batch, this runs strictly after `reload_models`' `apply_config`. That avoids rebuilding the catalog and notifying clients mid-flight, before the new config was accepted or rejected.
 fn handle_reload_models_cache(agent: &MvpAgent) -> ExtResult {
     agent.models_manager.reload_from_disk_cache();
     agent.sync_process_static_api_key(None);

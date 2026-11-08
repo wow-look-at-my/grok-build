@@ -19,7 +19,7 @@ pub use mock_fs::MockFs;
 pub use terminal::{ExitStatus, LocalTerminalBackend};
 
 /// Per-backend enable state for the bash-harness `find`→`bfs` / `grep`→`ugrep` shadows. Resolved
-/// once by the host (config.toml `[toolset.bash]` / env / requirements) and baked into a
+/// once by the host (config.json `tools.bash` / env / requirements) and baked into a
 /// [`LocalTerminalBackend`] at creation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SearchShadowConfig {

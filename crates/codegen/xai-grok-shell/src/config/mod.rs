@@ -45,9 +45,9 @@ fn resolve_standalone_memory_mode(
     MemoryConfig::resolve(false, false, config, remote).mode
 }
 /// Configuration for subagent (task tool) support.
-/// Parsed from the `[subagents]` section of `~/.grok/config.toml` or `.grok/config.toml`.
-/// Enabled by default; can be disabled via the `GROK_SUBAGENTS=0` env var or `[subagents] enabled = false` in config.toml.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// Parsed from the `agents.subagents` object of `~/.grok/config.json` or `.grok/config.json`.
+/// Enabled by default; can be disabled via the `GROK_SUBAGENTS=0` env var or `agents.subagents.enabled` set to `false` in config.json.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SubagentsConfig {
     /// Whether subagent support is enabled. Defaults to `true`, so a `[subagents]` table that only tunes limits, models, or toggles keeps subagents on.
@@ -70,7 +70,7 @@ pub struct SubagentsConfig {
     pub usage_frequency: Option<String>,
     /// Per-subagent model ID overrides.
     /// Keys are agent names, values are model IDs that must exist in the available models registry.
-    /// Parsed from `[subagents.models]` in config.toml.
+    /// Parsed from `agents.subagents.models` in config.json.
     #[serde(default)]
     pub models: std::collections::HashMap<String, String>,
     /// Per-subagent enable/disable toggles.
@@ -103,23 +103,51 @@ impl Default for SubagentsConfig {
         }
     }
 }
+/// Lists the role or persona files in `dir`: `<name>.json`, and the legacy `<name>.toml`.
+/// A `.json` file comes before a `.toml` file of the same name, so the JSON file wins.
+fn definition_files(dir: &std::path::Path, kind: &str) -> Vec<std::path::PathBuf> {
+    if !dir.is_dir() {
+        return Vec::new();
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::debug!(error = %e, kind, "Failed to read definitions directory");
+            return Vec::new();
+        }
+    };
+    let mut files: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("json" | "toml")
+            )
+        })
+        .collect();
+    files.sort_by_key(|path| {
+        let legacy = path.extension().and_then(|e| e.to_str()) == Some("toml");
+        (path.file_stem().map(|s| s.to_os_string()), legacy)
+    });
+    files
+}
+
+/// Parses one role or persona file. The extension selects JSON or TOML.
+fn parse_definition<T: serde::de::DeserializeOwned>(
+    path: &std::path::Path,
+    content: &str,
+) -> Result<T, String> {
+    if path.extension().and_then(|e| e.to_str()) == Some("json") {
+        serde_json::from_str(content).map_err(|e| e.to_string())
+    } else {
+        toml::from_str(content).map_err(|e| e.to_string())
+    }
+}
+
 impl SubagentsConfig {
     fn discover_personas_in_dir(&mut self, dir: &std::path::Path) {
-        if !dir.is_dir() {
-            return;
-        }
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::debug!(error = %e, "Failed to read personas directory");
-                return;
-            }
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
+        for path in definition_files(dir, "personas") {
             let Some(name) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
                 continue;
             };
@@ -127,7 +155,7 @@ impl SubagentsConfig {
                 continue;
             }
             match std::fs::read_to_string(&path) {
-                Ok(content) => match toml::from_str::<SubagentPersona>(&content) {
+                Ok(content) => match parse_definition::<SubagentPersona>(&path, &content) {
                     Ok(mut persona) => {
                         persona.source_dir = path.parent().map(|p| p.to_path_buf());
                         persona.source_path = Some(path.display().to_string());
@@ -145,21 +173,7 @@ impl SubagentsConfig {
         }
     }
     fn discover_roles_in_dir(&mut self, dir: &std::path::Path) {
-        if !dir.is_dir() {
-            return;
-        }
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::debug!(error = %e, "Failed to read roles directory");
-                return;
-            }
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
+        for path in definition_files(dir, "roles") {
             let Some(name) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
                 continue;
             };
@@ -168,7 +182,7 @@ impl SubagentsConfig {
                 continue;
             }
             match std::fs::read_to_string(&path) {
-                Ok(content) => match toml::from_str::<SubagentRole>(&content) {
+                Ok(content) => match parse_definition::<SubagentRole>(&path, &content) {
                     Ok(mut role) => {
                         role.source_dir = path.parent().map(|p| p.to_path_buf());
                         tracing::debug!(role = %name, "Loaded role from file");
@@ -206,7 +220,7 @@ impl SubagentsConfig {
     pub fn get_persona(&self, name: &str) -> Option<&SubagentPersona> {
         self.personas.get(name)
     }
-    /// Discover personas from `.grok/personas/` directory. File-based personas are loaded from `{cwd}/.grok/personas/*.toml`. Each file defines a single `SubagentPersona`. The file stem becomes the persona name.
+    /// Discover personas from `.grok/personas/` directory. File-based personas are loaded from `{cwd}/.grok/personas/*.json` and the legacy `*.toml`. Each file defines a single `SubagentPersona`. The file stem becomes the persona name.
     /// Inline config takes precedence.
     pub(crate) fn discover_personas(&mut self, cwd: &std::path::Path) {
         let dir = cwd.join(".grok").join("personas");
@@ -243,8 +257,8 @@ impl SubagentsConfig {
         }
         errors
     }
-    /// Discover roles from `.grok/roles/` directory and merge with inline config. File-based roles are loaded from `{cwd}/.grok/roles/*.toml`.
-    /// Each file defines a single `SubagentRole` (same schema as inline `[subagents.roles.*]`). The file stem becomes the role name. Precedence: inline config roles override file-based roles with the same name.
+    /// Discover roles from `.grok/roles/` directory and merge with inline
+    /// config.
     pub(crate) fn discover_roles(&mut self, cwd: &std::path::Path) {
         let roles_dir = cwd.join(".grok").join("roles");
         self.discover_roles_in_dir(&roles_dir);
@@ -472,10 +486,10 @@ impl SubagentsConfig {
         (project.roles, project.personas)
     }
 }
-/// Managed MCP connector fetching config (`[managed_mcps]` in config.toml).
+/// Managed MCP connector fetching config (`mcp.managed` in config.json).
 ///
 /// See [`Self::resolve`] for full priority chain.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ManagedMcpsConfig {
     pub enabled: bool,
@@ -552,14 +566,14 @@ impl Default for ModelOverrideConfig {
         }
     }
 }
-/// Resolved model pin for the next-prompt suggestion call (tab-autocomplete ghost text). Precedence is `env > config.toml > remote`; see [`ModelOverrideConfig::resolve`].
+/// Resolved model pin for the next-prompt suggestion call (tab-autocomplete ghost text). Precedence is `env > config.json > remote`; see [`ModelOverrideConfig::resolve`].
 /// Unlike the other auxiliary overrides this does not collapse to a plain model string. The consumer (`handle_suggest_prompt`) must distinguish an explicit pin from "unpinned".
 /// When unpinned, the client hint wins; otherwise reasoning-disabled sampling uses the alias and reasoning-enabled sampling uses the session model. Every effective model is catalog-guarded. A model missing from the shell's catalog skips the per-turn suggestion request instead of firing one that must fail.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum PromptSuggestModelPin {
     /// `GROK_PROMPT_SUGGESTIONS_MODEL`: catalog-guarded explicit pin.
     Env(String),
-    /// `[models] prompt_suggestion` in config.toml, or the remote `prompt_suggestion_model` (remote settings); catalog-guarded.
+    /// `models.prompt_suggestion` in config.json, or the remote `prompt_suggestion_model` (remote settings); catalog-guarded.
     Pinned(String),
     /// No explicit pin: the client hint, then the built-in default apply (both catalog-guarded).
     #[default]
@@ -577,7 +591,7 @@ fn non_empty_model_override(value: Option<&str>) -> Option<String> {
     })
 }
 impl ModelOverrideConfig {
-    /// CLI flag > env var > config.toml > remote settings > compiled default. `image_description` and `session_summary` always resolve to `Some(_)` (default `grok-4.6`), never the session model.
+    /// CLI flag > env var > config.json > remote settings > compiled default. `image_description` and `session_summary` always resolve to `Some(_)` (default `grok-4.6`), never the session model.
     /// `prompt_suggestion` resolves to a [`PromptSuggestModelPin`] instead of a model string. It has no CLI flag; the default and the catalog guard live at the consumer, `handle_suggest_prompt`.
     pub(crate) fn resolve(
         cli_web_search_model: Option<&str>,
@@ -679,7 +693,7 @@ impl ModelOverrideConfig {
     }
 }
 /// Raw `[tools.media_gen]` counts; resolve via [`ToolsConfig::resolve_max_parallel_image_gen_calls`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct MediaGenToolsConfig {
     #[serde(default)]
@@ -687,9 +701,9 @@ pub struct MediaGenToolsConfig {
     #[serde(default)]
     pub max_parallel_video_gen_calls: Option<i64>,
 }
-/// Tool behavior configuration (`[tools]` in config.toml).
+/// Tool behavior configuration (`tools` in config.json).
 /// Controls cross-cutting tool behavior such as `.gitignore` filtering.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ToolsConfig {
     /// When `true`, all tools (including `read_file`) filter gitignored files.
@@ -1650,7 +1664,7 @@ pub fn apply_sandbox(
     }
 }
 pub use xai_grok_workspace::project_config::find_project_configs;
-/// Resolve the effective `[plugins]` config for a working directory the same way a session does at reload time: global/user config ([`load_effective_config`]), plus every ancestor project `.grok/config.toml` ([`find_project_configs`], extending `paths` and `disabled`), plus the imported `enabledPlugins` merge.
+/// Resolve the effective `extensions.plugins` config for a working directory the same way a session does at reload time: global/user config ([`load_effective_config`]), plus every ancestor project `.grok/config.json` ([`find_project_configs`], extending `paths` and `disabled`), plus the imported `enabledPlugins` merge.
 /// All three must discover the same plugins for a given cwd.
 /// Centralizing it prevents the paths/disabled/discovered-command drift those callers would otherwise accumulate.
 pub(crate) fn resolve_effective_plugins_config(
@@ -1680,31 +1694,24 @@ pub(crate) fn resolve_effective_plugins_config(
     plugins_cfg
 }
 pub use xai_grok_config::{deep_merge_toml, expand_env_vars_in_string, expand_env_vars_in_toml};
-/// Locked read-modify-write of `~/.grok/config.toml`: the whole window runs under the config-init
+/// Locked read-modify-write of `~/.grok/config.json`: the whole window runs under the config-init
 /// flock and lands via atomic replace; unchanged configs skip the write.
 fn update_config_toml_locked(
     grok_home: &std::path::Path,
     mutate: impl FnOnce(&mut toml::value::Table) -> Result<bool, Box<dyn std::error::Error>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = grok_home.join("config.toml");
     let _flock = crate::util::config::acquire_init_lock(grok_home)?;
+    let config_path = xai_grok_config::user_config_file(grok_home)?;
     let (dest, content) = crate::util::config::read_follow_bound(&config_path)?;
-    let mut config: toml::Value = if content.is_empty() {
-        toml::Value::Table(toml::map::Map::new())
-    } else {
-        toml::from_str(&content).map_err(|e| format!("failed to parse config.toml: {e}"))?
-    };
+    let mut config = crate::util::config::parse_existing_config(dest.as_path(), &content)?;
     let table = config
         .as_table_mut()
-        .ok_or("config.toml root is not a table")?;
+        .ok_or("config.json root is not an object")?;
     if !mutate(table)? {
         return Ok(());
     }
-    crate::util::config::atomic_write_follow_bound(
-        &config_path,
-        &dest,
-        &toml::to_string_pretty(&config)?,
-    )?;
+    let text = crate::util::config::render_existing_config(dest.as_path(), &config)?;
+    crate::util::config::atomic_write_follow_bound(&config_path, &dest, &text)?;
     Ok(())
 }
 /// Append `value` to the `[plugins].<list>` string array (created if missing)
@@ -1718,12 +1725,12 @@ fn plugins_list_add(
         .entry("plugins".to_string())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .ok_or("[plugins] is not a table")?;
+        .ok_or("`extensions.plugins` is not an object")?;
     let entries = plugins
         .entry(list.to_string())
         .or_insert_with(|| toml::Value::Array(vec![]))
         .as_array_mut()
-        .ok_or_else(|| format!("[plugins].{list} is not an array"))?;
+        .ok_or_else(|| format!("`extensions.plugins.{list}` is not an array"))?;
     if entries
         .iter()
         .any(|v| v.as_str().is_some_and(|s| s == value))
@@ -1785,14 +1792,14 @@ pub(crate) async fn run_set_plugin_enabled(plugin_id: String, enabled: bool) -> 
     })
     .await
 }
-/// Add a plugin path to `[plugins].paths` in `~/.grok/config.toml`.
+/// Add a plugin path to `extensions.plugins.paths` in `~/.grok/config.json`.
 /// Deduplicates: if the path is already present, this is a no-op.
 pub(crate) fn add_plugin_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
     update_config_toml_locked(&crate::util::grok_home::grok_home(), |table| {
         plugins_list_add(table, "paths", path)
     })
 }
-/// Remove a plugin path from `[plugins].paths` in `~/.grok/config.toml`.
+/// Remove a plugin path from `extensions.plugins.paths`.
 ///
 /// If the path is not found, this is a no-op (returns Ok).
 pub(crate) fn remove_plugin_path(path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1800,14 +1807,14 @@ pub(crate) fn remove_plugin_path(path: &str) -> Result<(), Box<dyn std::error::E
         Ok(plugins_list_remove(table, "paths", path))
     })
 }
-/// Add a plugin to `[plugins].disabled` in `~/.grok/config.toml`.
+/// Add a plugin to `extensions.plugins.disabled` in `~/.grok/config.json`.
 /// Deduplicates: if already present, this is a no-op.
 pub fn add_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
     update_config_toml_locked(&crate::util::grok_home::grok_home(), |table| {
         plugins_list_add(table, "disabled", plugin_id)
     })
 }
-/// Remove a plugin from `[plugins].disabled` in `~/.grok/config.toml`.
+/// Remove a plugin from `extensions.plugins.disabled`.
 ///
 /// If the plugin is not in the disabled list, this is a no-op.
 pub fn remove_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1820,15 +1827,15 @@ pub fn remove_disabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error:
 pub async fn run_add_dismissed_plugin_cta(plugin_id: String) -> Result<(), String> {
     config_write_blocking(move || add_dismissed_plugin_cta(&plugin_id)).await
 }
-/// Add a plugin to `[plugin_cta].dismissed` in `~/.grok/config.toml`.
+/// Add a plugin to `plugin_cta.dismissed` in `~/.grok/config.json`.
 /// Creates the `[plugin_cta]` section and `dismissed` array if they don't exist.
 /// Deduplicates: if already present, this is a no-op.
 pub fn add_dismissed_plugin_cta(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
+    let config_path = crate::util::config::user_config_path();
     add_dismissed_plugin_cta_to_file(plugin_id, &config_path)
 }
 /// Add a dismissed plugin CTA to a specific config file (path-parameterized for tests); runs
-/// under the config-init flock with an atomic replace like every config.toml writer.
+/// runs under the config-init flock with an atomic replace like every config.json writer.
 #[doc(hidden)]
 pub fn add_dismissed_plugin_cta_to_file(
     plugin_id: &str,
@@ -1836,7 +1843,7 @@ pub fn add_dismissed_plugin_cta_to_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let grok_home = config_path
         .parent()
-        .ok_or("config.toml path has no parent directory")?;
+        .ok_or("config.json path has no parent directory")?;
     update_config_toml_locked(grok_home, |table| {
         let plugin_cta = table
             .entry("plugin_cta".to_string())
@@ -1858,11 +1865,11 @@ pub fn add_dismissed_plugin_cta_to_file(
         Ok(true)
     })
 }
-/// All plugin ids listed in `[plugin_cta].dismissed` in `~/.grok/config.toml`.
+/// All plugin ids listed in `plugin_cta.dismissed` in `~/.grok/config.json`.
 ///
 /// Read once (e.g. on catalog load) and cached so the matched-debounce recompute doesn't parse the config from disk on the UI thread.
 pub fn dismissed_plugin_ctas() -> std::collections::HashSet<String> {
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
+    let config_path = crate::util::config::user_config_path();
     dismissed_plugin_ctas_in_file(&config_path)
 }
 /// Read the dismissed plugin CTA set from a specific config file (for tests).
@@ -1870,10 +1877,7 @@ pub fn dismissed_plugin_ctas() -> std::collections::HashSet<String> {
 pub fn dismissed_plugin_ctas_in_file(
     config_path: &std::path::Path,
 ) -> std::collections::HashSet<String> {
-    let Ok(content) = std::fs::read_to_string(config_path) else {
-        return std::collections::HashSet::new();
-    };
-    let Ok(config) = toml::from_str::<toml::Value>(&content) else {
+    let Ok(config) = xai_grok_config::load_toml_file(config_path) else {
         return std::collections::HashSet::new();
     };
     config
@@ -1954,7 +1958,7 @@ pub(crate) fn auto_enable_plugins(names: &[String]) -> Vec<String> {
     }
     warnings
 }
-/// Add a plugin to `[plugins].enabled` in `~/.grok/config.toml`.
+/// Add a plugin to `extensions.plugins.enabled` in `~/.grok/config.json`.
 /// Used for project-scope plugins that are disabled by default.
 /// Deduplicates: if already present, this is a no-op.
 pub fn add_enabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -1962,7 +1966,7 @@ pub fn add_enabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Err
         plugins_list_add(table, "enabled", plugin_id)
     })
 }
-/// Remove a plugin from `[plugins].enabled` in `~/.grok/config.toml`.
+/// Remove a plugin from `extensions.plugins.enabled` in `~/.grok/config.json`.
 pub fn remove_enabled_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
     update_config_toml_locked(&crate::util::grok_home::grok_home(), |table| {
         Ok(plugins_list_remove(table, "enabled", plugin_id))

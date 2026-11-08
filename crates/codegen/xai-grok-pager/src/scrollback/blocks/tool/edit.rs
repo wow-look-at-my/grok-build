@@ -1216,7 +1216,7 @@ impl EditToolCallBlock {
         let tool_cfg = &ctx.appearance.scrollback.blocks.tool;
         let muted_collapsed = ctx.mute_when_collapsed(tool_cfg.muted_collapsed);
         let dim_details = tool_cfg.dim_details;
-        // Explicit pager.toml value wins; unset follows the shell-owned flag.
+        // Explicit pager.json value wins; unset follows the shell-owned flag.
         let show_summary =
             edit_cfg.effective_line_summary(crate::appearance::cache::load_collapsed_edit_blocks());
 

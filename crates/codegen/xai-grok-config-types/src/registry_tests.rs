@@ -204,7 +204,7 @@ fn off_reason_names_the_setting_that_turned_it_off() {
                 config: Some(false),
                 ..Default::default()
             },
-            "the session_search key in config.toml or managed_config.toml",
+            "the session_search key in config.json or managed_config.toml",
         ),
         (
             FeatureSources {

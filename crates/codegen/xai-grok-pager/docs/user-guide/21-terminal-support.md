@@ -147,12 +147,7 @@ through `grok wrap`, for example `grok wrap ssh user@host`. The same command can
 wrap container and pod shells. It also restores terminal modes after a dropped
 connection.
 
-When an SSH session is not using `grok wrap`, Grok shows the one-time tip
-“Run `/doctor` for details and fixes.” The tip stops appearing after the session
-is launched through wrap. Turn it off with `/settings` → **Show contextual
-hints** → **SSH wrap**, or set `ssh_wrap = false` under
-`[ui.contextual_hints]` in `$GROK_HOME/config.toml`. This setting does not hide
-the Doctor recommendation.
+Grok shows the one-time tip “Run `/doctor` for details and fixes.” The tip stops appearing after the session is launched through wrap. Do this when an SSH session is not using `grok wrap`. Turn it off with `/settings` → **Show contextual hints** → **SSH wrap**, or set `ssh_wrap` to `false` under `ui.contextual_hints` in `$GROK_HOME/config.json`. This setting does not hide the Doctor recommendation.
 
 For repeated SSH use, Doctor offers `grok doctor fix ssh-wrap`. It also shows
 the one-off command, the file that would change, and the cases where the alias
@@ -169,10 +164,7 @@ check.
 
 ### Fullscreen or alternate screen does not activate
 
-Zellij and tmux control mode can limit the alternate screen. Grok normally uses
-inline mode in those environments. Run `/doctor` to see the detected condition.
-You can configure `[terminal] alt_screen` in `~/.grok/pager.toml`, or run
-`grok --no-alt-screen` to confirm inline mode works.
+Zellij and tmux control mode can limit the alternate screen. Grok normally uses inline mode in those environments. Run `/doctor` to see the detected condition. You can configure `terminal.alt_screen` in `~/.grok/pager.json`, or run `grok --no-alt-screen` to confirm inline mode works.
 
 ### Zellij keybindings interfere with Grok
 
@@ -260,17 +252,19 @@ Many terminals already reorder right-to-left text themselves (VTE-based
 terminals, Terminal.app, Konsole, mlterm, and others). Grok Build therefore
 **does not** reorder RTL by default.
 
-If Arabic or Persian in **scrollback** (or list content) reads backwards,
-enable app-side reordering in `~/.grok/pager.toml` (or project config):
+If Arabic or Persian in **scrollback** (or list content) reads backwards, enable app-side reordering in `~/.grok/pager.json`:
 
-```toml
-[scrollback.display]
-rtl_bidi = true
+```json
+{
+  "scrollback": {
+    "display": {
+      "rtl_bidi": true
+    }
+  }
+}
 ```
 
-The setting reloads with appearance config (no full restart required). If text
-looks correct with the default and becomes wrong after enabling this, turn it
-back off — your terminal is already handling bidi.
+The setting applies when Grok restarts. If text looks correct with the default and becomes incorrect after enabling this, turn it back off — your terminal is already handling bidi.
 
 When enabled:
 

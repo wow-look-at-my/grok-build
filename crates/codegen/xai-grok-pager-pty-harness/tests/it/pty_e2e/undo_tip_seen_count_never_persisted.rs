@@ -3,7 +3,7 @@
 use super::common::*;
 
 /// After triggering the tip, the persisted config must not carry the tip key.
-/// The code wrote `[hints] undo_tip_shown_count` to `config.toml` from this
+/// The code wrote `[hints] undo_tip_shown_count` to `config.json` from this
 /// path.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
@@ -33,10 +33,10 @@ async fn undo_tip_seen_count_never_persisted() {
     harness.quit().expect("quit");
 
     // The code wrote `[hints] undo_tip_shown_count` here; the count now lives only in memory, so nothing is written.
-    let config = content.home().join(".grok").join("config.toml");
+    let config = content.home().join(".grok").join("config.json");
     let body = std::fs::read_to_string(&config).unwrap_or_default();
     assert!(
         !body.contains("undo_tip_shown_count"),
-        "the undo-tip seen count must never be persisted to config.toml:\n{body}"
+        "the undo-tip seen count must never be persisted to config.json:\n{body}"
     );
 }

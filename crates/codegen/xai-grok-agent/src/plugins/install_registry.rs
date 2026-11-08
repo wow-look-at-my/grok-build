@@ -248,7 +248,7 @@ impl InstallRegistry {
         xai_grok_config::grok_home().join(DEFAULT_INSTALL_DIR_NAME)
     }
 
-    /// Read `[plugins].install_dir` from the effective config (managed_config.toml merged under config.toml; user wins).
+    /// Read the plugins `install_dir` from the effective config (managed_config.toml `[plugins].install_dir` merged under config.json `extensions.plugins.install_dir`; user wins).
     fn read_install_dir_from_config() -> Option<PathBuf> {
         let root = xai_grok_config::load_effective_config_disk_only().ok()?;
         let value = root.get("plugins")?.get("install_dir")?.as_str()?;

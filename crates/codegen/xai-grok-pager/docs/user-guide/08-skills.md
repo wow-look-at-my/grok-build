@@ -32,22 +32,33 @@ Flat `*.md` files under a `commands/` directory become user-invocable slash comm
 
 Skill and command discovery does **not** use `.gitignore`. Paths under known skill roots (`.grok/`, `.agents/`, `.claude/`, `.cursor/`) always load when present on disk — teams often ignore `.claude/**` as local-only config while still expecting `/frontend`-style project commands to work. To hide a skill, use `[skills] ignore` in config (not repo ignore rules).
 
-Grok scans the Claude and Cursor skill directories by default. To stop scanning a vendor, set its `skills` cell to `false` under `[compat.cursor]` or `[compat.claude]` in `~/.grok/config.toml`, or set the `GROK_CURSOR_SKILLS_ENABLED` or `GROK_CLAUDE_SKILLS_ENABLED` environment variable to `false`. See [Configuration](05-configuration.md#harness-compatibility) for details. Grok always filters out known vendor-shipped default skills (such as Cursor's `shell`, `canvas`, and `statusline`), regardless of these settings.
+Grok scans the Claude and Cursor skill directories by default. Set its `skills` cell to `false` under `extensions.compat.cursor` or `extensions.compat.claude` in `~/.grok/config.json`, or set the `GROK_CURSOR_SKILLS_ENABLED` or `GROK_CLAUDE_SKILLS_ENABLED` environment variable to `false`. Do this to stop scanning a vendor. See [Configuration](05-configuration.md#harness-compatibility) for details.
 
 ### Additional Skill Directories
 
-Add directories, exclude paths, or disable individual skills via `[skills]` in `~/.grok/config.toml`:
+Add directories, exclude paths, or disable individual skills via `extensions.skills` in `~/.grok/config.json`:
 
-```toml
-[skills]
-paths = ["~/my-team-skills"]          # Additional directories to scan
-ignore = ["~/my-team-skills/wip"]     # Paths to exclude (hidden entirely)
-disabled = ["wip-skill"]              # Skill names to keep listed but inactive
+```json
+{
+  "extensions": {
+    "skills": {
+      "disabled": [
+        "wip-skill"
+      ],
+      "ignore": [
+        "~/my-team-skills/wip"
+      ],
+      "paths": [
+        "~/my-team-skills"
+      ]
+    }
+  }
+}
 ```
 
 Each entry in `paths` is a `SKILL.md` file or a directory that Grok walks recursively. `ignore` hides a skill completely; `disabled` keeps it in the list but excludes it from the system prompt and from invocation. `paths` and `ignore` take filesystem paths and support `~` expansion; `disabled` takes skill names.
 
-`[paths] extra_skill_dirs` is written by `/import-claude`. It does not inject skills. Put extra directories in `[skills] paths`.
+`/import-claude` writes `extensions.paths.extra_skill_dirs`. It does not inject skills. Put extra directories in `extensions.skills.paths`.
 
 ---
 
@@ -198,9 +209,9 @@ grok inspect          # Human-readable summary
 grok inspect --json   # Machine-readable report
 ```
 
-In the human-readable output, the Skills section lists each skill's name and its source -- `project`, `user`, `bundled`, `config` (a `[skills].paths` entry), `server` (skills synced from the skill store in managed workspaces), or `plugin: <name>`. Grok tags any skill disabled via `[skills].disabled` or from a disabled vendor surface with `[disabled]`.
+Grok tags any skill disabled via `extensions.skills.disabled` or from a disabled vendor surface with `[disabled]`.
 
-The report honors your `[skills]` config the same way a live session does: skills from `paths` are listed, skills under an `ignore` prefix are hidden, and skills named in `disabled` stay listed but tagged `[disabled]`.
+The report honors your `extensions.skills` config the same way a live session does. Skills from `paths` are listed, skills under an `ignore` prefix are hidden, and skills named in `disabled` stay listed but tagged `[disabled]`.
 
 The `--json` report includes the full detail for each skill: its `name`, `description`, `source` (with the path to the SKILL.md file), and `userInvocable` flag. Skills whose bare slash name is contested — by a built-in command or by another skill — also include `collidesWith` (the contested name) and `invocableAs` (the qualified command to type).
 

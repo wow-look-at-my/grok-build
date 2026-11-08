@@ -655,7 +655,7 @@ fn to_plugin_entry(
     }
 }
 
-/// Add a new git or local-path marketplace source to `~/.grok/config.toml`.
+/// Add a new git or local-path marketplace source to `~/.grok/config.json`.
 async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome {
     use crate::plugin::{self, MarketplaceAddInput};
     use xai_hooks_plugins_types::{ActionOutcome, OutcomeStatus};
@@ -775,7 +775,7 @@ async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome 
 
     // Run the write under the config write guard (SAVE_LOCK + init flock), off the reactor; an
     // unguarded add is exactly the read-modify-write race the guard prevents.
-    let config_path = xai_grok_config::grok_home().join("config.toml");
+    let config_path = user_config_path(&xai_grok_config::grok_home());
     let save_guard = match crate::util::config::lock_config_writes().await {
         Ok(guard) => guard,
         Err(e) => {
@@ -821,7 +821,7 @@ async fn handle_add_source(url: &str) -> xai_hooks_plugins_types::ActionOutcome 
     }
 }
 
-/// Remove a marketplace source from `~/.grok/config.toml` and uninstall all
+/// Remove a marketplace source from `~/.grok/config.json` and uninstall all
 /// plugins that were installed from it.
 async fn handle_remove_source(source_url_or_path: &str) -> xai_hooks_plugins_types::ActionOutcome {
     let src = source_url_or_path.to_string();
@@ -874,7 +874,7 @@ fn remove_source_locked(source_url_or_path: &str) -> xai_hooks_plugins_types::Ac
         }
     };
 
-    let config_path = grok_home.join("config.toml");
+    let config_path = user_config_path(&grok_home);
     match plugin::remove_marketplace_source_from_stores(&config_path, source_url_or_path) {
         Ok(plugin::MarketplaceSourceRemoval::NotFound) => {
             return ActionOutcome {
@@ -916,14 +916,15 @@ use crate::plugin::{
     OFFICIAL_MARKETPLACE_FLAG, set_marketplace_bool_flag, set_official_marketplace_auto_installed,
 };
 
+/// The user config file under `grok_home`. A legacy `config.toml` migrates to `config.json` first.
+fn user_config_path(grok_home: &std::path::Path) -> std::path::PathBuf {
+    xai_grok_config::user_config_file(grok_home)
+        .unwrap_or_else(|_| grok_home.join(xai_grok_config::USER_CONFIG_FILENAME))
+}
+
 fn read_marketplace_bool_flag(config_path: &std::path::Path, key: &str) -> bool {
-    let raw = match std::fs::read_to_string(config_path) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let parsed: toml::Value = match toml::from_str(&raw) {
-        Ok(v) => v,
-        Err(_) => return false,
+    let Ok(parsed) = xai_grok_config::load_toml_file(config_path) else {
+        return false;
     };
     parsed
         .get("marketplace")
@@ -968,7 +969,7 @@ fn read_default_skills_installs_purged(config_path: &std::path::Path) -> bool {
 }
 
 /// One-shot purge of legacy marketplace `default-skills` installs.
-/// Gated by the sticky `default_skills_installs_purged` flag in config.toml.
+/// Gated by the sticky `default_skills_installs_purged` flag in config.json.
 /// Best-effort: errors are logged and never block startup.
 pub(crate) fn purge_default_skills_installs(grok_home: &std::path::Path) {
     let install_dir =
@@ -992,7 +993,7 @@ fn purge_default_skills_installs_impl(
         xai_grok_agent::plugins::install_registry::InstallError,
     >,
 ) {
-    let config_path = grok_home.join("config.toml");
+    let config_path = user_config_path(grok_home);
 
     if read_default_skills_installs_purged(&config_path) {
         return;
@@ -1087,7 +1088,7 @@ fn purge_default_skills_installs_impl(
 }
 
 /// Auto-register the official xAI marketplace source on first run. Gated by the caller (`init_process`); see `Config::resolve_official_marketplace_auto_register`. No-op once `official_marketplace_auto_installed` is set.
-/// Under a process-wide flock it adds the source (or just sets the flag if it's already present in config.toml or a JSON store). Best-effort: errors are logged and never block startup.
+/// Under a process-wide flock it adds the source (or just sets the flag if it's already present in config.json or a JSON store). Best-effort: errors are logged and never block startup.
 pub(crate) fn ensure_official_marketplace_source(grok_home: &std::path::Path) {
     ensure_official_marketplace_source_with(
         grok_home,
@@ -1101,7 +1102,7 @@ fn ensure_official_marketplace_source_with(
     grok_home: &std::path::Path,
     policy: &xai_grok_workspace::permission::resolution::MarketplacePolicy,
 ) {
-    let config_path = grok_home.join("config.toml");
+    let config_path = user_config_path(grok_home);
 
     if read_official_marketplace_auto_installed(&config_path) {
         return;
@@ -1145,19 +1146,19 @@ fn ensure_official_marketplace_source_with(
     let raw = match crate::util::config::read_to_string_or_empty(&config_path) {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!(error = %e, "skipping official marketplace auto-register: cannot read config.toml");
+            tracing::warn!(error = %e, "skipping official marketplace auto-register: cannot read the user config");
             return;
         }
     };
-    let parsed: toml::Value = match toml::from_str(&raw) {
+    let parsed: toml::Value = match crate::util::config::parse_existing_config(&config_path, &raw) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!(error = %e, "skipping official marketplace auto-register: invalid config.toml");
+            tracing::warn!(error = %e, "skipping official marketplace auto-register: invalid user config");
             return;
         }
     };
 
-    // "Already present" means the official URL is in the config.toml sources or in a JSON store (settings.json, known_marketplaces.json) under grok_home
+    // "Already present" means the official URL is in the config.json sources or in a JSON store (settings.json, known_marketplaces.json) under grok_home
     // The scan is scoped to grok_home only (not ~/.claude) to keep tests hermetic
     // A user with the URL solely in ~/.claude gets one duplicate entry that the UI dedupes by URL
     let toml_sources = xai_grok_plugin_marketplace::load_sources(&parsed);
@@ -1205,16 +1206,14 @@ mod official_source_tests {
     fn read_sources(
         config_path: &std::path::Path,
     ) -> Vec<xai_grok_plugin_marketplace::MarketplaceSource> {
-        let raw = std::fs::read_to_string(config_path).unwrap_or_default();
-        let parsed: toml::Value =
-            toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(Default::default()));
+        let parsed = xai_grok_config::load_toml_file(config_path)
+            .unwrap_or_else(|_| toml::Value::Table(Default::default()));
         xai_grok_plugin_marketplace::load_sources(&parsed)
     }
 
     fn read_flag(config_path: &std::path::Path) -> bool {
-        let raw = std::fs::read_to_string(config_path).unwrap_or_default();
-        let parsed: toml::Value =
-            toml::from_str(&raw).unwrap_or_else(|_| toml::Value::Table(Default::default()));
+        let parsed = xai_grok_config::load_toml_file(config_path)
+            .unwrap_or_else(|_| toml::Value::Table(Default::default()));
         parsed
             .get("marketplace")
             .and_then(|m| m.get("official_marketplace_auto_installed"))
@@ -1223,12 +1222,12 @@ mod official_source_tests {
     }
 
     #[test]
-    fn set_official_flag_in_toml_preserves_other_content() {
-        let content = "[ui]\ntheme = \"dark\"\n";
-        let out = crate::plugin::set_official_flag_in_toml(content).unwrap();
-        assert!(out.contains("theme = \"dark\""), "{out}");
+    fn set_official_flag_in_text_preserves_other_content() {
+        let content = r#"{"ui": {"theme": "dark"}}"#;
+        let out = crate::plugin::set_official_flag_in_text(content).unwrap();
+        assert!(out.contains("\"theme\": \"dark\""), "{out}");
         assert!(
-            out.contains("official_marketplace_auto_installed = true"),
+            out.contains("\"official_marketplace_auto_installed\": true"),
             "{out}"
         );
     }
@@ -1236,7 +1235,7 @@ mod official_source_tests {
     #[test]
     fn add_marketplace_source_local_path_writes_path_entry() {
         let tmp = tempfile::tempdir().unwrap();
-        let config_path = tmp.path().join("config.toml");
+        let config_path = tmp.path().join("config.json");
         let dir = tmp.path().join("my-plugins");
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -1257,7 +1256,7 @@ mod official_source_tests {
         ));
         // The path must not be mangled into a git URL.
         let raw = std::fs::read_to_string(&config_path).unwrap();
-        assert!(!raw.contains("git ="), "{raw}");
+        assert!(!raw.contains("\"git\""), "{raw}");
     }
 
     /// Pins add-source dedup: a respelled URL (`.git`, host case) of a
@@ -1265,7 +1264,7 @@ mod official_source_tests {
     #[test]
     fn add_marketplace_source_dedupes_respelled_git_url() {
         let tmp = tempfile::tempdir().unwrap();
-        let config_path = tmp.path().join("config.toml");
+        let config_path = tmp.path().join("config.json");
 
         let original = crate::plugin::MarketplaceAddInput::GitUrl(
             "https://github.com/org/repo.git".to_string(),
@@ -1296,17 +1295,16 @@ mod official_source_tests {
         // Regression: removing the last (non-official) source must not wipe the sticky flag, or a gated startup would re-add the removed official source
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         std::fs::write(
             &config_path,
-            "[marketplace]\nofficial_marketplace_auto_installed = true\n\n\
-             [[marketplace.sources]]\nname = \"custom\"\ngit = \"https://example.com/custom.git\"\n",
+            r#"{"extensions": {"marketplace": {"official_marketplace_auto_installed": true, "sources": [{"name": "custom", "git": "https://example.com/custom.git"}]}}}"#,
         )
         .unwrap();
 
         let content = std::fs::read_to_string(&config_path).unwrap();
-        let new_content = crate::plugin::remove_toml_marketplace_block(
+        let new_content = crate::plugin::remove_marketplace_source_block(
             &content,
             "https://example.com/custom.git",
         )
@@ -1335,8 +1333,8 @@ mod official_source_tests {
 
         ensure_official_marketplace_source(home);
 
-        let config_path = home.join("config.toml");
-        assert!(config_path.exists(), "config.toml should be created");
+        let config_path = home.join("config.json");
+        assert!(config_path.exists(), "config.json should be created");
 
         let sources = read_sources(&config_path);
         assert_eq!(sources.len(), 1);
@@ -1360,7 +1358,7 @@ mod official_source_tests {
     fn policy_blocked_first_run_skips_register_and_retries_after_lift() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         let blocked = crate::plugin::test_fixtures::marketplace_allowlist(&[
             "https://github.com/corp/approved.git",
@@ -1393,10 +1391,10 @@ mod official_source_tests {
         let home = tmp.path();
 
         ensure_official_marketplace_source(home);
-        let after_first = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        let after_first = std::fs::read_to_string(home.join("config.json")).unwrap();
 
         ensure_official_marketplace_source(home);
-        let after_second = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        let after_second = std::fs::read_to_string(home.join("config.json")).unwrap();
 
         assert_eq!(
             after_first, after_second,
@@ -1408,7 +1406,7 @@ mod official_source_tests {
     fn removed_source_stays_removed_across_restarts() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         ensure_official_marketplace_source(home);
         assert_eq!(read_sources(&config_path).len(), 1);
@@ -1416,7 +1414,7 @@ mod official_source_tests {
         // Simulate removal: drop the source block, keep the flag.
         std::fs::write(
             &config_path,
-            "[marketplace]\nofficial_marketplace_auto_installed = true\n",
+            r#"{"extensions": {"marketplace": {"official_marketplace_auto_installed": true}}}"#,
         )
         .unwrap();
 
@@ -1433,16 +1431,16 @@ mod official_source_tests {
     fn pre_existing_official_source_just_sets_flag() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         // User added the official source manually (flag not set).
         std::fs::write(
             &config_path,
-            format!(
-                "[[marketplace.sources]]\nname = \"{}\"\ngit = \"{}\"\n",
-                xai_grok_plugin_marketplace::OFFICIAL_SOURCE_NAME,
-                xai_grok_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL,
-            ),
+            serde_json::json!({"extensions": {"marketplace": {"sources": [{
+                "name": xai_grok_plugin_marketplace::OFFICIAL_SOURCE_NAME,
+                "git": xai_grok_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL,
+            }]}}})
+            .to_string(),
         )
         .unwrap();
 
@@ -1470,10 +1468,10 @@ mod official_source_tests {
 
         ensure_official_marketplace_source(home);
 
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         assert!(
             read_sources(&config_path).is_empty(),
-            "must not append to config.toml when the source is already present in known_marketplaces.json"
+            "must not append to config.json when the source is already present in known_marketplaces.json"
         );
         assert!(
             read_flag(&config_path),
@@ -1496,10 +1494,10 @@ mod official_source_tests {
 
         ensure_official_marketplace_source(home);
 
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         assert!(
             read_sources(&config_path).is_empty(),
-            "must not append to config.toml when source is in extraKnownMarketplaces"
+            "must not append to config.json when source is in extraKnownMarketplaces"
         );
         assert!(read_flag(&config_path));
     }
@@ -1508,16 +1506,17 @@ mod official_source_tests {
     fn pre_existing_official_source_with_branch_just_sets_flag() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
 
         // Official source pinned to a non-main branch: dedup must match URL alone.
         std::fs::write(
             &config_path,
-            format!(
-                "[[marketplace.sources]]\nname = \"{}\"\ngit = \"{}\"\nbranch = \"some-branch\"\n",
-                xai_grok_plugin_marketplace::OFFICIAL_SOURCE_NAME,
-                xai_grok_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL,
-            ),
+            serde_json::json!({"extensions": {"marketplace": {"sources": [{
+                "name": xai_grok_plugin_marketplace::OFFICIAL_SOURCE_NAME,
+                "git": xai_grok_plugin_marketplace::OFFICIAL_SOURCE_GIT_URL,
+                "branch": "some-branch",
+            }]}}})
+            .to_string(),
         )
         .unwrap();
 
@@ -1528,20 +1527,20 @@ mod official_source_tests {
         assert!(
             std::fs::read_to_string(&config_path)
                 .unwrap()
-                .contains("branch = \"some-branch\""),
+                .contains("\"branch\": \"some-branch\""),
             "branch override must survive registration"
         );
         assert!(read_flag(&config_path));
     }
 
     #[test]
-    fn preserves_existing_user_sources_and_comments() {
+    fn preserves_existing_user_sources_and_fields() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         std::fs::write(
             &config_path,
-            "# my custom marketplaces\n[[marketplace.sources]]\nname = \"Local\"\npath = \"/tmp/mine\"\n",
+            r#"{"ui": {"theme": "dark"}, "extensions": {"marketplace": {"sources": [{"name": "Local", "path": "/tmp/mine"}]}}}"#,
         )
         .unwrap();
 
@@ -1549,8 +1548,8 @@ mod official_source_tests {
 
         let after = std::fs::read_to_string(&config_path).unwrap();
         assert!(
-            after.contains("# my custom marketplaces"),
-            "comments preserved"
+            after.contains("\"theme\": \"dark\""),
+            "other fields preserved"
         );
         assert!(after.contains("Local"), "existing source preserved");
         let sources = read_sources(&config_path);
@@ -1614,21 +1613,20 @@ mod default_skills_purge_tests {
     }
 
     #[test]
-    fn purged_flag_toml_preserves_other_content() {
-        let content =
-            "[ui]\ntheme = \"dark\"\n[marketplace]\nofficial_marketplace_auto_installed = true\n";
-        let out = crate::plugin::set_marketplace_bool_flag_in_toml(
+    fn purged_flag_text_preserves_other_content() {
+        let content = r#"{"ui": {"theme": "dark"}, "extensions": {"marketplace": {"official_marketplace_auto_installed": true}}}"#;
+        let out = crate::plugin::set_marketplace_bool_flag_in_text(
             content,
             "default_skills_installs_purged",
         )
         .unwrap();
-        assert!(out.contains("theme = \"dark\""), "{out}");
+        assert!(out.contains("\"theme\": \"dark\""), "{out}");
         assert!(
-            out.contains("official_marketplace_auto_installed = true"),
+            out.contains("\"official_marketplace_auto_installed\": true"),
             "{out}"
         );
         assert!(
-            out.contains("default_skills_installs_purged = true"),
+            out.contains("\"default_skills_installs_purged\": true"),
             "{out}"
         );
     }
@@ -1636,19 +1634,19 @@ mod default_skills_purge_tests {
     #[test]
     fn read_purged_flag_false_when_missing_or_wrong_type() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("config.toml");
+        let path = tmp.path().join("config.json");
         assert!(!read_default_skills_installs_purged(&path));
 
         std::fs::write(
             &path,
-            "[marketplace]\ndefault_skills_installs_purged = \"yes\"\n",
+            r#"{"extensions": {"marketplace": {"default_skills_installs_purged": "yes"}}}"#,
         )
         .unwrap();
         assert!(!read_default_skills_installs_purged(&path));
 
         std::fs::write(
             &path,
-            "[marketplace]\ndefault_skills_installs_purged = true\n",
+            r#"{"extensions": {"marketplace": {"default_skills_installs_purged": true}}}"#,
         )
         .unwrap();
         assert!(read_default_skills_installs_purged(&path));
@@ -1662,7 +1660,7 @@ mod default_skills_purge_tests {
         purge_default_skills_installs_impl(home, &install_dir, || {
             Ok(InstallRegistry::empty(install_dir.clone()))
         });
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         assert!(read_default_skills_installs_purged(&config_path));
 
         let after_first = std::fs::read_to_string(&config_path).unwrap();
@@ -1686,7 +1684,7 @@ mod default_skills_purge_tests {
         });
 
         assert!(!read_default_skills_installs_purged(
-            &home.join("config.toml")
+            &home.join("config.json")
         ));
     }
 
@@ -1727,7 +1725,7 @@ mod default_skills_purge_tests {
             "purge must not save an unlocked registry while the flock is held"
         );
         assert!(
-            !read_default_skills_installs_purged(&home.join("config.toml")),
+            !read_default_skills_installs_purged(&home.join("config.json")),
             "a skipped purge must not set the sticky flag"
         );
     }
@@ -1770,7 +1768,7 @@ mod default_skills_purge_tests {
         assert!(reloaded.get_repo("ds-aaaa").is_none());
         assert!(reloaded.get_repo("office-bbbb").is_some());
 
-        let config_path = home.join("config.toml");
+        let config_path = home.join("config.json");
         assert!(read_default_skills_installs_purged(&config_path));
 
         let after_first = std::fs::read_to_string(&config_path).unwrap();

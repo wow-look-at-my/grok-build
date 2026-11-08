@@ -77,17 +77,16 @@ impl UnsupportedEffortDiagnosis {
         out.push_str(&format!(
             "Where that flag comes from: the shell writes the key only when \
              `ModelInfo.supports_reasoning_effort` is true, which is set by, in \
-             precedence order — `[model.{id}].supports_reasoning_effort` in \
-             config.toml; a non-empty `[model.{id}].reasoning_efforts` menu; \
+             precedence order — `models.definitions.{id}.supports_reasoning_effort` in \
+             config.json; a non-empty `models.definitions.{id}.reasoning_efforts` menu; \
              `supports_reasoning_effort` (or `supportsReasoningEffort`) on the \
              entry the `/v1/models` catalog returned; or `api_backend = \
              \"messages\"`, which defaults it on.\n\
              If the model does take an effort, force it:\n\
-             \x20 [models]\n\
-             \x20 force_reasoning_effort_models = [\"{id}\"]\n\
+             \x20 \"models\": {{ \"force_reasoning_effort_models\": [\"{id}\"] }}\n\
              Globs match the catalog key or the model id. The per-model spelling \
-             `[model.{id}] supports_reasoning_effort = true` also works, but its \
-             table name must equal the CATALOG KEY — a name that matches nothing \
+             `models.definitions.{id}.supports_reasoning_effort` set to `true` also works, but its \
+             member name must equal the CATALOG KEY — a name that matches nothing \
              adds a second model instead of overriding this one."
         ));
         out

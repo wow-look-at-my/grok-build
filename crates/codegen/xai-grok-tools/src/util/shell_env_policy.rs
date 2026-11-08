@@ -23,7 +23,7 @@ where
         .collect())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ShellEnvironmentPolicyInherit {
     /// Core platform variables only (PATH, HOME, SHELL, ...).
@@ -36,19 +36,21 @@ pub enum ShellEnvironmentPolicyInherit {
 /// How to build the environment for agent subprocesses. Applied in order: start from `inherit`; if
 /// `ignore_default_excludes` is false, drop the secret patterns `*KEY*`/`*SECRET*`/`*TOKEN*`; drop `exclude`; insert
 /// `set`; if `include_only` is non-empty, keep only those. Patterns are case-insensitive globs (`*`, `?`).
-#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ShellEnvironmentPolicy {
     pub inherit: ShellEnvironmentPolicyInherit,
     /// Skip the built-in secret excludes (default `true`).
     pub ignore_default_excludes: bool,
     #[serde(deserialize_with = "deserialize_patterns")]
+    #[schemars(with = "Vec<String>")]
     pub exclude: Vec<EnvironmentVariablePattern>,
     /// Values inserted into the base environment before `include_only` filtering
     /// (an unmatched name is then dropped). These seed the base; request env
     /// layered at spawn can still override them.
     pub set: HashMap<String, String>,
     #[serde(deserialize_with = "deserialize_patterns")]
+    #[schemars(with = "Vec<String>")]
     pub include_only: Vec<EnvironmentVariablePattern>,
 }
 
