@@ -48,6 +48,8 @@ async fn compact_names_the_dense_summarization_model() {
         .wait_for_turn_idle(Duration::from_secs(15))
         .expect("turn idle");
 
+    // The shell rejects a short summary as degenerate, so the mock answers the compaction request with a long one.
+    content.set_response(long_response("SUMMARY", 10));
     let before = content.requests().len();
     harness.inject_keys(b"/compact\r").expect("submit /compact");
     harness
