@@ -1,7 +1,7 @@
 //! Goal-verification stage (harness-owned).
 //!
 //! The adversarial skeptic panel is the whole verification: it spawns N independent skeptic subagents in parallel.
-//! It parses each one's JSON verdict (with terminal-token fallback).
+//! Each skeptic writes one JSON verdict file. The harness reads only that file.
 //! The spawns go directly over `tool_context.subagent_event_tx` with no `task` tool call, so the parent model's transcript stays clean.
 //! The spawn is hidden behind the [`GoalClassifierSpawner`] trait so tests can inject deterministic responses; production uses [`ChannelSpawner`].
 //! The struct / trait / constant names keep the `classifier` prefix so the env / remote / config wire contract stays stable.
@@ -113,21 +113,15 @@ pub(crate) fn skeptic0_model_changed(
 }
 
 /// Per-skeptic JSON verdict FILE NAME template (rooted under the per-goal scratch root like [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]).
-/// The harness reads each skeptic's JSON to drive the aggregation; the terminal token is a quick signal but the JSON is authoritative.
+/// This file is the skeptic's only output. The harness renders the human report from it.
 pub(crate) const GOAL_VERIFIER_VERDICT_PATH_TEMPLATE: &str =
     "goal-verdict-{verifier_id}-{attempt}-{skeptic_idx}.json";
-
-/// Per-skeptic Markdown details FILE NAME template (rooted like [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]).
-/// Each skeptic writes its own analysis here;
-/// the harness concatenates them into the canonical `GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE` path the existing ack contract points at.
-pub(crate) const GOAL_VERIFIER_DETAILS_PATH_TEMPLATE: &str =
-    "goal-classifier-{verifier_id}-{attempt}-skeptic-{skeptic_idx}.md";
 
 // Outcome and spawner abstraction
 
 /// `Achieved` / `NotAchieved` are PARSE-class outcomes: the subagent produced a usable verdict.
 /// `FailOpenAchieved` is INFRA-class: the harness could not extract a verdict and treats the goal as achieved.
-/// PARSE-class fail-closed outcomes (malformed terminal token, missing details file) map onto `NotAchieved`.
+/// PARSE-class fail-closed outcomes (a missing or malformed verdict file) map onto `NotAchieved`.
 #[derive(Debug, Clone)]
 pub(crate) enum GoalClassifierOutcome {
     Achieved {
@@ -172,7 +166,7 @@ pub(crate) const USER_CANCELLED_VERIFICATION_NOTE: &str = "The user cancelled th
 /// Subagent spawn abstraction. Production uses [`ChannelSpawner`]; tests use [`MockSpawner`].
 #[async_trait::async_trait]
 pub(crate) trait GoalClassifierSpawner: Send + Sync {
-    /// Spawn under `id` and return the terminal response when the subagent finishes.
+    /// Spawn under `id` and return the final reply when the subagent finishes. The verdict is in the verdict file. The reply is only for the trace.
     /// `resume_from`, when `Some`, names a previously-completed subagent session whose transcript, tool state, and model the new child inherits.
     /// Used to resume skeptic 0 across attempts.
     async fn spawn_classifier(
@@ -180,7 +174,6 @@ pub(crate) trait GoalClassifierSpawner: Send + Sync {
         id: &str,
         skeptic_idx: u32,
         prompt: RoleRenderedPrompt,
-        details_path: &Path,
         resume_from: Option<&str>,
     ) -> Result<String, SpawnError>;
 
@@ -323,39 +316,6 @@ pub(crate) fn validate_details_path_in_root(
     Ok(())
 }
 
-// Terminal-verdict parse
-
-/// Parse an adversarial skeptic's terminal response into its verdict.
-/// A JSON verdict object carrying a boolean `refuted` field is a verdict,
-/// and it answers ahead of any wording. `Refuted` yields `Some(true)`,
-/// `Not Refuted` yields `Some(false)`.
-/// Tolerates code fences/backticks around either shape and a trailing `.`/`!` around the token.
-pub(crate) fn parse_skeptic_terminal_response(text: &str) -> Option<bool> {
-    let unfenced: String = text
-        .lines()
-        .map(str::trim)
-        // Drop fence lines entirely, including language-tagged ones ("```text") that backtick-trimming alone would leave behind
-        .filter(|l| !l.starts_with("```"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let unfenced = unfenced.trim().trim_matches('`').trim();
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(unfenced)
-        && let Some(refuted) = value.get("refuted").and_then(serde_json::Value::as_bool)
-    {
-        return Some(refuted);
-    }
-    let lines: Vec<&str> = unfenced
-        .lines()
-        .map(|l| l.trim_end_matches(['.', '!']).trim())
-        .filter(|l| !l.is_empty())
-        .collect();
-    match lines.as_slice() {
-        ["Refuted"] => Some(true),
-        ["Not Refuted"] => Some(false),
-        _ => None,
-    }
-}
-
 // Git baseline capture (called from `setup_goal`)
 
 /// Best-effort `git rev-parse HEAD` capture for goal creation.
@@ -483,7 +443,6 @@ impl GoalClassifierSpawner for ChannelSpawner {
         id: &str,
         skeptic_idx: u32,
         prompt: RoleRenderedPrompt,
-        _details_path: &Path,
         resume_from: Option<&str>,
     ) -> Result<String, SpawnError> {
         // Clone the primary render for the trace pair only when tracing; the wrapper moves each render into its attempt (no other clone)
@@ -761,10 +720,15 @@ impl SkepticBlocking {
     fn is_blocking(self) -> bool {
         !matches!(self, Self::None)
     }
+    fn as_const_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Contradiction => "contradiction",
+            Self::Unverifiable => "unverifiable",
+        }
+    }
 }
 
-/// Parsed skeptic verdict; the JSON shape mirrors the verifier prompt's contract.
-/// `evidence` and `details_md` are kept for the aggregated details file; the harness operates on `refuted`, `confidence`, and `blocking`.
 /// One concise verifier finding (the implementer-facing gap list).
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(crate) struct Finding {
@@ -787,13 +751,13 @@ impl Finding {
     }
 }
 
+/// Parsed skeptic verdict; the JSON shape mirrors the verifier prompt's contract.
 #[derive(Debug, Clone)]
 pub(crate) struct SkepticVerdict {
     pub refuted: bool,
     pub evidence: String,
     pub confidence: SkepticConfidence,
     pub blocking: SkepticBlocking,
-    pub details_md: String,
     /// Structured findings (the implementer-facing gap list); empty when the verifier emitted none (then the `evidence` fallback is used).
     pub findings: Vec<Finding>,
 }
@@ -809,15 +773,13 @@ struct SkepticVerdictRaw {
     #[serde(default)]
     blocking: Option<String>,
     #[serde(default)]
-    details_md: Option<String>,
-    #[serde(default)]
     findings: Option<Vec<Finding>>,
 }
 
 /// Parse a skeptic verdict body. The boolean `refuted` field is the verdict and the sole
 /// mandatory key. A JSON object naming it answers even when `evidence` or `confidence`
 /// are missing or empty, which degrade to defaults rather than discarding the vote.
-/// Absent, non-boolean, or unparseable bodies yield `None` so the caller can fall back.
+/// Absent, non-boolean, or unparseable bodies yield `None`: the skeptic gave no verdict.
 pub(crate) fn parse_verdict_json(body: &str) -> Option<SkepticVerdict> {
     let raw: SkepticVerdictRaw = serde_json::from_str(body.trim()).ok()?;
     let refuted = raw.refuted?;
@@ -843,27 +805,26 @@ pub(crate) fn parse_verdict_json(body: &str) -> Option<SkepticVerdict> {
         evidence,
         confidence,
         blocking,
-        details_md: raw.details_md.unwrap_or_default(),
         findings,
     })
 }
 
 /// Result of one skeptic in the panel. The `refuted` flag is the aggregator's input; the rest is for the details-file render.
-/// A malformed or missing JSON file maps to `refuted: true` (fail-closed at the skeptic level) per the verifier prompt's bias.
+/// A malformed or missing verdict file maps to `refuted: true` (fail-closed at the skeptic level) per the verifier prompt's bias.
 #[derive(Debug, Clone)]
 pub(crate) struct SkepticResult {
     pub skeptic_idx: u32,
     pub refuted: bool,
     pub confidence: SkepticConfidence,
     /// Blocker classification carried over from the verdict JSON;
-    /// `None` (default) for a model-fixable gap, a synthetic refute, or a terminal-token-only fallback.
+    /// `None` (default) for a model-fixable gap or a synthetic refute.
     pub blocking: SkepticBlocking,
     /// Single-line `path:line` citation from the verdict JSON.
     /// Drives the stall fingerprint and the gaps-summary fallback when no structured `findings` were emitted.
     pub evidence: String,
     /// Structured findings for the implementer (preferred over `evidence` when non-empty). Empty on fallback and failure paths.
     pub findings: Vec<Finding>,
-    /// `None` on a clean parse; populated when the JSON file was missing/malformed or the spawn failed.
+    /// `None` on a clean parse; populated when the verdict file was missing/malformed, carried no evidence, or the spawn failed.
     pub fallback_note: Option<String>,
     /// Wall clock from spawn to verdict in ms.
     /// Carried up so the panel-level event can report slow outliers even though emissions are batched after `join_all`.
@@ -873,8 +834,8 @@ pub(crate) struct SkepticResult {
 }
 
 impl SkepticResult {
-    /// A refute that carries no reason: the skeptic failed, or it gave only
-    /// a terminal token. The implementer has nothing in it to act on.
+    /// A refute that carries no reason: the skeptic failed, or its verdict
+    /// file is missing or empty. The implementer has nothing in it to act on.
     fn has_no_verdict(&self) -> bool {
         self.refuted
             && self.fallback_note.is_some()
@@ -888,21 +849,6 @@ pub(crate) fn format_verdict_path(verifier_id: &str, attempt: u32, skeptic_idx: 
     scratch_rooted(
         verifier_id,
         GOAL_VERIFIER_VERDICT_PATH_TEMPLATE
-            .replace("{verifier_id}", verifier_id)
-            .replace("{attempt}", &attempt.to_string())
-            .replace("{skeptic_idx}", &skeptic_idx.to_string()),
-    )
-}
-
-/// Substitute the per-skeptic Markdown-details path placeholders and root the result under the goal's scratch root.
-pub(crate) fn format_verifier_details_path(
-    verifier_id: &str,
-    attempt: u32,
-    skeptic_idx: u32,
-) -> String {
-    scratch_rooted(
-        verifier_id,
-        GOAL_VERIFIER_DETAILS_PATH_TEMPLATE
             .replace("{verifier_id}", verifier_id)
             .replace("{attempt}", &attempt.to_string())
             .replace("{skeptic_idx}", &skeptic_idx.to_string()),
@@ -935,7 +881,7 @@ pub(crate) fn aggregate_skeptic_verdicts(results: &[SkepticResult]) -> (u32, u32
 }
 
 /// Per-evidence-line char cap for the inlined gaps summary: bounds a runaway verdict yet holds a full multi-point gap.
-/// The model's reminder inlines only this bounded summary; the untruncated per-skeptic writeup is persisted to `last_classifier_details_path`.
+/// The model's reminder inlines only this bounded summary; each skeptic's untruncated verdict stays in its verdict file.
 /// Counted in `char`s, never bytes, so truncation can't split a codepoint.
 const GAPS_EVIDENCE_MAX_CHARS: usize = 800;
 
@@ -1226,12 +1172,12 @@ fn kind_lens(kind: Option<GoalKind>) -> &'static str {
 
 /// Prompt for skeptic when it is RESUMED across attempts; it already carries its prior transcript and the gaps it flagged.
 /// It must re-read the changed files (its cached reads are stale after the agent's further edits).
-/// It confirms each prior gap is genuinely fixed in the CURRENT files with no regression and emits the same verdict-file and terminal-token contract.
+/// It confirms each prior gap is genuinely fixed in the CURRENT files with no regression and writes the same verdict file.
 const GOAL_VERIFIER_RESUME_PROMPT_TEMPLATE: &str =
     include_str!("templates/goal_verifier_resume_prompt.md");
 
 /// Wrap the evidence packet (OBJECTIVE / CHANGES_FILE / PLAN_FILE / FINAL_RESPONSE) in `template`.
-/// Substitutes the kind-specific review lens into `{KIND_LENS}` and the runner-allocated output paths into `{DETAILS_FILE}` / `{VERDICT_FILE}`.
+/// Substitutes the kind-specific review lens into `{KIND_LENS}` and the runner-allocated verdict path into `{VERDICT_FILE}`.
 /// Shared by the cold and resume skeptic prompts; only the template differs.
 #[allow(clippy::too_many_arguments)]
 fn render_verifier_prompt(
@@ -1243,7 +1189,6 @@ fn render_verifier_prompt(
     plan_file: Option<&Path>,
     plan_changes: Option<&str>,
     final_response: &str,
-    details_path: &str,
     verdict_path: &str,
     kind_lens: &str,
     skeptic_scratch: &str,
@@ -1267,7 +1212,6 @@ fn render_verifier_prompt(
     };
     let rendered = template
         .replace("{KIND_LENS}", kind_lens)
-        .replace("{DETAILS_FILE}", details_path)
         .replace("{VERDICT_FILE}", verdict_path)
         .replace("{SKEPTIC_SCRATCH}", skeptic_scratch)
         .replace("{IMPLEMENTER_SCRATCH}", implementer_scratch)
@@ -1299,7 +1243,6 @@ fn render_skeptic_prompt(
     plan_file: Option<&Path>,
     plan_changes: Option<&str>,
     final_response: &str,
-    details_path: &str,
     verdict_path: &str,
     kind_lens: &str,
     skeptic_scratch: &str,
@@ -1317,7 +1260,6 @@ fn render_skeptic_prompt(
         plan_file,
         plan_changes,
         final_response,
-        details_path,
         verdict_path,
         kind_lens,
         skeptic_scratch,
@@ -1338,7 +1280,6 @@ fn render_skeptic_resume_prompt(
     plan_file: Option<&Path>,
     plan_changes: Option<&str>,
     final_response: &str,
-    details_path: &str,
     verdict_path: &str,
     kind_lens: &str,
     skeptic_scratch: &str,
@@ -1356,7 +1297,6 @@ fn render_skeptic_resume_prompt(
         plan_file,
         plan_changes,
         final_response,
-        details_path,
         verdict_path,
         kind_lens,
         skeptic_scratch,
@@ -1383,105 +1323,64 @@ fn skeptic_failure(skeptic_idx: u32, note: String, latency_ms: u64) -> SkepticRe
     }
 }
 
-/// Decide one skeptic's vote from its channels. The JSON verdict body is the
-/// source of truth: a boolean `refuted` inside it answers regardless of the
-/// terminal response's wording. The terminal response is consulted only when
-/// the body is absent or carries no boolean; it may itself be a JSON verdict
-/// (see [`parse_skeptic_terminal_response`]). Only when both channels carry
-/// no verdict does the fail-closed refute apply. Returns the vote and the
-/// JSON `details_md` to persist when the report file is empty.
-pub(crate) fn skeptic_result_from_sources(
+/// Decide one skeptic's vote from its verdict file body (`None` when the file
+/// was not written). The file is the only channel: a body with no boolean
+/// `refuted` is no verdict, and the skeptic fails closed.
+pub(crate) fn skeptic_result_from_verdict_file(
     skeptic_idx: u32,
     json_body: Option<&str>,
-    terminal: &str,
     latency_ms: u64,
-) -> (SkepticResult, Option<String>) {
-    if let Some(body) = json_body
-        && let Some(verdict) = parse_verdict_json(body)
-    {
-        let details_md =
-            (!verdict.details_md.trim().is_empty()).then(|| verdict.details_md.clone());
-        let fallback_note = if verdict.evidence.trim().is_empty() && verdict.findings.is_empty() {
-            Some("verdict JSON carried no evidence".to_string())
-        } else {
-            None
-        };
-        return (
-            SkepticResult {
-                skeptic_idx,
-                refuted: verdict.refuted,
-                confidence: verdict.confidence,
-                blocking: verdict.blocking,
-                evidence: verdict.evidence,
-                findings: verdict.findings,
-                fallback_note,
-                latency_ms,
-                cancelled: false,
-            },
-            details_md,
+) -> SkepticResult {
+    let Some(body) = json_body else {
+        return skeptic_failure(
+            skeptic_idx,
+            "the skeptic did not write its verdict file".into(),
+            latency_ms,
         );
-    }
-    match parse_skeptic_terminal_response(terminal) {
-        Some(refuted) => (
-            SkepticResult {
-                skeptic_idx,
-                refuted,
-                confidence: SkepticConfidence::Unknown,
-                blocking: SkepticBlocking::None,
-                evidence: String::new(),
-                findings: Vec::new(),
-                fallback_note: Some(
-                    "verdict JSON missing/malformed; used terminal response".into(),
-                ),
-                latency_ms,
-                cancelled: false,
-            },
-            None,
-        ),
-        None => (
-            skeptic_failure(
-                skeptic_idx,
-                format!(
-                    "verdict JSON missing/malformed AND terminal response carried no verdict: {}",
-                    terminal.chars().take(120).collect::<String>()
-                ),
-                latency_ms,
+    };
+    let Some(verdict) = parse_verdict_json(body) else {
+        return skeptic_failure(
+            skeptic_idx,
+            format!(
+                "the verdict file is not a JSON object with a boolean `refuted`: {}",
+                body.trim().chars().take(120).collect::<String>()
             ),
-            None,
-        ),
+            latency_ms,
+        );
+    };
+    let fallback_note = if verdict.evidence.trim().is_empty() && verdict.findings.is_empty() {
+        Some("verdict JSON carried no evidence".to_string())
+    } else {
+        None
+    };
+    SkepticResult {
+        skeptic_idx,
+        refuted: verdict.refuted,
+        confidence: verdict.confidence,
+        blocking: verdict.blocking,
+        evidence: verdict.evidence,
+        findings: verdict.findings,
+        fallback_note,
+        latency_ms,
+        cancelled: false,
     }
 }
 
-/// Read skeptic `skeptic_idx`'s verdict after its terminal response.
-/// The JSON verdict file is authoritative; the terminal response is a secondary signal used only when the JSON is missing/malformed.
+/// Read skeptic `skeptic_idx`'s verdict file after its run ends.
 async fn read_skeptic_verdict(
     skeptic_idx: u32,
-    details_raw: &str,
     verdict_raw: &str,
-    terminal: &str,
     started: std::time::Instant,
 ) -> SkepticResult {
     let json_body = tokio::fs::read_to_string(verdict_raw).await.ok();
-    let (result, details_md) = skeptic_result_from_sources(
+    skeptic_result_from_verdict_file(
         skeptic_idx,
         json_body.as_deref(),
-        terminal,
         started.elapsed().as_millis() as u64,
-    );
-    // If the skeptic produced a verdict but never wrote its report, persist the JSON `details_md` fallback to the path the aggregate references
-    if let Some(md) = details_md {
-        let file_empty = tokio::fs::read_to_string(details_raw)
-            .await
-            .map(|s| s.trim().is_empty())
-            .unwrap_or(true);
-        if file_empty {
-            let _ = tokio::fs::write(details_raw, &md).await;
-        }
-    }
-    result
+    )
 }
 
-/// Spawn one skeptic under `spawn_id`, wait for its terminal response, and read the JSON verdict file.
+/// Spawn one skeptic under `spawn_id`, wait for its run to end, and read the JSON verdict file.
 /// Emits no telemetry, so the orchestrator owns event emission for both the happy and failure paths uniformly.
 /// `resume_from` (skeptic 0 on attempt > 1) renders the resume prompt and resumes the prior child session.
 async fn run_one_skeptic(
@@ -1508,11 +1407,8 @@ async fn run_one_skeptic(
     let skeptic_scratch_ready = tokio::fs::create_dir_all(&skeptic_scratch).await.is_ok();
     let scratch_ready = inputs.scratch_dir_ready && skeptic_scratch_ready;
     let skeptic_scratch = skeptic_scratch.to_string_lossy();
-    let details_raw = format_verifier_details_path(inputs.verifier_id, inputs.attempt, skeptic_idx);
     let verdict_raw = format_verdict_path(inputs.verifier_id, inputs.attempt, skeptic_idx);
-    if validate_details_path(Path::new(&details_raw)).is_err()
-        || validate_details_path(Path::new(&verdict_raw)).is_err()
-    {
+    if validate_details_path(Path::new(&verdict_raw)).is_err() {
         return skeptic_failure(
             skeptic_idx,
             "internal: unsafe per-skeptic file path".to_string(),
@@ -1534,7 +1430,6 @@ async fn run_one_skeptic(
                 inputs.plan_file,
                 inputs.plan_changes,
                 inputs.final_response,
-                &details_raw,
                 &verdict_raw,
                 inputs.kind_lens,
                 &skeptic_scratch,
@@ -1549,24 +1444,11 @@ async fn run_one_skeptic(
             fallback: render(inherit_tool_names),
         };
         match spawner
-            .spawn_classifier(
-                spawn_id,
-                skeptic_idx,
-                prompt,
-                Path::new(&details_raw),
-                Some(prior),
-            )
+            .spawn_classifier(spawn_id, skeptic_idx, prompt, Some(prior))
             .await
         {
-            Ok(terminal) => {
-                return read_skeptic_verdict(
-                    skeptic_idx,
-                    &details_raw,
-                    &verdict_raw,
-                    &terminal,
-                    started,
-                )
-                .await;
+            Ok(_) => {
+                return read_skeptic_verdict(skeptic_idx, &verdict_raw, started).await;
             }
             Err(err) => {
                 tracing::info!(
@@ -1588,7 +1470,6 @@ async fn run_one_skeptic(
             inputs.plan_file,
             inputs.plan_changes,
             inputs.final_response,
-            &details_raw,
             &verdict_raw,
             inputs.kind_lens,
             &skeptic_scratch,
@@ -1603,12 +1484,10 @@ async fn run_one_skeptic(
         fallback: render(inherit_tool_names),
     };
     match spawner
-        .spawn_classifier(spawn_id, skeptic_idx, prompt, Path::new(&details_raw), None)
+        .spawn_classifier(spawn_id, skeptic_idx, prompt, None)
         .await
     {
-        Ok(terminal) => {
-            read_skeptic_verdict(skeptic_idx, &details_raw, &verdict_raw, &terminal, started).await
-        }
+        Ok(_) => read_skeptic_verdict(skeptic_idx, &verdict_raw, started).await,
         Err(SpawnError::Transport(d)) => skeptic_failure(
             skeptic_idx,
             format!("transport error: {d}"),
@@ -2181,7 +2060,7 @@ async fn user_cancelled_outcome(
 }
 
 /// Render the aggregated details file the rejection directive points the model at.
-/// The skeptics' full reasoning stays in those files, not embedded here.
+/// The harness renders it from the verdict files. No skeptic writes Markdown.
 /// Capped at [`GOAL_VERIFIER_PANEL_MAX_BYTES`].
 fn render_skeptic_panel_details(
     results: &[SkepticResult],
@@ -2208,7 +2087,7 @@ fn render_skeptic_panel_details(
     by_idx.sort_by_key(|r| r.skeptic_idx);
     let paths: Vec<String> = by_idx
         .iter()
-        .map(|r| format_verifier_details_path(verifier_id, attempt, r.skeptic_idx))
+        .map(|r| format_verdict_path(verifier_id, attempt, r.skeptic_idx))
         .collect();
 
     let mut out = String::with_capacity(headline.len() + 1024);
@@ -2221,19 +2100,43 @@ fn render_skeptic_panel_details(
             out.push_str("\n\n");
         }
     }
-    if !paths.is_empty() {
-        if achieved {
-            out.push_str("Per-skeptic reports: ");
-        } else {
-            out.push_str(
-                "Fix the gaps above — they are what matters. For the full reasoning \
-                 behind each, open the per-skeptic report files: ",
-            );
+    if !by_idx.is_empty() {
+        out.push_str("## Verdicts\n\n");
+        for r in &by_idx {
+            out.push_str(&render_verdict_line(r));
+            out.push('\n');
         }
+        out.push('\n');
+    }
+    if !paths.is_empty() {
+        out.push_str("Verdict files: ");
         out.push_str(&paths.join(", "));
         out.push('\n');
     }
     cap_panel_details(out)
+}
+
+/// One sanitized line per skeptic for the panel's `## Verdicts` section.
+/// The `## Gaps to fix` section above already lists a refuter's findings.
+fn render_verdict_line(r: &SkepticResult) -> String {
+    let vote = if r.refuted { "refuted" } else { "not refuted" };
+    let mut line = format!(
+        "- [skeptic {}] {vote}, confidence {}",
+        r.skeptic_idx,
+        r.confidence.as_const_str()
+    );
+    if r.blocking.is_blocking() {
+        line.push_str(&format!(", blocking {}", r.blocking.as_const_str()));
+    }
+    let reason = match (r.evidence.trim(), &r.fallback_note) {
+        ("", Some(note)) => note.as_str(),
+        (evidence, _) => evidence,
+    };
+    if !reason.is_empty() {
+        line.push_str(": ");
+        line.push_str(&sanitize_evidence(reason));
+    }
+    line
 }
 
 /// Truncate the rendered panel to [`GOAL_VERIFIER_PANEL_MAX_BYTES`] at a UTF-8 boundary, appending an explicit elision marker.
