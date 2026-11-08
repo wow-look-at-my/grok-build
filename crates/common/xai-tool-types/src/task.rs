@@ -39,7 +39,7 @@ impl AgentUsageFrequency {
 
     /// Parse a config/env string into a level. Accepts the canonical
     /// kebab-case form plus common variants (`snake_case`, spaces, mixed
-    /// case) so a hand-typed `config.toml` value or env var isn't rejected
+    /// case) so a hand-typed `config.json` value or env var isn't rejected
     /// over punctuation. Returns `None` on no match; the caller decides how
     /// to report an invalid value (config resolution warns and falls back to
     /// the default — see `SubagentsConfig::resolve_usage_frequency`).

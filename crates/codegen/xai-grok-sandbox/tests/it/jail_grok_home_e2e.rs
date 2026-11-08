@@ -123,8 +123,8 @@ impl Fixture {
             "the save must reach the real config.toml: {out}"
         );
         assert_eq!(
-            std::fs::read_to_string(self.grok_home.join("pager.toml")).unwrap(),
-            "b = 1\n",
+            std::fs::read_to_string(self.grok_home.join("pager.json")).unwrap(),
+            "{\"b\": 1}\n",
             "a new settings file must land in the real grok home: {out}"
         );
     }
@@ -148,7 +148,7 @@ fn settings_save_through_a_symlinked_grok_home_and_a_linked_config() {
     let (_, out) = fixture.run("plan-unfixed");
     assert_eq!(fixture.config(), "a = 1\n", "{out}");
     assert!(
-        !fixture.grok_home.join("pager.toml").exists(),
+        !fixture.grok_home.join("pager.json").exists(),
         "without the binds no save may reach the real grok home: {out}"
     );
 
@@ -226,8 +226,8 @@ fn save_settings() {
     xai_grok_config::fs_atomic::write_atomically_bound(&config, "a = 2\n", None)
         .expect("save config.toml inside the jail");
     xai_grok_config::fs_atomic::write_atomically_resolved(
-        &grok_home.join("pager.toml"),
-        "b = 1\n",
+        &grok_home.join("pager.json"),
+        "{\"b\": 1}\n",
         None,
     )
     .expect("save a new settings file inside the jail");

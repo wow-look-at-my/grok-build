@@ -1,58 +1,79 @@
-//! In dev mode, watches ~/.grok/pager.toml for changes and hot-reloads.
-//! In prod mode, returns static defaults (no file operations).
+//! Reads `$GROK_HOME/pager.json` once at startup. A legacy `pager.toml` is read when it is the only file.
 use super::config::AppearanceConfig;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::sync::watch;
-/// In dev mode: reads from ~/.grok/pager.toml, watches for changes.
-/// In prod mode: returns static defaults, `.changed()` never fires.
+/// The appearance config from `pager.json`. `.changed()` never fires.
 pub struct ConfigWatcher {
     rx: watch::Receiver<AppearanceConfig>,
+    load_error: Option<String>,
     #[allow(dead_code)]
     state: WatcherState,
 }
 enum WatcherState {
-    /// No background task (prod mode or dev without notify)
+    /// No background task.
     Static {
         /// Keep sender alive so channel doesn't close
         _tx: watch::Sender<AppearanceConfig>,
     },
 }
 impl ConfigWatcher {
-    /// - In dev mode: reads/creates ~/.grok/pager.toml, watches for changes
-    /// - In prod mode: returns default config, no file operations
+    /// Read the appearance file. A missing file gives the defaults.
     pub async fn start() -> io::Result<Self> {
         Self::start_static()
     }
     pub fn current(&self) -> watch::Ref<'_, AppearanceConfig> {
         self.rx.borrow()
     }
-    /// Never completes in prod mode.
+    /// Never completes.
     pub async fn changed(&mut self) -> Result<(), watch::error::RecvError> {
         self.rx.changed().await
     }
-    /// Path to `$GROK_HOME/pager.toml`.
-    fn pager_config_path() -> PathBuf {
-        crate::util::pager_toml_path()
+    /// Why the appearance file did not load, with its path. `None` when it loaded or does not exist.
+    pub fn load_error(&self) -> Option<&str> {
+        self.load_error.as_deref()
     }
-    /// Start with config loaded from disk (prod mode, no hot-reload).
+    /// The appearance file to read: `pager.json`, or a legacy `pager.toml` when only that exists.
+    fn pager_config_path() -> PathBuf {
+        xai_grok_config::format::resolve_config_file(
+            &crate::util::grok_home(),
+            xai_grok_config::format::PAGER_STEM,
+        )
+    }
     fn start_static() -> io::Result<Self> {
-        let config = xai_grok_config::user_grok_home()
-            .and_then(|_| std::fs::read_to_string(Self::pager_config_path()).ok())
-            .and_then(|content| {
-                toml::from_str::<super::config::RawAppearanceConfig>(&content)
-                    .ok()
-                    .map(AppearanceConfig::from)
-            })
-            .unwrap_or_default();
+        let (config, load_error) = match xai_grok_config::user_grok_home() {
+            Some(_) => match load_appearance(&Self::pager_config_path()) {
+                Ok(config) => (config, None),
+                Err(e) => (AppearanceConfig::default(), Some(e)),
+            },
+            None => (AppearanceConfig::default(), None),
+        };
         let (tx, rx) = watch::channel(config);
         Ok(Self {
             rx,
+            load_error,
             state: WatcherState::Static { _tx: tx },
         })
     }
 }
-/// True when a notify `Remove` fired but the pager.toml slot is still present.
+/// Load the appearance file at `path`. An absent file is the defaults.
+fn load_appearance(path: &Path) -> Result<AppearanceConfig, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(AppearanceConfig::default()),
+        Err(e) => {
+            tracing::error!(file = %path.display(), error = %e, "could not read the appearance file; using the default appearance");
+            return Err(format!("{}: {e}", path.display()));
+        }
+    };
+    super::config::parse_appearance_config(path, &text)
+        .map(AppearanceConfig::from)
+        .map_err(|e| {
+            tracing::error!(file = %path.display(), error = %e, "the appearance file does not parse; using the default appearance");
+            format!("{}: {e}", path.display())
+        })
+}
+/// True when a notify `Remove` fired but the pager.json slot is still present.
 #[cfg(test)]
 fn pager_slot_survived_remove(path: &std::path::Path) -> bool {
     std::fs::symlink_metadata(path).is_ok()
@@ -71,29 +92,34 @@ fn pager_referent_still_present(path: &std::path::Path) -> bool {
         Err(_) => false,
     }
 }
-/// Accept the slot name or the bound dest name. Dest basename need not be `pager.toml`.
+/// Accept the slot name, the bound dest name, or the legacy `pager.toml` that a migration renames.
+/// Dest basename need not be `pager.json`.
 #[cfg(test)]
 fn pager_event_is_watched_config(
     event_paths: &[std::path::PathBuf],
     slot: &std::path::Path,
     dest: Option<&std::path::Path>,
 ) -> bool {
+    let legacy = slot.with_extension("toml");
     event_paths.iter().any(|path| {
         let Some(name) = path.file_name() else {
             return false;
         };
-        slot.file_name() == Some(name) || dest.and_then(|d| d.file_name()) == Some(name)
+        slot.file_name() == Some(name)
+            || legacy.file_name() == Some(name)
+            || dest.and_then(|d| d.file_name()) == Some(name)
     })
 }
 #[cfg(test)]
 mod tests {
     use super::{
-        pager_event_is_watched_config, pager_referent_still_present, pager_slot_survived_remove,
+        load_appearance, pager_event_is_watched_config, pager_referent_still_present,
+        pager_slot_survived_remove,
     };
     #[test]
     fn pager_reload_matches_differently_named_dest() {
-        let slot = std::path::Path::new("/home/u/.grok/pager.toml");
-        let dest = std::path::Path::new("/dotfiles/appearance.toml");
+        let slot = std::path::Path::new("/home/u/.grok/pager.json");
+        let dest = std::path::Path::new("/dotfiles/appearance.json");
         assert!(pager_event_is_watched_config(
             &[dest.to_path_buf()],
             slot,
@@ -104,27 +130,63 @@ mod tests {
             slot,
             Some(dest),
         ));
+        assert!(
+            pager_event_is_watched_config(
+                &[std::path::PathBuf::from("/home/u/.grok/pager.toml")],
+                slot,
+                Some(dest),
+            ),
+            "the legacy name changes during a migration"
+        );
         assert!(!pager_event_is_watched_config(
-            &[std::path::PathBuf::from("/dotfiles/other.toml")],
+            &[std::path::PathBuf::from("/dotfiles/other.json")],
             slot,
             Some(dest),
         ));
+    }
+    #[test]
+    fn load_reads_json_and_reports_a_broken_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pager.json");
+        assert!(
+            !load_appearance(&path).unwrap().show_plan_chip,
+            "an absent file is the defaults"
+        );
+        std::fs::write(
+            &path,
+            r#"{"show_plan_chip": true, "animation": {"fps": null}}"#,
+        )
+        .unwrap();
+        assert!(load_appearance(&path).unwrap().show_plan_chip);
+        std::fs::write(&path, "{ broken").unwrap();
+        let err = load_appearance(&path).unwrap_err();
+        assert!(
+            err.contains("pager.json"),
+            "the error names the file: {err}"
+        );
+    }
+    #[test]
+    fn load_reads_a_legacy_toml_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pager.toml");
+        std::fs::write(&path, "show_plan_chip = true\n").unwrap();
+        assert!(load_appearance(&path).unwrap().show_plan_chip);
     }
     #[test]
     fn remove_reloads_when_symlink_slot_still_exists() {
         let dir = tempfile::tempdir().unwrap();
         let dest_dir = dir.path().join("dotfiles");
         std::fs::create_dir_all(&dest_dir).unwrap();
-        let dest = dest_dir.join("pager.toml");
-        std::fs::write(&dest, "x = 1").unwrap();
-        let slot = dir.path().join("pager.toml");
+        let dest = dest_dir.join("pager.json");
+        std::fs::write(&dest, "{\"x\": 1}").unwrap();
+        let slot = dir.path().join("pager.json");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&dest, &slot).unwrap();
         #[cfg(not(unix))]
         std::fs::copy(&dest, &slot).unwrap();
         assert!(pager_slot_survived_remove(&slot));
         let tmp = dest_dir.join(".tmp");
-        std::fs::write(&tmp, "x = 2").unwrap();
+        std::fs::write(&tmp, "{\"x\": 2}").unwrap();
         std::fs::rename(&tmp, &dest).unwrap();
         assert!(
             pager_slot_survived_remove(&slot),
@@ -148,9 +210,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let dest_dir = dir.path().join("dotfiles");
         std::fs::create_dir_all(&dest_dir).unwrap();
-        let dest = dest_dir.join("pager.toml");
-        std::fs::write(&dest, "x = 1").unwrap();
-        let slot = dir.path().join("pager.toml");
+        let dest = dest_dir.join("pager.json");
+        std::fs::write(&dest, "{\"x\": 1}").unwrap();
+        let slot = dir.path().join("pager.json");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&dest, &slot).unwrap();
         #[cfg(not(unix))]

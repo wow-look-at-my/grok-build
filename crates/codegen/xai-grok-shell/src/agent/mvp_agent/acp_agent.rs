@@ -716,7 +716,7 @@ impl acp::Agent for MvpAgent {
                             acp::Error::auth_required()
                                 .data(
                                     "Set XAI_API_KEY, or add api_key/env_key to a \
-                                     [model.<id>] or [model_providers.<id>] block in config.toml.",
+                                     `models.definitions.<id>` or `models.providers.<id>` block in config.json.",
                                 ),
                         );
                     }

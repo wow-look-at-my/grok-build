@@ -37,8 +37,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 toml = { workspace = true }
-toml_edit = { workspace = true, features = ["serde"] }
-documented = { workspace = true }
+schemars = { workspace = true }
 
 # VTE terminal emulation for native rendering of command output (SGR, cursor, \r)
 vte = { workspace = true }
@@ -116,6 +115,7 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 [dev-dependencies]
+jsonschema = { workspace = true }
 pretty_assertions = { workspace = true }
 serial_test = { workspace = true }
 tempfile = { workspace = true }

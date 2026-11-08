@@ -1,6 +1,6 @@
 # Model-request parallelism cap
 
-- `[ui].max_parallel_requests` (default 7, `0` = no cap) is the most model requests one process sends at once (`xai-grok-sampler/src/request_slots.rs`). A request past it waits in a FIFO queue. Every config load applies it (`apply_max_parallel_requests` in `util/config/campaigns.rs`), so a reload changes it live. A lowered cap never cuts off a request in flight.
+- `ui.max_parallel_requests` (default 7, `0` = no cap) is the most model requests one process sends at once (`xai-grok-sampler/src/request_slots.rs`). A request past it waits in a FIFO queue. Every config load applies it (`apply_max_parallel_requests` in `util/config/campaigns.rs`), so a reload changes it live. A lowered cap never cuts off a request in flight.
 - The slot is taken in the client's send methods and held until the response stream is dropped. So every caller is covered: the sampler actor, `conversation_collect`, and compaction's direct stream calls.
 - The actor takes its slot in `run_one_attempt` BEFORE `FirstTokenDeadline::start`, and runs the send under `with_slot_held` so the client takes no second one. The TTFT limit, the idle timeout and the rate gate therefore all start after the queue.
 - A caller's own deadline around a model call uses `timeout_excluding_queue`, not `tokio::time::timeout`. It moves the deadline by the time spent queued. The clock is a task-local, and `Submit` carries it to the actor's task by hand.

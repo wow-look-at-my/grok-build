@@ -19,14 +19,14 @@ async fn rtl_bidi_drag_copy_logical_pty() {
         "intro line\n\n{RTL_SENTINEL} {FA_LOGICAL}\n\n{RTL_OUTRO} line"
     ));
 
-    // Enable app-side RTL reordering via appearance config (pager.toml).
+    // Enable app-side RTL reordering via appearance config (pager.json).
     let grok_home = content.home().join(".grok");
     std::fs::create_dir_all(&grok_home).expect("create .grok");
     std::fs::write(
-        grok_home.join("pager.toml"),
-        "[scrollback.display]\nrtl_bidi = true\n",
+        grok_home.join("pager.json"),
+        "{\"scrollback\": {\"display\": {\"rtl_bidi\": true}}}\n",
     )
-    .expect("write pager.toml");
+    .expect("write pager.json");
 
     let binary = pager_binary().expect("resolve pager binary");
     let overrides: Vec<(String, String)> = vec![(

@@ -4,7 +4,7 @@ use super::common::*;
 
 /// 13. **Folder-trust question renders, and accepting persists the grant.**
 /// Feature on, an untrusted git repo with `.mcp.json`, and an empty store: the trust question renders BEFORE any session.
-/// Pressing `y` writes the grant to `trusted_folders.toml` and lets the session proceed (prompt streams back).
+/// Pressing `y` writes the grant to `trusted_folders.json` and lets the session proceed (prompt streams back).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore]
 async fn folder_trust_question_renders_and_accept_persists_grant() {

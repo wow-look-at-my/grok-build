@@ -391,10 +391,35 @@ pub(crate) fn ensure_grok_trust_boundary_slots(
             path: grok_home.to_path_buf(),
         });
     }
+    migrate_legacy_trust_boundary_files(grok_home);
     for name in TRUST_BOUNDARY_FILENAMES {
+        // An empty JSON slot would hide a legacy TOML file that could not migrate, so leave that slot to the loader, which reports the error
+        if legacy_sibling_of(grok_home, name).is_some_and(|legacy| legacy.is_file()) {
+            continue;
+        }
         ensure_real_file_slot(&grok_home.join(name))?;
     }
     Ok(())
+}
+
+/// Migrate each legacy TOML trust-boundary file to JSON before the slots exist.
+/// A failed migration leaves the TOML file in place; the loader then reads it or reports its error.
+fn migrate_legacy_trust_boundary_files(grok_home: &Path) {
+    for name in TRUST_BOUNDARY_FILENAMES {
+        let Some(stem) = name.strip_suffix(".json") else {
+            continue;
+        };
+        let schema_ref = (*name == USER_CONFIG_FILENAME).then_some(crate::format::USER_SCHEMA_REF);
+        if let Err(e) = crate::format::migrate_legacy_config(grok_home, stem, schema_ref) {
+            tracing::error!(dir = %grok_home.display(), file = name, error = %e, "could not migrate a legacy TOML config to JSON");
+        }
+    }
+}
+
+/// The legacy `<stem>.toml` path of a JSON file name in `dir`, if the name is JSON.
+fn legacy_sibling_of(dir: &Path, name: &str) -> Option<std::path::PathBuf> {
+    let stem = name.strip_suffix(".json")?;
+    Some(dir.join(format!("{stem}.toml")))
 }
 
 /// Resolve `$GROK_HOME` trust-boundary files (symlink-rejected for sandbox).

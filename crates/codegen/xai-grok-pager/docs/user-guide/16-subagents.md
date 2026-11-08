@@ -14,7 +14,7 @@ Agents and personas both customize behavior, but they operate at different level
 |---|---|---|
 | **What they configure** | The whole session: model, tools, prompt mode, system prompt | A behavioral overlay added to a subagent's prompt |
 | **Scope** | Primary session or subagent | Subagents only |
-| **How you set them** | At startup, or with agent definitions (`.md` files in `.grok/agents/` or `~/.grok/agents/`) | In `config.toml` (`[subagents.personas]`) or `.toml` files under `.grok/personas/`; applied during subagent resolution |
+| **How you set them** | At startup, or with agent definitions (`.md` files in `.grok/agents/` or `~/.grok/agents/`) | In `config.json` (`agents.subagents.personas`) or `.toml` files under `.grok/personas/`; applied during subagent resolution |
 | **What they control** | Model, tool availability, prompt body, skills | Tone, output format, task focus, and input/output contracts |
 | **Who edits them** | You -- create, delete, or toggle them in the agents modal or by editing files | You -- define custom personas in config or files; bundled personas are read-only |
 | **Examples** | `grok-build`, `explore`, `plan` | `researcher`, `concise` |
@@ -34,37 +34,36 @@ grok --no-subagents                  # This session only
 export GROK_SUBAGENTS=0              # Environment variable
 ```
 
-```toml
-# ~/.grok/config.toml
-[subagents]
-enabled = false
+```json
+{
+  "agents": {
+    "subagents": {
+      "enabled": false
+    }
+  }
+}
 ```
 
-Only an explicit `enabled = false` turns subagents off. A `[subagents]` table that sets `max_depth`, `[subagents.models]`, or `[subagents.toggle]` without an `enabled` key keeps them on.
+Only an explicit `"enabled": false` turns subagents off.
 
 ---
 
 ## Usage Frequency
 
-`usage_frequency` does not enable or disable subagents -- it tunes how strongly the system prompt and the `spawn_subagent` tool description nudge the model toward using them. Six levels, from most to least eager to delegate:
+`usage_frequency` does not enable or disable subagents -- it tunes how strongly the system prompt and the `spawn_subagent` tool description nudge the model toward using them.
 
-| Level | Effect |
-| ----- | ------ |
-| `very-often` | Default to delegating: break work into independent pieces and spawn them in parallel. |
-| `often` | Look for opportunities to delegate independent work. |
-| `default` | No added nudge either way (the baseline behavior). |
-| `rare` | Prefer doing work directly; delegate only when clearly independent. |
-| `very-rare` | Reserve subagents for the rare, unmistakably independent case. |
-| `explicit-only` | Never spawn a subagent unless the user explicitly asks for one in the conversation. |
-
-```toml
-# ~/.grok/config.toml
-[subagents]
-usage_frequency = "often"
+```json
+{
+  "agents": {
+    "subagents": {
+      "usage_frequency": "often"
+    }
+  }
+}
 ```
 
 ```bash
-export GROK_SUBAGENTS_USAGE_FREQUENCY=explicit-only   # env var takes precedence over config.toml
+export GROK_SUBAGENTS_USAGE_FREQUENCY=explicit-only   # env var takes precedence over config.json
 ```
 
 Even at `explicit-only`, the `spawn_subagent` tool stays available -- the model can still use it once the user asks. To remove the tool fully, use `enabled = false` above instead.
@@ -101,21 +100,30 @@ Project- or user-defined agents can add new types or shadow these built-ins by n
 
 A persona is a named behavioral overlay. Its instructions are injected into the subagent's conversation as a `<system-reminder>`, which shapes tone, output format, and task focus without changing the subagent's agent type. This is model, or tools.
 
-Define personas in `config.toml` or in `.toml` files:
+Define personas in `config.json` or in `.toml` files:
 
-```toml
-[subagents.personas.researcher]
-instructions = "You are a thorough researcher. Always cite specific file paths."
-description = "Deep investigator."
+```json
+{
+  "agents": {
+    "subagents": {
+      "personas": {
+        "researcher": {
+          "description": "Deep investigator.",
+          "instructions": "You are a thorough researcher. Always cite specific file paths."
+        }
+      }
+    }
+  }
+}
 ```
 
 Grok Build discovers file-based personas from these locations, in priority order:
 
-- `.grok/personas/*.toml` (project)
-- `~/.grok/personas/*.toml` (user)
+- `.grok/personas/*.json` (project)
+- `~/.grok/personas/*.json` (user)
 - The bundled personas directory (lowest priority)
 
-Each file defines one persona, and the file name (without the extension) becomes the persona name. Inline `config.toml` personas take precedence over files. Only `.toml` files are discovered.
+Each file defines one persona as a JSON object with the fields below, and the file name (without the extension) becomes the persona name. Inline `config.json` personas take precedence over files. A legacy `.toml` file still loads. When `name.json` and `name.toml` both exist, the `.json` file wins.
 
 Manage personas in the Personas tab of the agents modal (`/personas`). Bundled personas are read-only. Personas you define are editable.
 
@@ -137,18 +145,33 @@ Manage personas in the Personas tab of the agents modal (`/personas`). Bundled p
 
 A persona can declare the inputs it expects and the outputs it produces. The parent agent reads these to know what context to supply and what artifacts to expect. This lets you chain personas, so one persona's output file becomes the next persona's input:
 
-```toml
-[[subagents.personas.reviewer.inputs]]
-name = "review_file"
-io_type = "file"
-required = true
-description = "Path to the code under review"
-
-[[subagents.personas.reviewer.outputs]]
-name = "summary_file"
-io_type = "file"
-required = false
-description = "Path to write review notes"
+```json
+{
+  "agents": {
+    "subagents": {
+      "personas": {
+        "reviewer": {
+          "inputs": [
+            {
+              "description": "Path to the code under review",
+              "io_type": "file",
+              "name": "review_file",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "description": "Path to write review notes",
+              "io_type": "file",
+              "name": "summary_file",
+              "required": false
+            }
+          ]
+        }
+      }
+    }
+  }
+}
 ```
 
 Each field has a `name`, an `io_type` (defaults to `file`), a `required` flag, and a `description`.
@@ -185,7 +208,7 @@ When you run a subagent in the background, retrieve its result later with `get_c
 
 ### Sending messages to subagents
 
-The `send_subagent_message` tool is off by default. Enable it with `GROK_ACTIVE_AGENT_MESSAGES` or `[features] active_agent_messages`.
+The `send_subagent_message` tool is off by default. Enable it with `GROK_ACTIVE_AGENT_MESSAGES` or `features.active_agent_messages`.
 
 The root session can send a follow-up to a subagent it owns. When the flag is on, a granted child also receives the tool:
 
@@ -242,7 +265,7 @@ The new subagent inherits the source's transcript, tool state, and model. Its sy
 
 ### MCP inheritance
 
-The primary session overlays the active agent’s `mcpServers` frontmatter onto the disk/client merge by name (agent.md headers beat `config.toml`). Switching the primary agent replaces that overlay with the new seat only. Child inline `mcpServers` still become owned clients and beat inherited shared clients. Plugin agents cannot declare `mcpServers`.
+The primary session overlays the active agent’s `mcpServers` frontmatter onto the disk/client merge by name (agent.md headers beat `config.json`). Switching the primary agent replaces that overlay with the new seat only. Child inline `mcpServers` still become owned clients and beat inherited shared clients. Plugin agents cannot declare `mcpServers`.
 
 Subagents inherit the parent session’s **already-connected** MCP servers by default. That includes local stdio/HTTP servers and plugin-sourced agents (for example `my-plugin:reviewer`). The child discovers and calls those tools with `search_tool` / `use_tool` the same way the parent does.
 
@@ -296,22 +319,29 @@ Grok Build manages worktrees through the `example.invalid/git/worktree/*` extens
 
 Disable specific agent types, or route them to a different model:
 
-```toml
-[subagents.toggle]
-explore = true                       # default -- omit to keep enabled
-plan = false                         # disable the plan subagent
-
-[subagents.models]
-explore = "grok-4.6"                 # route explore to a specific model
+```json
+{
+  "agents": {
+    "subagents": {
+      "models": {
+        "explore": "grok-4.6"
+      },
+      "toggle": {
+        "explore": true,
+        "plan": false
+      }
+    }
+  }
+}
 ```
 
-Per-type model overrides apply for any parent. Without an override, a subagent inherits the parent's model. Settings lists one row per spawnable type under Models. Those Settings include the types your workspace defines and those a plugin provides, and each row writes its own `[subagents.models].<type>` entry.
+Per-type model overrides apply for any parent. Without an override, a subagent inherits the parent's model. Settings lists one row per spawnable type under Models. Those Settings include the types your workspace defines and those a plugin provides, and each row writes its own `agents.subagents.models.<type>` entry.
 
 ### Model Selection by the Agent
 
-The `spawn_subagent` tool offers the agent a `model` argument. Its description lists the models you can pick, for when you explicitly ask for a subagent on a different model. With `[features] subagent_model_inheritance = true` (or `GROK_SUBAGENT_MODEL_INHERITANCE=1`), both are hidden when every model in your picker is an xAI model. Subagents then always inherit the parent's model, and a spawn that still names one fails with a message asking the agent to retry without it. Catalogs with a third-party model, a model with no declared family, or a catalog still loading keep the argument. `[subagents.models]` pins, roles, and personas are unaffected.
+The `spawn_subagent` tool offers the agent a `model` argument. Its description lists the models you can pick, for when you explicitly ask for a subagent on a different model. With `features.subagent_model_inheritance` set to `true` (or `GROK_SUBAGENT_MODEL_INHERITANCE=1`), both are hidden when every model in your picker is an xAI model. Subagents then always inherit the parent's model, and a spawn that still names one fails with a message asking the agent to retry without it. Catalogs with a third-party model, a model with no declared family, or a catalog still loading keep the argument. `[subagents.models]` pins, roles, and personas are unaffected.
 
-Read when a session starts. Changing it requires a start. Precedence: a `requirements.toml`/MDM pin, then the environment variable, then `config.toml`, then remote settings, then the default (off).
+Read when a session starts. Changing it requires a start. Precedence: a `requirements.toml`/MDM pin, then the environment variable, then `config.json`, then remote settings, then the default (off).
 
 You can also toggle it from `/settings` → Models → **Subagent model inheritance**:
 
@@ -319,29 +349,46 @@ You can also toggle it from `/settings` → Models → **Subagent model inherita
 - Off: Grok may choose a different model for a subagent. Takes effect after restart.
 - NOTE: This setting only applies when all models are xAI "model_family". You likely do not need to configure this setting.
 
-The row shows the value that applies after start. Toggling writes `[features] subagent_model_inheritance = true` or `= false` (an explicit `false` overrides a remote `true`). `d` (reset) deletes the key so `managed_config.toml`, remote settings, or the default apply again. Agents already running keep the mode they started with. When a layer your `config.toml` cannot override decides the value — a `requirements.toml`/MDM pin, the environment variable, the `GROK_CONFIG` overlay, or an active campaign. This is both the toggle and the reset are refused with a toast that names that layer.
+The row shows the value that applies after start. Toggling writes `features.subagent_model_inheritance` as `true` or `false` (an explicit `false` overrides a remote `true`). `d` (reset) deletes the key so `managed_config.toml`, remote settings, or the default apply again. Agents already running keep the mode they started with. When a layer your `config.json` cannot override decides the value — a `requirements.toml`/MDM pin, the environment variable, the `GROK_CONFIG` overlay, or an active campaign. This is both the toggle and the reset are refused with a toast that names that layer.
 
 ### Custom Roles and Personas
 
 Define custom roles with their own capability and model defaults:
 
-```toml
-[subagents.roles.researcher]
-description = "Deep research agent"
-default_capability_mode = "read-only"
-model = "grok-4.6"
-prompt_file = ".grok/prompts/researcher.md"
+```json
+{
+  "agents": {
+    "subagents": {
+      "roles": {
+        "researcher": {
+          "default_capability_mode": "read-only",
+          "description": "Deep research agent",
+          "model": "grok-4.6",
+          "prompt_file": ".grok/prompts/researcher.md"
+        }
+      }
+    }
+  }
+}
 ```
 
 Define custom personas with behavioral instructions:
 
-```toml
-[subagents.personas.concise]
-instructions = "Be concise. No filler words."
-# instructions_file = ".grok/personas/concise.md"  # or load from a file
+```json
+{
+  "agents": {
+    "subagents": {
+      "personas": {
+        "concise": {
+          "instructions": "Be concise. No filler words."
+        }
+      }
+    }
+  }
+}
 ```
 
-Grok Build also discovers roles from `.grok/roles/*.toml` and personas from `.grok/personas/*.toml`. Inline `config.toml` definitions take precedence over files.
+Grok Build also discovers roles from `.grok/roles/*.json` and personas from `.grok/personas/*.json` (legacy `.toml` files still load). Inline `config.json` definitions take precedence over files.
 
 ---
 

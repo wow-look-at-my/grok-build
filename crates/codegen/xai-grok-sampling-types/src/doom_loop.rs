@@ -42,7 +42,7 @@ pub const SAMPLE_CHECK_EVENT_DATA_CUMULATIVE: &str = r#"{"sequence_number":4178,
 /// The resolver returns `None` when the check is disabled: absence IS the off state, so there is no separate enabled flag
 /// to keep in sync. When present on `SamplerConfig`, the sampler both sends the opt-in request header and parses the
 /// reported triggers. The tunables are consumed by the recovery decision logic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DoomLoopRecoveryPolicy {
     /// Act only on `tail_repetition:{t}@thinking` triggers with `t` at or below this value.
     /// Lower thresholds indicate tighter, more confident loops.

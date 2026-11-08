@@ -438,9 +438,9 @@ pub enum SessionCommand {
     FlattenHistory {
         responds_to: oneshot::Sender<xai_grok_sampling_types::conversation::FlattenReport>,
     },
-    /// Re-read the output-rate floor from config.toml for the session's current model.
+    /// Re-read the output-rate floor from config.json for the session's current model.
     ReloadOutputRateFloor,
-    /// Re-read `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` from config.toml.
+    /// Re-read `ui.thinking_summaries` and `ui.thinking_summary_history_*` from config.json.
     ReloadThinkingSummaries,
     /// Take the context window of the session's model from the rebuilt catalog.
     ReloadContextWindow,

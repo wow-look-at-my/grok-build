@@ -23,7 +23,7 @@ grok --sandbox strict
 
 ## The pathbox jail (`--sandbox=pathbox` or a path flag)
 
-The **pathbox** jail puts the whole session inside an OS jail. Grok replaces itself with `bwrap` on Linux, or `sandbox-exec` on macOS, before it starts any work. The agent runs in the jail, and so does every command it spawns. It is a reserved profile name: `--sandbox=pathbox` selects it. A custom `sandbox.toml` profile cannot redefine it.
+The **pathbox** jail puts the whole session inside an OS jail. Grok replaces itself with `bwrap` on Linux, or `sandbox-exec` on macOS, before it starts any work. The agent runs in the jail, and so does every command it spawns. It is a reserved profile name: `--sandbox=pathbox` selects it. A custom `sandbox.json` profile cannot redefine it.
 
 ```bash
 # Nothing but ~/.grok, a tmpfs, and a read-only system base
@@ -38,13 +38,13 @@ grok --rw . --ro ./secrets
 
 The jail binds these paths, in this order:
 
-1. A read-only system base: `/usr`, `/bin`, `/sbin`, `/lib*`, `/etc`, `/opt`, `/run`, `/var`. A process needs them to run at all.
+1. A process needs them to run at all.
 2. A fresh `/proc` and `/dev`.
 3. `/tmp` and `~/.cache` (and `$XDG_CACHE_HOME`) as overlays of the host directories. The jail reads the host files, and its writes go to a tmpfs that disappears with the session. Nothing written there touches the host. bubblewrap before 0.11, or a setuid bubblewrap, cannot mount an overlay. There both are empty tmpfs mounts and grok prints a warning.
 4. Each `--ro PATH` and `--rw PATH`, in the order you typed them.
-5. `$GROK_HOME` (`~/.grok`), read-write. A symlinked `~/.grok` works: the jail mounts it at the path grok uses. A file or folder that `~/.grok` links to elsewhere, such as a `config.toml` kept in a dotfiles repository, has its folder bound read-write too. Settings save in place. A link to a folder that contains your home directory is not bound, and grok prints a warning.
+5. `$GROK_HOME` (`~/.grok`), read-write. A symlinked `~/.grok` works: the jail mounts it at the path grok uses. A file or folder that `~/.grok` links to elsewhere, such as a `config.json` kept in a dotfiles repository, has its folder bound read-write too. Settings save in place. A link to a folder that contains your home directory is not bound, and grok prints a warning.
 
-A `--rw` on a parent, such as `--rw ~` or a working directory of `~`, does not expose the host `~/.cache` or `/tmp`. They are mounted over it. A flag on the directory itself or a path in it, such as `--rw ~/.cache/go-build`, gives the host directory back. To change the default, set `tmp` or `cache` in the `[jail]` table of `~/.grok/config.toml` to `overlay`, `tmpfs`, `rw` or `ro`.
+A `--rw` on a parent, such as `--rw ~` or a working directory of `~`, does not expose the host `~/.cache` or `/tmp`. They are mounted over it. A flag on the directory itself or a path in it, such as `--rw ~/.cache/go-build`, gives the host directory back.
 
 macOS has no mount namespaces. There the host `/tmp` and `~/.cache` are readable and never writable. `TMPDIR` names an empty session directory, and `XDG_CACHE_HOME` names an APFS copy-on-write clone of the host cache. Both are removed when the session and every process it started exited, a crash included. The next jail start removes any that a killed cleanup left behind.
 
@@ -78,7 +78,7 @@ To block specific files (e.g. `.env` or credential paths) on top of a profile, d
 
 **workspace** -- The recommended profile for everyday development. The agent can read any file on the system (for understanding dependencies, system libraries, etc.) but can only write to the current working directory, `~/.grok/`, and temp directories (`/tmp`, `/var/tmp`, plus the macOS temp dirs). Network access is allowed for tools like `web_search` and MCP servers.
 
-**devbox** -- A reserved built-in profile for disposable development VMs. The agent can read everywhere and write to every top-level directory except `/data` and the virtual filesystems (`/proc`, `/sys`, `/dev`), including the home directory. Network access is allowed. `--sandbox devbox` runs the built-in profile, which shadows any `[profiles.devbox]` you define in `sandbox.toml`.
+**devbox** -- A reserved built-in profile for disposable development VMs. Network access is allowed. `--sandbox devbox` runs the built-in profile, which shadows any `profiles.devbox` you define in `sandbox.json`.
 
 **read-only** -- Use when you want the agent to analyze code without modifying your project files. The agent can read everything but can only write to `~/.grok/` (needed for session persistence) and temp directories. Child-process network access is blocked on Linux (no-op on macOS).
 
@@ -91,9 +91,9 @@ Under `workspace`, `read-only`, and `strict` (and custom profiles that extend th
 - `~/.grok/hooks/` (hook directory)
 - `~/.grok/hooks-paths` (registry file; not loaded as hook JSON — only its absolute targets are)
 - Absolute targets listed in `hooks-paths` (relative lines are ignored; missing targets refuse sandbox start)
-- `~/.grok/config.toml`, `~/.grok/trusted_folders.toml`, `~/.grok/managed_config.toml`, `~/.grok/requirements.toml`, `~/.grok/sandbox.toml` (settings, folder trust, managed policy, requirements, and sandbox profiles)
 
-These files are read-only to the agent and its tools. Grok itself still saves its settings: `/model`, the permission mode (`/auto` or Shift+Tab), the settings modal, and an accepted folder-trust prompt all persist. Grok writes `config.toml` and `trusted_folders.toml` through a host worker that starts before the sandbox does. The sandbox does not apply to it. The worker writes those files and no other path.
+
+These files are read-only to the agent and its tools. Grok itself still saves its settings: `/model`, the permission mode (`/auto` or Shift+Tab), the settings modal, and an accepted folder-trust prompt all persist. Grok writes `config.json` and `trusted_folders.json` through a host worker that starts before the sandbox does. The sandbox does not apply to it. The worker writes those files and no other path.
 
 On first launch under these profiles, Grok creates a real empty `hooks/` directory and empty `hooks-paths` file when they are missing (never symlinks or wrong types). Claude/Cursor global settings are **not** covered by this write-deny; discovery of those vendors remains separately gated by compatibility settings.
 
@@ -103,22 +103,28 @@ A symlinked `$GROK_HOME` or a `hooks-paths` entry with a symlink component is re
 
 ## Custom Profiles
 
-Create custom sandbox profiles in `~/.grok/sandbox.toml` (global) or `.grok/sandbox.toml` (per-project):
+Create custom sandbox profiles in `~/.grok/sandbox.json` (global) or `.grok/sandbox.json` (per-project):
 
-```toml
-[profiles.project]
-# Start from a built-in profile, then add overrides
-extends = "workspace"
-restrict_network = true
-
-# Paths the agent can read but NOT write/delete
-read_only = ["/data"]
-
-# Additional writable paths
-read_write = ["/tmp/scratch"]
-
-# Paths or globs to kernel-deny (read + write/rename, enforced; see notes below)
-deny = ["/data/shared-secrets", "**/.env", "**/*.pem"]
+```json
+{
+  "profiles": {
+    "project": {
+      "deny": [
+        "/data/shared-secrets",
+        "**/.env",
+        "**/*.pem"
+      ],
+      "extends": "workspace",
+      "read_only": [
+        "/data"
+      ],
+      "read_write": [
+        "/tmp/scratch"
+      ],
+      "restrict_network": true
+    }
+  }
+}
 ```
 
 Use the custom profile:
@@ -127,7 +133,7 @@ Use the custom profile:
 grok --sandbox project
 ```
 
-A custom profile can't reuse a built-in name. `--sandbox devbox` always runs the built-in `devbox` profile, shadowing any `[profiles.devbox]` you define.
+A custom profile cannot reuse a built-in name. `--sandbox devbox` always runs the built-in `devbox` profile, shadowing any `profiles.devbox` you define.
 
 If the user and project files define the same custom profile differently, Grok uses the user profile and shows a startup warning. Run `/doctor` to see both file locations and how to resolve the conflict. Identical definitions do not produce a warning.
 
@@ -245,7 +251,7 @@ Resuming will **not** change a session's sandbox:
 Profile resolution order for a **new** session:
 
 1. An explicit `--sandbox <profile>` flag or `GROK_SANDBOX` environment variable
-2. The `[sandbox] profile` in your config
+2. The `sandbox.profile` in your config
 3. `off` (no sandbox)
 
 ---
@@ -257,7 +263,7 @@ Profile resolution order for a **new** session:
 | Linux    | Landlock  | Kernel 5.13 or later   |
 | macOS    | Seatbelt  | macOS (all versions)   |
 
-If the sandbox cannot be applied (e.g., unsupported kernel, missing entitlements), Grok logs a warning and continues without enforcement. The exception is an explicitly-requested **custom profile**: on **both macOS and Linux**, if it cannot be applied (unknown profile, malformed `sandbox.toml`, or — on Linux — `bubblewrap` unavailable for a non-empty `deny`), Grok refuses to start rather than run with its denied paths exposed.
+If the sandbox cannot be applied (e.g., unsupported kernel, missing entitlements), Grok logs a warning and continues without enforcement. The exception is an explicitly-requested **custom profile**. On **both macOS and Linux**, if it cannot be applied (unknown profile, malformed `sandbox.json`, or — on Linux — `bubblewrap` unavailable for a non-empty `deny`), Grok refuses to start rather than run with its denied paths exposed.
 
 ---
 
@@ -274,15 +280,28 @@ In practice, on Linux this means:
 
 ## Shell Environment Policy
 
-The sandbox controls which files and network a subprocess can reach. The top-level `[shell_environment_policy]` table controls which environment variables it inherits, so a tool command the model runs cannot read a secret that happens to sit in your shell environment.
+The sandbox controls which files and network a subprocess can reach. The `tools.shell_environment_policy` object controls which environment variables it inherits. A tool command the model runs cannot read a secret that happens to sit in your shell environment.
 
-```toml
-[shell_environment_policy]
-inherit = "core"                 # all (default) | core | none
-ignore_default_excludes = false  # also drop *KEY* / *SECRET* / *TOKEN*
-exclude = ["ACME_*", "CI_*"]     # drop these names
-include_only = ["PATH", "HOME"]  # if set, keep only these names
-set = { MY_FLAG = "1" }          # force these values
+```json
+{
+  "tools": {
+    "shell_environment_policy": {
+      "exclude": [
+        "ACME_*",
+        "CI_*"
+      ],
+      "ignore_default_excludes": false,
+      "include_only": [
+        "PATH",
+        "HOME"
+      ],
+      "inherit": "core",
+      "set": {
+        "MY_FLAG": "1"
+      }
+    }
+  }
+}
 ```
 
 Grok builds the child environment in order: it starts from `inherit` (`all` keeps everything, `core` keeps a small platform set such as `PATH` and `HOME`, `none` starts empty); drops the built-in secret patterns `*KEY*`, `*SECRET*`, and `*TOKEN*` unless `ignore_default_excludes = true`; drops any `exclude` matches; applies `set`; and, when `include_only` is non-empty, keeps only the matching names. Patterns are case-insensitive globs (`*`, `?`).

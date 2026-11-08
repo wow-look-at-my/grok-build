@@ -774,7 +774,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "max_thoughts_width",
         // SHELL-owned show_thinking_blocks (Appearance; live cache).
         "show_thinking_blocks",
-        // PAGER-owned respect_manual_folds (Appearance, persisted to pager.toml).
+        // PAGER-owned respect_manual_folds (Appearance, persisted to pager.json).
         "respect_manual_folds",
         // SHELL-owned group_tool_verbs (Appearance; live cache).
         "group_tool_verbs",

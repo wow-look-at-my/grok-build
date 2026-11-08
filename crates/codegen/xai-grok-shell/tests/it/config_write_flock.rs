@@ -48,8 +48,8 @@ fn settings_save_serializes_against_init_flock_writer() {
     // SAFETY: no other threads are running yet.
     unsafe { std::env::set_var("GROK_HOME", grok_home.path()) };
 
-    let config_path = grok_home.path().join("config.toml");
-    std::fs::write(&config_path, "[cli]\n").unwrap();
+    let config_path = grok_home.path().join("config.json");
+    std::fs::write(&config_path, "{\"cli\": {}}\n").unwrap();
 
     // Flock-holding writer mid read-modify-write (the shape of
     // session-start auto-enable's `add_enabled_plugin`).
@@ -77,14 +77,11 @@ fn settings_save_serializes_against_init_flock_writer() {
         "settings save never opened {}",
         lock_path.display()
     );
-    let mut modified: toml::Value = toml::from_str(&stale_read).unwrap();
-    modified.as_table_mut().unwrap().insert(
-        "plugins".into(),
-        toml::from_str("enabled = [\"demo\"]").unwrap(),
-    );
+    let mut modified: serde_json::Value = serde_json::from_str(&stale_read).unwrap();
+    modified["extensions"] = serde_json::json!({"plugins": {"enabled": ["demo"]}});
     xai_grok_shell::util::config::atomic_write_string(
         &config_path,
-        &toml::to_string_pretty(&modified).unwrap(),
+        &serde_json::to_string_pretty(&modified).unwrap(),
     )
     .unwrap();
     drop(flock);
@@ -94,22 +91,17 @@ fn settings_save_serializes_against_init_flock_writer() {
         .expect("saver thread")
         .expect("settings save succeeds");
 
-    let merged: toml::Value =
-        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let merged: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
     assert_eq!(
-        merged
-            .get("plugins")
-            .and_then(|p| p.get("enabled"))
-            .and_then(|e| e.as_array())
+        merged["extensions"]["plugins"]["enabled"]
+            .as_array()
             .map(|a| a.len()),
         Some(1),
         "flock writer's plugin enable must survive: {merged}"
     );
     assert_eq!(
-        merged
-            .get("ui")
-            .and_then(|u| u.get("show_thinking_blocks"))
-            .and_then(|v| v.as_bool()),
+        merged["ui"]["show_thinking_blocks"].as_bool(),
         Some(true),
         "settings save must survive the flock writer's rename: {merged}"
     );

@@ -8,10 +8,10 @@ fn cli_marketplace_remove_fails_closed_when_init_flock_held() {
     // SAFETY: no other threads are running yet.
     unsafe { std::env::set_var("GROK_HOME", grok_home.path()) };
 
-    let config_path = grok_home.path().join("config.toml");
+    let config_path = grok_home.path().join("config.json");
     std::fs::write(
         &config_path,
-        "[[marketplace.sources]]\nname = \"a\"\ngit = \"https://example.com/a.git\"\n",
+        r#"{"extensions": {"marketplace": {"sources": [{"name": "a", "git": "https://example.com/a.git"}]}}}"#,
     )
     .unwrap();
 

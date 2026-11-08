@@ -4,7 +4,7 @@
 
 /// One named `[auth_provider.<name>]` table, honored only from the trusted config layers (`parse_auth_providers`).
 /// A new field here needs a `parse_auth_providers` warning decision.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct AuthProviderConfig {
     /// Command to run; without `args` it uses the platform shell, with `args` it execs directly.

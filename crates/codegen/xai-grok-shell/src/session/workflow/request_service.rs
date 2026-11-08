@@ -37,7 +37,7 @@ pub(crate) fn spawn_request_service(
                 let _ = ack.send(WorkflowLaunchAck::Rejected {
                     code: "workflows_disabled",
                     detail: "Background workflows are disabled for this session \
-                             ([workflows] enabled = false / GROK_WORKFLOWS=0 / remote flag)."
+                             (`agents.workflows.enabled` is `false` / GROK_WORKFLOWS=0 / remote flag)."
                         .into(),
                 });
                 continue;

@@ -655,7 +655,7 @@ pub(super) fn set_scroll_speed_inner(app: &mut AppView, clamped: u8) {
 }
 
 /// Set mouse-wheel scroll speed (registry-driven path).
-/// SHELL-OWNED: persisted to `[ui].scroll_speed` in config.toml via `Effect::PersistSetting`.
+/// SHELL-OWNED: persisted to `ui.scroll_speed` in config.json via `Effect::PersistSetting`.
 /// Clamps to `[1, 100]` to match the registry's `Int { min: 1, max: 100 }` bounds.
 pub(in crate::app::dispatch) fn set_scroll_speed(app: &mut AppView, raw: i64) -> Vec<Effect> {
     let clamped = raw.clamp(1, 100) as u8;
@@ -787,7 +787,7 @@ pub(super) fn set_respect_manual_folds_inner(app: &mut AppView, new: bool) {
 
 /// Set `respect_manual_folds` (registry-driven path).
 /// PAGER-OWNED: live-applied to every agent via `AppView::set_appearance`.
-/// Persisted to `[scrollback.scroll]` in pager.toml via `Effect::PersistSetting`.
+/// Persisted to `scrollback.scroll` in pager.json via `Effect::PersistSetting`.
 pub(in crate::app::dispatch) fn set_respect_manual_folds(
     app: &mut AppView,
     new: bool,
@@ -1123,7 +1123,7 @@ pub(super) fn set_follow_up_behavior_inner(
     app.current_ui.follow_up_behavior = Some(new.as_canonical().to_string());
     crate::appearance::cache::set_follow_up_behavior(new);
     // Same-process atomic only (tests / in-proc shell)
-    // The real agent is a separate process; it re-resolves Steer from config.toml mtime after the PersistSetting disk write lands
+    // The real agent is a separate process; it re-resolves Steer from config.json mtime after the PersistSetting disk write lands
     xai_grok_shell::util::config::set_follow_up_steer_cache(new.is_steer());
 }
 

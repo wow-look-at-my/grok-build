@@ -41,7 +41,7 @@ Control how entries are displayed in the scrollback.
 | `Right` | Expand selected entry |
 | `Ctrl+E` | Expand/collapse all thinking blocks |
 
-Setting `respect_manual_folds = true` under `[scrollback.scroll]` in `pager.toml` (opt-in, off by default — see [Configuration](05-configuration.md)) makes a hand-folded block pinned: streaming updates. Finish events (for example a thinking block ending) leave it alone instead of resetting it, and expanding a block while auto-scroll follows the tail stops following. As a result, you can read. Resume with `Down` at the last entry, scrolling past the bottom, or sending a new prompt. `Ctrl+E` clears pins on thinking blocks.
+Setting `scrollback.scroll.respect_manual_folds` to `true` in `pager.json` (opt-in, off by default — see [Configuration](05-configuration.md)) makes a hand-folded block pinned: streaming updates. Finish events (for example a thinking block ending) leave it alone instead of resetting it, and expanding a block while auto-scroll follows the tail stops following. As a result, you can read. Resume with `Down` at the last entry, scrolling past the bottom, or sending a new prompt. `Ctrl+E` clears pins on thinking blocks.
 
 ### Block Content
 
@@ -360,7 +360,7 @@ The TUI supports mouse interaction:
 - **Click** on a scrollback entry to select it
 - **Scroll wheel** to scroll through the scrollback
 - **Click** on the prompt area to focus it
-- **Hover** over the prompt to see a highlight (configurable via `pager.toml`)
+- **Hover** over the prompt to see a highlight (configurable via `pager.json`)
 - **Middle click** on Linux X11/XWayland to paste the PRIMARY selection
 
 ---

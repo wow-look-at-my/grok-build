@@ -82,13 +82,13 @@ pub(super) fn worktree_persist_options()
     [
         QuestionOption {
             label: "Always worktree".into(),
-            description: "Use worktree and stop asking (reset in config.toml)".into(),
+            description: "Use worktree and stop asking (reset in config.json)".into(),
             preview: None,
             id: None,
         },
         QuestionOption {
             label: "Never worktree".into(),
-            description: "Skip worktree and stop asking (reset in config.toml)".into(),
+            description: "Skip worktree and stop asking (reset in config.json)".into(),
             preview: None,
             id: None,
         },

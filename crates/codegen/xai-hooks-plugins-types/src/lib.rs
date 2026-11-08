@@ -336,7 +336,7 @@ pub struct PluginsListResponse {
 pub enum McpServerSource {
     /// Managed by the platform (e.g., OAuth connectors).
     Managed,
-    /// Locally configured (config.toml, .mcp.json, plugins, etc.).
+    /// Locally configured (config.json, .mcp.json, plugins, etc.).
     Local,
 }
 
@@ -372,7 +372,7 @@ pub struct McpServerInfo {
     /// Tool names (for display when expanded).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tools: Vec<McpToolInfo>,
-    /// Config source label (e.g., "plugin: my-plugin", "config.toml", ".mcp.json").
+    /// Config source label (e.g., "plugin: my-plugin", "config.json", ".mcp.json").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_source: Option<String>,
 }

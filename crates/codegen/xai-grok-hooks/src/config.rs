@@ -90,14 +90,14 @@ impl HooksMap {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct MatcherGroup {
     #[serde(default)]
     pub matcher: Option<String>,
     pub hooks: Vec<RawHandler>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RawHandler {
     #[serde(rename = "type")]
     pub handler_type: String,

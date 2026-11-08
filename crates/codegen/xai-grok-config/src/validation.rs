@@ -72,7 +72,7 @@ pub fn requirements_layers() -> Vec<RequirementsLayer> {
         });
     }
     if let Some(dir) = system_config_dir() {
-        let sys_path = dir.join("requirements.toml");
+        let sys_path = system_requirements_file(&dir);
         if let Some(value) = load_requirements_layer(&sys_path) {
             out.push(RequirementsLayer {
                 value,
@@ -116,7 +116,12 @@ fn load_user_requirements(home: Option<&Path>) -> Option<toml::Value> {
 
 pub(crate) fn load_system_requirements() -> Option<toml::Value> {
     let dir = system_config_dir()?;
-    load_requirements_layer(&dir.join("requirements.toml"))
+    load_requirements_layer(&system_requirements_file(&dir))
+}
+
+/// The admin-written requirements file in the system dir: `requirements.json`, or a legacy `requirements.toml`.
+fn system_requirements_file(dir: &Path) -> PathBuf {
+    crate::loader::system_config_file(dir, crate::loader::SYSTEM_REQUIREMENTS_STEM)
 }
 
 /// Soft-fails on errors; fail-closed enforcement lives in [`validate_requirements`].
@@ -210,7 +215,7 @@ fn validate_requirements_value(
 pub fn validate_requirements() -> Result<(), RequirementsError> {
     validate_user_requirements(user_grok_home().as_deref())?;
     if let Some(dir) = system_config_dir() {
-        validate_requirements_layer(&dir.join("requirements.toml"))?;
+        validate_requirements_layer(&system_requirements_file(&dir))?;
     }
     // MDM uses the raw value (fail_closed intact) so it's enforced like the files.
     if let Some(mdm) = crate::macos_managed::managed_preferences_requirements() {

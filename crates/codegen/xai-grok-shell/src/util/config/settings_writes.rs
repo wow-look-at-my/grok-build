@@ -12,16 +12,15 @@ use xai_grok_config::fs_atomic::BoundDest;
 // All route through `update_config`, then `merge_section`, then `save_config` ---------------------------------------------------------------------------
 
 // Process-wide cache for `[ui].follow_up_behavior == "steer"`. The shell agent is a separate process from the pager, so an in-process atomic updated in the pager never reaches the turn loop
-// Key the cache on config.toml mtime instead A live settings write invalidates on the next safe-point drain (cheap stat; full parse only when the file changed) 0 = unknown, 1 = queue, 2 = steer.
+// Key the cache on config.json mtime instead A live settings write invalidates on the next safe-point drain (cheap stat; full parse only when the file changed) 0 = unknown, 1 = queue, 2 = steer.
 const FOLLOW_UP_CACHE_UNKNOWN: u8 = 0;
 const FOLLOW_UP_CACHE_QUEUE: u8 = 1;
 const FOLLOW_UP_CACHE_STEER: u8 = 2;
 static FOLLOW_UP_STEER_CACHE: AtomicU8 = AtomicU8::new(FOLLOW_UP_CACHE_UNKNOWN);
 static FOLLOW_UP_STEER_MTIME_NS: AtomicU64 = AtomicU64::new(0);
 
-/// Nanoseconds since epoch for the user `config.toml` mtime, or 0 if missing.
 fn follow_up_config_mtime_ns() -> u64 {
-    let path = crate::util::grok_home::grok_home().join("config.toml");
+    let path = crate::util::config::user_config_path();
     std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
@@ -43,14 +42,14 @@ pub fn set_follow_up_steer_cache(steer: bool) {
     FOLLOW_UP_STEER_MTIME_NS.store(follow_up_config_mtime_ns(), Ordering::Relaxed);
 }
 
-/// Whether Steer is enabled in this process. Hits disk only when the cache is cold or the `config.toml` mtime has changed since the last resolve.
+/// Whether Steer is enabled in this process. Hits disk only when the cache is cold or the `config.json` mtime has changed since the last resolve.
 /// That lets the pager toggle Follow-up behavior live without restarting the shell agent. A failed effective-config load does not pin Queue: the previous cache is kept, or a cold failure returns false for this call only.
 /// The cold failure writes neither QUEUE nor the mtime.
 pub async fn follow_up_steer_enabled() -> bool {
     let mtime = follow_up_config_mtime_ns();
     let cached_mtime = FOLLOW_UP_STEER_MTIME_NS.load(Ordering::Relaxed);
     let cached = FOLLOW_UP_STEER_CACHE.load(Ordering::Relaxed);
-    // A missing `config.toml` reads as the first mtime. That is a stable state too, so the cache holds until the file appears.
+    // A missing `config.json` reads as the first mtime. That is a stable state too, so the cache holds until the file appears.
     if cached != FOLLOW_UP_CACHE_UNKNOWN && mtime == cached_mtime {
         return cached == FOLLOW_UP_CACHE_STEER;
     }
@@ -140,13 +139,13 @@ pub(super) fn write_dashboard_preview(
             .entry("ui".to_owned())
             .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
             .as_table_mut()
-            .with_context(|| format!("{} [ui] must be a table", path.display()))?;
+            .with_context(|| format!("{} `ui` must be an object", path.display()))?;
         ui.insert("dashboard_preview".to_owned(), toml::Value::Boolean(value));
         Ok(())
     })
 }
 
-/// Run a raw-table rewrite of the user `config.toml` under the config write guard.
+/// Run a raw-table rewrite of the user `config.json` under the config write guard.
 /// For keys `update_config` cannot express (a deletion, or a table `save_config_locked` does not merge).
 async fn rewrite_user_config_locked(
     what: &'static str,
@@ -154,7 +153,7 @@ async fn rewrite_user_config_locked(
 ) -> Result<()> {
     let guard = crate::util::config::persist::lock_config_writes()
         .await
-        .map_err(|error| anyhow::anyhow!("lock config.toml to save {what}: {error}"))?;
+        .map_err(|error| anyhow::anyhow!("lock config.json to save {what}: {error}"))?;
     guard
         .run_blocking(move || rewrite(&crate::util::config::mcp::user_config_path()))
         .await
@@ -171,19 +170,15 @@ fn rewrite_user_config_table(
     let (destination, content) = crate::util::config::persist::read_follow_bound(path)
         .map_err(|error| anyhow::anyhow!("read {} to save {what}: {error}", path.display()))?;
     let mut document =
-        crate::util::config::persist::parse_existing_config_toml(&content).map_err(|error| {
-            anyhow::anyhow!(
-                "parse {} to save {what}: {}",
-                path.display(),
-                xai_grok_config::toml_error_detail(&content, &error)
-            )
-        })?;
+        crate::util::config::persist::parse_existing_config(destination.as_path(), &content)
+            .map_err(|error| anyhow::anyhow!("parse {} to save {what}: {error}", path.display()))?;
     let root = document
         .as_table_mut()
-        .with_context(|| format!("{} must contain a TOML table", path.display()))?;
+        .with_context(|| format!("{} must contain a JSON object", path.display()))?;
     edit(root)?;
-    let content = toml::to_string_pretty(&document)
-        .map_err(|error| anyhow::anyhow!("serialize {} for {what}: {error}", path.display()))?;
+    let content =
+        crate::util::config::persist::render_existing_config(destination.as_path(), &document)
+            .map_err(|error| anyhow::anyhow!("serialize {} for {what}: {error}", path.display()))?;
     write(path, &destination, &content)
         .map_err(|error| anyhow::anyhow!("write {} to save {what}: {error}", path.display()))
 }
@@ -201,7 +196,6 @@ pub async fn set_follow_up_behavior(value: String) -> Result<()> {
 }
 
 /// Persist `[ui.contextual_hints].undo` via `update_config`.
-/// The nested struct stays out of `config.toml` until a tip is toggled (`skip_serializing_if`).
 pub async fn set_contextual_hint_undo(value: bool) -> Result<()> {
     update_config(|cfg| cfg.ui.contextual_hints.undo = Some(value)).await
 }
@@ -299,7 +293,7 @@ pub async fn set_feedback_trace_card(value: bool) -> Result<()> {
     .await
 }
 
-/// Persist `[model."<model_key>"] context_window` in the user `config.toml`.
+/// Persist `models.definitions."<model_key>".context_window` in the user `config.json`.
 /// `None` removes the key, and a block left empty goes with it.
 pub async fn set_model_context_window(model_key: String, tokens: Option<u64>) -> Result<()> {
     if model_key.trim().is_empty() || model_key.len() > MAX_DEFAULT_MODEL_LEN {
@@ -326,8 +320,12 @@ pub(super) fn write_model_context_window(
     write: impl FnOnce(&Path, &BoundDest, &str) -> std::io::Result<()>,
 ) -> Result<()> {
     rewrite_user_config_table(path, "context window", write, |root| {
-        apply_model_context_window(root, model_key, tokens)
-            .with_context(|| format!("{} [model] must be a table of tables", path.display()))
+        apply_model_context_window(root, model_key, tokens).with_context(|| {
+            format!(
+                "{} `models.definitions` must be an object of objects",
+                path.display()
+            )
+        })
     })
 }
 
@@ -360,17 +358,17 @@ pub(crate) fn apply_model_context_window(
         .entry("model".to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .context("[model] is not a table")?;
+        .context("`models.definitions` is not an object")?;
     let block = models
         .entry(model_key.to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .with_context(|| format!("[model.\"{model_key}\"] is not a table"))?;
+        .with_context(|| format!("`models.definitions.{model_key}` is not an object"))?;
     block.insert("context_window".to_owned(), toml::Value::Integer(value));
     Ok(())
 }
 
-/// Persist or remove a registry `[features]` key in the user `config.toml`.
+/// Persist or remove a registry `features` key in the user `config.json`.
 /// `None` deletes the key so the remote and default tiers apply again.
 pub async fn set_feature_override(feature: Feature, value: Option<bool>) -> Result<()> {
     rewrite_user_config_locked(feature.path(), move |path| {
@@ -397,7 +395,7 @@ pub(super) fn write_feature_override(
                     .entry("features".to_owned())
                     .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
                     .as_table_mut()
-                    .with_context(|| format!("{} [features] must be a table", path.display()))?;
+                    .with_context(|| format!("{} `features` must be an object", path.display()))?;
                 features.insert(feature.key().to_owned(), toml::Value::Boolean(flag));
             }
             None => {
@@ -510,7 +508,7 @@ pub(crate) fn apply_model_group_model(
         .cloned()
         .map(toml::Value::try_into)
         .transpose()
-        .context("[model_groups] is invalid")?
+        .context("`models.groups` is invalid")?
         .unwrap_or_default();
     let groups = xai_grok_models::resolve_model_groups(&user).map_err(anyhow::Error::msg)?;
     let group = groups
@@ -539,11 +537,11 @@ pub(crate) fn apply_model_group_model(
         .entry("model_groups".to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .context("[model_groups] must be a table")?
+        .context("`models.groups` must be an object")?
         .entry(group_id.to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .with_context(|| format!("[model_groups.{group_id}] must be a table"))?;
+        .with_context(|| format!("`models.groups.{group_id}` must be an object"))?;
     table.insert("model".to_owned(), toml::Value::String(value.to_owned()));
     if let Some(models) = root.get_mut("models").and_then(toml::Value::as_table_mut) {
         for member in &group.members {
@@ -608,11 +606,11 @@ pub(crate) fn apply_subagent_model(
     root.entry("subagents".to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .context("[subagents] must be a table")?
+        .context("`agents.subagents` must be an object")?
         .entry("models".to_owned())
         .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
         .as_table_mut()
-        .context("[subagents.models] must be a table")?
+        .context("`agents.subagents.models` must be an object")?
         .insert(agent_type.to_owned(), toml::Value::String(value.to_owned()));
     Ok(())
 }
