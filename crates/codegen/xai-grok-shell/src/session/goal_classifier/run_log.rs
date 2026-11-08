@@ -317,7 +317,6 @@ pub(crate) fn session_tool_output_dirs(session_dir: &std::path::Path) -> Vec<Pat
     xai_grok_tools::session_output_dirs::TOOL_OUTPUT_DIRS
         .iter()
         .map(|dir| session_dir.join(dir))
-        .filter(|_| false)
         .collect()
 }
 
