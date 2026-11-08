@@ -133,6 +133,43 @@ pub(crate) fn resolve_catalog_key(
     .map(|(key, _)| acp::ModelId::new(key.clone()))
 }
 
+/// Map a session's route (the model id it sends and the base URL it sends to)
+/// to its catalog key. Several providers can serve one model id. The model id
+/// alone then names whichever entry [`resolve_catalog_key`] prefers, which is
+/// frequently another provider's entry. So an entry on the same URL wins. The
+/// fallback for a route that no entry has is [`resolve_catalog_key`].
+pub(crate) fn resolve_route_catalog_key(
+    models: &IndexMap<String, ModelEntry>,
+    model: &str,
+    base_url: &str,
+) -> Option<acp::ModelId> {
+    let base_url = normalize_route_url(base_url);
+    let on_route = |entry: &ModelEntry| {
+        !base_url.is_empty()
+            && std::iter::once(entry.info.base_url.as_str())
+                .chain(entry.api_base_url.as_deref())
+                .any(|url| normalize_route_url(url) == base_url)
+    };
+    if let Some(entry) = models.get(model)
+        && on_route(entry)
+    {
+        return Some(acp::ModelId::new(model));
+    }
+    pick_by_model_id(
+        models
+            .iter()
+            .rev()
+            .filter(|(_, entry)| entry.info.has_model_id(model) && on_route(entry)),
+    )
+    .map(|(key, _)| acp::ModelId::new(key.clone()))
+    .or_else(|| resolve_catalog_key(models, &acp::ModelId::new(model)))
+}
+
+/// A URL without case or trailing slashes, for comparison only.
+fn normalize_route_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+
 /// Catalog key for a persisted session model id, restricted to **selectable** entries.
 pub(crate) fn selectable_catalog_key_for_persisted(
     models: &IndexMap<String, ModelEntry>,

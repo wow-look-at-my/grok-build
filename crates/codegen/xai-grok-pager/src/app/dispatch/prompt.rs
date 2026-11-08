@@ -827,6 +827,15 @@ pub(super) fn dispatch_send_prompt_submission(
                     model_windows: crate::settings::context_limits::catalog_windows(
                         &agent.session.models.available,
                     ),
+                    model_routes: crate::settings::context_limits::catalog_routes(
+                        &agent.session.models.available,
+                    ),
+                    current_model_id: agent
+                        .session
+                        .models
+                        .current
+                        .as_ref()
+                        .map(|id| id.0.to_string()),
                     context_limits: context_limits_from_app,
                 },
             };

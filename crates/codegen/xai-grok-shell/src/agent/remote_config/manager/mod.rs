@@ -11,7 +11,7 @@ use agent_client_protocol as acp;
 use super::{
     HttpModelsEndpoint, ModelFetchAuth, ModelsCacheManager, ModelsCacheScope, ModelsEndpoint,
     allowlist_matches_nothing, available_models, is_campaign_only_flip, merge_additive_catalog,
-    resolve_catalog_key, resolve_default_model, resolve_model_catalog,
+    resolve_catalog_key, resolve_default_model, resolve_model_catalog, resolve_route_catalog_key,
     task_model_error_for_catalog, validate_selectable,
 };
 use crate::agent::config::{self, ModelEntry, resolve_credentials, sampling_config_for_model};
@@ -590,19 +590,36 @@ impl ModelsManager {
         models.get(key.0.as_ref()).map(f)
     }
 
-    /// The catalog window of `model_id`, and whether config or a listing pinned it.
-    pub(crate) fn model_context_window(
-        &self,
-        model_id: &str,
-    ) -> Option<(std::num::NonZeroU64, bool)> {
-        self.with_catalog_entry(model_id, |e| {
-            (e.info().context_window, e.info().context_window_pinned)
-        })
+    /// The catalog key of the entry a session sends to. See
+    /// [`resolve_route_catalog_key`].
+    pub(crate) fn route_catalog_key(&self, model: &str, base_url: &str) -> Option<acp::ModelId> {
+        resolve_route_catalog_key(&self.inner.catalog.read().models, model, base_url)
     }
 
-    /// The window a config block or a listing set for `model_id`. A guess at run time must not replace it.
-    pub(crate) fn pinned_context_window(&self, model_id: &str) -> Option<std::num::NonZeroU64> {
-        self.model_context_window(model_id)
+    /// The catalog window of the entry a session sends to, and whether config
+    /// or a listing pinned it. `model` is the id the session sends and
+    /// `base_url` is where it sends it. The model id alone can name another
+    /// provider's entry, with that provider's limit.
+    pub(crate) fn route_context_window(
+        &self,
+        model: &str,
+        base_url: &str,
+    ) -> Option<(std::num::NonZeroU64, bool)> {
+        let cat = self.inner.catalog.read();
+        let key = resolve_route_catalog_key(&cat.models, model, base_url)?;
+        cat.models
+            .get(key.0.as_ref())
+            .map(|e| (e.info().context_window, e.info().context_window_pinned))
+    }
+
+    /// The window a config block or a listing set for the entry a session sends
+    /// to. A guess at run time must not replace it.
+    pub(crate) fn pinned_route_context_window(
+        &self,
+        model: &str,
+        base_url: &str,
+    ) -> Option<std::num::NonZeroU64> {
+        self.route_context_window(model, base_url)
             .and_then(|(cw, pinned)| pinned.then_some(cw))
     }
 
