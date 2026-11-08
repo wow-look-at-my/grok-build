@@ -2723,7 +2723,7 @@ fn acp_model_meta_keeps_explicit_scalar_when_list_present() {
     assert_eq!(meta.get("reasoningEffort"), Some(&serde_json::json!("low")));
 }
 #[test]
-fn acp_model_meta_derives_first_option_when_no_default() {
+fn acp_model_meta_derives_the_default_tier_when_no_default() {
     let mut models = IndexMap::new();
     let mut entry = test_model_entry("m", "https://test.api/v1", None, None, None);
     entry.info.reasoning_efforts = vec![
@@ -8881,10 +8881,10 @@ fn slug_propagation_prefers_same_key_menu_donor_over_restricted_alias() {
     );
     assert_eq!(effort_ids(info("grok-4.6-cheap")), ["low"]);
 }
-/// Inheriting an unmarked `capabilities` menu must carry the server-default flag along, or the alias would
-/// derive `.first()` (`low`) where the same-key row sends nothing.
+/// Inheriting an unmarked `capabilities` menu carries the server-default flag along. An effort-capable model
+/// never goes out without an effort, so the alias takes the menu's default tier (`medium`), not its first (`low`).
 #[test]
-fn slug_inherited_unmarked_capabilities_menu_keeps_no_default_effort() {
+fn slug_inherited_unmarked_capabilities_menu_takes_the_default_tier() {
     let row = serde_json::json!({
         "id": "grok-4.6-build",
         "capabilities": { "reasoning_effort": ["low", "medium", "high", "xhigh"] }
@@ -8896,8 +8896,11 @@ fn slug_inherited_unmarked_capabilities_menu_keeps_no_default_effort() {
     assert_eq!(effort_ids(&entry.info), ["low", "medium", "high", "xhigh"]);
     assert!(entry.info.supports_reasoning_effort);
     assert!(entry.info.reasoning_effort_server_default);
-    assert_eq!(entry.info.reasoning_effort, None);
-    assert_eq!(resolve_sampling(&entry, None).reasoning_effort, None);
+    assert_eq!(entry.info.reasoning_effort, Some(ReasoningEffort::Medium));
+    assert_eq!(
+        resolve_sampling(&entry, None).reasoning_effort,
+        Some(ReasoningEffort::Medium)
+    );
 }
 /// An explicit `supports_reasoning_effort = false` in config discards the menu whether it arrives through the
 /// same-key base (wire-id key) or through slug propagation (alias key), and the scalar whether it came from the

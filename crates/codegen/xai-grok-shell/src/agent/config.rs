@@ -5024,18 +5024,15 @@ impl ModelInfo {
             return;
         }
         self.supports_reasoning_effort = true;
+        // A menu is usually listed weakest first, so its first entry is often
+        // `none`. Only the user turns reasoning off, never a default.
         if self.reasoning_effort.is_none() {
-            let first = if self.reasoning_effort_server_default {
-                None
-            } else {
-                self.reasoning_efforts.first()
-            };
-            self.reasoning_effort = self
-                .reasoning_efforts
-                .iter()
-                .find(|opt| opt.default)
-                .or(first)
-                .map(|opt| opt.value);
+            self.reasoning_effort = Some(crate::agent::reasoning_policy::resolve_reasoning_effort(
+                crate::agent::reasoning_policy::ReasoningNeed::Default,
+                &crate::agent::reasoning_policy::EffortSupport::Menu(
+                    self.reasoning_efforts.clone(),
+                ),
+            ));
         }
     }
     /// Whether this model appears in the picker for the given auth mode.
