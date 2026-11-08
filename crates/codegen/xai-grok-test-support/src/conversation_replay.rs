@@ -406,7 +406,8 @@ impl ReplayingScript {
                 text: entry.reply.clone(),
             });
         };
-        Some(match call.tool.pick(&request.offered, &call.arguments) {
+        let arguments = call.resolved_arguments(&request.results);
+        Some(match call.tool.pick(&request.offered, &arguments) {
             Some(picked) => NextStep::Call {
                 entry_index: index,
                 call_id,

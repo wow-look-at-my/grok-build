@@ -70,6 +70,16 @@ pub struct MockToolCall {
     pub(crate) narration: Option<String>,
     /// A thinking block the model writes ahead of its narration.
     pub(crate) reasoning: Option<String>,
+    /// A string in the arguments that the replay replaces with text from an earlier call's result.
+    pub(crate) argument_from: Option<ArgumentFromResult>,
+}
+
+/// The first capture group of `regex` in the result of `call_id` replaces `placeholder`.
+#[derive(Debug, Clone)]
+pub(crate) struct ArgumentFromResult {
+    pub(crate) placeholder: String,
+    pub(crate) call_id: String,
+    pub(crate) regex: Regex,
 }
 
 impl MockToolCall {
@@ -80,9 +90,66 @@ impl MockToolCall {
             result_check: None,
             narration: None,
             reasoning: None,
+            argument_from: None,
         }
     }
 
+    /// Replace every `placeholder` string in the arguments with the first capture group of
+    /// `pattern` in the result of the earlier call `call_id`. Use it for a value the agent puts in
+    /// a result at run time, such as the path of a file it saved.
+    pub fn argument_from_result(
+        mut self,
+        placeholder: impl Into<String>,
+        call_id: impl Into<String>,
+        pattern: &str,
+    ) -> Result<Self, regex::Error> {
+        self.argument_from = Some(ArgumentFromResult {
+            placeholder: placeholder.into(),
+            call_id: call_id.into(),
+            regex: Regex::new(pattern)?,
+        });
+        Ok(self)
+    }
+
+    /// The arguments with the placeholder replaced. With no earlier result, or no match in it,
+    /// the arguments stay as written, so the result check of the call reports the miss.
+    pub(crate) fn resolved_arguments(
+        &self,
+        results: &std::collections::BTreeMap<String, String>,
+    ) -> Value {
+        let Some(from) = &self.argument_from else {
+            return self.arguments.clone();
+        };
+        let Some(value) = results
+            .get(&from.call_id)
+            .and_then(|result| from.regex.captures(result))
+            .and_then(|captures| captures.get(1))
+        else {
+            return self.arguments.clone();
+        };
+        replace_strings(&self.arguments, &from.placeholder, value.as_str())
+    }
+}
+
+fn replace_strings(value: &Value, placeholder: &str, with: &str) -> Value {
+    match value {
+        Value::String(s) => Value::String(s.replace(placeholder, with)),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|v| replace_strings(v, placeholder, with))
+                .collect(),
+        ),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), replace_strings(v, placeholder, with)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+impl MockToolCall {
     /// The model writes `text` before the call, in the same response. Served on Chat Completions and Messages.
     pub fn narrated(mut self, text: impl Into<String>) -> Self {
         self.narration = Some(text.into());

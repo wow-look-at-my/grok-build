@@ -10,6 +10,8 @@ mod continue_resumes_session_with_history;
 mod endline_park_is_markerless;
 #[path = "pty_e2e/endline_wakeups_close_with_markers.rs"]
 mod endline_wakeups_close_with_markers;
+#[path = "pty_e2e/goal_reads_a_large_mcp_result.rs"]
+mod goal_reads_a_large_mcp_result;
 #[path = "pty_e2e/goal_round_rows_are_shown.rs"]
 mod goal_round_rows_are_shown;
 #[path = "pty_e2e/pre_tool_text_stays_visible.rs"]

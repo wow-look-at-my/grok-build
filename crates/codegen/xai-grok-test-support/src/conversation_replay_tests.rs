@@ -150,6 +150,35 @@ fn calls_are_answered_in_order_until_their_results_arrive_then_the_reply() {
 }
 
 #[test]
+fn a_call_takes_an_argument_from_an_earlier_result() {
+    let from_shell = MockToolCall::new(Tool::Read, json!({ "target_file": "SAVED_PATH" }))
+        .argument_from_result("SAVED_PATH", "call_mock_1_1", r"written to: (\S+)\.")
+        .unwrap();
+    let respond = chat_scripts(vec![
+        Conversation::nth(1)
+            .calls([shell_call(), from_shell])
+            .reply("DONE"),
+    ]);
+
+    let second = respond(
+        ConversationId::nth(1),
+        vec![chat_result(
+            "call_mock_1_1",
+            "Full output written to: /s/abc/mcp/x.json.",
+        )],
+    );
+
+    assert_eq!(
+        call(
+            "call_mock_1_2",
+            "read_file",
+            json!({ "target_file": "/s/abc/mcp/x.json" })
+        ),
+        second
+    );
+}
+
+#[test]
 fn request_after_a_reply_starts_the_next_entry() {
     let respond = chat_scripts(vec![
         Conversation::nth(1)
