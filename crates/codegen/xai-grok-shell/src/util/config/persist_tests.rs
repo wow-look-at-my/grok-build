@@ -467,7 +467,9 @@ fn keep_awake_writer_replaces_sleep_prevention_and_keeps_other_notification_keys
         "the legacy key and keep_awake together fail the whole ui.notifications object"
     );
     assert_eq!(
-        notifications.get("method").and_then(serde_json::Value::as_str),
+        notifications
+            .get("method")
+            .and_then(serde_json::Value::as_str),
         Some("bel")
     );
     assert_eq!(
