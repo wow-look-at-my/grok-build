@@ -1112,7 +1112,7 @@ Roles define reusable capability/model defaults. Personas layer tone and behavio
 }
 ```
 
-Both are also discovered from `.grok/roles/*.toml` and `.grok/personas/*.toml` files respectively. If a requested persona is not found, the spawn fails (fail-closed).
+Both are also discovered from `.grok/roles/*.json` and `.grok/personas/*.json` files respectively (legacy `.toml` files still load). If a requested persona is not found, the spawn fails (fail-closed).
 
 ---
 

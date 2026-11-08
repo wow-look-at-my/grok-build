@@ -119,11 +119,11 @@ Define personas in `config.json` or in `.toml` files:
 
 Grok Build discovers file-based personas from these locations, in priority order:
 
-- `.grok/personas/*.toml` (project)
-- `~/.grok/personas/*.toml` (user)
+- `.grok/personas/*.json` (project)
+- `~/.grok/personas/*.json` (user)
 - The bundled personas directory (lowest priority)
 
-Each file defines one persona, and the file name (without the extension) becomes the persona name. Inline `config.json` personas take precedence over files. Only `.toml` files are discovered.
+Each file defines one persona as a JSON object with the fields below, and the file name (without the extension) becomes the persona name. Inline `config.json` personas take precedence over files. A legacy `.toml` file still loads. When `name.json` and `name.toml` both exist, the `.json` file wins.
 
 Manage personas in the Personas tab of the agents modal (`/personas`). Bundled personas are read-only. Personas you define are editable.
 
@@ -388,7 +388,7 @@ Define custom personas with behavioral instructions:
 }
 ```
 
-Grok Build also discovers roles from `.grok/roles/*.toml` and personas from `.grok/personas/*.toml`. Inline `config.json` definitions take precedence over files.
+Grok Build also discovers roles from `.grok/roles/*.json` and personas from `.grok/personas/*.json` (legacy `.toml` files still load). Inline `config.json` definitions take precedence over files.
 
 ---
 
