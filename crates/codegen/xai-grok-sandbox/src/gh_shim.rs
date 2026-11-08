@@ -43,11 +43,13 @@ impl ShimLayout {
     }
 }
 
-/// The `gh` script that runs `api-cli --client`. An APE unpacks its loader into a writable
-/// directory, and TMPDIR is the one every sandbox can write.
+/// The `gh` script that runs `api-cli --client`. An APE unpacks its loader
+/// into a directory that is writable and sticky. TMPDIR is the directory
+/// every sandbox can write, but it is not sticky, so the script makes a
+/// sticky, private (a later mode) directory inside it.
 pub fn client_script(layout: &ShimLayout) -> String {
     format!(
-        "#!/bin/sh\nAPE_LOADERDIR=\"${{APE_LOADERDIR:-${{TMPDIR:-/tmp}}}}\"; export APE_LOADERDIR\nexec {} --client {} \"$@\"\n",
+        "#!/bin/sh\nif [ -z \"${{APE_LOADERDIR:-}}\" ]; then APE_LOADERDIR=\"${{TMPDIR:-/tmp}}/.ape-loader\"; mkdir -m 1700 \"$APE_LOADERDIR\" 2>/dev/null; fi; export APE_LOADERDIR\nexec {} --client {} \"$@\"\n",
         sh_quote(&layout.api_cli),
         sh_quote(&layout.socket)
     )
@@ -288,7 +290,7 @@ mod tests {
         let layout = ShimLayout::for_session(Path::new("/g"), 42);
         assert_eq!(
             client_script(&layout),
-            "#!/bin/sh\nAPE_LOADERDIR=\"${APE_LOADERDIR:-${TMPDIR:-/tmp}}\"; export APE_LOADERDIR\nexec '/g/sandbox-gh/api-cli' --client '/g/sandbox-gh/42/gh.sock' \"$@\"\n"
+            "#!/bin/sh\nif [ -z \"${APE_LOADERDIR:-}\" ]; then APE_LOADERDIR=\"${TMPDIR:-/tmp}/.ape-loader\"; mkdir -m 1700 \"$APE_LOADERDIR\" 2>/dev/null; fi; export APE_LOADERDIR\nexec '/g/sandbox-gh/api-cli' --client '/g/sandbox-gh/42/gh.sock' \"$@\"\n"
         );
     }
 
