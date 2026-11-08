@@ -732,10 +732,8 @@ grok
   },
   "models": {
     "definitions": {
-      "grok-4": {
-        "6": {
-          "api_key": "my-api-key"
-        }
+      "grok-4.6": {
+        "api_key": "my-api-key"
       }
     }
   }

@@ -1943,11 +1943,9 @@ You can override specific fields of built-in models without redefining everythin
 {
   "models": {
     "definitions": {
-      "grok-4": {
-        "20-0309-reasoning": {
-          "api_key": "sk-custom",
-          "temperature": 0.5
-        }
+      "grok-4.20-0309-reasoning": {
+        "api_key": "sk-custom",
+        "temperature": 0.5
       },
       "grok-build": {
         "api_key": "my-api-key"
