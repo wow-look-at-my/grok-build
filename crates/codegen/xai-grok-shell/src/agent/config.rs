@@ -3893,7 +3893,8 @@ pub(crate) fn resolve_model_list(
     }
     {
         let default_cw = DEFAULT_CONTEXT_WINDOW;
-        // Entries that carry a real (non-default) context window.
+        // Entries that carry a real (non-default) context window. A limit the user set in `[model.<key>]` belongs to that key's provider route, so only a
+        // sibling on the same route inherits it.
         let cw_sources: IndexMap<String, ModelEntry> = resolved
             .iter()
             .filter(|(_, e)| e.info.context_window.get() != default_cw)
@@ -3954,7 +3955,7 @@ pub(crate) fn resolve_model_list(
                         model = %entry.info.model,
                         from = default_cw,
                         to = resolved_cw.get(),
-                        "context_window resolved per exact slug from sibling model-listing entry"
+                        "context_window resolved per exact slug from sibling entry on the same route"
                     );
                     entry.info.context_window = resolved_cw;
                 }
