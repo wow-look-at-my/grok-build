@@ -63,6 +63,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "group_tool_verbs",
     "collapsed_edit_blocks",
     "respect_manual_folds",
+    "keep_awake",
     "hunk_tracker_mode",
     "voice_keybind_enabled",
     "voice_capture_mode",
@@ -2010,6 +2011,7 @@ fn registry_kind_membership_through_pr_14() {
             "default_selected_permission",
             "follow_up_behavior",
             "hunk_tracker_mode",
+            "keep_awake",
             "keep_text_selection",
             "permission_mode",
             "plan_mode",
@@ -2108,6 +2110,7 @@ fn enum_settings_membership_through_pr_14() {
             "default_selected_permission",
             "follow_up_behavior",
             "hunk_tracker_mode",
+            "keep_awake",
             "keep_text_selection",
             "permission_mode",
             "plan_mode",
@@ -2202,6 +2205,7 @@ fn defaults_round_trip_through_registry() {
             "group_tool_verbs" => SettingValue::Bool(true),
             "collapsed_edit_blocks" => SettingValue::Bool(false),
             "respect_manual_folds" => SettingValue::Bool(false),
+            "keep_awake" => SettingValue::Enum("while_running"),
             // Per-tip contextual-hint children default ON (inherit resolves to true)
             "contextual_hints.undo" => SettingValue::Bool(true),
             "contextual_hints.plan_mode" => SettingValue::Bool(true),
@@ -5935,6 +5939,91 @@ fn mouse_click_on_render_mermaid_indicator_opens_picker_in_one_click() {
     match &s.mode() {
         SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "render_mermaid"),
         _ => panic!("value click on render_mermaid must enter PickingEnum"),
+    }
+}
+
+// keep_awake (PAGER Enum, Agent, live, no preview). Catalog [never, while_running, always].
+
+/// Enter on the `keep_awake` row opens the picker seeded at the default `while_running`.
+#[test]
+fn enter_on_keep_awake_row_enters_picking_enum() {
+    let mut s = make_state();
+    navigate_to(&mut s, "keep_awake");
+    let outcome = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    assert!(
+        matches!(outcome, SettingsKeyOutcome::Changed),
+        "Enter on keep_awake row must transition to PickingEnum, got {outcome:?}"
+    );
+    match &s.mode() {
+        SettingsModalMode::PickingEnum {
+            key,
+            original_value,
+            ..
+        } => {
+            assert_eq!(*key, "keep_awake");
+            assert_eq!(original_value, &SettingValue::Enum("while_running"));
+        }
+        other => panic!("expected PickingEnum mode, got {other:?}"),
+    }
+}
+
+/// Down from `while_running` lands on `always`; Enter commits it as a typed `SetKeepAwake`.
+#[test]
+fn keep_awake_picker_enter_dispatches_set_commit() {
+    let mut s = make_state();
+    navigate_to(&mut s, "keep_awake");
+    let _ = handle_settings_key(&mut s, &press(KeyCode::Enter));
+    let nav = handle_settings_key(&mut s, &press(KeyCode::Down));
+    assert!(
+        matches!(nav, SettingsKeyOutcome::Changed),
+        "picker nav must not dispatch a preview, got {nav:?}"
+    );
+    match handle_settings_key(&mut s, &press(KeyCode::Enter)) {
+        SettingsKeyOutcome::Action(Action::SetKeepAwake(mode)) => {
+            assert_eq!(mode, xai_grok_pager::notifications::KeepAwake::Always);
+        }
+        other => panic!("expected Action::SetKeepAwake commit, got {other:?}"),
+    }
+    assert!(matches!(s.mode(), SettingsModalMode::Browse));
+}
+
+/// Every catalog canonical parses back to a mode, so no choice commits to nothing.
+#[test]
+fn keep_awake_choices_parse_as_modes() {
+    let reg = SettingsRegistry::defaults();
+    let meta = reg.find("keep_awake").unwrap();
+    let SettingKind::Enum { choices, .. } = &meta.kind else {
+        panic!("keep_awake must be Enum");
+    };
+    let canonicals: Vec<&str> = choices.iter().map(|c| c.canonical).collect();
+    assert_eq!(canonicals, vec!["never", "while_running", "always"]);
+    for canonical in canonicals {
+        assert!(
+            xai_grok_pager::notifications::KeepAwake::from_canonical(canonical).is_some(),
+            "{canonical} must parse"
+        );
+    }
+}
+
+/// Value-column click on the keep_awake row opens the picker in one click.
+#[test]
+fn mouse_click_on_keep_awake_indicator_opens_picker_in_one_click() {
+    let mut s = make_state();
+    synth_rects(&mut s);
+    let row_y = row_idx_for(&s, "keep_awake") as u16;
+    let outcome = handle_settings_mouse(
+        &mut s,
+        MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        72,
+        row_y,
+    );
+    assert!(
+        matches!(outcome, SettingsKeyOutcome::Changed),
+        "value click must open picker in one click, got: {outcome:?}",
+    );
+    match &s.mode() {
+        SettingsModalMode::PickingEnum { key, .. } => assert_eq!(*key, "keep_awake"),
+        _ => panic!("value click on keep_awake must enter PickingEnum"),
     }
 }
 

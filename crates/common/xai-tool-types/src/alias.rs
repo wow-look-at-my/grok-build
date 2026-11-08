@@ -409,6 +409,15 @@ pub struct LocalAlias {
 /// Every locally-written field that keeps a bare `#[serde(alias)]`.
 pub const LOCAL: &[LocalAlias] = &[
     LocalAlias {
+        file: "crates/codegen/xai-grok-pager/src/notifications/config.rs",
+        ty: "NotificationConfig",
+        canonical: "keep_awake",
+        aliases: &["sleep_prevention"],
+        why: "the `[ui.notifications]` TOML table; both keys together fail the \
+              section, which `load_notification_config` reports with a warning, \
+              and the settings writer removes the old key when it writes the new one",
+    },
+    LocalAlias {
         file: "crates/codegen/xai-grok-shell/src/agent/config.rs",
         ty: "ConfigModelOverride",
         canonical: "compactions_remaining",

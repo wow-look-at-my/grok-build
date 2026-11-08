@@ -690,6 +690,7 @@ pub(super) fn dispatch_send_prompt_submission(
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
+    let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let context_limits_from_app = app.model_context_limits.clone();
     let login_method_id_from_app = app.login_method_id.as_ref().map(|id| id.0.to_string());
     let Some(agent) = app.agents.get_mut(&id) else {
@@ -837,6 +838,7 @@ pub(super) fn dispatch_send_prompt_submission(
                         .as_ref()
                         .map(|id| id.0.to_string()),
                     context_limits: context_limits_from_app,
+                    keep_awake: keep_awake_from_app,
                 },
             };
 

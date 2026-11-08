@@ -7,9 +7,9 @@ use super::setters::{
     set_contextual_hint_inner, set_default_model_inner, set_default_selected_permission_inner,
     set_display_refresh_auto_cadence_inner, set_follow_up_behavior_inner,
     set_group_tool_verbs_inner, set_harness_model_inner, set_hunk_tracker_mode_inner,
-    set_invert_scroll_inner, set_keep_text_selection_inner, set_max_thoughts_width_inner,
-    set_min_output_tokens_per_sec_inner, set_model_group_model_inner, set_multiline_mode,
-    set_output_rate_max_retries_inner, set_output_rate_sustained_secs_inner,
+    set_invert_scroll_inner, set_keep_awake_inner, set_keep_text_selection_inner,
+    set_max_thoughts_width_inner, set_min_output_tokens_per_sec_inner, set_model_group_model_inner,
+    set_multiline_mode, set_output_rate_max_retries_inner, set_output_rate_sustained_secs_inner,
     set_output_rate_window_secs_inner, set_page_flip_on_send_inner, set_prompt_suggestions_inner,
     set_remember_tool_approvals_inner, set_render_mermaid_inner, set_respect_manual_folds_inner,
     set_scroll_lines_inner, set_scroll_mode_inner, set_scroll_speed_inner,
@@ -59,6 +59,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
+    let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
     let context_limits_from_app = app.model_context_limits.clone();
     for agent in app.agents.values_mut() {
         // Walk both `Settings` and `ResetSettingsConfirm`
@@ -109,6 +110,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                     .as_ref()
                     .map(|id| id.0.to_string()),
                 context_limits: context_limits_from_app.clone(),
+                keep_awake: keep_awake_from_app,
             };
             if coding_data_sharing_lock_from_app.is_some()
                 && matches!(
@@ -213,6 +215,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
+    let keep_awake_from_app = app.notification_service.sleep_inhibitor.mode();
 
     let Some(agent) = app.agents.get_mut(&id) else {
         return effects;
@@ -270,6 +273,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
             .as_ref()
             .map(|id| id.0.to_string()),
         context_limits: context_limits_from_app,
+        keep_awake: keep_awake_from_app,
     };
     let mut state = Box::new(SettingsModalState::new(
         registry,
@@ -619,6 +623,7 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         model_routes: agent_model_routes(app),
         current_model_id: agent_current_model_id(app),
         context_limits: app.model_context_limits.clone(),
+        keep_awake: app.notification_service.sleep_inhibitor.mode(),
     }
 }
 
@@ -735,6 +740,9 @@ pub(in crate::app::dispatch) fn action_for_reset(
         }
         ("prompt_suggestions", SettingValue::Bool(b)) => Some(Action::SetPromptSuggestions(*b)),
         ("respect_manual_folds", SettingValue::Bool(b)) => Some(Action::SetRespectManualFolds(*b)),
+        ("keep_awake", SettingValue::Enum(s)) => {
+            crate::notifications::KeepAwake::from_canonical(s).map(Action::SetKeepAwake)
+        }
         ("default_selected_permission", SettingValue::Enum(s)) => {
             Some(Action::SetDefaultSelectedPermission((*s).to_owned()))
         }
@@ -955,6 +963,11 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
             set_contextual_hint_inner(app, |h, v| h.ssh_wrap = v, *b)
         }
         ("respect_manual_folds", SettingValue::Bool(b)) => set_respect_manual_folds_inner(app, *b),
+        ("keep_awake", SettingValue::Enum(s)) => {
+            if let Some(mode) = crate::notifications::KeepAwake::from_canonical(s) {
+                set_keep_awake_inner(app, mode);
+            }
+        }
         ("theme", SettingValue::Enum(s)) => set_theme_inner(app, s),
         ("default_selected_permission", SettingValue::Enum(s)) => {
             set_default_selected_permission_inner(

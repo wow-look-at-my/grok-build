@@ -618,9 +618,9 @@ Fire terminal notifications when the agent finishes a turn or needs approval. Th
         "approval_required"
       ],
       "idle_threshold_secs": 3,
+      "keep_awake": "while_running",
       "method": "auto",
       "progress_bar": true,
-      "sleep_prevention": true,
       "title": {
         "enabled": true,
         "items": [
@@ -642,7 +642,7 @@ Fire terminal notifications when the agent finishes a turn or needs approval. Th
 | `condition` | string | `"unfocused"` | When to notify: `unfocused` (only when the terminal lost focus), `always`, or `never`. |
 | `idle_threshold_secs` | integer | `3` | Minimum seconds unfocused before a notification fires. |
 | `events` | array | `["turn_complete", "approval_required"]` | Events that trigger notifications. Options: `turn_complete`, `approval_required`, `session_ready`, `task_complete`, `agent_error`. |
-| `sleep_prevention` | bool | `true` | Keep the display awake while the agent works (macOS/Linux). |
+| `keep_awake` | string | `"while_running"` | Stop the system from idle-sleeping (macOS/Linux). `never`; `while_running`: while a turn, goal, background task, subagent or workflow runs; `always`: while grok is open. The old `sleep_prevention` bool still reads: `true` as `while_running`, `false` as `never`. |
 | `progress_bar` | bool | `true` | Show a progress indicator in the terminal tab (OSC 9;4). |
 | `title.enabled` | bool | `true` | Set the terminal title to reflect agent state. |
 | `title.items` | array | (see above) | Items shown in the title bar. Options: `action-required`, `spinner`, `activity`, `session-name`, `cwd`, `model`, `turn-timer`, `grok`. |
@@ -716,7 +716,7 @@ Run your own commands when events fire. Hooks receive `$GROK_EVENT`, `$GROK_MESS
 
 Run `/doctor` in the affected session. It shows the detected notification and focus issues, the relevant configuration file, and the steps to resolve them. An explicit `method = "bel"` is treated as intentional. `method = "none"` turns off notification and focus findings.
 
-**Sleep prevention not taking effect:** on macOS, sleep prevention uses `IOPMAssertionCreateWithName` via CoreFoundation. On Linux, `systemd-inhibit` (which must be on `$PATH`). Make sure the relevant tool is available. Prevention is only active during agent turns and releases automatically when the turn ends.
+**Keep-awake not taking effect:** on macOS, grok runs `/usr/bin/caffeinate -i -w <pid>`. On Linux, it runs `systemd-inhibit --what=idle`, which must be on `$PATH`. While the lock is held, `pmset -g assertions` (macOS) or `systemd-inhibit --list` (Linux) shows it. If the tool does not start or exits, grok logs a warning and stops trying for that run.
 
 ### Status line
 
