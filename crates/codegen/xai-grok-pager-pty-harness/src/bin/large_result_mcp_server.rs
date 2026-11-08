@@ -11,7 +11,7 @@ fn large_result() -> String {
         .map(|i| format!("item number {i} of the large result"))
         .collect();
     items.push(TAIL_MARKER.to_owned());
-    serde_json::to_string_pretty(&json!({ "items": items })).expect("serialize the large result")
+    format!("{:#}", json!({ "items": items }))
 }
 
 fn answer(method: &str, params: &Value) -> Value {
