@@ -139,6 +139,117 @@ fn migration_refuses_a_broken_toml_file() {
 }
 
 #[test]
+fn plain_migration_keeps_the_toml_key_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("pager.toml"),
+        "show_plan_chip = true\n[scrollback.scroll]\nrespect_manual_folds = true\n[ui]\ntips = 1\n",
+    )
+    .unwrap();
+    let path = migrate_legacy_plain_config(dir.path(), PAGER_STEM, Some(PAGER_SCHEMA_REF)).unwrap();
+    assert_eq!(path, dir.path().join("pager.json"));
+    assert!(!dir.path().join("pager.toml").exists());
+    assert!(dir.path().join("pager.toml.migrated").exists());
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(doc["$schema"], PAGER_SCHEMA_REF);
+    assert_eq!(doc["show_plan_chip"], true);
+    assert_eq!(doc["scrollback"]["scroll"]["respect_manual_folds"], true);
+    assert_eq!(
+        doc["ui"]["tips"], 1,
+        "the config.json layout must not move a key of a plain file"
+    );
+}
+
+#[test]
+fn plain_migration_refuses_a_broken_toml_file() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("pager.toml"), "[scrollback\n").unwrap();
+    assert!(migrate_legacy_plain_config(dir.path(), PAGER_STEM, Some(PAGER_SCHEMA_REF)).is_err());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("pager.toml")).unwrap(),
+        "[scrollback\n",
+        "a broken file stays where the user can fix it"
+    );
+    assert!(!dir.path().join("pager.json").exists());
+}
+
+#[test]
+fn plain_json_source_drops_nulls_and_the_schema_and_keeps_paths() {
+    let src = r#"{"$schema": "./pager.schema.json", "ui": {"tips": 1}, "terminal": {"minimal": null, "alt_screen": "never"}}"#;
+    let v = parse_plain_json_source(Path::new("/x/pager.json"), src).unwrap();
+    assert!(v.get(SCHEMA_KEY).is_none());
+    assert!(v.get("ui").and_then(|u| u.get("tips")).is_some());
+    let terminal = v.get("terminal").unwrap();
+    assert!(terminal.get("minimal").is_none(), "null means unset");
+    assert_eq!(
+        terminal.get("alt_screen").and_then(toml::Value::as_str),
+        Some("never")
+    );
+}
+
+#[test]
+fn ensure_pager_file_writes_only_the_schema_and_never_replaces_a_file() {
+    let dir = tempfile::tempdir().unwrap();
+    ensure_pager_file(dir.path()).unwrap();
+    let path = dir.path().join("pager.json");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "{\n\t\"$schema\": \"./pager.schema.json\"\n}\n"
+    );
+    std::fs::write(&path, "{\"show_plan_chip\": true}").unwrap();
+    ensure_pager_file(dir.path()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "{\"show_plan_chip\": true}"
+    );
+
+    let legacy = tempfile::tempdir().unwrap();
+    std::fs::write(legacy.path().join("pager.toml"), "x = = broken").unwrap();
+    ensure_pager_file(legacy.path()).unwrap();
+    assert!(
+        !legacy.path().join("pager.json").exists(),
+        "a stub must not hide a legacy file that did not migrate"
+    );
+}
+
+#[test]
+fn ensure_pager_schema_file_writes_this_build_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    ensure_pager_schema_file(dir.path()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join(PAGER_SCHEMA_FILENAME)).unwrap(),
+        PAGER_SCHEMA_JSON
+    );
+}
+
+#[test]
+fn edit_keeping_schema_keeps_an_existing_ref_and_adds_the_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pager.json");
+    edit_json_document_keeping_schema(&path, PAGER_SCHEMA_REF, |doc| {
+        doc.insert("a".into(), serde_json::json!(1));
+        Ok(())
+    })
+    .unwrap();
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(doc["$schema"], PAGER_SCHEMA_REF);
+
+    std::fs::write(&path, r#"{"$schema": "mine.json", "keep": [1, 2]}"#).unwrap();
+    edit_json_document_keeping_schema(&path, PAGER_SCHEMA_REF, |doc| {
+        doc.insert("a".into(), serde_json::json!(2));
+        Ok(())
+    })
+    .unwrap();
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(doc["$schema"], "mine.json");
+    assert_eq!(doc["keep"], serde_json::json!([1, 2]));
+    assert_eq!(doc["a"], 2);
+}
+
+#[test]
 fn json_wins_over_a_legacy_sibling() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("config.toml"), "[ui]\ntheme = \"old\"\n").unwrap();
