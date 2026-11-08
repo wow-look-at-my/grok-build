@@ -2597,6 +2597,58 @@ fn discover_roles_inline_takes_precedence() {
         );
 }
 #[test]
+fn discover_roles_reads_json_files_and_json_wins_over_toml() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let roles_dir = tmp.path().join(".grok").join("roles");
+    std::fs::create_dir_all(&roles_dir).unwrap();
+    std::fs::write(
+        roles_dir.join("reviewer.json"),
+        r#"{ "description": "JSON reviewer", "default_capability_mode": "read-only" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        roles_dir.join("reviewer.toml"),
+        r#"description = "TOML reviewer""#,
+    )
+    .unwrap();
+    std::fs::write(
+        roles_dir.join("legacy.toml"),
+        r#"description = "Legacy role""#,
+    )
+    .unwrap();
+    let mut cfg: SubagentsConfig = toml::from_str("").unwrap();
+    cfg.discover_roles(tmp.path());
+    let role = cfg.get_role("reviewer").unwrap();
+    assert_eq!(
+        role.description, "JSON reviewer",
+        "reviewer.json must win over reviewer.toml"
+    );
+    assert_eq!(role.default_capability_mode.as_deref(), Some("read-only"));
+    assert_eq!(
+        cfg.get_role("legacy").unwrap().description,
+        "Legacy role",
+        "a .toml role with no .json sibling still loads"
+    );
+}
+#[test]
+fn discover_personas_reads_json_files() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir = tmp.path().join(".grok").join("personas");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("scout.json"),
+        r#"{ "instructions": "Map the code base." }"#,
+    )
+    .unwrap();
+    let mut cfg: SubagentsConfig = toml::from_str("").unwrap();
+    cfg.discover_personas(tmp.path());
+    let persona = cfg.get_persona("scout").unwrap();
+    assert_eq!(
+        persona.source_path.as_deref(),
+        Some(dir.join("scout.json").display().to_string().as_str())
+    );
+}
+#[test]
 fn discover_roles_ignores_non_toml_files() {
     let tmp = tempfile::TempDir::new().unwrap();
     let roles_dir = tmp.path().join(".grok").join("roles");
