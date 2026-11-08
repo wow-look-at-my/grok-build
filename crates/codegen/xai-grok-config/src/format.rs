@@ -14,6 +14,18 @@ pub const CONFIG_SCHEMA_JSON: &str = include_str!("../../../../schemas/config.sc
 /// The `$schema` value that grok writes into the user config. It is relative to the config file.
 pub const USER_SCHEMA_REF: &str = "./config.schema.json";
 
+/// The stem of the TUI appearance file (`$GROK_HOME/pager.json`, legacy `pager.toml`).
+pub const PAGER_STEM: &str = "pager";
+
+/// The file name of the schema that grok writes next to `pager.json`.
+pub const PAGER_SCHEMA_FILENAME: &str = "pager.schema.json";
+
+/// The schema text of `pager.json` for this build. `schemas/pager.schema.json` in the repository holds the same bytes.
+pub const PAGER_SCHEMA_JSON: &str = include_str!("../../../../schemas/pager.schema.json");
+
+/// The `$schema` value of `pager.json`. It is relative to that file.
+pub const PAGER_SCHEMA_REF: &str = "./pager.schema.json";
+
 /// The format of one config file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigFormat {
@@ -46,6 +58,16 @@ pub fn parse_config_source(path: &Path, source: &str) -> std::io::Result<toml::V
 /// Parse a JSON config document. The root must be an object.
 /// A `null` member is the same as an absent member. A `null` array element is an error.
 pub fn parse_json_source(path: &Path, source: &str) -> std::io::Result<toml::Value> {
+    let mut tree = parse_plain_json_source(path, source)?;
+    crate::layout::json_to_internal(&mut tree);
+    Ok(tree)
+}
+
+/// [`parse_json_source`] without the section layout of `config.json`. The keys stay where the file puts them.
+pub fn parse_plain_json_source(path: &Path, source: &str) -> std::io::Result<toml::Value> {
+    if source.trim().is_empty() {
+        return Ok(empty_table());
+    }
     let json: serde_json::Value = serde_json::from_str(source).map_err(|e| {
         // serde_json errors give the line and the column and never quote the source, so they are safe to log
         let detail = format!(
@@ -63,12 +85,10 @@ pub fn parse_json_source(path: &Path, source: &str) -> std::io::Result<toml::Val
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, detail));
     };
     root.remove(SCHEMA_KEY);
-    let mut tree = json_to_tree(&serde_json::Value::Object(root)).map_err(|detail| {
+    json_to_tree(&serde_json::Value::Object(root)).map_err(|detail| {
         tracing::error!(file = %path.display(), "config json is not valid: {detail}");
         std::io::Error::new(std::io::ErrorKind::InvalidData, detail)
-    })?;
-    crate::layout::json_to_internal(&mut tree);
-    Ok(tree)
+    })
 }
 
 /// Convert a JSON config document (JSON layout) to the internal tree.
@@ -388,18 +408,45 @@ pub fn edit_json_document<T>(
     schema_ref: Option<&str>,
     edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> std::io::Result<T>,
 ) -> std::io::Result<T> {
+    // Keep the `$schema` the file already names when the caller gives none
+    edit_json_document_with(
+        path,
+        |existing| schema_ref.map(str::to_owned).or(existing),
+        edit,
+    )
+}
+
+/// [`edit_json_document`] that keeps the `$schema` the file already names.
+/// A file that names none gets `default_ref`.
+pub fn edit_json_document_keeping_schema<T>(
+    path: &Path,
+    default_ref: &str,
+    edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> std::io::Result<T>,
+) -> std::io::Result<T> {
+    edit_json_document_with(
+        path,
+        |existing| existing.or_else(|| Some(default_ref.to_owned())),
+        edit,
+    )
+}
+
+fn edit_json_document_with<T>(
+    path: &Path,
+    pick_schema: impl FnOnce(Option<String>) -> Option<String>,
+    edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> std::io::Result<T>,
+) -> std::io::Result<T> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let dest = crate::fs_atomic::bind_follow_destination(path)?;
     let mut doc = read_json_document(dest.as_path())?;
-    // Keep the `$schema` the file already names when the caller gives none
     let existing_ref = doc
         .get(SCHEMA_KEY)
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned);
     let out = edit(&mut doc)?;
-    let text = to_config_json_string(&doc, schema_ref.or(existing_ref.as_deref()));
+    let schema = pick_schema(existing_ref);
+    let text = to_config_json_string(&doc, schema.as_deref());
     crate::fs_atomic::write_atomically_bound(&dest, &text, None)?;
     Ok(out)
 }
@@ -443,13 +490,36 @@ pub fn resolve_config_file(dir: &Path, stem: &str) -> PathBuf {
 /// The suffix a migrated legacy file gets, so the original stays available.
 pub const MIGRATED_SUFFIX: &str = "migrated";
 
-/// Convert the legacy `<stem>.toml` in a directory that grok owns to `<stem>.json`, then rename the TOML file to `<stem>.toml.migrated`.
-/// Returns the path to read: the JSON file after a migration, or the TOML file when the migration could not write.
-/// A TOML file that does not parse is not migrated, and the error goes to the caller.
+/// Convert the legacy `<stem>.toml` in a directory that grok owns to
+/// `<stem>.json`, then rename the TOML file to `<stem>.toml.migrated`.
 pub fn migrate_legacy_config(
     dir: &Path,
     stem: &str,
     schema_ref: Option<&str>,
+) -> std::io::Result<PathBuf> {
+    migrate_legacy_file(dir, stem, schema_ref, internal_to_json_document)
+}
+
+/// [`migrate_legacy_config`] for a file that does not use the section layout of `config.json`, such as `pager.json`.
+/// The JSON file keeps the TOML key paths.
+pub fn migrate_legacy_plain_config(
+    dir: &Path,
+    stem: &str,
+    schema_ref: Option<&str>,
+) -> std::io::Result<PathBuf> {
+    migrate_legacy_file(dir, stem, schema_ref, |tree| match tree_to_json(tree) {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    })
+}
+
+/// Returns the JSON file after a migration, or the TOML file when the write failed.
+/// A TOML file that does not parse stays in place, and the error goes to the caller.
+fn migrate_legacy_file(
+    dir: &Path,
+    stem: &str,
+    schema_ref: Option<&str>,
+    to_document: fn(&toml::Value) -> serde_json::Map<String, serde_json::Value>,
 ) -> std::io::Result<PathBuf> {
     let (json, toml) = config_file_pair(dir, stem);
     if json.exists() || !toml.is_file() {
@@ -461,7 +531,7 @@ pub fn migrate_legacy_config(
     } else {
         parse_toml_source(&toml, &source)?
     };
-    let text = to_config_json_string(&internal_to_json_document(&tree), schema_ref);
+    let text = to_config_json_string(&to_document(&tree), schema_ref);
     match crate::fs_atomic::write_atomically_if_absent(
         &json,
         &text,
@@ -498,11 +568,34 @@ pub fn migrate_legacy_config(
 
 /// Write `config.schema.json` into `dir` when it is absent or differs from this build's schema.
 pub fn ensure_schema_file(dir: &Path) -> std::io::Result<()> {
-    let path = dir.join(SCHEMA_FILENAME);
-    if std::fs::read_to_string(&path).is_ok_and(|current| current == CONFIG_SCHEMA_JSON) {
+    ensure_named_schema_file(dir, SCHEMA_FILENAME, CONFIG_SCHEMA_JSON)
+}
+
+/// Write `pager.schema.json` into `dir` when it is absent or differs from this build's schema.
+pub fn ensure_pager_schema_file(dir: &Path) -> std::io::Result<()> {
+    ensure_named_schema_file(dir, PAGER_SCHEMA_FILENAME, PAGER_SCHEMA_JSON)
+}
+
+fn ensure_named_schema_file(dir: &Path, name: &str, schema: &str) -> std::io::Result<()> {
+    let path = dir.join(name);
+    if std::fs::read_to_string(&path).is_ok_and(|current| current == schema) {
         return Ok(());
     }
-    crate::fs_atomic::write_atomically(&path, CONFIG_SCHEMA_JSON, None)
+    crate::fs_atomic::write_atomically(&path, schema, None)
+}
+
+/// Create `pager.json` in `dir` with only its `$schema` member, so an editor shows the defaults and the docs from the schema.
+/// It does nothing when `pager.json` or a legacy `pager.toml` exists.
+pub fn ensure_pager_file(dir: &Path) -> std::io::Result<()> {
+    let (json, toml) = config_file_pair(dir, PAGER_STEM);
+    if json.exists() || toml.exists() {
+        return Ok(());
+    }
+    let text = to_config_json_string(&serde_json::Map::new(), Some(PAGER_SCHEMA_REF));
+    match crate::fs_atomic::write_atomically_if_absent(&json, &text, None) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        other => other,
+    }
 }
 
 #[cfg(test)]

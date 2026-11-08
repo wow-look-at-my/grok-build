@@ -107,8 +107,15 @@ pub const SANDBOX_CONFIG_FILENAME: &str = "sandbox.json";
 
 /// Every legacy TOML name that a JSON config file in `$GROK_HOME` or `.grok/`
 /// replaced.
-pub const LEGACY_CONFIG_FILENAMES: &[&str] =
-    &["config.toml", "trusted_folders.toml", "sandbox.toml"];
+pub const LEGACY_CONFIG_FILENAMES: &[&str] = &[
+    "config.toml",
+    "trusted_folders.toml",
+    "sandbox.toml",
+    "pager.toml",
+];
+
+/// TUI appearance file (`$GROK_HOME/pager.json`).
+pub const PAGER_CONFIG_FILENAME: &str = "pager.json";
 
 /// The user config file in `home`, after a one-time migration of a legacy
 /// `config.toml`. It returns the file only when the migration could not write
@@ -117,9 +124,9 @@ pub fn user_config_file(home: &Path) -> std::io::Result<std::path::PathBuf> {
     crate::format::migrate_legacy_config(home, CONFIG_STEM, Some(crate::format::USER_SCHEMA_REF))
 }
 
-/// Migrate the TOML files in `$GROK_HOME` to JSON and write the schema next
-/// to `config.json`. Call once at startup. A failure is logged, and the
-/// loaders then read a legacy file in place or report its error.
+/// Migrate the TOML files in `$GROK_HOME` to JSON and write the schemas next
+/// to `config.json` and `pager.json`. Call once at startup. A failure is
+/// logged, and the loaders then read a legacy file in place or report its error.
 pub fn prepare_user_config_dir() {
     let Some(home) = resolve_grok_home() else {
         return;
@@ -127,21 +134,41 @@ pub fn prepare_user_config_dir() {
     if !home.is_dir() {
         return;
     }
-    for (stem, schema_ref) in [
-        (CONFIG_STEM, Some(crate::format::USER_SCHEMA_REF)),
-        ("trusted_folders", None),
-        ("sandbox", None),
-    ] {
-        if let Err(e) = crate::format::migrate_legacy_config(&home, stem, schema_ref) {
+    let report = |stem: &str, result: std::io::Result<std::path::PathBuf>| {
+        if let Err(e) = result {
             tracing::error!(dir = %home.display(), stem, error = %e, "could not migrate a legacy TOML config to JSON; fix its syntax error");
             eprintln!(
                 "grok: could not convert {}/{stem}.toml to JSON: {e}",
                 home.display()
             );
         }
+    };
+    for (stem, schema_ref) in [
+        (CONFIG_STEM, Some(crate::format::USER_SCHEMA_REF)),
+        ("trusted_folders", None),
+        ("sandbox", None),
+    ] {
+        report(
+            stem,
+            crate::format::migrate_legacy_config(&home, stem, schema_ref),
+        );
     }
+    report(
+        crate::format::PAGER_STEM,
+        crate::format::migrate_legacy_plain_config(
+            &home,
+            crate::format::PAGER_STEM,
+            Some(crate::format::PAGER_SCHEMA_REF),
+        ),
+    );
     if let Err(e) = crate::format::ensure_schema_file(&home) {
         tracing::warn!(dir = %home.display(), error = %e, "could not write config.schema.json; editors cannot validate config.json");
+    }
+    if let Err(e) = crate::format::ensure_pager_schema_file(&home) {
+        tracing::warn!(dir = %home.display(), error = %e, "could not write pager.schema.json; editors cannot validate pager.json");
+    }
+    if let Err(e) = crate::format::ensure_pager_file(&home) {
+        tracing::warn!(dir = %home.display(), error = %e, "could not create pager.json");
     }
 }
 

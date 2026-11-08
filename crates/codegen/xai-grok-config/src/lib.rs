@@ -61,14 +61,14 @@ pub use global_hook_sources::{
 };
 pub use loader::{
     CONFIG_STEM, HookConfigLayer, HookProvenance, LEGACY_CONFIG_FILENAMES, MANAGED_CONFIG_FILENAME,
-    ManagedConfigLayer, REQUIREMENTS_FILENAME, SANDBOX_CONFIG_FILENAME, SYSTEM_MANAGED_CONFIG_STEM,
-    SYSTEM_REQUIREMENTS_STEM, TRUSTED_FOLDERS_FILENAME, TRUSTED_HOOK_PROJECTS_FILENAME,
-    TRUSTED_PLUGINS_FILENAME, USER_CONFIG_FILENAME, apply_version_overrides_with_registered,
-    deep_merge_toml, expand_env_vars_in_string, expand_env_vars_in_toml, hook_config_layers,
-    hook_config_layers_at, load_config_file, load_from_disk, load_managed_config,
-    load_system_managed_config, load_toml_file, managed_config_layers, managed_config_layers_at,
-    prepare_user_config_dir, project_config_file, project_config_file_for_write,
-    system_config_file, toml_error_detail, user_config_file,
+    ManagedConfigLayer, PAGER_CONFIG_FILENAME, REQUIREMENTS_FILENAME, SANDBOX_CONFIG_FILENAME,
+    SYSTEM_MANAGED_CONFIG_STEM, SYSTEM_REQUIREMENTS_STEM, TRUSTED_FOLDERS_FILENAME,
+    TRUSTED_HOOK_PROJECTS_FILENAME, TRUSTED_PLUGINS_FILENAME, USER_CONFIG_FILENAME,
+    apply_version_overrides_with_registered, deep_merge_toml, expand_env_vars_in_string,
+    expand_env_vars_in_toml, hook_config_layers, hook_config_layers_at, load_config_file,
+    load_from_disk, load_managed_config, load_system_managed_config, load_toml_file,
+    managed_config_layers, managed_config_layers_at, prepare_user_config_dir, project_config_file,
+    project_config_file_for_write, system_config_file, toml_error_detail, user_config_file,
 };
 pub use macos_managed::MDM_REQUIREMENTS_SOURCE;
 pub use managed_cache::{
