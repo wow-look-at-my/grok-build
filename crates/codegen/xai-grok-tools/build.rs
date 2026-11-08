@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Attempts per release download.
-const FETCH_ATTEMPTS: u32 = 4;
+const FETCH_ATTEMPTS: u32 = 6;
 
 /// Any other 4xx is the tree's answer: it returns at once. The last failure is
 /// the one the caller reports.
@@ -65,7 +65,7 @@ fn fetch_release(
             Ok(resp) => resp,
             Err(e) => {
                 last = format!(
-                    "Failed to download {tool}: {e}\nSet {override_env} for offline builds."
+                    "Failed to download {tool}: {e:?}\nSet {override_env} for offline builds."
                 );
                 continue;
             }
