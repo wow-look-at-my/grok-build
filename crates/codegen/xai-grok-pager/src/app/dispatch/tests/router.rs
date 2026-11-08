@@ -1856,6 +1856,16 @@ fn pager_registry_default_matches_agent_view_new_initializer() {
                          truth.",
                 );
             }
+            ("keep_awake", SettingKind::Enum { default, .. }) => {
+                let live = app.notification_service.sleep_inhibitor.mode();
+                assert_eq!(
+                    *default,
+                    live.as_canonical(),
+                    "registry default for `keep_awake` drifts from the app's sleep \
+                     inhibitor mode ({live:?}). NotificationConfig::default() is the \
+                     source of truth.",
+                );
+            }
             _ => {
                 panic!(
                     "PAGER setting `{}` has no arm in \

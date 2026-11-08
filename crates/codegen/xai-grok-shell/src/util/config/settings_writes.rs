@@ -140,6 +140,45 @@ pub(super) fn write_dashboard_preview(
     })
 }
 
+/// Persist `ui.notifications.keep_awake` (`never` | `while_running` | `always`).
+/// `update_config` has no model of `ui.notifications`, so this rewrites the raw object.
+pub async fn set_notifications_keep_awake(value: String) -> Result<()> {
+    rewrite_user_config_locked("keep awake", move |path| {
+        write_notifications_keep_awake(
+            path,
+            &value,
+            crate::util::config::persist::atomic_write_follow_bound,
+        )
+    })
+    .await
+}
+
+/// Also removes `sleep_prevention`: the pager reads it as an alias of `keep_awake`, and both keys together fail the whole section.
+pub(super) fn write_notifications_keep_awake(
+    path: &Path,
+    value: &str,
+    write: impl FnOnce(&Path, &BoundDest, &str) -> std::io::Result<()>,
+) -> Result<()> {
+    rewrite_user_config_table(path, "keep awake", write, |root| {
+        let ui = root
+            .entry("ui".to_owned())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut()
+            .with_context(|| format!("{} `ui` must be an object", path.display()))?;
+        let notifications = ui
+            .entry("notifications".to_owned())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+            .as_table_mut()
+            .with_context(|| format!("{} `ui.notifications` must be an object", path.display()))?;
+        notifications.remove("sleep_prevention");
+        notifications.insert(
+            "keep_awake".to_owned(),
+            toml::Value::String(value.to_owned()),
+        );
+        Ok(())
+    })
+}
+
 /// Run a raw-table rewrite of the user `config.json` under the config write guard.
 /// For keys `update_config` cannot express (a deletion, or a table `save_config_locked` does not merge).
 async fn rewrite_user_config_locked(

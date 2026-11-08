@@ -812,6 +812,40 @@ pub(in crate::app::dispatch) fn set_respect_manual_folds(
     }]
 }
 
+pub(super) fn set_keep_awake_inner(app: &mut AppView, new: crate::notifications::KeepAwake) {
+    let running = app.has_running_work();
+    app.notification_service
+        .sleep_inhibitor
+        .set_mode(new, running);
+}
+
+/// Set `keep_awake` (registry-driven path).
+/// PAGER-OWNED: applied to the sleep inhibitor at once, persisted to `[ui.notifications].keep_awake`.
+pub(in crate::app::dispatch) fn set_keep_awake(
+    app: &mut AppView,
+    new: crate::notifications::KeepAwake,
+) -> Vec<Effect> {
+    let prev = app.notification_service.sleep_inhibitor.mode();
+    if prev == new {
+        return vec![];
+    }
+    set_keep_awake_inner(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = "keep_awake",
+        value = new.as_canonical(),
+        "setting changed",
+    );
+    let label = crate::settings::defs::keep_awake_display(new);
+    app.show_toast(&format!("\u{2713} Keep system awake: {label}"));
+    vec![Effect::PersistSetting {
+        key: "keep_awake",
+        value: crate::settings::SettingValue::Enum(new.as_canonical()),
+        rollback_value: crate::settings::SettingValue::Enum(prev.as_canonical()),
+    }]
+}
+
 /// Set the cursor preselection canonical (registry-driven path).
 /// SHELL-OWNED: persisted to `[ui].default_selected_permission` via `Effect::PersistSetting`.
 /// The `always_allow_all_sessions` canonical is the effective default (the cursor falls to the enable-always-approve row).
