@@ -63,13 +63,7 @@ async fn channel_spawner_request_is_harness_internal() {
     };
     let handle = xai_spawn::spawn(async move {
         let _ = spawner
-            .spawn_classifier(
-                "clf-id",
-                0,
-                role_prompt("prompt"),
-                Path::new("/tmp/details.md"),
-                Some("prior-child"),
-            )
+            .spawn_classifier("clf-id", 0, role_prompt("prompt"), Some("prior-child"))
             .await;
     });
 
@@ -121,13 +115,7 @@ async fn channel_spawner_applies_per_index_model_to_request() {
     let handle = xai_spawn::spawn(async move {
         // Skeptic 0 with a resume id: even on the cold path it carries skeptic_overrides[0]
         let _ = spawner
-            .spawn_classifier(
-                "clf-0",
-                0,
-                role_prompt("prompt"),
-                Path::new("/tmp/details.md"),
-                Some("prior-child"),
-            )
+            .spawn_classifier("clf-0", 0, role_prompt("prompt"), Some("prior-child"))
             .await;
     });
 
@@ -180,13 +168,7 @@ async fn channel_spawner_inherit_index_leaves_model_none() {
     };
     let handle = xai_spawn::spawn(async move {
         let _ = spawner
-            .spawn_classifier(
-                "clf-x",
-                0,
-                role_prompt("prompt"),
-                Path::new("/tmp/d.md"),
-                None,
-            )
+            .spawn_classifier("clf-x", 0, role_prompt("prompt"), None)
             .await;
     });
     let SubagentEvent::Spawn(request) = rx.recv().await.expect("spawn event") else {
@@ -224,13 +206,7 @@ async fn channel_spawner_skeptic_blocks_its_caller_in_the_session_cwd() {
     };
     let handle = xai_spawn::spawn(async move {
         let _ = spawner
-            .spawn_classifier(
-                "clf-lock",
-                0,
-                role_prompt("prompt"),
-                Path::new("/tmp/d.md"),
-                None,
-            )
+            .spawn_classifier("clf-lock", 0, role_prompt("prompt"), None)
             .await;
     });
     let SubagentEvent::Spawn(request) = rx.recv().await.expect("spawn event") else {
@@ -3443,13 +3419,7 @@ async fn channel_spawner_blocks_until_subagent_result() {
     };
     let spawn_task = xai_spawn::spawn(async move {
         spawner
-            .spawn_classifier(
-                "classifier-id",
-                0,
-                role_prompt("prompt"),
-                Path::new("/tmp/goal-classifier-test-1.md"),
-                None,
-            )
+            .spawn_classifier("classifier-id", 0, role_prompt("prompt"), None)
             .await
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
