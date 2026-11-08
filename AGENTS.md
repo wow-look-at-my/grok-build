@@ -226,6 +226,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - A model the provider refuses on the configured backend goes out again on the others (`xai-grok-sampler/src/backend_detect.rs`). The triggers are `is_unsupported_backend_error` ("only supported in v1/responses", Copilot's `unsupported_api_for_model`) and `is_endpoint_missing_error` (a router 404, any 405), in `xai-grok-sampling-types/src/backend_mismatch.rs`.
 - A backend the error names goes first, then Chat Completions, Responses, Messages. Ollama's native API never takes part. Once the request left its first backend, any 4xx other than 401/403/429 moves it on. When none answers, the first refusal is the reported error.
 - The backend that answers is kept per (base URL, model) for the process. `SamplingClient::new` and `resolve_api_backend` read it. The actor loop (`RetryWithBackendSwitch`) and `conversation_collect` both run the walk.
+- A gateway can serve a model on a translated API that works but loses features: a Claude on Chat Completions has no thinking. No error fires. A listed model starts on the API it is native to (`listed_native_backend` in `remote/client.rs`). A per-model `supported_endpoints` list decides first: Messages, then Responses, then Chat Completions. Otherwise an Anthropic model (by `owned_by`, model family, Anthropic's row shape or a `claude` id) takes Messages. An `apiBackend` in the row or the config wins. A gateway with no `/v1/messages` route falls back through the walk above.
 
 ## Tool-call provider-field notes
 
