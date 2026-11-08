@@ -325,7 +325,7 @@ impl TurnActivity {
             Self::Thinking => "thinking",
             Self::Responding => "responding",
             Self::ToolRunning { .. } => "tool_running",
-            Self::AutoCompacting => "compacting",
+            Self::AutoCompacting { .. } => "compacting",
             Self::Retrying { .. } => "retrying",
             Self::WritingToolCall(_) => "writing_tool_call",
             Self::Waiting(reason) => reason.as_telemetry_label(),

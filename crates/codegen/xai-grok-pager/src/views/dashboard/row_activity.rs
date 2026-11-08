@@ -82,7 +82,7 @@ pub(crate) fn top_level_activity(agent: &AgentView, state: RowState) -> Option<S
         RowState::NeedsInput => Some("Awaiting your input".to_owned()),
         RowState::Working if has_live_parent_activity(agent) => {
             if let Some(cmd) = agent.session.state.command_in_flight() {
-                if cmd == crate::app::agent::AgentCommand::Compact {
+                if *cmd == crate::app::agent::AgentCommand::Compact {
                     return Some(crate::scrollback::blocks::compacting_label(
                         agent.session.compaction_model.as_deref(),
                     ));
