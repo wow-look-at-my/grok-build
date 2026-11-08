@@ -45,7 +45,7 @@ const MIN_ZDR_VIDEO_PRESIGN_EXPIRES_SECS: u64 =
     VIDEO_GEN_TIMEOUT_SECS + VIDEO_DOWNLOAD_TIMEOUT_SECS + 60;
 const DEFAULT_ZDR_VIDEO_KEY_PREFIX: &str = "grok-videos/";
 const ZDR_VIDEO_CONTENT_TYPE: &str = "video/mp4";
-const DEFAULT_VIDEO_DIR: &str = "videos";
+const DEFAULT_VIDEO_DIR: &str = crate::session_output_dirs::VIDEO_OUTPUT_DIR;
 const DEFAULT_RESOLUTION: &str = "480p";
 const DEFAULT_IMAGINE_VIDEO_DURATION_SECS: u32 = 6;
 const MAX_R2V_REFERENCE_IMAGES: usize = 14;

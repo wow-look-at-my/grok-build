@@ -305,15 +305,29 @@ pub(crate) struct BookkeepingReader {
     pub main_session_dir: Option<String>,
     /// Paths the reader may read even though they sit in a session directory.
     pub allowed_paths: Vec<PathBuf>,
+    /// Directories whose contents the reader may read, such as the session's MCP output dumps.
+    pub allowed_dirs: Vec<PathBuf>,
     /// Whether the harness evidence names are refused on their own.
     pub refuse_harness_evidence_names: bool,
+}
+
+/// The subdirectories of `session_dir` where tools save output that a tool result tells the
+/// model to read.
+pub(crate) fn session_tool_output_dirs(session_dir: &std::path::Path) -> Vec<PathBuf> {
+    xai_grok_tools::session_output_dirs::TOOL_OUTPUT_DIRS
+        .iter()
+        .map(|dir| session_dir.join(dir))
+        .collect()
 }
 
 /// What in `args` names a session record this reader must not read, if
 /// anything. A goal's implementer that reads its transcript is building
 /// evidence the verifier reads for itself, so the harness refuses the call.
 pub(crate) fn bookkeeping_refusal(reader: &BookkeepingReader, args: &str) -> Option<String> {
-    let remainder = strip_allowed_paths(args, &reader.allowed_paths);
+    let remainder = strip_allowed_dirs(
+        &strip_allowed_paths(args, &reader.allowed_paths),
+        &reader.allowed_dirs,
+    );
     for dir in std::iter::once(Some(reader.session_dir.as_str()))
         .chain(reader.main_session_dir.as_deref().map(Some))
         .flatten()
@@ -374,6 +388,52 @@ fn remove_whole_path(haystack: &str, needle: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// `args` with every path inside an allowed directory removed. A path that
+/// contains `..` keeps its session directory, so it cannot climb out to the record.
+fn strip_allowed_dirs(args: &str, allowed: &[PathBuf]) -> String {
+    let mut stripped = args.to_string();
+    for dir in allowed {
+        let needle = dir.to_string_lossy();
+        let needle = needle.trim_end_matches('/');
+        if needle.len() >= 4 {
+            stripped = remove_paths_under(&stripped, needle);
+        }
+    }
+    stripped
+}
+
+#[allow(clippy::string_slice)]
+fn remove_paths_under(haystack: &str, needle: &str) -> String {
+    let mut out = String::with_capacity(haystack.len());
+    let mut rest = haystack;
+    while let Some(start) = rest.find(needle) {
+        let end = start + needle.len();
+        let before_is_path = rest[..start].chars().next_back().is_some_and(is_path_char);
+        let tail = &rest[end..];
+        let token_len = tail.find(is_token_end).unwrap_or(tail.len());
+        let token = &tail[..token_len];
+        let inside_dir = token.is_empty() || token.starts_with('/');
+        if before_is_path || !inside_dir || token.contains("..") {
+            out.push_str(&rest[..end]);
+            rest = tail;
+            continue;
+        }
+        out.push_str(&rest[..start]);
+        rest = &tail[token_len..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A character that ends one path argument in a JSON string or a shell line.
+fn is_token_end(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(
+            c,
+            '"' | '\'' | '`' | ';' | '|' | '&' | '<' | '>' | '(' | ')' | ','
+        )
 }
 
 fn is_path_char(c: char) -> bool {
@@ -775,7 +835,41 @@ mod tests {
                 PathBuf::from(format!("{plan_root}/goal/plan.md")),
                 PathBuf::from(format!("{plan_root}/goal/plan.baseline.md")),
             ],
+            allowed_dirs: session_tool_output_dirs(std::path::Path::new(session_dir)),
             refuse_harness_evidence_names: main_session_dir.is_none(),
+        }
+    }
+
+    #[test]
+    fn tool_output_dumps_stay_readable_while_the_record_does_not() {
+        let dir = "/home/u/.grok/sessions/abc";
+        let r = reader(dir, None);
+        for args in [
+            format!(r#"{{"target_file":"{dir}/mcp/call_1.json"}}"#),
+            format!(r#"{{"command":"jq '.items | length' {dir}/mcp/call_1.json"}}"#),
+            format!(r#"{{"command":"ls {dir}/mcp"}}"#),
+            format!(r#"{{"command":"ls {dir}/mcp/"}}"#),
+            format!(r#"{{"command":"tail -n 50 {dir}/terminal/call_2.log"}}"#),
+            format!(r#"{{"target_file":"{dir}/web_fetch/0000000001.html"}}"#),
+            format!(r#"{{"target_file":"{dir}/assets/image-1.png"}}"#),
+        ] {
+            assert_eq!(
+                bookkeeping_refusal(&r, &args),
+                None,
+                "{args} reads a tool output the model was told about"
+            );
+        }
+        for args in [
+            format!(r#"{{"command":"cat {dir}/mcp/../{RECORD_TRANSCRIPT}"}}"#),
+            format!(r#"{{"command":"ls {dir}/mcp/../compaction_reports"}}"#),
+            format!(r#"{{"command":"ls {dir}/mcpx"}}"#),
+            format!(r#"{{"command":"cat {dir}/mcp/a.json {dir}/{RECORD_UPDATES}"}}"#),
+            format!(r#"{{"command":"ls {dir}"}}"#),
+        ] {
+            assert!(
+                bookkeeping_refusal(&r, &args).is_some(),
+                "{args} reaches the session record"
+            );
         }
     }
     /// Record file names, assembled so this module's own source never spells /// one out: the running binary reads these arguments.

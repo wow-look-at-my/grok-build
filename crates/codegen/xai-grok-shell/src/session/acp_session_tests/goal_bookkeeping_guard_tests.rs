@@ -121,6 +121,31 @@ async fn an_active_goal_reads_its_plan_but_not_its_record() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn an_active_goal_reads_a_large_mcp_result_dump() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let dump_dir = dir
+                .path()
+                .join(xai_grok_tools::session_output_dirs::MCP_OUTPUT_DIR);
+            std::fs::create_dir_all(&dump_dir).unwrap();
+            let dump_path = dump_dir.join("call_1.json");
+            std::fs::write(&dump_path, r#"{"items":["the full mcp result"]}"#).unwrap();
+
+            let actor = guard_actor(dir.path(), None).await;
+
+            let dump = read_once(&actor, "dump", dump_path.to_str().unwrap()).await;
+            assert!(dump.contains("the full mcp result"), "{dump}");
+            assert!(
+                !dump.contains("Refused"),
+                "the MCP dump must be readable: {dump}"
+            );
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_goal_verifier_cannot_read_the_main_session_record() {
     let local = tokio::task::LocalSet::new();
     local

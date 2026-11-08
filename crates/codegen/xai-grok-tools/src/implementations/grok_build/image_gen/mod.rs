@@ -36,7 +36,7 @@ const XAI_IMAGINE_MODEL: &str = "grok-imagine-image-quality";
 // minute. Keep these generous so a slow-but-progressing generation isn't cut off.
 const IMAGE_GEN_TIMEOUT_SECS: u64 = 300;
 const IMAGE_GEN_READ_TIMEOUT_SECS: u64 = 240;
-const DEFAULT_IMAGE_DIR: &str = "images";
+const DEFAULT_IMAGE_DIR: &str = crate::session_output_dirs::IMAGE_OUTPUT_DIR;
 
 pub use xai_grok_tools_api::slash_commands::{
     IMAGE_GEN_TOOL_NAME, IMAGINE_COMMAND_NAME, imagine_instruction, imagine_usage_message,

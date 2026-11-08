@@ -46,8 +46,10 @@ pub mod normalization;
 pub mod notification;
 pub mod persistence;
 pub mod registry;
+
 pub mod reminders;
 pub mod retry;
+pub mod session_output_dirs;
 pub mod tool_taxonomy;
 pub mod types;
 pub mod util;

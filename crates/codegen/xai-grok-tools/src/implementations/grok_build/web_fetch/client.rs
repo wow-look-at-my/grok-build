@@ -17,7 +17,7 @@ use crate::implementations::grok_build::storage::SessionFileWriter;
 use crate::types::output::{WebFetchContent, WebFetchOutput, WebFetchSourceArtifact};
 use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
 
-const DEFAULT_DOWNLOAD_DIR: &str = "downloads";
+const DEFAULT_DOWNLOAD_DIR: &str = crate::session_output_dirs::DOWNLOAD_OUTPUT_DIR;
 
 /// Shared HTTP client and cache for web fetching.
 #[derive(Clone)]
@@ -61,8 +61,8 @@ impl WebFetchClient {
             converter,
             params: params.clone(),
             download_writer: SessionFileWriter::new(DEFAULT_DOWNLOAD_DIR, "pdf"),
-            image_writer: SessionFileWriter::new("images", "jpg"),
-            video_writer: SessionFileWriter::new("videos", "mp4"),
+            image_writer: SessionFileWriter::new(crate::session_output_dirs::IMAGE_OUTPUT_DIR, "jpg"),
+            video_writer: SessionFileWriter::new(crate::session_output_dirs::VIDEO_OUTPUT_DIR, "mp4"),
             overflow: OverflowHandler::new(),
         })
     }

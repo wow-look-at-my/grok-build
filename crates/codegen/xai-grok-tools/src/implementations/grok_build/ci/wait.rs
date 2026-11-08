@@ -171,7 +171,7 @@ pub(super) async fn start_background_wait(
     };
 
     let call_id = ctx.call_id.as_str().to_owned();
-    let terminal_dir = session_folder.join("terminal");
+    let terminal_dir = session_folder.join(crate::session_output_dirs::TERMINAL_OUTPUT_DIR);
     std::fs::create_dir_all(&terminal_dir).map_err(|error| {
         ToolError::custom(
             "ci_wait_setup",
