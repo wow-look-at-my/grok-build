@@ -556,14 +556,15 @@ mod tests {
                 { "id": "deep", "value": "xhigh", "label": "Deep", "description": "Max" },
             ],
         })));
+        // The server's fields come through as sent; the rows are ordered strongest first.
         let opts = state.reasoning_effort_options();
         let [first, second] = opts.as_slice() else {
             panic!("expected 2 options, got {}", opts.len());
         };
-        assert_eq!(first.label, "Balanced");
-        assert_eq!(first.value, ReasoningEffort::Medium);
-        assert_eq!(second.id, "deep");
-        assert_eq!(second.description.as_deref(), Some("Max"));
+        assert_eq!(first.id, "deep");
+        assert_eq!(first.description.as_deref(), Some("Max"));
+        assert_eq!(second.label, "Balanced");
+        assert_eq!(second.value, ReasoningEffort::Medium);
     }
 
     #[test]
