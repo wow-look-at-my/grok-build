@@ -2597,7 +2597,7 @@
 					"default": null
 				}
 			},
-			"description": "User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.\nThat keeps the documented precedence (requirements > env > user > managed > remote). This struct exists so the keys are recognized in `config.json` and round-trip through `AgentConfig`."
+			"description": "User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.\n(`[toolset.ask_user_question]`)."
 		},
 		"AuthProviderConfig": {
 			"type": "object",
@@ -2775,7 +2775,7 @@
 						"boolean",
 						"null"
 					],
-					"description": "Whether to allow a background `&` operator in foreground commands (default: `true`).\nResolution: config.json (this) > remote settings > `true`.",
+					"description": "Whether to allow a background `&` operator in foreground commands (default: `true`).",
 					"default": null
 				},
 				"login_shell_capture": {
