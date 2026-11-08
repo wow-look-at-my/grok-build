@@ -61,8 +61,14 @@ impl WebFetchClient {
             converter,
             params: params.clone(),
             download_writer: SessionFileWriter::new(DEFAULT_DOWNLOAD_DIR, "pdf"),
-            image_writer: SessionFileWriter::new(crate::session_output_dirs::IMAGE_OUTPUT_DIR, "jpg"),
-            video_writer: SessionFileWriter::new(crate::session_output_dirs::VIDEO_OUTPUT_DIR, "mp4"),
+            image_writer: SessionFileWriter::new(
+                crate::session_output_dirs::IMAGE_OUTPUT_DIR,
+                "jpg",
+            ),
+            video_writer: SessionFileWriter::new(
+                crate::session_output_dirs::VIDEO_OUTPUT_DIR,
+                "mp4",
+            ),
             overflow: OverflowHandler::new(),
         })
     }
