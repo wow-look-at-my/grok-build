@@ -379,7 +379,7 @@ impl xai_tool_runtime::Tool for BashTool {
 
         // --- Build output file path ---
         let output_file = session_folder
-            .join("terminal")
+            .join(crate::session_output_dirs::TERMINAL_OUTPUT_DIR)
             .join(format!("{}.log", tool_call_id));
 
         // --- Foreground execution ---

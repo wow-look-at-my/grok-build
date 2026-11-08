@@ -205,11 +205,13 @@ async fn truncate_mcp_text(text: &mut String, trunc_ctx: &McpTruncateContext) {
     let kind = McpDumpKind::classify(text.as_str());
 
     let output_file_path = trunc_ctx.session_folder.as_ref().map(|folder| {
-        folder.join("mcp").join(format!(
-            "{}.{}",
-            sanitized_stem(&trunc_ctx.call_id),
-            kind.extension()
-        ))
+        folder
+            .join(crate::session_output_dirs::MCP_OUTPUT_DIR)
+            .join(format!(
+                "{}.{}",
+                sanitized_stem(&trunc_ctx.call_id),
+                kind.extension()
+            ))
     });
 
     let file_hint = if let Some(ref path) = output_file_path {
