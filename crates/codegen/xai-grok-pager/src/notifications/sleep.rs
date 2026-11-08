@@ -1,147 +1,122 @@
-//! Prevents the machine from idle-sleeping while an agent turn is in progress.
-//! macOS uses IOKit power assertions; Linux spawns `systemd-inhibit`.
+//! Holds the system awake as `[ui.notifications].keep_awake` asks.
+//! A child process holds the lock: `caffeinate` on macOS, `systemd-inhibit` on Linux.
 //!
 //! Threading: this lives on `AppView`, which is single-threaded and `!Send`, so fields use `Cell` and `RefCell` rather than atomics or mutexes.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::process::{Child, Command, Stdio};
 
-/// Prevents idle sleep while an agent turn is running.
-/// Calls are idempotent: repeated `inhibit()` or `release()` calls are no-ops when already in the requested state.
-/// On `Drop`, any held assertion is released.
+use super::config::KeepAwake;
+
+/// Holds the system awake while [`KeepAwake::wants_awake`] is true. Every call is idempotent.
+/// On `Drop`, the lock holder is stopped.
 pub struct SleepInhibitor {
-    #[cfg(target_os = "macos")]
-    assertion_id: Cell<Option<u32>>,
-    #[cfg(target_os = "linux")]
-    child: std::cell::RefCell<Option<std::process::Child>>,
-    active: Cell<bool>,
-    /// Set on the first `platform_inhibit` failure so a platform without an inhibitor (e.g. a container without systemd-inhibit) is not retried.
+    mode: Cell<KeepAwake>,
+    child: RefCell<Option<Child>>,
+    /// Set on the first failure, so a host without the tool does not spawn it again on every update.
     platform_unavailable: Cell<bool>,
-    enabled: bool,
+    make_command: fn() -> Option<Command>,
 }
 
 impl SleepInhibitor {
-    pub fn new(enabled: bool) -> Self {
-        Self {
-            #[cfg(target_os = "macos")]
-            assertion_id: Cell::new(None),
-            #[cfg(target_os = "linux")]
-            child: std::cell::RefCell::new(None),
-            active: Cell::new(false),
+    /// `Always` takes the lock here, before any session starts.
+    pub fn new(mode: KeepAwake) -> Self {
+        Self::with_command(mode, platform_command)
+    }
+
+    fn with_command(mode: KeepAwake, make_command: fn() -> Option<Command>) -> Self {
+        let inhibitor = Self {
+            mode: Cell::new(mode),
+            child: RefCell::new(None),
             platform_unavailable: Cell::new(false),
-            enabled,
-        }
-    }
-
-    /// Prevent idle sleep.
-    /// No-op if already inhibiting, disabled, or platform support was already determined to be unavailable.
-    pub fn inhibit(&self) {
-        if !self.enabled || self.active.get() || self.platform_unavailable.get() {
-            return;
-        }
-        if self.platform_inhibit() {
-            self.active.set(true);
-        } else {
-            self.platform_unavailable.set(true);
-        }
-    }
-
-    /// Allow idle sleep again. No-op if not currently inhibiting.
-    pub fn release(&self) {
-        if !self.active.get() {
-            return;
-        }
-        self.platform_release();
-        self.active.set(false);
-    }
-
-    #[cfg(target_os = "macos")]
-    fn platform_inhibit(&self) -> bool {
-        let mut assertion_id: u32 = 0;
-        let reason = core_foundation::string::CFString::new("grok: agent turn in progress");
-        let assertion_type =
-            core_foundation::string::CFString::from_static_string("NoIdleSleepAssertion");
-
-        // IOPMAssertionCreateWithName returns kIOReturnSuccess (0) on success.
-        let result = unsafe {
-            IOPMAssertionCreateWithName(
-                assertion_type.as_concrete_TypeRef(),
-                255, // kIOPMAssertionLevelOn
-                reason.as_concrete_TypeRef(),
-                &mut assertion_id,
-            )
+            make_command,
         };
+        inhibitor.sync(false);
+        inhibitor
+    }
 
-        if result == 0 {
-            self.assertion_id.set(Some(assertion_id));
-            true
+    pub fn mode(&self) -> KeepAwake {
+        self.mode.get()
+    }
+
+    /// Change the mode and apply it at once.
+    pub fn set_mode(&self, mode: KeepAwake, running: bool) {
+        self.mode.set(mode);
+        self.sync(running);
+    }
+
+    /// Take or drop the lock. `running` is true while any session does work.
+    pub fn sync(&self, running: bool) {
+        if self.mode.get().wants_awake(running) {
+            self.inhibit();
         } else {
-            tracing::warn!(error_code = result, "failed to create IOPMAssertion");
-            false
+            self.release();
         }
     }
 
-    #[cfg(target_os = "macos")]
-    fn platform_release(&self) {
-        if let Some(id) = self.assertion_id.get() {
-            let result = unsafe { IOPMAssertionRelease(id) };
-            if result != 0 {
-                tracing::warn!(error_code = result, "failed to release IOPMAssertion");
+    /// Whether a lock holder runs now.
+    pub fn is_active(&self) -> bool {
+        self.child.borrow().is_some()
+    }
+
+    fn inhibit(&self) {
+        if self.platform_unavailable.get() {
+            return;
+        }
+        let mut slot = self.child.borrow_mut();
+        if let Some(child) = slot.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return,
+                Ok(Some(status)) => {
+                    tracing::warn!(%status, "keep-awake lock holder exited; the system can sleep");
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "keep-awake lock holder cannot be polled; the system can sleep");
+                }
             }
-            self.assertion_id.set(None);
+            *slot = None;
+            self.platform_unavailable.set(true);
+            return;
         }
-    }
-
-    #[cfg(target_os = "linux")]
-    fn platform_inhibit(&self) -> bool {
-        let mut cmd = std::process::Command::new("systemd-inhibit");
-        cmd.args([
-            "--what=idle",
-            "--who=grok",
-            "--why=agent turn in progress",
-            "sleep",
-            "infinity",
-        ])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+        let Some(mut cmd) = (self.make_command)() else {
+            self.platform_unavailable.set(true);
+            return;
+        };
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         xai_tty_utils::detach_std_command(&mut cmd);
-        // The spawned process is the lock holder: `systemd-inhibit` keeps the idle-inhibit fd itself and runs `sleep
-        // infinity` as its child. Bind that pid to us so a crashed or killed grok (SIGKILL, `panic=abort` SIGABRT, no Drop
-        // runs) cannot leave it running forever.
+        // A crashed grok runs no Drop. On Linux this binds the holder to our death; `caffeinate -w` does that on macOS.
         xai_tty_utils::kill_on_parent_death_std(&mut cmd);
-        #[allow(clippy::disallowed_methods)] // bound by kill-on-parent-death; released each turn
-        let result = cmd.spawn();
-
-        match result {
-            Ok(child) => {
-                *self.child.borrow_mut() = Some(child);
-                true
-            }
-            Err(e) => {
-                tracing::debug!(error = %e, "systemd-inhibit not available");
-                false
+        #[allow(clippy::disallowed_methods)] // bound to our lifetime; stopped on release
+        match cmd.spawn() {
+            Ok(child) => *slot = Some(child),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    program = ?cmd.get_program(),
+                    "keep-awake tool did not start; the system can sleep"
+                );
+                self.platform_unavailable.set(true);
             }
         }
     }
 
-    #[cfg(target_os = "linux")]
-    fn platform_release(&self) {
-        if let Some(mut child) = self.child.borrow_mut().take() {
+    fn release(&self) {
+        let Some(mut child) = self.child.borrow_mut().take() else {
+            return;
+        };
+        #[cfg(unix)]
+        if let Ok(pid) = i32::try_from(child.id()) {
             let _ = nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(child.id() as i32),
+                nix::unistd::Pid::from_raw(pid),
                 nix::sys::signal::Signal::SIGTERM,
             );
-            let _ = child.wait();
         }
+        #[cfg(not(unix))]
+        let _ = child.kill();
+        let _ = child.wait();
     }
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    fn platform_inhibit(&self) -> bool {
-        false
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    fn platform_release(&self) {}
 }
 
 impl Drop for SleepInhibitor {
@@ -150,121 +125,129 @@ impl Drop for SleepInhibitor {
     }
 }
 
+/// `-i` stops idle system sleep. `-w` makes caffeinate exit when this process exits.
 #[cfg(target_os = "macos")]
-use core_foundation::base::TCFType;
-
-#[cfg(target_os = "macos")]
-#[link(name = "IOKit", kind = "framework")]
-unsafe extern "C" {
-    fn IOPMAssertionCreateWithName(
-        assertion_type: core_foundation::string::CFStringRef,
-        assertion_level: u32,
-        reason_for_activity: core_foundation::string::CFStringRef,
-        assertion_id: *mut u32,
-    ) -> i32;
-
-    fn IOPMAssertionRelease(assertion_id: u32) -> i32;
+fn platform_command() -> Option<Command> {
+    let mut cmd = Command::new("/usr/bin/caffeinate");
+    cmd.args(["-i", "-w", &std::process::id().to_string()]);
+    Some(cmd)
 }
 
-#[cfg(test)]
+/// `systemd-inhibit` keeps the idle-inhibit fd and runs `sleep infinity` as its child.
+#[cfg(target_os = "linux")]
+fn platform_command() -> Option<Command> {
+    let mut cmd = Command::new("systemd-inhibit");
+    cmd.args([
+        "--what=idle",
+        "--who=grok",
+        "--why=keep_awake",
+        "sleep",
+        "infinity",
+    ]);
+    Some(cmd)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn platform_command() -> Option<Command> {
+    None
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[test]
-    fn disabled_inhibitor_is_noop() {
-        let inhibitor = SleepInhibitor::new(false);
-        inhibitor.inhibit();
-        assert!(!inhibitor.active.get());
-        inhibitor.release();
-        assert!(!inhibitor.active.get());
+    /// A stand-in lock holder that every unix CI host has.
+    fn sleeper() -> Option<Command> {
+        let mut cmd = Command::new("sleep");
+        cmd.arg("1000");
+        Some(cmd)
     }
 
-    /// On unsupported platforms (not macOS or Linux), platform_inhibit returns false and `platform_unavailable` latches to prevent retry spam.
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    #[test]
-    fn platform_unavailable_prevents_retries() {
-        let inhibitor = SleepInhibitor::new(true);
-        // First attempt: platform_inhibit fails, flag latches.
-        inhibitor.inhibit();
-        assert!(!inhibitor.active.get());
-        assert!(inhibitor.platform_unavailable.get());
-        // Subsequent calls are short-circuited by the flag.
-        inhibitor.inhibit();
-        assert!(!inhibitor.active.get());
+    fn missing_tool() -> Option<Command> {
+        Some(Command::new("/nonexistent/keep-awake-tool"))
     }
 
-    #[test]
-    fn inhibit_is_idempotent() {
-        let inhibitor = SleepInhibitor::new(true);
-        inhibitor.inhibit();
-        let was_active = inhibitor.active.get();
-        // The second `inhibit` leaves the state alone and does not spawn a second child or assertion
-        inhibitor.inhibit();
-        assert_eq!(inhibitor.active.get(), was_active);
-        inhibitor.release();
+    fn holder_pid(inhibitor: &SleepInhibitor) -> Option<u32> {
+        inhibitor.child.borrow().as_ref().map(Child::id)
+    }
+
+    /// A reaped pid is gone; release waits on the child, so no zombie stays behind.
+    fn process_alive(pid: u32) -> bool {
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(pid).expect("pid fits i32"));
+        nix::sys::signal::kill(pid, None).is_ok()
     }
 
     #[test]
-    fn release_is_idempotent() {
-        let inhibitor = SleepInhibitor::new(true);
-        // Release without prior inhibit is a no-op.
-        inhibitor.release();
-        assert!(!inhibitor.active.get());
-        // Double release after inhibit is safe.
-        inhibitor.inhibit();
-        inhibitor.release();
-        assert!(!inhibitor.active.get());
-        inhibitor.release();
-        assert!(!inhibitor.active.get());
+    fn never_holds_nothing() {
+        let inhibitor = SleepInhibitor::with_command(KeepAwake::Never, sleeper);
+        inhibitor.sync(true);
+        assert!(!inhibitor.is_active());
     }
 
     #[test]
-    fn inhibit_release_cycle() {
-        let inhibitor = SleepInhibitor::new(true);
-        inhibitor.inhibit();
-        // On Linux, this spawns systemd-inhibit; on other platforms it's a no-op.
-        // Either way, the active flag tracks the intent.
-        let was_active = inhibitor.active.get();
-        inhibitor.release();
-        assert!(!inhibitor.active.get());
-        // Can re-inhibit after release.
-        inhibitor.inhibit();
-        assert_eq!(inhibitor.active.get(), was_active);
-        inhibitor.release();
+    fn while_running_follows_running() {
+        let inhibitor = SleepInhibitor::with_command(KeepAwake::WhileRunning, sleeper);
+        assert!(!inhibitor.is_active(), "idle at start");
+        inhibitor.sync(true);
+        let pid = holder_pid(&inhibitor).expect("work runs, so a holder runs");
+        inhibitor.sync(true);
+        assert_eq!(
+            holder_pid(&inhibitor),
+            Some(pid),
+            "a second sync spawns nothing"
+        );
+        inhibitor.sync(false);
+        assert!(!inhibitor.is_active());
+        assert!(!process_alive(pid), "release stops the holder");
     }
 
     #[test]
-    fn drop_releases() {
-        let inhibitor = SleepInhibitor::new(true);
-        inhibitor.inhibit();
+    fn always_holds_from_construction_and_while_idle() {
+        let inhibitor = SleepInhibitor::with_command(KeepAwake::Always, sleeper);
+        assert!(inhibitor.is_active(), "always takes the lock at start");
+        inhibitor.sync(false);
+        assert!(inhibitor.is_active(), "idle does not release it");
+    }
+
+    #[test]
+    fn set_mode_applies_at_once() {
+        let inhibitor = SleepInhibitor::with_command(KeepAwake::WhileRunning, sleeper);
+        inhibitor.set_mode(KeepAwake::Always, false);
+        assert!(inhibitor.is_active());
+        inhibitor.set_mode(KeepAwake::Never, true);
+        assert!(!inhibitor.is_active());
+        assert_eq!(inhibitor.mode(), KeepAwake::Never);
+    }
+
+    #[test]
+    fn drop_stops_the_holder() {
+        let inhibitor = SleepInhibitor::with_command(KeepAwake::Always, sleeper);
+        let pid = holder_pid(&inhibitor).expect("holder runs");
         drop(inhibitor);
-        // No assertion; the test only checks that drop neither panics nor leaks
+        assert!(!process_alive(pid));
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn linux_inhibit_spawns_child() {
-        let inhibitor = SleepInhibitor::new(true);
-        inhibitor.inhibit();
-        if inhibitor.active.get() {
-            assert!(inhibitor.child.borrow().is_some());
-            inhibitor.release();
-            assert!(inhibitor.child.borrow().is_none());
-        }
-        // If systemd-inhibit isn't available, active stays false and that's fine
+    fn a_missing_tool_latches_and_is_not_spawned_again() {
+        let inhibitor = SleepInhibitor::with_command(KeepAwake::Always, missing_tool);
+        assert!(!inhibitor.is_active());
+        assert!(inhibitor.platform_unavailable.get());
+        inhibitor.sync(true);
+        assert!(!inhibitor.is_active());
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn linux_release_kills_child() {
-        let inhibitor = SleepInhibitor::new(true);
-        inhibitor.inhibit();
-        if inhibitor.active.get() {
-            let pid = inhibitor.child.borrow().as_ref().map(|c| c.id());
-            assert!(pid.is_some());
-            inhibitor.release();
-            assert!(inhibitor.child.borrow().is_none());
-            assert!(!inhibitor.active.get());
+    fn a_holder_that_exits_is_not_reported_as_held() {
+        let inhibitor = SleepInhibitor::with_command(KeepAwake::Always, sleeper);
+        let pid = holder_pid(&inhibitor).expect("holder runs");
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(pid).expect("pid fits i32"));
+        nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL).expect("kill holder");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while inhibitor.is_active() && std::time::Instant::now() < deadline {
+            inhibitor.sync(true);
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
+        assert!(!inhibitor.is_active());
+        assert!(inhibitor.platform_unavailable.get());
     }
 }

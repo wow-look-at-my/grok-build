@@ -801,6 +801,8 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "multiline_mode",
         // SHELL-owned prompt_suggestions (Editor; tab autocomplete ghost text, live cache).
         "prompt_suggestions",
+        // PAGER-owned keep_awake (Agent).
+        "keep_awake",
         // voice_keybind_enabled + voice_capture_mode + voice_stt_language hidden when the voice gate is off.
         "stop_gate_unfinished_todos",
         "stop_gate_ci_failing",

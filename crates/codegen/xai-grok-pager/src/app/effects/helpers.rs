@@ -1348,6 +1348,14 @@ pub(crate) async fn persist_setting(
                 .map_err(|e| e.to_string())?
                 .map_err(|e| e.to_string())
         }
+        "keep_awake" => {
+            let SettingValue::Enum(s) = value else {
+                return Err(kind_mismatch("keep_awake", "Enum", &value));
+            };
+            xai_grok_shell::util::config::set_notifications_keep_awake(s.to_string())
+                .await
+                .map_err(|e| e.to_string())
+        }
         "render_mermaid" => {
             let SettingValue::Enum(s) = value else {
                 return Err(kind_mismatch("render_mermaid", "Enum", &value));

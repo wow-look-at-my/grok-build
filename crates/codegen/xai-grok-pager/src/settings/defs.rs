@@ -9,6 +9,7 @@ use super::registry::{
 use crate::appearance::ScrollMode;
 use crate::appearance::TextSelection;
 use crate::appearance::permission_cursor::DefaultSelectedPermission;
+use crate::notifications::KeepAwake;
 
 use xai_grok_shell::agent::config::{Feature, UiConfig};
 use xai_grok_shell::util::config::DISPLAY_REFRESH_DEFAULT_AUTO_CADENCE_ENABLED;
@@ -268,6 +269,33 @@ const TEXT_SELECTION_CHOICES: &[EnumChoice] = &[
         description: "Double-click selects & copies a word, triple-click a paragraph; selection stays until dismissed.",
     },
 ];
+
+// Keep-awake catalog. PAGER-owned, persisted to `[ui.notifications].keep_awake`.
+const KEEP_AWAKE_CHOICES: &[EnumChoice] = &[
+    EnumChoice {
+        canonical: KeepAwake::Never.as_canonical(),
+        display: "Never",
+        description: "Let the system idle-sleep as usual.",
+    },
+    EnumChoice {
+        canonical: KeepAwake::WhileRunning.as_canonical(),
+        display: "While running",
+        description: "While a turn, goal, background task, subagent or workflow runs. Default.",
+    },
+    EnumChoice {
+        canonical: KeepAwake::Always.as_canonical(),
+        display: "Always",
+        description: "For as long as grok is open.",
+    },
+];
+
+/// The settings-modal label of a keep-awake mode.
+pub(crate) fn keep_awake_display(mode: KeepAwake) -> &'static str {
+    KEEP_AWAKE_CHOICES
+        .iter()
+        .find(|choice| choice.canonical == mode.as_canonical())
+        .map_or(mode.as_canonical(), |choice| choice.display)
+}
 
 // Hunk-tracker-mode catalog. SHELL-owned, persisted to `[ui].hunk_tracker_mode`.
 // `disabled` is accepted as an alias for `off` at parse time but not shown as a choice
@@ -625,6 +653,33 @@ pub(crate) fn default_settings_with_subagent_rows(
             keywords: &["rewind", "confirm", "undo", "history", "ask", "prompt"],
             kind: SettingKind::Bool {
                 default: ui_default.confirm_before_rewind_enabled(),
+            },
+            restart_required: false,
+        },
+        // PAGER-owned: applied live to the sleep inhibitor, persisted to `[ui.notifications].keep_awake`
+        SettingMeta {
+            key: "keep_awake",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Pager,
+            label: "Keep system awake",
+            description: "Stop the system from idle-sleeping: never, while work runs \
+                          (a turn, goal, background task, subagent or workflow), or \
+                          always while grok is open. Uses caffeinate on macOS and \
+                          systemd-inhibit on Linux.",
+            keywords: &[
+                "sleep",
+                "awake",
+                "caffeinate",
+                "idle",
+                "suspend",
+                "inhibit",
+                "power",
+                "battery",
+            ],
+            kind: SettingKind::Enum {
+                default: KeepAwake::WhileRunning.as_canonical(),
+                choices: KEEP_AWAKE_CHOICES,
+                supports_preview: false,
             },
             restart_required: false,
         },

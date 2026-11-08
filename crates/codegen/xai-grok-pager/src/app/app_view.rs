@@ -5738,6 +5738,25 @@ impl AppView {
             ActiveView::Welcome => TickDemand::Slow,
         }
     }
+    /// Whether any session does work: a turn or command, an active goal, a background task, a live subagent or an active workflow.
+    pub(crate) fn has_running_work(&self) -> bool {
+        self.agents.values().any(|agent| {
+            !agent.session.state.is_idle()
+                || agent.session.has_running_bg_tasks()
+                || agent
+                    .goal_state
+                    .as_ref()
+                    .is_some_and(|goal| goal.status == super::agent::GoalDisplayStatus::Active)
+                || agent.subagent_sessions.values().any(|s| s.is_running())
+                || agent.workflow_runs.iter().any(|run| run.is_active())
+        })
+    }
+    /// Take or drop the keep-awake lock for `[ui.notifications].keep_awake`.
+    pub(crate) fn sync_keep_awake(&self) {
+        self.notification_service
+            .sleep_inhibitor
+            .sync(self.has_running_work());
+    }
     /// Update the terminal tab title and OSC 9;4 progress bar.
     /// Stores any resulting escape sequences in `pending_notification_escapes`.
     /// Also clears the permission notification flag when no permissions remain queued, so the next batch fires a fresh bell/popup.

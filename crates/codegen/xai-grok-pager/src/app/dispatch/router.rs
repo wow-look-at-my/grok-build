@@ -6,7 +6,7 @@ use super::auth::{
 use super::billing::dispatch_open_supergrok_url;
 use super::ctx::{
     active_agent_session_id, get_active_agent_mut, navigate_clearing_selection, open_url_or_show,
-    sync_sleep_inhibitor, with_active_agent, with_scrollback,
+    with_active_agent, with_scrollback,
 };
 use super::dashboard::{
     dispatch_dashboard_attach, dispatch_dashboard_begin_rename, dispatch_dashboard_change_location,
@@ -85,7 +85,7 @@ use super::settings::setters::{
     set_contextual_hint_ssh_wrap, set_contextual_hint_undo, set_contextual_hint_word_select,
     set_default_model, set_default_selected_permission, set_display_refresh_auto_cadence,
     set_follow_up_behavior, set_group_tool_verbs, set_harness_model, set_hunk_tracker_mode,
-    set_invert_scroll, set_keep_text_selection, set_max_thoughts_width,
+    set_invert_scroll, set_keep_awake, set_keep_text_selection, set_max_thoughts_width,
     set_min_output_tokens_per_sec, set_model_group_model, set_multiline_mode,
     set_output_rate_max_retries, set_output_rate_sustained_secs, set_output_rate_window_secs,
     set_page_flip_on_send, set_prompt_suggestions, set_remember_tool_approvals, set_render_mermaid,
@@ -1132,6 +1132,7 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetCollapsedEditBlocks(v) => set_collapsed_edit_blocks(app, v),
         Action::SetPromptSuggestions(v) => set_prompt_suggestions(app, v),
         Action::SetRespectManualFolds(v) => set_respect_manual_folds(app, v),
+        Action::SetKeepAwake(v) => set_keep_awake(app, v),
         Action::SetDefaultSelectedPermission(s) => set_default_selected_permission(app, s),
         Action::SetHunkTrackerMode(s) => set_hunk_tracker_mode(app, s),
         Action::SetVoiceKeybindEnabled(v) => set_voice_keybind_enabled(app, v),
@@ -1628,7 +1629,7 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
     };
     restore_stash_where_the_draft_was_consumed(app);
     app.reconcile_foreign_resume_launch();
-    sync_sleep_inhibitor(app);
+    app.sync_keep_awake();
     effects
 }
 /// Show the image notices queued so far as one message on the visible surface; true when a surface

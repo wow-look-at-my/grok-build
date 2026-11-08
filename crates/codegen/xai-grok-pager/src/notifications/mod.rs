@@ -9,6 +9,8 @@ pub mod tmux;
 
 use std::time::{Duration, Instant};
 
+use serde::Deserialize as _;
+
 use crate::render::draw::EscapeWriter;
 
 /// Ghostty resets the OSC 9;4 progress indicator after ~15 s of silence.
@@ -16,7 +18,7 @@ use crate::render::draw::EscapeWriter;
 const PROGRESS_KEEPALIVE: Duration = Duration::from_secs(5);
 
 pub use config::{
-    NotificationCondition, NotificationConfig, NotificationEventKind, NotificationHook,
+    KeepAwake, NotificationCondition, NotificationConfig, NotificationEventKind, NotificationHook,
     NotificationMethod, TitleConfig, TitleItem,
 };
 pub use title::TitleState;
@@ -54,7 +56,7 @@ impl NotificationService {
             config.idle_threshold_secs,
             config.session_recap_threshold_secs,
         );
-        let sleep_inhibitor = sleep::SleepInhibitor::new(config.sleep_prevention);
+        let sleep_inhibitor = sleep::SleepInhibitor::new(config.keep_awake);
         let title_manager = title::TitleManager::new(&config.title);
         Self {
             config,
@@ -225,7 +227,7 @@ impl NotificationService {
             config.idle_threshold_secs,
             config.session_recap_threshold_secs,
         );
-        let sleep_inhibitor = sleep::SleepInhibitor::new(config.sleep_prevention);
+        let sleep_inhibitor = sleep::SleepInhibitor::new(config.keep_awake);
         let title_manager = title::TitleManager::new(&config.title);
         Self {
             config,
@@ -259,12 +261,16 @@ fn resolve_protocol(
 /// Load `NotificationConfig` from the internal config tree. Looks for
 /// `ui.notifications`; falls back to defaults if absent or malformed.
 pub fn load_notification_config(raw_config: &toml::Value) -> NotificationConfig {
-    raw_config
-        .get("ui")
-        .and_then(|ui| ui.get("notifications"))
-        .and_then(|n| toml::to_string(n).ok())
-        .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or_default()
+    let Some(section) = raw_config.get("ui").and_then(|ui| ui.get("notifications")) else {
+        return NotificationConfig::default();
+    };
+    match NotificationConfig::deserialize(section.clone()) {
+        Ok(config) => config,
+        Err(error) => {
+            tracing::warn!(%error, "[ui.notifications] is invalid; every notification setting uses its default");
+            NotificationConfig::default()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -503,6 +509,13 @@ mod tests {
             load_notification_config(&raw),
             NotificationConfig::default()
         );
+    }
+
+    #[test]
+    fn load_reads_keep_awake_from_the_notifications_section() {
+        let raw: toml::Value =
+            toml::from_str("[ui.notifications]\nkeep_awake = \"always\"\n").unwrap();
+        assert_eq!(load_notification_config(&raw).keep_awake, KeepAwake::Always);
     }
 
     #[test]
