@@ -434,7 +434,7 @@ pub fn load_claude_env_with_project(cwd: &Path, project_trusted: bool) -> HashMa
 
 // Phase 2 cutoff marker. Reader is local because gate consumers cannot depend on shell (cycle); caching omitted until this is a hotspot.
 
-/// True when the user marked Claude settings imported (`[claude_compat].imported` in config.toml, or the test override).
+/// True when the user marked Claude settings imported (`claude_compat.imported` in config.json, or the test override).
 /// Public so callers that mirror this gate elsewhere use the same check.
 pub fn is_claude_import_marked() -> bool {
     // Test escape hatch: shell tests call `refresh_marker_cache(true)`, which lives in xai-grok-shell (inaccessible from here at runtime)
@@ -442,13 +442,12 @@ pub fn is_claude_import_marked() -> bool {
     if std::env::var("_GROK_CLAUDE_MARKER_OVERRIDE").as_deref() == Ok("1") {
         return true;
     }
-    let Some(config_path) = xai_grok_config::user_grok_home().map(|g| g.join("config.toml")) else {
+    let Some(config_path) = xai_grok_config::user_grok_home()
+        .map(|g| xai_grok_config::format::resolve_config_file(&g, xai_grok_config::CONFIG_STEM))
+    else {
         return false;
     };
-    let Ok(contents) = std::fs::read_to_string(&config_path) else {
-        return false;
-    };
-    let Ok(value) = toml::from_str::<toml::Value>(&contents) else {
+    let Ok(value) = xai_grok_config::load_toml_file(&config_path) else {
         return false;
     };
     value
@@ -468,7 +467,7 @@ pub(crate) fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool 
         LOGGED.get_or_init(|| {
             tracing::info!(
                 first_gate = gate_name,
-                "Claude compat disabled (marker set in config.toml)"
+                "Claude compat disabled (marker set in config.json)"
             );
         });
     }

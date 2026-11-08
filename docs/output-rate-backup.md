@@ -1,6 +1,6 @@
 # Output-rate backup generations
 
-The output-rate floor (`[ui].min_output_tokens_per_sec`) judges a streaming model call. When the rate stays under the floor for `output_rate_sustained_secs`, the gate breaches.
+The output-rate floor (`ui.min_output_tokens_per_sec`) judges a streaming model call. When the rate stays under the floor for `output_rate_sustained_secs`, the gate breaches.
 
 A breach does not cancel the slow call. The code is `drive_l2` in `crates/codegen/xai-grok-sampler/src/actor/request_task.rs`.
 

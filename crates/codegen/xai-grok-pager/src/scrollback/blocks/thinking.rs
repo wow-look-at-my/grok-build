@@ -65,7 +65,7 @@ const BODY_RAIL_WIDTH: usize = 2;
 /// An accent column would indent the header's diamond out of line and read as a second, different gutter treatment.
 ///
 /// Gated on `accent_enabled` like the accent-column rail it replaces (`rail_style`):
-/// a pager.toml `accent_enabled = false` turns off the reasoning rail wherever it is drawn.
+/// a pager.json `"accent_enabled": false` turns off the reasoning rail wherever it is drawn.
 fn rail_under_bullet(ctx: &BlockContext) -> bool {
     let cfg = &ctx.appearance.scrollback.blocks.thinking;
     cfg.rail_under_bullet && cfg.accent_enabled
@@ -848,7 +848,7 @@ mod tests {
         }
     }
 
-    /// `accent_enabled = false` in pager.toml turned off the accent-column rail
+    /// `"accent_enabled": false` in pager.json turned off the accent-column rail
     /// (`rail_style`); the in-body rail must honor the same switch.
     #[test]
     fn body_rail_honors_accent_enabled() {

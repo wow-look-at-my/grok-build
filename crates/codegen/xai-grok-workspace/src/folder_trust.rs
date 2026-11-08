@@ -197,7 +197,7 @@ impl fmt::Display for GrantRefuse {
             Self::Unreadable => write!(
                 f,
                 "Couldn't save folder trust: the trust store could not be read. \
-                 Fix or delete ~/.grok/trusted_folders.toml, then start Grok again and press y."
+                 Fix or delete ~/.grok/trusted_folders.json, then start Grok again and press y."
             ),
             Self::KeyMoved => write!(
                 f,
@@ -466,7 +466,7 @@ pub fn repo_config_kinds(cwd: &Path) -> Vec<&'static str> {
     collect_repo_config_kinds(cwd, false)
 }
 
-/// Whether a project `.grok/config.toml` `[permission]` value would contribute rules to the permission resolver.
+/// Whether a project `.grok/config.json` `permission` value would contribute rules to the permission resolver.
 /// Mirrors the shapes `permission::resolution` loads: non-empty `allow`/`deny`/`ask` arrays, or a non-empty verbose `rules` array.
 /// Empty arrays and empty tables do not gate (same as an empty `[mcp_servers]` or `[plugins].paths`).
 fn config_toml_permission_contributes(permission_value: &TomlValue) -> bool {
@@ -523,7 +523,7 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     if !crate::project_config::find_mcp_json_files_in(&chain.dirs).is_empty() {
         hit!("mcp");
     }
-    // Project `.grok/config.toml` markers: a non-empty `[mcp_servers]` table or `[plugins].paths` array, or a contributing `[permission]` section
+    // Project `.grok/config.json` markers: a non-empty `mcp.servers` object or `extensions.plugins.paths` array, or a contributing `permission` object
     // `[plugins].paths` loads as auto-trusted ConfigPath plugins; `[permission]` allow/deny/ask rules auto-approve or block tools
     // A clone whose ONLY repo-local config is either must still be gated (else it resolves Trusted and the loader runs ungated)
     for path in crate::project_config::find_project_configs_in(&chain.dirs) {
@@ -763,7 +763,11 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
-        std::fs::write(grok.join("config.toml"), "[mcp_servers.x]\ncommand=\"y\"\n").unwrap();
+        std::fs::write(
+            grok.join("config.json"),
+            r#"{"mcp": {"servers": {"x": {"command": "y"}}}}"#,
+        )
+        .unwrap();
         assert!(repo_configs_present(tmp.path()));
     }
 
@@ -1037,7 +1041,7 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
-        std::fs::write(grok.join("config.toml"), "[mcp_servers]\n").unwrap();
+        std::fs::write(grok.join("config.json"), r#"{"mcp": {"servers": {}}}"#).unwrap();
         assert!(!repo_configs_present(tmp.path()));
     }
 
@@ -1048,7 +1052,11 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
-        std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./x\"]\n").unwrap();
+        std::fs::write(
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": ["./x"]}}}"#,
+        )
+        .unwrap();
         assert!(repo_configs_present(tmp.path()));
     }
 
@@ -1058,7 +1066,11 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
-        std::fs::write(grok.join("config.toml"), "[plugins]\npaths = []\n").unwrap();
+        std::fs::write(
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": []}}}"#,
+        )
+        .unwrap();
         assert!(!repo_configs_present(tmp.path()));
     }
 
@@ -1071,8 +1083,8 @@ mod tests {
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(
-            grok.join("config.toml"),
-            "[permission]\nallow = [\"Bash(*)\"]\n",
+            grok.join("config.json"),
+            r#"{"permission": {"allow": ["Bash(*)"]}}"#,
         )
         .unwrap();
         assert!(repo_configs_present(tmp.path()));
@@ -1095,8 +1107,8 @@ mod tests {
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(&grok).unwrap();
         std::fs::write(
-            grok.join("config.toml"),
-            "[permission]\nallow = []\ndeny = []\n",
+            grok.join("config.json"),
+            r#"{"permission": {"allow": [], "deny": []}}"#,
         )
         .unwrap();
         assert!(!repo_configs_present(tmp.path()));
@@ -1109,7 +1121,11 @@ mod tests {
         let tmp = repo_tmp();
         let grok = tmp.path().join(".grok");
         std::fs::create_dir_all(grok.join("agents")).unwrap();
-        std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./x\"]\n").unwrap();
+        std::fs::write(
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": ["./x"]}}}"#,
+        )
+        .unwrap();
         let claude = tmp.path().join(".claude");
         std::fs::create_dir_all(&claude).unwrap();
         std::fs::write(claude.join("settings.json"), r#"{"env":{"X":"1"}}"#).unwrap();
@@ -1346,15 +1362,13 @@ mod tests {
         let after_grant = std::fs::read(&store_path).unwrap();
         // Marker a rewrite would drop.
         let mut marked = after_grant.clone();
-        marked.extend_from_slice(b"\n# keep-me\n");
+        marked.extend_from_slice(b"\n\n\n");
         std::fs::write(&store_path, &marked).unwrap();
 
         grant_folder_trust(tmp.path());
         let after_skip = std::fs::read(&store_path).unwrap();
-        assert!(
-            after_skip
-                .windows(b"# keep-me".len())
-                .any(|w| w == b"# keep-me"),
+        assert_eq!(
+            marked, after_skip,
             "already-trusted grant must not rewrite the store"
         );
         assert!(TrustStore::load().is_trusted(&key));
@@ -1447,7 +1461,7 @@ mod tests {
         let text = unread.to_string();
         assert!(text.contains("trust store could not be read"), "{text}");
         assert!(
-            text.contains("Fix or delete ~/.grok/trusted_folders.toml"),
+            text.contains("Fix or delete ~/.grok/trusted_folders.json"),
             "{text}"
         );
         let no_home = GrantOutcome::Refused {

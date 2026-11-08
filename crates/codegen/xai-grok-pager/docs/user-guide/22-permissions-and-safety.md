@@ -57,9 +57,12 @@ grok agent --always-approve serve --bind 127.0.0.1:2419 --secret <token>
 
 **Config:**
 
-```toml
-[ui]
-permission_mode = "always-approve"   # or "auto", "ask", …
+```json
+{
+  "ui": {
+    "permission_mode": "always-approve"
+  }
+}
 ```
 
 Claude-compatible `defaultMode` in `.claude/settings.json` is also supported (see [Claude-compatible settings](#3-claude-code-compatibility-claudesettingsjson)). CLI overrides config for that process.
@@ -71,7 +74,7 @@ Skips ordinary permission prompts so tools run without waiting for a click. `den
 | Mechanism | Example |
 | --------- | ------- |
 | CLI | `--always-approve` (alias `--yolo`), or `--permission-mode bypassPermissions` |
-| Config | `[ui] permission_mode = "always-approve"` |
+| Config | `"permission_mode": "always-approve"` under `ui` |
 | Interactive | `/always-approve`, `Ctrl+O` |
 | ACP | `_meta.yoloMode: true` on `session/new` |
 
@@ -79,16 +82,18 @@ Skips ordinary permission prompts so tools run without waiting for a click. `den
 
 Keep always-approve for automation, and add deny rules for paths or commands you never want run:
 
-```toml
-# project .grok/config.toml
-[ui]
-permission_mode = "always-approve"
-
-[permission]
-deny = [
-  "Bash(rm -rf *)",
-  "MCPTool(sales__delete_*)",
-]
+```json
+{
+  "permission": {
+    "deny": [
+      "Bash(rm -rf *)",
+      "MCPTool(sales__delete_*)"
+    ]
+  },
+  "ui": {
+    "permission_mode": "always-approve"
+  }
+}
 ```
 
 ```bash
@@ -105,14 +110,17 @@ For automation that must run tools without interactive approval, use always-appr
 
 ### Disable always-approve (administrators)
 
-Organizations can prevent always-approve from being enabled via CLI, TUI, or `/always-approve`. Set this in `requirements.toml` (user-level under `~/.grok/`, or system-wide under `/etc/grok/` for enforcement users cannot remove):
+Organizations can prevent always-approve from being enabled via CLI, TUI, or `/always-approve`. Set this in `requirements.toml` (user-level under `~/.grok/`) or in `/etc/grok/requirements.json` (system-wide, for enforcement users cannot remove):
 
-```toml
-[ui]
-disable_bypass_permissions_mode = true
+```json
+{
+  "ui": {
+    "disable_bypass_permissions_mode": true
+  }
+}
 ```
 
-Do not use `permission_mode` for this lock; that key is a switchable default. The legacy `[ui] yolo = false` key in `requirements.toml` also disables always-approve for compatibility.
+Do not use `permission_mode` for this lock. That key is a switchable default. The legacy `ui.yolo` key set to `false` in `requirements.toml` also disables always-approve for compatibility.
 
 Grok can still load Claude-style permission **rules** from managed settings; always-approve is locked with `requirements.toml` as shown above.
 
@@ -190,23 +198,29 @@ Permission rules can be global (all projects), project-scoped (one repository), 
 
 | Scope | File | Shared with teammates |
 |-------|------|-----------------------|
-| Global (all projects) | `~/.grok/config.toml` | No |
-| Project (committed) | `<project>/.grok/config.toml` | Yes (commit it) |
+| Global (all projects) | `~/.grok/config.json` | No |
+| Project (committed) | `<project>/.grok/config.json` | Yes (commit it) |
 | Project (personal) | `<project>/.claude/settings.local.json` | No (gitignore it) |
 | Interactive grants | Stored internally by Grok, per project | No |
 
 Notes on scoping:
 
-- Grok discovers a `.grok/config.toml` at every directory level from the repository root down to your working directory, so a subdirectory can add rules on top of the repo root's.
+- Grok discovers a `.grok/config.json` at every directory level from the repository root down to your working directory. A subdirectory can add rules on top of the repo root's.
 - Rules from all scopes are merged into one rule set; `deny` > `ask` > `allow` applies across scopes, so a global `deny` cannot be overridden by a project `allow`.
 - Grok has no native `config.local.toml`. For personal, uncommitted rules in a project, use `.claude/settings.local.json`; Grok reads it directly (see [Claude Code Compatibility](#3-claude-code-compatibility-claudesettingsjson)).
 - Interactive "Always allow" decisions are stored outside the repository, scoped to the project (see [Interactive Approvals](#interactive-approvals-and-where-they-persist)).
 
-To stop prompts for a specific command in one project, add a narrow allow rule to that project's `.grok/config.toml` (or `.claude/settings.json`):
+To stop prompts for a specific command in one project, add a narrow allow rule to that project's `.grok/config.json` (or `.claude/settings.json`):
 
-```toml
-[permission]
-allow = ["Bash(cargo test *)", "Bash(npm run build)"]
+```json
+{
+  "permission": {
+    "allow": [
+      "Bash(cargo test *)",
+      "Bash(npm run build)"
+    ]
+  }
+}
 ```
 
 This approves only the listed commands. Always-approve mode, by contrast, approves all tool calls.
@@ -235,50 +249,77 @@ Rule syntax examples:
 
 See [Rule Matching Reference](#rule-matching-reference) for the exact matching semantics, including how chained commands and wildcards are evaluated.
 
-### 2. Native Configuration (`~/.grok/config.toml` and `.grok/config.toml`)
+### 2. Native Configuration (`~/.grok/config.json` and `.grok/config.json`)
 
-```toml
-[permission]
-rules = [
-  { action = "allow", tool = "bash", pattern = "git *" },
-  { action = "allow", tool = "bash", pattern = "gh *" },
-  { action = "allow", tool = "read" },
-  { action = "allow", tool = "grep" },
-  { action = "deny",  tool = "bash", pattern = "rm -rf *" },  # block a dangerous pattern
-  { action = "ask",   tool = "edit" },
-]
+```json
+{
+  "permission": {
+    "rules": [
+      {
+        "action": "allow",
+        "pattern": "git *",
+        "tool": "bash"
+      },
+      {
+        "action": "allow",
+        "pattern": "gh *",
+        "tool": "bash"
+      },
+      {
+        "action": "allow",
+        "tool": "read"
+      },
+      {
+        "action": "allow",
+        "tool": "grep"
+      },
+      {
+        "action": "deny",
+        "pattern": "rm -rf *",
+        "tool": "bash"
+      },
+      {
+        "action": "ask",
+        "tool": "edit"
+      }
+    ]
+  }
+}
 ```
 
 The structured `tool` field accepts the lowercase names `bash`, `read`, `edit`, `grep`, `mcp`, `webfetch`, and `websearch`, corresponding to the tool classes in [Tool Names](#tool-names).
 
 Because `deny` always wins, you cannot combine these `allow` rules with a catch-all `deny` on `bash` to mean "only allow git/gh"; a `deny tool = "bash"` rule would block `git` and `gh` too. For deny-by-default, use `defaultMode: "dontAsk"` in `.claude/settings.json` or a `PreToolUse` hook (below).
 
-Rules from the global `~/.grok/config.toml` and every project `.grok/config.toml` (from the repo root down to your working directory) are merged into one rule set, alongside any `.claude/settings.json` rules.
+Rules from the global `~/.grok/config.json` and every project `.grok/config.json` (from the repo root down to your working directory) are merged into one rule set, alongside any `.claude/settings.json` rules.
 
-Managed configuration deployed by your organization also contributes `[permission]` rules: the system `/etc/grok/managed_config.toml`, and a user-level copy that Grok maintains automatically at `~/.grok/managed_config.toml`. Managed rules merge like rules from any other source, with two properties specific to managed `allow` rules: your own `deny` and `ask` rules win over a managed `allow` (severity ordering), and a catch-all managed `allow` is ignored when always-approve is locked off. For rules that users cannot edit away, use the root-owned system `/etc/grok/requirements.toml`.
+Managed configuration deployed by your organization also contributes `permission` rules: the system `/etc/grok/managed_config.json`, and a user-level copy that Grok maintains automatically at `~/.grok/managed_config.toml`. Managed rules merge like rules from any other source, with multiple properties specific to managed `allow` rules. Your own `deny` and `ask` rules win over a managed `allow` (severity ordering). A catch-all managed `allow` is ignored when always-approve is locked off. For rules that users cannot edit away, use the root-owned system `/etc/grok/requirements.json`.
 
 Permission rules from every source are read once, when a session starts. Changes apply to the next session.
 
-The native `[permission]` section also accepts the compact `allow` / `deny` / `ask` string-array form, using the same rule strings as the `--allow` / `--deny` flags and `.claude/settings.json`:
+The native `permission` section also accepts the compact `allow` / `deny` / `ask` string-array form. Using the same rule strings as the `--allow` / `--deny` flags and `.claude/settings.json`:
 
-```toml
-[permission]
-deny = [
-  "Read(/Users/you/private/**)",
-  "Edit(/Users/you/private/**)",
-  "Bash(rm -rf *)",
-]
-allow = [
-  "Bash(git *)",
-  "Bash(gh *)",
-]
+```json
+{
+  "permission": {
+    "allow": [
+      "Bash(git *)",
+      "Bash(gh *)"
+    ],
+    "deny": [
+      "Read(/Users/you/private/**)",
+      "Edit(/Users/you/private/**)",
+      "Bash(rm -rf *)"
+    ]
+  }
+}
 ```
 
 `deny` always wins over `allow` (evaluation is `deny` > `ask` > `allow`), regardless of order or source. To block reads of paths outside your project at the OS level as well, combine deny rules with the `strict` sandbox profile (see [18-sandbox.md](18-sandbox.md)).
 
 ### 3. Claude Code Compatibility (`.claude/settings.json`)
 
-Grok reads `~/.claude/settings.json` and `~/.claude/settings.local.json`, plus the project-level `<project>/.claude/settings.json` and `settings.local.json` (walking up to the repo root). The native `.grok` source for permission rules is `config.toml`, described in the section above.
+Grok reads `~/.claude/settings.json` and `~/.claude/settings.local.json`, plus the project-level `<project>/.claude/settings.json` and `settings.local.json` (walking up to the repo root). The native `.grok` source for permission rules is `config.json`, described in the section above.
 
 Example:
 
@@ -399,10 +440,12 @@ When a tool call requires approval, the permission prompt offers these choices:
 
 A narrower set of options remembers just the specific command, MCP tool, or web-fetch domain being prompted, for example "Always allow `cargo test`". These rows are on by default. Disable them with:
 
-```toml
-# ~/.grok/config.toml
-[ui]
-remember_tool_approvals = false
+```json
+{
+  "ui": {
+    "remember_tool_approvals": false
+  }
+}
 ```
 
 Organizations can disable them via the same key in `requirements.toml` or managed configuration. With the gate enabled (the default), prompts gain:
@@ -421,7 +464,7 @@ Interactive grants are stored in Grok's own state directory under your home dire
 
 To inspect or reset a project's grants, open the `sessions` subdirectory of your Grok home (the `.grok` directory under your home directory, or `$GROK_HOME`): each project directory there (URL-encoded scope root) holds a `permission.toml` (plus per-client `permission_<client>.toml` variants) listing the remembered command prefixes, globs, MCP tools/servers, web-fetch domains, and "never allow" entries. Deleting the file resets that project's grants; the next matching tool call prompts again. Treat it as read-only state — to *add* rules, use the declarative `[permission]` configuration instead.
 
-Interactive grants are personal, per-machine state. For an allowlist you can review in code review and share with teammates, use declarative rules in the project's `.grok/config.toml` instead.
+Interactive grants are personal, per-machine state. For an allowlist you can review in code review and share with teammates, use declarative rules in the project's `.grok/config.json` instead.
 
 ---
 
@@ -516,15 +559,29 @@ Install the `git-gh-only` hook above to deny every other `Bash` command. For den
 
 ### Read-Only Code Reviewer
 
-```toml
-# .grok/config.toml
-[permission]
-rules = [
-  { action = "allow", tool = "read" },
-  { action = "allow", tool = "grep" },
-  { action = "deny",  tool = "edit" },
-  { action = "deny",  tool = "bash" },
-]
+```json
+{
+  "permission": {
+    "rules": [
+      {
+        "action": "allow",
+        "tool": "read"
+      },
+      {
+        "action": "allow",
+        "tool": "grep"
+      },
+      {
+        "action": "deny",
+        "tool": "edit"
+      },
+      {
+        "action": "deny",
+        "tool": "bash"
+      }
+    ]
+  }
+}
 ```
 
 ### Interactive Development
@@ -549,7 +606,7 @@ Recommended combination for untrusted code:
 
 - Permission decisions appear in the transcript.
 - The `/always-approve` command toggles always-approve mode; other modes are set through `defaultMode` (see [How to set the mode](#how-to-set-the-mode)).
-- Permission prompts include per-command "Always allow" options that persist for the current project only (on by default; disable with `[ui] remember_tool_approvals = false`). See [Interactive Approvals](#interactive-approvals-and-where-they-persist).
+- Permission prompts include per-command "Always allow" options that persist for the current project only (on by default, disable with `ui.remember_tool_approvals` set to `false`). See [Interactive Approvals](#interactive-approvals-and-where-they-persist).
 - To manage hooks and plugins, run `/hooks` or `/plugins` (on most terminals, **Ctrl+L** also opens the Extensions modal; on VS Code, Cursor, Windsurf, and Zed, `Ctrl+L` is mid-turn interject instead). See [10-hooks.md](10-hooks.md).
 
 ---
@@ -558,7 +615,7 @@ Recommended combination for untrusted code:
 
 1. **Prefer narrow patterns.** `Bash(git *)` grants less access than a bare `Bash` allow rule.
 2. **Combine layers.** `dontAsk`, narrow allow rules, a restrictive hook, and the sandbox each restrict independently.
-3. **Review project configuration from unfamiliar sources.** Folder trust gates project permission rules in `.grok/config.toml` and `.claude/settings.json`, plus startup loading of project instructions and skills. Headless startup with these sources requires `--trust` or a prior grant. Review them and any project hooks before trusting an unfamiliar checkout (see [10-hooks.md](10-hooks.md)).
+3. **Review project configuration from unfamiliar sources.** Folder trust gates project permission rules in `.grok/config.json` and `.claude/settings.json`, plus startup loading of project instructions and skills. Headless startup with these sources requires `--trust` or a prior grant. Review them and any project hooks before trusting an unfamiliar checkout (see [10-hooks.md](10-hooks.md)).
 4. **Test your policy.** With `defaultMode: "dontAsk"` set (or your `PreToolUse` hook installed), run representative commands and confirm what is blocked.
 5. **Treat the read-only command list as a convenience, not a security boundary.**
 
@@ -570,4 +627,4 @@ Recommended combination for untrusted code:
 - [Headless mode](14-headless-mode.md) — One-shot CLI and automation flags
 - [Agent mode](15-agent-mode.md) — ACP, stdio, and agent servers
 - [Sandbox](18-sandbox.md) — OS-level isolation profiles
-- [Configuration](05-configuration.md) — Native `config.toml` structure
+- [Configuration](05-configuration.md) — Native `config.json` structure

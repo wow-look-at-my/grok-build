@@ -1,4 +1,4 @@
-//! `/voice` toggles dictation: it starts recording now, and Esc or Enter stops (Enter also sends). Nothing is written to `config.toml`.
+//! `/voice` toggles dictation: it starts recording now, and Esc or Enter stops (Enter also sends). Nothing is written to `config.json`.
 //!
 //! The keyboard chord is **Ctrl+Space** or **F8** (both work; F8 is a fallback where Ctrl+Space is taken, e.g. by macOS input switching).
 //! The chord follows `[ui].voice_capture_mode`.

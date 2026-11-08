@@ -105,7 +105,7 @@ pub enum WarningCategory {
     TmuxExtendedKeysOff,
     /// The terminal is unrecognised and the notification protocol fell back to BEL (audible bell only).
     NotificationProtocolFallback,
-    /// The terminal does not reliably support CSI focus-tracking events, so `condition = "unfocused"` will never fire.
+    /// The terminal does not reliably support CSI focus-tracking events, so `ui.notifications.condition` set to `unfocused` will never fire.
     FocusTrackingUnavailable,
     /// WezTerm with the Kitty keyboard protocol inactive (its `enable_kitty_keyboard` option defaults to `false`).
     /// Shift+Enter is then byte-identical to Enter and can't insert newlines.
@@ -531,8 +531,8 @@ pub(crate) fn collect_notification_warnings_with_method(
             None,
         );
         warning.note = Some(format!(
-            "If the bell works for you, no change is needed. Otherwise, set `method` in \
-             `[ui.notifications]` in {} to a protocol your terminal supports. Set it to `none` \
+            "If the bell works for you, no change is needed. Otherwise, set \
+             `ui.notifications.method` in {} to a protocol your terminal supports. Set it to `none` \
              to turn off terminal notifications.",
             crate::util::display_user_grok_path(xai_grok_config::USER_CONFIG_FILENAME)
         ));
@@ -565,7 +565,7 @@ pub(crate) fn collect_notification_warnings_with_method(
         let mut warning = TerminalWarning::new(
             WarningCategory::FocusTrackingUnavailable,
             "This terminal may not report focus changes, so notifications set to `unfocused` may not appear",
-            Some("condition = \"always\" in [ui.notifications]"),
+            Some("\"ui.notifications.condition\": \"always\""),
             Some(&crate::util::display_user_grok_path(
                 xai_grok_config::USER_CONFIG_FILENAME,
             )),
@@ -2345,7 +2345,7 @@ mod tests {
                 .remediation
                 .as_ref()
                 .is_some_and(|remediation| {
-                    remediation.fix.contains("condition = \"always\"")
+                    remediation.fix.contains("ui.notifications.condition")
                         && remediation.config_path.as_deref()
                             == Some(
                                 crate::util::display_user_grok_path(

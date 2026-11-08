@@ -7,6 +7,7 @@ description = "Default model IDs for the grok CLI, loaded from the embedded defa
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+schemars = { workspace = true }
 serde_json = { workspace = true }
 
 [lints]

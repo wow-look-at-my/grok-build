@@ -3,7 +3,7 @@
 //! Default model IDs loaded from `default_models.json` at runtime.
 //! Edit that JSON file to change them.
 //!
-//! At runtime each model is resolved from the first of these that is set: CLI flag, ENV var, config.toml, remote settings, these defaults.
+//! At runtime each model is resolved from the first of these that is set: CLI flag, ENV var, config.json, remote settings, these defaults.
 
 #![deny(clippy::indexing_slicing)]
 

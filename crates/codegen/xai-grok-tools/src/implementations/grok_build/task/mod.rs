@@ -832,7 +832,7 @@ fn reject_subagent_type(
         }
         SubagentValidateTypeOutcome::Disabled => {
             Err(xai_tool_runtime::ToolError::invalid_arguments(format!(
-                "Subagent '{subagent_type}' is disabled via [subagents.toggle] in config.toml"
+                "Subagent '{subagent_type}' is disabled via `agents.subagents.toggle` in config.json"
             )))
         }
         SubagentValidateTypeOutcome::NotAllowed { allowed } => {
@@ -1444,7 +1444,7 @@ mod tests {
         )
         .await;
         let msg = result.expect_err("must reject").to_string();
-        assert!(msg.contains("disabled via [subagents.toggle]"));
+        assert!(msg.contains("disabled via `agents.subagents.toggle`"));
         assert!(rx.try_recv().is_err());
     }
 
@@ -1738,7 +1738,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("disabled via [subagents.toggle]"),
+                .contains("disabled via `agents.subagents.toggle`"),
         );
         assert!(rx.try_recv().is_err());
     }

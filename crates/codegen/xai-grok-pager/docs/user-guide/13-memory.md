@@ -45,25 +45,30 @@ paths, model output, or free-form errors.
 
 Memory needs no setup. To turn it off in every session:
 
-```toml
-# ~/.grok/config.toml
-[memory]
-enabled = false
+```json
+{
+  "memory": {
+    "enabled": false
+  }
+}
 ```
 
 To use the pipeline instead of v2:
 
-```toml
-[memory]
-enabled = true
-
-[memory_v2]
-enabled = false
+```json
+{
+  "memory": {
+    "enabled": true,
+    "v2": {
+      "enabled": false
+    }
+  }
+}
 ```
 
 ### Force-Disable
 
-To disable memory for the process even when TOML or remote settings enable it:
+To disable memory for the process even when config or remote settings enable it:
 
 ```bash
 export GROK_MEMORY=0
@@ -74,7 +79,7 @@ export GROK_MEMORY=0
 Toggle memory on or off during a session without restarting: open `/memory`
 and press `t`.
 
-The toggle is session-scoped -- it does not persist to `config.toml`, and it works in both directions: a session that started with `[memory] enabled = true` can turn memory off, and a session that started with `[memory] enabled = false` can turn it on. New sessions follow `config.toml` again. Toggling off removes access to memory tools and the memory instructions in the system prompt but keeps existing files on disk. Toggling on re-initializes memory storage, registers the memory tools, restores the memory instructions, and injects the memory index on the next turn. Turning memory on waits for any turn in progress to finish.
+The toggle is session-scoped -- it does not persist to `config.json`. It works in both directions. A session that started with `memory.enabled` set to `true` can turn memory off. A session that started with `memory.enabled` set to `false` can turn it on. New sessions follow `config.json` again. Toggling off removes access to memory tools and the memory instructions in the system prompt but keeps existing files on disk.
 
 The toggle cannot override the process-wide force-disable (`--no-memory` or `GROK_MEMORY=0`); those hide `/memory` for the whole session.
 
@@ -82,10 +87,8 @@ The toggle cannot override the process-wide force-disable (`--no-memory` or `GRO
 
 1. A process-wide force-disable (`--no-memory` compatibility flag or
    `GROK_MEMORY=0`) turns memory off.
-2. An explicit `[memory] enabled = false` in effective TOML turns memory off,
-   including anything enabled by managed remote settings. The `/memory` `t`
-   toggle can still turn it on for the current session.
-3. Otherwise memory is on, in v2 mode. `[memory_v2] enabled = false` selects the legacy pipeline, which then needs `GROK_MEMORY=1`, `[memory] enabled = true`, or a managed remote setting.
+2. An explicit `memory.enabled` set to `false` in the effective config turns memory off, including anything enabled by managed remote settings. The `/memory` `t` toggle can still turn it on for the current session.
+3. Otherwise memory is on, in v2 mode. `memory.v2.enabled` set to `false` selects the legacy pipeline, which then needs `GROK_MEMORY=1`, `memory.enabled` set to `true`, or a managed remote setting.
 
 Staged-rollout and kill-switch controls for operators are documented in the
 internal hardening notes, not here.
@@ -94,7 +97,7 @@ internal hardening notes, not here.
 
 ## How Memory Is Stored
 
-By default (v2), each scope stores Markdown under `~/.grok/memory-v2/`: `topics/` for curated notes and `observations/_inbox/` for new facts. With `[memory_v2] enabled = false` and legacy memory on, files live under `~/.grok/memory/` (`MEMORY.md` plus hashed workspace directories).
+With `memory.v2.enabled` set to `false` and legacy memory on, files live under `~/.grok/memory/` (`MEMORY.md` plus hashed workspace directories).
 
 ---
 
@@ -240,12 +243,17 @@ Dream reorganizes individual session logs and memory entries into a coherent, de
 
 Dream also runs automatically. By default, Grok checks the consolidation gates at launch and periodically during a session, and runs Dream once enough time has passed and enough sessions have accumulated:
 
-```toml
-[memory.dream]
-enabled = true     # Run automatic consolidation (default: true)
-min_hours = 24     # Minimum hours between consolidations
-min_sessions = 5   # Minimum sessions since the last consolidation
-check_interval_secs = 3600 # Also check the gates hourly
+```json
+{
+  "memory": {
+    "dream": {
+      "check_interval_secs": 3600,
+      "enabled": true,
+      "min_hours": 24,
+      "min_sessions": 5
+    }
+  }
+}
 ```
 
 ---
@@ -258,10 +266,15 @@ On the first turn of each session, Grok automatically searches memory for conten
 
 First-turn injection can be configured:
 
-```toml
-[memory.initial_injection]
-enabled = true     # Enable or disable first-turn injection
-min_score = 0.9    # Score threshold for first-turn injection
+```json
+{
+  "memory": {
+    "initial_injection": {
+      "enabled": true,
+      "min_score": 0.9
+    }
+  }
+}
 ```
 
 ### After Compaction
@@ -289,7 +302,7 @@ The default embedding model is unset, so memory starts in full-text-only mode. I
 
 ### Source Weights
 
-Each memory source has a weight multiplier applied to its score. All sources default to `1.0`, and you can adjust any of them under `[memory.search.source_weights]`:
+Each memory source has a weight multiplier applied to its score. All sources default to `1.0`. You can adjust any of them under `memory.search.source_weights`:
 
 | Source | Weight | Description |
 |--------|--------|-------------|
@@ -301,10 +314,17 @@ Each memory source has a weight multiplier applied to its score. All sources def
 
 Session memories decay over time so recent sessions are prioritized:
 
-```toml
-[memory.search.temporal_decay]
-enabled = true           # Enable time-based decay
-half_life_days = 30.0    # Score halves after this many days
+```json
+{
+  "memory": {
+    "search": {
+      "temporal_decay": {
+        "enabled": true,
+        "half_life_days": 30.0
+      }
+    }
+  }
+}
 ```
 
 Only session chunks decay. Global and workspace memories are exempt since they contain curated long-term knowledge.
@@ -313,10 +333,17 @@ Only session chunks decay. Global and workspace memories are exempt since they c
 
 MMR re-ranking penalizes redundant results to improve diversity:
 
-```toml
-[memory.search.mmr]
-enabled = true           # Enable diversity re-ranking
-lambda = 0.7             # 0.0 = max diversity, 1.0 = pure relevance
+```json
+{
+  "memory": {
+    "search": {
+      "mmr": {
+        "enabled": true,
+        "lambda": 0.7
+      }
+    }
+  }
+}
 ```
 
 ---
@@ -348,7 +375,7 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 
 ## Configuration Reference
 
-### Core Settings (`[memory]`)
+### Core Settings (`memory`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -356,14 +383,14 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `session.save_on_end` | `true` | Write metadata summary on session end |
 | `watcher.enabled` | `true` | Watch `~/.grok/memory/` for external edits and reindex |
 
-### Index Settings (`[memory.index]`)
+### Index Settings (`memory.index`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `max_chunk_chars` | `1600` | Maximum chunk size in characters |
 | `chunk_overlap_chars` | `320` | Character overlap between chunks |
 
-### Embedding Settings (`[memory.embedding]`)
+### Embedding Settings (`memory.embedding`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -371,7 +398,7 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `model` | unset | Embedding model name. Unset or `""` uses full-text-only retrieval. |
 | `dimensions` | `1024` | Embedding vector dimensions |
 
-### Search Settings (`[memory.search]`)
+### Search Settings (`memory.search`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -380,14 +407,14 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `vector_weight` | `0.7` | Weight for vector similarity |
 | `text_weight` | `0.3` | Weight for BM25 text similarity |
 
-### Initial Injection Settings (`[memory.initial_injection]`)
+### Initial Injection Settings (`memory.initial_injection`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `enabled` | `true` | Enable first-turn memory injection |
 | `min_score` | `0.9` | Score threshold for first-turn results |
 
-### Dream Settings (`[memory.dream]`)
+### Dream Settings (`memory.dream`)
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -397,9 +424,9 @@ To edit memory from the shell, open the files in your editor directly -- for exa
 | `stale_lock_secs` | `3600` | Seconds before a stale consolidation lock is reclaimed |
 | `check_interval_secs` | `3600` | Periodic Dream-gate check interval in seconds. Set `0` to disable periodic checks. |
 
-### Flush Settings (`[compaction.memory_flush]`)
+### Flush Settings (`session.compaction.memory_flush`)
 
-You configure flush under `[compaction]`, not `[memory]`, because it is a compaction behavior.
+You configure flush under `session.compaction`, not `memory`, because it is a compaction behavior.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -410,9 +437,9 @@ You configure flush under `[compaction]`, not `[memory]`, because it is a compac
 | `idle_timeout_secs` | `300` | Idle seconds before a background flush. Set `0` to disable idle flushes. |
 | `semantic_dedup_threshold` | unset | Cosine-similarity threshold for de-duplicating flushed content. When unset, defaults to `0.92`. |
 
-### Pruning Settings (`[compaction.pruning]`)
+### Pruning Settings (`session.compaction.pruning`)
 
-You configure pruning under `[compaction]`, not `[memory]`, because it is a compaction behavior.
+You configure pruning under `session.compaction`, not `memory`, because it is a compaction behavior.
 
 | Key | Default | Description |
 |-----|---------|-------------|
@@ -438,9 +465,14 @@ By default, Grok watches `~/.grok/memory/` for external file changes. If you edi
 - Created or modified files are reindexed.
 - Deleted files have their stale chunks removed from the index.
 
-```toml
-[memory.watcher]
-enabled = true    # default
+```json
+{
+  "memory": {
+    "watcher": {
+      "enabled": true
+    }
+  }
+}
 ```
 
 ---
@@ -450,7 +482,7 @@ enabled = true    # default
 ### Memory Not Working
 
 1. Verify memory is enabled: check `grok inspect` output.
-2. Check `GROK_MEMORY` or `[memory] enabled` in effective TOML.
+2. Check `GROK_MEMORY` or `memory.enabled` in the effective config.
 3. Check for `GROK_MEMORY=0` or a deprecated compatibility flag overriding config.
 
 ### Memory Not Appearing in Sessions

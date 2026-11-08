@@ -80,9 +80,9 @@ pub enum ConfigChangeEvent {
     HomeClaudeJsonChanged,
 }
 
-/// Watches `~/.grok/` for `auth.json`, `config.toml`, and `models_cache.json` changes, plus any extra paths (project `.grok/config.toml`, `.mcp.json`, etc.) provided at startup.
+/// Watches `~/.grok/` for `auth.json`, `config.json`, and `models_cache.json`
 /// Uses `notify-debouncer-mini` for built-in debounce that coalesces rapid editor writes (including write-then-rename patterns). Self-write suppression is intentionally omitted.
-/// When the agent writes `auth.json` or `config.toml`, the watcher fires and the [`ConfigReloader`](super::reloader::ConfigReloader) re-reads it. The reloader's own content-based deduplication (auth key hash, toml value comparison) skips the update when nothing actually changed.
+/// editor writes (including write-then-rename patterns).
 pub struct ConfigFileWatcher {
     debouncer: Debouncer<AccessFilteredWatcher>,
     /// Project cwds currently registered (via [`Self::start`]'s `cwd` argument or [`Self::watch_path`]). Tracked so that [`Self::watch_path`] is idempotent at our layer instead of relying on `notify`'s internal de-dup.
@@ -121,7 +121,11 @@ impl ConfigFileWatcher {
             let mut batch_events: Vec<ConfigChangeEvent> = Vec::new();
             let live_dest = resolve_global_config_dest(&grok_home_buf);
             for event in events {
-                if event.path.file_name().and_then(|n| n.to_str()) == Some("config.toml")
+                if event
+                    .path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(is_config_file_name)
                     && event.path.parent() == Some(grok_home_buf.as_path())
                 {
                     saw_slot = true;
@@ -171,7 +175,7 @@ impl ConfigFileWatcher {
         }
 
         // Add the two narrow non-recursive cwd watches. Both are non-fatal. A missing directory just means the corresponding files don't exist yet; `watch_path` picks them up on the next session opening in this cwd
-        // The leader's own cwd may also be covered by `extra_paths` `find_project_configs(cwd)` already includes `<cwd>/.grok/config.toml`, so the loop above watches `<cwd>/.grok/`
+        // The leader's own cwd may also be covered by `extra_paths` `find_project_configs(cwd)` already includes `<cwd>/.grok/config.json`, so the loop above watches `<cwd>/.grok/`
         // The call below then installs a duplicate watch on the same directory `notify` dedupes silently in its `RecommendedWatcher` (last-write-wins for the recursion mode), so this is cosmetic Both additions remain non-recursive, so events are not amplified
         let mut watched_cwds = HashSet::new();
         if let Some(cwd) = cwd {
@@ -199,7 +203,7 @@ impl ConfigFileWatcher {
 
     /// Register `<cwd>/` and `<cwd>/.grok/` as **non-recursive** watch targets, in addition to whatever was passed to [`Self::start`].
     /// Intended for the session-open path, when a session opens in a cwd the leader hasn't seen before.
-    /// It ensures edits to `<cwd>/.mcp.json` and `<cwd>/.grok/config.toml` trigger a [`ConfigChangeEvent`] within the debounce window. Downstream that raises [`ConfigUpdate::ProjectMcpServersChanged`](super::reloader::ConfigUpdate::ProjectMcpServersChanged). If `notify` cannot register the watch (the directory doesn't exist yet, or the OS quota is reached), the error is logged and swallowed.
+    /// It ensures edits to `<cwd>/.mcp.json` and `<cwd>/.grok/config.json` trigger a [`ConfigChangeEvent`] within the debounce window. Downstream that raises [`ConfigUpdate::ProjectMcpServersChanged`](super::reloader::ConfigUpdate::ProjectMcpServersChanged). If `notify` cannot register the watch (the directory doesn't exist yet, or the OS quota is reached), the error is logged and swallowed.
     pub fn watch_path(&mut self, cwd: &Path) {
         // Idempotent at our layer: skip the redundant `notify` watch-add when this cwd is already registered
         // Re-opening sessions in the same directory then doesn't churn the OS watcher
@@ -222,9 +226,15 @@ impl ConfigFileWatcher {
     }
 }
 
-/// Snapshot the follow dest of `$GROK_HOME/config.toml`. Canonicalize for notify path match.
+/// `config.json`, or the legacy `config.toml` that grok still reads until it migrates.
+fn is_config_file_name(name: &str) -> bool {
+    name == xai_grok_config::USER_CONFIG_FILENAME || name == "config.toml"
+}
+
+/// Snapshot the follow dest of the `$GROK_HOME` config file. Canonicalize for notify path match.
 fn resolve_global_config_dest(grok_home: &Path) -> Option<PathBuf> {
-    let slot = grok_home.join("config.toml");
+    let slot =
+        xai_grok_config::format::resolve_config_file(grok_home, xai_grok_config::CONFIG_STEM);
     xai_grok_config::fs_atomic::resolve_atomic_destination(&slot)
         .ok()
         .map(|p| dunce::canonicalize(&p).unwrap_or(p))
@@ -297,7 +307,7 @@ impl FollowDestWatch {
         if let Some(ref parent) = parent
             && let Err(e) = inner.watcher.watch(parent, RecursiveMode::NonRecursive)
         {
-            log_watch_error(&e, "failed to watch global config.toml referent parent");
+            log_watch_error(&e, "failed to watch global config.json referent parent");
             return;
         }
         inner.dest_parent = parent;
@@ -317,13 +327,13 @@ fn classify_watched_path(
     let parent = path.parent();
     match name {
         Some("auth.json") if parent == Some(grok_home) => Some(ConfigChangeEvent::AuthChanged),
-        Some("config.toml") if parent == Some(grok_home) => {
+        Some(n) if is_config_file_name(n) && parent == Some(grok_home) => {
             Some(ConfigChangeEvent::GlobalConfigChanged)
         }
         Some("models_cache.json") if parent == Some(grok_home) => {
             Some(ConfigChangeEvent::ModelsCacheChanged)
         }
-        Some("config.toml") => Some(ConfigChangeEvent::ProjectConfigChanged {
+        Some(n) if is_config_file_name(n) => Some(ConfigChangeEvent::ProjectConfigChanged {
             path: path.to_path_buf(),
         }),
         Some(".claude.json") if user_home.is_some_and(|h| parent_is_dir(parent, h)) => {
@@ -348,7 +358,7 @@ fn parent_is_dir(parent: Option<&Path>, dir: &Path) -> bool {
 
 /// Add the two non-recursive watches for a project root. Both watches are best-effort and log-and-continue on failure (missing directory, quota exhausted, permission denied, etc.).
 /// The caller has no reasonable recovery path beyond the existing user-triggered refresh.
-/// **Known limitation:** if `<cwd>/.grok/` does not yet exist at session-open time, the `.grok/` watch fails ENOENT and is swallowed at `debug!`. A later `mkdir <cwd>/.grok/` followed by a write to `<cwd>/.grok/config.toml` will NOT be observed. The `<cwd>/` watch is non-recursive, so creating a subdirectory doesn't trigger a watch-add.
+/// **Known limitation:** if `<cwd>/.grok/` does not yet exist at session-open time, the `.grok/` watch fails ENOENT and is swallowed at `debug!`. A later `mkdir <cwd>/.grok/` followed by a write to `<cwd>/.grok/config.json` will NOT be observed. The `<cwd>/` watch is non-recursive, so creating a subdirectory doesn't trigger a watch-add.
 fn watch_cwd_dirs(debouncer: &mut Debouncer<AccessFilteredWatcher>, cwd: &Path) {
     if let Err(e) = debouncer.watcher().watch(cwd, RecursiveMode::NonRecursive) {
         log_watch_error(&e, "failed to watch project cwd (non-recursive)");

@@ -1,10 +1,10 @@
-//! `[cursor_worker]` section from config.toml.
+//! `agents.cursor_worker` object from config.json.
 //! Always parsed so a build without worker support still accepts the table;
 //! only a leader compiled with it acts on the values. Re-exported from `agent::config`.
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct CursorWorkerConfig {
     /// Register the worker when the leader starts.

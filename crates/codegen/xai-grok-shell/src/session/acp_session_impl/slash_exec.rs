@@ -641,9 +641,8 @@ impl SessionActor {
                                  Uninstalling will remove all {total} plugin(s). To proceed:\n\
                                    /plugins uninstall {name} --confirm\n\
                                  \n\
-                                 To disable a single plugin without removing the repo, add to config.toml:\n\
-                                   [plugins]\n\
-                                   disabled = [\"{name}\"]",
+                                 To disable a single plugin without removing the repo, add \"{name}\" to \
+                                 `extensions.plugins.disabled` in config.json.",
                                 other_plugins.iter().map(|p| format!("  - {p}")).collect::<Vec<_>>().join("\n"),
                             ))
                             .await;

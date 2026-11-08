@@ -9,7 +9,7 @@
 //! ([`apply_process_env_strip`]) `remove_var`s conflicting developer `OTEL_*`
 //! so children cannot inherit a decoy endpoint. The same strip matrix also
 //! hides unlisted user/managed file siblings — env-only hide would let
-//! `otel_logs_endpoint` in `config.toml` retarget a pinned generic endpoint.
+//! `otel_logs_endpoint` in `config.json` retarget a pinned generic endpoint.
 
 use std::collections::{HashMap, HashSet};
 

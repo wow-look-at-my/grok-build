@@ -201,7 +201,7 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     // Snapshot the registry, UiConfig, and pager-local state before the mutable borrow on `agent` so the borrow checker is happy
     let registry = app.settings_registry.clone();
     let ui_snapshot = app.current_ui.clone();
-    // Read the limits again, so a hand edit of config.toml shows in the modal.
+    // Read the limits again, so a hand edit of config.json shows in the modal.
     if !cfg!(test) {
         app.model_context_limits = crate::settings::context_limits::configured_limits();
     }

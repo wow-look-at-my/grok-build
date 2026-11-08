@@ -209,7 +209,7 @@ fn log_coding_data_consent_selected(
 }
 
 /// Set coding-data-sharing preference.
-/// The shell owns this setting and stores it in auth metadata (persists via ACP ext-request, NOT `~/.grok/config.toml`).
+/// The shell owns this setting and stores it in auth metadata (persists via ACP ext-request, NOT `~/.grok/config.json`).
 pub(super) fn set_coding_data_sharing(
     app: &mut AppView,
     opted_in: bool,
@@ -268,7 +268,7 @@ pub(super) fn set_coding_data_sharing(
     }]
 }
 
-/// The toast for a setting that could not be written to `config.toml`.
+/// The toast for a setting that could not be written to `config.json`.
 pub(super) fn toast_persist_failure(app: &mut AppView, key: &str, error: &str) {
     let scrubbed = scrub_error_for_toast(error);
     app.show_toast(&format!("\u{2717} Could not save {key}: {scrubbed}"));

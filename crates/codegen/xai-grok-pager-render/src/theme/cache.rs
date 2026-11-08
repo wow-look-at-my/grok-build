@@ -1,7 +1,7 @@
 //! In-memory theme cache and resolution.
 //!
 //! The pager reads the active `ThemeKind` on every render frame, so the
-//! lookup must be cheaper than re-loading from `~/.grok/config.toml`.
+//! lookup must be cheaper than re-loading from `~/.grok/config.json`.
 //! [`current_kind`] returns the in-memory value, lazily seeding from the shell's layered effective config on first call.
 //!
 //! Disk writes live in `xai_grok_shell::util::config::set_theme()` (and friends), invoked via `Effect::PersistSetting` from the dispatcher.
@@ -51,7 +51,7 @@ fn theme_kind_from_u8(byte: u8) -> ThemeKind {
 /// Uses `Mutex<Option<_>>` rather than `OnceLock` so the settings modal and the `/theme auto` command can invalidate it after changing mappings.
 static AUTO_THEME_CONFIG: Mutex<Option<AutoThemeConfig>> = Mutex::new(None);
 
-/// `dark_theme` and `light_theme` are the user-configured overrides read from `[ui].auto_dark_theme` and `[ui].auto_light_theme` in `config.toml`.
+/// `dark_theme` and `light_theme` are the user-configured overrides read from
 /// When `None`, `to_theme_kind()` defaults to `GrokNight` / `GrokDay`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AutoThemeConfig {
@@ -59,7 +59,7 @@ pub struct AutoThemeConfig {
     pub light_theme: Option<ThemeKind>,
 }
 
-/// On the first call, reads from `~/.grok/config.toml` (via the shell's
+/// On the first call, reads from `~/.grok/config.json` (via the shell's
 /// `load_effective_config`).
 /// After that, returns the in-memory value (updated by [`set`]).
 pub fn current_kind() -> ThemeKind {
@@ -250,7 +250,7 @@ pub fn resolve_auto() -> ThemeKind {
 
 // -- Disk reads --------------------------------------------------------------
 
-/// Read the theme from the effective config (managed_config.toml merged under config.toml; user wins).
+/// Read the theme from the effective config (managed_config.toml merged under config.json; user wins).
 /// Checks `[ui].theme` first (the canonical location), then falls back to a top-level `theme` key for backwards compatibility.
 fn load_from_disk() -> Option<ThemeKind> {
     let root = xai_grok_config::load_effective_config_disk_only().ok()?;
@@ -265,7 +265,7 @@ fn load_from_disk() -> Option<ThemeKind> {
     value.and_then(ThemeKind::from_name)
 }
 
-/// Reads `[ui].auto_dark_theme` and `[ui].auto_light_theme` from the effective config, parsing them as theme names.
+/// Reads `ui.auto_dark_theme` and `ui.auto_light_theme` from the effective config, parsing them as theme names.
 /// Filters out `Auto` to prevent circular reference.
 fn load_auto_theme_config() -> AutoThemeConfig {
     let Ok(root) = xai_grok_config::load_effective_config_disk_only() else {
@@ -310,7 +310,7 @@ pub fn reset_for_test() {
 }
 
 /// Seed `AUTO_THEME_CONFIG` with explicit defaults so `auto_theme_config()` never falls through to `load_auto_theme_config()`.
-/// That fallback reads the user's real `config.toml`.
+/// That fallback reads the user's real `config.json`.
 /// Call from test setup after `reset_for_test()`.
 #[cfg(any(test, feature = "test-support"))]
 pub fn seed_auto_theme_defaults_for_test() {

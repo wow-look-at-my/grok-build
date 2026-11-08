@@ -63,7 +63,7 @@ pub struct FeatureSpec {
     pub default_enabled: bool,
     /// `None` where the key has no remote tier, so adding one is a deliberate edit.
     pub remote: Option<fn(&RemoteSettings) -> Option<bool>>,
-    // No managed tier: `config` is the loader's merge, where a user's config.toml already beats managed_config.toml
+    // No managed tier: `config` is the loader's merge, where a user's config.json already beats managed_config.toml
 }
 
 /// What each tier had to say about one feature.
@@ -86,7 +86,7 @@ impl FeatureSources {
     }
 }
 
-/// A layer of the config tier other than the user `config.toml`, lowest first; the user file sits between `Managed`
+/// A layer of the config tier other than the user `config.json`, lowest and
 /// and `Campaign` in the effective merge, and the overlay is re-applied over campaign patches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeatureConfigLayer {
@@ -115,13 +115,13 @@ pub struct FeatureLayerValue {
     pub value: bool,
 }
 
-/// The config tier of one feature split around the user `config.toml`, the one layer a settings surface can write.
+/// The config tier of one feature split around the user `config.json`, the `merged` is what `Config`
 /// `merged` is what `Config` latches; the split tells a writer whether its key would decide anything.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FeatureConfigLayers {
     /// The requirements pin (MDM, then system, then user), read from the same layers. It is the pin tier, not part of `merged`.
     pub pin: Option<bool>,
-    /// The user `config.toml` key.
+    /// The user `config.json` key.
     pub user: Option<bool>,
     /// Beats a user write: the `GROK_CONFIG` overlay, or a campaign patch.
     pub above_user: Option<FeatureLayerValue>,
@@ -357,7 +357,7 @@ impl Feature {
             | ConfigSource::ManagedConfig
             | ConfigSource::SystemManagedConfig
             | ConfigSource::EnvOverlay => {
-                format!("the {} key in config.toml or managed_config.toml", spec.key)
+                format!("the {} key in config.json or managed_config.toml", spec.key)
             }
             ConfigSource::Remote => "a remote setting".to_owned(),
             ConfigSource::Default => "the default".to_owned(),
@@ -366,7 +366,7 @@ impl Feature {
         }
     }
 
-    /// Split this feature's config tier around the user `config.toml`. `active_campaigns` are the patches the effective
+    /// Split this feature's config tier around the user `config.json`. `active_campaigns` are the patches the effective
     /// merge applied, highest priority first; every layer is read from its own document, so a campaign that repeats a
     /// lower layer's value still shows above the user. A requirements pin is reported as `pin`, not as a config layer.
     pub fn config_layers(
