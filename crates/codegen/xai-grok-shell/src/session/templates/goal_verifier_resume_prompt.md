@@ -12,7 +12,7 @@ You have your standard tool inventory ({READ_TOOL}, {SEARCH_TOOL}, {LIST_TOOL}, 
 
 {PRIOR_GAPS}
 
-- The whole contract still applies (all numbered criteria + the `## Verification plan`), not only the gaps you flagged; refute a newly-doubtful criterion too. Anti-ratchet: the bar does NOT rise between rounds — a NEW objection counts only when it is a demonstrable defect in shipped behavior or an unmet gating criterion, never a stylistic or test-construction preference an earlier round implicitly accepted; when every prior gap is fixed and every gating criterion holds, return `Not Refuted`.
+- The whole contract still applies (all numbered criteria + the `## Verification plan`), not only the gaps you flagged; refute a newly-doubtful criterion too. Anti-ratchet: the bar does NOT rise between rounds — a NEW objection counts only when it is a demonstrable defect in shipped behavior or an unmet gating criterion, never a stylistic or test-construction preference an earlier round implicitly accepted; when every prior gap is fixed and every gating criterion holds, return `refuted: false`.
 - FINAL_RESPONSE leads with the agent's LATEST message. A `## Earlier summary (round 1, superseded)` section after it is first-round text the agent cannot edit. Judge the latest message. A claim there that the latest message corrects is NOT a gap. Never ask the agent to delete or edit that section.
 - PLAN_CHANGES shows how the agent edited PLAN_FILE this run — a weakened, deleted, or self-serving criterion is itself grounds for `refuted: true`.
 - Cite concrete evidence per assertion (`path:line`, a RUN_LOG entry, or a diff hunk). Classify any refute via `blocking` as before (`"none"`, `"contradiction"`, or `"unverifiable"`). {KIND_LENS}
@@ -25,11 +25,7 @@ You have your standard tool inventory ({READ_TOOL}, {SEARCH_TOOL}, {LIST_TOOL}, 
 
 ## Output contract — STRICT
 
-Do BOTH, then emit the terminal token.
-
-### 1. JSON verdict → `{VERDICT_FILE}`
-
-Write this object (fixed schema) with your file-write tool:
+Write this object (fixed schema) to `{VERDICT_FILE}` with your file-write tool. That file is your whole verdict. The harness reads nothing else. It renders the human report from this file. Do not write your findings a second time anywhere, and do not repeat them in your last reply.
 
 ```json
 {
@@ -37,8 +33,7 @@ Write this object (fixed schema) with your file-write tool:
 "findings": [{"kind": "bug|gap|todo", "location": "path:line or where", "detail": "one line"}],
 "evidence": "string — one-line summary citation",
 "confidence": "high",
-"blocking": "none",
-"details_md": "Markdown summary of your findings"
+"blocking": "none"
 }
 ```
 
@@ -47,24 +42,5 @@ Write this object (fixed schema) with your file-write tool:
 - `evidence` (string): a one-line summary citation; for `code-change`, FINAL_RESPONSE prose is NOT evidence.
 - `confidence` (string): `"high"` | `"medium"` | `"low"`.
 - `blocking` (string, default `"none"`): `"none"` | `"contradiction"` | `"unverifiable"`.
-- `details_md` (string, optional): Markdown writeup; if omitted, the aggregator falls back to the `{DETAILS_FILE}` contents.
 
-### 2. Details → `{DETAILS_FILE}`
-
-The same findings as `details_md`, rendered as real Markdown.
-
-### 3. Terminal token
-
-Your terminal response must be **exactly** one of these and nothing else — no prose, fences, or punctuation; capitalization is significant:
-
-```
-Refuted
-```
-
-or
-
-```
-Not Refuted
-```
-
-`Refuted` ⇒ `refuted: true`; `Not Refuted` ⇒ `refuted: false`. The JSON is authoritative; the token is the fast-path signal.
+A missing or malformed file is a failed run, not a verdict. After you write the file, end your turn with a one-line reply. The harness does not read the reply.
