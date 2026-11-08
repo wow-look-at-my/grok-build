@@ -89,6 +89,13 @@
         };
         assert!(apply_session_event(&named, &mut session, &mut scrollback, false));
         assert_eq!(session.compaction_model.as_deref(), Some("dense-model"));
+        assert_eq!(
+            session.tracker.activity(),
+            Some(TurnActivity::AutoCompacting {
+                model: Some("dense-model".into())
+            }),
+            "the running activity names the model for every activity label"
+        );
         let marker = last_session_event(&scrollback).expect("a start marker");
         assert_eq!(
             marker.message(),
@@ -954,7 +961,7 @@
     fn apply_compaction_completed_defers_message_until_turn_end() {
         let mut session = make_session(Some("s1"));
         let mut scrollback = ScrollbackState::new();
-        session.set_compaction_activity(Some(TurnActivity::AutoCompacting));
+        session.set_compaction_activity(Some(TurnActivity::AutoCompacting { model: None }));
         let update = XaiSessionUpdate::AutoCompactCompleted {
             tokens_before: Some(858_000),
             tokens_after: 66_000,
@@ -1046,7 +1053,7 @@
         let mut agent = make_agent(Some("s1"));
         agent
             .session
-            .set_compaction_activity(Some(TurnActivity::AutoCompacting));
+            .set_compaction_activity(Some(TurnActivity::AutoCompacting { model: None }));
 
         let update = XaiSessionUpdate::AutoCompactCompleted {
             tokens_before: Some(858_000),

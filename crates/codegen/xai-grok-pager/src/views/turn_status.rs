@@ -799,8 +799,12 @@ fn compute_activity(
             };
             (style, String::new(), true)
         }
-        (AgentState::TurnRunning, Some(TurnActivity::AutoCompacting))
-        | (
+        (AgentState::TurnRunning, Some(TurnActivity::AutoCompacting { model })) => (
+            Style::default().fg(theme.text_secondary),
+            crate::scrollback::blocks::compacting_label(model.as_deref().or(compaction_model)),
+            false,
+        ),
+        (
             AgentState::CommandRunning {
                 command: AgentCommand::Compact,
                 ..
@@ -1326,7 +1330,7 @@ mod tests {
     #[test]
     fn compaction_label_names_the_compaction_model() {
         let theme = Theme::current();
-        let auto = Some(TurnActivity::AutoCompacting);
+        let auto = Some(TurnActivity::AutoCompacting { model: None });
         let manual = AgentState::CommandRunning {
             command: AgentCommand::Compact,
             started_at: Instant::now(),

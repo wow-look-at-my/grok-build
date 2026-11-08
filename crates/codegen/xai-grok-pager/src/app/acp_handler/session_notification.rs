@@ -1996,7 +1996,7 @@ pub(super) fn apply_session_event(
             }
             session.in_flight_prompt = None;
             session.compaction_model = None;
-            session.set_compaction_activity(Some(TurnActivity::AutoCompacting));
+            session.set_compaction_activity(Some(TurnActivity::AutoCompacting { model: None }));
             scrollback.push_block(RenderBlock::session_event(
                 SessionEvent::CompactionStarted {
                     percentage: *percentage,
@@ -2008,6 +2008,7 @@ pub(super) fn apply_session_event(
         }
         XaiSessionUpdate::CompactionModel { model } => {
             session.compaction_model = Some(model.clone());
+            session.tracker.set_compaction_model(model);
             scrollback.set_compaction_start_model(model);
             true
         }
