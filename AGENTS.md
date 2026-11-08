@@ -166,6 +166,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` apply to a session that already runs. The config watcher sends `ReloadThinkingSummaries` to every resident session, the same path as the output-rate floor.
 - Headless `streaming-json` emits a `thinking_summary` line. The Messages format has no field for it and drops it.
 
+## A subagent always carries a reasoning effort
+
+- A child pinned to its own model (a `[subagents.models]` pin, its definition, a goal role, `@sonnet`) takes that model's catalog default effort. Where the catalog has none, `child_effort_fallback` (`subagent/handle_request.rs`) gives it the parent's live effort, else the root default, through `apply_supported_effort`.
+- Without an effort, the Messages builder sends no `thinking` block, so the child returns no thinking and no `display: "summarized"` summary. The Responses builder asks for a summary on every request. That backend never had this gap.
+
 ## Streaming tool-call notes
 
 [docs/streaming-tool-call-notes.md](docs/streaming-tool-call-notes.md) holds this section.
