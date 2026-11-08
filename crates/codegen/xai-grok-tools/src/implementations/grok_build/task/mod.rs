@@ -1444,7 +1444,7 @@ mod tests {
         )
         .await;
         let msg = result.expect_err("must reject").to_string();
-        assert!(msg.contains("disabled via [subagents.toggle]"));
+        assert!(msg.contains("disabled via `agents.subagents.toggle`"));
         assert!(rx.try_recv().is_err());
     }
 
@@ -1738,7 +1738,7 @@ mod tests {
             result
                 .unwrap_err()
                 .to_string()
-                .contains("disabled via [subagents.toggle]"),
+                .contains("disabled via `agents.subagents.toggle`"),
         );
         assert!(rx.try_recv().is_err());
     }
