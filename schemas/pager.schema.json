@@ -650,7 +650,7 @@
 						"boolean",
 						"null"
 					],
-					"description": "Show the +N/-M line summary in the collapsed header.\nUnset or `null`, it follows `ui.collapsed_edit_blocks` in config.json.\nA value pins it either way.",
+					"description": "Show the +N/-M line summary in the collapsed header. Unset follows `ui.collapsed_edit_blocks`.",
 					"default": null
 				},
 				"expanded_by_default": {
