@@ -236,7 +236,7 @@ async fn an_active_goal_reads_a_large_mcp_result_dump() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn an_active_goal_reads_a_large_mcp_result_dump() {
+async fn an_active_goal_reads_a_dump_in_the_mcp_output_dir() {
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
