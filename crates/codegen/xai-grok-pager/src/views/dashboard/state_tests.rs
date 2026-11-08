@@ -166,7 +166,7 @@ fn gc_drops_stale_ids() {
 #[test]
 fn parse_persist_keys_rejects_non_array() {
     let s = r#"pinned = "not-an-array""#;
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("pinned").unwrap();
     let out = parse_persist_keys(item);
     assert!(out.is_empty());
@@ -177,7 +177,7 @@ fn parse_persist_keys_rejects_non_array() {
 #[test]
 fn parse_persist_key_list_rejects_non_array() {
     let s = "[reorder]\nx = 1";
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("reorder").unwrap();
     let out = parse_persist_key_list(item);
     assert!(out.is_empty());
@@ -187,7 +187,7 @@ fn parse_persist_key_list_rejects_non_array() {
 #[test]
 fn parse_persist_keys_skips_non_string_entries() {
     let s = "pinned = [1, 2, \"top:sess-7\", false]";
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("pinned").unwrap();
     let out = parse_persist_keys(item);
     assert_eq!(out.len(), 1);
@@ -203,7 +203,7 @@ fn parse_persist_keys_caps_entry_count() {
         .map(|i| format!("\"top:s-{i}\""))
         .collect();
     let s = format!("pinned = [{}]", many.join(","));
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("pinned").unwrap();
     let out = parse_persist_keys(item);
     assert!(out.len() <= MAX_PERSISTED_ENTRIES);
@@ -214,7 +214,7 @@ fn parse_persist_keys_caps_entry_count() {
 fn parse_persist_keys_rejects_overlong_strings() {
     let huge = format!("\"top:{}\"", "a".repeat(MAX_PERSIST_KEY_LEN + 10));
     let s = format!("pinned = [{huge}]");
-    let doc: toml_edit::DocumentMut = s.parse().unwrap();
+    let doc: toml::Value = toml::from_str(&s).unwrap();
     let item = doc.get("pinned").unwrap();
     let out = parse_persist_keys(item);
     assert!(out.is_empty());
@@ -333,7 +333,7 @@ fn reanchor_selection_drops_to_none_when_previous_disappeared() {
 fn persisted_on_disk_round_trip() {
     use std::collections::BTreeSet;
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
+    let path = tmp.path().join("config.json");
     let mut pinned: BTreeSet<PersistedRowId> = BTreeSet::new();
     pinned.insert(PersistedRowId::TopLevel {
         session_id: "sess-3".into(),
@@ -361,16 +361,15 @@ fn persisted_on_disk_round_trip() {
 fn load_persisted_drops_stale_subagent_row_ids() {
     use std::collections::BTreeSet;
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
+    let path = tmp.path().join("config.json");
     std::fs::write(
         &path,
-        "\
-[dashboard]
-enabled = true
-grouping = \"state\"
-pinned = [\"top:sess-keep\", \"sub:parent:child\"]
-reorder = [\"sub:parent:child:with:colons\", \"top:sess-keep\"]
-",
+        r#"{"ui": {"dashboard": {
+	"enabled": true,
+	"grouping": "state",
+	"pinned": ["top:sess-keep", "sub:parent:child"],
+	"reorder": ["sub:parent:child:with:colons", "top:sess-keep"]
+}}}"#,
     )
     .unwrap();
     let loaded =
@@ -384,15 +383,14 @@ reorder = [\"sub:parent:child:with:colons\", \"top:sess-keep\"]
     assert_eq!(loaded.reorder, vec![keep]);
 }
 
-/// The onboarding hint was removed — a stale `[dashboard.onboarding]`
-/// table left by an older version is dropped on the next write.
+/// A stale `ui.dashboard.onboarding` table left by an older version is dropped on the next write.
 #[test]
 fn persisted_write_drops_stale_onboarding_table() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
+    let path = tmp.path().join("config.json");
     std::fs::write(
         &path,
-        "[dashboard]\nenabled = true\n\n[dashboard.onboarding]\ndismissed = true\n",
+        r#"{"ui": {"dashboard": {"enabled": true, "onboarding": {"dismissed": true}}}}"#,
     )
     .unwrap();
     write_persisted_to_path(&path, &PersistedDashboard::defaults()).unwrap();
@@ -403,15 +401,15 @@ fn persisted_write_drops_stale_onboarding_table() {
     );
 }
 
-/// Pre-populated `[hints]` table survives the dashboard write
+/// Pre-populated `ui.hints` survives the dashboard write
 /// (the guarantee — we never clobber unrelated tables).
 #[test]
 fn persisted_write_preserves_other_tables() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
+    let path = tmp.path().join("config.json");
     std::fs::write(
         &path,
-        "[hints]\nmemory_modal_fullscreen = true\n\n[ui]\ncompact_mode = false\n",
+        r#"{"ui": {"compact_mode": false, "hints": {"memory_modal_fullscreen": true}}}"#,
     )
     .unwrap();
     let p = PersistedDashboard {
@@ -421,20 +419,19 @@ fn persisted_write_preserves_other_tables() {
         reorder: Vec::new(),
     };
     write_persisted_to_path(&path, &p).unwrap();
-    let after = std::fs::read_to_string(&path).unwrap();
-    assert!(after.contains("[hints]"));
-    assert!(after.contains("memory_modal_fullscreen = true"));
-    assert!(after.contains("[ui]"));
-    assert!(after.contains("compact_mode = false"));
-    assert!(after.contains("[dashboard]"));
+    let after: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(after["ui"]["hints"]["memory_modal_fullscreen"], true);
+    assert_eq!(after["ui"]["compact_mode"], false);
+    assert_eq!(after["ui"]["dashboard"]["enabled"], true);
 }
 
 /// Garbage `enabled` value falls back to defaults at load.
 #[test]
 fn persisted_load_garbage_enabled_falls_back() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
-    std::fs::write(&path, "[dashboard]\nenabled = \"garbage\"\n").unwrap();
+    let path = tmp.path().join("config.json");
+    std::fs::write(&path, r#"{"ui": {"dashboard": {"enabled": "garbage"}}}"#).unwrap();
     let loaded = load_persisted_from_path(&path).expect("section present");
     // Garbage → default `true`.
     assert!(loaded.enabled);
@@ -447,8 +444,8 @@ fn persisted_load_garbage_enabled_falls_back() {
 #[test]
 fn persisted_write_refuses_unparseable_file() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join("config.toml");
-    std::fs::write(&path, "this is :: not :: valid :: toml :: at all").unwrap();
+    let path = tmp.path().join("config.json");
+    std::fs::write(&path, "this is :: not :: valid :: json :: at all").unwrap();
     let p = PersistedDashboard {
         enabled: true,
         grouping: Grouping::Directory,

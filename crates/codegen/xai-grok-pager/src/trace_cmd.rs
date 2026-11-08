@@ -64,7 +64,7 @@ pub async fn run(args: TraceArgs, agent_config: &AgentConfig) -> Result<()> {
         );
         if !args.json {
             eprintln!(
-                "Trace uploads disabled. Set [telemetry] trace_upload = true in {}",
+                "Trace uploads disabled. Set telemetry.trace_upload to true in {}",
                 crate::util::display_user_grok_path(xai_grok_config::USER_CONFIG_FILENAME)
             );
             eprintln!("Falling back to local export.");

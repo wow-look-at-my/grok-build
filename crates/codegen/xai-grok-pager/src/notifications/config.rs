@@ -133,50 +133,24 @@ fn default_hook_timeout() -> u64 {
 }
 
 impl NotificationConfig {
-    /// Generate a commented TOML template for the `[ui.notifications]` section.
-    /// Mirrors `RawAppearanceConfig::to_toml_with_comments()` for `pager.toml`.
-    /// The output is suitable for documentation or as a starter config snippet.
-    pub fn to_toml_with_comments() -> String {
-        "\
-[ui.notifications]
-# Notification protocol: auto|osc9|osc99|osc777|bel|none
-# \"auto\" selects the best protocol for your terminal.
-method = \"auto\"
-# When to notify: unfocused|always|never
-# \"unfocused\" only fires when the terminal has lost focus.
-condition = \"unfocused\"
-# Minimum seconds the terminal must be unfocused before notifications fire.
-idle_threshold_secs = 3
-# Events that trigger notifications.
-# Options: turn_complete, approval_required, session_ready, task_complete, agent_error
-events = [\"turn_complete\", \"approval_required\"]
-# Prevent display sleep during agent turns (macOS/Linux).
-sleep_prevention = true
-# Show a progress indicator in the terminal tab (OSC 9;4).
-progress_bar = true
-# Show an automatic \"where was I\" session recap when you return after being away.
-# Shell session_recap is on by default; disable via [features] session_recap or
-# GROK_SESSION_RECAP=0. Manual /recap uses only the shell flag.
-session_recap = true
-# Minimum seconds unfocused (\"stepped away\") before requesting a recap; a
-# debounce against quick tab blips. The \"3 min since the last turn\" timing is
-# enforced agent-side.
-session_recap_threshold_secs = 30
-
-[ui.notifications.title]
-# Set the terminal/tab title to reflect agent state.
-enabled = true
-# Items shown in the title. Options: action-required, spinner, activity,
-# session-name, cwd, model, turn-timer, grok
-items = [\"action-required\", \"spinner\", \"activity\", \"session-name\", \"grok\"]
-
-# [[ui.notifications.hooks]]
-# command = \"terminal-notifier -title 'Grok' -message '$GROK_MESSAGE'\"
-# events = [\"turn_complete\", \"approval_required\"]
-# only_unfocused = true
-# timeout_secs = 10
-"
-        .to_owned()
+    /// A `config.json` snippet with the `ui.notifications` defaults and one example hook.
+    /// It is a starter config for the docs. The config schema describes each key.
+    pub fn to_json_example() -> serde_json::Result<String> {
+        let mut config = Self::default();
+        config.hooks.push(NotificationHook {
+            command: "terminal-notifier -title 'Grok' -message '$GROK_MESSAGE'".to_owned(),
+            events: vec![
+                NotificationEventKind::TurnComplete,
+                NotificationEventKind::ApprovalRequired,
+            ],
+            only_unfocused: default_only_unfocused(),
+            timeout_secs: default_hook_timeout(),
+        });
+        let mut ui = serde_json::Map::new();
+        ui.insert("notifications".to_owned(), serde_json::to_value(&config)?);
+        let mut root = serde_json::Map::new();
+        root.insert("ui".to_owned(), serde_json::Value::Object(ui));
+        Ok(xai_grok_config::format::to_config_json_string(&root, None))
     }
 }
 
@@ -321,65 +295,47 @@ mod tests {
         );
     }
 
-    #[test]
-    fn to_toml_with_comments_contains_all_sections() {
-        let toml = NotificationConfig::to_toml_with_comments();
-        assert!(toml.contains("[ui.notifications]"));
-        assert!(toml.contains("[ui.notifications.title]"));
-        assert!(toml.contains("[[ui.notifications.hooks]]"));
+    fn json_example() -> serde_json::Value {
+        serde_json::from_str(&NotificationConfig::to_json_example().unwrap())
+            .expect("the example is valid JSON")
     }
 
     #[test]
-    fn to_toml_with_comments_matches_defaults() {
-        let template = NotificationConfig::to_toml_with_comments();
-        let defaults = NotificationConfig::default();
+    fn to_json_example_contains_all_sections() {
+        let example = json_example();
+        let notifications = &example["ui"]["notifications"];
+        assert!(notifications.is_object());
+        assert!(notifications["title"].is_object());
+        assert!(notifications["hooks"].is_array());
+    }
 
-        assert!(
-            template.contains(&format!(
-                "idle_threshold_secs = {}",
-                defaults.idle_threshold_secs
-            )),
-            "template idle_threshold_secs does not match default"
-        );
-        assert!(
-            template.contains(&format!("sleep_prevention = {}", defaults.sleep_prevention)),
-            "template sleep_prevention does not match default"
-        );
-        assert!(
-            template.contains(&format!("progress_bar = {}", defaults.progress_bar)),
-            "template progress_bar does not match default"
-        );
-        assert!(
-            template.contains(&format!("enabled = {}", defaults.title.enabled)),
-            "template title.enabled does not match default"
-        );
+    /// Apart from the example hook, the example is the defaults.
+    #[test]
+    fn to_json_example_matches_defaults() {
+        let example = json_example();
+        let mut parsed: NotificationConfig =
+            serde_json::from_value(example["ui"]["notifications"].clone()).unwrap();
+        assert_eq!(parsed.hooks.len(), 1);
+        parsed.hooks.clear();
+        assert_eq!(parsed, NotificationConfig::default());
     }
 
     #[test]
-    fn to_toml_with_comments_hook_section_is_valid_toml() {
-        let template = NotificationConfig::to_toml_with_comments();
-        // Uncomment only TOML structural lines (table headers and key = value).
-        // Plain-English comment lines are left as comments so they don't produce parse errors
-        let uncommented: String = template
-            .lines()
-            .map(|line| {
-                if let Some(stripped) = line.strip_prefix("# ") {
-                    let trimmed = stripped.trim_start();
-                    if trimmed.starts_with("[[") || trimmed.contains(" = ") {
-                        return format!("{stripped}\n");
-                    }
-                }
-                format!("{line}\n")
-            })
-            .collect();
-        let parsed: toml::Value =
-            toml::from_str(&uncommented).expect("uncommented template should be valid TOML");
-        let hooks = parsed
-            .get("ui")
-            .and_then(|u| u.get("notifications"))
-            .and_then(|n| n.get("hooks"))
-            .expect("hooks key must exist after uncommenting");
-        assert!(hooks.is_array(), "hooks should be an array of tables");
+    fn to_json_example_hook_parses() {
+        let example = json_example();
+        let parsed: NotificationConfig =
+            serde_json::from_value(example["ui"]["notifications"].clone()).unwrap();
+        let hook = &parsed.hooks[0];
+        assert!(hook.command.contains("$GROK_MESSAGE"));
+        assert_eq!(
+            hook.events,
+            vec![
+                NotificationEventKind::TurnComplete,
+                NotificationEventKind::ApprovalRequired
+            ]
+        );
+        assert!(hook.only_unfocused);
+        assert_eq!(hook.timeout_secs, 10);
     }
 
     // Helper wrappers for single-field deserialization tests

@@ -325,7 +325,7 @@ impl SharedPluginRegistryHandle {
         project_trusted: bool,
     ) -> Option<std::sync::Arc<PluginRegistry>> {
         let mut config = disk_config.clone();
-        // Merge startup CLI dirs back in (they're not in config.toml)
+        // Merge startup CLI dirs back in (they're not in config.json)
         config
             .cli_plugin_dirs
             .extend(self.cli_plugin_dirs.iter().cloned());

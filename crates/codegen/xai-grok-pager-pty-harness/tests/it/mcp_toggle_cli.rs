@@ -1,4 +1,4 @@
-//! CLI-seam tests for `grok mcp enable`/`disable`/`add`/`list` against the real pager binary: no-op toggles leave config.toml alone.
+//! CLI-seam tests for `grok mcp enable`/`disable`/`add`/`list` against the real pager binary: no-op toggles leave config.json alone.
 
 use std::process::{Command, Stdio};
 
@@ -25,8 +25,8 @@ fn toggle_env(user_config: &str) -> ToggleEnv {
     std::fs::create_dir_all(&cwd).expect("create cwd");
     // Bound the project-config walk to the temp dir.
     xai_test_utils::git::init_git_repo(&cwd);
-    let config = grok_home.join("config.toml");
-    std::fs::write(&config, user_config).expect("write config.toml");
+    let config = grok_home.join("config.json");
+    std::fs::write(&config, user_config).expect("write config.json");
     ToggleEnv {
         home,
         grok_home,
@@ -104,16 +104,19 @@ fn assert_refused_without_write(
     );
 }
 
-const ENABLED_SERVER: &str = r#"
-[mcp_servers.svc]
-url = "https://svc.example.test/sse"
+const ENABLED_SERVER: &str = r#"{
+	"mcp": {
+		"servers": { "svc": { "url": "https://svc.example.test/sse" } }
+	}
+}
 "#;
 
-const DISABLED_SERVER: &str = r#"
-disabled_mcp_servers = ["svc"]
-
-[mcp_servers.svc]
-url = "https://svc.example.test/sse"
+const DISABLED_SERVER: &str = r#"{
+	"mcp": {
+		"disabled_servers": ["svc"],
+		"servers": { "svc": { "url": "https://svc.example.test/sse" } }
+	}
+}
 "#;
 
 #[test]
@@ -141,7 +144,7 @@ fn noop_enable_reports_already_enabled_without_config_write() {
     assert_eq!(
         std::fs::read(&env.config).expect("re-read config"),
         before,
-        "a no-op enable must not rewrite config.toml"
+        "a no-op enable must not rewrite config.json"
     );
 }
 
@@ -170,7 +173,7 @@ fn noop_disable_reports_already_disabled_without_config_write() {
     assert_eq!(
         std::fs::read(&env.config).expect("re-read config"),
         before,
-        "a no-op disable must not rewrite config.toml"
+        "a no-op disable must not rewrite config.json"
     );
 }
 
@@ -195,17 +198,26 @@ fn blocked_enable_refuses_without_config_write() {
 #[ignore = "spawns the real pager binary; CI/Bazel provides PAGER_BINARY"]
 fn blocked_enable_refuses_setup_required_server() {
     let user_config = format!(
-        r#"
-disabled_mcp_servers = ["svc"]
-
-[mcp_servers.svc]
-url = "{BLOCKED_URL}"
-
-[[mcp_servers.svc.setup.fields]]
-id = "site"
-label = "Site"
-type = "select"
-options = [{{ label = "US", value = "us1" }}]
+        r#"{{
+	"mcp": {{
+		"disabled_servers": ["svc"],
+		"servers": {{
+			"svc": {{
+				"url": "{BLOCKED_URL}",
+				"setup": {{
+					"fields": [
+						{{
+							"id": "site",
+							"label": "Site",
+							"type": "select",
+							"options": [{{ "label": "US", "value": "us1" }}]
+						}}
+					]
+				}}
+			}}
+		}}
+	}}
+}}
 "#
     );
     let env = blocked_env(&user_config);
@@ -227,7 +239,7 @@ options = [{{ label = "US", value = "us1" }}]
 #[test]
 #[ignore = "spawns the real pager binary; CI/Bazel provides PAGER_BINARY"]
 fn enable_refuses_denied_server_from_project_path_plugin() {
-    let mut env = blocked_env(r#"disabled_mcp_servers = ["corp-tool"]"#);
+    let mut env = blocked_env(r#"{"mcp": {"disabled_servers": ["corp-tool"]}}"#);
     // Under $HOME so the config-path plugin is auto-trusted (folder trust is inert in dev builds).
     let project = env.home.join("project");
     let plugin = project.join("tools").join("plugin");
@@ -259,7 +271,7 @@ fn enable_refuses_denied_server_from_project_path_plugin() {
 #[ignore = "spawns the real pager binary; CI/Bazel provides PAGER_BINARY"]
 fn enable_refuses_denied_project_server_in_untrusted_folder() {
     for (user_config, project_extra) in [
-        (r#"disabled_mcp_servers = ["corp"]"#, ""),
+        (r#"{"mcp": {"disabled_servers": ["corp"]}}"#, ""),
         ("", "enabled = false\n"),
     ] {
         let mut env = blocked_env(user_config);
@@ -315,16 +327,15 @@ fn disable_persists_personal_disable_over_project_tier_disable() {
     );
     assert!(
         stdout.contains("Disabled MCP server 'x'.")
-            && stdout.contains("File modified: $GROK_HOME/config.toml"),
+            && stdout.contains("File modified: $GROK_HOME/config.json"),
         "stdout: {stdout}"
     );
-    let parsed: toml::Value =
-        toml::from_str(&std::fs::read_to_string(&env.config).expect("re-read config"))
-            .expect("config.toml stays parseable");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&env.config).expect("re-read config"))
+            .expect("config.json stays parseable");
     assert_eq!(
-        parsed
-            .get("disabled_mcp_servers")
-            .and_then(|v| v.as_array())
+        parsed["mcp"]["disabled_servers"]
+            .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
         Some(vec!["x"]),
         "the personal disable must be persisted: {parsed}"
@@ -443,15 +454,15 @@ fn real_toggle_writes_config_and_reports_file_modified() {
         "stdout: {stdout}"
     );
     assert!(
-        stdout.contains("File modified: $GROK_HOME/config.toml"),
+        stdout.contains("File modified: $GROK_HOME/config.json"),
         "stdout: {stdout}"
     );
     let enabled_body = std::fs::read(&env.config).expect("re-read config");
-    assert_ne!(enabled_body, before, "a real enable must write config.toml");
-    let parsed: toml::Value = toml::from_str(std::str::from_utf8(&enabled_body).unwrap())
-        .expect("config.toml stays parseable");
+    assert_ne!(enabled_body, before, "a real enable must write config.json");
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&enabled_body).expect("config.json stays parseable");
     assert!(
-        parsed.get("disabled_mcp_servers").is_none(),
+        parsed["mcp"].get("disabled_servers").is_none(),
         "enable must clear the disabled list: {parsed}"
     );
 
@@ -468,16 +479,15 @@ fn real_toggle_writes_config_and_reports_file_modified() {
         "stdout: {stdout}"
     );
     assert!(
-        stdout.contains("File modified: $GROK_HOME/config.toml"),
+        stdout.contains("File modified: $GROK_HOME/config.json"),
         "stdout: {stdout}"
     );
     let disabled_body = std::fs::read(&env.config).expect("re-read config");
-    let parsed: toml::Value = toml::from_str(std::str::from_utf8(&disabled_body).unwrap())
-        .expect("config.toml stays parseable");
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&disabled_body).expect("config.json stays parseable");
     assert_eq!(
-        parsed
-            .get("disabled_mcp_servers")
-            .and_then(|v| v.as_array())
+        parsed["mcp"]["disabled_servers"]
+            .as_array()
             .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
         Some(vec!["svc"]),
         "disable must re-add the disabled list entry: {parsed}"

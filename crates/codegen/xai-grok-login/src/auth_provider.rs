@@ -197,7 +197,7 @@ fn warn_empty_command(name: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(name.to_owned());
-    const MSG: &str = "auth provider has no usable command: the [auth_provider.*] table is \
+    const MSG: &str = "auth provider has no usable command: the `models.auth_providers.*` object is \
                        missing from the trusted config layers, or its `command` is empty";
     if first {
         tracing::warn!(provider = %name, "{MSG}");

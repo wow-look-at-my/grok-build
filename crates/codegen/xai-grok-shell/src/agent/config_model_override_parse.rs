@@ -208,7 +208,7 @@ pub(crate) fn parse_model_overrides(raw_config: &toml::Value) -> ParsedModelOver
         warnings.push(ConfigWarning::model_section(
             ConfigWarningKind::NotATable,
             format!(
-                "`model` must be a table of [model.<id>] entries, got {}; all model overrides ignored",
+                "`models.definitions` must be an object of `<id>` entries, got {}; all model overrides ignored",
                 section.type_str()
             ),
         ));
@@ -221,7 +221,7 @@ pub(crate) fn parse_model_overrides(raw_config: &toml::Value) -> ParsedModelOver
                 None,
                 ConfigWarningKind::NotATable,
                 format!(
-                    "expected a table like [model.\"{model_key}\"], got {}; entry dropped",
+                    "expected an object like `models.definitions.{model_key}`, got {}; entry dropped",
                     value.type_str()
                 ),
             ));

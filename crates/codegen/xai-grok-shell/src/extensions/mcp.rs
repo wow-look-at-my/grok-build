@@ -183,7 +183,7 @@ pub struct McpToolEntry {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct McpCallRequest {
-    /// When present: session pool. When absent: agent pool (config.toml only).
+    /// When present: session pool. When absent: agent pool (config.json only).
     #[serde(default)]
     pub session_id: Option<String>,
     pub server: String,
@@ -809,7 +809,7 @@ async fn ensure_agent_pool_initialized(mcp_state: &Arc<TokioMutex<McpState>>) {
     }
 }
 
-/// Spawn config.toml MCP clients into the agent pool. Handshakes happen lazily on first `CallMcpTool`.
+/// Spawn config.json MCP clients into the agent pool. Handshakes happen lazily on first `CallMcpTool`.
 pub(crate) async fn init_agent_mcp_pool(
     mcp_state: &Arc<TokioMutex<McpState>>,
     cwd: &std::path::Path,
@@ -1311,7 +1311,7 @@ async fn handle_call(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
                 .await
         }
         None => {
-            // No session: use the agent-level MCP pool (config.toml servers).
+            // No session: use the agent-level MCP pool (config.json servers).
             let mcp_state = agent.agent_mcp_state();
             ensure_agent_pool_initialized(&mcp_state).await;
             call_mcp_tool(
@@ -2189,7 +2189,7 @@ struct McpUpsertRequest {
     config: crate::util::config::McpServerConfig,
 }
 
-/// Policy subject for an `mcp/upsert`: grok-native user config.toml unless a project source
+/// Policy subject for an `mcp/upsert`: grok-native user config.json unless a project source
 /// claims the name — then foreign (fail closed), via the ONE shared origin classifier.
 fn upsert_policy_subject(
     cwd: &std::path::Path,
@@ -2270,7 +2270,7 @@ async fn handle_delete(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
 
     if !existed {
         return Err(acp::Error::invalid_params().data(format!(
-            "server '{}' not found in config.toml (only locally-configured servers can be deleted)",
+            "server '{}' not found in config.json (only locally-configured servers can be deleted)",
             req.server_name
         )));
     }

@@ -1,23 +1,14 @@
 # grok clone
 
-`grok clone` fetches a Git repository into a Grove content store and mounts a
-projected working tree (NFS on macOS, FUSE on Linux). Each invocation reads
-`GROK_CLONE` / `GROVE_CLONE` in this process, then grok enable-all
-(`GROK_GROVE` or `[cli] grove` in `~/.grok/config.toml`), then `[clone] enabled`
-authorize Clone IPC.
+`grok clone` fetches a Git repository into a Grove content store and mounts a projected working tree (NFS on macOS, FUSE on Linux). Each invocation reads `GROK_CLONE` / `GROVE_CLONE` in this process, then grok enable-all (`GROK_GROVE` or `cli.grove` in `~/.grok/config.json`), then `clone.enabled` authorize Clone IPC.
 
-This does **not** enable Grove for session / `-w` worktrees. Those use a
-separate gate (`GROK_WORKTREE_TYPE` and `[cli] grove_worktree` in
-`~/.grok/config.toml`; see [Configuration reference](26-config-reference.md)).
-`GROK_WORKTREE_TYPE` and `[cli] grove_worktree` do **not** enable `grok clone`.
-`GROK_CLONE` / `GROVE_CLONE` / `[clone] enabled` do **not** enable session /
-`-w` Grove.
+This does **not** enable Grove for session / `-w` worktrees. Those use a separate gate (`GROK_WORKTREE_TYPE` and `cli.grove_worktree` in `~/.grok/config.json`. See [Configuration reference](26-config-reference.md)). `GROK_WORKTREE_TYPE` and `cli.grove_worktree` do **not** enable `grok clone`. `GROK_CLONE` / `GROVE_CLONE` / `clone.enabled` do **not** enable session / `-w` Grove.
 
 To turn **both** surfaces on without touching the specific knobs:
 
 ```bash
 export GROK_GROVE=1
-# or in ~/.grok/config.toml:
+# or in ~/.grok/config.json:
 # [cli]
 # grove = true
 ```
@@ -72,10 +63,7 @@ The two are separate worlds:
 |-------|--------|----------|-------|
 | Grok | the model and API | `grok login`, `grok logout` | `~/.grok/auth.json` |
 
-`grok clone` never reads `~/.grok/auth.json` for Git. Signing into Grok does not
-give the daemon a credential for the remote, and neither does
-`[clone] enabled = true`: that flag is a **product gate** deciding whether
-`grok clone` runs at all, not authorization for GitHub.
+`grok clone` never reads `~/.grok/auth.json` for Git. Signing into Grok does not give the daemon a credential for the remote, and neither does `clone.enabled` set to `true`. That flag is a **product gate** deciding whether `grok clone` runs at all, not authorization for GitHub.
 
 When Grove classifies a failure as a credential problem, the clone prints the
 class and the commands that own it, without the remote URL:
@@ -142,7 +130,4 @@ exist, and either this user can open it or a setuid `fusermount3` / `fusermount`
 error with install commands, not a hang. When a daemon is already running the
 check is skipped, since that daemon may hold privileges this process does not.
 
-On Windows, clone mounts through ProjFS (Windows Projected File System),
-whether it is enabled. Build-output directories such as `target` and
-`node_modules` are redirected out of the projected tree as NTFS junctions
-(`[redirects] windows_junction`, on by default).
+On Windows, clone mounts through ProjFS (Windows Projected File System), whether it is enabled. Default) redirects build-output directories such as `target` and `node_modules`.

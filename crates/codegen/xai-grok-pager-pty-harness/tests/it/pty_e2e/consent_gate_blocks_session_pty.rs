@@ -128,7 +128,7 @@ async fn an_answered_notice_does_not_ask_again() {
         .expect("notice clears");
 
     // The write is a spawned task, so wait for it rather than assume it landed before exit.
-    let config = content.sandbox().grok_home().join("config.toml");
+    let config = content.sandbox().grok_home().join("config.json");
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         if std::fs::read_to_string(&config).is_ok_and(|c| c.contains("pty-consent")) {
@@ -139,8 +139,8 @@ async fn an_answered_notice_does_not_ask_again() {
 
     let recorded = std::fs::read_to_string(&config).unwrap_or_default();
     assert!(
-        recorded.contains("[consent.answers"),
-        "the answer must reach config.toml:\n{recorded}"
+        recorded.contains("\"answers\""),
+        "the answer must reach config.json:\n{recorded}"
     );
 
     first.quit().expect("clean quit");

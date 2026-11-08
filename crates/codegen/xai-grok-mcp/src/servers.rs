@@ -432,7 +432,6 @@ pub struct McpState {
     /// Monotonic source for [`UnreachableRetry::InFlight`] attempt tokens.
     unreachable_attempt_counter: u64,
     /// Per-server set of unqualified tool names that the user has disabled.
-    /// Persisted to `~/.grok/config.toml` under `[mcp_servers.<name>].disabled_tools`.
     pub disabled_tools: HashMap<McpServerName, std::collections::HashSet<ToolName>>,
     /// Stashed registrations for disabled tools so they can be re-enabled without a full MCP re-init (no need to call `list_tools` again).
     pub disabled_tool_registrations: HashMap<String, McpToolRegistration>,
@@ -1176,14 +1175,13 @@ const ANONYMOUS_ACCESS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration:
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerMetaConfig {
-    /// Init handshake timeout in ms. Overrides config.toml `startup_timeout_sec`.
+    /// Init handshake timeout in ms. Overrides config.json `startup_timeout_sec`.
     #[serde(default)]
     pub startup_timeout_ms: Option<u64>,
-    /// Per-tool-call timeout in ms. Overrides config.toml `tool_timeout_sec`.
+    /// Per-tool-call timeout in ms. Overrides config.json `tool_timeout_sec`.
     #[serde(default)]
     pub tool_timeout_ms: Option<u64>,
     /// Per-tool timeout overrides in ms: `{ "create_issue": 120000, "search": 30000 }`.
-    /// Overrides config.toml `tool_timeouts` (and `tool_timeout_sec`) for matching tools.
     #[serde(default)]
     pub tool_timeouts_ms: Option<HashMap<ToolName, u64>>,
     /// Also keep the raw base64 in tool-result text, in addition to the vision-token rendering.
@@ -3549,7 +3547,7 @@ impl McpClient {
     }
 
     /// Resolve the timeout for a specific tool.
-    /// Precedence (highest to lowest): `_meta.mcpConfig.<server>.toolTimeoutsMs.<tool>`; `config.toml [mcp_servers.<server>].tool_timeouts.<tool>`; `_meta.mcpConfig.<server>.toolTimeoutMs`; `config.toml [mcp_servers.<server>].tool_timeout_sec`; Default (60s).
+    /// Precedence (highest to lowest): `_meta.mcpConfig.<server>.toolTimeoutsMs.<tool>`; `mcp.servers.<server>.tool_timeouts.<tool>` in config.json; `_meta.mcpConfig.<server>.toolTimeoutMs`; `mcp.servers.<server>.tool_timeout_sec` in config.json; Default (60s).
     /// Steps 1 and 2 are already merged into `self.tool_timeouts` at construction.
     pub fn tool_timeout_for(&self, tool_name: &str) -> u64 {
         self.tool_timeouts

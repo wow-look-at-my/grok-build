@@ -5,12 +5,12 @@ use xai_grok_tools::implementations::grok_build;
 use xai_grok_tools::registry::types::ToolConfig;
 
 /// The tool-server binary defaults to a 5-minute foreground ceiling (`DEFAULT_MAX_TIMEOUT_MS`).
-/// Production opts *up* to 10h by sending this explicitly, overridable via config.toml.
+/// Production opts *up* to 10h by sending this explicitly, overridable via config.json.
 /// This bounds only foreground commands; background tasks are always unbounded.
 pub const PRODUCTION_MAX_TIMEOUT_SECS: f64 = 36_000.0; // 10 hours
 
 /// User configurable settings for the built-in bash tool (`[toolset.bash]`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct BashToolConfig {
     pub timeout_secs: Option<f64>,
@@ -26,7 +26,6 @@ pub struct BashToolConfig {
     /// `Some(0)` disables the short budget, so auto-backgrounding happens only at the model/default timeout.
     pub foreground_block_budget_ms: Option<u64>,
     /// Whether to allow a background `&` operator in foreground commands (default: `true`).
-    /// Resolution: config.toml (this) > remote settings > `true`.
     pub allow_background_operator: Option<bool>,
     pub login_shell_capture: Option<bool>,
 }
@@ -45,7 +44,7 @@ impl BashToolConfig {
     }
 
     /// `remote_auto_bg` is the remote settings fallback for `auto_background_on_timeout`.
-    /// Resolution: local config.toml > remote fallback > `true`.
+    /// Resolution: local config.json > remote fallback > `true`.
     pub(crate) fn to_bash_params_json(
         &self,
         remote_auto_bg: Option<bool>,
@@ -55,7 +54,7 @@ impl BashToolConfig {
         if let Some(t) = self.timeout_secs {
             map.insert("timeout_secs".into(), t.into());
         }
-        // Production grok-build opts up to 10h by sending it explicitly (overridable via config.toml)
+        // Production grok-build opts up to 10h by sending it explicitly (overridable via config.json)
         let max_timeout_secs = self.max_timeout_secs.unwrap_or(PRODUCTION_MAX_TIMEOUT_SECS);
         map.insert("max_timeout_secs".into(), max_timeout_secs.into());
         if let Some(limit) = self.output_byte_limit {
@@ -82,8 +81,8 @@ impl BashToolConfig {
 }
 
 /// User configurable settings for the ask_user_question tool (`[toolset.ask_user_question]`). Consumed by `crate::util::config::resolve_ask_user_question_params_from_disk`, which reads the raw config layers directly.
-/// That keeps the documented precedence (requirements > env > user > managed > remote). This struct exists so the keys are recognized in `config.toml` and round-trip through `AgentConfig`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+/// (`[toolset.ask_user_question]`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct AskUserQuestionToolConfig {
     /// Whether the questionnaire timeout is enabled (default: `true`).
@@ -94,7 +93,7 @@ pub struct AskUserQuestionToolConfig {
 }
 
 /// User configurable settings for the web_fetch tool (`[toolset.web_fetch]`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct WebFetchToolConfig {
     /// When set, all HTTP requests are routed through this URL.
@@ -151,7 +150,7 @@ impl WebFetchToolConfig {
 
 /// This is the *shell-side* config that holds sampling-level settings (e.g., web search API key from the sampling client).
 /// It is distinct from `xai_grok_tools::registry::types::ToolsetConfig` which holds tool-implementation-level config (bash limits, web search mode).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ShellToolsetConfig {
     pub bash: BashToolConfig,
@@ -272,8 +271,8 @@ impl ShellToolsetConfig {
 // File toolset selection
 // ---------------------------------------------------------------------------
 
-/// Configurable in `config.toml` under `[toolset.hashline]`:
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Configurable in `config.json` under `tools.hashline`:
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct HashlineSchemeConfig {
     /// Active scheme: `"chunk"` (default) or `"content_only"`.
@@ -317,7 +316,9 @@ impl HashlineSchemeConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FileToolset {
     /// Standard toolset: read_file, search_replace, grep.

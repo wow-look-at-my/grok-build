@@ -638,7 +638,7 @@ fn enable_always_approve_sends_response_and_flips_yolo_and_persists() {
 
     // (2) The dispatcher returns a PersistPermissionMode effect with canonical "always-approve". This is the bridge that writes
     //     canonical "always-approve". This is the bridge that writes
-    //     ~/.grok/config.toml AND fires example.invalid/yolo_mode_changed.
+    //     ~/.grok/config.json AND fires example.invalid/yolo_mode_changed.
     let persist = effects
         .iter()
         .find_map(|e| match e {
@@ -703,7 +703,7 @@ fn enable_always_approve_is_idempotent_when_yolo_already_on() {
             .iter()
             .any(|e| matches!(e, Effect::PersistPermissionMode { .. })),
         "redundant PersistPermissionMode when YOLO already on — the dispatcher \
-             must short-circuit to avoid double-writing config.toml and double-firing \
+             must short-circuit to avoid double-writing config.json and double-firing \
              example.invalid/yolo_mode_changed",
     );
 }
@@ -1454,7 +1454,7 @@ fn cycle_mode_pre_session_always_approve_to_normal_persists_ask() {
             }
         )),
         "pre-session Always-Approve → Normal must persist 'ask' \
-         (stale config.toml relaunches yolo), got {effects:?}"
+         (stale config.json relaunches yolo), got {effects:?}"
     );
 }
 

@@ -2221,7 +2221,7 @@ impl SessionActor {
 
     /// Proactively refresh the auth token if near expiry.
     /// Session-token path is best-effort: on success, update credentials and return.
-    /// On failure, do not fall through to the JWT/config.toml branch when the session gate was active; that path is for BYOK JWTs only.
+    /// On failure, do not fall through to the JWT/config.json branch when the session gate was active; that path is for BYOK JWTs only.
     pub(crate) async fn refresh_token_if_expired(&self) {
         if let Some(ref am) = self.auth_manager {
             let creds = self.chat_state_handle.get_credentials().await;
@@ -2250,7 +2250,7 @@ impl SessionActor {
                     }
                     Err(e) => {
                         // Session path applied and failed
-                        // Never fall through to JWT/config.toml reload (that branch is BYOK-only)
+                        // Never fall through to JWT/config.json reload (that branch is BYOK-only)
                         // Hard-expired: strip the chat-state seed so default headers cannot carry a dead AT (resolver is wire-valid only)
                         let hard_expired = !am.has_usable_token();
                         if hard_expired && creds.api_key.is_some() {
@@ -2285,7 +2285,7 @@ impl SessionActor {
             );
         }
 
-        // JWT from config.toml: a separate mechanism for BYOK tokens
+        // JWT from config.json: a separate mechanism for BYOK tokens
         use xai_grok_login::{is_jwt_expired_or_near, parse_jwt_expiration};
 
         const REFRESH_THRESHOLD: chrono::Duration = chrono::Duration::minutes(5);
@@ -2338,7 +2338,7 @@ impl SessionActor {
         tracing::info!(
             model = %current_model_id,
             remaining_secs,
-            "JWT near expiry, refreshing from config.toml"
+            "JWT near expiry, refreshing from config.json"
         );
 
         let Some(new_key) = self.reload_api_key_from_config(&current_model_id) else {
@@ -2359,7 +2359,7 @@ impl SessionActor {
             model = %current_model_id,
             new_remaining_secs,
             key_len = new_key.len(),
-            "Refreshed API token from config.toml"
+            "Refreshed API token from config.json"
         );
 
         let mut creds = self.chat_state_handle.get_credentials().await;
@@ -2373,7 +2373,7 @@ impl SessionActor {
             .ok()?;
 
         let config = crate::agent::config::Config::new_from_toml_cfg(&raw_config)
-            .map_err(|e| tracing::warn!(error = %e, "Failed to parse reloaded config.toml"))
+            .map_err(|e| tracing::warn!(error = %e, "Failed to parse reloaded config.json"))
             .ok()?;
 
         let config_model = config
@@ -2386,7 +2386,7 @@ impl SessionActor {
             tracing::warn!(
                 model = %current_model_id,
                 available = ?config.config_models.keys().collect::<Vec<_>>(),
-                "Model not found in config.toml [model.*]"
+                "Model not found in config.json `models.definitions.*`"
             );
             return None;
         };

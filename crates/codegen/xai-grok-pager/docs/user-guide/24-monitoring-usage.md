@@ -15,10 +15,10 @@ These knobs are independent of each other (and of this guide's external OTEL str
 
 | Setting | How to set it |
 |---------|---------------|
-| Telemetry master switch | `[features] telemetry` / `GROK_TELEMETRY_ENABLED` |
+| Telemetry master switch | `features.telemetry` / `GROK_TELEMETRY_ENABLED` |
 | Coding data, retention, and training | Settings — `/privacy` opens the row |
-| Trace upload | `[telemetry] trace_upload` / `GROK_TELEMETRY_TRACE_UPLOAD` |
-| External OpenTelemetry | `GROK_EXTERNAL_OTEL` / `[telemetry] otel_*` (this guide) |
+| Trace upload | `telemetry.trace_upload` / `GROK_TELEMETRY_TRACE_UPLOAD` |
+| External OpenTelemetry | `GROK_EXTERNAL_OTEL` / `telemetry.otel_*` (this guide) |
 
 See also [Authentication](02-authentication.md#related-settings) and
 [Configuration](05-configuration.md#telemetry).
@@ -86,8 +86,8 @@ without the master switch.
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` for HTTP, `http://localhost:4317` for gRPC | Base endpoint. For `http/protobuf`, `/v1/logs` and `/v1/metrics` are appended per the OTLP spec; for `grpc`, the collector endpoint is used as-is. Path appending uses **that signal’s** protocol. |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` / `..._METRICS_ENDPOINT` | — | Signal-specific overrides, used verbatim. For gRPC these should normally be collector endpoints without `/v1/...` paths. |
 | `OTEL_EXPORTER_OTLP_HEADERS` (+ signal-specific variants) | — | Collector auth (`k=v,k2=v2`). The **only** headers the external exporters send, and the only supported collector-auth mechanism (no config-file headers key — tokens never live on disk). |
-| `OTEL_EXPORTER_OTLP_CERTIFICATE` (+ signal-specific variants) | — | Path to a PEM bundle with additional trusted CA certificate(s) for verifying the collector — for collectors behind a private/corporate CA. Additive to the default trust roots (system store and embedded Mozilla roots). Also settable via `[telemetry] otel_certificate`. |
-| `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE` / `OTEL_EXPORTER_OTLP_CLIENT_KEY` (+ signal-specific `…_LOGS_…` / `…_METRICS_…` variants) | — | PEM **paths** for mTLS client identity. Both cert and key must be set (base or same signal); half-config is ignored with a warning. Unencrypted PEM keys only. Also settable via `[telemetry] otel_client_certificate` / `otel_client_key`. |
+| `OTEL_EXPORTER_OTLP_CERTIFICATE` (+ signal-specific variants) | — | Path to a PEM bundle with additional trusted CA certificate(s) for verifying the collector — for collectors behind a private/corporate CA. Additive to the default trust roots (system store and embedded Mozilla roots). Also settable via `telemetry.otel_certificate`. |
+| `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE` / `OTEL_EXPORTER_OTLP_CLIENT_KEY` (+ signal-specific `…_LOGS_…` / `…_METRICS_…` variants) | — | PEM **paths** for mTLS client identity. Both cert and key must be set (base or same signal); half-config is ignored with a warning. Unencrypted PEM keys only. Also settable via `telemetry.otel_client_certificate` / `telemetry.otel_client_key`. |
 | `OTEL_EXPORTER_OTLP_TIMEOUT` | `10000` (ms) | Export timeout. |
 | `OTEL_METRIC_EXPORT_INTERVAL` | `60000` (ms) | Metric export interval. |
 | `OTEL_BLRP_SCHEDULE_DELAY` (or alias `OTEL_LOGS_EXPORT_INTERVAL`) | `5000` (ms) | Log batch interval. |
@@ -108,12 +108,15 @@ bodies. CONTENT does **not** imply DETAILS — CONTENT-only yields 60 KB
 `tool_output` with `tool_name` / `mcp_tool.name` still collapsed to
 `mcp_tool`.
 
-```toml
-[telemetry]
-otel_log_user_prompts = false
-otel_log_assistant_responses = false   # unset would follow prompts; pin off
-otel_log_tool_details = true           # metadata for SIEM join
-otel_log_tool_content = false          # bodies; independent of details
+```json
+{
+  "telemetry": {
+    "otel_log_assistant_responses": false,
+    "otel_log_tool_content": false,
+    "otel_log_tool_details": true,
+    "otel_log_user_prompts": false
+  }
+}
 ```
 
 `OTEL_RESOURCE_ATTRIBUTES` is deliberately ignored: the resource is built
@@ -128,57 +131,37 @@ from a fixed, audited attribute set.
 
 ## Config file
 
-Org defaults live under the existing `[telemetry]` table in `config.toml`
-(env vars win). The keys are `otel_`-prefixed peers of the other
-`[telemetry]` settings:
+Org defaults live under the existing `telemetry` section in `config.json` (env vars win). The keys are `otel_`-prefixed peers of the other `telemetry` settings:
 
-```toml
-[telemetry]
-otel_enabled = true
-otel_metrics_exporter = "otlp"
-otel_logs_exporter = "otlp"
-otel_endpoint = "https://collector.corp.example:4318"
-otel_protocol = "http/protobuf"  # or "grpc"
-# Optional PEM *paths* for private-CA trust and mTLS (never PEM contents):
-otel_certificate = "/etc/ssl/corp-ca.pem"
-otel_client_certificate = "/etc/ssl/client.crt"
-otel_client_key = "/etc/ssl/client.key"
-otel_log_user_prompts = false   # admins can pin these via requirements
-otel_log_assistant_responses = false
-otel_log_tool_details = false   # code default; SIEM fleets usually true — see Recommended fleet gates
-otel_log_tool_content = false
+```json
+{
+  "telemetry": {
+    "otel_certificate": "/etc/ssl/corp-ca.pem",
+    "otel_client_certificate": "/etc/ssl/client.crt",
+    "otel_client_key": "/etc/ssl/client.key",
+    "otel_enabled": true,
+    "otel_endpoint": "https://collector.corp.example:4318",
+    "otel_log_assistant_responses": false,
+    "otel_log_tool_content": false,
+    "otel_log_tool_details": false,
+    "otel_log_user_prompts": false,
+    "otel_logs_exporter": "otlp",
+    "otel_metrics_exporter": "otlp",
+    "otel_protocol": "http/protobuf"
+  }
+}
 ```
 
-The config keys are `otel_*` under `[telemetry]`; the **env vars keep their
-standard OTEL names** (`GROK_EXTERNAL_OTEL`, `OTEL_*`) for ecosystem
-interop, so the two layers use deliberately different namespaces. The
-`otel_protocol` config key maps to `OTEL_EXPORTER_OTLP_PROTOCOL`. Env vars
-win over config file paths for CA and client identity.
+The config keys are `otel_*` under `telemetry`. The **env vars keep their standard OTEL names** (`GROK_EXTERNAL_OTEL`, `OTEL_*`) for ecosystem interop, so the layers use deliberately different namespaces. The `otel_protocol` config key maps to `OTEL_EXPORTER_OTLP_PROTOCOL`. Env vars win over config file paths for CA and client identity.
 
-There is deliberately no `headers` key: supply collector auth via
-`OTEL_EXPORTER_OTLP_HEADERS` so tokens are never stored on disk. Certificate
-and key config keys are **paths only** — never embed private key material
-in TOML.
+There is deliberately no `headers` key: supply collector auth via `OTEL_EXPORTER_OTLP_HEADERS` so tokens are never stored on disk. Certificate and key config keys are **paths only** — never embed private key material in the config file.
 
-Every **present** `[telemetry] otel_*` key in signed `requirements.toml` is a
-**pin** (env cannot override it). `managed_config.toml` is not a lock — env
-still wins there. Pinning `otel_endpoint` strips developer generic and
-per-signal endpoint env **and unlisted user/managed file siblings** except
-endpoints you also list. Pinning client
-cert/key also strips developer endpoints and unlisted file siblings. Pinning CA (`otel_certificate`)
-does **not** strip endpoints. If requirements lists any of
-`otel_log_user_prompts` / `otel_log_tool_details` /
-`otel_log_assistant_responses` / `otel_log_tool_content` and omits a sibling, the omitted gate
-defaults **off** (do not rely on the prompts→responses fallback across that
-boundary).
+Every **present** `telemetry.otel_*` key in signed `requirements.toml` is a **pin** (env cannot override it). `managed_config.toml` is not a lock — env still wins there. Pinning `otel_endpoint` strips developer generic and per-signal endpoint env **and unlisted user/managed file siblings** except endpoints you also list. Pinning client cert/key also strips developer endpoints and unlisted file siblings. Pinning CA (`otel_certificate`) does **not** strip endpoints. If requirements lists any of `otel_log_user_prompts` / `otel_log_tool_details` / `otel_log_assistant_responses` / `otel_log_tool_content` and omits a sibling, the omitted gate defaults **off** (do not rely on the prompts→responses fallback across that boundary).
 
 The external stream exports **logs and metrics only** (no customer-facing
 traces exporter).
 
-Fleet enablement is one signed `requirements.toml` (destination, exporters,
-and content gates together). `user.email` is not a pin key — it follows
-OAuth/gateway identity. Headers stay in the process environment from the
-launcher after strip, never in this TOML.
+Fleet enablement is one signed `requirements.toml` (destination, exporters, and content gates together). `user.email` is not a pin key — it follows OAuth/gateway identity. Headers stay in the process environment from the launcher after strip, not in this file.
 
 ## Startup suppression (why nothing arrives for the first few seconds)
 
@@ -189,9 +172,7 @@ setup that is well under a second and invisible.
 
 **The wait is bounded**, so a deployment that cannot reach xAI still exports:
 
-- If no fleet policy can apply at all — `[features] remote_fetch = false`, or
-  `[endpoints] cli_chat_proxy_base_url` points somewhere other than xAI — the
-  stream starts immediately, governed by your local configuration.
+- Or `endpoints.cli_chat_proxy_base_url` points somewhere other than xAI — the stream starts immediately, governed by your local configuration. This happens if no fleet policy can apply at all — `features.remote_fetch` is `false`.
 - If the policy fetch fails or never completes (firewalled host, offline
   laptop), emission starts anyway once the attempt is exhausted, and in all
   cases no later than 30 seconds after startup.
@@ -233,7 +214,7 @@ Identity attributes (`user.id`, and `organization.id` / `team.id` when known) ar
 | `grok_code.startup.phase_duration` | `ms` | `phase`, `outcome`, `auth_mode` |
 | `grok_code.startup.timeout` | `{timeout}` | `stuck_in`, `auth_mode` |
 
-`startup.total` measures process start to a usable session, recorded once per process. `outcome` = `timeout` or `error` means startup ended without one. `startup.interactive` records process start to the first frame the live loop confirmed written, once per process. `phase_duration` breaks the connect try down by step (`config_load`, `managed_policy`, `bootstrap`, `model_catalog`, `worker_spawn`, `leader_connect`, `acp_initialize`, `eager_auth`). Filter on its `outcome` (`ok` | `timeout` | `cancelled` | `error`) so truncated samples do not skew `ok` percentiles. The later `app_init` and `session_create` phases appear in the log timeline and the summary strings, not in this metric.
+`turn.ttft` is the time from turn start to the first token of any channel (reasoning, text, or a tool call) and `turn.ttfm`. The time from turn start to the first assistant text message (reasoning and tool calls excluded), one sample per turn on the same clock, so `ttft` never exceeds `ttfm`. A turn that produced no model output records no `ttft`. A reasoning-only or tool-only turn records `ttft` but no `ttfm`.
 
 `turn.ttft` is the time from turn start to the first token of any channel
 (reasoning, text, or a tool call) and `turn.ttfm` the time from turn start to the

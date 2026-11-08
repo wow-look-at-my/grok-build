@@ -70,7 +70,7 @@ pub(crate) fn fail_open_detail(
     match reason {
         Reason::ModelUnknown => format!(
             "\"{subject}\" is not a model this session knows. Open /model: if it is listed, \
-             set the role to that exact id. If it is not, fix its [model_providers] or [model] \
+             set the role to that exact id. If it is not, fix its `models.providers` or `models.definitions` \
              block (base URL, key, server running). Then restart."
         ),
         Reason::ToolsetUnknown => format!("the agent type \"{subject}\" does not exist."),

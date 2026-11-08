@@ -29,18 +29,27 @@ List, refresh, and remove sources with `grok plugin marketplace list`, `grok plu
 
 You can also declare sources in config so they are always present.
 
-### In config.toml
+### In config.json
 
 Each source needs a `name` and either a `git` URL (with an optional `branch`) or a local `path`:
 
-```toml
-[[marketplace.sources]]
-name = "My Team Plugins"
-git = "https://github.com/my-org/plugins.git"
-
-[[marketplace.sources]]
-name = "Local Dev"
-path = "~/dev/my-plugins"
+```json
+{
+  "extensions": {
+    "marketplace": {
+      "sources": [
+        {
+          "git": "https://github.com/my-org/plugins.git",
+          "name": "My Team Plugins"
+        },
+        {
+          "name": "Local Dev",
+          "path": "~/dev/my-plugins"
+        }
+      ]
+    }
+  }
+}
 ```
 
 ### In settings.json
@@ -126,18 +135,29 @@ In the **Workflows** tab (open it directly with `/workflows`, or `Tab` from the 
 
 ### Turn plugins on or off in config
 
-Set these in `~/.grok/config.toml`:
+Set these in `~/.grok/config.json`:
 
-```toml
-[plugins]
-paths = ["~/my-plugins/custom-tools"]        # extra plugin directories
-disabled = ["user/a1b2c3d4/noisy-plugin"]    # names or IDs to skip
-enabled = ["project/9f8e7d6c/team-tools"]    # names or IDs to force on
+```json
+{
+  "extensions": {
+    "plugins": {
+      "disabled": [
+        "user/a1b2c3d4/noisy-plugin"
+      ],
+      "enabled": [
+        "project/9f8e7d6c/team-tools"
+      ],
+      "paths": [
+        "~/my-plugins/custom-tools"
+      ]
+    }
+  }
+}
 ```
 
 Plugins are off by default, so list one in `enabled` to turn it on, or in `disabled` to discover it but skip loading it. Each entry is a plain plugin name (from `grok plugin list`) or a full ID (`<scope>/<hash>/<name>`).
 
-To hide the plugins and hooks interface entirely, set `disable_plugins = true` in `~/.grok/pager.toml`.
+To hide the plugins and hooks interface fully, set `"disable_plugins": true` in `~/.grok/pager.json`.
 
 ---
 
@@ -243,31 +263,40 @@ To install it for everyone automatically instead of person by person, see [Distr
 
 ## Distribute across an organization
 
-Admins control plugins, marketplaces, and MCP servers through grok's TOML layers plus an optional Claude policy file:
+Admins control plugins, marketplaces, and MCP servers through grok's config layers plus an optional Claude policy file:
 
-- **`managed_config.toml` / `requirements.toml`** (and macOS MDM) are **native** policy. Put allowlists, denylists, and pins here when grok should enforce them on every server and marketplace, including ones defined in the user's own config or by plugins. `requirements.toml` / MDM is the tamper-resistant tier; user-writable `~/.grok` copies are self-imposed only.
-- **Claude `managed-settings.json`** is **advisory**. Its MCP and marketplace restrictions bind **foreign** subjects only — project files (`.grok/config.toml`, `.mcp.json`), imported Claude configs, CLI overrides, and client-injected servers. They never bind grok-native subjects (user/system `config.toml`, plugin-provided definitions, admin pins). **Adding** a marketplace or installing a new source is always treated as foreign, so an advisory strict list still refuses unlisted `marketplace add` / `plugin install` sources.
+- **`managed_config.toml` / `requirements.toml`** (and their system counterparts `/etc/grok/managed_config.json` / `/etc/grok/requirements.json`, and macOS MDM) are **native** policy. Put allowlists, denylists, and pins here when grok must enforce them on every server and marketplace, including ones. Plugins define those ones. `requirements.toml` / MDM is the tamper-resistant tier. User-writable `~/.grok` copies are self-imposed only.
+- **Claude `managed-settings.json`** is **advisory**. Its MCP and marketplace restrictions bind **foreign** subjects only — project files (`.grok/config.json`, `.mcp.json`), imported Claude configs, CLI overrides, and client-injected servers. They never bind grok-native subjects (user/system `config.json`, plugin-provided definitions, admin pins). **Adding** a marketplace or installing a new source is always treated as foreign, so an advisory strict list still refuses unlisted `marketplace add` / `plugin install` sources.
 
-Layers combine **strictest-wins**: any deny wins, every restricted source must allow, and boolean pins only tighten (`false` sticks; a later `true` cannot unpin). CamelCase Claude keys and snake_case grok keys are both accepted in TOML.
+Layers combine **strictest-wins**: any deny wins, every restricted source must allow, and boolean pins only tighten (`false` sticks. A later `true` cannot unpin). CamelCase Claude keys and snake_case grok keys are both accepted.
 
 `grok inspect` (and `grok inspect --json`) shows the loaded MCP/marketplace lists, whether `allowManagedMcpServersOnly` is `off` / `advisory` / `enforced`, extra marketplace pins, and tighten-only pins under **Enforced by policy**.
 
 ### Roll a marketplace out to everyone
 
-Add the source, and turn on the plugins you want, in `managed_config.toml`:
+Add the source, and turn on the plugins you want, in `/etc/grok/managed_config.json`:
 
-```toml
-[[marketplace.sources]]
-name = "My Org Plugins"
-git = "https://github.com/my-org/my-org-plugins.git"
-
-# Plugins stay off until enabled. List plugin names (from `grok plugin list`)
-# or full IDs (`<scope>/<hash>/<name>`).
-[plugins]
-enabled = ["gdrive"]
+```json
+{
+  "extensions": {
+    "marketplace": {
+      "sources": [
+        {
+          "git": "https://github.com/my-org/my-org-plugins.git",
+          "name": "My Org Plugins"
+        }
+      ]
+    },
+    "plugins": {
+      "enabled": [
+        "gdrive"
+      ]
+    }
+  }
+}
 ```
 
-For a hands-off install with no per-person step, also place the plugin's files where Grok discovers and trusts them automatically: `~/.grok/plugins/`, or a directory your device-management tool manages that you point to with `[plugins].paths`. Then enable them with `[plugins].enabled`.
+For a hands-off install with no per-person step, also place the plugin's files. This happens where Grok discovers and trusts them automatically: `~/.grok/plugins/`, or a directory your device-management tool manages that you point to with `extensions.plugins.paths`. Then enable them with `extensions.plugins.enabled`.
 
 A managed workspace can also sync skills to users directly, without a plugin. Synced skills appear with the `server` scope and are administered by the workspace; a user's own skill of the same name shadows the synced one. See [Skills](08-skills.md).
 
@@ -279,29 +308,46 @@ The key being **present** is what restricts: an empty list (`strict_known_market
 
 Adding a **local path** while a binding strict list is present is refused (paths never match a git-URL allowlist; fail closed), unless an **admin** `extraKnownMarketplaces` pin names that exact path. A pin from a user-writable `~/.grok` layer cannot carve that exception. Existing git sources that fail the list are dropped at load (`Marketplace source blocked by allowlist`).
 
-```toml
-# /etc/grok/requirements.toml  (native: binds every marketplace)
-[[strict_known_marketplaces]]
-source = "git"
-url = "git@github.enterprise.example:ACME/my-org-plugins.git"
-
-[[strict_known_marketplaces]]
-source = "github"
-repo = "ACME/more-plugins"
+```json
+{
+  "policy": {
+    "strict_known_marketplaces": [
+      {
+        "source": "git",
+        "url": "git@github.enterprise.example:ACME/my-org-plugins.git"
+      },
+      {
+        "repo": "ACME/more-plugins",
+        "source": "github"
+      }
+    ]
+  }
+}
 ```
 
 The same lists work in Claude `managed-settings.json` (advisory for already-configured grok-native sources). URL comparison folds case on the **scheme and host only**, and strips exactly one trailing `.git` (`repo.git.git` is a different repo). Use `grok inspect` to see the loaded allowlist.
 
 Provision extra sources from policy with `extraKnownMarketplaces` / `extra_known_marketplaces`. First pinning layer wins a name; a configured source already holding that name with a different URL is not overwritten (logged). `autoUpdate = false` on an extra pin turns **global** session-start plugin auto-update off (there is no per-marketplace grok equivalent).
 
-```toml
-[extra_known_marketplaces.acme]
-source = { source = "git", url = "https://github.com/ACME/my-org-plugins.git", ref = "main" }
+```json
+{
+  "policy": {
+    "extra_known_marketplaces": {
+      "acme": {
+        "source": {
+          "ref": "main",
+          "source": "git",
+          "url": "https://github.com/ACME/my-org-plugins.git"
+        }
+      }
+    }
+  }
+}
 ```
 
 ### Restrict which MCP servers can run
 
-Grok enforces MCP allow/deny lists from every native TOML policy layer and from Claude `managed-settings.json` (advisory; see above). `grok inspect` prints the merged lists.
+Grok enforces MCP allow/deny lists from every native policy layer and from Claude `managed-settings.json` (advisory. See above). `grok inspect` prints the merged lists.
 
 Each allow or deny entry is one of:
 
@@ -316,32 +362,42 @@ Each allow or deny entry is one of:
 
 **Misconfiguration locks down rather than failing open.** A policy key with the wrong type (a table or string where a list belongs), a key written in both spellings with different values, an allow list whose every entry is unsupported, or a deny entry that cannot be enforced (unknown fields, a partial `serverCommand`, a `serverUrl` that can never match) locks that file's MCP policy down: every server it binds is blocked with the reason `locked down by policy (<file>)` until the file is fixed. Startup logs name the file and the offending key. An unusable **allow** entry only grants nothing.
 
-`allowManagedMcpServersOnly = true` (or `allow_managed_mcp_servers_only`) is a lockdown: a positive allow-entry match is required even when the allow list is empty. Native TOML shows as `enforced` in inspect; Claude-only shows as `advisory` (grok-native servers exempt).
+`allowManagedMcpServersOnly = true` (or `allow_managed_mcp_servers_only`) is a lockdown: a positive allow-entry match is required even when the allow list is empty. A native layer shows as `enforced` in inspect, Claude-only shows as `advisory` (grok-native servers exempt).
 
 `enableAllProjectMcpServers = false` drops project-scoped MCP unless the server also matches an allow entry.
 
-```toml
-# /etc/grok/requirements.toml
-allow_managed_mcp_servers_only = true
-enable_all_project_mcp_servers = false
-
-[[allowed_mcp_servers]]
-server_url = "https://*.example.com/*"
-
-[[allowed_mcp_servers]]
-command = "npx"
-
-[[allowed_mcp_servers]]
-server_command = ["npx", "@corp/mcp"]
-
-[[allowed_mcp_servers]]
-server_name = "linear"
-
-[[denied_mcp_servers]]
-command = "node"
-
-[[denied_mcp_servers]]
-server_url = "https://mcp.untrusted.example/*"
+```json
+{
+  "policy": {
+    "allow_managed_mcp_servers_only": true,
+    "allowed_mcp_servers": [
+      {
+        "server_url": "https://*.example.com/*"
+      },
+      {
+        "command": "npx"
+      },
+      {
+        "server_command": [
+          "npx",
+          "@corp/mcp"
+        ]
+      },
+      {
+        "server_name": "linear"
+      }
+    ],
+    "denied_mcp_servers": [
+      {
+        "command": "node"
+      },
+      {
+        "server_url": "https://mcp.untrusted.example/*"
+      }
+    ],
+    "enable_all_project_mcp_servers": false
+  }
+}
 ```
 
 The lists apply after Grok merges user, project, plugin, and imported MCP config. A blocked server is dropped from the session (logged as `MCP server blocked by managed settings policy`) with a reason of matching `deniedMcpServers`, not in `allowedMcpServers`, locked down by policy, or the project-MCP pin, plus the policy file path (inspect/JSON/logs keep the full path; user-facing refusals show the file name).
@@ -356,19 +412,26 @@ The deployment can also send MCP servers to users directly. Native allowlists st
 
 Refuse any remote plugin install or update that is not pinned to a full commit sha:
 
-```toml
-[marketplace]
-require_sha = true
+```json
+{
+  "extensions": {
+    "marketplace": {
+      "require_sha": true
+    }
+  }
+}
 ```
 
 You can also set `GROK_MARKETPLACE_REQUIRE_SHA=1`. Both only tighten the policy; neither turns it back off. Publish `sha` values in your marketplace's `plugin-index.json` so installs from it satisfy the rule. Plugins vendored directly inside a marketplace repository are copied from that repository's checkout, so pin them the same way, with `sha` values in `plugin-index.json`.
 
 ### Turn off the plugins UI
 
-To hide the plugins and hooks interface, set this in `pager.toml`:
+To hide the plugins and hooks interface, set this in `pager.json`:
 
-```toml
-disable_plugins = true
+```json
+{
+  "disable_plugins": true
+}
 ```
 
 ### What this does not cover
@@ -379,7 +442,7 @@ Marketplaces distribute Grok content: skills, commands, agents, hooks, and MCP s
 
 ## Troubleshooting
 
-**A plugin you installed isn't showing up.** Plugins are off until enabled. Check `grok plugin list`, then add the plugin's name or ID to `[plugins].enabled`, or press `Space` on it in the Plugins tab. Reload with `r` in the Plugins tab or start a new session.
+**A plugin you installed is not showing up.** Plugins are off until enabled. Check `grok plugin list`, then add the plugin's name or ID to `extensions.plugins.enabled`, or press `Space` on it in the Plugins tab. Reload with `r` in the Plugins tab or start a new session.
 
 **A plugin's skills, hooks, or MCP servers don't load.** They stay inactive until the plugin is trusted. Reinstall with `--trust`, or place the plugin under `~/.grok/plugins/` (auto-trusted). See [Trust and security](#trust-and-security).
 
@@ -422,7 +485,7 @@ Grok discovers plugins from these locations, in priority order. The `.claude/plu
 | `--plugin-dir` (the `grok agent … stdio` flag) | Process, that agent process only | Trusted automatically |
 | `.grok/plugins/` | Project, shared through version control | Requires trust |
 | `~/.grok/plugins/` | User, every project | Trusted automatically |
-| `[plugins].paths` (config) | Custom directories you add | Depends on location |
+| `extensions.plugins.paths` (config) | Custom directories you add | Depends on location |
 
 The `_meta.pluginDirs` field on the `session/new` and `session/load` requests loads plugins for a single session; because the caller supplies the directory, those plugins are trusted automatically and do not persist after the session. `--plugin-dir` is the process-wide equivalent for a dedicated `grok agent … stdio` process, repeatable (`grok agent --no-leader --plugin-dir A --plugin-dir B stdio`), and ignored in leader mode, where the shared leader discovers its own plugins.
 

@@ -54,13 +54,13 @@ impl std::fmt::Display for EndpointRefusal {
             Self::NoUrl { url } if url.trim().is_empty() => write!(
                 f,
                 "No URL is configured for this request, so nothing was sent. \
-                 Set the URL in config.toml."
+                 Set the URL in config.json."
             ),
             Self::NoUrl { url } => write!(f, "\"{url}\" is not a valid URL, so nothing was sent."),
             Self::NotAllowed { origin, .. } => write!(
                 f,
                 "{origin} is not an allowed endpoint, so nothing was sent. \
-                 Add \"{origin}\" to [endpoints] allowed_endpoints in config.toml \
+                 Add \"{origin}\" to `endpoints.allowed_endpoints` in config.json \
                  to allow it."
             ),
         }

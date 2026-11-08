@@ -19,10 +19,9 @@ const TEST_NAME: &str = "a_seatbelt_confined_session_saves_its_config_through_th
 
 /// What the confined child saves through the worker.
 #[cfg(target_os = "macos")]
-const SAVED_CONFIG: &str =
-    "[models]\ndefault = \"model-b\"\n\n[ui]\npermission_mode = \"always-approve\"\n";
+const SAVED_CONFIG: &str = "{\n\t\"models\": {\n\t\t\"default\": \"model-b\"\n\t},\n\t\"ui\": {\n\t\t\"permission_mode\": \"always-approve\"\n\t}\n}\n";
 #[cfg(target_os = "macos")]
-const SAVED_TRUST: &str = "version = 1\n";
+const SAVED_TRUST: &str = "{\n\t\"folders\": {}\n}\n";
 /// What the child tries to write to a file the worker must refuse.
 #[cfg(target_os = "macos")]
 const OTHER_CONTENT: &str = "refused = true\n";
@@ -59,7 +58,7 @@ fn parent() {
     }
     let grok_home = fixture_dir("grok-home");
     let workspace = fixture_dir("workspace");
-    std::fs::write(grok_home.join("config.toml"), "").expect("seed config.toml");
+    std::fs::write(grok_home.join("config.json"), "").expect("seed config.json");
     // SAFETY: this binary runs one test on one thread, before any child exists.
     unsafe { std::env::set_var("GROK_HOME", &grok_home) };
 
@@ -95,7 +94,7 @@ fn parent() {
     assert_eq!(
         report("direct_write="),
         "denied",
-        "Seatbelt must deny a direct write of config.toml, or this test proves nothing: {context}"
+        "Seatbelt must deny a direct write of config.json, or this test proves nothing: {context}"
     );
     assert_eq!(
         report("in_process_write="),
@@ -105,7 +104,7 @@ fn parent() {
     assert_eq!(
         report("config_write="),
         "ok",
-        "the config.toml save must land: {context}"
+        "the config.json save must land: {context}"
     );
     assert_eq!(
         report("trust_write="),
@@ -118,19 +117,19 @@ fn parent() {
         "the worker must not write a file that is not a grok config file: {context}"
     );
     assert_eq!(
-        std::fs::read_to_string(grok_home.join("config.toml")).expect("read config.toml"),
+        std::fs::read_to_string(grok_home.join("config.json")).expect("read config.json"),
         SAVED_CONFIG
     );
     assert_eq!(
-        std::fs::read_to_string(grok_home.join("trusted_folders.toml")).expect("read trust store"),
+        std::fs::read_to_string(grok_home.join("trusted_folders.json")).expect("read trust store"),
         SAVED_TRUST
     );
-    // The profile can create an empty `sandbox.toml` to deny. The refused write must not be in it.
+    // The profile can create an empty `sandbox.json` to deny. The refused write must not be in it.
     assert!(
-        !std::fs::read_to_string(grok_home.join("sandbox.toml"))
+        !std::fs::read_to_string(grok_home.join("sandbox.json"))
             .unwrap_or_default()
             .contains(OTHER_CONTENT),
-        "the refused sandbox.toml write must not land"
+        "the refused sandbox.json write must not land"
     );
     println!("{REPORT}PASS");
 }
@@ -144,7 +143,7 @@ fn confined_child() {
 
     let workspace = PathBuf::from(std::env::var(WORKSPACE_ENV).expect(WORKSPACE_ENV));
     let grok_home = PathBuf::from(std::env::var("GROK_HOME").expect("GROK_HOME"));
-    let config = grok_home.join("config.toml");
+    let config = grok_home.join("config.json");
 
     let mut sandbox = SandboxManager::new(ProfileName::Workspace, &workspace);
     let applied = sandbox.apply(&workspace).is_ok() && sandbox.is_applied();
@@ -174,7 +173,7 @@ fn confined_child() {
     println!(
         "{REPORT}trust_write={}",
         outcome(write_atomically(
-            &grok_home.join("trusted_folders.toml"),
+            &grok_home.join("trusted_folders.json"),
             SAVED_TRUST,
             Some(0o600)
         ))
@@ -182,7 +181,7 @@ fn confined_child() {
     println!(
         "{REPORT}other_write={}",
         outcome(write_atomically(
-            &grok_home.join("sandbox.toml"),
+            &grok_home.join("sandbox.json"),
             OTHER_CONTENT,
             None
         ))

@@ -2,7 +2,7 @@ use super::*;
 
 /// Cached `mcp.push_server_status` flag resolution.
 /// Resolution mirrors the `mcp.liveness_watchers` flag pattern but only stacks the env and default layers.
-/// The pager process does not load `config.toml` / `requirements.toml`.
+/// The pager process does not load `config.json` / `requirements.toml`.
 pub(super) fn push_server_status_enabled() -> bool {
     use std::sync::OnceLock;
     static ENABLED: OnceLock<bool> = OnceLock::new();

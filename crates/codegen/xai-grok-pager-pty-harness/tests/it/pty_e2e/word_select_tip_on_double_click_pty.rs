@@ -29,7 +29,7 @@ fn spawn_with_hints(content: &ContentController) -> PtyHarness {
 }
 
 /// Double-clicking scrollback while Text selection is fold/nav (`flash`) shows an ephemeral tip naming the settings path and the Ctrl+Y accept chord.
-/// Pressing Ctrl+Y while the tip is up flips the setting to `word_select` and persists it to config.toml.
+/// Pressing Ctrl+Y while the tip is up flips the setting to `word_select` and persists it to config.json.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; run with cargo test -p xai-grok-pager-pty-harness --test it -- --ignored"]
 #[cfg(unix)]
@@ -104,12 +104,12 @@ async fn word_select_tip_shows_and_ctrl_y_accepts() {
             )
         });
 
-    // The flip persists: `[ui].keep_text_selection = "word_select"` lands in config.toml. The persist is async, so poll briefly.
-    let config_path = content.home().join(".grok").join("config.toml");
+    // The flip persists: `[ui].keep_text_selection = "word_select"` lands in config.json. The persist is async, so poll briefly.
+    let config_path = content.home().join(".grok").join("config.json");
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
         let config = std::fs::read_to_string(&config_path).unwrap_or_default();
-        if config.contains("keep_text_selection = \"word_select\"") {
+        if config.contains("\"keep_text_selection\": \"word_select\"") {
             break;
         }
         assert!(

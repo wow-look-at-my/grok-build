@@ -235,7 +235,7 @@ pub(super) fn gate_snapshot_locked(home: &std::path::Path) -> GateSnapshot {
     }
 }
 
-/// Marker-scoped: a config.toml blip is not a switch.
+/// Marker-scoped: a config.json blip is not a switch.
 fn purge_prior_tenant_locked(home: &std::path::Path) {
     let crate::config::ServingIdentity::Team(team_id) = current_serving_identity_any_expiry()
     else {

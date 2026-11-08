@@ -15,9 +15,10 @@ pub enum ResolvedStatusLine<'a> {
     Command { command: &'a str },
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, schemars::JsonSchema)]
 pub struct StatusLineConfig {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "status_line_type_schema")]
     kind: Option<StatusLineType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     command: Option<String>,
@@ -31,6 +32,13 @@ pub struct StatusLineConfig {
     parse_problem: Option<String>,
     #[serde(skip)]
     unknown_keys: Vec<String>,
+}
+
+fn status_line_type_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "string",
+        "enum": ["builtin", "command", "disabled", "off", "none", "hidden"]
+    })
 }
 
 /// `eq` destructures `Self` so a new field is a compile error rather than a field the comparison silently skips.
@@ -93,7 +101,7 @@ impl<'de> Deserialize<'de> for StatusLineConfig {
         let Lenient::Read(fields) = Lenient::<RawStatusLineConfig>::deserialize(deserializer)?
         else {
             return Ok(Self {
-                parse_problem: Some("[ui.status_line] must be a table".to_string()),
+                parse_problem: Some("`ui.status_line` must be an object".to_string()),
                 ..Self::default()
             });
         };
@@ -130,10 +138,10 @@ impl<'de> Deserialize<'de> for StatusLineConfig {
         let mut seen = BTreeSet::new();
         ignored.retain(|entry| seen.insert(entry.clone()));
         config.parse_problem = if !ignored.is_empty() {
-            Some(format!("[ui.status_line] ignored {}", ignored.join(", ")))
+            Some(format!("`ui.status_line` ignored {}", ignored.join(", ")))
         } else if config.kind.is_none() && config.has_payload() {
             // A payload with no `type` is inert; report it rather than drop it.
-            Some("[ui.status_line] needs type = \"builtin\" or \"command\"".to_string())
+            Some("`ui.status_line` needs type \"builtin\" or \"command\"".to_string())
         } else {
             None
         };
@@ -229,10 +237,10 @@ impl StatusLineConfig {
         if self.resolve().is_none() {
             return match self.effective_kind() {
                 StatusLineType::Command => {
-                    Some("[ui.status_line] type = \"command\" needs command = \"…\"")
+                    Some("`ui.status_line.type` \"command\" needs `command`")
                 }
                 StatusLineType::Builtin => {
-                    Some("[ui.status_line] type = \"builtin\" needs at least one item")
+                    Some("`ui.status_line.type` \"builtin\" needs at least one item")
                 }
                 // A stray key under `disabled` stays silent, like a stray `command`: the off switch outranks its neighbours
                 StatusLineType::Disabled => None,
@@ -240,7 +248,7 @@ impl StatusLineConfig {
         }
         // A timer under `builtin` schedules nothing
         if self.refresh_interval.is_some() && self.kind == Some(StatusLineType::Builtin) {
-            return Some("[ui.status_line] refresh_interval needs type = \"command\"");
+            return Some("`ui.status_line.refresh_interval` needs type \"command\"");
         }
         None
     }
@@ -282,6 +290,7 @@ impl StatusLineConfig {
     strum::EnumString,
     strum::IntoStaticStr,
     strum::VariantArray,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase", ascii_case_insensitive)]
@@ -319,6 +328,7 @@ impl StatusLineType {
     strum::EnumString,
     strum::IntoStaticStr,
     strum::VariantArray,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case", ascii_case_insensitive)]

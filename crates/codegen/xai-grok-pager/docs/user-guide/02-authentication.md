@@ -68,11 +68,15 @@ Authenticate developers through your own Identity Provider (IdP) -- such as Okta
 
 Via config file:
 
-```toml
-# ~/.grok/config.toml
-[grok_com_config.oidc]
-issuer = "https://acme.okta.com"
-client_id = "0oa1b2c3d4e5f6g7h8i9"
+```json
+{
+  "login": {
+    "oidc": {
+      "client_id": "0oa1b2c3d4e5f6g7h8i9",
+      "issuer": "https://acme.okta.com"
+    }
+  }
+}
 ```
 
 Or via environment variables:
@@ -161,12 +165,14 @@ JSON fields:
 
 Via config file:
 
-```toml
-# ~/.grok/config.toml
-[auth]
-auth_provider_command = "/usr/local/bin/my-auth-provider"
-auth_provider_label = "Acme Corp"   # optional -- customizes the TUI login button
-auth_token_ttl = 3600               # optional -- token lifetime in seconds
+```json
+{
+  "login": {
+    "auth_provider_command": "/usr/local/bin/my-auth-provider",
+    "auth_provider_label": "Acme Corp",
+    "auth_token_ttl": 3600
+  }
+}
 ```
 
 Or via environment variables:
@@ -221,14 +227,7 @@ device-code URL or a browser prompt reaches you. Exiting promptly on
 instead makes you wait out the refresh timeout on every start. Mid-session, the
 turn fails with a re-auth prompt and `/login` re-runs the binary interactively.
 
-One case stays ambiguous, and only in **leader mode** (`--leader`, or
-`[cli] use_leader = true`; off by default): with no credential at all, the
-leader makes one extra attempt in the background just after startup, and that
-run has the variable unset, like a sign-in. A binary that mints without help
-(service account, keytab, mounted token) succeeds there and the session heals
-itself. One that must prompt just sits, up to the 300s sign-in ceiling —
-nothing waits on it, the sign-in screen is already up, and that run's stderr
-goes to `~/.grok/leader.log` rather than to you.
+One case stays ambiguous, and only in **leader mode** (`--leader`, or `cli.use_leader` set to `true`. Off by default): with no credential at all, the leader makes one extra try in the background just after startup. That run has the variable unset, like a sign-in. A binary that mints without help (service account, keytab, mounted token) succeeds there and the session heals itself. One that must prompt just sits, up to the 300s sign-in ceiling — nothing waits on it. The sign-in screen is already up, and that run's stderr goes to `~/.grok/leader.log` rather than to you.
 
 ### Environment Variables
 
@@ -286,14 +285,13 @@ Grok picks up changes to `~/.grok/auth.json` automatically. If you update creden
 
 Grok resolves credentials for each request in this order, highest to lowest:
 
-1. **Per-model `api_key` or `env_key`** -- set under `[model.<name>]` in `config.toml`. Wins whenever present.
+1. **Per-model `api_key` or `env_key`** -- set under `models.definitions.<name>` in `config.json`. Wins when present.
 2. **Active session token** -- obtained through browser, OIDC/OAuth2, or external-provider login and stored in `~/.grok/auth.json`.
 3. **`XAI_API_KEY`** -- fallback when no session token is active.
 
 When more than one login flow is configured, Grok populates the session token from the first available source, highest to lowest:
 
 1. **External auth provider** (`auth_provider_command`)
-2. **Enterprise OIDC** -- when OIDC is configured, through `[grok_com_config.oidc]` in `config.toml` or the `GROK_OIDC_ISSUER` and `GROK_OIDC_CLIENT_ID` environment variables
 3. **SpaceXAI OAuth2 browser login** -- the default
 
 During a session, the active method handles all mid-session refreshes.
@@ -314,9 +312,9 @@ which `/privacy` opens — does not change these config knobs:
 
 | Setting | How to set it |
 |---------|---------------|
-| `[features] telemetry` | `config.toml` or `GROK_TELEMETRY_ENABLED` |
-| `[telemetry] trace_upload` | `config.toml` or `GROK_TELEMETRY_TRACE_UPLOAD` |
-| External OpenTelemetry | `GROK_EXTERNAL_OTEL` / `[telemetry] otel_*`. See [Monitoring Usage](24-monitoring-usage.md). |
+| `features.telemetry` | `config.json` or `GROK_TELEMETRY_ENABLED` |
+| `telemetry.trace_upload` | `config.json` or `GROK_TELEMETRY_TRACE_UPLOAD` |
+| External OpenTelemetry | `GROK_EXTERNAL_OTEL` / `telemetry.otel_*`. See [Monitoring Usage](24-monitoring-usage.md). |
 
 On team accounts, only a team admin can change coding-data sharing. Team admins can also enable or disable Zero Data Retention (ZDR) for their team. See [How to enable ZDR](https://docs.example.invalid/developers/faq/security#how-to-enable-zdr). When ZDR is on, coding-data sharing cannot be changed at all — the settings row shows `ZDR` in place of the value. ZDR does not turn off external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
 
