@@ -17,8 +17,8 @@ fn gateway_toggle_propagates_failed_enable_persist() {
         let (conn, _init) = connect_and_auth(AutoApproveClient, "gateway-persist-test").await;
         let session_id = new_session(&conn, &cwd).await;
 
-        // Unparseable config.toml: the enable write refuses to clobber it and errors.
-        std::fs::write(grok_home.join("config.toml"), "not toml [[[").unwrap();
+        // Unparseable config.json: the enable write refuses to clobber it and errors.
+        std::fs::write(grok_home.join("config.json"), "not json {{{").unwrap();
 
         let params = serde_json::value::RawValue::from_string(
             json!({

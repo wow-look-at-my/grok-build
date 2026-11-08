@@ -315,7 +315,7 @@ pub const CHAT_MODE_LOCAL_BUILD_REFUSAL: &str = "cannot open a local Build sessi
 resume a conversation or start a new chat (/chat)";
 /// User-facing error when `--chat` is combined with leader mode.
 pub const CHAT_MODE_LEADER_CONFLICT: &str = "gateway chat mode (--chat) cannot run with leader mode; \
-pass --no-leader or disable [cli] use_leader in config";
+pass --no-leader or disable cli.use_leader in config";
 /// Startup guard used by TUI `run` (and unit-tested): sticky `--chat` + leader is invalid.
 #[inline]
 pub fn chat_mode_conflicts_with_leader(chat: bool, use_leader: bool) -> bool {

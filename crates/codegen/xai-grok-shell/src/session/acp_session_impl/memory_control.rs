@@ -250,7 +250,7 @@ impl SessionActor {
         };
         // The toggle is session-scoped; say so when the persistent default still says off.
         let enabled_message = if self.memory.config_opt_out {
-            "Memory enabled for this session. `[memory] enabled = false` in config.toml still \
+            "Memory enabled for this session. `memory.enabled` is `false` in config.json, which still \
              applies to new sessions; edit it to make this permanent."
         } else {
             "Memory enabled for this session."

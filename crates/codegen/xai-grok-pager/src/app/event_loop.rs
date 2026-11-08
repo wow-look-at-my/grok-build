@@ -1286,6 +1286,13 @@ pub(crate) async fn run(
                 .collect(),
         );
     }
+    if let Some(error) = config_watcher.load_error() {
+        app.startup_warnings.push(crate::startup::StartupWarning {
+            severity: crate::startup::WarningSeverity::Warning,
+            message: "pager.json did not load; the default appearance is in use".to_string(),
+            action: Some(error.to_string()),
+        });
+    }
     let mut initial_config = config_watcher.current().clone();
     initial_config.prompt.compact = crate::views::agent::effective_compact(
         crate::appearance::cache::load(),
@@ -2276,7 +2283,7 @@ pub(crate) async fn run(
             // Hot-reload: config file changed (dev mode) or initial load.
             Ok(()) = config_watcher.changed() => {
                 let mut config = config_watcher.current().clone();
-                // The watcher only knows about pager.toml, so a hot-reload would otherwise revert these to their hardcoded defaults
+                // The watcher only knows about pager.json, so a hot-reload would otherwise revert these to their hardcoded defaults
                 // The canonical re-derive below owns any correction, so its fast path cannot skip a needed prompt-widget fan-out
                 // (`set_appearance` alone never syncs `PromptWidget.compact`.)
                 config.prompt.compact = app.appearance.prompt.compact;

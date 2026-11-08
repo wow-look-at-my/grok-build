@@ -587,7 +587,7 @@ fn persona_detail_from_local_file(
         scope_label: Some(scope.label().to_string()),
     })
 }
-/// Load the `[subagents.toggle]` map from config.toml.
+/// Load the `agents.subagents.toggle` map from the effective config.
 pub fn load_agent_toggle() -> HashMap<String, bool> {
     let root = match xai_grok_shell::config::load_effective_config() {
         Ok(r) => r,
@@ -732,7 +732,7 @@ pub(crate) fn config_agent_is_explicit() -> bool {
         .is_some_and(|name| !name.trim().is_empty())
         || agent.definition.is_some()
 }
-/// Explicit `[agent] name` in config.toml (not env/CLI overrides).
+/// Explicit `agents.selection.name` in config.json (not env/CLI overrides).
 fn load_config_agent_name() -> Option<String> {
     load_agent_selection_config().name.filter(|s| !s.is_empty())
 }
@@ -753,49 +753,58 @@ fn refresh_default_agent(state: &mut AgentsModalState) {
     let model_agent_type = state.model_agent_type.as_deref();
     state.default_agent = resolve_default_agent_name(&state.cwd, model_agent_type);
 }
-/// Set or clear the default agent via `[agent] name` in config.toml.
+/// Set or clear the default agent via `agents.selection.name` in config.json.
 ///
 /// Pass `Some(name)` to set, `None` to clear (remove the key).
 pub fn set_default_agent(name: Option<&str>) -> Result<(), String> {
-    let config_path = xai_grok_config::grok_home().join(xai_grok_config::USER_CONFIG_FILENAME);
-    if let Some(parent) = config_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let Some(mut doc) = crate::config_toml_edit::read_config_document_for_edit(&config_path) else {
-        return Err("Could not read or parse config.toml".to_string());
-    };
-    if let Some(agent_name) = name {
-        let agent_item = doc.entry("agent").or_insert(toml_edit::table());
-        let agent_table = agent_item.as_table_mut().ok_or("[agent] is not a table")?;
-        agent_table.insert("name", toml_edit::value(agent_name));
-    } else if let Some(agent_table) = doc.get_mut("agent").and_then(|v| v.as_table_mut()) {
-        agent_table.remove("name");
-    }
-    std::fs::write(&config_path, doc.to_string())
-        .map_err(|e| format!("Failed to write config.toml: {e}"))?;
-    Ok(())
+    edit_user_config(|doc| {
+        if let Some(agent_name) = name {
+            let agent = doc
+                .as_table_mut()
+                .ok_or("config root is not a table")?
+                .entry("agent")
+                .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+            let agent_table = agent
+                .as_table_mut()
+                .ok_or("agents.selection is not a table")?;
+            agent_table.insert("name".into(), toml::Value::String(agent_name.into()));
+        } else if let Some(agent_table) = doc.get_mut("agent").and_then(|v| v.as_table_mut()) {
+            agent_table.remove("name");
+        }
+        Ok(())
+    })
 }
-/// Toggle an agent's enabled state via `[subagents.toggle]` in config.toml.
+/// Run `edit` on the user config tree and write the result. Refuses when the file does not parse.
+fn edit_user_config(
+    edit: impl FnOnce(&mut toml::Value) -> Result<(), String>,
+) -> Result<(), String> {
+    let home = xai_grok_config::grok_home();
+    let config_path = xai_grok_config::user_config_file(&home)
+        .map_err(|e| format!("Could not locate config.json: {e}"))?;
+    let schema = xai_grok_config::format::schema_ref_for(&config_path);
+    xai_grok_config::edit_config_tree(&config_path, schema, edit)
+        .map_err(|e| format!("Failed to write config.json: {e}"))?
+}
+/// Toggle an agent's enabled state via `agents.subagents.toggle` in config.json.
 pub fn toggle_agent(name: &str, enabled: bool) -> Result<(), String> {
-    let config_path = xai_grok_config::grok_home().join(xai_grok_config::USER_CONFIG_FILENAME);
-    if let Some(parent) = config_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let Some(mut doc) = crate::config_toml_edit::read_config_document_for_edit(&config_path) else {
-        return Err("Could not read or parse config.toml".to_string());
-    };
-    let subagents_item = doc.entry("subagents").or_insert(toml_edit::table());
-    let subagents = subagents_item
-        .as_table_mut()
-        .ok_or("subagents is not a table")?;
-    let toggle_item = subagents.entry("toggle").or_insert(toml_edit::table());
-    let toggle_table = toggle_item
-        .as_table_mut()
-        .ok_or("subagents.toggle is not a table")?;
-    toggle_table.insert(name, toml_edit::value(enabled));
-    std::fs::write(&config_path, doc.to_string())
-        .map_err(|e| format!("Failed to write config.toml: {e}"))?;
-    Ok(())
+    edit_user_config(|doc| {
+        let subagents = doc
+            .as_table_mut()
+            .ok_or("config root is not a table")?
+            .entry("subagents")
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+        let subagents = subagents
+            .as_table_mut()
+            .ok_or("agents.subagents is not a table")?;
+        let toggle = subagents
+            .entry("toggle")
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+        let toggle_table = toggle
+            .as_table_mut()
+            .ok_or("agents.subagents.toggle is not a table")?;
+        toggle_table.insert(name.into(), toml::Value::Boolean(enabled));
+        Ok(())
+    })
 }
 /// Format detail lines for an expanded agent entry.
 pub fn format_agent_detail(entry: &AgentListEntry) -> Vec<String> {

@@ -28,6 +28,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/verification.md](docs/verification.md) holds this section.
 
+## Config files are JSON
+
+[docs/json-config-notes.md](docs/json-config-notes.md) holds this section: the format boundary, the section layout table, the schema, and the TOML migration.
+
 ## `--sandbox` jail notes
 
 [docs/sandbox-jail-notes.md](docs/sandbox-jail-notes.md) holds this section.

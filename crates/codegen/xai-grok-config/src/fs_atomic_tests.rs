@@ -106,7 +106,7 @@ fn write_atomically_replaces_leaf_symlink() {
     );
 }
 
-/// User config.toml / pager.toml opt into following via [`resolve_atomic_destination`].
+/// User config.json / pager.json opt into following via [`resolve_atomic_destination`].
 #[cfg(unix)]
 #[test]
 fn resolve_atomic_destination_follows_leaf_symlink() {

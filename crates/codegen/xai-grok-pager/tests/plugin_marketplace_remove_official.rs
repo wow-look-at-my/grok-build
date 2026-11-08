@@ -42,14 +42,12 @@ fn cli_remove_of_json_store_official_source_sets_sticky_flag() {
         "source must be removed from the JSON store: {known}"
     );
 
-    let config: toml::Value =
-        toml::from_str(&std::fs::read_to_string(grok_home.path().join("config.toml")).unwrap())
-            .expect("config.toml written");
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(grok_home.path().join("config.json")).unwrap(),
+    )
+    .expect("config.json written");
     assert_eq!(
-        config
-            .get("marketplace")
-            .and_then(|m| m.get("official_marketplace_auto_installed"))
-            .and_then(|v| v.as_bool()),
+        config["extensions"]["marketplace"]["official_marketplace_auto_installed"].as_bool(),
         Some(true),
         "removing the official source must set the sticky flag: {config}"
     );

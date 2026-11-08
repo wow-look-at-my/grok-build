@@ -1184,30 +1184,16 @@ pub fn add_marketplace_source(
         let _ = std::fs::create_dir_all(parent);
     }
     let (dest, existing) = crate::util::config::read_follow_bound(config_path)?;
-    let mut doc = existing.parse::<toml_edit::DocumentMut>().map_err(|e| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("invalid TOML: {e}"),
-        )
-    })?;
-
-    let marketplace_item = doc
-        .entry("marketplace")
-        .or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()));
-    let marketplace = marketplace_item.as_table_mut().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "[marketplace] is not a table",
-        )
-    })?;
+    let mut doc = xai_grok_config::parse_config_for_edit(dest.as_path(), &existing)?;
+    let marketplace = marketplace_table_mut(&mut doc)?;
 
     let sources_item = marketplace
         .entry("sources")
-        .or_insert_with(|| toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new()));
-    let sources = sources_item.as_array_of_tables_mut().ok_or_else(|| {
+        .or_insert_with(|| toml::Value::Array(Vec::new()));
+    let sources = sources_item.as_array_mut().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "[[marketplace.sources]] is not an array of tables",
+            "`extensions.marketplace.sources` is not an array",
         )
     })?;
 
@@ -1233,38 +1219,67 @@ pub fn add_marketplace_source(
         }
     };
     if !already_present {
-        let mut entry = toml_edit::Table::new();
-        entry.insert("name", toml_edit::value(name.to_string()));
+        let mut entry = toml::map::Map::new();
+        entry.insert("name".into(), toml::Value::String(name.to_string()));
         match source {
             MarketplaceAddInput::GitUrl(git_url) => {
-                entry.insert("git", toml_edit::value(git_url.to_string()));
+                entry.insert("git".into(), toml::Value::String(git_url.to_string()));
             }
             MarketplaceAddInput::LocalPath(path) => {
-                entry.insert("path", toml_edit::value(path.display().to_string()));
+                entry.insert(
+                    "path".into(),
+                    toml::Value::String(path.display().to_string()),
+                );
             }
         }
-        sources.push(entry);
+        sources.push(toml::Value::Table(entry));
     }
 
     if set_official_flag {
         marketplace.insert(
-            "official_marketplace_auto_installed",
-            toml_edit::value(true),
+            "official_marketplace_auto_installed".into(),
+            toml::Value::Boolean(true),
         );
     }
 
-    crate::util::config::atomic_write_follow_bound(config_path, &dest, &doc.to_string())
+    let text = xai_grok_config::render_config(dest.as_path(), &doc)?;
+    crate::util::config::atomic_write_follow_bound(config_path, &dest, &text)
 }
 
-/// Remove a `[[marketplace.sources]]` entry matching `git` or `path`.
+/// The `marketplace` table of a config tree, created when absent.
+fn marketplace_table_mut(
+    doc: &mut toml::Value,
+) -> std::io::Result<&mut toml::map::Map<String, toml::Value>> {
+    let root = doc.as_table_mut().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "config root is not an object",
+        )
+    })?;
+    root.entry("marketplace")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "`extensions.marketplace` is not an object",
+            )
+        })
+}
+
+/// The path label for config text that has no file of its own.
+const CONFIG_TEXT_LABEL: &str = "config.json";
+
+/// Remove an `extensions.marketplace.sources` entry matching `git` or `path` from JSON config text.
 /// Returns `Some(new_content)` on removal, `None` if not found or unparseable.
-pub fn remove_toml_marketplace_block(content: &str, source_identity: &str) -> Option<String> {
-    let mut doc: toml_edit::DocumentMut = content.parse().ok()?;
+pub fn remove_marketplace_source_block(content: &str, source_identity: &str) -> Option<String> {
+    let label = Path::new(CONFIG_TEXT_LABEL);
+    let mut doc = xai_grok_config::parse_config_for_edit(label, content).ok()?;
 
     let sources = doc
         .get_mut("marketplace")?
         .get_mut("sources")?
-        .as_array_of_tables_mut()?;
+        .as_array_mut()?;
 
     // Full git-URL normalization (.git, host case, scp-vs-https): a different spelling of the
     // configured source must still match, or the remove leaves the entry behind.
@@ -1289,27 +1304,29 @@ pub fn remove_toml_marketplace_block(content: &str, source_identity: &str) -> Op
     let sources_now_empty = doc
         .get("marketplace")
         .and_then(|m| m.get("sources"))
-        .and_then(|s| s.as_array_of_tables())
+        .and_then(|s| s.as_array())
         .is_some_and(|a| a.is_empty());
     if sources_now_empty
         && let Some(marketplace) = doc.get_mut("marketplace").and_then(|m| m.as_table_mut())
     {
         marketplace.remove("sources");
-        if marketplace.is_empty() {
-            doc.remove("marketplace");
+        if marketplace.is_empty()
+            && let Some(root) = doc.as_table_mut()
+        {
+            root.remove("marketplace");
         }
     }
 
-    Some(doc.to_string())
+    xai_grok_config::render_config(label, &doc).ok()
 }
 
 /// Where [`remove_marketplace_source_from_stores`] found and removed a source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarketplaceSourceRemoval {
-    /// Removed from `config.toml` (the official flag folded into the write).
+    /// Removed from `config.json` (the official flag folded into the write).
     ConfigToml,
     /// Removed from a settings/known_marketplaces JSON store (the official
-    /// flag written to `config.toml` separately, best-effort).
+    /// flag written to `config.json` separately, best-effort).
     JsonStore,
     /// Not present in any store.
     NotFound,
@@ -1323,9 +1340,9 @@ pub fn remove_marketplace_source_from_stores(
 ) -> std::io::Result<MarketplaceSourceRemoval> {
     let is_official = is_official_source_url(source_identity);
     let (dest, content) = crate::util::config::read_follow_bound(config_path)?;
-    if let Some(removed) = remove_toml_marketplace_block(&content, source_identity) {
+    if let Some(removed) = remove_marketplace_source_block(&content, source_identity) {
         let final_content = if is_official {
-            set_official_flag_in_toml(&removed)?
+            set_official_flag_in_text(&removed)?
         } else {
             removed
         };
@@ -1347,45 +1364,31 @@ pub fn remove_marketplace_source_from_stores(
 
 pub(crate) const OFFICIAL_MARKETPLACE_FLAG: &str = "official_marketplace_auto_installed";
 
-/// Set `[marketplace].<key> = true` in a TOML document, preserving layout.
-pub(crate) fn set_marketplace_bool_flag_in_toml(
+/// Set `extensions.marketplace.<key> = true` in JSON config text.
+pub(crate) fn set_marketplace_bool_flag_in_text(
     content: &str,
     key: &str,
 ) -> std::io::Result<String> {
-    let mut doc = content.parse::<toml_edit::DocumentMut>().map_err(|e| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("invalid TOML: {e}"),
-        )
-    })?;
-
-    let marketplace = doc
-        .entry("marketplace")
-        .or_insert_with(|| toml_edit::Item::Table(toml_edit::Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "[marketplace] is not a table",
-            )
-        })?;
-    marketplace.insert(key, toml_edit::value(true));
-
-    Ok(doc.to_string())
+    let label = Path::new(CONFIG_TEXT_LABEL);
+    let mut doc = xai_grok_config::parse_config_for_edit(label, content)?;
+    marketplace_table_mut(&mut doc)?.insert(key.to_string(), toml::Value::Boolean(true));
+    xai_grok_config::render_config(label, &doc)
 }
 
-/// Set `[marketplace].<key> = true` in `config_path` via atomic replace.
+/// Set `extensions.marketplace.<key> = true` in `config_path` via atomic replace.
 pub(crate) fn set_marketplace_bool_flag(config_path: &Path, key: &str) -> std::io::Result<()> {
     if let Some(parent) = config_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let (dest, existing) = crate::util::config::read_follow_bound(config_path)?;
-    let updated = set_marketplace_bool_flag_in_toml(&existing, key)?;
+    let mut doc = xai_grok_config::parse_config_for_edit(dest.as_path(), &existing)?;
+    marketplace_table_mut(&mut doc)?.insert(key.to_string(), toml::Value::Boolean(true));
+    let updated = xai_grok_config::render_config(dest.as_path(), &doc)?;
     crate::util::config::atomic_write_follow_bound(config_path, &dest, &updated)
 }
 
-pub(crate) fn set_official_flag_in_toml(content: &str) -> std::io::Result<String> {
-    set_marketplace_bool_flag_in_toml(content, OFFICIAL_MARKETPLACE_FLAG)
+pub(crate) fn set_official_flag_in_text(content: &str) -> std::io::Result<String> {
+    set_marketplace_bool_flag_in_text(content, OFFICIAL_MARKETPLACE_FLAG)
 }
 
 pub(crate) fn set_official_marketplace_auto_installed(config_path: &Path) -> std::io::Result<()> {
@@ -1730,50 +1733,64 @@ mod tests {
         assert!(matches!(status, UpdateStatus::LiveLocal));
     }
 
+    fn marketplace_json(marketplace: serde_json::Value) -> String {
+        serde_json::json!({ "extensions": { "marketplace": marketplace } }).to_string()
+    }
+
     #[test]
-    fn remove_toml_selects_correct_entry() {
-        let content = "[[marketplace.sources]]\nname = \"a\"\ngit = \"https://a.com\"\n\n\
-                       [[marketplace.sources]]\nname = \"b\"\ngit = \"https://b.com\"\n";
-        let new = remove_toml_marketplace_block(content, "https://a.com").unwrap();
+    fn remove_source_selects_correct_entry() {
+        let content = marketplace_json(serde_json::json!({ "sources": [
+            { "name": "a", "git": "https://a.com" },
+            { "name": "b", "git": "https://b.com" }
+        ] }));
+        let new = remove_marketplace_source_block(&content, "https://a.com").unwrap();
         assert!(!new.contains("\"a\"") && new.contains("\"b\""), "{new}");
     }
 
     #[test]
-    fn remove_toml_no_match_returns_none() {
-        let content = "[[marketplace.sources]]\nname = \"x\"\ngit = \"https://a.com\"\n";
-        assert!(remove_toml_marketplace_block(content, "https://nope.com").is_none());
+    fn remove_source_no_match_returns_none() {
+        let content = marketplace_json(
+            serde_json::json!({ "sources": [{ "name": "x", "git": "https://a.com" }] }),
+        );
+        assert!(remove_marketplace_source_block(&content, "https://nope.com").is_none());
     }
 
     #[test]
-    fn remove_toml_matches_tilde_path_entry_by_expanded_identity() {
-        // Loaded sources carry expanded paths, so removal by identity must still find a hand-written `path = "~/x"` entry
+    fn remove_source_matches_tilde_path_entry_by_expanded_identity() {
+        // Loaded sources carry expanded paths, so removal by identity must still find a hand-written `"path": "~/x"` entry
         let Some(home) = xai_dirs::home_dir() else {
             return;
         };
-        let content = "[[marketplace.sources]]\nname = \"dev\"\npath = \"~/dev/plugins\"\n";
+        let content = marketplace_json(
+            serde_json::json!({ "sources": [{ "name": "dev", "path": "~/dev/plugins" }] }),
+        );
         let identity = home.join("dev/plugins").display().to_string();
-        let new = remove_toml_marketplace_block(content, &identity).unwrap();
+        let new = remove_marketplace_source_block(&content, &identity).unwrap();
         assert!(!new.contains("dev/plugins"), "{new}");
     }
 
     #[test]
-    fn remove_toml_cleans_empty_section() {
-        let content = "[[marketplace.sources]]\nname = \"x\"\ngit = \"https://a.com\"\n";
-        let new = remove_toml_marketplace_block(content, "https://a.com").unwrap();
+    fn remove_source_cleans_empty_section() {
+        let content = marketplace_json(
+            serde_json::json!({ "sources": [{ "name": "x", "git": "https://a.com" }] }),
+        );
+        let new = remove_marketplace_source_block(&content, "https://a.com").unwrap();
         assert!(!new.contains("marketplace"), "{new}");
     }
 
     #[test]
-    fn remove_toml_preserves_sibling_keys_when_sources_empty() {
-        let content = "[marketplace]\nofficial_marketplace_auto_installed = true\n\n\
-                       [[marketplace.sources]]\nname = \"x\"\ngit = \"https://a.com\"\n";
-        let new = remove_toml_marketplace_block(content, "https://a.com").unwrap();
+    fn remove_source_preserves_sibling_keys_when_sources_empty() {
+        let content = marketplace_json(serde_json::json!({
+            "official_marketplace_auto_installed": true,
+            "sources": [{ "name": "x", "git": "https://a.com" }]
+        }));
+        let new = remove_marketplace_source_block(&content, "https://a.com").unwrap();
         assert!(
             new.contains("official_marketplace_auto_installed"),
             "sticky flag must survive removing the last source: {new}"
         );
         assert!(
-            !new.contains("[[marketplace.sources]]"),
+            !new.contains("\"sources\""),
             "empty sources array should be dropped: {new}"
         );
     }

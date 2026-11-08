@@ -1864,7 +1864,7 @@ mod tests {
         assert_eq!(state.session_total_cost_usd_ticks(), Some(7));
     }
 
-    /// State with pager.toml `expanded_by_default` set. A true flag still collapses over `Some(true)`.
+    /// State with pager.json `expanded_by_default` set. A true flag still collapses over `Some(true)`.
     fn edit_state(expanded_by_default: bool) -> ScrollbackState {
         let mut state = ScrollbackState::new();
         let mut appearance = AppearanceConfig::default();
@@ -2280,7 +2280,7 @@ mod tests {
         );
     }
 
-    /// With the pager.toml shape keys unset (the shipped default), the shell-owned `collapsed_edit_blocks` flag decides
+    /// With the pager.json shape keys unset (the shipped default), the shell-owned `collapsed_edit_blocks` flag decides
     /// materialization. On means the collapsed one-liner, off means the legacy expanded diff. Untrusted summaries still
     /// escape the collapse. Spawned thread: the cache is a sticky thread-local seeded explicitly here.
     #[test]

@@ -539,7 +539,7 @@ pub(crate) async fn run_shell_child(
     match gate_subagent_type(&request.subagent_type, &ctx) {
         SubagentValidateTypeOutcome::Disabled => {
             let msg = format!(
-                "Subagent '{}' is disabled via [subagents.toggle] in config.toml",
+                "Subagent '{}' is disabled via agents.subagents.toggle in config.json",
                 request.subagent_type
             );
             return child_run_output(failure_result(&request, &msg), completion_data, None);
@@ -1346,7 +1346,7 @@ pub(crate) async fn run_shell_child(
         tracing::warn!(
             agent = %definition.name,
             "agent `memory:` scope is a legacy-memory feature; memory v2 is active, so this \
-             agent uses the session's shared v2 memory instead. Set `[memory_v2] enabled = false` \
+             agent uses the session's shared v2 memory instead. Set `memory.v2.enabled` to `false` \
              to keep a per-agent scope"
         );
     }

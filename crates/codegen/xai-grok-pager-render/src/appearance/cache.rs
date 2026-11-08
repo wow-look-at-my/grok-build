@@ -1,6 +1,6 @@
 //! Thread-local caches for the pager's UI settings.
 //!
-//! Every render frame reads these, so they must be cheaper than re-loading `config.toml`.
+//! Every render frame reads these, so they must be cheaper than re-loading `config.json`.
 //! Call [`prime`] at startup so the first frame never hits disk; as a safety net, the first read lazily seeds from `load_effective_config()`.
 //!
 //! Disk writes live in `xai_grok_shell::util::config::set_<field>()`; this module only caches in memory.
@@ -391,7 +391,7 @@ thread_local! {
 }
 
 /// Read cached scroll speed (1..=100), seeding from disk and the env var on first call.
-/// `GROK_SCROLL_SPEED` overrides config.toml.
+/// `GROK_SCROLL_SPEED` overrides config.json.
 pub fn load_scroll_speed() -> u8 {
     SCROLL_SPEED_LOADED.with(|loaded| {
         if !loaded.get() {

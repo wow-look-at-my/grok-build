@@ -208,8 +208,12 @@ fn parse_overlay(raw: &str, format: OverlayFormat, source: &str) -> Option<toml:
                 }
             };
             strip_json_nulls(&mut json);
-            match toml::Value::try_from(json) {
-                Ok(v) => v,
+            match crate::format::json_to_tree(&json) {
+                // A JSON overlay uses the same section layout as `config.json`
+                Ok(mut v) => {
+                    crate::layout::json_to_internal(&mut v);
+                    v
+                }
                 Err(_) => {
                     tracing::warn!(
                         source,

@@ -417,7 +417,10 @@ impl DebugContext {
 fn config_file_paths(grok_home: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     if let Some(system) = xai_grok_config::system_config_dir() {
-        paths.push(system.join(xai_grok_config::MANAGED_CONFIG_FILENAME));
+        paths.push(xai_grok_config::system_config_file(
+            &system,
+            xai_grok_config::SYSTEM_MANAGED_CONFIG_STEM,
+        ));
     }
     paths.push(grok_home.join(xai_grok_config::MANAGED_CONFIG_FILENAME));
     paths.push(grok_home.join(xai_grok_config::USER_CONFIG_FILENAME));
@@ -511,7 +514,7 @@ mod tests {
     #[test]
     fn stat_reports_size_for_a_real_file_and_missing_for_an_absent_one() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let present = dir.path().join("config.toml");
+        let present = dir.path().join("config.json");
         std::fs::write(&present, "model = \"grok-4.5\"\n").expect("write");
         let fact = FileFact::stat(present.clone());
         match fact.state {
@@ -533,13 +536,13 @@ mod tests {
     fn config_paths_cover_every_layer_grok_loads() {
         let paths = config_file_paths(Path::new("/h/.grok"));
         assert!(
-            paths.contains(&PathBuf::from("/h/.grok/config.toml"))
+            paths.contains(&PathBuf::from("/h/.grok/config.json"))
                 && paths.contains(&PathBuf::from("/h/.grok/managed_config.toml")),
             "{paths:?}"
         );
         if cfg!(unix) {
             assert!(
-                paths.contains(&PathBuf::from("/etc/grok/managed_config.toml")),
+                paths.contains(&PathBuf::from("/etc/grok/managed_config.json")),
                 "the system layer must be named on unix: {paths:?}"
             );
         }
@@ -555,7 +558,7 @@ mod tests {
         );
         for expected in [
             "/h/.grok/debug/sid.txt", // the log to read
-            "/h/.grok/config.toml",   // the config to read
+            "/h/.grok/config.json",   // the config to read
             "262144",                 // the number the user is asking about
             "grok-4.5",
             "GROK_DEBUG_LOG=1", // how this process was launched
@@ -604,7 +607,7 @@ mod tests {
             grok_home: PathBuf::from("/h/.grok"),
             grok_home_from_env: false,
             config_files: vec![FileFact {
-                path: PathBuf::from("/h/.grok/config.toml"),
+                path: PathBuf::from("/h/.grok/config.json"),
                 state: FileState::Present {
                     bytes: 120,
                     modified: None,

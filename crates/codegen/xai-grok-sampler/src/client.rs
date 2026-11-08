@@ -816,7 +816,7 @@ struct ClientDefaults {
 
 /// The refusal for a model with no URL. No default URL exists to fall back to.
 pub const MISSING_BASE_URL: &str = "This model has no URL, so no request was sent. \
-     Set base_url in its [model.<id>] block, or on the [model_providers.<id>] block it names.";
+     Set base_url in its `models.definitions.<id>` block, or on the `models.providers.<id>` block it names.";
 
 /// Endpoint URL builder, resolved once at client construction so each request only appends its path.
 #[derive(Clone, Debug)]

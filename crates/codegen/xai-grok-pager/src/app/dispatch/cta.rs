@@ -430,7 +430,7 @@ pub(super) fn handle_plugin_cta_catalog_loaded(
                     plugin_cta_candidates(response, cta_marketplace);
                 agent.plugin_cta.candidates = candidates;
                 agent.plugin_cta.source_url_or_path = source_url_or_path;
-                // Cache the dismissed set once here so recomputing after the debounce never reads config.toml from the UI thread
+                // Cache the dismissed set once here so recomputing after the debounce never reads config.json from the UI thread
                 // Only needed when enabled (the matcher short-circuits to Hidden before consulting it otherwise)
                 if enabled {
                     agent.plugin_cta.dismissed = xai_grok_shell::config::dismissed_plugin_ctas();

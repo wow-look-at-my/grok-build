@@ -1,4 +1,4 @@
-// Scans Claude settings and generates TOML patches for .grok/config.toml.
+// Scans Claude settings and generates TOML patches for .grok/config.json.
 //
 // This module reuses the existing discovery and parsing functions from claude_compat.rs and util/config.rs
 // It does NOT modify the runtime Claude compat layer; that continues to work as before
@@ -22,9 +22,9 @@ use xai_grok_workspace::permission::types::{PatternMode, PermissionRule, RuleAct
 /// Scope for an import operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportScope {
-    /// User-level: writes to `~/.grok/config.toml`.
+    /// User-level: writes to `~/.grok/config.json`.
     Global,
-    /// Project-level: writes to `<repo>/.grok/config.toml`.
+    /// Project-level: writes to `<repo>/.grok/config.json`.
     Project,
 }
 
@@ -63,9 +63,9 @@ pub enum ImportableItem {
 /// A plan describing what would be imported and where.
 #[derive(Debug, Clone, Default)]
 pub struct ImportPlan {
-    /// Items to write to `~/.grok/config.toml`.
+    /// Items to write to `~/.grok/config.json`.
     pub global_items: Vec<ImportableItem>,
-    /// Items to write to `<repo>/.grok/config.toml`.
+    /// Items to write to `<repo>/.grok/config.json`.
     pub project_items: Vec<ImportableItem>,
 }
 
@@ -89,13 +89,13 @@ impl ImportPlan {
         let mut out = String::from("Found Claude settings to import:\n");
 
         if !self.global_items.is_empty() {
-            out.push_str("\nGlobal (~/.grok/config.toml):\n");
+            out.push_str("\nGlobal (~/.grok/config.json):\n");
             out.push_str(&format_item_summary(&self.global_items));
         }
 
         if !self.project_items.is_empty() {
             out.push_str(&format!(
-                "\nProject ({}/.grok/config.toml):\n",
+                "\nProject ({}/.grok/config.json):\n",
                 find_project_root(cwd).display()
             ));
             out.push_str(&format_item_summary(&self.project_items));
@@ -165,7 +165,7 @@ fn format_item_summary(items: &[ImportableItem]) -> String {
         out.push_str(&format!("  - {} environment variable(s)\n", envs.len()));
         for (key, value) in &envs {
             // Redact the value: even keys like FOO_KEY can hide secrets (API tokens, credentials)
-            // The raw value still flows into the on-disk config.toml for actual use; only the human-facing summary suppresses it
+            // The raw value still flows into the on-disk config.json for actual use; only the human-facing summary suppresses it
             // The length hint lets the user recognise their setting without exposing the contents in terminals, screenshots, or CI logs
             out.push_str(&format!(
                 "      {} = <redacted, {} chars>\n",
@@ -460,7 +460,7 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
     xai_gix_status::discover::discover_workdir(cwd).unwrap_or_else(|| cwd.to_path_buf())
 }
 
-// Import Marker (Read Side) The marker `[claude_compat] imported = true` in `~/.grok/config.toml` is the signal that runtime fallback paths should stop reading `.claude/`.
+// Import Marker (Read Side) The marker `claude_compat.imported` set to `true` in `~/.grok/config.json` is the signal that runtime fallback paths should stop reading `.claude/`.
 // The reader lives here so the hook, path, and permission gates all consult the same cached marker The writer is `mark_claude_imported` below
 
 /// Cached result of [`is_claude_import_marked`]; see its doc for the caching rationale and trade-offs.
@@ -468,14 +468,14 @@ pub fn find_project_root(cwd: &Path) -> PathBuf {
 /// The fast path is a read lock and a cached `bool`, far below the cost of the uncached `read_to_string` and TOML parse.
 static MARKER_CACHE: std::sync::RwLock<Option<bool>> = std::sync::RwLock::new(None);
 
-/// Whether the current user has already imported Claude settings. Reads `[claude_compat] imported = true` from `~/.grok/config.toml` once per process and caches the result.
+/// Whether the current user has already imported Claude settings. Reads `claude_compat.imported` (`true`) from `~/.grok/config.json` once per process and caches the result.
 /// When the marker is set, runtime fallbacks that read `.claude/` should be skipped; the user has migrated to native config. Resilient: returns `false` on missing file, missing section, parse error, or any other failure.
 /// Trade-off: a user who manually flips the marker mid-session must restart to see the change, acceptable because reverting after import is rare. That variant logs one line so users can see the cutoff fired.
 pub(crate) fn is_claude_import_marked() -> bool {
     if let Some(v) = *MARKER_CACHE.read().expect("MARKER_CACHE poisoned") {
         return v;
     }
-    let config_path = crate::util::grok_home::grok_home().join("config.toml");
+    let config_path = crate::util::config::user_config_path();
     let v = is_claude_import_marked_at(&config_path);
     *MARKER_CACHE.write().expect("MARKER_CACHE poisoned") = Some(v);
     v
@@ -503,7 +503,7 @@ pub(crate) fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool 
         LOGGED.get_or_init(|| {
             info!(
                 first_gate = gate_name,
-                "Claude compat disabled (marker set in config.toml)"
+                "Claude compat disabled (marker set in config.json)"
             );
         });
     }
@@ -512,13 +512,8 @@ pub(crate) fn is_claude_import_marked_with_log(gate_name: &'static str) -> bool 
 
 /// Testable variant of [`is_claude_import_marked`] that reads from the given path.
 pub(crate) fn is_claude_import_marked_at(config_path: &Path) -> bool {
-    let content = match std::fs::read_to_string(config_path) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let value: TomlValue = match toml::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return false,
+    let Ok(value) = xai_grok_config::read_config_tree(config_path) else {
+        return false;
     };
     value
         .get("claude_compat")
@@ -527,60 +522,51 @@ pub(crate) fn is_claude_import_marked_at(config_path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Write `[claude_compat] imported = true` to `~/.grok/config.toml`.
-/// Uses the same atomic write pattern as `save_mcp_server_config` (write to `.tmp`, then rename).
-/// Creates the file and parent directory if missing. Existing content in the file is preserved.
-fn write_import_marker(config_path: &Path) -> anyhow::Result<()> {
-    // Report parse errors instead of silently discarding the file
-    // An atomic rewrite would otherwise drop unrelated sections ([model], [ui], etc.) and overwrite a hand-edited config that happens to have a trailing comma
-    // The user can fix the TOML and retry
-    let mut root: TomlValue = match std::fs::read_to_string(config_path) {
-        Ok(s) => toml::from_str(&s).map_err(|e| {
-            anyhow::anyhow!(
-                "refusing to write import marker: existing config at {} is \
-                 not valid TOML ({}). Fix the file (or move it aside) and \
-                 retry.",
-                config_path.display(),
-                e
-            )
-        })?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => TomlValue::Table(TomlMap::new()),
+/// Read a config file for an edit. Absent is an empty table.
+/// A file that does not parse is an error, so an atomic rewrite never drops unrelated sections of a hand-edited config.
+fn read_config_for_edit(config_path: &Path, what: &str) -> anyhow::Result<TomlValue> {
+    let text = match std::fs::read_to_string(config_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e.into()),
     };
+    xai_grok_config::parse_config_for_edit(config_path, &text).map_err(|e| {
+        anyhow::anyhow!("refusing to {what}: {e}. Fix the file (or move it aside) and retry.")
+    })
+}
+
+/// Atomically write an edited config tree as JSON.
+fn write_config_after_edit(config_path: &Path, root: &TomlValue) -> anyhow::Result<()> {
+    let text = xai_grok_config::render_config(config_path, root)?;
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    xai_grok_config::fs_atomic::write_atomically(config_path, &text, None)?;
+    Ok(())
+}
+
+/// Write `claude_compat.imported = true` to `~/.grok/config.json`.
+/// Creates the file and parent directory if missing. Existing content in the file is preserved.
+fn write_import_marker(config_path: &Path) -> anyhow::Result<()> {
+    let mut root = read_config_for_edit(config_path, "write the import marker")?;
     let table = root
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("config root is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("config root is not an object"))?;
     let compat = table
         .entry("claude_compat")
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let compat_table = compat
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[claude_compat] is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("`claude_compat` is not an object"))?;
     compat_table.insert("imported".to_string(), TomlValue::Boolean(true));
-
-    let toml_str = toml::to_string_pretty(&root)?;
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp = config_path.with_extension("toml.tmp");
-    // Best-effort cleanup of the .tmp file if either write or rename fails
-    // A stale .tmp would otherwise survive next to the real config, and the next attempt would inherit a half-written file before the rename clobbers it
-    if let Err(e) = std::fs::write(&tmp, &toml_str) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    if let Err(e) = std::fs::rename(&tmp, config_path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    Ok(())
+    write_config_after_edit(config_path, &root)
 }
 
 /// Public entry point for the slash command: write the marker, log success, and seed the in-process cache so gate checks reflect it without restart.
 /// Called from `/import-claude` even when nothing was imported: the marker is the user's opt-in choice, not a side effect of having imported items.
 /// Re-entering a workspace with `.claude/` content must not re-engage the runtime fallbacks.
 pub fn mark_claude_imported() -> anyhow::Result<()> {
-    let path = crate::util::grok_home::grok_home().join("config.toml");
+    let path = xai_grok_config::user_config_file(&crate::util::grok_home::grok_home())?;
     write_import_marker(&path)?;
     refresh_marker_cache(true);
     Ok(())
@@ -589,12 +575,12 @@ pub fn mark_claude_imported() -> anyhow::Result<()> {
 
 /// Apply an import plan by writing TOML patches to the appropriate config files. This is additive-only: existing entries are never removed.
 /// New permission rules are appended; new env vars and MCP servers are added without overwriting existing keys or names.
-/// Project items are written to `<repo_root>/.grok/config.toml` (found by repository discovery), not `cwd/.grok/config.toml`. This avoids creating config files in unexpected subdirectories.
+/// Project items are written to `<repo_root>/.grok/config.json` (found by repository discovery), not `cwd/.grok/config.json`. This avoids creating config files in unexpected subdirectories.
 pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> anyhow::Result<ImportResult> {
     let mut result = ImportResult::default();
 
     if !plan.global_items.is_empty() {
-        let global_path = crate::util::grok_home::grok_home().join("config.toml");
+        let global_path = xai_grok_config::user_config_file(&crate::util::grok_home::grok_home())?;
         let count = apply_items_to_config(&global_path, &plan.global_items)?;
         result.global_count = count;
         if count > 0 {
@@ -619,7 +605,7 @@ pub fn apply_import(plan: &ImportPlan, cwd: &Path) -> anyhow::Result<ImportResul
 
     if !plan.project_items.is_empty() {
         let project_root = find_project_root(cwd);
-        let project_path = project_root.join(".grok").join("config.toml");
+        let project_path = xai_grok_config::project_config_file_for_write(&project_root)?;
         let count = apply_items_to_config(&project_path, &plan.project_items)?;
         result.project_count = count;
         if count > 0 {
@@ -664,22 +650,9 @@ impl ImportResult {
     }
 }
 
-/// Apply items to a single config.toml file using atomic write.
+/// Apply items to a single config.json file using atomic write.
 fn apply_items_to_config(config_path: &Path, items: &[ImportableItem]) -> anyhow::Result<usize> {
-    // Read existing TOML, reporting parse errors instead of silently discarding the file
-    // An atomic rewrite would otherwise drop unrelated sections ([model], [ui], etc.) and overwrite a hand-edited config that happens to have a trailing comma
-    let mut root: TomlValue = match std::fs::read_to_string(config_path) {
-        Ok(s) => toml::from_str(&s).map_err(|e| {
-            anyhow::anyhow!(
-                "refusing to import: existing config at {} is not valid TOML \
-                 ({}). Fix the file (or move it aside) and retry.",
-                config_path.display(),
-                e
-            )
-        })?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => TomlValue::Table(TomlMap::new()),
-        Err(e) => return Err(e.into()),
-    };
+    let mut root = read_config_for_edit(config_path, "import")?;
 
     let table = root
         .as_table_mut()
@@ -699,7 +672,7 @@ fn apply_items_to_config(config_path: &Path, items: &[ImportableItem]) -> anyhow
             ImportableItem::Permission(rule) => permissions.push(rule),
             ImportableItem::EnvVar { key, value } => env_vars.push((key, value)),
             ImportableItem::McpServer { name, config } => mcp_servers.push((name, config)),
-            // Hooks are written to .grok/hooks/ JSON files in apply_hooks_to_dir, not into config.toml
+            // Hooks are written to .grok/hooks/ JSON files in apply_hooks_to_dir, not into config.json
             ImportableItem::Hook { .. } => {}
             ImportableItem::PathEntry { kind, path } => match kind {
                 PathKind::Skill => skill_dirs.push(path.as_str()),
@@ -728,18 +701,11 @@ fn apply_items_to_config(config_path: &Path, items: &[ImportableItem]) -> anyhow
     }
 
     if count > 0 {
-        // Atomic write: write to .tmp, then rename.
-        let toml_str = toml::to_string_pretty(&root)?;
-        let tmp = config_path.with_extension("toml.tmp");
-        if let Some(parent) = config_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&tmp, &toml_str)?;
-        std::fs::rename(&tmp, config_path)?;
+        write_config_after_edit(config_path, &root)?;
         info!(
             path = %config_path.display(),
             count,
-            "Wrote imported settings to config.toml"
+            "Wrote imported settings to the config file"
         );
     }
 
@@ -757,7 +723,7 @@ fn merge_permissions(
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let perm_table = permission
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[permission] is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("`permission` is not an object"))?;
 
     let mut count = 0;
 
@@ -847,7 +813,7 @@ fn merge_env_vars(table: &mut TomlMap<String, TomlValue>, vars: &[(&str, &str)])
     let env_table = match env.as_table_mut() {
         Some(t) => t,
         None => {
-            warn!("[env] in config.toml is not a table, skipping env import");
+            warn!("`env` in config.json is not an object, skipping env import");
             return 0;
         }
     };
@@ -872,7 +838,7 @@ fn merge_mcp_servers(
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let mcp_table = mcp
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[mcp_servers] is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("`mcp.servers` is not an object"))?;
 
     let mut count = 0;
     for (name, config) in servers {
@@ -899,7 +865,7 @@ fn merge_paths(
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let paths_table = paths
         .as_table_mut()
-        .ok_or_else(|| anyhow::anyhow!("[paths] is not a table"))?;
+        .ok_or_else(|| anyhow::anyhow!("`extensions.paths` is not an object"))?;
 
     let arr = paths_table
         .entry(key)
@@ -1265,32 +1231,32 @@ mod tests {
     #[test]
     fn is_claude_import_marked_at_missing_section() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[ui]\ntheme = \"dark\"\n").unwrap();
-        std::fs::write(&path, "[other]\nkey = \"value\"\n").unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"ui": {"theme": "dark"}}"#).unwrap();
+        std::fs::write(&path, r#"{"other": {"key": "value"}}"#).unwrap();
         assert!(!is_claude_import_marked_at(&path));
     }
 
     #[test]
     fn is_claude_import_marked_at_explicit_false() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[claude_compat]\nimported = false\n").unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"claude_compat": {"imported": false}}"#).unwrap();
         assert!(!is_claude_import_marked_at(&path));
     }
 
     #[test]
     fn is_claude_import_marked_at_true() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
-        std::fs::write(&path, "[claude_compat]\nimported = true\n").unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, r#"{"claude_compat": {"imported": true}}"#).unwrap();
         assert!(is_claude_import_marked_at(&path));
     }
 
     #[test]
     fn write_import_marker_creates_new_file() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("sub").join("config.toml");
+        let path = dir.path().join("sub").join("config.json");
         write_import_marker(&path).unwrap();
         assert!(is_claude_import_marked_at(&path));
     }
@@ -1298,16 +1264,16 @@ mod tests {
     #[test]
     fn write_import_marker_preserves_existing_content() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+        let path = dir.path().join("config.json");
         std::fs::write(
             &path,
-            "[other]\nkey = \"value\"\n\n[mcp_servers.foo]\ncommand = \"x\"\n",
+            r#"{"other": {"key": "value"}, "mcp": {"servers": {"foo": {"command": "x"}}}}"#,
         )
         .unwrap();
         write_import_marker(&path).unwrap();
 
         let content = std::fs::read_to_string(&path).unwrap();
-        let parsed: TomlValue = toml::from_str(&content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(
             parsed
                 .get("other")
@@ -1317,7 +1283,8 @@ mod tests {
         );
         assert_eq!(
             parsed
-                .get("mcp_servers")
+                .get("mcp")
+                .and_then(|m| m.get("servers"))
                 .and_then(|m| m.get("foo"))
                 .and_then(|f| f.get("command"))
                 .and_then(|v| v.as_str()),
@@ -1335,7 +1302,7 @@ mod tests {
     #[test]
     fn write_import_marker_idempotent() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+        let path = dir.path().join("config.json");
         write_import_marker(&path).unwrap();
         write_import_marker(&path).unwrap();
         assert!(is_claude_import_marked_at(&path));
@@ -1986,7 +1953,7 @@ extra_rule_dirs = ["/c/rules"]
     #[test]
     fn apply_items_to_config_writes_path_entries() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+        let path = dir.path().join("config.json");
         let items = vec![
             ImportableItem::PathEntry {
                 kind: PathKind::Skill,
@@ -2001,7 +1968,8 @@ extra_rule_dirs = ["/c/rules"]
         assert_eq!(count, 2);
 
         let content = std::fs::read_to_string(&path).unwrap();
-        let parsed: TomlValue = toml::from_str(&content).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let parsed = parsed.get("extensions").unwrap();
         assert_eq!(
             parsed
                 .get("paths")

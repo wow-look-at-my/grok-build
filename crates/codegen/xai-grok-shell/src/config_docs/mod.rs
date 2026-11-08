@@ -46,7 +46,7 @@ pub const TELEMETRY_OTEL_KEYS: &[&str] = &[
     "telemetry.otel_log_tool_content",
 ];
 
-/// Keys that the pager and `load_from_disk()` read from the user `config.toml` only.
+/// Keys that the pager and `load_from_disk()` read from the user `config.json` only.
 const USER_ONLY_KEYS: &[&str] = &["features.remember_mode", "privacy.privacy_banner_acked"];
 
 /// The nested GrokComConfig, OAuth2, and OIDC leaf keys that enterprise deployments write today.
@@ -155,18 +155,18 @@ fn strip_cell(s: &str) -> String {
     s.trim().trim_matches('`').trim().to_string()
 }
 
-/// Parse `| `key` | type | req | managed | details |` (config.toml) and the requirements-only `| key | type | default | details |` table.
+/// Parse `| `key` | type | req | managed | details |` (config.json) and the requirements-only `| key | type | default | details |` table.
 fn parse_tables(markdown: &str) -> (Vec<Row>, Vec<Row>) {
     let mut config = Vec::new();
     let mut requirements_only = Vec::new();
     let mut section = "none";
     for line in markdown.lines() {
         if line.starts_with("## ") {
-            section = if line.starts_with("## config.toml") {
+            section = if line.starts_with("## config.json") {
                 "config"
-            } else if line.starts_with("## managed_config.toml") {
+            } else if line.starts_with("## managed config") {
                 "managed"
-            } else if line.starts_with("## requirements.toml") {
+            } else if line.starts_with("## requirements") {
                 "requirements"
             } else {
                 "none"
@@ -190,6 +190,8 @@ fn parse_tables(markdown: &str) -> (Vec<Row>, Vec<Row>) {
         if key == "Key" || key.is_empty() {
             continue;
         }
+        // The page names JSON-layout paths; the registries name internal keys
+        let key = xai_grok_config::layout::json_path_to_internal(&key);
         match section {
             "config" => {
                 let Some(details_cell) = extra.first() else {
@@ -380,19 +382,12 @@ mod tests {
         let (config, _, _) = page();
         let map = by_key(&config);
         for leaf in GROK_COM_CONFIG_LEAVES {
-            let row = map.get(*leaf).unwrap_or_else(|| panic!("missing {leaf}"));
+            assert!(map.contains_key(*leaf), "missing {leaf}");
+            // The JSON layout documents only `login`; the old `auth` spelling has no rows
             let alias = leaf.replacen("grok_com_config.", "auth.", 1);
-            let alias_row = map
-                .get(alias.as_str())
-                .unwrap_or_else(|| panic!("missing alias {alias}"));
-            assert_eq!(row.requirements, alias_row.requirements);
             assert!(
-                !alias_row.details.starts_with("Same as"),
-                "{alias} must state what the key does, then note the alias"
-            );
-            assert!(
-                alias_row.details.contains(leaf),
-                "{alias} should name `{leaf}`"
+                !map.contains_key(alias.as_str()),
+                "{alias} must not have a row"
             );
         }
         let Some(disable_auth) = map.get("grok_com_config.disable_api_key_auth") else {

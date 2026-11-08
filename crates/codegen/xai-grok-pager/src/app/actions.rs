@@ -441,10 +441,9 @@ pub enum Action {
     /// Open the prompt-history search panel on the active agent (composer as filter query). Dispatched by `/history`.
     OpenHistorySearch,
     /// Set how ` ```mermaid ` code blocks are rendered (auto/on/off).
-    /// SHELL-owned: updates the process-wide cache mirror and persists to `[ui].render_mermaid` in config.toml via `Effect::PersistSetting`.
     SetRenderMermaid(crate::appearance::RenderMermaid),
-    /// Delegates to `set_vim_mode` so the new value is persisted to `[ui].vim_mode` in config.toml, the same path as the settings modal.
-    /// Set vim-style scrollback keybindings. SHELL-owned: persisted to `[ui].vim_mode` in config.toml via `Effect::PersistSetting`.
+    /// Delegates to `set_vim_mode` so the new value is persisted to `ui.vim_mode` in config.json, the same path as the settings modal.
+    /// Set vim-style scrollback keybindings. SHELL-owned: persisted to `ui.vim_mode` in config.json via `Effect::PersistSetting`.
     /// Used by the settings modal; the `ToggleVimMode` variant covers the `/vim-mode` slash-command path.
     /// Toggle the per-tool "Always allow …" prompt options. SHELL-owned; persisted to `[ui].remember_tool_approvals`. Applies to new sessions.
     SetRememberToolApprovals(bool),
@@ -480,7 +479,6 @@ pub enum Action {
     /// SHELL-owned: updates the process-wide cache mirror and persists to `[ui].prompt_suggestions` via `Effect::PersistSetting`.
     SetPromptSuggestions(bool),
     /// Set `[scrollback.scroll].respect_manual_folds`.
-    /// PAGER-owned: live-applied via `AppView::set_appearance` and persisted to pager.toml via `Effect::PersistSetting`.
     SetRespectManualFolds(bool),
     /// Set the canonical for `[ui].default_selected_permission`. Persists via `Effect::PersistSetting`.
     /// Payload is the registry's canonical string (`default` | `allow_once` | `allow_always` | `reject`).
@@ -692,7 +690,7 @@ pub enum Action {
     EnterPlanMode {
         description: Option<String>,
     },
-    /// Set plan mode on/off. Per-session, ACP-mediated (not persisted to config.toml).
+    /// Set plan mode on/off. Per-session, ACP-mediated (not persisted to config.json).
     /// `/plan <desc>` uses `EnterPlanMode` instead because it also starts a turn.
     SetPlanMode(PlanModeKind),
     /// Open the feedback modal (every screen mode).
@@ -803,7 +801,7 @@ pub enum Action {
         plan: Box<crate::diagnostics::FixPlan>,
     },
     DoctorFixCancelled(DoctorFixTarget),
-    /// Persist the memory modal fullscreen preference to config.toml.
+    /// Persist the memory modal fullscreen preference to config.json.
     PersistMemoryFullscreen(bool),
     /// Turn memory on or off for the active session (`t` in the `/memory` modal).
     MemoryToggle {
@@ -990,8 +988,6 @@ pub struct SharedQueueTarget {
     pub expected_version: u64,
 }
 /// Persist-and-notify behavior for [`Effect::PersistPermissionMode`].
-/// Both variants write to `~/.grok/config.toml` and route ACP
-/// `example.invalid/yolo_mode_changed` notifications.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionModePersist {
     /// Typed-setter path: on disk-write failure, revert in-memory state to the prior canonical (`&'static str`).
@@ -1667,7 +1663,7 @@ pub enum Effect {
     /// Persist a plugin CTA dismissal to `[plugin_cta].dismissed`; the locked write sleep-polls the config-init flock, so it must run off the render path.
     /// config-init flock, so it must run off the render path.
     PersistPluginCtaDismissed { plugin_id: String },
-    /// Persist the consent answer to `[consent]` in config.toml.
+    /// Persist the consent answer to `privacy.consent` in config.json.
     PersistConsentAnswer {
         account: Option<String>,
         notice_id: String,
@@ -1676,24 +1672,24 @@ pub enum Effect {
     },
     /// Files the acceptance server side; the local marker is what stops the re-prompt if it fails.
     RecordConsentUpstream { notice_id: String, version: i32 },
-    /// Persist memory modal fullscreen preference to `[hints]` in config.toml.
+    /// Persist memory modal fullscreen preference to `ui.hints` in config.json.
     PersistMemoryFullscreen { fullscreen: bool },
-    /// Persist the dashboard's `[dashboard]` configuration to `~/.grok/config.toml`.
-    /// Multi-pager safe via `config_toml_edit::read_config_document_for_edit`, which loads, modifies, then writes the whole document.
+    /// Persist the dashboard's `ui.dashboard` configuration to `~/.grok/config.json`.
+    /// Multi-pager safe via `config_edit::edit_config_tree`, which loads, modifies, then writes the whole document.
     /// Concurrent pagers may produce last-writer-wins behaviour but never corrupt the file.
     PersistDashboard(crate::views::dashboard::PersistedDashboard),
-    /// Persist a per-command worktree mode preference to `[hints]` in config.toml.
+    /// Persist a per-command worktree mode preference to `ui.hints` in
     /// `config_key` is the TOML key under `[hints]` (`"new_session_worktree_mode"` or `"fork_worktree_mode"`).
     PersistWorktreeMode {
         mode: crate::app::app_view::WorktreeMode,
         config_key: &'static str,
     },
-    /// Persist preferred model (and effort if Some) to config.toml.
+    /// Persist preferred model (and effort if Some) to config.json.
     PersistPreferredModel {
         model_id: acp::ModelId,
         reasoning_effort: Option<ReasoningEffort>,
     },
-    /// Persist the permission mode to config.toml and notify the agent via ACP.
+    /// Persist the permission mode to config.json and notify the agent via ACP.
     /// See [`PermissionModePersist`] for rollback behavior.
     PersistPermissionMode {
         /// One of `"ask"`, `"always-approve"`, or `"default"`.
@@ -1701,7 +1697,7 @@ pub enum Effect {
         session_id: Option<acp::SessionId>,
         persist: PermissionModePersist,
     },
-    /// Persist a typed setting to `~/.grok/config.toml`. On failure,
+    /// Persist a typed setting to `~/.grok/config.json`. On failure,
     /// rolls the in-memory cache back to `rollback_value`.
     PersistSetting {
         key: crate::settings::SettingKey,

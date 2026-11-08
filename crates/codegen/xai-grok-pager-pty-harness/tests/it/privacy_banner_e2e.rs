@@ -191,10 +191,10 @@ fn click_text(pager: &mut PtyHarness, needle: &str) -> Result<()> {
     Ok(())
 }
 
-/// Poll `<home>/.grok/config.toml` for the async `privacy_banner_acked` write.
+/// Poll `<home>/.grok/config.json` for the async `privacy_banner_acked` write.
 /// Pumps PTY output between polls so the pager never blocks on a full output buffer.
 fn wait_for_ack_on_disk(pager: &mut PtyHarness, home: &Path, timeout: Duration) -> Result<()> {
-    let path = home.join(".grok").join("config.toml");
+    let path = home.join(".grok").join("config.json");
     let deadline = Instant::now() + timeout;
     loop {
         let body = std::fs::read_to_string(&path).unwrap_or_default();

@@ -7,7 +7,7 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 16_000;
 
 /// Prefer https `api_base` (same shape as chat). [`Self::stt_ws_url`] derives `wss://`. When `[voice].api_base` is unset,
 /// inherits `[endpoints].xai_api_base_url` so enterprise proxies need no second knob.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct VoiceConfig {
     /// HTTPS API root (or bare host).
@@ -48,7 +48,7 @@ impl VoiceConfig {
     pub fn stt_ws_url(&self) -> Result<String, VoiceError> {
         if self.api_base.trim().is_empty() {
             return Err(VoiceError::Config(
-                "voice has no URL: set [voice] api_base or [endpoints] xai_api_base_url".into(),
+                "voice has no URL: set `ui.voice.api_base` or `endpoints.xai_api_base_url`".into(),
             ));
         }
         let url = ws_url(&self.api_base, &self.stt_ws_path)?;

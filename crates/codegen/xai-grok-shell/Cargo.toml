@@ -59,6 +59,7 @@ regex = { workspace = true }
 xai-grok-mcp = { workspace = true }
 xai-grok-net = { workspace = true }
 serde = { workspace = true }
+schemars = { workspace = true }
 serde_ignored = "0.1"
 serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror = { workspace = true }
@@ -161,6 +162,7 @@ xai-grok-env = { workspace = true }
 xai-dirs = { workspace = true }
 xai-grok-memory = { workspace = true }
 xai-grok-hooks = { path = "../xai-grok-hooks" }
+xai-grok-voice = { path = "../xai-grok-voice", default-features = false }
 xai-hooks-plugins-types = { path = "../xai-hooks-plugins-types" }
 xai-grok-plugin-marketplace = { path = "../xai-grok-plugin-marketplace" }
 xai-file-utils = { path = "../xai-file-utils" }

@@ -717,7 +717,7 @@ pub(crate) fn default_settings_with_subagent_rows(
                           from 100+ tok/s to a crawl mid-response and never recover; a fresh \
                           request usually lands on a healthy one. The tokens/sec indicator \
                           turns amber near this floor and red under it. 0 turns the gate off. \
-                          A model overrides it with `[model.<id>].min_output_tokens_per_sec`.",
+                          A model overrides it with `models.definitions.<id>.min_output_tokens_per_sec`.",
             keywords: &[
                 "tokens",
                 "rate",
@@ -817,8 +817,8 @@ pub(crate) fn default_settings_with_subagent_rows(
             description: "Reissue a model call that has produced no output this many seconds \
                           after the request was sent. It uses the slow-output retries above. \
                           0 turns it off. A provider or model overrides it with \
-                          `[model_providers.<id>].ttft_timeout_secs` or \
-                          `[model.<id>].ttft_timeout_secs`.",
+                          `models.providers.<id>.ttft_timeout_secs` or \
+                          `models.definitions.<id>.ttft_timeout_secs`.",
             keywords: &[
                 "ttft", "first", "token", "timeout", "prefill", "queue", "slow", "stall",
                 "retry", "reissue",
@@ -1150,7 +1150,7 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: false,
         },
-        // PAGER-owned, persisted to `[scrollback.scroll].respect_manual_folds` in pager.toml (NOT config.toml)
+        // PAGER-owned, persisted to `scrollback.scroll.respect_manual_folds` in pager.json (NOT config.json)
         // The live value is the appearance config (`AppView::set_appearance` fans changes out to every agent)
         // The flag is read at use time, so no restart
         SettingMeta {
@@ -1313,7 +1313,7 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: true,
         },
-        // SHELL-owned, persisted to `[ui].scroll_speed` in config.toml.
+        // SHELL-owned, persisted to `ui.scroll_speed` in config.json.
         SettingMeta {
             key: "scroll_speed",
             category: SettingCategory::Mouse,
@@ -1453,7 +1453,7 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: false,
         },
-        // SHELL-owned, persisted to `[ui].default_selected_permission` in config.toml. Canonical
+        // SHELL-owned, persisted to `ui.default_selected_permission` in config.json. Canonical
         // `always_allow_all_sessions` (the effective default) lands the first prompt's cursor on the enable-always-approve
         // row.
         SettingMeta {

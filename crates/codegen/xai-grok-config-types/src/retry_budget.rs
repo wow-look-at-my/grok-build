@@ -38,6 +38,15 @@ fn parse(raw: Raw) -> Result<u32, String> {
     }
 }
 
+pub fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "anyOf": [
+            { "type": "integer", "minimum": -1, "maximum": i64::from(UNLIMITED) - 1 },
+            { "type": "string", "enum": ["unlimited"] }
+        ]
+    })
+}
+
 /// [`UNLIMITED`] is written as `-1`.
 pub fn serialize<S>(value: &Option<u32>, serializer: S) -> Result<S::Ok, S::Error>
 where
