@@ -32,7 +32,6 @@ pub use text_selection::TextSelection;
 pub use watcher::ConfigWatcher;
 
 // Atomic so MarkdownContent can read tab width without an AppearanceConfig handle.
-// Updated by the event loop whenever pager.json is (re)loaded.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 

@@ -224,6 +224,17 @@ jobs:
             -E 'binary_id(xai-grok-pager-pty-harness::it) and (test(/^pty_e2e_smoke::/) or test(/^pty_e2e_config_ui::/) or test(/^pty_e2e_queue::/) or test(/^common::/))' \
             --run-ignored all --test-threads 4
 
+      # Keeps the hyperfine startup benchmark runnable. A boot that fails or never exits fails the step.
+      - name: Startup benchmark (hyperfine)
+        if: ${{ matrix.name == 'PTY 1/3' && !cancelled() }}
+        timeout-minutes: 10
+        run: |
+          sudo apt-get install -y --no-install-recommends hyperfine
+          scripts/bench-startup.sh pager --binary "$PAGER_BINARY" \
+            --seed-binary "${{ github.workspace }}/target/debug/startup-resume-seed" --runs 3 --warmup 1
+          scripts/bench-startup.sh watchers --examples-dir "${{ github.workspace }}/target/debug/examples" \
+            --runs 3 --warmup 1
+
   # Clippy shares no artifact with the test build, so it needs nothing from build-test.
   lint:
     name: Clippy

@@ -380,7 +380,6 @@ pub struct EditBlockConfig {
     pub gutter_bg: bool,
     pub indent_bg: bool,
     /// Show the +N/-M line summary in the collapsed header.
-    /// `None` (default) follows the shell-owned `collapsed_edit_blocks` flag; an explicit pager.json value pins the shape regardless of the flag.
     pub line_summary: Option<bool>,
     /// Whether Edit blocks start expanded. Fold shape is [`Self::effective_expanded`].
     pub expanded_by_default: Option<bool>,
@@ -473,14 +472,13 @@ pub struct ThinkingConfig {
     /// It respects muted_collapsed when collapsed. When false (default), the header is always dim/muted gray.
     pub header_bright: bool,
     /// Render the reasoning body de-emphasized (SGR dim and italic) on top of the `bg_blend` fade.
-    /// **Not a pager.json key**: minimal mode sets it because there the fade alone cannot separate reasoning from the answer.
     pub body_dim_italic: bool,
     /// Append a dim "(ctrl+e to expand)" hint to the *collapsed* header when it fits on the same row (never adds a row).
     /// **Not a pager.json key**: minimal mode sets it, the only mode where a folded block cannot be unfolded in place.
     pub collapsed_expand_hint: bool,
     /// Draw the reasoning rail inside the body lines (a `┃ ` prefix directly below the header's bullet) instead of painting the reserved accent column.
     /// The rail then sits under the diamond rather than beside it.
-    /// **Not a pager.json key**: minimal mode sets it so every block's bullet stays flush at column 0.
+    /// the first column.
     pub rail_under_bullet: bool,
 }
 
@@ -982,8 +980,6 @@ pub struct RawEditBlockConfig {
     /// true = skip indent, false = include indent in background.
     pub indent_bg: bool,
     /// Show the +N/-M line summary in the collapsed header.
-    /// Unset or `null`, it follows `ui.collapsed_edit_blocks` in config.json.
-    /// A value pins it either way.
     pub line_summary: Option<bool>,
     /// Unset follows `ui.collapsed_edit_blocks`. A true flag collapses even when this is true.
     /// An explicit false still collapses when the flag is off.

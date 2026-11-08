@@ -11370,7 +11370,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "xai-bench",
  "xai-spawn",
  "xai-test-utils",
  "xai-tracing-macros",

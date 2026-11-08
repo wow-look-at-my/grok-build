@@ -157,7 +157,7 @@ Set these in `~/.grok/config.json`:
 
 Plugins are off by default, so list one in `enabled` to turn it on, or in `disabled` to discover it but skip loading it. Each entry is a plain plugin name (from `grok plugin list`) or a full ID (`<scope>/<hash>/<name>`).
 
-To hide the plugins and hooks interface entirely, set `"disable_plugins": true` in `~/.grok/pager.json`.
+To hide the plugins and hooks interface fully, set `"disable_plugins": true` in `~/.grok/pager.json`.
 
 ---
 

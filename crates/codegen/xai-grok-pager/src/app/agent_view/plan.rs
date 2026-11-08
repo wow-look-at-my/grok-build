@@ -97,7 +97,7 @@ impl AgentView {
         self.plan_file_path().is_some_and(|path| path.is_file())
     }
     /// Whether the "plan" status-bar chip should be rendered.
-    /// Visible while plan mode is active, or always when the user has set `"show_plan_chip": true` in `pager.json`.
+    /// plan mode is active, or always when the user has set
     /// Hidden by default once the user exits plan mode.
     pub(super) fn should_show_plan_chip(
         &self,

@@ -99,6 +99,15 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 model_windows: crate::settings::context_limits::catalog_windows(
                     &agent.session.models.available,
                 ),
+                model_routes: crate::settings::context_limits::catalog_routes(
+                    &agent.session.models.available,
+                ),
+                current_model_id: agent
+                    .session
+                    .models
+                    .current
+                    .as_ref()
+                    .map(|id| id.0.to_string()),
                 context_limits: context_limits_from_app.clone(),
             };
             if coding_data_sharing_lock_from_app.is_some()
@@ -251,6 +260,15 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         model_windows: crate::settings::context_limits::catalog_windows(
             &agent.session.models.available,
         ),
+        model_routes: crate::settings::context_limits::catalog_routes(
+            &agent.session.models.available,
+        ),
+        current_model_id: agent
+            .session
+            .models
+            .current
+            .as_ref()
+            .map(|id| id.0.to_string()),
         context_limits: context_limits_from_app,
     };
     let mut state = Box::new(SettingsModalState::new(
@@ -598,6 +616,8 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         voice_stt_language: app.voice_config.language.clone(),
         subagent_model_inheritance: app.subagent_model_inheritance,
         model_windows: agent_model_windows(app),
+        model_routes: agent_model_routes(app),
+        current_model_id: agent_current_model_id(app),
         context_limits: app.model_context_limits.clone(),
     }
 }
@@ -609,6 +629,29 @@ fn agent_model_windows(app: &AppView) -> std::collections::BTreeMap<String, u64>
         return crate::settings::context_limits::catalog_windows(&agent.session.models.available);
     }
     std::collections::BTreeMap::new()
+}
+
+fn agent_model_routes(app: &AppView) -> std::collections::BTreeMap<String, String> {
+    if let ActiveView::Agent(id) = app.active_view
+        && let Some(agent) = app.agents.get(&id)
+    {
+        return crate::settings::context_limits::catalog_routes(&agent.session.models.available);
+    }
+    std::collections::BTreeMap::new()
+}
+
+fn agent_current_model_id(app: &AppView) -> Option<String> {
+    if let ActiveView::Agent(id) = app.active_view
+        && let Some(agent) = app.agents.get(&id)
+    {
+        return agent
+            .session
+            .models
+            .current
+            .as_ref()
+            .map(|m| m.0.to_string());
+    }
+    None
 }
 
 /// Map a `(SettingKey, SettingValue)` to the matching typed `Action::SetX(value)`.
