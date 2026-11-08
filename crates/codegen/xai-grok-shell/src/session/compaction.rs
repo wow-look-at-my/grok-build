@@ -1116,6 +1116,12 @@ impl SessionActor {
         }
         let model_id = sampling_config.map(|c| c.model).unwrap_or_default();
         let (sampling_client, sampling_config) = self.compaction_sampler().await?;
+        self.send_xai_notification(
+            crate::extensions::notification::SessionUpdate::CompactionModel {
+                model: sampling_config.model.to_string(),
+            },
+        )
+        .await;
         let summary_strips_reasoning =
             strips_reasoning_for_summary(&sampling_client, &model_id, &sampling_config.model);
         // The compaction model reads the input, so its window sizes the input budgets.
