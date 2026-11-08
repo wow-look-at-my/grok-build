@@ -1689,6 +1689,22 @@ async fn load_effort_precedence_prefers_meta_hint_over_persisted() {
         Some(ReasoningEffort::Low),
     );
 }
+/// The real restore path never lands an effort-capable session on no effort.
+/// Only an explicit `none` turns reasoning off.
+#[tokio::test]
+async fn a_restored_session_with_no_effort_anywhere_still_gets_one() {
+    use xai_grok_sampling_types::ReasoningEffort;
+    let landed = restore_effort_via_load(None, None).await;
+    assert!(
+        landed.is_some_and(|effort| effort != ReasoningEffort::None),
+        "nothing chose an effort, so the default applies: {landed:?}"
+    );
+    assert_eq!(
+        restore_effort_via_load(Some(ReasoningEffort::None), None).await,
+        Some(ReasoningEffort::None),
+        "an explicit none is kept"
+    );
+}
 /// A session persisted under a routing *slug* (not the catalog map key) must still get reasoning modes and a selected model.
 /// `session_config_options` resolves the id to the catalog key before the catalog effort lookups and the selected-model match.
 #[tokio::test]
