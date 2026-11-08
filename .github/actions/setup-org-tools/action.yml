@@ -37,5 +37,39 @@ runs:
           sudo curl -fsSL -o "/usr/local/lib/${tool}/${tool}" "$url"
           printf '#!/bin/sh\nexec sh /usr/local/lib/%s/%s "$@"\n' "$tool" "$tool" | sudo tee "/usr/local/bin/${tool}" > /dev/null
           sudo chmod +x "/usr/local/bin/${tool}"
+          # Each build boots through a separate loader, apeld-<os>-<arch>. Its header takes APE_LOADER, then /usr/local/lib/ape, /usr/lib/ape and PATH. It unpacks the copy it carries only into a writable directory, and a jailed process gets none. The header names that copy and the dd line that unpacks it, so unpack it here and install it where the header searches.
+          sudo mkdir -p /usr/local/lib/ape
+          loader="/usr/local/lib/ape/apeld-${os}-${arch}"
+          if [ ! -x "$loader" ]; then
+            stage=$(mktemp -d)
+            recipe=""
+            skip=""
+            count=""
+            if grep -a -A16 "l=apeld-${os}-${arch}" "/usr/local/lib/${tool}/${tool}" > "${stage}/branch" \
+              && recipe=$(grep -a -m1 'dd if=' "${stage}/branch"); then
+              skip=$(printf '%s' "$recipe" | sed -n 's/.*skip=\([0-9][0-9]*\).*/\1/p')
+              count=$(printf '%s' "$recipe" | sed -n 's/.*count=\([0-9][0-9]*\).*/\1/p')
+              if [ -n "$skip" ] && [ -n "$count" ]; then
+                dd if="/usr/local/lib/${tool}/${tool}" bs=512 skip="$skip" count="$count" 2>/dev/null > "${stage}/raw"
+                case "$recipe" in
+                  *gzip*)
+                    # A failed decompression leaves no loader, so nothing gets installed.
+                    if ! gzip -dc < "${stage}/raw" > "${stage}/apeld" 2>/dev/null; then
+                      rm -f "${stage}/apeld"
+                    fi
+                    ;;
+                  *) cp "${stage}/raw" "${stage}/apeld" ;;
+                esac
+              fi
+            fi
+            # Only a loader that boots this tool is worth installing.
+            if [ -s "${stage}/apeld" ]; then
+              chmod 755 "${stage}/apeld"
+              if APE_LOADER="${stage}/apeld" sh "/usr/local/lib/${tool}/${tool}" --version > /dev/null 2>&1; then
+                sudo install -m 755 "${stage}/apeld" "$loader"
+              fi
+            fi
+            rm -rf "$stage"
+          fi
           "$tool" --version
         done
