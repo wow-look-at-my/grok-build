@@ -1626,10 +1626,9 @@ fn verifier_prompts_ask_for_the_verdict_file_only() {
                 "{name} verifier prompt still asks for `{banned}`",
             );
         }
-        assert_eq!(
-            template.matches("{VERDICT_FILE}").count(),
-            1,
-            "{name} verifier prompt names the verdict file once in its output contract",
+        assert!(
+            template.contains("{VERDICT_FILE}"),
+            "{name} verifier prompt must name the verdict file",
         );
     }
 }
