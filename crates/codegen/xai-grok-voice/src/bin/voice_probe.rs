@@ -138,8 +138,9 @@ fn load_config(path: Option<&std::path::Path>) -> VoiceConfig {
         return VoiceConfig::from_config_table(&table, env_base.as_deref());
     }
     if let Some(home) = xai_dirs::resolve_grok_home()
-        && let Ok(raw) = std::fs::read_to_string(home.join("config.toml"))
-        && let Ok(table) = toml::from_str::<toml::Table>(&raw)
+        && let Ok(toml::Value::Table(table)) = xai_grok_config::load_toml_file(
+            &xai_grok_config::format::resolve_config_file(&home, xai_grok_config::CONFIG_STEM),
+        )
     {
         return VoiceConfig::from_config_table(&table, env_base.as_deref());
     }
@@ -157,7 +158,7 @@ Environment:
   XAI_API_KEY     required
   RUST_LOG        optional (default info,xai_grok_voice=debug)
 
-Reads [voice] from ~/.grok/config.toml unless --config PATH is set.
+Reads `ui.voice` from ~/.grok/config.json unless --config PATH is set.
 "#
     );
 }

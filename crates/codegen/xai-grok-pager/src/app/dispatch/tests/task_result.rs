@@ -1397,7 +1397,7 @@ fn switch_to_non_reasoning_model_clears_persisted_effort() {
         }) => {
             assert_eq!(
                 *reasoning_effort, None,
-                "persisted effort must be None so config.toml clears the stale value",
+                "persisted effort must be None so config.json clears the stale value",
             );
         }
         other => panic!("expected PersistPreferredModel, got {other:?}"),

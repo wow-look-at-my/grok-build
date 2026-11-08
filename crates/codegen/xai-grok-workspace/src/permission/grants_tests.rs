@@ -57,7 +57,7 @@ fn protected_target_covers_edits_and_creation_operands() {
     assert_eq!(None, protected(AccessKind::Bash("touch notes.md".into())));
     for path in [
         ".git/hooks/pre-commit",
-        ".grok/config.toml",
+        ".grok/config.json",
         "/home/user/.ssh/config",
     ] {
         assert!(

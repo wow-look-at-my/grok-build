@@ -17,7 +17,7 @@ use crate::sampling::ApiBackend;
 /// Every field here is also a `[model.<id>]` field, and the model's own value
 /// always wins. What is NOT here is what identifies one model: `model`,
 /// `name`, `description`.
-#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ModelProviderConfig {
     pub base_url: Option<String>,
@@ -68,13 +68,24 @@ pub struct ModelProviderConfig {
     /// Suppress the modelinfo price lookup for this provider's models.
     pub pricing_lookup_enabled: Option<bool>,
     /// Extra top-level fields merged into every request body this provider serves.
+    #[schemars(with = "IndexMap<String, serde_json::Value>")]
     pub extra_body: IndexMap<String, toml::Value>,
     /// Request-body cap of this endpoint; inherited by models that set none of their own.
     pub max_request_bytes: Option<NonZeroU64>,
 }
 
 /// The shape of a provider's model listing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelsListDialect {
     /// `GET <base>/models` answering `{ "data": [...] }`.
@@ -95,7 +106,17 @@ impl ModelsListDialect {
 }
 
 /// Which of a local runtime's windows reaches the catalog.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Deserialize,
+    serde::Serialize,
+    schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextWindowSource {
     /// The window the loaded instance is running at.
@@ -236,7 +257,7 @@ pub(crate) fn parse_model_providers(
         warnings.push(ConfigWarning::model_provider_section(
             ConfigWarningKind::NotATable,
             format!(
-                "`model_providers` must be a table of [model_providers.<id>] entries, got {}; \
+                "`models.providers` must be an object of `<id>` entries, got {}; \
                  all model providers ignored",
                 section.type_str()
             ),

@@ -849,7 +849,7 @@ fn fixture_homes(
     let grok = unique_temp_dir(&format!("{tag}-grok"));
     let workspace = unique_temp_dir(&format!("{tag}-ws"));
     fs::write(grok.join(xai_grok_config::SANDBOX_CONFIG_FILENAME), "")
-        .expect("empty global sandbox.toml");
+        .expect("empty global sandbox.json");
     (
         home.clone(),
         grok.clone(),
@@ -883,9 +883,11 @@ fn run_deny_case(
     fs::write(
         tmp.join(".grok")
             .join(xai_grok_config::SANDBOX_CONFIG_FILENAME),
-        format!("[profiles.{profile}]\nextends = \"workspace\"\ndeny = [{deny_list}]\n"),
+        format!(
+            "{{\"profiles\": {{\"{profile}\": {{\"extends\": \"workspace\", \"deny\": [{deny_list}]}}}}}}\n"
+        ),
     )
-    .expect("write sandbox.toml");
+    .expect("write sandbox.json");
     fs::create_dir_all(grok.join("hooks")).expect("mkdir fixture hooks");
     fs::write(grok.join("hooks-paths"), b"").expect("write fixture hooks-paths");
     for rel in targets {
@@ -998,9 +1000,9 @@ fn read_deny_marker_spoof_refused() {
     fs::create_dir_all(workspace.join(".grok")).expect("mkdir .grok");
     fs::write(
             workspace.join(".grok").join(xai_grok_config::SANDBOX_CONFIG_FILENAME),
-            "[profiles.netspoof]\nextends = \"devbox\"\nrestrict_network = true\ndeny = [\"secret.pem\"]\n",
+            r#"{"profiles": {"netspoof": {"extends": "devbox", "restrict_network": true, "deny": ["secret.pem"]}}}"#,
         )
-        .expect("write sandbox.toml");
+        .expect("write sandbox.json");
     fs::write(workspace.join("secret.pem"), format!("SECRET={MARKER}")).expect("write secret");
     let exe = std::env::current_exe().expect("current_exe");
     let mut cmd = Command::new(exe);
@@ -1034,9 +1036,9 @@ fn read_deny_forged_mounts_are_refused() {
         workspace
             .join(".grok")
             .join(xai_grok_config::SANDBOX_CONFIG_FILENAME),
-        "[profiles.forged]\nextends = \"devbox\"\ndeny = [\"secret.pem\"]\n",
+        r#"{"profiles": {"forged": {"extends": "devbox", "deny": ["secret.pem"]}}}"#,
     )
-    .expect("write sandbox.toml");
+    .expect("write sandbox.json");
     let secret = workspace.join("secret.pem");
     fs::write(&secret, format!("SECRET={MARKER}")).expect("write secret");
     fs::set_permissions(&secret, fs::Permissions::from_mode(0o000)).expect("chmod secret");
@@ -1085,9 +1087,9 @@ fn read_deny_empty_set_verifies_inside_bwrap() {
         workspace
             .join(".grok")
             .join(xai_grok_config::SANDBOX_CONFIG_FILENAME),
-        "[profiles.netempty]\nextends = \"devbox\"\nrestrict_network = true\n",
+        r#"{"profiles": {"netempty": {"extends": "devbox", "restrict_network": true}}}"#,
     )
-    .expect("write sandbox.toml");
+    .expect("write sandbox.json");
     let exe = std::env::current_exe().expect("current_exe");
     let mut cmd = Command::new(exe);
     apply_fixture_env(&mut cmd, &home, &grok, &workspace);

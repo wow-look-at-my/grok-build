@@ -1,14 +1,9 @@
 //! Folder-trust store ("do you trust this folder?").
 //!
-//! Persists per-folder trust decisions to `~/.grok/trusted_folders.toml`.
+//! Persists per-folder trust decisions to `~/.grok/trusted_folders.json`.
 //! This is the durable backing store for the VS-Code-style folder-trust gate that decides whether repo-local MCP / LSP servers may spawn.
 //! Those servers run arbitrary commands from repo-controlled config files.
 //!
-//! TOML shape:
-//! ```toml
-//! [folders."/abs/repo/root"]
-//! trusted = true
-//! decided_at = 1780000000
 //! ```
 //!
 //! A recorded grant covers that workspace key and descendants that still resolve to the same git root ([`workspace_key`]).
@@ -19,7 +14,7 @@
 //! The store is rooted at a fresh [`xai_dirs::resolve_grok_home`], never `grok_home()` or a cwd-relative `./.grok`.
 //! Home is `None` when `$GROK_HOME` and the user home are unset, or when the resolved home is relative.
 //! In that no-home environment [`TrustStore::load`] yields an empty store that trusts nothing and persists nothing.
-//! So a cloned repo can never ship a `./.grok/trusted_folders.toml` that self-trusts its own checkout (fail closed).
+//! So a cloned repo can never ship a `./.grok/trusted_folders.json` that self-trusts its own checkout (fail closed).
 
 use std::collections::BTreeMap;
 use std::io;
@@ -42,7 +37,7 @@ pub struct FolderTrust {
     pub decided_at: Option<i64>,
 }
 
-/// On-disk document shape for `trusted_folders.toml`.
+/// On-disk document shape for `trusted_folders.json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct TrustDocument {
     #[serde(default)]
@@ -353,10 +348,17 @@ impl TrustStore {
             }
             Err(e) => return Err(e),
         };
-        match toml::from_str::<TrustDocument>(&contents) {
-            Ok(doc) => Ok(StoreRead::Document(doc)),
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
-        }
+        let parsed = match xai_grok_config::format::ConfigFormat::of(path) {
+            xai_grok_config::format::ConfigFormat::Json => {
+                serde_json::from_str::<TrustDocument>(&contents)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            }
+            xai_grok_config::format::ConfigFormat::Toml => {
+                toml::from_str::<TrustDocument>(&contents)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+            }
+        };
+        parsed.map(StoreRead::Document)
     }
 
     /// Write `doc` to `path` atomically (unique temp, fsync, rename) with owner-only (`0600`) permissions. Uses a unique temp file in the destination directory so concurrent writers never share a temp path.
@@ -372,8 +374,19 @@ impl TrustStore {
         })?;
         std::fs::create_dir_all(parent)?;
 
-        let body = toml::to_string_pretty(doc)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let value =
+            serde_json::to_value(doc).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let body = match value {
+            serde_json::Value::Object(map) => {
+                xai_grok_config::format::to_config_json_string(&map, None)
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "trust store document is not an object",
+                ));
+            }
+        };
         if let Some(result) = xai_grok_config::host_write::try_write(path, &body, Some(0o600)) {
             return result;
         }
@@ -671,7 +684,7 @@ mod tests {
     fn migrate_legacy_hook_trust_does_not_rename_on_unreadable_store() {
         let tmp = tempfile::tempdir().unwrap();
         let store_path = tmp.path().join(TRUST_FILE_NAME);
-        std::fs::write(&store_path, b"[[[not toml").unwrap();
+        std::fs::write(&store_path, b"{[[not json").unwrap();
         let project = tmp.path().join("repo");
         std::fs::create_dir_all(&project).unwrap();
         let legacy = tmp.path().join("trusted-hook-projects");
@@ -1167,7 +1180,7 @@ mod tests {
         // The empty path is a prefix of every path, so honoring it would trust the whole filesystem (fail open)
         let tmp = tempfile::tempdir().unwrap();
         let store_path = tmp.path().join(TRUST_FILE_NAME);
-        std::fs::write(&store_path, "[folders.\"\"]\ntrusted = true\n").unwrap();
+        std::fs::write(&store_path, r#"{"folders": {"": {"trusted": true}}}"#).unwrap();
 
         let store = TrustStore::load_from(store_path);
         // The record loads, so this exercises the read-side guard (not a parse drop).
@@ -1183,7 +1196,7 @@ mod tests {
         // Corrupt TOML must fail closed: empty store, trust nothing, no panic.
         let tmp = tempfile::tempdir().unwrap();
         let store_path = tmp.path().join(TRUST_FILE_NAME);
-        std::fs::write(&store_path, "this is not = valid toml [[[").unwrap();
+        std::fs::write(&store_path, "this is not { valid json [[[").unwrap();
 
         let store = TrustStore::load_from(store_path);
         assert!(store.is_empty(), "malformed store must load as empty");
@@ -1196,7 +1209,7 @@ mod tests {
         // The root is a prefix of all of them via the cascade, so it is ignored on read even if it reaches the file by hand-edit / migration
         let tmp = tempfile::tempdir().unwrap();
         let store_path = tmp.path().join(TRUST_FILE_NAME);
-        std::fs::write(&store_path, "[folders.\"/\"]\ntrusted = true\n").unwrap();
+        std::fs::write(&store_path, r#"{"folders": {"/": {"trusted": true}}}"#).unwrap();
 
         let store = TrustStore::load_from(store_path);
         assert!(!store.is_empty(), "root-key record should still load");
@@ -1217,8 +1230,7 @@ mod tests {
             std::fs::write(
                 &store_path,
                 format!(
-                    "[folders.'/a/b']\ntrusted = {trusted_ab}\n\
-                     [folders.'/a/b/']\ntrusted = {trusted_ab_slash}\n"
+                    r#"{{"folders": {{"/a/b": {{"trusted": {trusted_ab}}}, "/a/b/": {{"trusted": {trusted_ab_slash}}}}}}}"#
                 ),
             )
             .unwrap();
@@ -1255,12 +1267,10 @@ mod tests {
         let canonical_home = canonicalize_or_owned(&home);
         let tmp = tempfile::tempdir().unwrap();
         let store_path = tmp.path().join(TRUST_FILE_NAME);
-        // TOML literal-string key avoids escaping issues on any platform.
-        let body = format!(
-            "[folders.'{}']\ntrusted = true\n",
-            canonical_home.to_string_lossy()
-        );
-        std::fs::write(&store_path, body).unwrap();
+        let body = serde_json::json!({
+            "folders": { canonical_home.to_string_lossy(): { "trusted": true } }
+        });
+        std::fs::write(&store_path, body.to_string()).unwrap();
 
         let store = TrustStore::load_from(store_path);
         let sub = canonical_home.join("some").join("sub");
@@ -1413,12 +1423,9 @@ mod tests {
     fn corrupt_store_is_not_rewritten_by_set_trusted() {
         let tmp = tempfile::tempdir().unwrap();
         let store_path = tmp.path().join(TRUST_FILE_NAME);
-        let good = br#"
-[folders."/tmp/keep"]
-trusted = true
-"#;
+        let good = br#"{"folders": {"/tmp/keep": {"trusted": true}}}"#;
         std::fs::write(&store_path, good).unwrap();
-        let corrupt = b"this is not toml [[[";
+        let corrupt = b"this is not json {[[";
         std::fs::write(&store_path, corrupt).unwrap();
         let before = std::fs::read(&store_path).unwrap();
 

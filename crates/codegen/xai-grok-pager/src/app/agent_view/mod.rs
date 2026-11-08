@@ -605,7 +605,7 @@ pub struct PluginCtaState {
     pub expects_mcp: bool,
     /// Post-install MCP-list re-probe counter, reset on each `AwaitingMcps` entry and bounded by the poll budget.
     pub mcp_attempt: u32,
-    /// Dismissed plugin ids, cached from `config.toml` on catalog load so the matched-debounce recompute never reads the config from disk.
+    /// Dismissed plugin ids, cached from `config.json` on catalog load so the matched-debounce recompute never reads the config from disk.
     pub dismissed: std::collections::HashSet<String>,
 }
 /// Follow-up suggestion chips for the latest assistant response
@@ -1587,11 +1587,13 @@ fn is_hash_key(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('#')
         || (key.code == KeyCode::Char('3') && key.modifiers.contains(KeyModifiers::SHIFT))
 }
-/// Check `[features] remember_mode` in config.toml. Defaults to `false`.
+/// Check `features.remember_mode` in config.json. Defaults to `false`.
 fn remember_mode_enabled() -> bool {
-    let path =
-        xai_grok_tools::util::grok_home::grok_home().join(xai_grok_config::USER_CONFIG_FILENAME);
-    let Some(doc) = crate::config_toml_edit::read_config_document_for_edit(&path) else {
+    let home = xai_grok_tools::util::grok_home::grok_home();
+    let Ok(path) = xai_grok_config::user_config_file(&home) else {
+        return false;
+    };
+    let Some(doc) = crate::config_edit::read_config_tree_for_edit(&path) else {
         return false;
     };
     doc.get("features")

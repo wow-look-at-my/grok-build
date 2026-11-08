@@ -7,7 +7,7 @@ fn expect_agent(app: &AppView, id: AgentId) -> &AgentView {
     agent
 }
 /// `Action::ToggleVimMode` flips the active agent's `vim_mode` field and the in-process pager cache (`load_vim_mode`) that seeds future agents.
-/// It emits `Effect::PersistSetting` so the new value lands in `[ui].vim_mode` in config.toml, and a second toggle restores the original.
+/// It emits `Effect::PersistSetting` so the new value lands in `ui.vim_mode` in config.json, and a second toggle restores the original.
 /// End-to-end: in vim mode, Tab from the prompt focuses scrollback, and `j` then navigates the scrollback instead of bouncing back to the prompt.
 /// Drives the real loop from handle_input through dispatch.
 /// `/vim-mode` (ToggleVimMode) must propagate to OPEN subagent views, not just top-level agents.
@@ -1099,7 +1099,7 @@ fn every_setting_has_action_for_reset_arm() {
     });
 }
 /// Every setting whose setter emits `Effect::PersistSetting` MUST have an `apply_setting_rollback` arm.
-/// A failed disk write rolls back through it, and a missing arm silently diverges in-memory state from `config.toml`.
+/// A failed disk write rolls back through it, and a missing arm silently diverges in-memory state from `config.json`.
 /// Drives each setter (move away, then reset) to discover which keys actually persist, then asserts the rollback hits a real arm (not the catch-all).
 #[test]
 fn every_persisting_setting_has_rollback_arm() {
@@ -1133,7 +1133,7 @@ fn every_persisting_setting_has_rollback_arm() {
                     toast.as_deref(),
                     Some(crate::app::dispatch::ROLLBACK_NO_ARM_TOAST),
                     "Setting `{key}` emits Effect::PersistSetting but apply_setting_rollback has \
-                     no arm — a failed persist diverges in-memory state from config.toml. Add an arm.",
+                     no arm — a failed persist diverges in-memory state from config.json. Add an arm.",
                 );
             }
         }

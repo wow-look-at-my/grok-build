@@ -923,7 +923,7 @@ fn marketplace_add(url: &str, force: bool) -> Result<()> {
     let grok_home = xai_grok_config::grok_home();
     let _flock = xai_grok_shell::util::config::acquire_init_lock(&grok_home)?;
     plugin::add_marketplace_source(
-        &grok_home.join(xai_grok_config::USER_CONFIG_FILENAME),
+        &xai_grok_config::user_config_file(&grok_home)?,
         &name,
         &input,
         is_official,
@@ -1013,9 +1013,9 @@ fn marketplace_remove(
     let uninstalled = plugin::uninstall_marketplace_source_plugins(&identity)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    // Shared remove-write core (same as the shell modal): config.toml with the
+    // Shared remove-write core (same as the shell modal): config.json with the
     // official flag folded in, JSON stores as fallback.
-    let config_path = grok_home.join(xai_grok_config::USER_CONFIG_FILENAME);
+    let config_path = xai_grok_config::user_config_file(&grok_home)?;
     if plugin::remove_marketplace_source_from_stores(&config_path, &identity)?
         == plugin::MarketplaceSourceRemoval::NotFound
     {

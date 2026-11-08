@@ -217,19 +217,19 @@ pub(crate) fn trust_env(feature_on: bool) -> [(&'static str, &'static str); 2] {
 }
 
 /// Filename of the folder-trust store under `$HOME/.grok`.
-pub(crate) const TRUST_FILE_NAME: &str = "trusted_folders.toml";
+pub(crate) const TRUST_FILE_NAME: &str = "trusted_folders.json";
 
-/// Whether the `trusted_folders.toml` at `store_path` records a grant covering `query`.
-/// Reads the on-disk document (`[folders."<canonical path>"] trusted = <bool>`) the way
+/// Whether the `trusted_folders.json` at `store_path` records a grant covering `query`.
+/// Reads the on-disk document (`{"folders": {"<canonical path>": {"trusted": <bool>}}}`) the way
 /// `TrustStore::is_trusted` does: the most specific recorded ancestor of the canonical query decides.
 pub(crate) fn store_trusts(store_path: &Path, query: &Path) -> bool {
     let Ok(text) = std::fs::read_to_string(store_path) else {
         return false;
     };
-    let Ok(doc) = text.parse::<toml::Table>() else {
+    let Ok(doc) = serde_json::from_str::<serde_json::Value>(&text) else {
         return false;
     };
-    let Some(folders) = doc.get("folders").and_then(toml::Value::as_table) else {
+    let Some(folders) = doc.get("folders").and_then(serde_json::Value::as_object) else {
         return false;
     };
     let query = dunce::canonicalize(query).unwrap_or_else(|_| query.to_path_buf());
@@ -238,7 +238,7 @@ pub(crate) fn store_trusts(store_path: &Path, query: &Path) -> bool {
         .filter(|(folder, _)| query.starts_with(folder))
         .max_by_key(|(folder, _)| Path::new(folder).components().count())
         .is_some_and(|(_, record)| {
-            record.get("trusted").and_then(toml::Value::as_bool) == Some(true)
+            record.get("trusted").and_then(serde_json::Value::as_bool) == Some(true)
         })
 }
 

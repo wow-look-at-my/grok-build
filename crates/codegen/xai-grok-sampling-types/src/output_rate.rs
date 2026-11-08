@@ -25,7 +25,7 @@ pub const DEFAULT_SUSTAINED_SECS: u64 = 10;
 
 /// A floor on output tokens/sec. A response whose rate stays under it for
 /// `sustained_secs` is abandoned and reissued.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct OutputRateFloorPolicy {
     /// Reissue below this many output tokens per second. Zero disables the gate.
     #[serde(default)]

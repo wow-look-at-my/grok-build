@@ -69,7 +69,7 @@ impl TryFrom<CampaignOverrideWire> for CampaignOverride {
 /// Every field is `Option` with a per-field default, so a partial object parses and unknown future keys are ignored.
 /// Unset fields fall through per-field in `resolve_doom_loop_recovery`: env, then TOML, then remote, then default.
 /// The namespace is distinct from the removed legacy `doom_loop_*` keys.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct DoomLoopRecoverySettings {
     /// Send the `x-grok-doom-loop-check` header, parse the reported triggers, and resample confident loops.
@@ -81,13 +81,14 @@ pub struct DoomLoopRecoverySettings {
     pub max_threshold: Option<u32>,
     /// Resample budget per turn. `-1` or `"unlimited"` never runs out.
     #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "retry_budget::json_schema")]
     pub max_retries: Option<u32>,
     /// Detector window sent as the value of `x-grok-doom-loop-check` (honored in 512..=4096, otherwise 4096; absent uses the client default, 1024).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_tokens: Option<u32>,
 }
 /// Shared shape of the `[long_reasoning_reminder]` TOML table and the remote `long_reasoning_reminder` object; unset fields fall through per field.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct LongReasoningReminderSettings {
     /// Mid-turn reminder to reason briefly after a long hidden-reasoning call; default off.
@@ -103,7 +104,7 @@ pub struct LongReasoningReminderSettings {
 /// Advanced knobs for the output-rate floor: the `[output_rate_floor]` TOML
 /// table. Every field is `Option` so a partial table never fails the parse
 /// and each key falls through to the client default on its own.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct OutputRateFloorSettings {
     /// Trailing window the rate is measured over, in seconds.
@@ -111,6 +112,7 @@ pub struct OutputRateFloorSettings {
     pub window_secs: Option<u64>,
     /// Reissue budget per model call. `-1` or `"unlimited"` never runs out.
     #[serde(with = "retry_budget", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "retry_budget::json_schema")]
     pub max_retries: Option<u32>,
 }
 
@@ -126,6 +128,20 @@ impl Serialize for WorktreeKindMaxAge {
             Self::Secs(n) => serializer.serialize_u64(*n),
             Self::Never => serializer.serialize_str("never"),
         }
+    }
+}
+impl schemars::JsonSchema for WorktreeKindMaxAge {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "WorktreeKindMaxAge".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Seconds, or \"never\".",
+            "anyOf": [
+                { "type": "integer", "minimum": 0 },
+                { "type": "string", "pattern": "^([Nn][Ee][Vv][Ee][Rr]|[0-9]+)$" }
+            ]
+        })
     }
 }
 impl<'de> Deserialize<'de> for WorktreeKindMaxAge {
@@ -165,7 +181,7 @@ impl<'de> Deserialize<'de> for WorktreeKindMaxAge {
 }
 /// Policy from the local `[worktree.auto_gc]` table or the remote `worktree_auto_gc` object.
 /// Each field deserializes tolerantly, so one bad key cannot drop a sibling kill-switch.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct WorktreeAutoGcSettings {
     /// `Some(false)` is a kill-switch; absent defaults to on (an env kill still applies).
@@ -461,11 +477,9 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub active_agent_messages_enabled: Option<bool>,
     /// File toolset: `"standard"` or `"hashline"`.
-    /// This is the server-side default; local `[toolset] file_toolset` in config.toml takes precedence when set.
     #[serde(default)]
     pub file_toolset: Option<String>,
     /// Per-chunk idle timeout in seconds for inference streaming.
-    /// It is the fallback when no per-model `inference_idle_timeout_secs` is set in config.toml.
     #[serde(default)]
     pub inference_idle_timeout_secs: Option<u64>,
     #[serde(default)]
@@ -475,7 +489,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub mcp_startup_timeout_secs: Option<u64>,
     /// Global default MCP tool-result inline cap (bytes), from remote settings `grok_build_settings.max_mcp_output_bytes`.
-    /// Requirements, env, and `config.toml [mcp] max_output_bytes` override it. The built-in default is 20_000.
+    /// Requirements, env, and `mcp.max_output_bytes` in config.json override it.
     #[serde(default)]
     pub max_mcp_output_bytes: Option<u64>,
     /// When `Some(true)`, enable session registry hooks (register, update, finalize, memory upload).
@@ -647,7 +661,7 @@ pub struct RemoteSettings {
     pub slash_command_tags: Option<std::collections::BTreeMap<String, String>>,
     /// When present, controls the non-Git-repo warning at session start.
     /// It arrives as `non_git_warning` in `grok_build_settings`.
-    /// It takes precedence over `[features] non_git_warning` in config.toml.
+    /// It takes precedence over `features.non_git_warning` in config.json.
     /// `Some(true)` enables, `Some(false)` acts as a kill-switch, `None` falls back to local config.
     #[serde(default)]
     pub non_git_warning: Option<bool>,
@@ -670,7 +684,7 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub image_description_model: Option<String>,
     /// Server-side pin for the next-prompt suggestion model (tab-autocomplete ghost text), from the `grok_build_settings` remote settings flag.
-    /// It sits below env (`GROK_PROMPT_SUGGESTIONS_MODEL`) and `[models] prompt_suggestion` in config.toml.
+    /// It sits below env (`GROK_PROMPT_SUGGESTIONS_MODEL`) and `models.prompt_suggestion` in config.json.
     /// It sits above the client hint and the built-in `grok-4.6` default.
     /// When the effective model is not in the shell's model catalog the suggestion request is skipped entirely; the session model is never used instead.
     /// See `ModelOverrideConfig::resolve` and `handle_suggest_prompt`.
@@ -682,7 +696,6 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub campaigns: Vec<CampaignOverride>,
     /// When `Some(true)`, foreground commands that hit the default timeout are auto-backgrounded instead of killed.
-    /// It is the fallback when no local `[toolset.bash] auto_background_on_timeout` is set in config.toml.
     #[serde(default)]
     pub auto_background_on_timeout: Option<bool>,
     /// When `Some(false)`, foreground commands containing a background `&` operator are rejected.
@@ -699,7 +712,7 @@ pub struct RemoteSettings {
     pub ask_user_question_timeout_secs: Option<u64>,
     /// When `Some(true)`, a completed subagent's isolated worktree is snapshotted into a durable git ref and its directory deleted.
     /// Resume restores the worktree from the ref.
-    /// It is the fallback when no local `[features] subagent_worktree_snapshot` is set in config.toml; absent defaults to disabled.
+    /// It is the fallback when no local `features.subagent_worktree_snapshot` is set in config.json; absent defaults to disabled.
     #[serde(default)]
     pub subagent_worktree_snapshot_enabled: Option<bool>,
     /// Remote fallback for `[features] subagent_model_inheritance`; absent or null means off.
@@ -733,7 +746,6 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub contextual_hints: Option<ContextualHintsRemote>,
     /// Server-recommended worktree creation type.
-    /// It is the fallback when no local `[cli] worktree_type` is set in config.toml.
     #[serde(default)]
     pub worktree_type: Option<String>,
     /// Grove-projected worktree strategy (`true` means grove-fuse or grove-nfs, `false` means copy).
@@ -1120,7 +1132,7 @@ where
 }
 /// A model and the harness whose system prompt and toolset flavor that model must run against.
 /// The pair is the atomic configurable unit because a model is only guaranteed to work with a compatible harness (cursor vs grok-build).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GoalRoleModel {
     /// Model id, e.g. "grok-4". It resolves against available models at spawn time; unknown or unauthorized fails open to the current model.
     pub model: String,

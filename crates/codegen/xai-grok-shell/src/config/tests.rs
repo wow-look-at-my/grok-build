@@ -2597,6 +2597,58 @@ fn discover_roles_inline_takes_precedence() {
         );
 }
 #[test]
+fn discover_roles_reads_json_files_and_json_wins_over_toml() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let roles_dir = tmp.path().join(".grok").join("roles");
+    std::fs::create_dir_all(&roles_dir).unwrap();
+    std::fs::write(
+        roles_dir.join("reviewer.json"),
+        r#"{ "description": "JSON reviewer", "default_capability_mode": "read-only" }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        roles_dir.join("reviewer.toml"),
+        r#"description = "TOML reviewer""#,
+    )
+    .unwrap();
+    std::fs::write(
+        roles_dir.join("legacy.toml"),
+        r#"description = "Legacy role""#,
+    )
+    .unwrap();
+    let mut cfg: SubagentsConfig = toml::from_str("").unwrap();
+    cfg.discover_roles(tmp.path());
+    let role = cfg.get_role("reviewer").unwrap();
+    assert_eq!(
+        role.description, "JSON reviewer",
+        "reviewer.json must win over reviewer.toml"
+    );
+    assert_eq!(role.default_capability_mode.as_deref(), Some("read-only"));
+    assert_eq!(
+        cfg.get_role("legacy").unwrap().description,
+        "Legacy role",
+        "a .toml role with no .json sibling still loads"
+    );
+}
+#[test]
+fn discover_personas_reads_json_files() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let dir = tmp.path().join(".grok").join("personas");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("scout.json"),
+        r#"{ "instructions": "Map the code base." }"#,
+    )
+    .unwrap();
+    let mut cfg: SubagentsConfig = toml::from_str("").unwrap();
+    cfg.discover_personas(tmp.path());
+    let persona = cfg.get_persona("scout").unwrap();
+    assert_eq!(
+        persona.source_path.as_deref(),
+        Some(dir.join("scout.json").display().to_string().as_str())
+    );
+}
+#[test]
 fn discover_roles_ignores_non_toml_files() {
     let tmp = tempfile::TempDir::new().unwrap();
     let roles_dir = tmp.path().join(".grok").join("roles");
@@ -3100,20 +3152,20 @@ fn remove_hooks_path_succeeds_when_absent() {
 #[test]
 fn add_dismissed_plugin_cta_creates_table() {
     let tmp = tempfile::tempdir().unwrap();
-    let config_path = tmp.path().join("config.toml");
+    let config_path = tmp.path().join("config.json");
     add_dismissed_plugin_cta_to_file("figma", &config_path).unwrap();
     let content = std::fs::read_to_string(&config_path).unwrap();
-    assert!(content.contains("[plugin_cta]"));
+    assert!(content.contains("\"plugin_cta\""));
     assert!(content.contains("figma"));
     assert!(dismissed_plugin_ctas_in_file(&config_path).contains("figma"));
 }
 #[test]
 fn add_dismissed_plugin_cta_is_idempotent() {
     let tmp = tempfile::tempdir().unwrap();
-    let config_path = tmp.path().join("config.toml");
+    let config_path = tmp.path().join("config.json");
     add_dismissed_plugin_cta_to_file("notion", &config_path).unwrap();
     add_dismissed_plugin_cta_to_file("notion", &config_path).unwrap();
-    let config: toml::Value = toml::from_str(
+    let config: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(&config_path).unwrap(),
         )
         .unwrap();
@@ -3128,7 +3180,7 @@ fn add_dismissed_plugin_cta_is_idempotent() {
 #[test]
 fn dismissed_plugin_ctas_reflects_added_entries() {
     let tmp = tempfile::tempdir().unwrap();
-    let config_path = tmp.path().join("config.toml");
+    let config_path = tmp.path().join("config.json");
     assert!(!dismissed_plugin_ctas_in_file(&config_path).contains("figma"));
     add_dismissed_plugin_cta_to_file("figma", &config_path).unwrap();
     let dismissed = dismissed_plugin_ctas_in_file(&config_path);
@@ -3138,16 +3190,21 @@ fn dismissed_plugin_ctas_reflects_added_entries() {
 #[test]
 fn add_dismissed_plugin_cta_preserves_other_config() {
     let tmp = tempfile::tempdir().unwrap();
-    let config_path = tmp.path().join("config.toml");
-    std::fs::write(&config_path, "[plugins]\ndisabled = [\"keep-me\"]\n").unwrap();
+    let config_path = tmp.path().join("config.json");
+    std::fs::write(
+            &config_path,
+            r#"{"extensions": {"plugins": {"disabled": ["keep-me"]}}}"#,
+        )
+        .unwrap();
     add_dismissed_plugin_cta_to_file("figma", &config_path).unwrap();
-    let config: toml::Value = toml::from_str(
+    let config: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(&config_path).unwrap(),
         )
         .unwrap();
     assert_eq!(
             config
-                .get("plugins")
+                .get("extensions")
+                .and_then(|v| v.get("plugins"))
                 .and_then(|v| v.get("disabled"))
                 .and_then(|v| v.as_array())
                 .and_then(|a| a.first())
@@ -3378,8 +3435,8 @@ fn project_config_never_sources_feedback_user() {
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
-            grok.join("config.toml"),
-            "[plugins]\npaths = [\"./p\"]\n\n[feedback.user]\ncommand = \"/evil\"\n",
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": ["./p"]}}, "telemetry": {"feedback": {"user": {"command": "/evil"}}}}"#,
         )
         .unwrap();
     let cwd = repo.path();
@@ -4173,8 +4230,8 @@ fn resolve_effective_plugins_config_gates_project_paths_on_folder_trust() {
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
-            grok.join("config.toml"),
-            "[plugins]\npaths = [\"./proj-plugin\"]\ndisabled = [\"proj-bad\"]\n",
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": ["./proj-plugin"], "disabled": ["proj-bad"]}}}"#,
         )
         .unwrap();
     let cwd = repo.path();
@@ -4232,8 +4289,9 @@ fn discover_plugins_excludes_untrusted_configpath_plugin_end_to_end() {
     let grok = cwd.join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
     std::fs::write(
-            grok.join("config.toml"),
-            format!("[plugins]\npaths = ['{}']\n", plugin_dir.display()),
+            grok.join("config.json"),
+            serde_json::json!({"extensions": {"plugins": {"paths": [plugin_dir.display().to_string()]}}})
+                .to_string(),
         )
         .unwrap();
     let trust_store = TrustStore::load_from(home.path().join("plugin-trust"));
@@ -4295,7 +4353,10 @@ fn kill_switched_cold_cwd_stays_allowed_through_plugins_config_read() {
     gix::init(repo.path()).unwrap();
     let grok = repo.path().join(".grok");
     std::fs::create_dir_all(&grok).unwrap();
-    std::fs::write(grok.join("config.toml"), "[plugins]\npaths = [\"./proj-plugin\"]\n")
+    std::fs::write(
+            grok.join("config.json"),
+            r#"{"extensions": {"plugins": {"paths": ["./proj-plugin"]}}}"#,
+        )
         .unwrap();
     let cwd = repo.path();
     let remote = crate::util::config::RemoteSettings {
@@ -4403,10 +4464,11 @@ fn concurrent_plugin_list_writers_lose_no_updates() {
     for handle in handles {
         handle.join().unwrap();
     }
-    let content = std::fs::read_to_string(home.path().join("config.toml")).unwrap();
-    let config: toml::Value = toml::from_str(&content).unwrap();
+    let content = std::fs::read_to_string(home.path().join("config.json")).unwrap();
+    let config: serde_json::Value = serde_json::from_str(&content).unwrap();
     let enabled = config
-        .get("plugins")
+        .get("extensions")
+        .and_then(|e| e.get("plugins"))
         .and_then(|p| p.get("enabled"))
         .and_then(|v| v.as_array())
         .unwrap();
@@ -4418,11 +4480,11 @@ fn concurrent_plugin_list_writers_lose_no_updates() {
 #[test]
 fn update_config_toml_locked_refuses_retarget_between_read_and_write() {
     let home = tempfile::tempdir().unwrap();
-    let a = home.path().join("a.toml");
-    let b = home.path().join("b.toml");
-    std::fs::write(&a, "[ui]\nfrom_a = true\n").unwrap();
-    std::fs::write(&b, "[ui]\nfrom_b = true\n").unwrap();
-    let link = home.path().join("config.toml");
+    let a = home.path().join("a.json");
+    let b = home.path().join("b.json");
+    std::fs::write(&a, r#"{"ui": {"from_a": true}}"#).unwrap();
+    std::fs::write(&b, r#"{"ui": {"from_b": true}}"#).unwrap();
+    let link = home.path().join("config.json");
     std::os::unix::fs::symlink(&a, &link).unwrap();
     let err = update_config_toml_locked(
             home.path(),
@@ -4442,11 +4504,11 @@ fn update_config_toml_locked_refuses_retarget_between_read_and_write() {
     let raw_a = std::fs::read_to_string(&a).unwrap();
     let raw_b = std::fs::read_to_string(&b).unwrap();
     assert!(
-        raw_a.contains("from_a = true") && !raw_a.contains("demo-plugin"),
+        raw_a.contains("\"from_a\": true") && !raw_a.contains("demo-plugin"),
         "referent A must stay unmerged:\n{raw_a}"
     );
     assert!(
-        raw_b.contains("from_b = true") && !raw_b.contains("demo-plugin"),
+        raw_b.contains("\"from_b\": true") && !raw_b.contains("demo-plugin"),
         "must not merge A's snapshot onto B:\n{raw_b}"
     );
     assert_eq!(b, std::fs::read_link(&link).unwrap());

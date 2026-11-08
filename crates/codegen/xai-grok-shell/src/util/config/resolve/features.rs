@@ -3,7 +3,7 @@ use toml::Value as TomlValue;
 
 /// Resolve whether ZDR users are allowed to use the product.
 ///
-/// Precedence: requirements > env > config.toml > managed > remote settings > default (false).
+/// (false).
 pub fn resolve_zdr_access_enabled(
     requirements: Option<&TomlValue>,
     user: Option<&TomlValue>,
@@ -53,12 +53,12 @@ fn compose_turn_transient_retry(
 }
 
 /// Whether model-catalog (`/v1/models`) and remote-settings (`/v1/settings`) fetches from xAI backends are allowed. That includes the deployment-config sync bundled into the startup prefetch.
-/// The background managed-config sync has its own `[features] managed_config` gate. Precedence: requirements (MDM > system > user) > managed (`managed_config.toml` > system managed) > user `config.toml` > default (true).
+/// The background managed-config sync has its own `features.managed_config` gate. Precedence: requirements (MDM > system > user) > managed (`managed_config.toml` > system managed) > user `config.json` > default (true).
 /// This is an egress gate, so an overlay cannot re-enable a user's or a deployment's "never fetch" decision. Callable before an `AgentConfig` exists (startup prefetch runs pre-agent).
 pub fn resolve_remote_fetch_enabled() -> bool {
     match crate::config::ConfigLayers::load() {
         Ok(layers) => remote_fetch_enabled_from_layers(&layers),
-        // A corrupt user-writable config.toml must not drop a requirements or managed-layer pin
+        // A corrupt user-writable config.json must not drop a requirements or managed-layer pin
         Err(_) => remote_fetch_enabled_from_policy_layers(
             crate::config::load_merged_requirements().as_ref(),
             crate::config::load_managed_config().ok().as_ref(),
@@ -69,7 +69,7 @@ pub fn resolve_remote_fetch_enabled() -> bool {
 
 pub const REMOTE_FETCH_CONFIG_PATH: &str = "features.remote_fetch";
 
-/// Keys whose dedicated resolver walks managed before user `config.toml`.
+/// Keys whose dedicated resolver walks managed before user `config.json`.
 /// The effective merge lets the user file win for every other key.
 pub const MANAGED_WINS_OVER_USER: &[&str] = &[REMOTE_FETCH_CONFIG_PATH];
 
@@ -108,7 +108,7 @@ fn remote_fetch_enabled_from_layers(layers: &crate::config::ConfigLayers) -> boo
 
 /// Err-arm fallback for [`resolve_remote_fetch_enabled`]: walks the independently loadable policy tiers in Ok-arm walk order.
 /// Merged requirements come first (`load_merged_requirements` merges user, system, MDM with last-wins, matching the walk), then the managed tiers. A root-owned or synced managed-only pin thus survives a corrupt user layer.
-/// The user `config.toml` tier stays fail-open: it is a preference, not deployment policy.
+/// The user `config.json` tier stays fail-open: it is a preference, not deployment policy.
 fn remote_fetch_enabled_from_policy_layers(
     merged_requirements: Option<&TomlValue>,
     managed: Option<&TomlValue>,

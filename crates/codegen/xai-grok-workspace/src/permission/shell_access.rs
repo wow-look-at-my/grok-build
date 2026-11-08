@@ -1428,8 +1428,8 @@ mod tests {
             "/etc",
             "/etc/grok-test",
             "/work/subdir/../.git/hooks/pre-commit",
-            "/home/user/.grok/sandbox.toml",
-            "/work/project/.grok/sandbox.toml",
+            "/home/user/.grok/sandbox.json",
+            "/work/project/.grok/sandbox.json",
         ] {
             assert!(
                 edit_target_protection(Path::new(path)).is_some(),
@@ -1438,8 +1438,8 @@ mod tests {
         }
         for path in [
             "/work/src/main.rs",
-            "/work/project/.grok/config.toml/backup",
-            "/work/project/sandbox.toml",
+            "/work/project/.grok/config.json/backup",
+            "/work/project/sandbox.json",
             "/work/project/requirements.toml",
             "/work/project/managed_config.toml",
         ] {
@@ -1489,15 +1489,15 @@ mod tests {
             ("/home/user/.zshrc", ProtectedEditReason::StartupFile),
             ("/etc/hosts", ProtectedEditReason::Etc),
             (
-                "/home/user/.grok/config.toml",
+                "/home/user/.grok/config.json",
                 ProtectedEditReason::GrokConfig,
             ),
             (
-                "/home/user/.grok/sandbox.toml",
+                "/home/user/.grok/sandbox.json",
                 ProtectedEditReason::GrokSandbox,
             ),
             (
-                "/work/project/.grok/sandbox.toml",
+                "/work/project/.grok/sandbox.json",
                 ProtectedEditReason::GrokSandbox,
             ),
             (
@@ -1609,7 +1609,7 @@ mod tests {
         for path in [
             "/custom/grok-home/hooks-disabled/note.json",
             "/custom/grok-home/hooks-evil/note.json",
-            "/custom/grok-home/config.toml",
+            "/custom/grok-home/config.json",
             "/custom/other/hooks/x.json",
             "/custom/grok-home-extra/hooks/x.json",
         ] {

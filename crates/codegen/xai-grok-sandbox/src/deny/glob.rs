@@ -80,7 +80,7 @@ pub(crate) fn validate_deny_glob(glob: &str) -> anyhow::Result<()> {
         if segment.is_empty() && !(index == 0 && glob.starts_with('/')) {
             anyhow::bail!(
                 "deny glob {glob:?}: empty path segment (a doubled '//' or \
-                 trailing '/'); remove the extra slash in sandbox.toml"
+                 trailing '/'); remove the extra slash in sandbox.json"
             );
         }
         // `.`/`..` would let a relative glob scan outside the workspace on Linux while the macOS regex stays dead; reject on both platforms

@@ -5,7 +5,7 @@ reads the same project conventions other agents use, and imports the rest.
 
 ## Picked up automatically
 
-- **Rules & instructions** — `AGENTS.md` (the OpenCode convention), `CLAUDE.md` (including nested ones), and `*.md` rules under `.claude/rules/` and `.cursor/rules/`.
+
 - **Skills & custom commands** — `~/.claude/skills/`, `~/.claude/commands/`,
   `~/.cursor/skills/`, and their project-level twins. Flat command `.md`
   files become slash commands here too.
@@ -26,9 +26,7 @@ The **`/resume-claude`** and **`/resume-cursor`** skills continue a recent sessi
 
 ## Check what was discovered
 
-Run **`grok inspect`** in a repo to see every rules file, skill, and MCP
-server Grok picked up, tagged with where it came from. Each compat source
-can be toggled in `[compat.claude]` / `[compat.cursor]` config sections.
+Run **`grok inspect`** in a repo to see every rules file, skill, and MCP server Grok picked up, tagged with where it came from. Each compat source can be toggled in `extensions.compat.claude` / `extensions.compat.cursor` config sections.
 
 And a few things you might have missed elsewhere: `/btw` asks a side
 question without interrupting the current task, and `/rewind` rewinds the

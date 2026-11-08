@@ -1,6 +1,6 @@
 //! Config hot-reload, shared by every way of running an agent.
 //!
-//! `config.toml` is the store of settings. `/settings` writes it and so does
+//! `config.json` is the store of settings. `/settings` writes it and so does
 //! an editor. This watcher is what carries either write into the running
 //! agent.
 use crate::agent::MvpAgent;

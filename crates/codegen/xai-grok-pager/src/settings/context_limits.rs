@@ -25,7 +25,7 @@ pub struct ContextLimitTarget {
     pub label: String,
     /// The window the catalog reports now. With a limit set, this is the limit.
     pub window: Option<u64>,
-    /// The limit `config.toml` holds for this model.
+    /// The limit `config.json` holds for this model.
     pub limit: Option<u64>,
 }
 
@@ -166,7 +166,7 @@ pub fn row_label(snapshot: &PagerLocalSnapshot, model_id: &str) -> String {
         .unwrap_or_else(|| model_id.to_owned())
 }
 
-/// The limits the user `config.toml` sets, by model key. A config that does not
+/// The limits the user `config.json` sets, by model key. A config that does not
 /// load gives no limits, and the log says why.
 pub fn configured_limits() -> BTreeMap<String, u64> {
     if cfg!(test) {
@@ -178,7 +178,7 @@ pub fn configured_limits() -> BTreeMap<String, u64> {
             tracing::error!(
                 target: "settings",
                 %error,
-                "config.toml did not load; the context window limits are not shown"
+                "config.json did not load; the context window limits are not shown"
             );
             return BTreeMap::new();
         }

@@ -165,7 +165,7 @@ pub const COMPAT_CELLS: [CompatCell; 12] = [
 /// Raw per-vendor compat cells parsed from `[compat.<vendor>]` TOML.
 ///
 /// Resolution order is env override, this value, remote flag, default ON.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct VendorCompatToml {
     pub skills: Option<bool>,
     pub rules: Option<bool>,
@@ -189,7 +189,7 @@ impl VendorCompatToml {
 }
 
 /// Raw `[compat]` TOML section.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, schemars::JsonSchema)]
 pub struct CompatConfigToml {
     #[serde(default)]
     pub cursor: VendorCompatToml,

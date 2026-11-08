@@ -23,7 +23,7 @@ Examples:
   # Add a remote server with an authentication header
   grok mcp add --transport http api https://mcp.example.com/mcp --header \"Authorization: Bearer YOUR_TOKEN\"
 
-  # Add to the project config (./.grok/config.toml) instead of ~/.grok/config.toml
+  # Add to the project config (./.grok/config.json) instead of ~/.grok/config.json
   grok mcp add --scope project github -- npx -y @modelcontextprotocol/server-github";
 
 #[derive(Debug, clap::Args, Clone)]
@@ -46,9 +46,9 @@ pub enum McpTransport {
 /// Which config file an MCP server definition is written to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum McpScope {
-    /// `~/.grok/config.toml`, available in all your projects
+    /// `~/.grok/config.json`, available in all your projects
     User,
-    /// `./.grok/config.toml`, shared with everyone working in this directory
+    /// `./.grok/config.json`, shared with everyone working in this directory
     Project,
 }
 
@@ -120,7 +120,7 @@ pub struct AddArgs {
     #[arg(short = 't', long, value_enum)]
     transport: Option<McpTransport>,
 
-    /// Config to write to: user (~/.grok/config.toml) or project (./.grok/config.toml)
+    /// Config to write to: user (~/.grok/config.json) or project (./.grok/config.json)
     #[arg(short = 's', long, value_enum, default_value = "user")]
     scope: McpScope,
 
@@ -158,7 +158,7 @@ pub async fn run(mcp_args: McpArgs) -> Result<()> {
 }
 
 fn run_list(json: bool) -> Result<()> {
-    // Include project-scoped servers (nearest definition wins), matching what a session started in this directory would load from config.toml files
+    // Include project-scoped servers (nearest definition wins), matching what a session started in this directory would load from config.json files
     let cwd = current_dir_or_exit();
     let servers = xai_grok_shell::util::config::load_mcp_server_configs_with_project(&cwd);
     let disabled = xai_grok_shell::util::config::disabled_mcp_server_names(&cwd);
@@ -740,7 +740,7 @@ async fn run_remove(name: &str, requested_scope: Option<McpScope>) -> Result<()>
     println!("Removed MCP server '{name}' from {} config", scope.label());
     println!("File modified: {}", scope_display(scope, &path));
 
-    // A scoped delete can leave the name defined in the other scope or an ancestor .grok/config.toml, where it still resolves for sessions
+    // A scoped delete can leave the name defined in the other scope or an ancestor .grok/config.json, where it still resolves for sessions
     let still_user_defined = mcp_server_defined_at(&user_config_path(), name);
     if let Some((survivor_scope, remaining)) =
         surviving_definition(still_user_defined, find_project_site())
@@ -1315,7 +1315,7 @@ mod tests {
     }
 
     #[test]
-    fn grok_com_known_only_with_toml_definition() {
+    fn grok_com_known_only_with_config_definition() {
         // Unique name: `grok_home()` is process-wide OnceLock, so GROK_HOME. `grok_com_*` in the real ~/.grok disabled
         // list would fail an orphan assertion on a well-known name.
         let name = format!("grok_com_orphan_{}", uuid::Uuid::new_v4().as_simple());
@@ -1335,17 +1335,14 @@ mod tests {
                 .join(".grok")
                 .join(xai_grok_config::USER_CONFIG_FILENAME),
             format!(
-                r#"
-[mcp_servers.{name}]
-url = "https://mcp.example.test/sse"
-"#
+                r#"{{"mcp": {{"servers": {{"{name}": {{"url": "https://mcp.example.test/sse"}}}}}}}}"#
             ),
         )
         .unwrap();
         xai_test_utils::git::init_git_repo(defined.path());
         assert!(
             mcp_server_is_known(&name, defined.path()),
-            "TOML-defined {name} must be known"
+            "config-defined {name} must be known"
         );
     }
 
@@ -1402,7 +1399,7 @@ url = "https://mcp.example.test/sse"
     #[test]
     fn select_remove_site_covers_scope_presence_matrix() {
         let user = xai_grok_shell::util::config::user_config_path();
-        let project = PathBuf::from("/repo/.grok/config.toml");
+        let project = PathBuf::from("/repo/.grok/config.json");
 
         // No scope: a single hit resolves, both scopes is ambiguous, neither is NotFound
         assert_eq!(
@@ -1446,7 +1443,7 @@ url = "https://mcp.example.test/sse"
     #[test]
     fn surviving_definition_prefers_project_then_user() {
         let user = xai_grok_shell::util::config::user_config_path();
-        let project = PathBuf::from("/repo/.grok/config.toml");
+        let project = PathBuf::from("/repo/.grok/config.json");
 
         // The mirror of the remove note: a user-scope delete with a project survivor (and vice versa) must still report the remaining site
         assert_eq!(
