@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use fs2::FileExt;
 
-const ARTIFACT_DIR: &str = "web_fetch";
+const ARTIFACT_DIR: &str = crate::session_output_dirs::WEB_FETCH_OUTPUT_DIR;
 const ALLOCATION_FILE: &str = ".allocation";
 const COUNTER_WIDTH: usize = 10;
 const MAX_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;

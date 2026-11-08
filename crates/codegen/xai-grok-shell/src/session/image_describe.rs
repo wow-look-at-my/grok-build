@@ -257,7 +257,7 @@ pub(crate) struct PersistedImage {
 }
 /// Where a session's user-attached images are written; compaction lists only files found here.
 pub(crate) fn session_assets_dir(session_dir: &Path) -> PathBuf {
-    session_dir.join("assets")
+    session_dir.join(xai_grok_tools::session_output_dirs::USER_ASSETS_DIR)
 }
 /// Persist a batch of normalized images to `<session_dir>/assets/`.
 /// Each file is written as `image-<uuid>.<ext>` where `<ext>` is inferred from `mime_type` (falling back to `png`).
