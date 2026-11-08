@@ -19,7 +19,7 @@ You are READ-ONLY. Do NOT edit, create, move, or delete any file, and do NOT run
 
 ## Output contract
 
-Output ONLY the summary as your final message (Markdown, no preamble like "Here is the summary", no terminal token). Structure:
+Output ONLY the summary as your final message (Markdown, no preamble like "Here is the summary"). Structure:
 
 1. One sentence naming WHAT was delivered.
 2. HOW to use it: the exact command(s) / steps (one short line or up to 3 bullets).

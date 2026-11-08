@@ -1885,16 +1885,8 @@ fn terminal_transitions_rescue_classifier_details_file() {
         let root = goal_scratch_root(&vid);
         let details = root.join("goal-classifier-x-1.md");
         std::fs::write(&details, "panel verdict body").unwrap();
-        std::fs::write(
-            root.join("goal-classifier-x-1-skeptic-0.md"),
-            "SKEPTIC_ZERO_BODY",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("goal-classifier-x-1-skeptic-1.md"),
-            "SKEPTIC_ONE_BODY",
-        )
-        .unwrap();
+        std::fs::write(root.join("goal-verdict-x-1-0.json"), "SKEPTIC_ZERO_BODY").unwrap();
+        std::fs::write(root.join("goal-verdict-x-1-1.json"), "SKEPTIC_ONE_BODY").unwrap();
         t.snapshot_mut().unwrap().last_classifier_details_path =
             Some(details.to_string_lossy().into_owned());
 
@@ -1914,14 +1906,14 @@ fn terminal_transitions_rescue_classifier_details_file() {
         );
         let s0 = body
             .find("SKEPTIC_ZERO_BODY")
-            .unwrap_or_else(|| panic!("{ending}: skeptic-0 report inlined:\n{body}"));
+            .unwrap_or_else(|| panic!("{ending}: skeptic-0 verdict inlined:\n{body}"));
         let s1 = body
             .find("SKEPTIC_ONE_BODY")
-            .unwrap_or_else(|| panic!("{ending}: skeptic-1 report inlined:\n{body}"));
-        assert!(s0 < s1, "{ending}: reports inlined in name order:\n{body}");
+            .unwrap_or_else(|| panic!("{ending}: skeptic-1 verdict inlined:\n{body}"));
+        assert!(s0 < s1, "{ending}: verdicts inlined in name order:\n{body}");
         assert!(
-            body.contains("## Inlined skeptic report: goal-classifier-x-1-skeptic-0.md"),
-            "{ending}: each inlined report carries a per-file header:\n{body}",
+            body.contains("## Inlined skeptic verdict: goal-verdict-x-1-0.json"),
+            "{ending}: each inlined verdict carries a per-file header:\n{body}",
         );
         assert!(
             !goal_scratch_root(&vid).exists(),
@@ -2070,18 +2062,18 @@ fn append_skeptic_reports_prefers_latest_attempt_numerically() {
     std::fs::write(&dest, "canonical body").unwrap();
     // Stale attempt 1: alone larger than the whole budget.
     std::fs::write(
-        scratch.path().join("goal-classifier-v-1-skeptic-0.md"),
+        scratch.path().join("goal-verdict-v-1-0.json"),
         "s".repeat(crate::session::goal_classifier::GOAL_VERIFIER_PANEL_MAX_BYTES + 1),
     )
     .unwrap();
-    // Final attempt 10: two small reports.
+    // Final a later attempt: small verdicts.
     std::fs::write(
-        scratch.path().join("goal-classifier-v-10-skeptic-0.md"),
+        scratch.path().join("goal-verdict-v-10-0.json"),
         "LATEST_S0_BODY",
     )
     .unwrap();
     std::fs::write(
-        scratch.path().join("goal-classifier-v-10-skeptic-1.md"),
+        scratch.path().join("goal-verdict-v-10-1.json"),
         "LATEST_S1_BODY",
     )
     .unwrap();
@@ -2097,7 +2089,7 @@ fn append_skeptic_reports_prefers_latest_attempt_numerically() {
         .expect("final attempt's skeptic-1 report inlined");
     assert!(s0 < s1, "skeptics ascend within an attempt:\n{body}");
     assert!(
-        body.contains("(remaining skeptic reports elided"),
+        body.contains("(remaining skeptic verdicts elided"),
         "the oversized stale report must be elided:\n{body}",
     );
     assert!(
