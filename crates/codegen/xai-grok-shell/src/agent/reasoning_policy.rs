@@ -7,7 +7,23 @@ use xai_grok_sampling_types::{ReasoningEffort, ReasoningEffortOption};
 pub(crate) enum ReasoningNeed {
     /// As little reasoning as the model can be asked for.
     Off,
+    /// The model's ordinary level, for a session that chose none.
+    Default,
 }
+
+/// The tiers [`ReasoningNeed::Default`] tries, in order, on a menu that marks
+/// no default.
+const DEFAULT_LADDER: [ReasoningEffort; 6] = [
+    ReasoningEffort::Medium,
+    ReasoningEffort::High,
+    ReasoningEffort::Low,
+    ReasoningEffort::Xhigh,
+    ReasoningEffort::Max,
+    ReasoningEffort::Minimal,
+];
+
+/// The effort a model that publishes no tiers is asked for by default.
+const UNLISTED_DEFAULT_EFFORT: ReasoningEffort = ReasoningEffort::Medium;
 
 /// The effort tiers the catalog publishes for a model.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +81,20 @@ pub(crate) fn resolve_reasoning_effort(
             lowest_enabled(menu).unwrap_or(UNLISTED_MODEL_EFFORT)
         }
         (ReasoningNeed::Off, EffortSupport::Unlisted) => UNLISTED_MODEL_EFFORT,
+        // The default never turns reasoning off: only an explicit `none` does.
+        (ReasoningNeed::Default, EffortSupport::Menu(menu)) => menu
+            .iter()
+            .find(|option| option.default && option.value != ReasoningEffort::None)
+            .map(|option| option.value)
+            .or_else(|| {
+                DEFAULT_LADDER
+                    .iter()
+                    .copied()
+                    .find(|tier| menu.iter().any(|option| option.value == *tier))
+            })
+            .or_else(|| lowest_enabled(menu))
+            .unwrap_or(ReasoningEffort::None),
+        (ReasoningNeed::Default, EffortSupport::Unlisted) => UNLISTED_DEFAULT_EFFORT,
     }
 }
 
@@ -169,5 +199,63 @@ mod tests {
                 "{support:?} must name a tier"
             );
         }
+    }
+
+    #[test]
+    fn the_default_is_the_marked_option_then_medium_then_the_nearest_tier() {
+        let mut marked = vec![
+            option(ReasoningEffort::None),
+            option(ReasoningEffort::Low),
+            option(ReasoningEffort::High),
+        ];
+        marked[2].default = true;
+        assert_eq!(
+            resolve_reasoning_effort(ReasoningNeed::Default, &EffortSupport::Menu(marked)),
+            ReasoningEffort::High
+        );
+        for (listed, expected) in [
+            (
+                vec![
+                    ReasoningEffort::None,
+                    ReasoningEffort::Low,
+                    ReasoningEffort::Medium,
+                ],
+                ReasoningEffort::Medium,
+            ),
+            (
+                vec![
+                    ReasoningEffort::None,
+                    ReasoningEffort::Low,
+                    ReasoningEffort::High,
+                ],
+                ReasoningEffort::High,
+            ),
+            (
+                vec![ReasoningEffort::None, ReasoningEffort::Low],
+                ReasoningEffort::Low,
+            ),
+        ] {
+            assert_eq!(
+                resolve_reasoning_effort(ReasoningNeed::Default, &menu(&listed)),
+                expected,
+                "menu {listed:?}"
+            );
+        }
+        assert_eq!(
+            resolve_reasoning_effort(ReasoningNeed::Default, &EffortSupport::Unlisted),
+            ReasoningEffort::Medium
+        );
+    }
+
+    /// Only an explicit `none` turns reasoning off. A menu that marks `none` as
+    /// its default still gets an enabled tier by default.
+    #[test]
+    fn the_default_never_turns_reasoning_off() {
+        let mut marked_none = vec![option(ReasoningEffort::None), option(ReasoningEffort::Low)];
+        marked_none[0].default = true;
+        assert_eq!(
+            resolve_reasoning_effort(ReasoningNeed::Default, &EffortSupport::Menu(marked_none)),
+            ReasoningEffort::Low
+        );
     }
 }

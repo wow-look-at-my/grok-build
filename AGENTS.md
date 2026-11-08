@@ -166,10 +166,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 - `[ui].thinking_summaries` and `[ui].thinking_summary_history_*` apply to a session that already runs. The config watcher sends `ReloadThinkingSummaries` to every resident session, the same path as the output-rate floor.
 - Headless `streaming-json` emits a `thinking_summary` line. The Messages format has no field for it and drops it.
 
-## A subagent always carries a reasoning effort
+## A model that takes an effort always carries one
 
-- A child pinned to its own model (a `[subagents.models]` pin, its definition, a goal role, `@sonnet`) takes that model's catalog default effort. Where the catalog has none, `child_effort_fallback` (`subagent/handle_request.rs`) gives it the parent's live effort, else the root default, through `apply_supported_effort`.
-- Without an effort, the Messages builder sends no `thinking` block, so the child returns no thinking and no `display: "summarized"` summary. The Responses builder asks for a summary on every request. That backend never had this gap.
+- Without an effort, the Messages builder sends no `thinking` block, so the model returns no thinking and no `display: "summarized"` summary. No effort is never a stand-in for "off". Reasoning goes off only through an explicit `none` (`/effort none`, also spelled `off` or `disabled`), and only on a model whose menu offers it.
+- `ModelsManager::apply_supported_effort` (`mvp_agent/reasoning_effort.rs`) enforces it. Every path that builds a session's config calls it: new session, load, model switch, subagent spawn. Called with no effort on a config that carries none, it applies `default_effort_for`. That is the catalog default, else `ReasoningNeed::Default` (`reasoning_policy.rs`): the menu's marked option, else Medium, else the nearest offered tier. The default never resolves to `none`.
+- A child pinned to its own model (a `[subagents.models]` pin, its definition, a goal role, `@sonnet`) first tries the parent's live effort, else the root default (`child_effort_fallback` in `subagent/handle_request.rs`).
 
 ## Streaming tool-call notes
 

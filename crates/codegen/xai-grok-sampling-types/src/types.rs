@@ -1068,7 +1068,8 @@ impl std::str::FromStr for ReasoningEffort {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "none" => Ok(Self::None),
+            // `/effort off` reads as the explicit way to turn reasoning off.
+            "none" | "off" | "disabled" => Ok(Self::None),
             "minimal" => Ok(Self::Minimal),
             "low" => Ok(Self::Low),
             "medium" => Ok(Self::Medium),
@@ -1840,6 +1841,13 @@ mod tests {
         );
         assert!(parse_canonical_effort_token("deep").is_none());
         assert!(parse_canonical_effort_token("bogus").is_none());
+        for off in ["none", "off", "OFF", "disabled"] {
+            assert_eq!(
+                parse_canonical_effort_token(off),
+                Some(ReasoningEffort::None),
+                "{off}"
+            );
+        }
     }
 
     #[test]
