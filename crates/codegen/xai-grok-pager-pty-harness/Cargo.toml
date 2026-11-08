@@ -94,8 +94,8 @@ name = "scroll-matrix"
 path = "src/bin/scroll_matrix.rs"
 
 [[bin]]
-name = "startup-tui-probe"
-path = "src/bin/startup_tui_probe.rs"
+name = "startup-resume-seed"
+path = "src/bin/startup_resume_seed.rs"
 
 # pty_bench scenario runner — produces a standalone binary the CI pipeline
 # pre-compiles and executes directly against a release pager artifact.

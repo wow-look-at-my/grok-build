@@ -32,8 +32,8 @@ pub(crate) use resolution::{
     ModelGlobSet, allowlist_denied_message, allowlist_excludes_all_message,
     allowlist_matches_nothing, available_models, is_campaign_only_flip, merge_additive_catalog,
     resolve_catalog_key, resolve_context_window, resolve_context_window_from_provider,
-    resolve_context_window_on_route, resolve_default_model, resolve_model_catalog,
-    resolve_route_catalog_key, selectable_catalog_key_for_persisted, validate_selectable,
+    resolve_default_model, resolve_model_catalog, resolve_route_catalog_key,
+    selectable_catalog_key_for_persisted, validate_selectable,
 };
 pub(in crate::agent::remote_config) use scope::{
     Commit, evaluate_commit, evaluate_models_commit, resolve_disk_auth,

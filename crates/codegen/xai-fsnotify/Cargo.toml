@@ -23,12 +23,7 @@ xai-spawn = { workspace = true }
 tempfile = { workspace = true }
 serial_test = "3"
 xai-test-utils = { path = "../../common/xai-test-utils" }
-criterion = { workspace = true }
 xai-tracing-macros = { path = "../xai-tracing-macros" }
-
-[[bench]]
-name = "startup"
-harness = false
 
 [lints]
 workspace = true
