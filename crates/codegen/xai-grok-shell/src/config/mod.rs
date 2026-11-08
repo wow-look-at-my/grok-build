@@ -103,23 +103,51 @@ impl Default for SubagentsConfig {
         }
     }
 }
+/// Lists the role or persona files in `dir`: `<name>.json`, and the legacy `<name>.toml`.
+/// A `.json` file comes before a `.toml` file of the same name, so the JSON file wins.
+fn definition_files(dir: &std::path::Path, kind: &str) -> Vec<std::path::PathBuf> {
+    if !dir.is_dir() {
+        return Vec::new();
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) => {
+            tracing::debug!(error = %e, kind, "Failed to read definitions directory");
+            return Vec::new();
+        }
+    };
+    let mut files: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("json" | "toml")
+            )
+        })
+        .collect();
+    files.sort_by_key(|path| {
+        let legacy = path.extension().and_then(|e| e.to_str()) == Some("toml");
+        (path.file_stem().map(|s| s.to_os_string()), legacy)
+    });
+    files
+}
+
+/// Parses one role or persona file. The extension selects JSON or TOML.
+fn parse_definition<T: serde::de::DeserializeOwned>(
+    path: &std::path::Path,
+    content: &str,
+) -> Result<T, String> {
+    if path.extension().and_then(|e| e.to_str()) == Some("json") {
+        serde_json::from_str(content).map_err(|e| e.to_string())
+    } else {
+        toml::from_str(content).map_err(|e| e.to_string())
+    }
+}
+
 impl SubagentsConfig {
     fn discover_personas_in_dir(&mut self, dir: &std::path::Path) {
-        if !dir.is_dir() {
-            return;
-        }
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::debug!(error = %e, "Failed to read personas directory");
-                return;
-            }
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
+        for path in definition_files(dir, "personas") {
             let Some(name) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
                 continue;
             };
@@ -127,7 +155,7 @@ impl SubagentsConfig {
                 continue;
             }
             match std::fs::read_to_string(&path) {
-                Ok(content) => match toml::from_str::<SubagentPersona>(&content) {
+                Ok(content) => match parse_definition::<SubagentPersona>(&path, &content) {
                     Ok(mut persona) => {
                         persona.source_dir = path.parent().map(|p| p.to_path_buf());
                         persona.source_path = Some(path.display().to_string());
@@ -145,21 +173,7 @@ impl SubagentsConfig {
         }
     }
     fn discover_roles_in_dir(&mut self, dir: &std::path::Path) {
-        if !dir.is_dir() {
-            return;
-        }
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::debug!(error = %e, "Failed to read roles directory");
-                return;
-            }
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
+        for path in definition_files(dir, "roles") {
             let Some(name) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
                 continue;
             };
@@ -168,7 +182,7 @@ impl SubagentsConfig {
                 continue;
             }
             match std::fs::read_to_string(&path) {
-                Ok(content) => match toml::from_str::<SubagentRole>(&content) {
+                Ok(content) => match parse_definition::<SubagentRole>(&path, &content) {
                     Ok(mut role) => {
                         role.source_dir = path.parent().map(|p| p.to_path_buf());
                         tracing::debug!(role = %name, "Loaded role from file");
