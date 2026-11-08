@@ -8929,10 +8929,10 @@ fn explicit_supports_reasoning_effort_false_discards_inherited_menu() {
         );
     }
 }
-/// A `/v1/models` row whose `capabilities` names no default keeps the menu but sends no effort, so the
-/// server applies its own instead of the lowest listed tier.
+/// A `/v1/models` row whose `capabilities` names no default keeps the menu. The `/v1/models` row
+/// takes its default tier (`medium`), neither the lowest listed tier nor no effort at all.
 #[test]
-fn capabilities_menu_without_default_resolves_to_no_reasoning_effort() {
+fn capabilities_menu_without_default_resolves_to_the_default_tier() {
     let mut cfg = Config::default();
     cfg.endpoints.models_base_url = Some("https://test.example.com/v1".to_owned());
     let row = serde_json::json!({
@@ -8953,7 +8953,7 @@ fn capabilities_menu_without_default_resolves_to_no_reasoning_effort() {
         .info;
     assert_eq!(info.reasoning_efforts.len(), 4);
     assert!(info.supports_reasoning_effort);
-    assert_eq!(info.reasoning_effort, None);
+    assert_eq!(info.reasoning_effort, Some(ReasoningEffort::Medium));
 }
 #[test]
 fn resolve_model_list_inherits_context_window_from_default_when_prefetched_has_fallback() {
