@@ -108,7 +108,10 @@ const ALLOWED_FLAGS: &[&str] = &[
 ];
 
 /// The files in `$GROK_HOME` that grok edits about itself and a sandbox profile write-denies.
-const HOST_WRITTEN_CONFIG_FILES: &[&str] = &["config.toml", "trusted_folders.toml"];
+const HOST_WRITTEN_CONFIG_FILES: &[&str] = &[
+    xai_grok_config::USER_CONFIG_FILENAME,
+    xai_grok_config::TRUSTED_FOLDERS_FILENAME,
+];
 
 /// One whole-file write of a grok config file, done by the worker.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -833,9 +836,9 @@ mod tests {
     fn config_write_saves_any_setting_into_config_toml() {
         let home = scratch_grok_home("config-write");
         let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
-        let config = home.join("config.toml");
+        let config = home.join("config.json");
         let contents =
-            "[models]\ndefault = \"model-b\"\n\n[ui]\npermission_mode = \"always-approve\"\n";
+            r#"{"models": {"default": "model-b"}, "ui": {"permission_mode": "always-approve"}}"#;
         let response = config_write_answer(&config_write_line(&config, contents));
         assert!(response.ok, "the write must land: {response:?}");
         assert_eq!(
@@ -850,7 +853,7 @@ mod tests {
     fn config_write_saves_the_folder_trust_store() {
         let home = scratch_grok_home("trust-write");
         let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
-        let store = home.join("trusted_folders.toml");
+        let store = home.join("trusted_folders.json");
         let response = config_write_answer(&config_write_line(&store, "version = 1\n"));
         assert!(response.ok, "the write must land: {response:?}");
         assert_eq!(
@@ -868,10 +871,10 @@ mod tests {
         let home = scratch_grok_home("config-refuse");
         let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
         for path in [
-            home.join("sandbox.toml"),
+            home.join("sandbox.json"),
             home.join("managed_config.toml"),
-            home.join("hooks").join("config.toml"),
-            std::env::temp_dir().join("config.toml"),
+            home.join("hooks").join("config.json"),
+            std::env::temp_dir().join("config.json"),
         ] {
             let response = config_write_answer(&config_write_line(&path, "x = 1\n"));
             assert!(!response.ok, "{} must be refused", path.display());
@@ -883,21 +886,21 @@ mod tests {
                 "the refusal must say why: {response:?}"
             );
         }
-        assert!(!home.join("sandbox.toml").exists());
+        assert!(!home.join("sandbox.json").exists());
         let _ = std::fs::remove_dir_all(&home);
     }
 
-    /// A `config.toml` that is a symlink is written at its target, which is the
+    /// A `config.json` that is a symlink is written at its target, which is the
     /// path the in-process writer binds and sends.
     #[test]
     #[serial_test::serial(ci_host_env)]
     fn config_write_accepts_the_target_of_a_symlinked_config_toml() {
         let home = scratch_grok_home("config-symlink");
         let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
-        let target = home.join("dotfiles-grok.toml");
+        let target = home.join("dotfiles-grok.json");
         std::fs::write(&target, "").expect("seed target");
-        std::os::unix::fs::symlink(&target, home.join("config.toml")).expect("symlink config");
-        let bound = xai_grok_config::fs_atomic::bind_follow_destination(&home.join("config.toml"))
+        std::os::unix::fs::symlink(&target, home.join("config.json")).expect("symlink config");
+        let bound = xai_grok_config::fs_atomic::bind_follow_destination(&home.join("config.json"))
             .expect("bind config");
         let response = config_write_answer(&config_write_line(bound.as_path(), "a = 1\n"));
         assert!(response.ok, "the write must land: {response:?}");
@@ -911,11 +914,11 @@ mod tests {
     #[test]
     fn write_config_on_host_reports_the_workers_verdict() {
         let fd = peer_expecting("config-write ", vec![r#"{"ok":true,"error":null}"#]);
-        let landed = write_config_on_host(fd, Path::new("/g/config.toml"), "a = 1\n", None);
+        let landed = write_config_on_host(fd, Path::new("/g/config.json"), "a = 1\n", None);
         assert!(matches!(landed, Some(Ok(()))), "{landed:?}");
 
         let fd = peer_expecting("config-write ", vec![r#"{"ok":false,"error":"disk full"}"#]);
-        let failed = write_config_on_host(fd, Path::new("/g/config.toml"), "a = 1\n", None)
+        let failed = write_config_on_host(fd, Path::new("/g/config.json"), "a = 1\n", None)
             .expect("an answer")
             .expect_err("the worker's failure must reach the caller");
         assert!(failed.to_string().contains("disk full"), "{failed}");
@@ -925,7 +928,7 @@ mod tests {
     #[test]
     fn write_config_on_host_gives_back_a_write_an_old_worker_does_not_know() {
         let fd = peer(vec!["."]);
-        assert!(write_config_on_host(fd, Path::new("/g/config.toml"), "", None).is_none());
+        assert!(write_config_on_host(fd, Path::new("/g/config.json"), "", None).is_none());
     }
 
     /// The installed writer touches only grok's config files, and only when a
@@ -936,8 +939,11 @@ mod tests {
         let home = scratch_grok_home("host-writer");
         let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
         let _no_worker = EnvGuard::set(CI_HOST_FD_ENV, "");
-        assert!(host_config_writer(&home.join("pager.toml"), "", None).is_none());
-        assert!(host_config_writer(&home.join("config.toml"), "", None).is_none());
+        assert!(
+            host_config_writer(&home.join(xai_grok_config::PAGER_CONFIG_FILENAME), "", None)
+                .is_none()
+        );
+        assert!(host_config_writer(&home.join("config.json"), "", None).is_none());
         let _ = std::fs::remove_dir_all(&home);
     }
 

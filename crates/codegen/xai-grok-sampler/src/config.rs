@@ -15,7 +15,9 @@ use xai_grok_sampling_types::{
 use crate::attribution::SharedAttributionCallback;
 use crate::retry::{DEFAULT_MAX_RETRIES, RATE_LIMIT_RETRY_THRESHOLD};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthScheme {
     #[default]
@@ -26,7 +28,9 @@ pub enum AuthScheme {
 }
 
 /// Set by the shell: `Zstd` only toward the cli-chat-proxy that advertised it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum RequestCompression {
     #[default]
@@ -36,7 +40,7 @@ pub enum RequestCompression {
 
 /// All knobs that control a single sampling request.
 /// Auth is selected separately via `auth_scheme`, while `api_backend` controls only the request/response protocol shape.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SamplerConfig {
     pub api_key: Option<String>,
     pub base_url: String,
@@ -233,7 +237,7 @@ impl Default for RetryPolicy {
 
 /// Identity of the client that originated the request, used for User-Agent rendering.
 /// The shell layer composes this with platform info into a final UA string.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OriginClientInfo {
     pub product: String,
     pub version: Option<String>,

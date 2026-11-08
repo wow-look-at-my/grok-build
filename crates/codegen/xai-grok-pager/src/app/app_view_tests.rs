@@ -5109,9 +5109,9 @@ fn worktree_mode_unrecognised_falls_back_to_never() {
     assert_eq!(WorktreeMode::from_config_str(""), WorktreeMode::Never);
     assert_eq!(WorktreeMode::from_config_str("ALWAYS"), WorktreeMode::Never);
 }
-/// Helper: parse a TOML string and return the document.
-fn parse_toml(s: &str) -> toml_edit::DocumentMut {
-    s.parse::<toml_edit::DocumentMut>().expect("valid TOML")
+/// Helper: parse an internal-tree string and return the tree.
+fn parse_toml(s: &str) -> toml::Value {
+    toml::from_str(s).expect("valid TOML")
 }
 #[test]
 fn resolve_from_hints_no_keys_returns_defaults() {

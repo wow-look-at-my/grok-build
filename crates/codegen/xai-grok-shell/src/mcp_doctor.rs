@@ -116,7 +116,7 @@ fn cli_plugin_registry(cwd: &Path) -> xai_grok_agent::plugins::PluginRegistry {
     )
 }
 
-/// Which config file declares each TOML server: the user config.toml unless a
+/// Which config file declares each TOML server: the user config.json unless a
 /// project layer (repo-root-first, nearest wins) redefines the name.
 fn toml_declaring_paths(
     user_config: &Path,
@@ -148,7 +148,8 @@ fn discover_servers(cwd: &Path) -> (Vec<ConfigSourceStatus>, Vec<DiscoveredServe
     );
 
     let grok_home = xai_grok_tools::util::grok_home::grok_home();
-    let user_config = grok_home.join("config.toml");
+    let user_config =
+        xai_grok_config::format::resolve_config_file(&grok_home, xai_grok_config::CONFIG_STEM);
     let project_config_paths = crate::config::find_project_configs(cwd);
     let project_layers: Vec<(std::path::PathBuf, toml::Value)> = project_config_paths
         .iter()
@@ -192,14 +193,14 @@ fn discover_servers(cwd: &Path) -> (Vec<ConfigSourceStatus>, Vec<DiscoveredServe
 
     if user_config.is_file() {
         sources.push(ConfigSourceStatus {
-            path: "~/.grok/config.toml".to_string(),
+            path: "~/.grok/config.json".to_string(),
             status: ConfigSourceState::Found {
                 server_count: toml_counts.get(&user_config).copied().unwrap_or(0),
             },
         });
     } else {
         sources.push(ConfigSourceStatus {
-            path: "~/.grok/config.toml".to_string(),
+            path: "~/.grok/config.json".to_string(),
             status: ConfigSourceState::NotFound,
         });
     }
@@ -413,7 +414,7 @@ fn format_mcp_error(label: &str, err: &mcp_servers::McpError) -> Check {
         McpError::Timeout { timeout_secs, .. } => Check::fail(
             "server timed out",
             format!("no response within {}s", timeout_secs),
-            "try increasing startup_timeout_sec in config.toml",
+            "try increasing mcp.servers.<name>.startup_timeout_sec in config.json",
         ),
         McpError::SpawnFailed { source, .. } => Check::fail(
             "spawn failed",
@@ -459,7 +460,7 @@ fn skip_verdict_checks(
     }
     if disabled {
         let label = "disabled in config";
-        let detail = "server is disabled in config.toml";
+        let detail = "server is disabled in config.json";
         checks.push(if checks.is_empty() {
             Check::fail(
                 label,
@@ -649,9 +650,9 @@ pub fn policy_enable_refusal(cwd: &Path, name: &str) -> Option<String> {
 /// Which config file a new MCP definition is written to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpWriteScope {
-    /// `~/.grok/config.toml`.
+    /// `~/.grok/config.json`.
     User,
-    /// `./.grok/config.toml`.
+    /// `./.grok/config.json`.
     Project,
 }
 

@@ -153,19 +153,13 @@ async fn verify_preview_preference(workspace: &str) {
     harness.inject_keys(keys::F2).expect("close settings");
     harness.quit().expect("stop first pager");
 
-    let config: toml::Value = toml::from_str(
-        &std::fs::read_to_string(content.sandbox().grok_home().join("config.toml"))
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(content.sandbox().grok_home().join("config.json"))
             .expect("saved config"),
     )
     .expect("valid saved config");
 
-    assert_eq!(
-        Some(false),
-        config
-            .get("ui")
-            .and_then(|ui| ui.get("dashboard_preview"))
-            .and_then(toml::Value::as_bool)
-    );
+    assert_eq!(Some(false), config["ui"]["dashboard_preview"].as_bool());
 
     let mut harness = PtyHarness::spawn_with_content_env(
         &binary,

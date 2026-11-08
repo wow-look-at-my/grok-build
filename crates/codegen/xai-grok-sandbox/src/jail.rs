@@ -168,18 +168,13 @@ impl JailDefaults {
         defaults
     }
 
-    /// Read the `[jail]` defaults from `<home>/config.toml`. A missing or
-    /// unparsable file yields the release defaults (fail open to the
-    /// historical behavior, never to a `[jail]`-free accident). The built-in
-    /// grok-build sandbox file `sandbox.toml` is deliberately never consulted
-    /// here.
+    /// Read the `jail` defaults from `<home>/config.json` (or a legacy
+    /// `config.toml`). A missing or unparsable file yields the release
+    /// defaults (fail open to the historical behavior, never to a `jail`-free
+    /// accident).
     pub fn load(home: &Path) -> JailDefaults {
-        let path = home.join("config.toml");
-        let contents = match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(_) => return JailDefaults::default(),
-        };
-        match toml::from_str::<toml::Value>(&contents) {
+        let path = xai_grok_config::format::resolve_config_file(home, xai_grok_config::CONFIG_STEM);
+        match xai_grok_config::load_toml_file(&path) {
             Ok(value) => JailDefaults::from_config(&value),
             Err(_) => JailDefaults::default(),
         }
@@ -416,7 +411,7 @@ pub struct JailPlan {
     pub grok_home_links: Vec<PathBuf>,
 }
 
-/// Resolve a request into a plan. Every path must exist: a missing bind is a hole the caller cannot see. `defaults` is the config layer (see [`JailDefaults`]) that supplies the per-path access where the command line is silent. The runtime caller loads it via [`JailDefaults::load`], tests pass an explicit value so they never depend on the host's `config.toml`. The working directory is bound read-write by default, so a jail built with the pathbox marker (`--sandbox=pathbox`). Otherwise, a path flag can write in the cwd without an explicit `--rw .`. The effective cwd access is the LAST user mount that contains the cwd (`defaults.cwd` when none does). The effective cwd access also is that single cwd mount is placed at the FRONT of `plan.mounts`. Front-placement plus the effective access is what lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`. The Seatbelt profile emits no stale write-allow for the cwd and bwrap binds it read-only. `parse_jail_args` is untouched — the default is a plan-level injection, not a flag.
+/// Resolve a request into a plan. Every path must exist: a missing bind is a hole the caller cannot see. `defaults` is the config layer (see [`JailDefaults`]) that supplies the per-path access where the command line is silent. The runtime caller loads it via [`JailDefaults::load`], tests pass an explicit value so they never depend on the host's `config.json`. The working directory is bound read-write by default, so a jail built with the pathbox marker (`--sandbox=pathbox`). Otherwise, a path flag can write in the cwd without an explicit `--rw .`. The effective cwd access is the LAST user mount that contains the cwd (`defaults.cwd` when none does). The effective cwd access also is that single cwd mount is placed at the FRONT of `plan.mounts`. Front-placement plus the effective access is what lets `--ro .` win cleanly: the front cwd mount then carries `Access::Ro`. The Seatbelt profile emits no stale write-allow for the cwd and bwrap binds it read-only. `parse_jail_args` is untouched — the default is a plan-level injection, not a flag.
 pub fn build_plan(
     request: &JailRequest,
     defaults: &JailDefaults,
@@ -1150,7 +1145,7 @@ pub fn maybe_reexec_into_jail() {
     if !request.enabled && !env_pathbox {
         return;
     }
-    // Read the `[jail]` defaults from this process's `$GROK_HOME`/`config.toml` (release defaults when there is no `[jail]` section), then drive the real plan/service builders.
+    // Read the `jail` defaults from this process's `$GROK_HOME`/`config.json` (release defaults when there is no `jail` object), then drive the real plan/service builders.
     let defaults = JailDefaults::load(&crate::paths::grok_home());
     sweep_stale_session_dirs(&crate::paths::grok_home());
     let mut plan = match build_plan(&request, &defaults, argv) {
@@ -2219,11 +2214,11 @@ mod tests {
     fn load_reads_the_config_toml_under_an_isolated_home() {
         let home = FixtureHome::new("reads");
         std::fs::write(
-            home.0.join("config.toml"),
-            "[sandbox]\ntmp = \"tmpfs\"\n[jail]\ncwd = \"ro\"\ntmp = \"rw\"\nsystem = \"rw\"\n",
+            home.0.join("config.json"),
+            r#"{"sandbox": {"tmp": "tmpfs"}, "jail": {"cwd": "ro", "tmp": "rw", "system": "rw"}}"#,
         )
-        .expect("write config.toml");
-        // The `[jail]` table is read; the unrelated `[sandbox]` in the same file
+        .expect("write config.json");
+        // The `jail` object is read; the unrelated `sandbox` in the same file
         // (the profile-era vocabulary) is not a `[jail]` axis.
         assert_eq!(
             JailDefaults::load(&home.0),
@@ -2242,8 +2237,8 @@ mod tests {
         let empty = FixtureHome::new("empty");
         assert_eq!(JailDefaults::load(&empty.0), RELEASE);
         let broken = FixtureHome::new("broken");
-        std::fs::write(broken.0.join("config.toml"), "this is = = not toml")
-            .expect("write config.toml");
+        std::fs::write(broken.0.join("config.json"), "this is = = not json")
+            .expect("write config.json");
         assert_eq!(JailDefaults::load(&broken.0), RELEASE);
     }
 

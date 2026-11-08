@@ -26,7 +26,7 @@ pub enum DefaultSelectedPermission {
 }
 
 impl DefaultSelectedPermission {
-    /// The single canonical config.toml / registry string for this variant.
+    /// The single canonical config.json / registry string for this variant.
     /// It is `const` so the settings catalog can build its choice table at compile time.
     pub const fn as_canonical(self) -> &'static str {
         match self {
@@ -49,7 +49,7 @@ impl DefaultSelectedPermission {
         }
     }
 
-    /// Parse a config.toml / registry value (trimmed, case-insensitive, no aliases).
+    /// Parse a config.json / registry value (trimmed, case-insensitive, no aliases).
     /// Both `always_allow_all_sessions` and any unrecognised or empty value resolve to [`AlwaysAllowAllSessions`](Self::AlwaysAllowAllSessions).
     /// No `Option` has to be threaded through callers.
     pub fn from_config_value(s: &str) -> Self {

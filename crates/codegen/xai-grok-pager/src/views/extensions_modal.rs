@@ -621,7 +621,7 @@ pub enum ButtonAction {
         name: String,
         config: Box<xai_grok_shell::util::config::McpServerConfig>,
     },
-    /// Remove the selected MCP server from config.toml.
+    /// Remove the selected MCP server from config.json.
     RemoveSelectedMcpServer,
     /// Reload the skills list (re-fetch from shell).
     ReloadSkills,

@@ -445,7 +445,7 @@ impl AgentView {
         }
 
         // 0d2. Remember mode activation: `#` on empty prompt enters remember mode.
-        //     Gated by `[features] remember_mode = true` in config.toml (default: off).
+        //     Gated by `features.remember_mode` = `true` in config.json (default: off).
         if self.prompt_input_mode == PromptInputMode::Normal
             && is_hash_key(key)
             && self.prompt.text().is_empty()
@@ -1649,7 +1649,7 @@ mod prompt_suggestion_key_tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     /// Idle agent with the gate open and a loaded suggestion: the state right after a turn ends with `example.invalid/suggestPrompt` resolved.
-    /// Pins the settings cache so `resolve_enabled()` never reads the dev machine's config.toml (thread-local, so per-test).
+    /// Pins the settings cache so `resolve_enabled()` never reads the dev machine's config.json (thread-local, so per-test).
     fn suggestion_agent(text: &str) -> AgentView {
         crate::appearance::cache::set_prompt_suggestions(true);
         let mut agent = super::test_fixtures::make_agent();

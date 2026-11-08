@@ -1,6 +1,4 @@
-//! Project config-file discovery: locating repo-local `.mcp.json` and `.grok/config.toml` files by walking from `cwd` up to the git root.
-//!
-//! These pure repository and filesystem walks are shared by the shell's config loaders and the folder-trust gate's `repo_configs_present`.
+//! Project config-file discovery: locating repo-local `.mcp.json` and `.grok/config.json` files by walking from `cwd` up to the git root.
 
 use std::path::{Path, PathBuf};
 
@@ -38,24 +36,27 @@ pub(crate) fn find_mcp_json_files_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// True when `config_path` is `$GROK_HOME/config.toml` (user tier, not project).
+/// True when `config_path` is the `$GROK_HOME` config file (user tier, not project), JSON or legacy TOML.
 fn is_user_grok_config_file(config_path: &Path) -> bool {
     let Some(user_home) = xai_grok_config::user_grok_home() else {
         return false;
     };
-    let user_config = user_home.join("config.toml");
-    if config_path == user_config.as_path() {
-        return true;
-    }
     let Ok(canonical_config) = dunce::canonicalize(config_path) else {
         return false;
     };
-    let canonical_user = dunce::canonicalize(&user_config).unwrap_or(user_config);
-    canonical_config == canonical_user
+    ["config.json", "config.toml"].into_iter().any(|name| {
+        let user_config = user_home.join(name);
+        if config_path == user_config.as_path() {
+            return true;
+        }
+        let canonical_user = dunce::canonicalize(&user_config).unwrap_or(user_config);
+        canonical_config == canonical_user
+    })
 }
 
-/// Find `.grok/config.toml` from `cwd` up to the git repo root, repo-root (lowest) to cwd (highest), matching skills and AGENTS.md discovery.
-/// No repo: only `cwd/.grok/config.toml`. Excludes user-global config so `cwd == $HOME` is not a project overlay.
+/// Find `.grok/config.json` (or a legacy `.grok/config.toml`) from `cwd` up
+/// to the git repo root, repo-root (lowest) to cwd (highest), matching skills
+/// and AGENTS.md discovery.
 pub fn find_project_configs(cwd: &Path) -> Vec<PathBuf> {
     find_project_configs_in(&RepoDirChain::resolve(cwd).dirs)
 }
@@ -67,7 +68,7 @@ pub(crate) fn find_project_configs_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
     chain_dirs
         .iter()
         .rev()
-        .map(|dir| dir.join(".grok").join("config.toml"))
+        .map(|dir| xai_grok_config::project_config_file(dir))
         .filter(|config_path| config_path.is_file() && !is_user_grok_config_file(config_path))
         .collect()
 }

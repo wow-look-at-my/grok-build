@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// extra_skill_dirs = ["~/.claude/skills", "/path/to/.claude/skills"]
 /// extra_rule_dirs = ["~/.claude/rules"]
 /// ```
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct PathsConfig {
     /// Additional directories to scan for skills (each contains `<skill>/SKILL.md`).

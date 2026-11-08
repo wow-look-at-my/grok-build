@@ -1,12 +1,8 @@
 //! Config file loading for Grok.
 //!
-//! Merge order (lowest to highest priority):
-//! 1. `/etc/grok/managed_config.toml`
-//! 2. `$GROK_HOME/managed_config.toml`
-//! 3. `$GROK_HOME/config.toml`
-//! 4. `$GROK_HOME/requirements.toml` (cloud cache; Ed25519-signed at rest once a key is embedded, see [`signed_policy`])
-//! 5. `/etc/grok/requirements.toml`
-//! 6. macOS MDM managed preferences (`ai.x.grok`, admin-forced), macOS only
+//! A config file that a person writes is JSON ([`format`]), grouped by [`layout`], and described by `schemas/config.schema.json`.
+//!
+//! macOS MDM managed preferences (`ai.x.grok`, admin-forced), macOS only
 //!
 //! Each layer applies its own [`[[version_overrides]]`](version_overrides) before merge.
 //! Requirements layers (#4 through #6) may opt into fail-closed startup; see [`validate_requirements`].
@@ -19,9 +15,11 @@ pub mod config_override;
 pub mod deserialize;
 mod display_refresh;
 mod env_overlay;
+pub mod format;
 pub mod fs_atomic;
 pub mod global_hook_sources;
 pub mod host_write;
+pub mod layout;
 mod loader;
 mod macos_managed;
 mod managed_cache;
@@ -53,18 +51,24 @@ pub use display_refresh::DisplayRefreshSettings;
 pub use env_overlay::{
     GROK_CONFIG_ENV, GROK_CONFIG_PATH_ENV, OverlaySource, ResolvedOverlay, resolved_env_overlay,
 };
+pub use format::{
+    CONFIG_SCHEMA_JSON, SCHEMA_FILENAME, edit_config_tree, ensure_schema_file,
+    parse_config_for_edit, read_config_tree, render_config, tree_to_config_json_string,
+};
 #[cfg(unix)]
 pub use global_hook_sources::{
     validate_direct_hook_json_file, validated_hook_json_files_for_sources,
 };
 pub use loader::{
-    HookConfigLayer, HookProvenance, MANAGED_CONFIG_FILENAME, ManagedConfigLayer,
-    REQUIREMENTS_FILENAME, SANDBOX_CONFIG_FILENAME, TRUSTED_FOLDERS_FILENAME,
+    CONFIG_STEM, HookConfigLayer, HookProvenance, LEGACY_CONFIG_FILENAMES, MANAGED_CONFIG_FILENAME,
+    ManagedConfigLayer, PAGER_CONFIG_FILENAME, REQUIREMENTS_FILENAME, SANDBOX_CONFIG_FILENAME,
+    SYSTEM_MANAGED_CONFIG_STEM, SYSTEM_REQUIREMENTS_STEM, TRUSTED_FOLDERS_FILENAME,
     TRUSTED_HOOK_PROJECTS_FILENAME, TRUSTED_PLUGINS_FILENAME, USER_CONFIG_FILENAME,
     apply_version_overrides_with_registered, deep_merge_toml, expand_env_vars_in_string,
     expand_env_vars_in_toml, hook_config_layers, hook_config_layers_at, load_config_file,
     load_from_disk, load_managed_config, load_system_managed_config, load_toml_file,
-    managed_config_layers, managed_config_layers_at, toml_error_detail,
+    managed_config_layers, managed_config_layers_at, prepare_user_config_dir, project_config_file,
+    project_config_file_for_write, system_config_file, toml_error_detail, user_config_file,
 };
 pub use macos_managed::MDM_REQUIREMENTS_SOURCE;
 pub use managed_cache::{

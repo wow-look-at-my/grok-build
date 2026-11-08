@@ -262,7 +262,7 @@ fn apply_max_parallel_requests(effective: &toml::Value) {
                 tracing::error!(
                     value = %value,
                     limit = xai_grok_sampler::request_slots::global().limit(),
-                    "[ui].max_parallel_requests must be a whole number, 0 or more; the cap keeps its current value"
+                    "`ui.max_parallel_requests` must be a whole number, 0 or more; the cap keeps its current value"
                 );
                 *reported = Some(value);
             }

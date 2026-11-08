@@ -105,6 +105,32 @@ pub fn env_telemetry_mode(name: &str) -> Option<TelemetryMode> {
 /// Parse `[telemetry] otel_timeout` / `otel_metric_export_interval`: docs say
 /// `number`, so TOML integers must not fail-close config load. Strings still
 /// work (`"10000"`). Stored as decimal strings to match the env-var overlay.
+fn ms_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "description": "Milliseconds, as an integer or a decimal string.",
+        "type": ["integer", "string"]
+    })
+}
+impl schemars::JsonSchema for TelemetryMode {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TelemetryMode".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "`true`, `false`, or `\"session_metrics\"`. An unknown string is read as disabled.",
+            "anyOf": [
+                { "type": "boolean" },
+                {
+                    "type": "string",
+                    "enum": [
+                        "session_metrics", "session-metrics", "true", "false", "enabled", "disabled",
+                        "full", "on", "off", "yes", "no", "1", "0"
+                    ]
+                }
+            ]
+        })
+    }
+}
 fn deserialize_opt_ms_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -121,7 +147,7 @@ where
         Some(IntOrString::Str(s)) => Some(s),
     })
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default, try_from = "TelemetryConfigWire")]
 pub struct TelemetryConfig {
     /// Declared for `serde_ignored`. Actual toggle is `[features] telemetry`.
@@ -183,7 +209,7 @@ impl TelemetryConfig {
 /// instead of tripping serde's duplicate-field check. This table can arrive
 /// from a remote campaign patch. This is merged into the same value the config
 /// is read from and is not limited to any field set.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 struct TelemetryConfigWire {
     enabled: Option<bool>,
@@ -206,8 +232,10 @@ struct TelemetryConfigWire {
     otel_log_assistant_responses: Option<bool>,
     otel_log_tool_content: Option<bool>,
     #[serde(deserialize_with = "deserialize_opt_ms_string")]
+    #[schemars(schema_with = "ms_schema")]
     otel_timeout: Option<String>,
     #[serde(deserialize_with = "deserialize_opt_ms_string")]
+    #[schemars(schema_with = "ms_schema")]
     otel_metric_export_interval: Option<String>,
     otel_logs_endpoint: Option<String>,
     otel_metrics_endpoint: Option<String>,

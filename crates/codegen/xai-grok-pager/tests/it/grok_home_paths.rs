@@ -12,8 +12,8 @@ fn grok_home_override_path_helpers() {
     }
 
     assert_eq!(
-        xai_grok_pager::util::pager_toml_path(),
-        grok_home.join("pager.toml")
+        xai_grok_pager::util::pager_config_path(),
+        grok_home.join("pager.json")
     );
     assert_eq!(
         xai_grok_pager::util::display_grok_home_prefix(),

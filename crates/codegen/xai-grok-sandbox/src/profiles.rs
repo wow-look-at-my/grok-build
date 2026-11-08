@@ -1,5 +1,5 @@
 //! Sandbox profiles. Built-in: `workspace`, `devbox`, `read-only`, `strict`,
-//! `off`. Custom profiles via `~/.grok/sandbox.toml` or `.grok/sandbox.toml`.
+//! `off`. Custom profiles via `~/.grok/sandbox.json` or `.grok/sandbox.json`.
 //! A custom profile's `deny` list is kernel-enforced (read and write/rename) on both platforms.
 
 #[cfg(all(feature = "enforce", unix))]
@@ -149,19 +149,19 @@ impl std::str::FromStr for ProfileName {
     }
 }
 
-/// Load sandbox config from `~/.grok/sandbox.toml` and `.grok/sandbox.toml`. Project config may add new profile names
+/// Load sandbox config from `~/.grok/sandbox.json` and `.grok/sandbox.json`. Project config may add new profile names
 /// only. It cannot redefine a name already present in the global config. Last-write-wins would let a malicious workspace
 /// hollow out a user/enterprise custom profile while keeping the trusted name.
 pub fn load_sandbox_config(workspace: &Path) -> SandboxConfig {
     let mut config = SandboxConfig::default();
 
-    // Global config: ~/.grok/sandbox.toml
+    // Global config: ~/.grok/sandbox.json
     let global_path = grok_home().join(SANDBOX_CONFIG_FILENAME);
     if let Some(global) = load_config_file(&global_path) {
         config = global;
     }
 
-    // Project config: <workspace>/.grok/sandbox.toml (additive only)
+    // Project config: <workspace>/.grok/sandbox.json (additive only)
     let project_path = workspace.join(".grok").join(SANDBOX_CONFIG_FILENAME);
     if let Some(project) = load_config_file(&project_path) {
         merge_project_profiles(&mut config, project);
@@ -201,12 +201,24 @@ fn merge_project_profiles(config: &mut SandboxConfig, project: SandboxConfig) {
     }
 }
 
+/// Read `sandbox.json` in `dir`, or a legacy `sandbox.toml` when only that exists.
 fn load_config_file(path: &Path) -> Option<SandboxConfig> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let dir = path.parent()?;
+    let stem = path.file_stem()?.to_str()?;
+    let path = xai_grok_config::format::resolve_config_file(dir, stem);
+    let content = std::fs::read_to_string(&path).ok()?;
     if content.trim().is_empty() {
         return Some(SandboxConfig::default());
     }
-    match toml::from_str(&content) {
+    let parsed = match xai_grok_config::format::ConfigFormat::of(&path) {
+        xai_grok_config::format::ConfigFormat::Json => {
+            serde_json::from_str(&content).map_err(|e| e.to_string())
+        }
+        xai_grok_config::format::ConfigFormat::Toml => {
+            toml::from_str(&content).map_err(|e| e.to_string())
+        }
+    };
+    match parsed {
         Ok(config) => Some(config),
         Err(e) => {
             tracing::warn!(path = %path.display(), error = %e, "Failed to parse sandbox config");
@@ -549,10 +561,9 @@ impl ProfileName {
                 let profile_config = config.profiles.get(name).ok_or_else(|| {
                     anyhow::anyhow!(
                         "Custom sandbox profile '{name}' not found. \
-                         Define it in ~/.grok/sandbox.toml or .grok/sandbox.toml:\n\n\
-                         [profiles.{name}]\n\
-                         extends = \"workspace\"\n\
-                         read_only = [\"/data\"]\n"
+                         Define it in ~/.grok/sandbox.json or .grok/sandbox.json:\n\n\
+                         {{\"profiles\": {{\"{name}\": {{\"extends\": \"workspace\", \
+                         \"read_only\": [\"/data\"]}}}}}}\n"
                     )
                 })?;
 

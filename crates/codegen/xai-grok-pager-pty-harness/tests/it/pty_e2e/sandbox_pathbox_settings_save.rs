@@ -3,7 +3,7 @@
 use super::common::*;
 
 /// **Settings changed inside the `--sandbox=pathbox` jail save to the real
-/// `config.toml`.** The jail binds `$GROK_HOME`. A `/model` switch and a
+/// `config.json`.** The jail binds `$GROK_HOME`. A `/model` switch and a
 /// permission-mode change must reach the file on the host, with no
 /// "Could not save" toast.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -11,11 +11,11 @@ use super::common::*;
 #[cfg(target_os = "linux")]
 async fn sandbox_pathbox_settings_save_to_the_real_config() {
     let content = start_content().await;
-    let config_path = content.sandbox().grok_home().join("config.toml");
+    let config_path = content.sandbox().grok_home().join("config.json");
     switch_and_persist(&content, &[], &config_path).await;
 }
 
-/// **The same with a symlinked `$GROK_HOME` and a `config.toml` linked into a
+/// **The same with a symlinked `$GROK_HOME` and a `config.json` linked into a
 /// dotfiles folder.** The jailed process uses the symlink path, and the save
 /// renames a temp file beside the link's target, so the jail must bind both.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -27,12 +27,12 @@ async fn sandbox_pathbox_settings_save_through_a_symlinked_grok_home() {
     let real_home = sandbox.grok_home();
     let dotfiles = sandbox.root().join("dotfiles");
     std::fs::create_dir_all(&dotfiles).expect("create dotfiles");
-    let linked_config = dotfiles.join("config.toml");
-    let existing = std::fs::read_to_string(real_home.join("config.toml")).unwrap_or_default();
-    let _ = std::fs::remove_file(real_home.join("config.toml"));
-    std::fs::write(&linked_config, existing).expect("write the dotfiles config.toml");
-    std::os::unix::fs::symlink(&linked_config, real_home.join("config.toml"))
-        .expect("link config.toml");
+    let linked_config = dotfiles.join("config.json");
+    let existing = std::fs::read_to_string(real_home.join("config.json")).unwrap_or_default();
+    let _ = std::fs::remove_file(real_home.join("config.json"));
+    std::fs::write(&linked_config, existing).expect("write the dotfiles config.json");
+    std::os::unix::fs::symlink(&linked_config, real_home.join("config.json"))
+        .expect("link config.json");
     let home_link = sandbox.root().join("grok-home-link");
     std::os::unix::fs::symlink(real_home, &home_link).expect("link grok home");
     let home_link = home_link.to_str().expect("utf-8 path").to_string();
@@ -93,7 +93,7 @@ async fn switch_and_persist(
     harness
         .inject_keys(b"/always-approve\r")
         .expect("type always-approve");
-    wait_for_config(config_path, "permission_mode = \"always-approve\"");
+    wait_for_config(config_path, "\"permission_mode\": \"always-approve\"");
     assert!(
         !harness.contains_text("Could not save"),
         "the jail must not fail a settings save\nscreen:\n{}",
@@ -119,7 +119,7 @@ fn wait_for_config(config_path: &std::path::Path, needle: &str) {
         }
         assert!(
             Instant::now() < deadline,
-            "`{needle}` must reach the real config.toml\nconfig.toml:\n{config}"
+            "`{needle}` must reach the real config.json\nconfig.json:\n{config}"
         );
         std::thread::sleep(Duration::from_millis(100));
     }

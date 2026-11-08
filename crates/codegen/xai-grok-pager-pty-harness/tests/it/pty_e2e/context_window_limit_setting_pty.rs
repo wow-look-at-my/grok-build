@@ -6,7 +6,7 @@ use super::common::*;
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 fn config_text(content: &ContentController) -> String {
-    std::fs::read_to_string(content.home().join(".grok").join("config.toml")).unwrap_or_default()
+    std::fs::read_to_string(content.home().join(".grok").join("config.json")).unwrap_or_default()
 }
 
 /// The `GROK_DEBUG_LOG` file of the test child.
@@ -51,7 +51,7 @@ fn open_limit_row(harness: &mut PtyHarness) {
 }
 
 /// Pick the session model in the chooser, type `350k`, and expect the limit in
-/// `config.toml` and in the chooser label when the row opens again.
+/// `config.json` and in the chooser label when the row opens again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "PTY e2e; requires a rebuilt pager binary"]
 async fn context_window_limit_setting_writes_config_and_shows_the_limit() {
@@ -92,12 +92,12 @@ async fn context_window_limit_setting_writes_config_and_shows_the_limit() {
     harness.inject_keys(keys::ENTER).expect("save limit");
 
     harness
-        .wait_until("config.toml holds the limit", TIMEOUT, |_| {
-            config_text(&content).contains("context_window = 350000")
+        .wait_until("config.json holds the limit", TIMEOUT, |_| {
+            config_text(&content).contains("\"context_window\": 350000")
         })
         .unwrap_or_else(|_| {
             panic!(
-                "config.toml after save:\n{}\nscreen:\n{}",
+                "config.json after save:\n{}\nscreen:\n{}",
                 config_text(&content),
                 harness.screen_contents()
             )
@@ -154,10 +154,10 @@ async fn context_window_limit_reaches_the_running_session() {
     harness.inject_keys(b"1k").expect("type limit");
     harness.inject_keys(keys::ENTER).expect("save limit");
     harness
-        .wait_until("config.toml holds the limit", TIMEOUT, |_| {
-            config_text(&content).contains("context_window = 1000")
+        .wait_until("config.json holds the limit", TIMEOUT, |_| {
+            config_text(&content).contains("\"context_window\": 1000")
         })
-        .unwrap_or_else(|_| panic!("config.toml:\n{}", config_text(&content)));
+        .unwrap_or_else(|_| panic!("config.json:\n{}", config_text(&content)));
     harness.inject_keys(keys::ESC).expect("close editor");
     harness.update(Duration::from_millis(300));
     harness.inject_keys(keys::ESC).expect("close settings");

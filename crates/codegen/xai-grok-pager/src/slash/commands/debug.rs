@@ -404,7 +404,7 @@ mod tests {
         );
         for expected in [
             expected_log.to_str().unwrap(),
-            home.join("config.toml").to_str().unwrap(),
+            home.join("config.json").to_str().unwrap(),
             "Running binary",
             "PID",
             "DEBUG mode",

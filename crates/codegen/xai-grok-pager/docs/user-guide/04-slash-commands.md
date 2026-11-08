@@ -22,7 +22,7 @@ Open the session picker to reload a previous session from disk.
 
 Open the [Agent Dashboard](23-dashboard.md): live roster of top-level sessions in this pager (peek, reply, dispatch, pin, rename, stop, attach). Aliases: `/agents-dashboard`, `/sessions`.
 
-Not `/config-agents` (alias `/agents`), which manages agent *definitions* and personas. Disable with `GROK_AGENT_DASHBOARD=0` or `[dashboard].enabled = false`.
+Not `/config-agents` (alias `/agents`), which manages agent *definitions* and personas. Disable with `GROK_AGENT_DASHBOARD=0` or `ui.dashboard.enabled` set to `false`.
 
 ### `/compact [context]`
 
@@ -33,7 +33,7 @@ Compress conversation history to reclaim context-window space. Pass a note to te
 /compact keep the auth implementation details
 ```
 
-Grok also auto-compacts once the context window hits 85% (tune it with `[session] auto_compact_threshold_percent`).
+Grok also auto-compacts once the context window hits 85% (tune it with `session.auto_compact_threshold_percent`).
 
 ### `/context`
 
@@ -156,16 +156,11 @@ Open a preview of the current saved plan. Aliases: `/show-plan`, `/plan-view`.
 
 ## Memory
 
-`/flush` and `/dream` need memory on, which is the default. `/memory` is available when a memory store is configured for the session, including when `[memory] enabled = false` turned memory off. You can browse saved notes and turn memory on for the session from inside the modal. It is hidden only when no memory store is configured, or when `--no-memory` / `GROK_MEMORY=0` turned memory off for the whole process. `/remember` is always available.
+`/flush` and `/dream` need memory on, which is the default. `/memory` is available when a memory store is configured for the session, including when `memory.enabled` set to `false` turned memory off. You can browse saved notes and turn memory on for the session from inside the modal. It is hidden only when no memory store is configured, or when `--no-memory` / `GROK_MEMORY=0` turned memory off for the whole process. `/remember` is always available.
 
 ### `/memory`
 
-Browse, view, and manage saved memories. Alias: `/mem`. Inside the modal, `t`
-turns memory on or off for the session, `x` deletes the selected note, and `s`
-shows content-free queue, lease, retention, and pinned-rollout diagnostics.
-The `t` toggle is session-scoped: it does not edit `config.toml`, and new
-sessions follow the config again. It cannot override `--no-memory` or
-`GROK_MEMORY=0`.
+Browse, view, and manage saved memories. Alias: `/mem`. Inside the modal, `t` turns memory on or off for the session. `x` deletes the selected note, and `s` shows content-free queue, lease, retention, and pinned-rollout diagnostics. The `t` toggle is session-scoped: it does not edit `config.json`, and new sessions follow the config again. It cannot override `--no-memory` or `GROK_MEMORY=0`.
 
 ```
 /memory
@@ -264,7 +259,7 @@ Set, manage, or check an autonomous goal. Grok works across rounds and only mark
 /goal clear
 ```
 
-Arguments are `<objective> [--budget <tokens>]`, or one of `status`, `pause`, `resume`, `clear`. The `--budget` here is a **token** budget for the goal run, separate from the agent-count budgets that workflows use. `/goal` appears when goal mode is enabled for the session. The host evaluates each model round and runs adversarial verification on completion candidates.
+The `--budget` here is a **token** budget for the goal run, separate from the agent-count budgets that workflows use. `/goal` appears when goal mode is enabled for the session. The host evaluates each model round and runs adversarial verification on completion candidates.
 
 ### `/deep-research <query>`
 
@@ -360,7 +355,7 @@ Turn Grok on itself. The question goes to the model along with this session's ex
 /debug why was the context size defaulted to 256k? this model is supposed to be 1m context
 ```
 
-With no question it injects the context alone and debugs whatever you say next. `/debug scroll`, `/debug fps`, and `/debug log` are unrelated developer overlays: the scroll-diagnostics HUD, the FPS overlay, and the scroll flight recorder.
+With no question it injects the context alone and debugs whatever you say next.
 
 ### `/release-notes`
 
@@ -446,7 +441,7 @@ Open Settings on **Coding data, retention, and training**, where you choose
 /privacy
 ```
 
-This setting does not touch `[features] telemetry`, `trace_upload`, or your external OTEL settings — see [Monitoring Usage](24-monitoring-usage.md#related-settings). On team accounts only a team admin can change it. Admins can also enable or disable Zero Data Retention for the team ([how to enable ZDR](https://docs.example.invalid/developers/faq/security#how-to-enable-zdr)). When the choice is not yours to make, the row says so — `ZDR` or `· Admin Managed` — instead of opening the chooser. ZDR locks coding-data sharing. It does not mute external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
+This setting does not touch `features.telemetry`, `trace_upload`, or your external OTEL settings — see [Monitoring Usage](24-monitoring-usage.md#related-settings). On team accounts only a team admin can change it. Admins can also enable or disable Zero Data Retention for the team ([how to enable ZDR](https://docs.example.invalid/developers/faq/security#how-to-enable-zdr)). When the choice is not yours to make, the row says so — `ZDR` or `· Admin Managed` — instead of opening the chooser. ZDR locks coding-data sharing. It does not mute external OTEL or `user.email` — see [ZDR and this stream](24-monitoring-usage.md#zdr-and-this-stream).
 
 ---
 

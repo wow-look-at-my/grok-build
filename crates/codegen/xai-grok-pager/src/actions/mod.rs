@@ -628,7 +628,7 @@ mod tests {
 
     #[test]
     fn toggle_mouse_capture_disabled_by_default() {
-        // Opt-in via config.toml; default registry must not register it.
+        // Opt-in via config.json; default registry must not register it.
         let registry = ActionRegistry::defaults();
         assert!(registry.find(ActionId::ToggleMouseCapture).is_none());
         let ctrl_r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL);

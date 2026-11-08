@@ -97,7 +97,7 @@ async fn await_memory_archive(build: &mut MemoryArchiveBuild) -> MemoryArchiveRe
 }
 
 /// Upload memory .md files as `memory.tar.gz` alongside the per-turn trace.
-/// Only runs when session registry is enabled via remote settings or config.toml.
+/// Only runs when session registry is enabled via remote settings or config.json.
 /// With [`UploadWait::Defer`] the build wait is bounded by the flush deadline (the `UploadWait` contract): past it the turn records a miss while the build finishes detached and uploads best-effort.
 pub(crate) async fn upload_memory_state(ctx: &PromptTraceContext, wait: UploadWait) {
     if !ctx.session_registry_enabled {

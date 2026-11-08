@@ -1296,7 +1296,7 @@ fn test_search_tool_call_flow() {
         );
     }
 }
-/// Scrollback with pager.toml `expanded_by_default` set. Does not touch the flag cache.
+/// Scrollback with pager.json `expanded_by_default` set. Does not touch the flag cache.
 fn edit_config_scrollback(expanded_by_default: bool) -> ScrollbackState {
     use crate::appearance::AppearanceConfig;
     let mut sb = ScrollbackState::new();

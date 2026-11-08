@@ -15,6 +15,7 @@ memory-log = []
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true }
+schemars = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
 tracing = { workspace = true }

@@ -5005,7 +5005,7 @@ mod tests {
                 for path in [
                     "/etc/hosts",
                     "/home/user/.grok/hooks/evil.json",
-                    "/home/user/.grok/sandbox.toml",
+                    "/home/user/.grok/sandbox.json",
                 ] {
                     let mut auto = crate::permission::types::PermissionConfig::new(vec![]);
                     auto.prompt_policy = PromptPolicy::Auto;
