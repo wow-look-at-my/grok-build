@@ -477,8 +477,7 @@ pub struct ThinkingConfig {
     /// **Not a pager.json key**: minimal mode sets it, the only mode where a folded block cannot be unfolded in place.
     pub collapsed_expand_hint: bool,
     /// Draw the reasoning rail inside the body lines (a `┃ ` prefix directly below the header's bullet) instead of painting the reserved accent column.
-    /// The rail then sits under the diamond rather than beside it.
-    /// the first column.
+    /// The rail then sits under the diamond rather than beside it. Only minimal mode sets it.
     pub rail_under_bullet: bool,
 }
 
@@ -979,7 +978,7 @@ pub struct RawEditBlockConfig {
     /// Whether to skip indent columns in diff line background (keep them clean).
     /// true = skip indent, false = include indent in background.
     pub indent_bg: bool,
-    /// Show the +N/-M line summary in the collapsed header.
+    /// Show the +N/-M line summary in the collapsed header. Unset follows `ui.collapsed_edit_blocks`.
     pub line_summary: Option<bool>,
     /// Unset follows `ui.collapsed_edit_blocks`. A true flag collapses even when this is true.
     /// An explicit false still collapses when the flag is off.
