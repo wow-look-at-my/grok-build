@@ -107,6 +107,65 @@ pub fn catalog_windows(
         .collect()
 }
 
+/// Where each catalog model routes, by model id: its provider, else its endpoint host.
+pub fn catalog_routes(
+    available: &indexmap::IndexMap<acp::ModelId, acp::ModelInfo>,
+) -> BTreeMap<String, String> {
+    available
+        .iter()
+        .filter_map(|(id, info)| {
+            let meta = info.meta.as_ref();
+            let route = xai_grok_sampling_types::provider_meta(meta)
+                .or_else(|| xai_grok_sampling_types::endpoint_meta(meta))?;
+            Some((id.0.to_string(), route.to_owned()))
+        })
+        .collect()
+}
+
+/// The labels of the chooser rows, by model id. Several providers can serve
+/// one model under one name. Each such row gets its route, or its id when
+/// the route does not tell the rows apart. So no rows read the same.
+pub fn row_labels(snapshot: &PagerLocalSnapshot) -> BTreeMap<String, String> {
+    let route_of = |id: &acp::ModelId| snapshot.model_routes.get(id.0.as_ref()).cloned();
+    let mut by_name: BTreeMap<String, Vec<&acp::ModelId>> = BTreeMap::new();
+    for (name, id) in &snapshot.available_models {
+        by_name
+            .entry(model_choice_label(name, id).to_lowercase())
+            .or_default()
+            .push(id);
+    }
+    snapshot
+        .available_models
+        .iter()
+        .map(|(name, id)| {
+            let label = model_choice_label(name, id);
+            let others: Vec<&acp::ModelId> = by_name
+                .get(&label.to_lowercase())
+                .map(|ids| ids.iter().copied().filter(|other| *other != id).collect())
+                .unwrap_or_default();
+            if others.is_empty() {
+                return (id.0.to_string(), label);
+            }
+            let route = route_of(id)
+                .filter(|route| {
+                    others
+                        .iter()
+                        .all(|other| route_of(other).as_ref() != Some(route))
+                })
+                .unwrap_or_else(|| id.0.to_string());
+            (id.0.to_string(), format!("{label} ({route})"))
+        })
+        .collect()
+}
+
+/// The label of the chooser row of `model_id`, or the id when the catalog
+/// does not hold it.
+pub fn row_label(snapshot: &PagerLocalSnapshot, model_id: &str) -> String {
+    row_labels(snapshot)
+        .remove(model_id)
+        .unwrap_or_else(|| model_id.to_owned())
+}
+
 /// The limits the user `config.toml` sets, by model key. A config that does not
 /// load gives no limits, and the log says why.
 pub fn configured_limits() -> BTreeMap<String, u64> {
@@ -146,15 +205,20 @@ pub fn limits_from_config(root: &toml::Value) -> BTreeMap<String, u64> {
 /// rest sort by label.
 pub fn choices(snapshot: &PagerLocalSnapshot) -> Vec<OwnedEnumChoice> {
     let limits = &snapshot.context_limits;
-    let current = snapshot.current_model_name.as_deref();
+    let mut labels = row_labels(snapshot);
     let mut rows: Vec<(bool, OwnedEnumChoice)> = snapshot
         .available_models
         .iter()
         .map(|(name, id)| {
-            let label = model_choice_label(name, id);
+            let label = labels
+                .remove(id.0.as_ref())
+                .unwrap_or_else(|| model_choice_label(name, id));
             let window = snapshot.model_windows.get(id.0.as_ref()).copied();
             let limit = limits.get(id.0.as_ref()).copied();
-            let is_current = current.is_some_and(|c| c == name);
+            let is_current = match snapshot.current_model_id.as_deref() {
+                Some(current) => current == id.0.as_ref(),
+                None => snapshot.current_model_name.as_deref() == Some(name.as_str()),
+            };
             (
                 is_current,
                 OwnedEnumChoice {
@@ -187,13 +251,7 @@ pub fn summary(snapshot: &PagerLocalSnapshot) -> String {
     if limits.len() > 1 {
         return format!("{} models", limits.len());
     }
-    let label = snapshot
-        .available_models
-        .iter()
-        .find(|(_, mid)| mid.0.as_ref() == id.as_str())
-        .map(|(name, mid)| model_choice_label(name, mid))
-        .unwrap_or_else(|| id.clone());
-    format!("{label} {}", short_tokens(*tokens))
+    format!("{} {}", row_label(snapshot, id), short_tokens(*tokens))
 }
 
 /// `Name · 1M`, or `Name · 350k limit` for a model with a configured limit.
@@ -239,6 +297,101 @@ mod tests {
         ] {
             assert_eq!(parse_token_amount(input), Ok(Some(want)), "{input:?}");
         }
+    }
+
+    fn model(id: &str, name: &str) -> (String, acp::ModelId) {
+        (name.to_owned(), acp::ModelId::new(std::sync::Arc::from(id)))
+    }
+
+    /// Providers serve "Opus". Each row names its provider, the limit
+    /// shows only on its own row, and only the selected route is current.
+    #[test]
+    fn choices_name_the_provider_of_a_shared_model() {
+        let snapshot = PagerLocalSnapshot {
+            available_models: vec![
+                model("alpha/opus", "Opus"),
+                model("beta/opus", "Opus"),
+                model("solo", "Solo"),
+            ],
+            model_routes: [
+                ("alpha/opus".to_owned(), "alpha".to_owned()),
+                ("beta/opus".to_owned(), "beta".to_owned()),
+                ("solo".to_owned(), "alpha".to_owned()),
+            ]
+            .into(),
+            model_windows: [
+                ("alpha/opus".to_owned(), 1_000_000),
+                ("beta/opus".to_owned(), 1_000_000),
+            ]
+            .into(),
+            context_limits: [("beta/opus".to_owned(), 350_000)].into(),
+            current_model_name: Some("Opus".to_owned()),
+            current_model_id: Some("beta/opus".to_owned()),
+            ..PagerLocalSnapshot::default()
+        };
+        let rows: Vec<(String, String)> = choices(&snapshot)
+            .into_iter()
+            .map(|c| (c.canonical, c.display))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "beta/opus".to_owned(),
+                    "Opus (beta) \u{00B7} 350k limit".to_owned()
+                ),
+                (
+                    "alpha/opus".to_owned(),
+                    "Opus (alpha) \u{00B7} 1M".to_owned()
+                ),
+                ("solo".to_owned(), "Solo".to_owned()),
+            ],
+            "the current route first, every shared name with its provider"
+        );
+        assert_eq!(summary(&snapshot), "Opus (beta) 350k");
+    }
+
+    /// Ids of one name on one provider fall back to the id.
+    #[test]
+    fn row_labels_fall_back_to_the_id_when_the_route_is_shared() {
+        let snapshot = PagerLocalSnapshot {
+            available_models: vec![model("gw/opus", "Opus"), model("gw/opus-fast", "Opus")],
+            model_routes: [
+                ("gw/opus".to_owned(), "gw".to_owned()),
+                ("gw/opus-fast".to_owned(), "gw".to_owned()),
+            ]
+            .into(),
+            ..PagerLocalSnapshot::default()
+        };
+        let labels = row_labels(&snapshot);
+        assert_eq!(labels["gw/opus"], "Opus (gw/opus)");
+        assert_eq!(labels["gw/opus-fast"], "Opus (gw/opus-fast)");
+    }
+
+    #[test]
+    fn catalog_routes_prefers_the_provider_over_the_endpoint() {
+        let mut available = indexmap::IndexMap::new();
+        for (id, meta) in [
+            (
+                "a/m",
+                serde_json::json!({ "provider": "a", "endpoint": "a.example" }),
+            ),
+            ("b/m", serde_json::json!({ "endpoint": "b.example" })),
+            ("c", serde_json::json!({})),
+        ] {
+            let model_id = acp::ModelId::new(std::sync::Arc::from(id));
+            let serde_json::Value::Object(meta) = meta else {
+                unreachable!()
+            };
+            available.insert(
+                model_id.clone(),
+                acp::ModelInfo::new(model_id, "M".to_owned()).meta(Some(meta)),
+            );
+        }
+        let routes = catalog_routes(&available);
+        assert_eq!(routes.get("a/m").map(String::as_str), Some("a"));
+        assert_eq!(routes.get("b/m").map(String::as_str), Some("b.example"));
+        assert!(!routes.contains_key("c"));
     }
 
     #[test]
