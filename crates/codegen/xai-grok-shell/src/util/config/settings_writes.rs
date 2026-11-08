@@ -141,7 +141,7 @@ pub(super) fn write_dashboard_preview(
 }
 
 /// Persist `ui.notifications.keep_awake` (`never` | `while_running` | `always`).
-/// `update_config` has no model of `ui.notifications`, so this rewrites the raw table.
+/// `update_config` has no model of `ui.notifications`, so this rewrites the raw object.
 pub async fn set_notifications_keep_awake(value: String) -> Result<()> {
     rewrite_user_config_locked("keep awake", move |path| {
         write_notifications_keep_awake(

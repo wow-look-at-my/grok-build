@@ -449,28 +449,31 @@ fn keep_awake_writer_replaces_sleep_prevention_and_keeps_other_notification_keys
     let path = directory.path().join("config.json");
     std::fs::write(
         &path,
-        r#"{"ui": {"theme": "dark", "notifications": {"method": "bel", "sleep_prevention": false}}}"#,
+        r#"{ "ui": { "theme": "dark", "notifications": { "method": "bel", "sleep_prevention": false } } }"#,
     )
     .unwrap();
     write_notifications_keep_awake(&path, "always", atomic_write_follow_bound).unwrap();
-    let saved = xai_grok_config::load_toml_file(&path).unwrap();
-    let ui = saved.get("ui").unwrap();
-    let notifications = ui.get("notifications").unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+        .expect("config.json stays parseable");
+    let notifications = &saved["ui"]["notifications"];
     assert_eq!(
         notifications
             .get("keep_awake")
-            .and_then(toml::Value::as_str),
+            .and_then(serde_json::Value::as_str),
         Some("always")
     );
     assert!(
         notifications.get("sleep_prevention").is_none(),
-        "both keys together fail the whole [ui.notifications] section"
+        "the legacy key and keep_awake together fail the whole ui.notifications object"
     );
     assert_eq!(
-        notifications.get("method").and_then(toml::Value::as_str),
+        notifications.get("method").and_then(serde_json::Value::as_str),
         Some("bel")
     );
-    assert_eq!(ui.get("theme").and_then(toml::Value::as_str), Some("dark"));
+    assert_eq!(
+        saved["ui"].get("theme").and_then(serde_json::Value::as_str),
+        Some("dark")
+    );
 }
 #[test]
 fn keep_awake_writer_creates_the_section_in_an_empty_file() {
@@ -478,13 +481,12 @@ fn keep_awake_writer_creates_the_section_in_an_empty_file() {
     let path = directory.path().join("config.json");
     std::fs::write(&path, "").unwrap();
     write_notifications_keep_awake(&path, "never", atomic_write_follow_bound).unwrap();
-    let saved = xai_grok_config::load_toml_file(&path).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
+        .expect("config.json stays parseable");
     assert_eq!(
-        saved
-            .get("ui")
-            .and_then(|ui| ui.get("notifications"))
-            .and_then(|n| n.get("keep_awake"))
-            .and_then(toml::Value::as_str),
+        saved["ui"]["notifications"]
+            .get("keep_awake")
+            .and_then(serde_json::Value::as_str),
         Some("never")
     );
 }
