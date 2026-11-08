@@ -50,6 +50,8 @@ async fn reasoning_efforts_menu_renders_and_remaps_on_wire() {
 
     // Dismiss the dropdown and clear the composer before issuing the command.
     harness.inject_keys(keys::ESC).expect("dismiss dropdown");
+    // An ESC followed at once by another byte reads as Alt plus that key. The pause keeps Ctrl+U a plain kill-to-BOL.
+    harness.update(Duration::from_millis(200));
     harness
         .inject_keys(b"\x15")
         .expect("clear composer (Ctrl+U)");
