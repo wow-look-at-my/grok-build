@@ -1895,7 +1895,9 @@ impl SessionActor {
     fn goal_bookkeeping_reader(
         &self,
     ) -> Option<crate::session::goal_classifier::run_log::BookkeepingReader> {
-        use crate::session::goal_classifier::run_log::BookkeepingReader;
+        use crate::session::goal_classifier::run_log::{
+            BookkeepingReader, session_tool_output_dirs,
+        };
         use crate::session::goal_tracker::{GoalStatus, GoalTracker};
 
         let own_dir = crate::session::persistence::session_dir(&self.session_info);
@@ -1905,6 +1907,7 @@ impl SessionActor {
                 session_dir: own_dir.to_string_lossy().into_owned(),
                 main_session_dir: Some(main.to_string_lossy().into_owned()),
                 allowed_paths: vec![plan.plan_path(), plan.plan_baseline_path()],
+                allowed_dirs: session_tool_output_dirs(&own_dir),
                 // The run log, patch and verdict the harness wrote for it.
                 refuse_harness_evidence_names: false,
             });
@@ -1917,6 +1920,7 @@ impl SessionActor {
             session_dir: tracker.session_dir().to_string_lossy().into_owned(),
             main_session_dir: None,
             allowed_paths: vec![tracker.plan_path(), tracker.plan_baseline_path()],
+            allowed_dirs: session_tool_output_dirs(tracker.session_dir()),
             refuse_harness_evidence_names: true,
         })
     }

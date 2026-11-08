@@ -1825,7 +1825,7 @@ impl xai_tool_runtime::Tool for BashTool {
 
         // --- Route to foreground or background ---
         let output_file = session_folder
-            .join("terminal")
+            .join(crate::session_output_dirs::TERMINAL_OUTPUT_DIR)
             .join(format!("{}.log", tool_call_id.as_str()));
 
         if input.is_background {
