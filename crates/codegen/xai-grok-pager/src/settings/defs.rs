@@ -1124,7 +1124,7 @@ pub(crate) fn default_settings_with_subagent_rows(
             },
             restart_required: false,
         },
-        // PAGER-owned, persisted to `[scrollback.scroll].respect_manual_folds` in pager.toml (NOT config.json)
+        // PAGER-owned, persisted to `scrollback.scroll.respect_manual_folds` in pager.json (NOT config.json)
         // The live value is the appearance config (`AppView::set_appearance` fans changes out to every agent)
         // The flag is read at use time, so no restart
         SettingMeta {

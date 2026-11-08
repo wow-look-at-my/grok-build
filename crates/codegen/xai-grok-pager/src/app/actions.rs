@@ -479,7 +479,7 @@ pub enum Action {
     /// SHELL-owned: updates the process-wide cache mirror and persists to `[ui].prompt_suggestions` via `Effect::PersistSetting`.
     SetPromptSuggestions(bool),
     /// Set `[scrollback.scroll].respect_manual_folds`.
-    /// PAGER-owned: live-applied via `AppView::set_appearance` and persisted to pager.toml via `Effect::PersistSetting`.
+    /// PAGER-owned: live-applied via `AppView::set_appearance` and persisted to pager.json via `Effect::PersistSetting`.
     SetRespectManualFolds(bool),
     /// Set the canonical for `[ui].default_selected_permission`. Persists via `Effect::PersistSetting`.
     /// Payload is the registry's canonical string (`default` | `allow_once` | `allow_always` | `reject`).

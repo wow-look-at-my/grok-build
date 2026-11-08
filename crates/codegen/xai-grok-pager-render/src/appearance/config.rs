@@ -1,10 +1,9 @@
-//! `RawAppearanceConfig` is the serde-friendly shape of pager.toml.
+//! `RawAppearanceConfig` is the serde-friendly shape of pager.json.
 //! `AppearanceConfig` is the resolved runtime form (ratatui::Color, BlockBackground, etc.).
 
-use documented::{Documented, DocumentedFields};
 use ratatui::style::Color;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use toml_edit::{DocumentMut, Item, RawString};
 use xai_grok_shared::ui_config::UiConfig;
 
 // ============================================================================
@@ -381,7 +380,7 @@ pub struct EditBlockConfig {
     pub gutter_bg: bool,
     pub indent_bg: bool,
     /// Show the +N/-M line summary in the collapsed header.
-    /// `None` (default) follows the shell-owned `collapsed_edit_blocks` flag; an explicit pager.toml value pins the shape regardless of the flag.
+    /// `None` (default) follows the shell-owned `collapsed_edit_blocks` flag; an explicit pager.json value pins the shape regardless of the flag.
     pub line_summary: Option<bool>,
     /// Whether Edit blocks start expanded. Fold shape is [`Self::effective_expanded`].
     pub expanded_by_default: Option<bool>,
@@ -474,14 +473,14 @@ pub struct ThinkingConfig {
     /// It respects muted_collapsed when collapsed. When false (default), the header is always dim/muted gray.
     pub header_bright: bool,
     /// Render the reasoning body de-emphasized (SGR dim and italic) on top of the `bg_blend` fade.
-    /// **Not a TOML key**: minimal mode sets it because there the fade alone cannot separate reasoning from the answer.
+    /// **Not a pager.json key**: minimal mode sets it because there the fade alone cannot separate reasoning from the answer.
     pub body_dim_italic: bool,
     /// Append a dim "(ctrl+e to expand)" hint to the *collapsed* header when it fits on the same row (never adds a row).
-    /// **Not a TOML key**: minimal mode sets it, the only mode where a folded block cannot be unfolded in place.
+    /// **Not a pager.json key**: minimal mode sets it, the only mode where a folded block cannot be unfolded in place.
     pub collapsed_expand_hint: bool,
     /// Draw the reasoning rail inside the body lines (a `┃ ` prefix directly below the header's bullet) instead of painting the reserved accent column.
     /// The rail then sits under the diamond rather than beside it.
-    /// **Not a TOML key**: minimal mode sets it so every block's bullet stays flush at column 0.
+    /// **Not a pager.json key**: minimal mode sets it so every block's bullet stays flush at column 0.
     pub rail_under_bullet: bool,
 }
 
@@ -619,11 +618,11 @@ impl Default for ExecuteConfig {
     }
 }
 
-// Raw TOML structs: field docs become generated comments via DocumentedFields.
-// A new section also needs a runtime twin, a From conversion, and an annotate_table call in to_toml_with_comments().
+// The Raw structs are the shape of pager.json. Their doc comments are the descriptions in schemas/pager.schema.json.
+// A new section also needs a runtime twin and a From conversion. Regenerate the schema after a change.
 
-/// Root appearance configuration (TOML format).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Documented, DocumentedFields)]
+/// The grok TUI appearance file, `$GROK_HOME/pager.json`. Every member is optional. An absent or `null` member keeps the built-in default.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawAppearanceConfig {
     /// Terminal behavior settings (fullscreen policy).
@@ -644,7 +643,7 @@ pub struct RawAppearanceConfig {
 }
 
 /// Fullscreen (alternate screen) policy and related terminal settings.
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawTerminalConfig {
     /// "auto" (default): fullscreen except tmux control mode and Zellij. "always" / "never" force the choice.
@@ -672,7 +671,7 @@ impl Default for RawTerminalConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RawAltScreenMode {
     /// Automatic: fullscreen in healthy environments, inline in degraded ones.
@@ -694,7 +693,7 @@ impl From<RawAltScreenMode> for crate::terminal::AltScreenMode {
     }
 }
 /// Prompt editor widget, not the user prompt block in scrollback.
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawPromptViewConfig {
     /// When true, the prompt collapses to its minimum height (single-line)
@@ -716,8 +715,8 @@ impl Default for RawPromptViewConfig {
     }
 }
 
-/// Scrollback pane configuration (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Default, Documented, DocumentedFields)]
+/// Scrollback pane configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(default)]
 pub struct RawScrollbackConfig {
     /// Layout settings (padding, spacing).
@@ -732,13 +731,13 @@ pub struct RawScrollbackConfig {
     pub display: RawScrollbackDisplayConfig,
 }
 
-/// Scrollback display options (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Scrollback display options.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawScrollbackDisplayConfig {
     /// Render a subtle horizontal line below the last entry ("end of content" marker).
     pub line_under_last_entry: bool,
-    /// Accent character for collapsed groupable blocks. Default: "❙".
+    /// Accent character for collapsed groupable blocks. Default: "❙" ("|" on the Windows console).
     pub collapsed_accent_char: Option<String>,
     /// Blend factor for dimmed accents on collapsed groupable blocks (0.0–1.0). Default: 0.5.
     pub dim_accent: Option<f32>,
@@ -772,7 +771,8 @@ impl Default for RawScrollbackDisplayConfig {
     fn default() -> Self {
         Self {
             line_under_last_entry: false,
-            collapsed_accent_char: Some(crate::glyphs::collapsed_accent().to_string()),
+            // Unset picks the glyph for this console, so the schema default stays the same on every platform
+            collapsed_accent_char: None,
             dim_accent: Some(0.5),
             group_selection_split: Some(true),
             highlight_overlays_border: Some(false),
@@ -788,8 +788,8 @@ impl Default for RawScrollbackDisplayConfig {
     }
 }
 
-/// Layout configuration (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Layout configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawLayoutConfig {
     /// Vertical padding (top/bottom) for outer viewport.
@@ -816,8 +816,8 @@ impl Default for RawLayoutConfig {
     }
 }
 
-/// Scrollbar configuration (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Scrollbar configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawScrollbarConfig {
     /// Whether scrollbar is enabled.
@@ -849,8 +849,8 @@ impl Default for RawScrollbarConfig {
     }
 }
 
-/// Scroll behavior configuration (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Scroll behavior configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawScrollConfig {
     /// Minimum lines of context to keep above/below selected entry.
@@ -889,7 +889,7 @@ impl Default for RawScrollConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RawFollowIndicator {
     /// No scroll indicators.
@@ -899,7 +899,7 @@ pub enum RawFollowIndicator {
     Center,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum RawToolBullet {
     /// No bullet.
@@ -919,8 +919,8 @@ pub enum RawToolBullet {
     Diamond,
 }
 
-/// Animation configuration (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Animation configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawAnimationConfig {
     /// Animation frame rate (ticks per second).
@@ -944,8 +944,8 @@ impl Default for RawAnimationConfig {
     }
 }
 
-/// Configuration for all block types (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Default, Documented, DocumentedFields)]
+/// Configuration for all block types.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(default)]
 pub struct RawBlocksConfig {
     /// Edit block settings.
@@ -962,8 +962,8 @@ pub struct RawBlocksConfig {
     pub execute: RawExecuteConfig,
 }
 
-/// Configuration for EditBlock rendering (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Configuration for EditBlock rendering.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawEditBlockConfig {
     /// Whether to apply 2-char indent before line numbers.
@@ -982,10 +982,10 @@ pub struct RawEditBlockConfig {
     /// true = skip indent, false = include indent in background.
     pub indent_bg: bool,
     /// Show the +N/-M line summary in the collapsed header.
-    /// Commented out (unset), it follows the `[ui] collapsed_edit_blocks`
-    /// flag in config.json; uncomment to pin either way.
+    /// Unset or `null`, it follows `ui.collapsed_edit_blocks` in config.json.
+    /// A value pins it either way.
     pub line_summary: Option<bool>,
-    /// Unset follows `[ui] collapsed_edit_blocks`. A true flag collapses even when this is true.
+    /// Unset follows `ui.collapsed_edit_blocks`. A true flag collapses even when this is true.
     /// An explicit false still collapses when the flag is off.
     pub expanded_by_default: Option<bool>,
     /// Separator between diff hunks. Options: "…" (default), "───", "⋯", "" (none).
@@ -1014,7 +1014,7 @@ impl Default for RawEditBlockConfig {
 }
 
 /// User prompt block in scrollback, not the prompt editor widget.
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawPromptConfig {
     /// Whether to apply vertical padding (blank lines above/below).
@@ -1042,8 +1042,8 @@ impl Default for RawPromptConfig {
     }
 }
 
-/// Configuration for thinking/reasoning block rendering (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Configuration for thinking/reasoning block rendering.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawThinkingConfig {
     /// Accent color for the vertical line.
@@ -1083,8 +1083,8 @@ impl Default for RawThinkingConfig {
     }
 }
 
-/// Configuration for tool call blocks (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Configuration for tool call blocks.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawToolConfig {
     /// When true, collapsed tool calls render entirely in muted gray.
@@ -1111,8 +1111,8 @@ impl Default for RawToolConfig {
     }
 }
 
-/// Configuration for ListDir block (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Configuration for ListDir block.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawListDirConfig {
     /// When true, output has terminal-style dark background.
@@ -1128,8 +1128,8 @@ impl Default for RawListDirConfig {
     }
 }
 
-/// Configuration for Execute tool call block (TOML format).
-#[derive(Debug, Clone, Serialize, Deserialize, Documented, DocumentedFields)]
+/// Configuration for Execute tool call block.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RawExecuteConfig {
     /// Number of output lines to show at the start in truncated mode.
@@ -1164,7 +1164,7 @@ impl Default for RawExecuteConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RawExecuteHeaderStyle {
     /// Shell style: `$ command` (default).
@@ -1183,7 +1183,7 @@ impl From<RawExecuteHeaderStyle> for ExecuteHeaderStyle {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RawBlockBackground {
     #[default]
@@ -1214,7 +1214,7 @@ impl From<RawAppearanceConfig> for AppearanceConfig {
                 collapse_unfocused: raw.prompt.collapse_unfocused,
                 mouse_hover: raw.prompt.mouse_hover,
                 show_prefix: raw.prompt.show_prefix,
-                compact: false, // runtime-only, not persisted in TOML
+                compact: false, // runtime-only, not persisted in pager.json
             },
             scrollback: ScrollbackConfig {
                 layout: raw.scrollback.layout.into(),
@@ -1451,7 +1451,7 @@ impl From<RawThinkingConfig> for ThinkingConfig {
 // ============================================================================
 
 /// An optional color that can be "none" or a color value.
-/// This allows TOML to represent None values explicitly.
+/// The string "none" is the explicit unset value.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum OptionalColor {
     #[default]
@@ -1459,9 +1459,86 @@ pub enum OptionalColor {
     Some(Color),
 }
 
+/// The names that [`lookup_named_color`] accepts. The schema lists them.
+const NAMED_COLORS: &[&str] = &[
+    "BG",
+    "BG_BASE",
+    "BG_LIGHT",
+    "BG_HIGHLIGHT",
+    "BG_DARK",
+    "BG_TERMINAL",
+    "BG_NIGHT",
+    "BG_VISUAL",
+    "BG_SEARCH",
+    "BLUE",
+    "BLUE0",
+    "BLUE1",
+    "BLUE2",
+    "BLUE5",
+    "BLUE6",
+    "BLUE7",
+    "CYAN",
+    "GREEN",
+    "GREEN1",
+    "GREEN2",
+    "YELLOW",
+    "ORANGE",
+    "RED",
+    "RED1",
+    "MAGENTA",
+    "PURPLE",
+    "MAGENTA2",
+    "TEAL",
+    "HINT",
+    "FG",
+    "TEXT",
+    "TEXT_PRIMARY",
+    "FG_DARK",
+    "TEXT_SECONDARY",
+    "FG_GUTTER",
+    "COMMENT",
+    "MUTED",
+    "TEXT_MUTED",
+    "DARK3",
+    "DARK5",
+    "TOOL",
+    "ERROR",
+    "SUCCESS",
+    "WARNING",
+    "INFO",
+    "BLACK",
+    "WHITE",
+    "GRAY",
+    "GREY",
+];
+
+impl JsonSchema for OptionalColor {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Color".into()
+    }
+
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let names = NAMED_COLORS.join(", ");
+        schemars::json_schema!({
+            "description": format!(
+                "A color: \"none\" for the theme default, a hex string (\"#7aa2f7\" or \"#f7f\"), an RGB array ([122, 162, 247]), or a color name. Names are case-insensitive: {names}."
+            ),
+            "anyOf": [
+                { "type": "string" },
+                {
+                    "type": "array",
+                    "items": { "type": "integer", "minimum": 0, "maximum": 255 },
+                    "minItems": 3,
+                    "maxItems": 3
+                }
+            ]
+        })
+    }
+}
+
 impl OptionalColor {
     /// Convert to `Option<Color>`, quantizing to the terminal's color level.
-    /// User-configured colors arrive as raw RGB from TOML.
+    /// User-configured colors arrive as raw RGB from pager.json.
     /// Unlike theme colors (pre-quantized by [`Theme::current()`]), they need quantization here to work on 256-color terminals.
     pub fn to_option(&self) -> Option<Color> {
         match self {
@@ -1486,7 +1563,7 @@ impl Serialize for OptionalColor {
             OptionalColor::None => serializer.serialize_str("none"),
             OptionalColor::Some(Color::Rgb(r, g, b)) => [*r, *g, *b].serialize(serializer),
             OptionalColor::Some(Color::Indexed(n)) => {
-                // Convert indexed to RGB for serialization so the TOML round-trips.
+                // Convert indexed to RGB for serialization so the file round-trips.
                 let (r, g, b) = crate::render::color::indexed_to_rgb(*n);
                 [r, g, b].serialize(serializer)
             }
@@ -1640,231 +1717,112 @@ fn lookup_named_color(name: &str) -> Result<Color, String> {
 }
 
 // ============================================================================
-// TOML Generation with Comments
+// pager.json
 // ============================================================================
 
-impl RawAppearanceConfig {
-    pub fn to_toml_with_comments() -> String {
-        let mut config = Self::default();
-        // These two keys default to None (the shell's `[ui] collapsed_edit_blocks` flag decides), which the serializer would omit entirely
-        // Show the flag-off shape as commented lines so the keys stay discoverable; commenting-out below keeps them inert
-        config.scrollback.blocks.edit.expanded_by_default = Some(true);
-        config.scrollback.blocks.edit.line_summary = Some(false);
-        let toml_str = toml_edit::ser::to_string_pretty(&config).expect("serialize default");
-        let mut doc: DocumentMut = toml_str.parse().expect("parse toml");
+/// Parse the text of the appearance file at `path`. A `.json` path is JSON,
+/// where a `null` member is unset. Any other path is the TOML.
+pub fn parse_appearance_config(
+    path: &std::path::Path,
+    text: &str,
+) -> Result<RawAppearanceConfig, String> {
+    use xai_grok_config::format::{ConfigFormat, parse_plain_json_source, parse_toml_source};
 
-        let pager_path = crate::util::display_user_grok_path("pager.toml");
-        let header = format!(
-            "\
-# Grok Pager Appearance Configuration ({pager_path})
-# Every value below is a commented-out built-in default: uncomment a line and
-# save to override it. Values left commented track future default changes.
-# Delete the file to regenerate this template.
-#
-# ═══════════════════════════════════════════════════════════════════════════════
-# TOKYO NIGHT STORM COLOR PALETTE
-# ═══════════════════════════════════════════════════════════════════════════════
-#
-# Colors can be specified as:
-#   - Named color: \"BLUE\", \"cyan\", \"Comment\" (case-insensitive)
-#   - Hex string:  \"#7aa2f7\" or \"#f7f\" (3 or 6 digits)
-#   - RGB array:   [122, 162, 247]
-#
-# Background colors:
-#   BG, BG_BASE       #141414  (neutral background)
-#   BG_LIGHT          #1c1c1c  (highlighted background)
-#   BG_DARK           #111111  (darker background)
-#   BG_TERMINAL       #0e0e0e  (terminal background)
-#   BG_VISUAL         #262628  (visual selection background)
-#   BG_SEARCH         #303034  (search highlight background)
-#
-# Primary colors:
-#   BLUE              #7aa2f7
-#   BLUE0             #3d59a1  (dark blue, used for search/visual)
-#   BLUE1             #2ac3de  (bright cyan-blue)
-#   BLUE2             #0db9d7  (teal-blue)
-#   BLUE5             #89ddff  (light cyan)
-#   BLUE6             #b4f9f8  (pale cyan)
-#   BLUE7             #394b70  (dark muted blue)
-#   CYAN              #7dcfff
-#   GREEN             #9ece6a
-#   GREEN1            #73daca  (teal-green)
-#   GREEN2            #41a6b5  (dark teal)
-#   YELLOW            #e0af68
-#   ORANGE            #ff9e64
-#   RED               #f7768e
-#   RED1              #db4b4b  (dark red)
-#   MAGENTA           #bb9af7
-#   PURPLE            #9d7cd8
-#   MAGENTA2          #ff007c  (hot pink)
-#   TEAL, HINT        #1abc9c
-#
-# Text colors:
-#   FG, TEXT          #c8c8c8  (primary text)
-#   FG_DARK           #b2b2b2  (secondary text)
-#   FG_GUTTER         #414141  (line number gutter)
-#   COMMENT, MUTED    #5f5f5f  (muted/comment text)
-#   DARK3             #5a5a5a  (medium gray)
-#   DARK5, TOOL       #787878  (tool accent, system prompt)
-#
-# Semantic colors:
-#   ERROR             #f7768e  (same as RED)
-#   SUCCESS           #9ece6a  (same as GREEN)
-#   WARNING           #e0af68  (same as YELLOW)
-#   INFO              #7dcfff  (same as CYAN)
-#
-# ═══════════════════════════════════════════════════════════════════════════════
-
-"
-        );
-
-        if let Some(terminal) = doc.get_mut("terminal").and_then(Item::as_table_mut) {
-            annotate_table::<RawTerminalConfig>(terminal);
+    let tree = match ConfigFormat::of(path) {
+        ConfigFormat::Json => parse_plain_json_source(path, text),
+        ConfigFormat::Toml if text.trim().is_empty() => {
+            Ok(toml::Value::Table(toml::map::Map::new()))
         }
-
-        if let Some(animation) = doc.get_mut("animation").and_then(Item::as_table_mut) {
-            annotate_table::<RawAnimationConfig>(animation);
-        }
-
-        if let Some(prompt) = doc.get_mut("prompt").and_then(Item::as_table_mut) {
-            annotate_table::<RawPromptViewConfig>(prompt);
-        }
-
-        if let Some(scrollback) = doc.get_mut("scrollback").and_then(Item::as_table_mut) {
-            if let Some(display) = scrollback.get_mut("display").and_then(Item::as_table_mut) {
-                annotate_table::<RawScrollbackDisplayConfig>(display);
-            }
-            if let Some(layout) = scrollback.get_mut("layout").and_then(Item::as_table_mut) {
-                annotate_table::<RawLayoutConfig>(layout);
-            }
-            if let Some(scrollbar) = scrollback.get_mut("scrollbar").and_then(Item::as_table_mut) {
-                annotate_table::<RawScrollbarConfig>(scrollbar);
-            }
-            if let Some(scroll) = scrollback.get_mut("scroll").and_then(Item::as_table_mut) {
-                annotate_table::<RawScrollConfig>(scroll);
-            }
-            if let Some(blocks) = scrollback.get_mut("blocks").and_then(Item::as_table_mut) {
-                if let Some(edit) = blocks.get_mut("edit").and_then(Item::as_table_mut) {
-                    annotate_table::<RawEditBlockConfig>(edit);
-                }
-                if let Some(prompt) = blocks.get_mut("prompt").and_then(Item::as_table_mut) {
-                    annotate_table::<RawPromptConfig>(prompt);
-                }
-                if let Some(thinking) = blocks.get_mut("thinking").and_then(Item::as_table_mut) {
-                    annotate_table::<RawThinkingConfig>(thinking);
-                }
-                if let Some(tool) = blocks.get_mut("tool").and_then(Item::as_table_mut) {
-                    annotate_table::<RawToolConfig>(tool);
-                }
-                if let Some(list_dir) = blocks.get_mut("list_dir").and_then(Item::as_table_mut) {
-                    annotate_table::<RawListDirConfig>(list_dir);
-                }
-                if let Some(execute) = blocks.get_mut("execute").and_then(Item::as_table_mut) {
-                    annotate_table::<RawExecuteConfig>(execute);
-                }
-            }
-        }
-
-        format!("{header}{}", comment_out_values(&doc.to_string()))
+        ConfigFormat::Toml => parse_toml_source(path, text),
     }
+    .map_err(|e| e.to_string())?;
+    tree.try_into::<RawAppearanceConfig>()
+        .map_err(|e| e.to_string())
 }
 
-/// Comment out every key-value line, keeping section headers and comments.
-/// The generated template documents defaults without pinning them, so a future built-in default change reaches installs holding an old file.
-/// Active values would freeze the defaults of the day forever.
-fn comment_out_values(toml: &str) -> String {
-    let mut out = String::with_capacity(toml.len() + 256);
-    for line in toml.lines() {
-        let trimmed = line.trim_start();
-        if !(trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('[')) {
-            out.push_str("# ");
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
-}
-
-/// Serializes the pager.toml read-modify-write so two rapid settings toggles can't interleave and clobber each other.
+/// Serializes the pager.json read-modify-write so rapid settings toggles can't interleave and clobber each other.
 /// It mirrors the shell's `save_config` `SAVE_LOCK`.
-static PAGER_TOML_SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static PAGER_SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub fn persist_respect_manual_folds(enabled: bool) -> std::io::Result<()> {
     use std::io::{Error, ErrorKind};
 
-    if xai_grok_config::user_grok_home().is_none() {
+    let Some(home) = xai_grok_config::user_grok_home() else {
         return Err(Error::new(
             ErrorKind::NotFound,
-            "no user grok home resolved; refusing to write a cwd-relative pager.toml \
+            "no user grok home resolved; refusing to write a cwd-relative pager.json \
              that startup would never read",
         ));
-    }
-    // The lock serialises writes of `pager.toml`.
+    };
+    persist_respect_manual_folds_in(&home, enabled)
+}
+
+fn persist_respect_manual_folds_in(home: &std::path::Path, enabled: bool) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+
     #[allow(clippy::disallowed_methods)]
-    let _guard = PAGER_TOML_SAVE_LOCK
+    let _guard = PAGER_SAVE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-    let path = crate::util::pager_toml_path();
-    // Bind read + publish to one follow destination (path + inode).
-    let dest = xai_grok_config::fs_atomic::bind_follow_destination(&path)?;
-    let content = match std::fs::read_to_string(dest.as_path()) {
-        Ok(c) => c,
-        Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(e),
+    let path = writable_pager_config(home)?;
+    xai_grok_config::format::edit_json_document_keeping_schema(
+        &path,
+        xai_grok_config::format::PAGER_SCHEMA_REF,
+        |doc| {
+            set_json_member(
+                doc,
+                &["scrollback", "scroll", "respect_manual_folds"],
+                serde_json::Value::Bool(enabled),
+            )
+            .map_err(|e| Error::new(ErrorKind::InvalidData, e))
+        },
+    )
+}
+
+/// The `pager.json` in `home` that a writer may edit. A legacy `pager.toml` is converted first.
+/// A legacy file that cannot be converted is an error, so a write never hides it behind a new `pager.json`.
+fn writable_pager_config(home: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    use xai_grok_config::format::{
+        ConfigFormat, PAGER_SCHEMA_REF, PAGER_STEM, migrate_legacy_plain_config,
     };
-    let dest = xai_grok_config::fs_atomic::require_same_bound_destination(&path, &dest)?;
-    let updated = upsert_respect_manual_folds(&content, enabled)
-        .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
-    if let Some(dir) = dest.as_path().parent() {
-        std::fs::create_dir_all(dir)?;
+
+    let path = migrate_legacy_plain_config(home, PAGER_STEM, Some(PAGER_SCHEMA_REF))?;
+    if ConfigFormat::of(&path) != ConfigFormat::Json {
+        return Err(std::io::Error::other(format!(
+            "could not convert {} to pager.json; convert or delete it, then try again",
+            path.display()
+        )));
     }
-    xai_grok_config::fs_atomic::write_atomically_bound(&dest, &updated, None)
+    Ok(path)
 }
 
-fn upsert_respect_manual_folds(content: &str, enabled: bool) -> Result<String, String> {
-    let mut doc: DocumentMut = content
-        .parse()
-        .map_err(|e: toml_edit::TomlError| e.to_string())?;
-    let scrollback = doc
-        .entry("scrollback")
-        .or_insert_with(implicit_table)
-        .as_table_mut()
-        .ok_or_else(|| "pager.toml `scrollback` is not a table".to_string())?;
-    let scroll = scrollback
-        .entry("scroll")
-        .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
-        .as_table_mut()
-        .ok_or_else(|| "pager.toml `scrollback.scroll` is not a table".to_string())?;
-    scroll.insert("respect_manual_folds", toml_edit::value(enabled));
-    Ok(doc.to_string())
-}
-
-fn implicit_table() -> Item {
-    let mut table = toml_edit::Table::new();
-    table.set_implicit(true);
-    Item::Table(table)
-}
-
-fn annotate_table<T: DocumentedFields>(table: &mut toml_edit::Table) {
-    for (mut key, _value) in table.iter_mut() {
-        let field_name = key.get();
-        if let Ok(docs) = T::get_field_docs(field_name) {
-            let comment: String = docs
-                .lines()
-                .map(|l| {
-                    if l.is_empty() {
-                        "#\n".to_string()
-                    } else {
-                        format!("# {l}\n")
-                    }
-                })
-                .collect();
-            let decor = key.leaf_decor_mut();
-            let prefix = decor.prefix().and_then(RawString::as_str).unwrap_or("");
-            decor.set_prefix(format!("{prefix}{comment}"));
+/// Set the member at `keys` in `doc`. An absent or `null` parent becomes an object.
+fn set_json_member(
+    doc: &mut serde_json::Map<String, serde_json::Value>,
+    keys: &[&str],
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let Some((last, parents)) = keys.split_last() else {
+        return Ok(());
+    };
+    let mut node = doc;
+    for (depth, key) in parents.iter().enumerate() {
+        let slot = node
+            .entry((*key).to_string())
+            .or_insert(serde_json::Value::Null);
+        if slot.is_null() {
+            *slot = serde_json::Value::Object(serde_json::Map::new());
         }
+        node = slot.as_object_mut().ok_or_else(|| {
+            format!(
+                "pager.json `{}` is not an object",
+                keys.get(..=depth).unwrap_or(keys).join(".")
+            )
+        })?;
     }
+    node.insert((*last).to_string(), value);
+    Ok(())
 }
 
 // ============================================================================
@@ -1934,18 +1892,38 @@ mod tests {
         assert_eq!(t.color.to_option(), None);
     }
 
+    /// Parse `text` as the content of `pager.json`.
+    fn json(text: &str) -> RawAppearanceConfig {
+        parse_appearance_config(std::path::Path::new("/g/pager.json"), text).unwrap()
+    }
+
+    /// Every name in the schema description must parse, so the list cannot name a color that grok refuses.
+    #[test]
+    fn every_listed_color_name_parses() {
+        for name in NAMED_COLORS {
+            assert!(lookup_named_color(name).is_ok(), "{name}");
+        }
+    }
+
     #[test]
     fn test_deserialize_full_config() {
-        let toml = r#"
-[scrollback.blocks.edit]
-indent = false
-vpad = true
-bg = "dark"
-accent_bg = true
-accent = "CYAN"
-gutter_bg = true
-"#;
-        let raw: RawAppearanceConfig = toml::from_str(toml).unwrap();
+        let raw = json(
+            r#"{
+				"$schema": "./pager.schema.json",
+				"scrollback": {
+					"blocks": {
+						"edit": {
+							"indent": false,
+							"vpad": true,
+							"bg": "dark",
+							"accent_bg": true,
+							"accent": "CYAN",
+							"gutter_bg": true
+						}
+					}
+				}
+			}"#,
+        );
         let cfg: AppearanceConfig = raw.into();
         assert!(!cfg.scrollback.blocks.edit.indent);
         assert!(cfg.scrollback.blocks.edit.vpad);
@@ -1965,11 +1943,14 @@ gutter_bg = true
         assert_eq!(cfg.scrollback.blocks.edit.bg, BlockBackground::None);
     }
 
-    /// Legacy configs still contain the removed `invert` key (it was written by old generated `pager.toml`s); parsing must keep ignoring it.
+    /// A legacy `pager.toml` that has not migrated is read in place. Its removed `invert` key is ignored.
     #[test]
-    fn removed_prompt_invert_key_is_ignored() {
-        let raw: RawAppearanceConfig =
-            toml::from_str("[scrollback.blocks.prompt]\ninvert = true\nvpad = false").unwrap();
+    fn legacy_toml_still_parses_and_ignores_the_removed_invert_key() {
+        let raw = parse_appearance_config(
+            std::path::Path::new("/g/pager.toml"),
+            "[scrollback.blocks.prompt]\ninvert = true\nvpad = false",
+        )
+        .unwrap();
         let cfg: AppearanceConfig = raw.into();
         assert!(!cfg.scrollback.blocks.prompt.vpad);
     }
@@ -1979,194 +1960,107 @@ gutter_bg = true
         let cfg = AppearanceConfig::default();
         assert!(!cfg.scrollback.scroll.respect_manual_folds);
 
-        let raw: RawAppearanceConfig =
-            toml::from_str("[scrollback.scroll]\nrespect_manual_folds = true").unwrap();
+        let raw = json(r#"{"scrollback": {"scroll": {"respect_manual_folds": true}}}"#);
         let cfg: AppearanceConfig = raw.into();
         assert!(cfg.scrollback.scroll.respect_manual_folds);
     }
 
+    /// A `null` member is unset, at every depth, also for a key whose type is not optional.
     #[test]
-    fn test_upsert_respect_manual_folds_writes_key_and_preserves_siblings() {
-        let updated = upsert_respect_manual_folds("", true).unwrap();
-        assert!(
-            updated.contains("[scrollback.scroll]"),
-            "missing section must render in section form, not as inline tables:\n{updated}"
+    fn null_members_keep_the_builtin_defaults() {
+        let raw = json(
+            r#"{
+				"show_plan_chip": null,
+				"animation": {"fps": null, "wave_rows": 16},
+				"scrollback": null,
+				"terminal": {"alt_screen": null, "minimal_live_rows": null}
+			}"#,
         );
-        let raw: RawAppearanceConfig = toml::from_str(&updated).unwrap();
-        let cfg: AppearanceConfig = raw.into();
-        assert!(
-            cfg.scrollback.scroll.respect_manual_folds,
-            "empty pager.toml: upserted key must parse back as true:\n{updated}"
-        );
-
-        let existing = "[scrollback.scroll]\nanchor_on_fold = false\nrespect_manual_folds = true\n";
-        let updated = upsert_respect_manual_folds(existing, false).unwrap();
-        let raw: RawAppearanceConfig = toml::from_str(&updated).unwrap();
-        let cfg: AppearanceConfig = raw.into();
-        assert!(
-            !cfg.scrollback.scroll.respect_manual_folds,
-            "key updated in place"
-        );
-        assert!(
-            !cfg.scrollback.scroll.anchor_on_fold,
-            "sibling keys must be preserved:\n{updated}"
-        );
-
-        assert!(
-            upsert_respect_manual_folds("scrollback = 5", true).is_err(),
-            "non-table `scrollback` must be a hard error, not a panic"
-        );
-        assert!(
-            upsert_respect_manual_folds("[scrollback]\nscroll = 5", true).is_err(),
-            "non-table `scrollback.scroll` must be a hard error, not a panic"
-        );
-    }
-
-    #[test]
-    fn test_to_toml_with_comments() {
-        let toml = RawAppearanceConfig::to_toml_with_comments();
-        // Check scrollback sections by key names rather than section headers
-        // toml_edit may format subtables differently when the parent table has inline keys (like line_under_last_entry)
-        assert!(
-            toml.contains("margin = "),
-            "Missing scroll margin in:\n{toml}"
-        );
-        assert!(
-            toml.contains("min_page_fraction = "),
-            "Missing scroll min_page_fraction in:\n{toml}"
-        );
-        assert!(
-            toml.contains("follow_indicator = "),
-            "Missing follow_indicator in:\n{toml}"
-        );
-        assert!(
-            toml.contains("follow_auto_select = "),
-            "Missing follow_auto_select in:\n{toml}"
-        );
-        assert!(
-            toml.contains("follow_by_overscroll = "),
-            "Missing follow_by_overscroll in:\n{toml}"
-        );
-        assert!(
-            toml.contains("respect_manual_folds = "),
-            "Missing respect_manual_folds in:\n{toml}"
-        );
-        assert!(
-            toml.contains("# Opt-in: keep manually folded blocks as-is"),
-            "Missing respect_manual_folds comment in:\n{toml}"
-        );
-        assert!(
-            toml.contains("line_under_last_entry"),
-            "Missing line_under_last_entry in:\n{toml}"
-        );
-        assert!(
-            toml.contains("bullet = "),
-            "Missing tool bullet in:\n{toml}"
-        );
-        assert!(
-            toml.contains("outer_vpad = "),
-            "Missing layout outer_vpad in:\n{toml}"
-        );
-        assert!(
-            toml.contains("enabled = "),
-            "Missing scrollbar enabled in:\n{toml}"
-        );
-        // Check animation section
-        assert!(
-            toml.contains("[animation]"),
-            "Missing [animation] section in:\n{toml}"
-        );
-        assert!(toml.contains("fps = "), "Missing animation fps in:\n{toml}");
-        assert!(
-            toml.contains("wave_rows = "),
-            "Missing animation wave_rows in:\n{toml}"
-        );
-        // Check edit block comments
-        assert!(toml.contains("# Whether to apply 2-char indent"));
-        assert!(toml.contains("indent = true"));
-        // Check prompt block comments
-        assert!(
-            toml.contains("# Whether to apply vertical padding"),
-            "Missing prompt vpad comment in:\n{toml}"
-        );
-        assert!(
-            toml.contains("# Minimum content lines to show"),
-            "Missing prompt min_lines comment in:\n{toml}"
-        );
-        // Check prompt view section
-        assert!(
-            toml.contains("[prompt]"),
-            "Missing [prompt] section in:\n{toml}"
-        );
-        assert!(
-            toml.contains("collapse_unfocused = "),
-            "Missing collapse_unfocused in:\n{toml}"
-        );
-        assert!(
-            toml.contains("mouse_hover = "),
-            "Missing mouse_hover in:\n{toml}"
-        );
-        // Check blocks are under scrollback
-        assert!(
-            toml.contains("[scrollback.blocks.edit]"),
-            "Missing [scrollback.blocks.edit] section in:\n{toml}"
-        );
-        assert!(
-            toml.contains("[scrollback.blocks.execute]"),
-            "Missing [scrollback.blocks.execute] section in:\n{toml}"
-        );
-        assert!(
-            toml.contains("running_accent = "),
-            "Missing execute running_accent in:\n{toml}"
-        );
-        // Ensure old top-level sections are gone
-        assert!(
-            !toml.contains("\n[scroll]\n"),
-            "Old [scroll] section should not exist:\n{toml}"
-        );
-        assert!(
-            !toml.contains("[prompt_input]"),
-            "Old [prompt_input] section should not exist:\n{toml}"
-        );
-        assert!(
-            !toml.contains("\n[mouse]\n"),
-            "Old [mouse] section should not exist:\n{toml}"
-        );
-        assert!(
-            !toml.contains("\n[blocks."),
-            "Old top-level [blocks.*] should not exist:\n{toml}"
-        );
-    }
-
-    /// The generated template must be inert: parsing it (and an empty file) yields exactly the built-in defaults.
-    /// So an old dev-generated file can never pin a superseded default again.
-    #[test]
-    fn template_parses_to_builtin_defaults() {
-        let serialize = |cfg: &RawAppearanceConfig| toml_edit::ser::to_string_pretty(cfg).unwrap();
-        let defaults = serialize(&RawAppearanceConfig::default());
-
-        let template = RawAppearanceConfig::to_toml_with_comments();
-        let parsed: RawAppearanceConfig = toml::from_str(&template).expect("template must parse");
+        let defaults = RawAppearanceConfig::default();
+        assert!(!raw.show_plan_chip);
+        assert_eq!(raw.animation.fps, defaults.animation.fps);
+        assert_eq!(raw.animation.wave_rows, 16);
         assert_eq!(
-            serialize(&parsed),
-            defaults,
-            "inert template must round-trip to built-in defaults"
+            raw.scrollback.scroll.anchor_on_fold,
+            defaults.scrollback.scroll.anchor_on_fold
         );
-
-        let empty: RawAppearanceConfig = toml::from_str("").expect("empty config must parse");
-        assert_eq!(serialize(&empty), defaults);
+        assert_eq!(raw.terminal.alt_screen, RawAltScreenMode::Auto);
+        assert_eq!(raw.terminal.minimal_live_rows, None);
     }
 
-    /// Every value line in the template is commented out; only section headers (empty tables) and comments are active.
     #[test]
-    fn template_has_no_active_value_lines() {
-        let template = RawAppearanceConfig::to_toml_with_comments();
-        for line in template.lines() {
-            let trimmed = line.trim_start();
-            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('[') {
-                continue;
-            }
-            panic!("active value line in generated template: {line:?}");
+    fn an_empty_file_and_the_schema_stub_parse_to_the_builtin_defaults() {
+        let serialize = |cfg: &RawAppearanceConfig| serde_json::to_value(cfg).unwrap();
+        let defaults = serialize(&RawAppearanceConfig::default());
+        assert_eq!(serialize(&json("")), defaults);
+        assert_eq!(serialize(&json("{}")), defaults);
+        assert_eq!(
+            serialize(&json(r#"{"$schema": "./pager.schema.json"}"#)),
+            defaults
+        );
+    }
+
+    #[test]
+    fn a_bad_file_is_an_error_that_names_the_problem() {
+        let path = std::path::Path::new("/g/pager.json");
+        let err = parse_appearance_config(path, "{ \"animation\": ").unwrap_err();
+        assert!(err.contains("JSON parse error"), "{err}");
+        let err = parse_appearance_config(path, r#"{"animation": {"fps": "fast"}}"#).unwrap_err();
+        assert!(err.contains("fps") || err.contains("invalid type"), "{err}");
+        assert!(parse_appearance_config(path, "[1, 2]").is_err());
+    }
+
+    #[test]
+    fn set_json_member_writes_the_key_and_keeps_siblings() {
+        let mut doc = serde_json::Map::new();
+        set_json_member(
+            &mut doc,
+            &["scrollback", "scroll", "respect_manual_folds"],
+            serde_json::Value::Bool(true),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::Value::Object(doc),
+            serde_json::json!({"scrollback": {"scroll": {"respect_manual_folds": true}}})
+        );
+
+        let mut doc = serde_json::json!({
+            "$schema": "./pager.schema.json",
+            "show_plan_chip": true,
+            "scrollback": {"scroll": {"anchor_on_fold": false, "respect_manual_folds": true}, "layout": null}
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        set_json_member(
+            &mut doc,
+            &["scrollback", "scroll", "respect_manual_folds"],
+            serde_json::Value::Bool(false),
+        )
+        .unwrap();
+        assert_eq!(doc["scrollback"]["scroll"]["respect_manual_folds"], false);
+        assert_eq!(doc["scrollback"]["scroll"]["anchor_on_fold"], false);
+        assert_eq!(doc["show_plan_chip"], true);
+        assert_eq!(doc["$schema"], "./pager.schema.json");
+
+        let mut doc = serde_json::json!({"scrollback": {"scroll": null}})
+            .as_object()
+            .unwrap()
+            .clone();
+        set_json_member(&mut doc, &["scrollback", "scroll", "x"], true.into()).unwrap();
+        assert_eq!(
+            doc["scrollback"]["scroll"]["x"], true,
+            "a null parent is unset"
+        );
+
+        for bad in [
+            serde_json::json!({"scrollback": 5}),
+            serde_json::json!({"scrollback": {"scroll": [1]}}),
+        ] {
+            let mut doc = bad.as_object().unwrap().clone();
+            let err =
+                set_json_member(&mut doc, &["scrollback", "scroll", "x"], true.into()).unwrap_err();
+            assert!(err.contains("is not an object"), "{err}");
         }
     }
 
@@ -2219,64 +2113,28 @@ gutter_bg = true
         );
     }
 
-    /// The two flag-deferred edit keys default to `None` (omitted by the serializer).
-    /// The template must still document them as commented lines showing the flag-off shape.
-    #[test]
-    fn template_documents_flag_deferred_edit_keys() {
-        let template = RawAppearanceConfig::to_toml_with_comments();
-        assert!(
-            template.contains("# expanded_by_default = true"),
-            "expanded_by_default missing from template:\n{template}"
-        );
-        assert!(
-            template.contains("# line_summary = false"),
-            "line_summary missing from template:\n{template}"
-        );
-        assert!(
-            template.contains("collapsed_edit_blocks"),
-            "doc comments must point at the [ui] flag:\n{template}"
-        );
-    }
-
-    /// The `/settings` writer must insert an ACTIVE key into the inert template (whose keys are all comments).
-    /// It must not edit a commented line or fail.
-    #[test]
-    fn upsert_into_inert_template_inserts_active_key() {
-        let template = RawAppearanceConfig::to_toml_with_comments();
-        let updated = upsert_respect_manual_folds(&template, true).expect("upsert");
-        let parsed: RawAppearanceConfig =
-            toml::from_str(&updated).expect("updated template must parse");
-        assert!(
-            parsed.scrollback.scroll.respect_manual_folds,
-            "inserted key must be active:\n{updated}"
-        );
-    }
-
     // ── Terminal config (alt_screen) parsing ─────────────────────
 
     #[test]
     fn terminal_alt_screen_auto_default() {
-        let raw: RawAppearanceConfig = toml::from_str("").unwrap();
-        assert_eq!(raw.terminal.alt_screen, RawAltScreenMode::Auto);
+        assert_eq!(json("{}").terminal.alt_screen, RawAltScreenMode::Auto);
     }
 
     #[test]
     fn terminal_alt_screen_never() {
-        let raw: RawAppearanceConfig =
-            toml::from_str("[terminal]\nalt_screen = \"never\"").unwrap();
+        let raw = json(r#"{"terminal": {"alt_screen": "never"}}"#);
         assert_eq!(raw.terminal.alt_screen, RawAltScreenMode::Never);
     }
 
     #[test]
     fn terminal_alt_screen_always() {
-        let raw: RawAppearanceConfig =
-            toml::from_str("[terminal]\nalt_screen = \"always\"").unwrap();
+        let raw = json(r#"{"terminal": {"alt_screen": "always"}}"#);
         assert_eq!(raw.terminal.alt_screen, RawAltScreenMode::Always);
     }
 
     #[test]
     fn terminal_alt_screen_auto_explicit() {
-        let raw: RawAppearanceConfig = toml::from_str("[terminal]\nalt_screen = \"auto\"").unwrap();
+        let raw = json(r#"{"terminal": {"alt_screen": "auto"}}"#);
         assert_eq!(raw.terminal.alt_screen, RawAltScreenMode::Auto);
     }
 
@@ -2294,25 +2152,14 @@ gutter_bg = true
         assert_eq!(AltScreenMode::from(raw), AltScreenMode::Never);
     }
 
-    #[test]
-    fn terminal_section_appears_in_generated_toml() {
-        let toml = RawAppearanceConfig::to_toml_with_comments();
-        assert!(
-            toml.contains("alt_screen = "),
-            "Missing alt_screen in generated config:\n{toml}"
-        );
-    }
-
     /// A config written before the key existed must still parse and keep `minimal_collapse_thinking` off.
     #[test]
     fn minimal_collapse_thinking_defaults_off_and_old_configs_parse() {
-        let empty: RawAppearanceConfig = toml::from_str("").expect("empty config must parse");
+        let empty = json("");
         assert!(!empty.terminal.minimal_collapse_thinking);
         assert!(!AppearanceConfig::from(empty).minimal_collapse_thinking);
 
-        let legacy: RawAppearanceConfig =
-            toml::from_str("[terminal]\nminimal = true\nminimal_live_rows = 12\n")
-                .expect("legacy config must parse");
+        let legacy = json(r#"{"terminal": {"minimal": true, "minimal_live_rows": 12}}"#);
         let cfg: AppearanceConfig = legacy.into();
         assert!(cfg.minimal);
         assert_eq!(cfg.minimal_live_rows, 12);
@@ -2326,22 +2173,85 @@ gutter_bg = true
 
     #[test]
     fn minimal_collapse_thinking_opt_in_parses() {
-        let raw: RawAppearanceConfig =
-            toml::from_str("[terminal]\nminimal_collapse_thinking = true\n").unwrap();
+        let raw = json(r#"{"terminal": {"minimal_collapse_thinking": true}}"#);
         assert!(AppearanceConfig::from(raw).minimal_collapse_thinking);
     }
 
-    /// `body_dim_italic` and `collapsed_expand_hint` must stay un-settable from pager.toml.
     #[test]
-    fn thinking_body_treatment_is_off_by_default_and_not_a_toml_key() {
+    fn persist_creates_pager_json_with_the_schema() {
+        let home = tempfile::tempdir().unwrap();
+        persist_respect_manual_folds_in(home.path(), true).unwrap();
+        let text = std::fs::read_to_string(home.path().join("pager.json")).unwrap();
+        assert_eq!(
+            text,
+            "{\n\t\"$schema\": \"./pager.schema.json\",\n\t\"scrollback\": {\n\t\t\"scroll\": {\n\t\t\t\"respect_manual_folds\": true\n\t\t}\n\t}\n}\n"
+        );
+        assert!(json(&text).scrollback.scroll.respect_manual_folds);
+    }
+
+    #[test]
+    fn persist_keeps_an_existing_schema_and_other_keys() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("pager.json");
+        std::fs::write(
+            &path,
+            r#"{"$schema": "https://example.invalid/pager.json", "show_plan_chip": true, "scrollback": {"scroll": {"margin": 3}}}"#,
+        )
+        .unwrap();
+        persist_respect_manual_folds_in(home.path(), true).unwrap();
+        persist_respect_manual_folds_in(home.path(), false).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(doc["$schema"], "https://example.invalid/pager.json");
+        assert_eq!(doc["show_plan_chip"], true);
+        assert_eq!(doc["scrollback"]["scroll"]["margin"], 3);
+        assert_eq!(doc["scrollback"]["scroll"]["respect_manual_folds"], false);
+    }
+
+    #[test]
+    fn persist_migrates_a_legacy_pager_toml_first() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(
+            home.path().join("pager.toml"),
+            "show_plan_chip = true\n[scrollback.scroll]\nmargin = 2\n",
+        )
+        .unwrap();
+        persist_respect_manual_folds_in(home.path(), true).unwrap();
+        assert!(!home.path().join("pager.toml").exists());
+        assert!(home.path().join("pager.toml.migrated").exists());
+        let raw = json(&std::fs::read_to_string(home.path().join("pager.json")).unwrap());
+        assert!(raw.show_plan_chip);
+        assert_eq!(raw.scrollback.scroll.margin, 2);
+        assert!(raw.scrollback.scroll.respect_manual_folds);
+    }
+
+    #[test]
+    fn persist_refuses_to_hide_a_broken_legacy_pager_toml() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(home.path().join("pager.toml"), "[scrollback\n").unwrap();
+        assert!(persist_respect_manual_folds_in(home.path(), true).is_err());
+        assert!(!home.path().join("pager.json").exists());
+        assert_eq!(
+            std::fs::read_to_string(home.path().join("pager.toml")).unwrap(),
+            "[scrollback\n"
+        );
+    }
+
+    #[test]
+    fn persist_refuses_a_pager_json_it_cannot_parse() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("pager.json");
+        std::fs::write(&path, "{ broken").unwrap();
+        assert!(persist_respect_manual_folds_in(home.path(), true).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ broken");
+    }
+
+    /// The runtime-only thinking flags default off. The schema tests check that pager.json cannot set them.
+    #[test]
+    fn thinking_body_treatment_is_off_by_default() {
         let cfg = AppearanceConfig::default();
         assert!(!cfg.scrollback.blocks.thinking.body_dim_italic);
         assert!(!cfg.scrollback.blocks.thinking.collapsed_expand_hint);
         assert!(!cfg.scrollback.blocks.thinking.rail_under_bullet);
-
-        let template = RawAppearanceConfig::to_toml_with_comments();
-        assert!(!template.contains("body_dim_italic"));
-        assert!(!template.contains("collapsed_expand_hint"));
-        assert!(!template.contains("rail_under_bullet"));
     }
 }

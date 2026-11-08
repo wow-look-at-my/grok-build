@@ -787,7 +787,7 @@ pub(super) fn set_respect_manual_folds_inner(app: &mut AppView, new: bool) {
 
 /// Set `respect_manual_folds` (registry-driven path).
 /// PAGER-OWNED: live-applied to every agent via `AppView::set_appearance`.
-/// Persisted to `[scrollback.scroll]` in pager.toml via `Effect::PersistSetting`.
+/// Persisted to `scrollback.scroll` in pager.json via `Effect::PersistSetting`.
 pub(in crate::app::dispatch) fn set_respect_manual_folds(
     app: &mut AppView,
     new: bool,

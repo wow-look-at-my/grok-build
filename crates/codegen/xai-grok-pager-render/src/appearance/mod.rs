@@ -2,9 +2,9 @@
 //!
 //! Two unrelated concerns live under this module name:
 //!
-//! - **`config` + `watcher`**: dev-only `~/.grok/pager.toml` RenderConfig
-//!   (200+ fields for terminal rendering tuning).
-//!   Hot-reloaded in dev mode, static defaults in prod.
+//! - **`config` + `watcher` + `schema`**: the `~/.grok/pager.json` RenderConfig
+//!   (200+ fields for terminal rendering tuning) and its JSON Schema.
+//!   Read once at startup.
 //! - **`cache`**: thread-local in-memory caches for the user-facing UI bool settings (`compact_mode`, `show_timestamps`, `simple_mode`).
 //!   Disk writes happen in `xai_grok_shell::util::config::set_<field>()` via `Effect::PersistSetting`, NOT here; this is a read-cache only.
 //! - **`permission_cursor`**: the `default_selected_permission` value type plus the caches and logic for which row a permission prompt preselects.
@@ -14,6 +14,7 @@ mod config;
 pub mod follow_up_behavior;
 pub mod permission_cursor;
 pub mod render_mermaid;
+pub mod schema;
 pub mod scroll_mode;
 pub mod text_selection;
 mod watcher;
@@ -22,7 +23,7 @@ pub use config::{
     AnimationConfig, AppearanceConfig, BlockBackground, BlocksConfig, EditBlockConfig,
     ExecuteHeaderStyle, FollowIndicator, LayoutConfig, PromptConfig, PromptViewConfig,
     RawAltScreenMode, RawAppearanceConfig, RawTerminalConfig, ScrollConfig, ScrollbackConfig,
-    ScrollbarConfig, ToolBullet, ToolConfig, persist_respect_manual_folds,
+    ScrollbarConfig, ToolBullet, ToolConfig, parse_appearance_config, persist_respect_manual_folds,
 };
 pub use follow_up_behavior::FollowUpBehavior;
 pub use render_mermaid::RenderMermaid;
@@ -31,7 +32,7 @@ pub use text_selection::TextSelection;
 pub use watcher::ConfigWatcher;
 
 // Atomic so MarkdownContent can read tab width without an AppearanceConfig handle.
-// Updated by the event loop whenever pager.toml is (re)loaded.
+// Updated by the event loop whenever pager.json is (re)loaded.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 

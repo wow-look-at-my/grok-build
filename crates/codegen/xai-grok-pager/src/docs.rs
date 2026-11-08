@@ -68,12 +68,12 @@ pub static USER_GUIDE: &[Doc] = &[
     guide!(
         "05-configuration.md",
         "Configuration",
-        "config.json, pager.toml, environment variables, file locations"
+        "config.json, pager.json, environment variables, file locations"
     ),
     guide!(
         "06-theming.md",
         "Theming and Appearance",
-        "Themes, color support, pager.toml customization"
+        "Themes, color support, pager.json customization"
     ),
     guide!(
         "07-mcp-servers.md",

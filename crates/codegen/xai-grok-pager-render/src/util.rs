@@ -15,9 +15,9 @@ pub fn ignore_broken_pipe(result: std::io::Result<()>) -> std::io::Result<()> {
     }
 }
 
-/// Path to `$GROK_HOME/pager.toml`.
-pub fn pager_toml_path() -> PathBuf {
-    grok_home().join("pager.toml")
+/// Path to `$GROK_HOME/pager.json`.
+pub fn pager_config_path() -> PathBuf {
+    grok_home().join(xai_grok_config::PAGER_CONFIG_FILENAME)
 }
 
 /// `~/.grok` or `$GROK_HOME`, decided by the resolved home rather than by

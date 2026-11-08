@@ -939,7 +939,10 @@ mod tests {
         let home = scratch_grok_home("host-writer");
         let _home = EnvGuard::set("GROK_HOME", home.to_str().expect("utf-8 path"));
         let _no_worker = EnvGuard::set(CI_HOST_FD_ENV, "");
-        assert!(host_config_writer(&home.join("pager.toml"), "", None).is_none());
+        assert!(
+            host_config_writer(&home.join(xai_grok_config::PAGER_CONFIG_FILENAME), "", None)
+                .is_none()
+        );
         assert!(host_config_writer(&home.join("config.json"), "", None).is_none());
         let _ = std::fs::remove_dir_all(&home);
     }

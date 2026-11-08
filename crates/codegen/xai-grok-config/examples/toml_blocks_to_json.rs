@@ -78,18 +78,18 @@ fn convert(name: &str, text: &str) -> (String, usize, usize) {
     (out, ok, bad)
 }
 
-/// Top-level keys of `pager.toml`, which stays TOML.
-const PAGER_TOML_KEYS: &[&str] = &["scrollback", "animation", "prompt", "terminal"];
+/// Top-level keys of `pager.json`, which has no section layout.
+const PAGER_KEYS: &[&str] = &["scrollback", "animation", "prompt", "terminal"];
 
 fn to_json(body: &str) -> Option<String> {
     let tree = toml::from_str::<toml::Value>(body).ok()?;
-    if tree
+    let doc = if tree
         .as_table()
-        .is_some_and(|t| t.keys().any(|k| PAGER_TOML_KEYS.contains(&k.as_str())))
+        .is_some_and(|t| t.keys().any(|k| PAGER_KEYS.contains(&k.as_str())))
     {
-        return None;
-    }
-    let doc = xai_grok_config::format::internal_to_json_document(&tree);
-    let text = serde_json::to_string_pretty(&serde_json::Value::Object(doc)).ok()?;
-    Some(text)
+        xai_grok_config::format::tree_to_json(&tree)
+    } else {
+        serde_json::Value::Object(xai_grok_config::format::internal_to_json_document(&tree))
+    };
+    serde_json::to_string_pretty(&doc).ok()
 }
