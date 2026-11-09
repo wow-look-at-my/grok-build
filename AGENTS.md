@@ -209,6 +209,11 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/model-pricing-resolution-notes.md](docs/model-pricing-resolution-notes.md) holds this section.
 
+## Request-body compression
+
+- JSON bodies of 64 KiB. This covers and up go out zstd-compressed toward the cli-chat-proxy that lists `zstd` in its settings. And toward any origin whose last response with an `Accept-Encoding` header listed `zstd` (RFC 7694, `xai-grok-sampler/src/request_compression.rs`). A later `Accept-Encoding` without `zstd` stops it for that origin.
+- `GROK_REQUEST_COMPRESSION=0` maps to `RequestCompression::Off`, which no advertisement overrides.
+
 ## Stream-timing notes
 
 - `itl_intervals_ms` truncates every gap to whole milliseconds. A stream above many chunks/s reads as a run of zeros and `itl_p50_ms` reports 0 for one that stutters. `InferenceLatencyStats.chunk_offsets_us` keeps each content chunk's arrival offset from `stream_start` in microseconds instead, off the `Instant`s all backend streams already record.
