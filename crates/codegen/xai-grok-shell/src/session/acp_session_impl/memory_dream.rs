@@ -667,10 +667,9 @@ impl SessionActor {
 
             // Run on the multi-threaded runtime so it doesn't block the session's LocalSet
             let handle = xai_spawn::spawn(async move {
-                let response = sampling_client
-                    .conversation_collect(request)
-                    .await
-                    .map_err(|e| format!("flush model call failed: {e}"))?;
+                let response = sampling_client.conversation_collect_with_idle_timeout(request, xai_grok_sampler::DEFAULT_COLLECT_IDLE_TIMEOUT)
+                .await
+                .map_err(|e| format!("flush model call failed: {e}"))?;
                 Ok::<_, String>(response.assistant_text())
             });
             // Abort the spawned task if this future is dropped (session cancellation), preventing orphan HTTP streams

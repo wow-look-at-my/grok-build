@@ -694,3 +694,52 @@ async fn a_summary_call_asks_for_reasoning_off_on_the_wire() {
         })
         .await;
 }
+
+/// The summary call ends after its turn reported the session total. It bills
+/// the session ledger, and its broadcast carries the new total to the client.
+#[tokio::test]
+async fn a_summary_bills_the_session_and_carries_the_new_total() {
+    const TICKS: i64 = 2_100_000;
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, mut grx) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _prx) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let mut actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            actor.thinking_summaries_enabled.set(true);
+            let actor = std::sync::Arc::new(actor);
+
+            let server = MockInferenceServer::start().await.unwrap();
+            server.set_response("Weighed the lexer boundary, then changed the offset.");
+            server.set_messages_cost_usd_ticks(Some(TICKS));
+            let mut cfg = actor.chat_state_handle.get_sampling_config().await.unwrap();
+            cfg.base_url = server.url();
+            cfg.api_backend = xai_grok_sampling_types::ApiBackend::Messages;
+            actor.chat_state_handle.update_sampling_config(cfg);
+
+            actor.spawn_thinking_summary(&response_carrying_thinking(&long_reasoning()), Some(7));
+            let update = take_thinking_summary(&mut grx)
+                .await
+                .expect("the summary must be broadcast");
+            assert_eq!(
+                update
+                    .get("session_cost_usd_ticks")
+                    .and_then(|v| v.as_i64()),
+                Some(TICKS),
+                "the broadcast carries the total after the summary's own call"
+            );
+
+            let ledger = actor
+                .chat_state_handle
+                .try_get_session_usage()
+                .await
+                .expect("session ledger");
+            assert_eq!(ledger.totals.cost_usd_ticks, Some(TICKS));
+            assert_eq!(
+                ledger.main_loop_model_calls, 0,
+                "a summary call is not a main-loop round"
+            );
+        })
+        .await;
+}

@@ -660,6 +660,12 @@ pub(crate) async fn spawn_session_actor(
     .await;
     drop(chat_state_timer);
     chat_state_handle.update_credentials(credentials);
+    // The persistence actor makes the first auto-title call. It bills to this session.
+    let _ = persistence
+        .tx
+        .send(crate::session::persistence::PersistenceMsg::SideCallLedger(
+            chat_state_handle.clone(),
+        ));
     let state = TokioMutex::new(State {
         running_task: None,
         finalization_gate: Default::default(),
@@ -1266,6 +1272,9 @@ pub(crate) async fn spawn_session_actor(
         plugin_registry: plugin_registry.clone(),
         api_key_provider: api_key_provider.clone(),
         attribution_callback: attribution_callback_for_spec,
+        usage_sink: Some(crate::session::billed_client::session_usage_sink(
+            &chat_state_handle,
+        )),
         tool_params_json: tool_params_json.clone(),
         subagent_event_tx: tool_context.subagent_event_tx.clone(),
         parent_messenger: tool_context.parent_messenger.clone(),
@@ -1570,6 +1579,10 @@ pub(crate) async fn spawn_session_actor(
     let permissions_for_handle = permissions.clone();
     let (event_tx, event_rx) = mpsc::unbounded_channel::<SessionEvent>();
     let mut sampler_config_initial = sampling_config.clone();
+    // This session's own sink. A sink that came with the config belongs to another session.
+    sampler_config_initial.usage_sink = Some(crate::session::billed_client::session_usage_sink(
+        &chat_state_handle,
+    ));
     sampler_config_initial.idle_timeout_secs = Some(inference_idle_timeout_secs);
     let task_output_budgeted = tool_context.task_output_token_budget.is_some();
     let retry_only_before_output =

@@ -33,15 +33,13 @@ fn test_actor_inner(
 ) -> ActorGuard {
     let (tx, rx) = mpsc::unbounded_channel();
     let (disk_full_tx, disk_full_rx) = tokio::sync::watch::channel(false);
-    // A client needs a URL to build. The discard port answers nothing.
-    let sampling_client = OaiCompatClient::new(xai_grok_sampler::SamplerConfig {
-        base_url: "http://127.0.0.1:9/v1".to_owned(),
-        ..xai_grok_sampler::SamplerConfig::default()
-    })
-    .unwrap();
+    // The discard port answers nothing.
     let mut summary =
         crate::session::summary::SummaryGenerator::new(crate::session::summary::SummaryConfig {
-            sampling_client: Some(sampling_client),
+            sampler_config: Some(xai_grok_sampler::SamplerConfig {
+                base_url: "http://127.0.0.1:9/v1".to_owned(),
+                ..xai_grok_sampler::SamplerConfig::default()
+            }),
             model: String::new(),
             persistence_tx: tx.downgrade(),
         });

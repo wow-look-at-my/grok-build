@@ -833,6 +833,8 @@ async fn read_parent_sampling_config(
                 user_id: ctx.sampling_config.user_id.clone(),
                 origin_client: ctx.sampling_config.origin_client.clone(),
                 attribution_callback: ctx.attribution_callback.clone(),
+                // The child session stamps its own sink, so its calls fold into the parent once.
+                usage_sink: None,
                 bearer_resolver: if strip_guard {
                     None
                 } else {

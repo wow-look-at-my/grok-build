@@ -322,6 +322,7 @@ fn headless_thinking_summary_decodes() {
         xai_grok_shell::extensions::notification::SessionUpdate::ThinkingSummary {
             stream_start_ms: 1_234,
             summary: "Fix the caller".into(),
+            session_cost_usd_ticks: None,
         },
     )
     .unwrap();

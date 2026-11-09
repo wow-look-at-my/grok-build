@@ -129,6 +129,12 @@ impl UsageLedger {
         self.fold_entry(model_id, &call);
     }
 
+    /// Count one main-agent-loop round whose tokens and cost the client sink
+    /// already folded.
+    pub fn record_main_loop_round(&mut self) {
+        self.main_loop_model_calls = self.main_loop_model_calls.saturating_add(1);
+    }
+
     /// Fold one side call, such as compaction, without incrementing `main_loop_model_calls`.
     pub fn record_side_call(
         &mut self,
@@ -223,6 +229,16 @@ mod tests {
         assert_eq!(ledger.totals.cost_usd_ticks, Some(400));
         assert_eq!(ledger.totals.api_duration_ms, 12);
         assert_eq!(ledger.by_model["c"].input_tokens, 40);
+    }
+
+    #[test]
+    fn a_sink_fold_and_a_round_equal_one_main_loop_call() {
+        let mut direct = UsageLedger::default();
+        direct.record_main_loop_call("m", &tu(10, 2), Some(5), Some(100));
+        let mut split = UsageLedger::default();
+        split.record_side_call("m", &tu(10, 2), Some(5), Some(100));
+        split.record_main_loop_round();
+        assert_eq!(direct, split);
     }
 
     #[test]

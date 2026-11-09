@@ -34,20 +34,31 @@ fn thought_chunk(
     })
 }
 
-/// The shell's `thinking_summary` broadcast, built through the typed payload so
-/// the wire shape cannot drift from what the shell emits. `example.invalid/session/update`
-/// is the method a reload replays persisted updates under.
+/// The shell's `thinking_summary` broadcast, built through the typed payload
+/// so the wire shape cannot drift from what the shell emits.
 fn thinking_summary_notif(
     session_id: &str,
     stream_start_ms: i64,
     summary: &str,
     is_replay: bool,
 ) -> acp::ExtNotification {
+    costed_thinking_summary_notif(session_id, stream_start_ms, summary, is_replay, None)
+}
+
+/// [`thinking_summary_notif`] that also carries the session total after the summary's call.
+fn costed_thinking_summary_notif(
+    session_id: &str,
+    stream_start_ms: i64,
+    summary: &str,
+    is_replay: bool,
+    session_cost_usd_ticks: Option<i64>,
+) -> acp::ExtNotification {
     let payload = SessionNotification {
         session_id: acp::SessionId::new(session_id),
         update: XaiSessionUpdate::ThinkingSummary {
             stream_start_ms,
             summary: summary.to_string(),
+            session_cost_usd_ticks,
         },
         meta: Some(serde_json::json!({ "isReplay": is_replay })),
     };
@@ -296,6 +307,44 @@ fn a_summary_naming_no_thinking_row_changes_nothing() {
         after.iter().all(|r| !r.contains("orphan summary")),
         "the orphan summary must not be drawn: {after:?}"
     );
+}
+
+/// A summary call ends after the turn's own total went out, so the live
+/// summary brings the fresh total. A replayed one belongs to an older run.
+#[test]
+fn a_live_summary_updates_the_session_total_and_a_replayed_one_does_not() {
+    let mut app = make_app_with_agent("sess-think-cost");
+    {
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        agent.session.start_turn(&mut agent.scrollback);
+        agent.session.current_prompt_id = Some("pid-1".into());
+    }
+    stream_call(&mut app, "sess-think-cost", 1_000, "Reads the parser.");
+
+    let changed = handle_ext_notification(
+        &costed_thinking_summary_notif("sess-think-cost", 1_000, "Reads it", false, Some(5_000)),
+        &mut app,
+    );
+    assert!(changed);
+    let total = |app: &AppView| {
+        app.agents
+            .get(&AgentId(0))
+            .unwrap()
+            .session
+            .tracker
+            .reported_session_cost_usd_ticks()
+    };
+    assert_eq!(total(&app), Some(5_000), "the live summary's total is adopted");
+
+    {
+        let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+        agent.session.loading_replay = true;
+    }
+    let _ = handle_ext_notification(
+        &costed_thinking_summary_notif("sess-think-cost", 1_000, "Old", true, Some(9_000)),
+        &mut app,
+    );
+    assert_eq!(total(&app), Some(5_000), "a replayed total is not adopted");
 }
 
 #[test]
