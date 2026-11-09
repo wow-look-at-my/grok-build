@@ -9572,7 +9572,7 @@ fn sampling_config_compresses_only_toward_the_advertising_proxy() {
     env.set_value("0");
     assert_eq!(
         compression_for(proxy),
-        RequestCompression::None,
+        RequestCompression::Off,
         "the env kill switch wins over the advertisement"
     );
     env.set_value("1");
