@@ -626,3 +626,66 @@
         assert!(agent.permission_stashed_pane.is_none());
     }
 
+    /// The shell's own prompter sends the prompt for each script, and the pager draws it.
+    /// A chain or a wrapper must still show "Always allow:" beside "Never allow:".
+    #[tokio::test]
+    async fn shell_prompt_for_chained_script_draws_the_always_allow_row() {
+        use std::sync::Arc;
+        use xai_grok_workspace::permission::{AccessKind, AcpPrompter, ClientType};
+
+        for script in [
+            "ls && npm publish",
+            "env FOO=1 git push origin main",
+            "git status && git push origin main",
+        ] {
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let prompter = AcpPrompter::new(
+                acp::SessionId::new("sess-1"),
+                xai_acp_lib::AcpAgentGatewaySender::new(tx),
+                ClientType::GrokPager,
+            )
+            .with_remember_tool_approvals(true);
+            let access = AccessKind::Bash(script.to_owned());
+            let update = acp::ToolCallUpdate::new(
+                acp::ToolCallId::new(Arc::from("call-chain")),
+                acp::ToolCallUpdateFields::default(),
+            );
+            let mut app = make_app_with_agent("sess-1");
+
+            let (_outcome, text) = tokio::join!(
+                prompter.request(&access, &update, None, None),
+                async {
+                    let msg = rx.recv().await.expect("the prompter sends a permission request");
+                    handle(msg, &mut app);
+                    let agent = app.agents.get_mut(&AgentId(0)).unwrap();
+                    let area = ratatui::layout::Rect::new(0, 0, 100, 30);
+                    let mut buf = ratatui::buffer::Buffer::empty(area);
+                    let state = agent.permission_queue.front().expect("permission queued");
+                    let _ = crate::views::permission_view::render_permission_view(
+                        &mut buf,
+                        area,
+                        state,
+                        "",
+                        None,
+                        None,
+                        &crate::theme::Theme::current(),
+                        true,
+                    );
+                    let text: String = (0..area.height)
+                        .map(|row| {
+                            (0..area.width)
+                                .map(|col| buf.cell((col, row)).map(|c| c.symbol().to_owned()).unwrap_or_default())
+                                .collect::<String>()
+                                + "\n"
+                        })
+                        .collect();
+                    // Drop the queued prompt so the prompter's request returns.
+                    agent.permission_queue.clear();
+                    text
+                }
+            );
+            assert!(text.contains("Always allow:"), "{script:?} lost the allow row:\n{text}");
+            assert!(text.contains("Never allow:"), "{script:?} lost the deny row:\n{text}");
+        }
+    }
+
