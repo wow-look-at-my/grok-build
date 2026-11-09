@@ -2443,9 +2443,8 @@ mod tests {
         assert!(message.contains("reasoning"), "{message}");
     }
 
-    /// The chunk shape reported against a real gateway: `reasoning`,
-    /// `reasoning_details` and `reasoning_content` together. The details key is
-    /// the provider's own and is nobody else's business.
+    /// The chunk shape reported against a real gateway. The details key is the
+    /// provider's own and is nobody else's business.
     #[test]
     fn gateway_chunk_carrying_reasoning_details_and_both_spellings_parses() {
         let chunk: ChatCompletionChunk = serde_json::from_str(

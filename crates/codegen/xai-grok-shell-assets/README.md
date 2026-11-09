@@ -1383,7 +1383,7 @@ Configure telemetry destinations and credentials. Empty values disable the corre
 }
 ```
 
-Defaults can also be baked into the binary at compile time in the build environment (providing a Mixpanel token this way also enables Mixpanel by default). This happens when building from source. Config-file and runtime env values override build-time defaults.
+Default) can also bake defaults. This happens when building from source. Config-file and runtime env values override build-time defaults.
 
 ### LSP Servers
 

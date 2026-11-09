@@ -596,9 +596,9 @@ fn extract_retry_after(headers: &xai_grok_net::header::HeaderMap) -> Option<u64>
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<u64>().ok());
 
-    // A token bucket answers a breach with the WHOLE window ("Retry-After:
-    // 60" on a per-minute limit), while its own reset header says when this
-    // caller's tokens come back. Take whichever is sooner.
+    // A token bucket answers a breach with the WHOLE window
+    // ("Retry-After: 60" on a per-minute limit), while its own reset header
+    // says when this caller's tokens come back. Take whichever is sooner.
     let bucket_reset = headers
         .iter()
         .filter(|(name, _)| {
@@ -616,10 +616,10 @@ fn extract_retry_after(headers: &xai_grok_net::header::HeaderMap) -> Option<u64>
 }
 
 /// Seconds from a rate-limit reset header, which is written as a bare number
-/// or with a unit (`1.5`, `1.5s`, `30s`). A value with no `u64` second count
-/// is `None`: the same unusable answer the parser already gives for a
-/// non-finite or negative one. The caller uses its own backoff rather than a
-/// wait this header did not state.
+/// or with a unit. A value with no `u64` second count is `None`: the same
+/// unusable answer the parser already gives for a non-finite or negative
+/// one. The caller uses its own backoff rather than a wait this header did
+/// not state.
 fn parse_reset_seconds(raw: &str) -> Option<u64> {
     let raw = raw.trim();
     let digits = raw.strip_suffix('s').unwrap_or(raw).trim();
@@ -2786,7 +2786,6 @@ impl SamplingClient {
         let meter = self.meter(Some(&model_id));
 
         let mut body = serde_json::to_value(&chat_request).map_err(SamplingError::Serialization)?;
-        // `keep_alive`, `truncate` and `options.num_ctx` reach the wire from here and nowhere else: they are per-deployment settings with no cross-provider meaning.
         xai_grok_sampling_types::merge_extra_body(&mut body, &self.extra_body);
 
         let endpoint = self.endpoint("api/chat");

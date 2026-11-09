@@ -638,8 +638,7 @@ mod tests {
         })
     }
 
-    /// A loopback Ollama: `/api/tags`, `/api/ps` and `/api/show`, which is
-    /// the whole set the dialect reads.
+    /// A loopback Ollama.
     async fn start_ollama_server() -> (String, tokio::task::JoinHandle<()>) {
         use axum::routing::{get, post};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

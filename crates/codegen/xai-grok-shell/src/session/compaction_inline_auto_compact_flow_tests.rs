@@ -313,7 +313,6 @@ async fn create_test_actor(
     }
 }
 /// Suppression gates both AUTO paths; the reset scope depends on the reason.
-/// `other` and `schema` clear next turn, `credit_block` holds until a successful model call, `size` is sticky until a full reset (success/rewind/model switch).
 #[tokio::test(flavor = "current_thread")]
 async fn suppression_gates_and_reset_is_reason_scoped() {
     use crate::session::compaction_config::{SUPPRESS_NONE, SUPPRESS_TURN, SUPPRESS_UNTIL_SUCCESS};

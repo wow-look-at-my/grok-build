@@ -409,8 +409,6 @@ impl SamplingError {
         message.contains("signature") && message.contains("thinking")
     }
 
-    /// The provider rejected a tool schema for a top-level `oneOf`, `anyOf`
-    /// or `allOf`, which the standard allows.
     pub fn is_tool_schema_combinator_error(&self) -> bool {
         matches!(
             self,

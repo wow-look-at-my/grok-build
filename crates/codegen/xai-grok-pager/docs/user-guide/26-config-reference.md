@@ -102,7 +102,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `endpoints.managed_config_url` | `string` | `yes` | `user` | Override managed config endpoint. Also GROK_MANAGED_CONFIG_URL. |
 | `endpoints.models_base_url` | `string` | `pin` | `user` | Custom inference base URL. Also GROK_MODELS_BASE_URL. |
 | `endpoints.models_list_url` | `string` | `pin` | `user` | Override model-list URL. Also GROK_MODELS_LIST_URL. Alias `models_endpoint`. |
-| `endpoints.trace_upload_url` | `string` | `pin` | `user` | Proxy destination for traces. Also GROK_TRACE_UPLOAD_URL. Trace uploads go through the proxy only: a config that sets a removed direct-bucket key (`trace_upload_bucket`, `trace_upload_region`, `trace_upload_credentials`, `trace_upload_credentials_file`, `trace_upload_endpoint_url`, `gcs_service_account_key`) or env var (`GROK_TRACE_UPLOAD_BUCKET`, `GROK_TRACE_UPLOAD_REGION`, `GROK_TRACE_UPLOAD_CREDENTIALS_FILE`, `GROK_TRACE_UPLOAD_ENDPOINT_URL`, `GROK_TELEMETRY_GCS_BUCKET`) fails to load. |
+| `endpoints.trace_upload_url` | `string` | `pin` | `user` | Proxy destination for traces. Also GROK_TRACE_UPLOAD_URL. Trace uploads go through the proxy only: a config that sets a removed direct-bucket key or env var fails to load. |
 | `endpoints.xai_api_base_url` | `string` | `pin` | `user` | Public xAI API base. Also GROK_XAI_API_BASE_URL. |
 
 ### `extensions`
@@ -252,7 +252,6 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `memory.v2.file_writes_enabled` | `boolean` | — | `user` | Enables all memory-v2 file mutation; `false` fails closed before scaffold creation. Default: `true`. |
 | `memory.v2.job_retention_days` | `number` | — | `user` | Retains terminal memory-v2 capture-job metadata for this many days. Default: `14`. |
 | `memory.v2.manual_dream_enabled` | `boolean` | — | `user` | Enables explicitly requested memory-v2 Dream. Default: `true`. |
-| `memory.v2.rollout` | `"off"`, `"record_only"`, `"shadow"`, `"active"` | — | `user` | Advanced staged-rollout control for new v2 sessions. Default: `"active"`. Most users should leave this unset. |
 
 ### `models`
 
@@ -285,7 +284,6 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `models.definitions.<id>.model_family` | `string` | `yes` | `user` | Family id used for compaction and capability grouping. |
 | `models.definitions.<id>.model_provider` | `string` | `yes` | `user` | Named `models.providers.<name>` provider id for this model. |
 | `models.definitions.<id>.model` | `string` | `yes` | `user` | Model id sent to the API. |
-| `models.definitions.<id>.mtls_cert_dir` | `string` | `yes` | `user` | Directory containing the model endpoint's mTLS identity as `client.crt` and `client.key`, or `tls.crt` and `tls.key`; configuration is rejected unless the same model has one HTTPS `base_url` and no `api_base_url`, and requests do not follow redirects. |
 | `models.definitions.<id>.name` | `string` | `yes` | `user` | Label shown in the model picker. |
 | `models.definitions.<id>.query_params` | `map<string,string>` | `yes` | `user` | Extra query parameters on this model's requests. |
 | `models.definitions.<id>.rate_limit_retry_threshold` | `number` | `yes` | `user` | Total-attempt ceiling for rate-limited requests, capped by the resolved `max_retries`; when configured, it disables the separate subagent 429 wait loop. |
@@ -367,7 +365,7 @@ User-level configuration lives in `$GROK_HOME/config.json` (default `~/.grok/con
 | `telemetry.otel_enabled` | `boolean` | `pin` | `user` | External OTEL master switch. Also GROK_EXTERNAL_OTEL. |
 | `telemetry.otel_endpoint` | `string` | `pin` | `user` | External OTLP base endpoint. Also OTEL_EXPORTER_OTLP_ENDPOINT. Pin strips developer env and unlisted user/managed file siblings except listed. |
 | `telemetry.otel_log_assistant_responses` | `boolean` | `pin` | `user` | Content gate for grok_code.assistant_response text. Unset follows otel_log_user_prompts unless a sibling gate is pinned in requirements. Env-only OTEL_LOG_USER_PROMPTS=1 must set this to 0 (or pin it false) for a prompts-only stream. Also OTEL_LOG_ASSISTANT_RESPONSES. |
-| `telemetry.otel_log_tool_content` | `boolean` | `pin` | `user` | Body gate for tool_input, tool_output, full_command, and error_message. Independent of details; default off. CONTENT-only loses verbatim MCP names and paths. Also OTEL_LOG_TOOL_CONTENT. |
+| `telemetry.otel_log_tool_content` | `boolean` | `pin` | `user` | Body gate. Independent of details; default off. CONTENT-only loses verbatim MCP names and paths. Also OTEL_LOG_TOOL_CONTENT. |
 | `telemetry.otel_log_tool_details` | `boolean` | `pin` | `user` | Metadata gate for tool-arg preview, paths, and verbatim names. Recommended on for SIEM join. Also OTEL_LOG_TOOL_DETAILS. Does not include full bodies. |
 | `telemetry.otel_log_user_prompts` | `boolean` | `pin` | `user` | Content gate for prompt text on grok_code.user_prompt. Also OTEL_LOG_USER_PROMPTS. Pinning any content gate without listing a sibling defaults the omitted sibling off. |
 | `telemetry.otel_logs_certificate` | `string` | `pin` | `user` | Logs-signal CA PEM path. Also OTEL_EXPORTER_OTLP_LOGS_CERTIFICATE. |

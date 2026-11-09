@@ -13,7 +13,7 @@ enum Tail {
     Str,
     /// Inside a number that opened at this byte index.
     Number(usize),
-    /// Inside a bare word (`true`, `false`, `null`) that opened here.
+    /// Inside a bare word that opened here.
     Literal(usize),
 }
 /// The most complete valid JSON the fragment can stand for. Returns `None`

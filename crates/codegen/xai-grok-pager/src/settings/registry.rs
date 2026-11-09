@@ -197,7 +197,7 @@ pub enum StringValidator {
     HttpUrlOrEmpty,
     /// No constraint (any UTF-8 accepted).
     Any,
-    /// A token count such as `350k`, `1.5m` or `350000`. Empty, `0` and `none` remove the value.
+    /// A token count. Empty, `0` and `none` remove the value.
     TokenAmount,
 }
 

@@ -15,8 +15,7 @@ use crate::sampling::ApiBackend;
 /// `model_provider = "<id>"` inherits each field it leaves unset, so an
 /// endpoint, a credential. A wire format or a header set is written once.
 /// Every field here is also a `[model.<id>]` field, and the model's own value
-/// always wins. What is NOT here is what identifies one model: `model`,
-/// `name`, `description`.
+/// always wins. What is NOT here is what identifies one model.
 #[derive(Clone, Debug, Default, serde::Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct ModelProviderConfig {

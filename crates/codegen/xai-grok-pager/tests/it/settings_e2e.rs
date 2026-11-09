@@ -1313,9 +1313,6 @@ fn filter_backspace_broadens_visible_set() {
     assert_eq!(s.query(), "st");
     let _ = handle_settings_key(&mut s, &press(KeyCode::Backspace)); // query becomes "s"
     assert_eq!(s.query(), "s");
-    // "s" matches compact_mode ("messages" in its description),
-    // show_timestamps ("show"/"timestamps"), and simple_mode
-    // ("simple"/"ascii").
     let setting_count_at_s = s
         .filtered_indices()
         .iter()
@@ -5389,9 +5386,9 @@ fn default_selected_permission_mouse_click_on_indicator_opens_picker_in_one_clic
     }
 }
 
-/// `/privacy` takes no arguments: it opens the settings page and nothing else. The alias parser it used to carry
-/// (`opt-in`, `share`, `out`, …) is gone. The ambiguous forms (`on`/`off`) risked landing on the opposite of the
-/// intent.
+/// `/privacy` takes no arguments: it opens the settings page and nothing
+/// else. The ambiguous forms (`on`/`off`) risked landing on the opposite of
+/// the intent.
 #[test]
 fn pr9_privacy_slash_command_takes_no_arguments() {
     use xai_grok_pager::slash::commands::builtin_commands;

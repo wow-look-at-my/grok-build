@@ -1,5 +1,4 @@
-//! `@sonnet`, `@haiku` and `@opus` reach the subagent coordinator as a background spawn on the
-//! newest model of the family, with the typed effort.
+// model_mention_spawn_tests.rs holds recording_coordinator.
 
 use super::support::*;
 use super::*;
