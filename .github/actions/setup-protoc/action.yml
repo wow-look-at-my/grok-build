@@ -3,10 +3,12 @@ description: Install the repository-pinned Linux protoc artifact
 runs:
   using: composite
   steps:
+    - uses: ./.github/actions/release-mirror
     - name: Install protoc (pinned v29.3)
       shell: bash
       run: |
         # bin/protoc is the source of truth for this artifact and its sha256.
+<<<<<<< HEAD
         # The release CDN can answer 504 for hours. Maven Central publishes the same
         # protoc 29.3 as a bare binary, so it is the fallback, pinned by its own sha256.
         # No .proto here imports the well-known types, so the zip's include/ is not needed.
@@ -22,5 +24,13 @@ runs:
           echo "5ae94ad986e83f0b52bd8139e036cbf94ddbba3ad348be8e4baf44447d7e19a4  $RUNNER_TEMP/protoc/bin/protoc" | sha256sum -c -
           chmod +x "$RUNNER_TEMP/protoc/bin/protoc"
         fi
+=======
+        # The mirror serves a stored copy after its first fetch, so a GitHub release CDN outage does not reach this job.
+        curl -fsSL --retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors -o "$RUNNER_TEMP/protoc.zip" \
+          -H "Authorization: Bearer $BUILDHOST_READ_TOKEN" \
+          "$GROK_RELEASE_MIRROR/github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip"
+        echo "3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a  $RUNNER_TEMP/protoc.zip" | sha256sum -c -
+        unzip -q -o "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+>>>>>>> origin/master
         echo "PROTOC=$RUNNER_TEMP/protoc/bin/protoc" >> "$GITHUB_ENV"
         "$RUNNER_TEMP/protoc/bin/protoc" --version
