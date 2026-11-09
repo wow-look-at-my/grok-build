@@ -2921,6 +2921,55 @@ fn forced_reasoning_effort_reaches_the_acp_meta_gate() {
     );
 }
 
+/// A client that sets the model with no effort reads the catalog default, so
+/// every effort-capable entry carries one, even with no menu (forced or listed).
+/// Otherwise a resumed session shows no effort while its requests send one.
+#[test]
+fn every_effort_capable_entry_carries_a_default_effort() {
+    use crate::agent::remote_config::resolve_model_catalog;
+    use xai_grok_sampling_types::parse_reasoning_effort_meta;
+    let raw: toml::Value = toml::from_str(
+        r#"
+        [models]
+        force_reasoning_effort_models = ["forced-one"]
+        [model.forced-one]
+        model = "forced-one"
+        base_url = "https://api.example.invalid/v1"
+        context_window = 200000
+        [model.flagged]
+        model = "flagged"
+        base_url = "https://api.example.invalid/v1"
+        context_window = 200000
+        supports_reasoning_effort = true
+        [model.plain]
+        model = "plain"
+        base_url = "https://api.example.invalid/v1"
+        context_window = 200000
+        "#,
+    )
+    .unwrap();
+    let catalog = resolve_model_catalog(&Config::new_from_toml_cfg(&raw).unwrap(), None);
+    for key in ["forced-one", "flagged"] {
+        assert_eq!(
+            catalog[key].info.reasoning_effort,
+            Some(ReasoningEffort::Medium),
+            "{key}"
+        );
+    }
+    assert_eq!(catalog["plain"].info.reasoning_effort, None);
+
+    let acp_models = to_acp_model_info(&catalog);
+    let forced = acp_models
+        .values()
+        .find(|m| m.name == "forced-one")
+        .expect("forced model in acp catalog");
+    assert_eq!(
+        parse_reasoning_effort_meta(forced.meta.as_ref()),
+        Some(ReasoningEffort::Medium),
+        "the default must reach the meta key a client falls back to"
+    );
+}
+
 #[test]
 fn force_reasoning_effort_models_rejects_an_invalid_glob() {
     let raw: toml::Value = toml::from_str(
