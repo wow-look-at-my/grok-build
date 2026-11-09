@@ -49,7 +49,6 @@ fn the_root_has_the_sections_and_refuses_other_keys() {
         "prompt",
         "scrollback",
         "disable_plugins",
-        "show_plan_chip",
     ] {
         assert!(props.contains_key(key), "no `{key}` member");
     }
@@ -90,7 +89,6 @@ fn a_full_file_is_valid() {
         "animation": { "fps": 60, "wave_rows": 16, "show_fps": false },
         "prompt": { "collapse_unfocused": false, "mouse_hover": true, "show_prefix": true },
         "disable_plugins": true,
-        "show_plan_chip": true,
         "scrollback": {
             "layout": { "outer_vpad": 0, "outer_hpad_left": 1 },
             "scrollbar": { "enabled": true, "scrollbar_fg": "#7aa2f7", "scrollbar_bg": "none" },

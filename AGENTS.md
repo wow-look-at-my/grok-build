@@ -52,6 +52,10 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/branch-stats-notes.md](docs/branch-stats-notes.md) holds this section.
 
+## Status-bar notes
+
+[docs/status-bar-notes.md](docs/status-bar-notes.md) holds this section: the order of the top-right items. This also covers the merged todo and goal chip, the context percent, and the dashboard button.
+
 ## Git status reuse in `git_gate`
 
 - `git_gate` joins same status and diff walks and keeps the result for `SNAPSHOT_TTL`. A client that polls `example.invalid/git/status` slower than that walked the whole tree, and ran `git branch`, `rev-parse` and `remote get-url`, on every poll.
@@ -138,7 +142,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## Lite `/goal` mode
 
 - `/goal --lite <objective>` (the flag may also be the last token) runs no planner and no skeptic panel. `GoalOrchestration::mode` holds the choice. A snapshot with no `mode` field reads as `Full`.
-- A lite goal starts the way `/todo <objective>` does. `setup_goal` runs the capture (`run_todo_capture`) before it creates the goal. A capture that adds nothing returns an error, and no goal starts.
+- A lite goal starts the way `/todo <objective>` does. So does a full goal when the planner is off. `setup_goal` runs the capture (`run_todo_capture`) before it creates the goal. A capture that adds nothing returns an error, and no goal starts. A goal never runs without todos.
 - The per-round evaluator (`goal_evaluator.rs`) is the whole check. Its `candidate_complete` ends the goal (`complete_lite_goal`). Any other verdict sends the model back. And the directive carries the evaluator's evidence as the reason. The evaluator prompt changes with the mode, because a lite verdict is last.
 - Every planner entry and plan-path read goes through `goal_planner_on()`, which is false for a lite goal. That includes the load-time reconcile, which otherwise pauses an active goal that has no plan.
 ## A give-up claim is reviewed, not counted
