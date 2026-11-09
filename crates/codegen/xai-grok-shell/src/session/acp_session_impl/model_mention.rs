@@ -1,4 +1,3 @@
-
 // model_mention.rs holds MODEL_MENTION_FAMILIES.
 
 use super::*;

@@ -1,4 +1,3 @@
-
 // model_agent.rs holds MODEL_AGENT_FAMILIES.
 
 use crate::app::actions::Action;
