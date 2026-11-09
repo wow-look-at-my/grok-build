@@ -191,10 +191,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ripgrep bubblewrap
 
-      # Consider the gh shim e2e tests. Those tests serve sandbox/gh.xml with the real api-cli, and workspace_gh_slopfix_e2e runs slopfix in the sandbox.
+      # Consider the gh shim e2e tests. Those tests serve sandbox/gh.xml with the real api-cli, and workspace_gh_slopfix_e2e runs slopfix in the sandbox. test_ai_proxy_delta_e2e puts the real ai-proxy between grok and the mock provider.
       - uses: ./.github/actions/setup-org-tools
         with:
-          tools: api-cli slopfix
+          tools: api-cli slopfix ai-proxy
 
       - name: Install cargo-nextest
         run: |

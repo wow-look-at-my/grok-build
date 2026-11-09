@@ -594,6 +594,57 @@ fn request_text(req: &ConversationRequest) -> String {
         .join("\n")
 }
 
+/// A `redacted_thinking` block goes back to the model that made it as the same
+/// block with the same data. It is dropped for any other model.
+#[test]
+fn redacted_thinking_is_replayed_to_its_own_model_only() {
+    let redacted = ConversationItem::Reasoning(rs::ReasoningItem {
+        id: String::new(),
+        summary: vec![],
+        content: None,
+        encrypted_content: Some(crate::messages::tag_redacted_thinking("EvwBopaque")),
+        status: None,
+    });
+    let items = |model: &str| {
+        vec![
+            ConversationItem::user("q1"),
+            redacted.clone(),
+            ConversationItem::Assistant(AssistantItem {
+                content: "The answer.".into(),
+                tool_calls: vec![],
+                model_id: Some(model.to_owned()),
+                model_fingerprint: None,
+                reasoning_effort: None,
+            }),
+            ConversationItem::user("q2"),
+        ]
+    };
+    let redacted_blocks = |req: &ConversationRequest| -> Vec<String> {
+        build_messages_request(req)
+            .messages
+            .iter()
+            .flat_map(|m| match &m.content {
+                crate::messages::MessageContent::Blocks(blocks) => blocks.clone(),
+                crate::messages::MessageContent::Text(_) => Vec::new(),
+            })
+            .filter_map(|b| match b {
+                crate::messages::ContentBlock::RedactedThinking { data } => Some(data),
+                _ => None,
+            })
+            .collect()
+    };
+
+    let same = ConversationRequest::from_items(items("claude-opus-5")).with_model("claude-opus-5");
+    assert_eq!(redacted_blocks(&same), vec!["EvwBopaque".to_string()]);
+    assert!(
+        thinking_blocks(&same).is_empty(),
+        "it must not turn into a thinking block"
+    );
+
+    let other = ConversationRequest::from_items(items("grok-4-fast")).with_model("claude-opus-5");
+    assert!(redacted_blocks(&other).is_empty());
+}
+
 /// The signature cannot be re-minted, so the BLOCK gives. Its words do not:
 /// they ride as ordinary assistant text, and the rest of the turn is
 /// untouched.

@@ -542,6 +542,13 @@ pub struct EnumVariantAlias {
 /// Every enum whose variants accept more than one name.
 pub const ENUM_VARIANTS: &[EnumVariantAlias] = &[
     EnumVariantAlias {
+        file: "crates/codegen/xai-grok-sampler/src/config.rs",
+        ty: "RequestCompression",
+        aliases: &["none"],
+        why: "the variant's name before it became `auto`; a config file written \
+              earlier still says it, and a mode is one string value",
+    },
+    EnumVariantAlias {
         file: "crates/codegen/xai-grok-tools/src/types/tool.rs",
         ty: "ToolNamespace",
         aliases: &[

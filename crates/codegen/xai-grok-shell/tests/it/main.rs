@@ -23,6 +23,7 @@ mod session_search_off_builds_no_index;
 mod sessions_active_gauge;
 mod spawn_actor_timers;
 mod subagent_bootstrap_regression;
+mod test_ai_proxy_delta_e2e;
 mod test_auth_provider_command_e2e;
 mod test_bootstrap_subphase_timings;
 mod test_config_update_isolation;

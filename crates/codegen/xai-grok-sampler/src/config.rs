@@ -27,15 +27,20 @@ pub enum AuthScheme {
     None,
 }
 
-/// Set by the shell: `Zstd` only toward the cli-chat-proxy that advertised it.
+/// Set by the shell. `Zstd` is the cli-chat-proxy that advertised it in its
+/// settings.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum RequestCompression {
+    /// Compress only toward an origin whose response sent `Accept-Encoding: zstd`.
     #[default]
-    None,
+    #[serde(alias = "none")]
+    Auto,
     Zstd,
+    /// Never compress. `GROK_REQUEST_COMPRESSION=0` sets this.
+    Off,
 }
 
 /// All knobs that control a single sampling request.
