@@ -38,6 +38,60 @@ const FD_TARBALL_SHA256: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// Pinned SHA-256 of each `(version, triple)` ripgrep release tarball we embed.
+const RG_TARBALL_SHA256: &[(&str, &str, &str)] = &[
+    (
+        "15.0.0",
+        "x86_64-unknown-linux-musl",
+        "253ad0fd5fef0d64cba56c70dccdacc1916d4ed70ad057cc525fcdb0c3bbd2a7",
+    ),
+    (
+        "15.0.0",
+        "aarch64-unknown-linux-gnu",
+        "15f8cc2fab12d88491c54d49f38589922a9d6a7353c29b0a0856727bcdf80754",
+    ),
+    (
+        "15.0.0",
+        "aarch64-apple-darwin",
+        "98bb2e61e7277ba0ea72d2ae2592497fd8d2940934a16b122448d302a6637e3b",
+    ),
+    (
+        "15.0.0",
+        "x86_64-apple-darwin",
+        "44128c733d127ddbda461e01225a68b5f9997cfe7635242a797f645ca674a71a",
+    ),
+];
+
+/// Checks a downloaded tarball against its pin before it is unpacked. The pin
+/// is what keeps a compromised mirror or release from reaching the binary.
+fn check_pinned_sha256(
+    pins: &[(&str, &str, &str)],
+    tool: &str,
+    ver: &str,
+    triple: &str,
+    url: &str,
+    bytes: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let expected = pins
+        .iter()
+        .find(|(v, t, _)| *v == ver && *t == triple)
+        .map(|(_, _, sha)| *sha)
+        .ok_or_else(|| format!("No pinned SHA-256 for {tool} {ver} {triple}"))?;
+    let actual = {
+        use sha2::Digest as _;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(bytes);
+        hex_encode(&hasher.finalize())
+    };
+    if actual != expected {
+        return Err(format!(
+            "SHA-256 mismatch for {url}:\n  expected {expected}\n  actual   {actual}"
+        )
+        .into());
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     bundle_rg()?;
     bundle_fd()?;
@@ -59,12 +113,18 @@ fn fetch_release(
     tool: &str,
     override_env: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let (url, token) = release_source(url)?;
+    let client = request::blocking::Client::new();
     let mut last = String::new();
     for attempt in 0..FETCH_ATTEMPTS {
         if attempt > 0 {
             std::thread::sleep(FETCH_RETRY_DELAY);
         }
-        let resp = match request::blocking::get(url) {
+        let mut req = client.get(&url);
+        if let Some(token) = &token {
+            req = req.bearer_auth(token);
+        }
+        let resp = match req.send() {
             Ok(resp) => resp,
             Err(e) => {
                 last = format!(
@@ -83,6 +143,30 @@ fn fetch_release(
         }
     }
     Err(last.into())
+}
+
+/// With `GROK_RELEASE_MIRROR` set, a github.com release URL goes to the
+/// buildhost mirror, which needs `BUILDHOST_READ_TOKEN`. CI sets both.
+fn release_source(url: &str) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-env-changed=GROK_RELEASE_MIRROR");
+    let Some(mirror) = env::var("GROK_RELEASE_MIRROR")
+        .ok()
+        .filter(|m| !m.is_empty())
+    else {
+        return Ok((url.to_string(), None));
+    };
+    let Some(path) = url.strip_prefix("https://github.com/") else {
+        return Err(
+            format!("GROK_RELEASE_MIRROR is set, and {url} is not a github.com URL").into(),
+        );
+    };
+    let token = env::var("BUILDHOST_READ_TOKEN")
+        .ok()
+        .filter(|t| !t.is_empty())
+        .ok_or("GROK_RELEASE_MIRROR is set, and BUILDHOST_READ_TOKEN is empty")?;
+    let mirrored = format!("{}/github.com/{path}", mirror.trim_end_matches('/'));
+    println!("cargo:warning=downloading {mirrored} through the release mirror");
+    Ok((mirrored, Some(token)))
 }
 
 /// Download + embed fd as an optional vendored file-search binary, mirroring the ripgrep bundling
@@ -157,24 +241,7 @@ fn bundle_fd() -> Result<(), Box<dyn std::error::Error>> {
 
     let bytes: Vec<u8> = fetch_release(&url, "fd", "GROK_TOOLS_BUNDLE_FD_PATH")?;
 
-    // Verify the tarball against the pinned per-asset hash before unpacking.
-    let expected_sha = FD_TARBALL_SHA256
-        .iter()
-        .find(|(v, t, _)| *v == ver && *t == asset_triple)
-        .map(|(_, _, sha)| *sha)
-        .ok_or_else(|| format!("No pinned SHA-256 for fd {ver} {asset_triple}"))?;
-    let actual_sha = {
-        use sha2::Digest as _;
-        let mut hasher = sha2::Sha256::new();
-        hasher.update(&bytes);
-        hex_encode(&hasher.finalize())
-    };
-    if actual_sha != expected_sha {
-        return Err(format!(
-            "SHA-256 mismatch for {url}:\n  expected {expected_sha}\n  actual   {actual_sha}"
-        )
-        .into());
-    }
+    check_pinned_sha256(FD_TARBALL_SHA256, "fd", ver, asset_triple, &url, &bytes)?;
 
     let gz = flate2::read::GzDecoder::new(bytes.as_slice());
     let mut ar = tar::Archive::new(gz);
@@ -339,6 +406,14 @@ fn bundle_rg() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let bytes: Vec<u8> = fetch_release(&url, "ripgrep", "GROK_TOOLS_BUNDLE_RG_PATH")?;
+    check_pinned_sha256(
+        RG_TARBALL_SHA256,
+        "ripgrep",
+        RG_VER,
+        asset_triple,
+        &url,
+        &bytes,
+    )?;
 
     let gz = flate2::read::GzDecoder::new(bytes.as_slice());
     let mut ar = tar::Archive::new(gz);
