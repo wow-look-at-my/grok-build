@@ -174,12 +174,18 @@ api_key = "{PROVIDER_KEY}"
     provider.assert_no_script_violations();
 
     // The provider read every body as JSON in its own dialect, tool results included.
-    let bodies: Vec<String> = provider
+    let bodies: Vec<Option<String>> = provider
         .requests()
         .into_iter()
         .filter(|entry| entry.method == "POST" && entry.path == upstream_path)
-        .map(|entry| entry.body.to_string())
+        .map(|entry| entry.body.map(|body| body.to_string()))
         .collect();
+    assert!(
+        bodies.iter().all(Option::is_some),
+        "{label}: every body the relay forwarded must parse as JSON; log:\n{}",
+        provider.request_log_summary()
+    );
+    let bodies: Vec<String> = bodies.into_iter().flatten().collect();
     assert!(
         bodies.iter().any(|body| body.contains(SECOND_MARKER)),
         "{label}: the second tool result must reach the provider; log:\n{}",
