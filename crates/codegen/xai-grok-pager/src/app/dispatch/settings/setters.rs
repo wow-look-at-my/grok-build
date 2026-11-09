@@ -3,8 +3,9 @@
 use super::ui::{refresh_open_settings_modals, save_success_toast};
 use crate::app::actions::Effect;
 use crate::app::app_view::{ActiveView, AppView};
-use crate::settings::PendingWrite;
+use crate::settings::{FeatureOverrideState, PendingWrite};
 use agent_client_protocol as acp;
+use xai_grok_shell::agent::config::Feature;
 
 /// Set multiline input mode: swap Enter and Shift+Enter behavior.
 /// PAGER-OWNED: ephemeral, no `Effect::PersistSetting`.

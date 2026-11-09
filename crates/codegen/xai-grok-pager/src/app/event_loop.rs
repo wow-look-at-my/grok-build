@@ -1143,6 +1143,11 @@ pub(crate) async fn run(
         config_layers.as_ref(),
         remote_settings.as_ref(),
     );
+    app.two_pass_compaction = crate::settings::FeatureOverrideState::from_layers(
+        xai_grok_shell::agent::config::Feature::TwoPassCompaction,
+        config_layers.as_ref(),
+        remote_settings.as_ref(),
+    );
     app.subscription_watch_interval_secs = remote_settings
         .as_ref()
         .and_then(|rs| rs.subscription_watch_interval_secs);
