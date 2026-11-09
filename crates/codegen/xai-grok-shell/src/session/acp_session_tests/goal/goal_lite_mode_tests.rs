@@ -450,9 +450,8 @@ async fn a_give_up_claim_is_sent_back_with_steps_then_upheld_on_the_same_path_fo
                     .await
                     .expect("mock inference server");
                 server.set_keep_requests(true);
-                if mode == GoalMode::Lite {
-                    server.enqueue_response("/v1/responses", lite_capture());
-                }
+                // With the planner off, both modes start with the capture.
+                server.enqueue_response("/v1/responses", lite_capture());
                 server.enqueue_response(
                     "/v1/responses",
                     claim_verdict("rejected", &[UNTRIED_STEP], ""),
@@ -651,9 +650,8 @@ async fn lite_and_full_goals_run_the_panel_on_an_upheld_claim() {
                 let server = MockInferenceServer::start()
                     .await
                     .expect("mock inference server");
-                if mode == GoalMode::Lite {
-                    server.enqueue_response("/v1/responses", lite_capture());
-                }
+                // With the planner off, both modes start with the capture.
+                server.enqueue_response("/v1/responses", lite_capture());
                 server.enqueue_response(
                     "/v1/responses",
                     claim_verdict("upheld", &[], "Capture a Tracy trace of updateColor()"),

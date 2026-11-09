@@ -448,6 +448,13 @@ async fn write_existing_todo(actor: &SessionActor, id: &str, content: &str) {
         .expect("an existing todo must be writable");
 }
 
+/// Put one open item on the session's list. A goal never runs without todos, so a plan
+/// published onto an empty list pauses the goal.
+async fn give_the_session_an_open_todo(actor: &SessionActor) {
+    arm_todo_writes(actor).await;
+    write_existing_todo(actor, "t-open", "do the work").await;
+}
+
 /// The work items the scripted planner puts on its OWN todo list with
 /// `todo_write` while it plans — the source of the session's seeded list.
 const PLANNER_TODOS: &[&str] = &[
@@ -1096,6 +1103,7 @@ async fn planner_success_stamps_plan_file_on_orchestration() {
             let (tx, spawn_count) =
                 spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDone { body: b"# Plan\n" });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
             let plan_path = actor.goal_tracker.lock().plan_path();
             let baseline_path = actor.goal_tracker.lock().plan_baseline_path();
@@ -1206,6 +1214,7 @@ async fn planner_snapshots_plan_baseline_once_and_does_not_overwrite() {
                 body: b"# Plan v1\n",
             });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
             let baseline_path = actor.goal_tracker.lock().plan_baseline_path();
 
@@ -1346,6 +1355,7 @@ async fn planner_clears_planning_latch_before_publishing_the_plan() {
                 spawn_planner_coordinator(SpawnBehaviour::WritePlanThenDone { body: b"# Plan\n" });
             let (actor, _tmp, mut persistence_rx) =
                 make_planner_actor_capturing(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
             let plan_path = actor.goal_tracker.lock().plan_path();
 
@@ -1509,6 +1519,7 @@ async fn planner_reopens_spawn_admission_blocked_by_prior_cancel() {
                     body: b"# Plan\n",
                 });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
 
             actor.maybe_run_goal_planner("do X").await;
@@ -1896,6 +1907,7 @@ async fn lifecycle_fail_pause_resume_retry_success() {
             });
 
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
 
             actor.maybe_run_goal_planner("do X").await;
@@ -2178,6 +2190,7 @@ async fn setup_goal_reminder_is_plan_aware_when_planner_enabled() {
                 body: b"# Plan\n\n1. do it\n",
             });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             let plan_path = actor.goal_tracker.lock().plan_path();
 
             let GoalSetupOutcome::Inference { reminder } =
@@ -2439,6 +2452,7 @@ async fn resume_after_planner_failure_succeeds_without_infra_recap() {
                     body: b"# Plan\n",
                 });
             let (actor, _tmp) = make_planner_actor(Some(tx), true).await;
+            give_the_session_an_open_todo(&actor).await;
             create_test_goal(&actor);
             actor.maybe_run_goal_planner("do X").await;
             assert_eq!(
