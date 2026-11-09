@@ -149,15 +149,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("pager.json");
         assert!(
-            !load_appearance(&path).unwrap().show_plan_chip,
+            !load_appearance(&path).unwrap().disable_plugins,
             "an absent file is the defaults"
         );
         std::fs::write(
             &path,
-            r#"{"show_plan_chip": true, "animation": {"fps": null}}"#,
+            r#"{"disable_plugins": true, "animation": {"fps": null}}"#,
         )
         .unwrap();
-        assert!(load_appearance(&path).unwrap().show_plan_chip);
+        assert!(load_appearance(&path).unwrap().disable_plugins);
         std::fs::write(&path, "{ broken").unwrap();
         let err = load_appearance(&path).unwrap_err();
         assert!(
@@ -169,8 +169,8 @@ mod tests {
     fn load_reads_a_legacy_toml_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("pager.toml");
-        std::fs::write(&path, "show_plan_chip = true\n").unwrap();
-        assert!(load_appearance(&path).unwrap().show_plan_chip);
+        std::fs::write(&path, "disable_plugins = true\n").unwrap();
+        assert!(load_appearance(&path).unwrap().disable_plugins);
     }
     #[test]
     fn remove_reloads_when_symlink_slot_still_exists() {

@@ -24,6 +24,7 @@ use crate::app::agent::{GoalDisplayPhase, GoalDisplayState, GoalDisplayStatus};
 use crate::app::agent_view::McpInitProgress;
 use crate::theme::Theme;
 use crate::views::tasks_pane::TaskStatusCounts;
+use crate::views::todo_pane::TodoCounts;
 
 /// A named status bar item.
 struct StatusEntry {
@@ -58,22 +59,6 @@ impl<'a> AgentStatusBar<'a> {
     pub fn push(&mut self, id: &'static str, line: Line<'static>) {
         let width = line.width() as u16;
         self.items.push(StatusEntry { id, line, width });
-    }
-
-    /// Prepend an item sized with [`Self::room_for_front`], so it can never push the items already pushed off the row.
-    pub fn push_front(&mut self, id: &'static str, line: Line<'static>) {
-        let width = line.width() as u16;
-        self.items.insert(0, StatusEntry { id, line, width });
-    }
-
-    /// Columns a prepended item may take in a row `area_width` wide: what the current group and its joining separator leave.
-    pub fn room_for_front(&self, area_width: u16) -> u16 {
-        let joining_sep = if self.items.is_empty() {
-            0
-        } else {
-            SEPARATOR_WIDTH
-        };
-        area_width.saturating_sub(self.right_pad + self.width() + joining_sep)
     }
 
     /// Columns the group occupies: items plus the separators between them.
@@ -196,33 +181,24 @@ pub(crate) fn format_tokens_compact(tokens: i64) -> String {
     }
 }
 
-/// Format elapsed milliseconds compactly: `5s`, `3m`, `2h`.
-fn format_elapsed_compact(ms: u64) -> String {
-    let secs = ms / 1000;
-    if secs >= 3600 {
-        format!("{}h", secs / 3600)
-    } else if secs >= 60 {
-        format!("{}m", secs / 60)
-    } else {
-        format!("{}s", secs)
-    }
-}
-
-/// Build the status-chip label.
-/// Paused variants render their `pause_label()`, Budget renders "Budget", Done renders "Done".
-/// An Active goal uses the shared [`active_phase_label`] suffix.
-fn goal_phase_label(goal: &GoalDisplayState) -> String {
+/// The word the goal chip adds to the todo count. `None` while the goal runs.
+/// Every pause reason reads "Paused": the goal detail names the reason.
+fn goal_state_word(goal: &GoalDisplayState) -> Option<&'static str> {
     match goal.status {
+        GoalDisplayStatus::Active if goal.verifying_completion => Some("Verifying"),
+        GoalDisplayStatus::Active if goal.planning || goal.phase == GoalDisplayPhase::Planning => {
+            Some("Planning")
+        }
+        GoalDisplayStatus::Active => None,
         GoalDisplayStatus::UserPaused
         | GoalDisplayStatus::BackOffPaused
         | GoalDisplayStatus::NoProgressPaused
         | GoalDisplayStatus::InfraPaused
-        | GoalDisplayStatus::Blocked => goal.status.pause_label().into(),
-        GoalDisplayStatus::Failed => "Failed".into(),
-        GoalDisplayStatus::Interrupted => "Interrupted".into(),
-        GoalDisplayStatus::BudgetLimited => "Budget".into(),
-        GoalDisplayStatus::Complete => "Done".into(),
-        GoalDisplayStatus::Active => active_phase_label(goal),
+        | GoalDisplayStatus::Blocked => Some("Paused"),
+        GoalDisplayStatus::Failed => Some("Failed"),
+        GoalDisplayStatus::Interrupted => Some("Interrupted"),
+        GoalDisplayStatus::BudgetLimited => Some("Stopped"),
+        GoalDisplayStatus::Complete => Some("Done"),
     }
 }
 
@@ -260,66 +236,43 @@ pub fn classifier_attempts_label(goal: &GoalDisplayState) -> String {
     format!("{attempt}/{max}")
 }
 
-/// Build a compact goal status `Line` for the agent status bar. Format: `[Goal: {label}] {tokens}
-/// {elapsed}`. When `hovered` is true the label is bolded/underlined to signal clickability. When
-/// the goal is `Active`, a braille spinner driven by `tick` is prepended.
+/// The goal chip: `[Goal: 4/5]`, or `[Goal: Paused 4/5]` when the goal does
+/// not run. The count is the todo list's `done/total`, cancelled items left
+/// out. `None` for a running goal with no todo to count: such a goal is
+/// invalid, and the caller reports it. Only a running goal is gold. Failed
+/// and interrupted are a red chip. Every other state is gray.
 pub fn goal_status_line(
     goal: &GoalDisplayState,
+    counts: &TodoCounts,
     theme: &Theme,
     hovered: bool,
-    tick: usize,
-    context_used: Option<u64>,
-    active_subagent_tokens: u64,
-) -> Line<'static> {
-    let label = goal_phase_label(goal);
-
-    let tokens_str =
-        format_tokens_compact(goal.live_tokens_used(context_used, active_subagent_tokens));
-    let tokens_display = match goal.token_budget {
-        Some(budget) if budget > 0 => {
-            format!("{}/{} tokens", tokens_str, format_tokens_compact(budget))
-        }
-        _ => format!("{} tokens", tokens_str),
+) -> Option<Line<'static>> {
+    let total = counts.total_excluding_cancelled();
+    let count = (total > 0).then(|| format!("{}/{total}", counts.completed));
+    let text = match (goal_state_word(goal), count) {
+        (Some(word), Some(count)) => format!("Goal: {word} {count}"),
+        (None, Some(count)) => format!("Goal: {count}"),
+        (Some(word), None) => format!("Goal: {word}"),
+        (None, None) => return None,
     };
-
-    let elapsed_str = format_elapsed_compact(goal.live_elapsed_ms());
-
     let dim_style = Style::default().fg(theme.gray_dim).bg(theme.bg_base);
-    // Paused goals use an inverted warning-colour chip so the chip background visually matches the modal's `theme.warning` status row
-    let mut label_style = if goal.status.is_paused() {
-        Style::default().fg(theme.bg_base).bg(theme.warning)
-    } else if matches!(
-        goal.status,
-        GoalDisplayStatus::Failed | GoalDisplayStatus::Interrupted
-    ) {
-        Style::default().fg(theme.bg_base).bg(theme.accent_error)
-    } else {
-        Style::default().fg(theme.accent_plan).bg(theme.bg_base)
+    let mut label_style = match goal.status {
+        GoalDisplayStatus::Active => Style::default().fg(theme.accent_plan).bg(theme.bg_base),
+        GoalDisplayStatus::Failed | GoalDisplayStatus::Interrupted => {
+            Style::default().fg(theme.bg_base).bg(theme.accent_error)
+        }
+        _ => Style::default().fg(theme.gray).bg(theme.bg_base),
     };
-
     if hovered {
         label_style = label_style
             .add_modifier(ratatui::style::Modifier::BOLD)
             .add_modifier(ratatui::style::Modifier::UNDERLINED);
     }
-
-    let is_active = matches!(goal.status, GoalDisplayStatus::Active);
-
-    let chip_name = "Goal";
-    let goal_text = if is_active {
-        let frames = crate::glyphs::dot_spinner_frames();
-        let frame = frames.get((tick / 4) % frames.len()).copied().unwrap_or("");
-        format!("{frame} {chip_name}: {label}")
-    } else {
-        format!("{chip_name}: {label}")
-    };
-
-    Line::from(vec![
+    Some(Line::from(vec![
         Span::styled("[", dim_style),
-        Span::styled(goal_text, label_style),
+        Span::styled(text, label_style),
         Span::styled("]", dim_style),
-        Span::styled(format!("  {tokens_display}  {elapsed_str}"), dim_style),
-    ])
+    ]))
 }
 
 /// The chip shows real server counts only. "Starting session…" is the turn-status row's job
@@ -385,26 +338,6 @@ mod tests {
         assert_eq!(format_tokens_compact(10_000_000), "10M");
     }
 
-    #[test]
-    fn elapsed_compact_seconds() {
-        assert_eq!(format_elapsed_compact(0), "0s");
-        assert_eq!(format_elapsed_compact(5_000), "5s");
-        assert_eq!(format_elapsed_compact(59_999), "59s");
-    }
-
-    #[test]
-    fn elapsed_compact_minutes() {
-        assert_eq!(format_elapsed_compact(60_000), "1m");
-        assert_eq!(format_elapsed_compact(180_000), "3m");
-        assert_eq!(format_elapsed_compact(3_599_000), "59m");
-    }
-
-    #[test]
-    fn elapsed_compact_hours() {
-        assert_eq!(format_elapsed_compact(3_600_000), "1h");
-        assert_eq!(format_elapsed_compact(7_200_000), "2h");
-    }
-
     fn make_goal(
         status: GoalDisplayStatus,
         phase: GoalDisplayPhase,
@@ -449,97 +382,6 @@ mod tests {
             received_at: std::time::Instant::now(),
             elapsed_floor_ms: 0,
         }
-    }
-
-    #[test]
-    fn phase_label_active_executing() {
-        let g = make_goal(
-            GoalDisplayStatus::Active,
-            GoalDisplayPhase::Executing,
-            None,
-            0,
-            0,
-        );
-        assert_eq!(goal_phase_label(&g), "Executing");
-    }
-
-    #[test]
-    fn phase_label_active_planning() {
-        let g = make_goal(
-            GoalDisplayStatus::Active,
-            GoalDisplayPhase::Planning,
-            None,
-            0,
-            0,
-        );
-        assert_eq!(goal_phase_label(&g), "Planning");
-    }
-
-    #[test]
-    fn phase_label_paused_variants() {
-        for (status, expected) in [
-            (GoalDisplayStatus::UserPaused, "Paused"),
-            (GoalDisplayStatus::BackOffPaused, "Paused (back-off)"),
-            (GoalDisplayStatus::NoProgressPaused, "Paused (no progress)"),
-            (GoalDisplayStatus::InfraPaused, "Paused (error)"),
-            (GoalDisplayStatus::Blocked, "Paused (verification blocked)"),
-        ] {
-            let g = make_goal(status, GoalDisplayPhase::Executing, Some(0), 2, 0);
-            assert_eq!(goal_phase_label(&g), expected, "for {status:?}");
-        }
-    }
-
-    #[test]
-    fn goal_line_contains_pause_label_for_infra_paused() {
-        let g = make_goal(
-            GoalDisplayStatus::InfraPaused,
-            GoalDisplayPhase::Executing,
-            Some(1),
-            2,
-            0,
-        );
-        let t = Theme::current();
-        let line = goal_status_line(&g, &t, false, 0, None, 0);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("Paused (error)"));
-    }
-
-    #[test]
-    fn status_chip_shows_verifying_completion_when_flag_set() {
-        // An Active goal with `verifying_completion = true` renders the "Verifying (n/m)" label instead of the regular phase label
-        // The user can then see the classifier run
-        let mut g = make_goal(
-            GoalDisplayStatus::Active,
-            GoalDisplayPhase::Executing,
-            None,
-            0,
-            0,
-        );
-        g.verifying_completion = true;
-        g.classifier_runs_attempted = Some(2);
-        g.classifier_max_runs = Some(3);
-        assert_eq!(goal_phase_label(&g), "Verifying (2/3)");
-
-        let t = Theme::current();
-        let line = goal_status_line(&g, &t, false, 0, None, 0);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("Verifying (2/3)"));
-    }
-
-    #[test]
-    fn status_chip_verifying_omits_counter_when_counts_absent() {
-        // Before the first counter arrives (both fields None) the chip reads "Verifying", not "Verifying (0/0)"
-        let mut g = make_goal(
-            GoalDisplayStatus::Active,
-            GoalDisplayPhase::Executing,
-            None,
-            0,
-            0,
-        );
-        g.verifying_completion = true;
-        g.classifier_runs_attempted = None;
-        g.classifier_max_runs = None;
-        assert_eq!(goal_phase_label(&g), "Verifying");
     }
 
     #[test]
@@ -594,214 +436,170 @@ mod tests {
         assert_eq!(g.live_elapsed_ms(), 9_000);
     }
 
-    #[test]
-    fn status_chip_shows_planning_when_flag_set() {
-        // An Active goal with `planning = true` renders the "Planning" label instead of the regular phase label
-        // The user can see the planner subagent run while it executes
-        let mut g = make_goal(
-            GoalDisplayStatus::Active,
-            GoalDisplayPhase::Idle,
-            None,
-            0,
-            0,
-        );
-        g.planning = true;
-        assert_eq!(goal_phase_label(&g), "Planning");
-
-        let t = Theme::current();
-        let line = goal_status_line(&g, &t, false, 0, None, 0);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("Planning"));
+    fn counts(completed: usize, pending: usize) -> TodoCounts {
+        TodoCounts {
+            completed,
+            pending,
+            cancelled: 1,
+            ..Default::default()
+        }
     }
 
-    #[test]
-    fn status_chip_verifying_wins_over_planning() {
-        // Deterministic precedence: the two flags never overlap in practice, but if both were set `verifying_completion` wins
-        let mut g = make_goal(
-            GoalDisplayStatus::Active,
-            GoalDisplayPhase::Idle,
-            None,
-            0,
-            0,
-        );
-        g.planning = true;
-        g.verifying_completion = true;
-        g.classifier_runs_attempted = Some(1);
-        g.classifier_max_runs = Some(2);
-        assert_eq!(goal_phase_label(&g), "Verifying (1/2)");
+    fn chip(goal: &GoalDisplayState, counts: &TodoCounts) -> Option<String> {
+        goal_status_line(goal, counts, &Theme::current(), false)
+            .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
     }
 
-    #[test]
-    fn status_chip_planning_suppressed_on_non_active_status() {
-        // The "Planning" label is gated on `Active`
-        // A paused goal that somehow still carries `planning = true` shows its terminal label, not the in-flight one
-        let mut g = make_goal(
-            GoalDisplayStatus::UserPaused,
-            GoalDisplayPhase::Idle,
-            None,
-            0,
-            0,
-        );
-        g.planning = true;
-        assert_eq!(goal_phase_label(&g), "Paused");
-    }
-
-    #[test]
-    fn status_chip_verifying_suppressed_on_non_active_status() {
-        // The chip text is gated on `Active`
-        // A paused, complete, or budget-limited goal can still carry `verifying_completion = true`
-        // It must show its terminal label, not the in-flight one
-        let mut g = make_goal(
-            GoalDisplayStatus::UserPaused,
-            GoalDisplayPhase::Executing,
-            None,
-            0,
-            0,
-        );
-        g.verifying_completion = true;
-        assert_eq!(goal_phase_label(&g), "Paused");
-    }
-
-    #[test]
-    fn goal_line_paused_chip_uses_warning_background() {
-        // Paused chips render with the `theme.warning` background to visually warn the user.
-        let g = make_goal(
-            GoalDisplayStatus::UserPaused,
-            GoalDisplayPhase::Executing,
-            Some(0),
-            2,
-            0,
-        );
-        let t = Theme::groknight();
-        let line = goal_status_line(&g, &t, false, 0, None, 0);
-        // The label span is the one whose content starts with "Goal:".
-        let label_span = line
+    fn label_span(goal: &GoalDisplayState, theme: &Theme) -> Span<'static> {
+        goal_status_line(goal, &counts(4, 1), theme, false)
+            .expect("a goal with todos draws a chip")
             .spans
-            .iter()
+            .into_iter()
             .find(|s| s.content.contains("Goal:"))
-            .expect("label span with `Goal:` prefix");
-        assert_eq!(label_span.style.bg, Some(t.warning));
-        assert_ne!(label_span.style.bg, Some(t.bg_base));
+            .expect("label span with the `Goal:` prefix")
     }
 
     #[test]
-    fn goal_line_active_chip_does_not_use_warning_background() {
-        // Negative companion: an Active goal must keep the standard accent-plan-on-bg-base chip style
+    fn a_running_goal_shows_only_the_todo_count() {
         let g = make_goal(
             GoalDisplayStatus::Active,
-            GoalDisplayPhase::Executing,
-            Some(0),
-            2,
-            0,
-        );
-        let t = Theme::groknight();
-        let line = goal_status_line(&g, &t, false, 0, None, 0);
-        let label_span = line
-            .spans
-            .iter()
-            .find(|s| s.content.contains("Goal:"))
-            .expect("label span with `Goal:` prefix");
-        assert_eq!(label_span.style.bg, Some(t.bg_base));
-        assert_ne!(label_span.style.bg, Some(t.warning));
-    }
-
-    #[test]
-    fn phase_label_failed() {
-        let g = make_goal(
-            GoalDisplayStatus::Failed,
-            GoalDisplayPhase::Idle,
-            None,
-            0,
-            0,
-        );
-        assert_eq!(goal_phase_label(&g), "Failed");
-    }
-
-    #[test]
-    fn phase_label_budget_limited() {
-        let g = make_goal(
-            GoalDisplayStatus::BudgetLimited,
             GoalDisplayPhase::Executing,
             Some(1),
-            2,
-            0,
+            4,
+            1,
         );
-        assert_eq!(goal_phase_label(&g), "Budget");
+        assert_eq!(
+            chip(&g, &counts(4, 1)).as_deref(),
+            Some("[Goal: 4/5]"),
+            "no phase, tokens, budget, elapsed time or spinner; cancelled items stay out"
+        );
     }
 
     #[test]
-    fn phase_label_complete() {
+    fn a_goal_that_does_not_simply_run_keeps_one_state_word() {
+        let mut verifying = make_goal(
+            GoalDisplayStatus::Active,
+            GoalDisplayPhase::Executing,
+            None,
+            0,
+            0,
+        );
+        verifying.verifying_completion = true;
+        verifying.classifier_runs_attempted = Some(1);
+        verifying.classifier_max_runs = Some(3);
+        assert_eq!(
+            chip(&verifying, &counts(4, 1)).as_deref(),
+            Some("[Goal: Verifying 4/5]"),
+            "the attempt counter stays in the goal detail"
+        );
+        for (status, word) in [
+            (GoalDisplayStatus::UserPaused, "Paused"),
+            (GoalDisplayStatus::BackOffPaused, "Paused"),
+            (GoalDisplayStatus::NoProgressPaused, "Paused"),
+            (GoalDisplayStatus::InfraPaused, "Paused"),
+            (GoalDisplayStatus::Blocked, "Paused"),
+            (GoalDisplayStatus::Failed, "Failed"),
+            (GoalDisplayStatus::Interrupted, "Interrupted"),
+            (GoalDisplayStatus::BudgetLimited, "Stopped"),
+            (GoalDisplayStatus::Complete, "Done"),
+        ] {
+            let mut g = make_goal(status, GoalDisplayPhase::Executing, None, 0, 0);
+            g.verifying_completion = true;
+            g.planning = true;
+            assert_eq!(
+                chip(&g, &counts(4, 1)),
+                Some(format!("[Goal: {word} 4/5]")),
+                "{status:?} shows its own word, not the in-flight one"
+            );
+        }
+    }
+
+    #[test]
+    fn a_planning_goal_shows_planning_before_it_has_todos() {
+        let mut g = make_goal(
+            GoalDisplayStatus::Active,
+            GoalDisplayPhase::Idle,
+            None,
+            0,
+            0,
+        );
+        g.planning = true;
+        assert_eq!(
+            chip(&g, &TodoCounts::default()).as_deref(),
+            Some("[Goal: Planning]")
+        );
+    }
+
+    #[test]
+    fn a_running_goal_with_no_todos_draws_no_chip() {
+        let g = make_goal(
+            GoalDisplayStatus::Active,
+            GoalDisplayPhase::Executing,
+            None,
+            0,
+            0,
+        );
+        let only_cancelled = TodoCounts {
+            cancelled: 2,
+            ..Default::default()
+        };
+        assert_eq!(chip(&g, &TodoCounts::default()), None);
+        assert_eq!(chip(&g, &only_cancelled), None);
+    }
+
+    #[test]
+    fn a_finished_goal_whose_list_was_archived_still_says_done() {
         let g = make_goal(
             GoalDisplayStatus::Complete,
             GoalDisplayPhase::Idle,
             None,
-            3,
-            3,
-        );
-        assert_eq!(goal_phase_label(&g), "Done");
-    }
-
-    #[test]
-    fn phase_label_active_idle() {
-        let g = make_goal(
-            GoalDisplayStatus::Active,
-            GoalDisplayPhase::Idle,
-            None,
             0,
             0,
         );
-        assert_eq!(goal_phase_label(&g), "Idle");
+        let archived = TodoCounts {
+            archived: 5,
+            ..Default::default()
+        };
+        assert_eq!(chip(&g, &archived).as_deref(), Some("[Goal: Done]"));
     }
 
     #[test]
-    fn phase_label_executing_ignores_deliverables() {
-        let g = make_goal(
+    fn only_a_running_goal_is_gold() {
+        let t = Theme::groknight();
+        let running = make_goal(
             GoalDisplayStatus::Active,
             GoalDisplayPhase::Executing,
             None,
-            4,
-            2,
-        );
-        assert_eq!(goal_phase_label(&g), "Executing");
-    }
-
-    #[test]
-    fn goal_line_contains_expected_text() {
-        let g = make_goal(
-            GoalDisplayStatus::Active,
-            GoalDisplayPhase::Executing,
-            Some(1),
-            4,
-            1,
-        );
-        let t = Theme::current();
-        let line = goal_status_line(&g, &t, false, 0, None, 0);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("Goal: Exec"));
-        assert!(text.contains("12.3k/50k tokens"));
-        assert!(text.contains("3m"));
-    }
-
-    #[test]
-    fn goal_line_without_budget() {
-        let mut g = make_goal(
-            GoalDisplayStatus::Active,
-            GoalDisplayPhase::Planning,
-            None,
             0,
             0,
         );
-        g.token_budget = None;
-        g.tokens_used = 500;
-        let t = Theme::current();
-        let line = goal_status_line(&g, &t, false, 0, None, 0);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("500 tokens"));
-        assert!(!text.contains('/'));
+        assert_eq!(label_span(&running, &t).style.fg, Some(t.accent_plan));
+        for status in [
+            GoalDisplayStatus::UserPaused,
+            GoalDisplayStatus::InfraPaused,
+            GoalDisplayStatus::BudgetLimited,
+            GoalDisplayStatus::Complete,
+        ] {
+            let span = label_span(&make_goal(status, GoalDisplayPhase::Idle, None, 0, 0), &t);
+            assert_eq!(span.style.fg, Some(t.gray), "{status:?} is gray");
+            assert_eq!(
+                span.style.bg,
+                Some(t.bg_base),
+                "{status:?} has no chip background"
+            );
+        }
+        for status in [GoalDisplayStatus::Failed, GoalDisplayStatus::Interrupted] {
+            let span = label_span(&make_goal(status, GoalDisplayPhase::Idle, None, 0, 0), &t);
+            assert_eq!(
+                span.style.bg,
+                Some(t.accent_error),
+                "{status:?} is a red chip"
+            );
+        }
     }
 
     #[test]
-    fn goal_line_no_title_in_status_bar() {
+    fn the_goal_chip_never_names_the_objective() {
         let g = make_goal(
             GoalDisplayStatus::Active,
             GoalDisplayPhase::Executing,
@@ -809,10 +607,7 @@ mod tests {
             1,
             0,
         );
-        let t = Theme::current();
-        let line = goal_status_line(&g, &t, false, 0, None, 0);
-        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        // Title should NOT appear in status bar (only in the modal)
+        let text = chip(&g, &counts(0, 1)).unwrap();
         assert!(!text.contains("Add CSS vars"));
         assert!(!text.contains("Build widget"));
     }

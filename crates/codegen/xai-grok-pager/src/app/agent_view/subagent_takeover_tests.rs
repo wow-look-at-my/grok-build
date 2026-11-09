@@ -270,7 +270,7 @@ fn takeover_draw_forwards_pending_hint_and_child_cursor() {
             .height
     );
 }
-/// A child view paints no `[Dashboard]` button, even when its own registry could dispatch `/dashboard`.
+/// A child view paints no dashboard button, even when its own registry could dispatch `/dashboard`.
 /// Inside the dashboard overlay the button stays as the way back.
 #[test]
 fn takeover_shows_dashboard_button_only_inside_the_overlay() {
@@ -300,7 +300,7 @@ fn takeover_shows_dashboard_button_only_inside_the_overlay() {
         let text = buffer_text(&buf, area);
         assert_eq!(
             expect_button,
-            text.contains("[Dashboard]"),
+            text.contains(crate::glyphs::dashboard()),
             "in_overlay={in_overlay}: {text}"
         );
         let child = parent.subagent_view("child").expect("child view");

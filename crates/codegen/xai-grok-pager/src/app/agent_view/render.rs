@@ -80,6 +80,19 @@ enum ShortcutsBarContent {
     Hidden,
 }
 impl AgentView {
+    /// A running goal with no todo item is invalid, so the status bar draws no goal chip for it.
+    /// Logs one error line per goal, not one per frame.
+    fn report_goal_without_todos(&mut self, goal_id: String) {
+        if self.goal_without_todos_reported.as_deref() == Some(goal_id.as_str()) {
+            return;
+        }
+        tracing::error!(
+            goal_id = %goal_id,
+            "a running goal has no todo item; the status bar draws no goal chip"
+        );
+        self.goal_without_todos_reported = Some(goal_id);
+    }
+
     pub(crate) fn live_standalone_subagent_tokens(&self) -> u64 {
         self.subagent_sessions
             .values()
@@ -1275,33 +1288,24 @@ impl AgentView {
                 status.push("bg_tasks", line);
             }
         }
-        if self.should_show_plan_chip(&appearance) {
-            let mut plan_style = Style::default().fg(theme.accent_plan).bg(theme.bg_base);
-            if self.hit_plan_button.hovered {
-                plan_style = plan_style.add_modifier(ratatui::style::Modifier::BOLD);
-            }
-            status.push("plan", Line::from(Span::styled("plan", plan_style)));
-        }
+        // One item for the todo count: inside the goal chip while a goal exists, else the badge.
         let counts = self.todo.counts();
-        if let Some(badge_spans) =
+        if let Some(goal) = self.goal_state.as_ref() {
+            let line = crate::views::agent_status::goal_status_line(
+                goal,
+                &counts,
+                &theme,
+                self.hit_goal_status.hovered,
+            );
+            let goal_id = goal.goal_id.clone();
+            match line {
+                Some(line) => status.push("goal", line),
+                None => self.report_goal_without_todos(goal_id),
+            }
+        } else if let Some(badge_spans) =
             crate::views::agent::render_todo_badge_spans(&counts, self.hit_badge.hovered, &theme)
         {
             status.push("badge", Line::from(badge_spans));
-        }
-        if let Some(ref goal) = self.goal_state {
-            let tick = self.tasks.tick_count() as usize;
-            let active_subagent_tokens = self.live_standalone_subagent_tokens();
-            status.push(
-                "goal",
-                crate::views::agent_status::goal_status_line(
-                    goal,
-                    &theme,
-                    self.hit_goal_status.hovered,
-                    tick,
-                    self.context_state.as_ref().map(|c| c.used),
-                    active_subagent_tokens,
-                ),
-            );
         }
         if let Some(mcp_line) = self.mcp_init_progress.as_ref().and_then(|p| {
             crate::views::agent_status::mcp_status_line(p, self.scrollback.animation_tick(), &theme)
@@ -1324,11 +1328,11 @@ impl AgentView {
         }
         let ctx_used = self.context_state.as_ref().map(|c| c.used);
         let model_window = self.session.models.get_context_window();
-        let ctx_total = self
-            .context_state
-            .as_ref()
-            .and_then(|c| (c.total > 0).then_some(c.total))
-            .or(model_window);
+        // The total is the auto-compact point, not the whole window.
+        let ctx_total = self.context_state.as_ref().and_then(|c| {
+            let window = (c.total > 0).then_some(c.total).or(model_window)?;
+            Some(window.saturating_mul(u64::from(c.auto_compact_threshold_percent)) / 100)
+        });
         if let Some(ctx_line) = context_bar::context_bar_line_for_session(
             ctx_used,
             ctx_total,
@@ -1345,51 +1349,8 @@ impl AgentView {
                 resting
             }
         };
-        if let Some((cur, total)) = overlay_header.cycle_position() {
-            status.push(
-                "switcher",
-                Line::from(vec![
-                    Span::styled(
-                        crate::glyphs::chevron_left(),
-                        hover_or(self.hit_overlay_prev.hovered, faint),
-                    ),
-                    Span::styled(format!(" {cur}/{total} "), bg.fg(theme.gray)),
-                    Span::styled(
-                        crate::glyphs::chevron(),
-                        hover_or(self.hit_overlay_next.hovered, faint),
-                    ),
-                ]),
-            );
-        }
-        let dashboard_available = in_dashboard_overlay
-            || (self.child_link().is_none()
-                && self
-                    .prompt
-                    .slash_controller
-                    .registry()
-                    .dashboard_dispatchable());
-        if dashboard_available {
-            status.push(
-                "dashboard",
-                Line::from(Span::styled(
-                    "[Dashboard]",
-                    hover_or(self.hit_dashboard.hovered, bg.fg(theme.gray)),
-                )),
-            );
-        }
-        if let Some(url) = self.highlighted_link_url() {
-            const LOCATION_FLOOR: u16 = 24;
-            const LINK_MIN: u16 = 12;
-            let max_len = status
-                .room_for_front(layout.status_bar.width)
-                .saturating_sub(LOCATION_FLOOR);
-            if max_len >= LINK_MIN {
-                let display = crate::util::truncate_to_width(&url, max_len as usize).into_owned();
-                let link_style = Style::default().fg(theme.link_fg).bg(theme.bg_base);
-                status.push_front("link_url", Line::from(Span::styled(display, link_style)));
-            }
-        }
-        // Top-right: this run's total cost.
+        // This run's total cost. The cache warning takes its place while it shows: the cache
+        // matters only for what it costs.
         let session_cost_ticks = self
             .session
             .tracker
@@ -1401,34 +1362,79 @@ impl AgentView {
                     .then(|| self.scrollback.session_total_cost_usd_ticks())
                     .flatten()
             });
-        if let Some(cost_display) =
-            crate::scrollback::wrappers::cost_ticks_to_display(session_cost_ticks)
-        {
-            let cost_style = Style::default().fg(theme.gray_dim).bg(theme.bg_base);
-            status.push(
-                "cost",
-                Line::from(Span::styled(format!("{cost_display} session"), cost_style)),
-            );
-        }
         if let Some(label) = self
             .session
             .tracker
             .cache_invalidated_label(std::time::Instant::now())
         {
             let style = Style::default().fg(theme.warning).bg(theme.bg_base);
-            status.push("cache_invalidated", Line::from(Span::styled(label, style)));
+            status.push("cost", Line::from(Span::styled(label, style)));
+        } else if let Some(cost_display) =
+            crate::scrollback::wrappers::cost_ticks_to_display(session_cost_ticks)
+        {
+            let cost_style = Style::default().fg(theme.gray_dim).bg(theme.bg_base);
+            status.push("cost", Line::from(Span::styled(cost_display, cost_style)));
+        }
+        // The dashboard button is always the last item.
+        let dashboard_available = in_dashboard_overlay
+            || (self.child_link().is_none()
+                && self
+                    .prompt
+                    .slash_controller
+                    .registry()
+                    .dashboard_dispatchable());
+        let dashboard_style = hover_or(self.hit_dashboard.hovered, bg.fg(theme.gray));
+        if let Some((cur, total)) = overlay_header.cycle_position() {
+            let position = format!(" {cur}/{total} ");
+            let middle = if dashboard_available && self.hit_dashboard.hovered {
+                let width = position.chars().count();
+                Span::styled(
+                    format!("{:^width$}", crate::glyphs::dashboard()),
+                    dashboard_style,
+                )
+            } else {
+                Span::styled(position, bg.fg(theme.gray))
+            };
+            status.push(
+                "switcher",
+                Line::from(vec![
+                    Span::styled(
+                        crate::glyphs::chevron_left(),
+                        hover_or(self.hit_overlay_prev.hovered, faint),
+                    ),
+                    middle,
+                    Span::styled(
+                        crate::glyphs::chevron(),
+                        hover_or(self.hit_overlay_next.hovered, faint),
+                    ),
+                ]),
+            );
+        } else if dashboard_available {
+            status.push(
+                "dashboard",
+                Line::from(Span::styled(crate::glyphs::dashboard(), dashboard_style)),
+            );
         }
         let areas = status.render(buf, layout.status_bar);
         self.hit_bg_status.rect = areas.get("bg_tasks").copied();
         self.hit_goal_status.rect = areas.get("goal").copied();
         self.hit_context.rect = areas.get("context").copied();
         self.hit_credits.rect = areas.get("credits").copied();
-        self.hit_plan_button.rect = areas.get("plan").copied();
         self.hit_badge.rect = areas.get("badge").copied();
         let dropdown_open = self.prompt.any_dropdown_open();
-        self.hit_dashboard
-            .set_unless_dropdown(areas.get("dashboard").copied(), dropdown_open);
         let switcher_rect = areas.get("switcher").copied();
+        // Inside the switcher, every cell between both chevrons opens the dashboard.
+        let dashboard_rect = areas.get("dashboard").copied().or_else(|| {
+            switcher_rect
+                .filter(|r| dashboard_available && r.width > 2)
+                .map(|r| Rect {
+                    x: r.x + 1,
+                    width: r.width - 2,
+                    ..r
+                })
+        });
+        self.hit_dashboard
+            .set_unless_dropdown(dashboard_rect, dropdown_open);
         self.hit_overlay_prev
             .set_unless_dropdown(switcher_rect.map(|r| Rect { width: 1, ..r }), dropdown_open);
         self.hit_overlay_next.set_unless_dropdown(

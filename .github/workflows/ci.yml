@@ -286,7 +286,7 @@ jobs:
       - name: Install zig (pinned 0.14.1)
         if: matrix.darwin
         run: |
-          curl -fsSL --retry 5 --retry-delay 10 --retry-all-errors -o "${{ runner.temp }}/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
+          curl -fsSL --retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/zig.tar.xz" https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz
           echo "24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c  ${{ runner.temp }}/zig.tar.xz" | sha256sum -c -
           mkdir -p "${{ runner.temp }}/zig"
           tar -xJf "${{ runner.temp }}/zig.tar.xz" -C "${{ runner.temp }}/zig" --strip-components=1

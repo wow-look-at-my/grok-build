@@ -622,8 +622,17 @@ pub(crate) fn resolve_model_catalog(
         }
     }
 
+    fill_default_efforts(&mut catalog);
     apply_favorites(cfg, &mut catalog);
     catalog
+}
+
+/// Last pass: every effort-capable entry carries a default effort, including
+/// one forced on above or listed by a provider with no menu.
+fn fill_default_efforts(catalog: &mut IndexMap<String, ModelEntry>) {
+    for entry in catalog.values_mut() {
+        entry.info.fill_default_reasoning_effort();
+    }
 }
 
 /// Force the effort gate on for every model
@@ -703,6 +712,7 @@ pub(crate) fn merge_additive_catalog(
         }
     }
 
+    fill_default_efforts(&mut additive);
     catalog.extend(additive);
     apply_favorites(cfg, &mut catalog);
     catalog
