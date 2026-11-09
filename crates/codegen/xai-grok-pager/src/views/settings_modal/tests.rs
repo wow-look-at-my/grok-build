@@ -817,6 +817,8 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "toolset.ask_user_question.timeout_enabled",
         // PAGER-owned plan_mode (Agent category).
         "plan_mode",
+        // SHELL-owned `[features]` row (Agent category, registered right after plan_mode).
+        "two_pass_compaction",
         // SHELL-owned coding_data_sharing (Privacy category).
         "coding_data_sharing",
         // SHELL-owned default_model (Models category).
@@ -825,8 +827,6 @@ fn rows_contain_categories_and_settings_through_pr_14() {
         "model_context_window",
         // SHELL-owned `[features]` row (Models category, registered right after the context limit row).
         "subagent_model_inheritance",
-        // SHELL-owned `[features]` row (Agent category, registered right after subagent_model_inheritance).
-        "two_pass_compaction",
     ];
     expected.extend(
         xai_grok_models::HARNESS_MODEL_SLOTS
