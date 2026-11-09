@@ -59,12 +59,18 @@ fn fetch_release(
     tool: &str,
     override_env: &str,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let (url, token) = release_source(url)?;
+    let client = request::blocking::Client::new();
     let mut last = String::new();
     for attempt in 0..FETCH_ATTEMPTS {
         if attempt > 0 {
             std::thread::sleep(FETCH_RETRY_DELAY);
         }
-        let resp = match request::blocking::get(url) {
+        let mut req = client.get(&url);
+        if let Some(token) = &token {
+            req = req.bearer_auth(token);
+        }
+        let resp = match req.send() {
             Ok(resp) => resp,
             Err(e) => {
                 last = format!(
@@ -83,6 +89,30 @@ fn fetch_release(
         }
     }
     Err(last.into())
+}
+
+/// With `GROK_RELEASE_MIRROR` set, a github.com release URL goes to the
+/// buildhost mirror, which needs `BUILDHOST_READ_TOKEN`. CI sets both.
+fn release_source(url: &str) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-env-changed=GROK_RELEASE_MIRROR");
+    let Some(mirror) = env::var("GROK_RELEASE_MIRROR")
+        .ok()
+        .filter(|m| !m.is_empty())
+    else {
+        return Ok((url.to_string(), None));
+    };
+    let Some(path) = url.strip_prefix("https://github.com/") else {
+        return Err(
+            format!("GROK_RELEASE_MIRROR is set, and {url} is not a github.com URL").into(),
+        );
+    };
+    let token = env::var("BUILDHOST_READ_TOKEN")
+        .ok()
+        .filter(|t| !t.is_empty())
+        .ok_or("GROK_RELEASE_MIRROR is set, and BUILDHOST_READ_TOKEN is empty")?;
+    let mirrored = format!("{}/github.com/{path}", mirror.trim_end_matches('/'));
+    println!("cargo:warning=downloading {mirrored} through the release mirror");
+    Ok((mirrored, Some(token)))
 }
 
 /// Download + embed fd as an optional vendored file-search binary, mirroring the ripgrep bundling

@@ -122,7 +122,8 @@ jobs:
         run: |
           mkdir -p "${{ runner.temp }}/nextest-bin"
           curl -fsSL --retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
-            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
+            -H "Authorization: Bearer $BUILDHOST_READ_TOKEN" \
+            "$GROK_RELEASE_MIRROR/github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz"
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
           echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
 
@@ -199,7 +200,8 @@ jobs:
         run: |
           mkdir -p "${{ runner.temp }}/nextest-bin"
           curl -fsSL --retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/nextest.tar.gz" \
-            https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz
+            -H "Authorization: Bearer $BUILDHOST_READ_TOKEN" \
+            "$GROK_RELEASE_MIRROR/github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.143/cargo-nextest-0.9.143-x86_64-unknown-linux-gnu.tar.gz"
           tar -xzf "${{ runner.temp }}/nextest.tar.gz" -C "${{ runner.temp }}/nextest-bin"
           echo "${{ runner.temp }}/nextest-bin" >> "$GITHUB_PATH"
 
@@ -310,7 +312,8 @@ jobs:
         if: matrix.darwin
         run: |
           curl -fsSL --retry 20 --retry-delay 30 --retry-max-time 600 --retry-all-errors -o "${{ runner.temp }}/sdk.tar.xz" \
-            https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
+            -H "Authorization: Bearer $BUILDHOST_READ_TOKEN" \
+            "$GROK_RELEASE_MIRROR/github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz"
           echo "6e146275d19f027faa2e8354da5e0267513abf013b8f16ad65a231653a2b1c5d  ${{ runner.temp }}/sdk.tar.xz" | sha256sum -c -
           mkdir -p "$SDKROOT"
           tar -xJf "${{ runner.temp }}/sdk.tar.xz" -C "$SDKROOT" --strip-components=1
