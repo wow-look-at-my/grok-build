@@ -100,21 +100,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         t = asset_triple
     );
 
+    // github.com's release CDN answers a transient 5xx or drops the connection under load.
+    const FETCH_ATTEMPTS: u32 = 6;
     let bytes: Vec<u8> = {
-        let resp = request::blocking::get(&url).map_err(|e| {
-            format!(
-                "Failed to download ripgrep: {}\nSet GROK_SHELL_BUNDLE_RG_PATH to a local rg for offline builds.",
-                e
-            )
-        })?;
-        if !resp.status().is_success() {
-            return Err(format!(
-                "HTTP {} downloading ripgrep. Set GROK_SHELL_BUNDLE_RG_PATH for offline builds.",
-                resp.status()
-            )
-            .into());
+        let mut last = String::new();
+        let mut fetched: Option<Vec<u8>> = None;
+        for attempt in 0..FETCH_ATTEMPTS {
+            if attempt > 0 {
+                std::thread::sleep(std::time::Duration::from_secs(2u64 << (attempt - 1)));
+            }
+            match request::blocking::get(&url) {
+                Ok(resp) if resp.status().is_success() => {
+                    fetched = Some(resp.bytes()?.to_vec());
+                    break;
+                }
+                Ok(resp) => {
+                    let status = resp.status();
+                    last = format!(
+                        "HTTP {status} downloading ripgrep. Set GROK_SHELL_BUNDLE_RG_PATH for offline builds."
+                    );
+                    if !status.is_server_error() && status.as_u16() != 429 {
+                        return Err(last.into());
+                    }
+                }
+                Err(e) => {
+                    last = format!(
+                        "Failed to download ripgrep: {e:?}\nSet GROK_SHELL_BUNDLE_RG_PATH to a local rg for offline builds."
+                    );
+                }
+            }
         }
-        resp.bytes()?.to_vec()
+        match fetched {
+            Some(bytes) => bytes,
+            None => return Err(last.into()),
+        }
     };
 
     let gz = flate2::read::GzDecoder::new(bytes.as_slice());

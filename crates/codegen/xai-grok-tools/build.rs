@@ -46,6 +46,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Attempts per release download.
+const FETCH_ATTEMPTS: u32 = 6;
+
+/// Any other 4xx is the tree's answer: it returns at once. The last failure is
+/// the one the caller reports.
+fn fetch_release(
+    url: &str,
+    tool: &str,
+    override_env: &str,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let mut last = String::new();
+    for attempt in 0..FETCH_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_secs(2u64 << (attempt - 1)));
+        }
+        let resp = match request::blocking::get(url) {
+            Ok(resp) => resp,
+            Err(e) => {
+                last = format!(
+                    "Failed to download {tool}: {e:?}\nSet {override_env} for offline builds."
+                );
+                continue;
+            }
+        };
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(resp.bytes()?.to_vec());
+        }
+        last = format!("HTTP {status} downloading {tool}. Set {override_env} for offline builds.");
+        if !status.is_server_error() && status.as_u16() != 429 {
+            break;
+        }
+    }
+    Err(last.into())
+}
+
 /// Download + embed fd as an optional vendored file-search binary, mirroring the ripgrep bundling
 /// (release-only or `GROK_TOOLS_BUNDLE_FD_PATH` override), plus pinned per-asset SHA-256
 /// verification of the downloaded tarball.
@@ -116,21 +152,7 @@ fn bundle_fd() -> Result<(), Box<dyn std::error::Error>> {
         "https://github.com/sharkdp/fd/releases/download/v{ver}/fd-v{ver}-{asset_triple}.tar.gz"
     );
 
-    let bytes: Vec<u8> = {
-        let resp = request::blocking::get(&url).map_err(|e| {
-            format!(
-                "Failed to download fd: {e}\nSet GROK_TOOLS_BUNDLE_FD_PATH to a local fd for offline builds."
-            )
-        })?;
-        if !resp.status().is_success() {
-            return Err(format!(
-                "HTTP {} downloading fd. Set GROK_TOOLS_BUNDLE_FD_PATH for offline builds.",
-                resp.status()
-            )
-            .into());
-        }
-        resp.bytes()?.to_vec()
-    };
+    let bytes: Vec<u8> = fetch_release(&url, "fd", "GROK_TOOLS_BUNDLE_FD_PATH")?;
 
     // Verify the tarball against the pinned per-asset hash before unpacking.
     let expected_sha = FD_TARBALL_SHA256
@@ -313,22 +335,7 @@ fn bundle_rg() -> Result<(), Box<dyn std::error::Error>> {
         t = asset_triple
     );
 
-    let bytes: Vec<u8> = {
-        let resp = request::blocking::get(&url).map_err(|e| {
-            format!(
-                "Failed to download ripgrep: {}\nSet GROK_TOOLS_BUNDLE_RG_PATH to a local rg for offline builds.",
-                e
-            )
-        })?;
-        if !resp.status().is_success() {
-            return Err(format!(
-                "HTTP {} downloading ripgrep. Set GROK_TOOLS_BUNDLE_RG_PATH for offline builds.",
-                resp.status()
-            )
-            .into());
-        }
-        resp.bytes()?.to_vec()
-    };
+    let bytes: Vec<u8> = fetch_release(&url, "ripgrep", "GROK_TOOLS_BUNDLE_RG_PATH")?;
 
     let gz = flate2::read::GzDecoder::new(bytes.as_slice());
     let mut ar = tar::Archive::new(gz);

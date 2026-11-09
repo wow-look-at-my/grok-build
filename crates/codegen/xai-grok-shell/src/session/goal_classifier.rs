@@ -113,7 +113,7 @@ pub(crate) fn skeptic0_model_changed(
 }
 
 /// Per-skeptic JSON verdict FILE NAME template (rooted under the per-goal scratch root like [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]).
-/// This file is the skeptic's only output. The harness renders the human report from it.
+/// scratch root like [`GOAL_CLASSIFIER_DETAILS_PATH_TEMPLATE`]).
 pub(crate) const GOAL_VERIFIER_VERDICT_PATH_TEMPLATE: &str =
     "goal-verdict-{verifier_id}-{attempt}-{skeptic_idx}.json";
 
@@ -166,7 +166,7 @@ pub(crate) const USER_CANCELLED_VERIFICATION_NOTE: &str = "The user cancelled th
 /// Subagent spawn abstraction. Production uses [`ChannelSpawner`]; tests use [`MockSpawner`].
 #[async_trait::async_trait]
 pub(crate) trait GoalClassifierSpawner: Send + Sync {
-    /// Spawn under `id` and return the final reply when the subagent finishes. The verdict is in the verdict file. The reply is only for the trace.
+    /// Spawn under `id` and return the final reply when the subagent
     /// `resume_from`, when `Some`, names a previously-completed subagent session whose transcript, tool state, and model the new child inherits.
     /// Used to resume skeptic 0 across attempts.
     async fn spawn_classifier(
@@ -1380,7 +1380,7 @@ async fn read_skeptic_verdict(
     )
 }
 
-/// Spawn one skeptic under `spawn_id`, wait for its run to end, and read the JSON verdict file.
+/// Spawn one skeptic under `spawn_id`, wait for its run to end, and read the JSON verdict file. Emits no Emits
 /// Emits no telemetry, so the orchestrator owns event emission for both the happy and failure paths uniformly.
 /// `resume_from` (skeptic 0 on attempt > 1) renders the resume prompt and resumes the prior child session.
 async fn run_one_skeptic(
