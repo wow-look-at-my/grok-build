@@ -232,6 +232,14 @@ api_key = "{PROVIDER_KEY}"
             "{label}: a delta must be far smaller than a full frame of the same history:\n{summary}"
         );
     }
+    for r in &wire {
+        eprintln!(
+            "{label}: {} {} bytes on the wire, base {}",
+            r.path,
+            r.wire_bytes,
+            r.zstd_base.as_deref().unwrap_or("none")
+        );
+    }
 }
 
 #[tokio::test]
