@@ -243,7 +243,10 @@ pub enum TurnActivity {
         description: Option<String>,
     },
     /// Auto-compaction in progress (mid-turn, agent-initiated).
-    AutoCompacting,
+    AutoCompacting {
+        /// The model of the compaction request. `None` until the shell names it.
+        model: Option<String>,
+    },
     /// A retry is in progress (transient error, empty response, etc.).
     Retrying {
         /// Current retry attempt number (1-indexed).
@@ -286,7 +289,7 @@ fn phase_key(activity: &TurnActivity) -> PhaseKey<'_> {
         TurnActivity::Thinking => PhaseKey::Thinking,
         TurnActivity::Responding => PhaseKey::Responding,
         TurnActivity::ToolRunning { title, .. } => PhaseKey::ToolRunning(title),
-        TurnActivity::AutoCompacting => PhaseKey::AutoCompacting,
+        TurnActivity::AutoCompacting { .. } => PhaseKey::AutoCompacting,
         TurnActivity::Retrying {
             attempt, reason, ..
         } => PhaseKey::Retrying {
@@ -322,7 +325,7 @@ impl TurnActivity {
             Self::Thinking => "thinking",
             Self::Responding => "responding",
             Self::ToolRunning { .. } => "tool_running",
-            Self::AutoCompacting => "compacting",
+            Self::AutoCompacting { .. } => "compacting",
             Self::Retrying { .. } => "retrying",
             Self::WritingToolCall(_) => "writing_tool_call",
             Self::Waiting(reason) => reason.as_telemetry_label(),
@@ -742,6 +745,12 @@ impl AcpUpdateTracker {
     /// Cleared automatically by `finish_turn()`.
     pub fn set_compaction_activity(&mut self, activity: Option<TurnActivity>) {
         self.compaction_activity = activity;
+    }
+    /// Name the model on a running auto-compaction. No effect when none runs.
+    pub fn set_compaction_model(&mut self, name: &str) {
+        if let Some(TurnActivity::AutoCompacting { model }) = &mut self.compaction_activity {
+            *model = Some(name.to_owned());
+        }
     }
     pub fn defer_compaction(
         &mut self,

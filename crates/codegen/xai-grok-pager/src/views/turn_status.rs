@@ -182,6 +182,8 @@ pub struct TurnStatusArgs<'a> {
     pub flat_background: bool,
     pub held_queue: usize,
     pub held_queue_top_sendable: bool,
+    /// The model of the running compaction request, once the shell names it.
+    pub compaction_model: Option<&'a str>,
 }
 
 /// Render the turn status line into the given area.
@@ -212,6 +214,7 @@ pub fn render_turn_status(
         flat_background,
         held_queue,
         held_queue_top_sendable,
+        compaction_model,
     } = args;
     // Resolve the mouse affordances: a keyboard-only host (`None`) suppresses both buttons and reports no hover
     let show_buttons = buttons.is_some();
@@ -309,8 +312,14 @@ pub fn render_turn_status(
                 | AgentState::CommandCancelling { .. }
         );
 
-    let (activity_style, label, is_tool) =
-        compute_activity(&theme, state, activity, is_bash_turn, goal_harness);
+    let (activity_style, label, is_tool) = compute_activity(
+        &theme,
+        state,
+        activity,
+        is_bash_turn,
+        goal_harness,
+        compaction_model,
+    );
 
     // Early return for idle (shouldn't happen if should_show is respected, but be safe).
     if matches!(state, AgentState::Idle) {
@@ -749,6 +758,7 @@ fn compute_activity(
     activity: &Option<TurnActivity>,
     is_bash_turn: bool,
     goal_harness: Option<GoalHarnessActivity<'_>>,
+    compaction_model: Option<&str>,
 ) -> (Style, String, bool) {
     match (state, activity) {
         (AgentState::TurnCancelling | AgentState::CommandCancelling { .. }, _) => (
@@ -789,9 +799,20 @@ fn compute_activity(
             };
             (style, String::new(), true)
         }
-        (AgentState::TurnRunning, Some(TurnActivity::AutoCompacting)) => (
+        (AgentState::TurnRunning, Some(TurnActivity::AutoCompacting { model })) => (
             Style::default().fg(theme.text_secondary),
-            "Compacting…".to_string(),
+            crate::scrollback::blocks::compacting_label(model.as_deref().or(compaction_model)),
+            false,
+        ),
+        (
+            AgentState::CommandRunning {
+                command: AgentCommand::Compact,
+                ..
+            },
+            _,
+        ) => (
+            Style::default().fg(theme.text_secondary),
+            crate::scrollback::blocks::compacting_label(compaction_model),
             false,
         ),
         (
@@ -985,6 +1006,7 @@ pub(crate) fn render_running_row(
         flat_background: false,
         held_queue: 0,
         held_queue_top_sendable: false,
+        compaction_model: None,
     };
     let area = Rect::new(0, 0, 100, 1);
     let mut buf = Buffer::empty(area);
@@ -1062,6 +1084,7 @@ mod tests {
                 flat_background: false,
                 held_queue: 0,
                 held_queue_top_sendable: false,
+                compaction_model: None,
             },
         );
         buf
@@ -1192,7 +1215,7 @@ mod tests {
         };
         let theme = Theme::current();
         let label = |activity: Option<TurnActivity>, g| {
-            compute_activity(&theme, &AgentState::TurnRunning, &activity, false, g).1
+            compute_activity(&theme, &AgentState::TurnRunning, &activity, false, g, None).1
         };
         assert_eq!(label(None, harness(GOAL_ROLE_VERIFIER)), "Verifying…");
         assert_eq!(label(None, None), "Waiting…");
@@ -1288,6 +1311,7 @@ mod tests {
                 &Some(TurnActivity::Waiting(reason.clone())),
                 false,
                 None,
+                None,
             );
             assert_eq!(label, expected, "reason {reason:?}");
             assert!(!is_tool, "waiting is not a tool activity");
@@ -1298,8 +1322,26 @@ mod tests {
     fn bash_turn_still_renders_running_not_waiting() {
         let theme = Theme::current();
         // A bash (non-inference) turn.
-        let (_, label, _) = compute_activity(&theme, &AgentState::TurnRunning, &None, true, None);
+        let (_, label, _) =
+            compute_activity(&theme, &AgentState::TurnRunning, &None, true, None, None);
         assert_eq!(label, "Running…");
+    }
+
+    #[test]
+    fn compaction_label_names_the_compaction_model() {
+        let theme = Theme::current();
+        let auto = Some(TurnActivity::AutoCompacting { model: None });
+        let manual = AgentState::CommandRunning {
+            command: AgentCommand::Compact,
+            started_at: Instant::now(),
+        };
+        for (state, activity) in [(&AgentState::TurnRunning, &auto), (&manual, &None)] {
+            let (_, named, _) =
+                compute_activity(&theme, state, activity, false, None, Some("dense-model"));
+            assert_eq!(named, "Compacting with dense-model…");
+            let (_, unnamed, _) = compute_activity(&theme, state, activity, false, None, None);
+            assert_eq!(unnamed, "Compacting…");
+        }
     }
 
     #[test]
@@ -1309,7 +1351,7 @@ mod tests {
             command: AgentCommand::SwitchModelCompact,
             started_at: Instant::now(),
         };
-        let (_, label, _) = compute_activity(&theme, &state, &None, false, None);
+        let (_, label, _) = compute_activity(&theme, &state, &None, false, None, None);
         assert_eq!(label, "Switching model…");
         assert!(should_show(&state, false, None, Watchers::default(), false));
     }
@@ -1392,6 +1434,7 @@ mod tests {
                 flat_background: false,
                 held_queue: 0,
                 held_queue_top_sendable: false,
+                compaction_model: None,
             },
         );
         assert!(
@@ -1505,6 +1548,7 @@ mod tests {
             flat_background: false,
             held_queue: 0,
             held_queue_top_sendable: false,
+            compaction_model: None,
         }
     }
 

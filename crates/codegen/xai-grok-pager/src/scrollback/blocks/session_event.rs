@@ -90,6 +90,8 @@ pub enum SessionEvent {
         /// Percentage of context window used (e.g., 85).
         percentage: u8,
         reason: String,
+        /// The model of the compaction request. `None` until the shell names it.
+        model: Option<String>,
     },
     /// Auto-compaction completed successfully.
     CompactionCompleted {
@@ -142,7 +144,10 @@ pub enum SessionEvent {
     /// Manual `/compact` command started. The invocation marker that pairs each `/compact` with its own outcome line.
     /// Without it, back-to-back failures render as adjacent identical lines that read as one duplicated flow.
     /// Local scrollback block only: like the manual outcome lines it is not persisted, so a resumed session replays neither.
-    CompactStarted,
+    CompactStarted {
+        /// The model of the compaction request. `None` until the shell names it.
+        model: Option<String>,
+    },
     /// Manual `/compact` command completed.
     CompactCompleted {
         /// Wall-clock elapsed time for the command.
@@ -437,11 +442,16 @@ impl SessionEvent {
             } => {
                 format!("Turn failed: {error}")
             }
-            SessionEvent::CompactionStarted { percentage, reason } => {
+            SessionEvent::CompactionStarted {
+                percentage,
+                reason,
+                model,
+            } => {
+                let compacting = compacting_label(model.as_deref());
                 if reason == MODEL_FAMILY_SWITCH_COMPACT_BANNER {
-                    MODEL_FAMILY_SWITCH_COMPACT_BANNER.to_string()
+                    format!("Switching model. {compacting}")
                 } else {
-                    format!("Context {percentage}% full. Compacting…")
+                    format!("Context {percentage}% full. {compacting}")
                 }
             }
             SessionEvent::CompactionCompleted {
@@ -514,7 +524,7 @@ impl SessionEvent {
                 xai_grok_shell::extensions::notification::DISK_FULL_USER_MESSAGE.to_string()
             }
             // No "Context N% full." prefix; that phrasing is the auto marker's
-            SessionEvent::CompactStarted => "Compacting conversation…".to_string(),
+            SessionEvent::CompactStarted { model } => compacting_label(model.as_deref()),
             SessionEvent::CompactCompleted { elapsed } => {
                 format!("Compaction completed in {}.", format_duration(*elapsed))
             }
@@ -640,6 +650,14 @@ impl SessionEvent {
                 | SessionEvent::TurnHalted { .. }
                 | SessionEvent::TurnFailed { .. }
         )
+    }
+}
+
+/// "Compacting with <model>…" once the shell names the model, "Compacting…" before that.
+pub(crate) fn compacting_label(model: Option<&str>) -> String {
+    match model.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(model) => format!("Compacting with {model}…"),
+        None => "Compacting…".to_string(),
     }
 }
 
@@ -1085,8 +1103,18 @@ mod tests {
         let event = SessionEvent::CompactionStarted {
             percentage: 9,
             reason: MODEL_FAMILY_SWITCH_COMPACT_BANNER.into(),
+            model: None,
         };
         assert_eq!(event.message(), MODEL_FAMILY_SWITCH_COMPACT_BANNER);
+        let event = SessionEvent::CompactionStarted {
+            percentage: 9,
+            reason: MODEL_FAMILY_SWITCH_COMPACT_BANNER.into(),
+            model: Some("dense-model".into()),
+        };
+        assert_eq!(
+            event.message(),
+            "Switching model. Compacting with dense-model…"
+        );
     }
 
     #[test]
@@ -1095,9 +1123,29 @@ mod tests {
             let event = SessionEvent::CompactionStarted {
                 percentage: 9,
                 reason: reason.into(),
+                model: None,
             };
             assert_eq!(event.message(), "Context 9% full. Compacting…");
         }
+    }
+
+    #[test]
+    fn compaction_started_names_the_compaction_model() {
+        let event = SessionEvent::CompactionStarted {
+            percentage: 9,
+            reason: "Context window 9% full".into(),
+            model: Some("dense-model".into()),
+        };
+        assert_eq!(
+            event.message(),
+            "Context 9% full. Compacting with dense-model…"
+        );
+        let manual = SessionEvent::CompactStarted {
+            model: Some("dense-model".into()),
+        };
+        assert_eq!(manual.message(), "Compacting with dense-model…");
+        let unnamed = SessionEvent::CompactStarted { model: None };
+        assert_eq!(unnamed.message(), "Compacting…");
     }
 
     #[test]
