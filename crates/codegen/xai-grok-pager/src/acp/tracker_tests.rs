@@ -2485,8 +2485,11 @@ fn activity_compaction_overrides_other_state() {
     let mut tracker = AcpUpdateTracker::new();
     tracker.handle_update(agent_chunk("text"), &meta(), &mut sb);
     assert_eq!(tracker.activity(), Some(TurnActivity::Responding));
-    tracker.set_compaction_activity(Some(TurnActivity::AutoCompacting));
-    assert_eq!(tracker.activity(), Some(TurnActivity::AutoCompacting));
+    tracker.set_compaction_activity(Some(TurnActivity::AutoCompacting { model: None }));
+    assert_eq!(
+        tracker.activity(),
+        Some(TurnActivity::AutoCompacting { model: None })
+    );
     tracker.finish_turn(&mut sb, None);
     assert_eq!(tracker.activity(), None);
 }

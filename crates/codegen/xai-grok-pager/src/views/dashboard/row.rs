@@ -1612,6 +1612,7 @@ mod tests {
             scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
+            compaction_model: None,
             current_prompt_id: None,
             created_via_new: false,
         };

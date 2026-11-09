@@ -2174,6 +2174,7 @@ impl AgentView {
                         flat_background: false,
                         held_queue,
                         held_queue_top_sendable,
+                        compaction_model: self.session.compaction_model.as_deref(),
                     },
                 );
                 self.hit_cancel_button

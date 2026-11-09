@@ -481,7 +481,7 @@ fn driver_mid_active_work(agent: &AgentView) -> bool {
         Some(
             TurnActivity::ToolRunning { .. }
             | TurnActivity::Thinking
-            | TurnActivity::AutoCompacting
+            | TurnActivity::AutoCompacting { .. }
             | TurnActivity::Retrying { .. }
             | TurnActivity::WritingToolCall(_),
         ) => true,

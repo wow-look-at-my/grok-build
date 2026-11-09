@@ -371,6 +371,7 @@ fn make_test_agent_session(app: &AppView, id: AgentId, sid: &str) -> AgentSessio
         scheduled_tasks: std::collections::HashMap::new(),
         in_flight_prompt: None,
         compact_held_prompt: None,
+        compaction_model: None,
         current_prompt_id: None,
         created_via_new: false,
     }
@@ -648,6 +649,7 @@ fn insert_placeholder_agent(app: &mut AppView, id: AgentId) {
             scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
+            compaction_model: None,
             current_prompt_id: None,
             created_via_new: false,
         },
@@ -812,6 +814,7 @@ fn two_agent_app_with_bg_task() -> AppView {
             scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
+            compaction_model: None,
             current_prompt_id: None,
             created_via_new: false,
         },
