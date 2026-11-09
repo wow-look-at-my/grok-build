@@ -1065,6 +1065,7 @@ pub(super) fn action_for_bool(key: SettingKey, new: bool) -> Option<Action> {
             Some(Action::SetAskUserQuestionTimeoutEnabled(new))
         }
         "subagent_model_inheritance" => Some(Action::SetSubagentModelInheritance(new)),
+        "two_pass_compaction" => Some(Action::SetTwoPassCompaction(new)),
         "show_thinking_blocks" => Some(Action::SetShowThinkingBlocks(new)),
         "thinking_summaries" => Some(Action::SetThinkingSummaries(new)),
         "group_tool_verbs" => Some(Action::SetGroupToolVerbs(new)),

@@ -100,7 +100,6 @@ pub struct CiRunSummary {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct CiOutput {
-    /// `passing`, `failing`, `in_progress`, or `none`.
     pub state: String,
     pub branch: String,
     /// Whether anything on this branch can still change on its own.
@@ -275,9 +274,8 @@ pub fn remote_repo(cwd: &std::path::Path) -> Option<String> {
     repo_from_remote_url(String::from_utf8_lossy(&output.stdout).trim())
 }
 
-/// `owner/name` out of the remote forms git accepts: `https://host/o/r`,
-/// `ssh://git@host/o/r`, `git@host:o/r`, each with an optional trailing `.git`
-/// or `/`. `None` when what is left does not end in usable segments.
+/// `owner/name` out of the remote forms git accepts. `None` when what is left
+/// does not end in usable segments.
 fn repo_from_remote_url(url: &str) -> Option<String> {
     let url = url.trim().trim_end_matches('/');
     let url = url.strip_suffix(".git").unwrap_or(url);

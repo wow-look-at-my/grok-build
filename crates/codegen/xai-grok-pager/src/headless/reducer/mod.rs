@@ -243,8 +243,8 @@ fn json_array_or_empty<T: serde::Serialize>(value: &T) -> Value {
     }
 }
 
-/// Canonical model-facing tool name from the `example.invalid/tool` `_meta` envelope, else the display title, else kind, else `"tool"`.
-/// The shell stamps the wire name (`bash`, `x_search`, `read_file`) under `example.invalid/tool.name`; the human title (`Execute ...`, `X search:`) is the fallback.
+/// Canonical model-facing tool name from the `example.invalid/tool` `_meta` envelope, else the display title, else kind, else `"tool"`. The shell stamps the wire
+/// name under `example.invalid/tool.name`; the human title (`Execute ...`, `X search:`) is the fallback.
 fn tool_name_from(meta: Option<&proto::Meta>, title: &str, kind: Option<&str>) -> String {
     if let Some(meta) = meta
         && let Some(name) = meta
@@ -276,8 +276,8 @@ fn is_backend_web_search(meta: Option<&proto::Meta>, raw_input: &Value) -> bool 
     backend && is_web_search
 }
 
-/// Canonical tool kind from the `example.invalid/tool` `_meta` envelope, else the ACP `ToolCall.kind`.
-/// Client tools register as `ToolKind::Other` on the early notification, so the real kind (`read`, `edit`, `execute`) arrives in `example.invalid/tool.kind`.
+/// Canonical tool kind from the `example.invalid/tool` `_meta` envelope, else the ACP `ToolCall.kind`. Client tools register as `ToolKind::Other` on the
+/// early notification, so the real kind arrives in `example.invalid/tool.kind`.
 fn tool_kind_from(meta: Option<&proto::Meta>, kind: proto::ToolKind) -> Option<String> {
     if let Some(meta) = meta
         && let Some(k) = meta

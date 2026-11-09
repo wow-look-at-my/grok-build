@@ -190,7 +190,7 @@ pub fn load_mcp_servers(cwd: &std::path::Path, compat: &CompatConfig) -> Vec<acp
     reload_mcp_servers_merged(&global_config, cwd, compat)
 }
 
-/// Load MCP servers from config.json only (global and project-scoped). Skips the `~/.claude.json`, `~/.cursor/mcp.json`, and `.mcp.json` sources.
+/// Load MCP servers from config.json only (global and project-scoped).
 /// Used by [`crate::session::managed_mcp::merge_managed_mcp_servers_sourced`]; it handles those sources separately with `ConfigSource` tracking.
 /// Using [`load_mcp_servers`] there would cause all entries to be tagged as `ConfigSource::ConfigToml`, hiding the true origin.
 pub(crate) fn load_mcp_servers_toml_only(cwd: &std::path::Path) -> Vec<acp::McpServer> {

@@ -23,7 +23,6 @@ use crate::config::StorageMode;
 
 use crate::remote::RemoteSync;
 
-use crate::sampling::Client as OaiCompatClient;
 use crate::sampling::ConversationItem;
 use crate::session::export::ExportedMetadata;
 use xai_grok_workspace::session::file_state::RewindPoint;
@@ -352,6 +351,8 @@ pub enum PersistenceMsg {
     /// Generated session title from background LLM task.
     /// Routed back through the persistence channel so the storage write stays sequential with other summary.json mutations.
     GeneratedTitle(String),
+    /// The session ledger that the first auto-title call bills to.
+    SideCallLedger(xai_chat_state::ChatStateHandle),
     /// Early-session title refresh (turns 3 and 6): overwrite an existing auto title with one regenerated from the whole conversation.
     /// Never overwrites a manual `/rename` (enforced atomically under the summary lock).
     RegenerateTitle(String),
@@ -2334,6 +2335,7 @@ impl SessionPersistence {
                         &self.info.cwd,
                     );
                 }
+                PersistenceMsg::SideCallLedger(ledger) => self.summary.set_ledger(ledger),
                 PersistenceMsg::GeneratedTitle(title) => {
                     // Auto-generated titles must never overwrite a title the user set via `/rename`
                     // `set_generated_title_if_absent` writes only when the session still has no title (checked atomically under the summary lock)
@@ -2867,7 +2869,8 @@ const WORKTREE_TOUCH_INTERVAL: std::time::Duration = std::time::Duration::from_s
 
 /// What the actor is handed once and holds for the life of the session.
 pub(crate) struct SessionDeps {
-    pub(crate) sampling_client: Option<OaiCompatClient>,
+    /// The title model's config. The title client is built with the session's sink when the title is due.
+    pub(crate) title_sampler_config: Option<xai_grok_sampler::SamplerConfig>,
     pub(crate) storage_mode: StorageMode,
     pub(crate) auth_manager: Option<Arc<xai_grok_login::AuthManager>>,
     pub(crate) relay_sync: Option<crate::relay::RelaySync>,
@@ -2886,7 +2889,7 @@ pub(crate) async fn new(
     deps: SessionDeps,
 ) -> io::Result<(PersistenceHandle, SessionIdentity)> {
     let SessionDeps {
-        sampling_client,
+        title_sampler_config,
         storage_mode,
         auth_manager,
         relay_sync,
@@ -2939,7 +2942,7 @@ pub(crate) async fn new(
             relay_sync,
             summary: crate::session::summary::SummaryGenerator::new(
                 crate::session::summary::SummaryConfig {
-                    sampling_client,
+                    sampler_config: title_sampler_config,
                     model: session_summary_model,
                     persistence_tx: summary_tx,
                 },
@@ -2975,7 +2978,7 @@ pub(crate) async fn new_with_explicit_dir(
     info: &Info,
     target_dir: PathBuf,
     model_id: acp::ModelId,
-    sampling_client: OaiCompatClient,
+    title_sampler_config: xai_grok_sampler::SamplerConfig,
     session_summary_model: String,
     open: ExplicitSessionOpen,
 ) -> io::Result<PersistenceHandle> {
@@ -3048,7 +3051,7 @@ pub(crate) async fn new_with_explicit_dir(
             relay_sync: None,
             summary: crate::session::summary::SummaryGenerator::new(
                 crate::session::summary::SummaryConfig {
-                    sampling_client: Some(sampling_client),
+                    sampler_config: Some(title_sampler_config),
                     model: session_summary_model,
                     persistence_tx: summary_tx,
                 },
@@ -3114,7 +3117,7 @@ pub(crate) async fn load_light(
     deps: SessionDeps,
 ) -> io::Result<(PersistedInfo, PersistenceHandle)> {
     let SessionDeps {
-        sampling_client,
+        title_sampler_config,
         storage_mode,
         auth_manager,
         relay_sync,
@@ -3176,7 +3179,7 @@ pub(crate) async fn load_light(
     xai_spawn::spawn(async move {
         let mut summary_gen = crate::session::summary::SummaryGenerator::new(
             crate::session::summary::SummaryConfig {
-                sampling_client,
+                sampler_config: title_sampler_config,
                 model: session_summary_model,
                 persistence_tx: summary_tx,
             },

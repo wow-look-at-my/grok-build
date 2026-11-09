@@ -989,10 +989,8 @@ pub(crate) fn parse_remote_model_value(
 }
 
 /// The per-token price a model listing states, or all zeros when it states
-/// none. Shapes are read. `{type: "tokens", unit, input, output, cache_read,
-/// cache_write}`, where `unit` is `per_token`, `per_thousand_tokens` or
-/// `per_million_tokens`. OpenRouter's `pricing` object, whose values are USD
-/// per token.
+/// none. Shapes are read. OpenRouter's `pricing` object, whose values are
+/// USD per token.
 pub(crate) fn parse_listing_pricing(
     obj: &serde_json::Map<String, serde_json::Value>,
 ) -> xai_grok_sampling_types::ModelPricing {

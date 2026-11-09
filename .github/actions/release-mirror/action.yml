@@ -1,0 +1,15 @@
+name: Release mirror
+description: Export the buildhost release mirror base and its read token, so GitHub release downloads come from the mirror
+runs:
+  using: composite
+  steps:
+    # The read token is the long-lived one secret-server vends. An OIDC token expires before build.rs runs.
+    - uses: wow-look-at-my/actions@secret-server#latest
+    - name: Point release downloads at the mirror
+      shell: bash
+      run: |
+        if [ -z "${BUILDHOST_READ_TOKEN:-}" ]; then
+          echo "::error::secret-server vended no BUILDHOST_READ_TOKEN to this workflow, so the release mirror cannot authenticate"
+          exit 1
+        fi
+        echo "GROK_RELEASE_MIRROR=https://mirror.pazer.build" >> "$GITHUB_ENV"

@@ -708,8 +708,6 @@ fn bash_command_is_routine(words: &[String]) -> bool {
     })
 }
 
-/// `git commit --amend`, `git reset --hard`, `git filter-branch` /
-/// `filter-repo`, and `git push --force` are never auto-mode routine.
 fn git_is_history_rewrite(inner: &[String]) -> bool {
     let verb = inner
         .iter()

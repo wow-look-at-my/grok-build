@@ -68,6 +68,7 @@ async fn tool_bridge_routes_writes_through_injected_fs() {
         api_key_provider: None,
         auth_provider: None,
         attribution_callback: None,
+        usage_sink: None,
         system_reminder_tag: xai_grok_tools::reminders::DEFAULT_REMINDER_TAG,
     };
     let bridge = crate::tools::bridge::ToolBridge::finalize_builder(builder, config, ctx)

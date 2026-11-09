@@ -610,9 +610,9 @@ fn extract_retry_after(headers: &xai_grok_net::header::HeaderMap) -> Option<u64>
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<u64>().ok());
 
-    // A token bucket answers a breach with the WHOLE window ("Retry-After:
-    // 60" on a per-minute limit), while its own reset header says when this
-    // caller's tokens come back. Take whichever is sooner.
+    // A token bucket answers a breach with the WHOLE window
+    // ("Retry-After: 60" on a per-minute limit), while its own reset header
+    // says when this caller's tokens come back. Take whichever is sooner.
     let bucket_reset = headers
         .iter()
         .filter(|(name, _)| {
@@ -630,10 +630,10 @@ fn extract_retry_after(headers: &xai_grok_net::header::HeaderMap) -> Option<u64>
 }
 
 /// Seconds from a rate-limit reset header, which is written as a bare number
-/// or with a unit (`1.5`, `1.5s`, `30s`). A value with no `u64` second count
-/// is `None`: the same unusable answer the parser already gives for a
-/// non-finite or negative one. The caller uses its own backoff rather than a
-/// wait this header did not state.
+/// or with a unit. A value with no `u64` second count is `None`: the same
+/// unusable answer the parser already gives for a non-finite or negative
+/// one. The caller uses its own backoff rather than a wait this header did
+/// not state.
 fn parse_reset_seconds(raw: &str) -> Option<u64> {
     let raw = raw.trim();
     let digits = raw.strip_suffix('s').unwrap_or(raw).trim();
@@ -786,6 +786,8 @@ pub struct SamplingClient {
     /// The shell wires this to emit a structured event at every UNAUTHORIZED arm so 401s can be bucketed by stale-snapshot vs. live-token-rejected.
     /// `None` for sampler-only callers and tests.
     attribution_callback: Option<crate::attribution::SharedAttributionCallback>,
+    /// Receives the usage of every request this client sends.
+    usage_sink: Option<crate::usage_sink::SharedUsageSink>,
     /// Per-request bearer override. See `SamplerConfig::bearer_resolver`.
     bearer_resolver: Option<crate::config::SharedBearerResolver>,
     /// Per-request header injection (OTel traceparent).
@@ -805,6 +807,7 @@ impl std::fmt::Debug for SamplingClient {
                 &self.attribution_callback.is_some(),
             )
             .field("has_bearer_resolver", &self.bearer_resolver.is_some())
+            .field("has_usage_sink", &self.usage_sink.is_some())
             .finish()
     }
 }
@@ -1182,6 +1185,7 @@ impl SamplingClient {
             extra_body: config.extra_body,
             defaults,
             attribution_callback: config.attribution_callback,
+            usage_sink: config.usage_sink,
             bearer_resolver: config.bearer_resolver,
             header_injector: config.header_injector,
             endpoint,
@@ -1191,6 +1195,20 @@ impl SamplingClient {
 
     pub fn api_backend(&self) -> ApiBackend {
         self.defaults.api_backend.clone()
+    }
+
+    /// Whether this client reports its usage to a sink.
+    pub fn has_usage_sink(&self) -> bool {
+        self.usage_sink.is_some()
+    }
+
+    /// The meter for one request to `model`, or the client's model when `model` is empty.
+    fn meter(&self, model: Option<&str>) -> crate::usage_sink::CallMeter {
+        let model = model
+            .filter(|m| !m.is_empty())
+            .unwrap_or(&self.defaults.model)
+            .to_owned();
+        crate::usage_sink::CallMeter::new(self.usage_sink.clone(), model)
     }
 
     /// Give the bearer resolver its pre-send hook before [`Self::post`] reads it.
@@ -1454,6 +1472,7 @@ impl SamplingClient {
     ) -> Result<ChatCompletionResponse> {
         let payload = self.apply_defaults(request)?;
         let _slot = crate::request_slots::acquire_unless_held().await;
+        let mut meter = self.meter(payload.model.as_deref());
         let x_grok_conv_id = &payload.x_grok_conv_id.clone().unwrap_or_default();
         let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
         let model_id = payload.model.clone().unwrap_or_default();
@@ -1499,7 +1518,12 @@ impl SamplingClient {
             .record("status_code", status.as_u16() as i64);
         request_region.span().record("success", status.is_success());
 
-        self.handle_response(response, sent_bearer.as_deref()).await
+        let completion = self
+            .handle_response(response, sent_bearer.as_deref())
+            .await?;
+        meter.observe_chat_response(&completion);
+        meter.finish();
+        Ok(completion)
     }
 
     /// Serialize `payload` onto `builder` the way `RequestBuilder::json` does
@@ -1658,6 +1682,7 @@ impl SamplingClient {
         Option<ResponseModelMetadata>,
     )> {
         let slot = crate::request_slots::acquire_unless_held().await;
+        let meter = self.meter(request.model.as_deref());
         let region = crate::span_timing::stream_span!(
             "http.chat_completion_stream",
             endpoint = %self.endpoint("chat/completions"),
@@ -1672,6 +1697,8 @@ impl SamplingClient {
                 .instrument(span)
                 .await?
         };
+        let chunks =
+            crate::usage_sink::meter_stream(chunks, meter, crate::usage_sink::observe_chat_chunk);
         Ok((hold_slot(chunks, slot), metadata))
     }
 
@@ -1916,6 +1943,7 @@ impl SamplingClient {
     ) -> Result<rs::Response> {
         self.apply_response_defaults(&mut request)?;
         let _slot = crate::request_slots::acquire_unless_held().await;
+        let mut meter = self.meter(request.inner.model.as_deref());
 
         let x_grok_conv_id = request.x_grok_conv_id.as_deref().unwrap_or_default();
         let x_grok_req_id = request.x_grok_req_id.as_deref().unwrap_or_default();
@@ -2019,6 +2047,8 @@ impl SamplingClient {
             );
             SamplingError::Serialization(e)
         })?;
+        meter.observe_responses_response(&response_obj);
+        meter.finish();
         Ok(response_obj)
     }
 
@@ -2035,6 +2065,7 @@ impl SamplingClient {
         Option<crate::doom_loop::DoomLoopSignalCollector>,
     )> {
         let slot = crate::request_slots::acquire_unless_held().await;
+        let meter = self.meter(request.inner.model.as_deref());
         let region = crate::span_timing::stream_span!(
             "http.create_response_stream",
             endpoint = %self.endpoint("responses"),
@@ -2049,6 +2080,11 @@ impl SamplingClient {
                 .instrument(span)
                 .await?
         };
+        let events = crate::usage_sink::meter_stream(
+            events,
+            meter,
+            crate::usage_sink::observe_responses_event,
+        );
         Ok((hold_slot(events, slot), metadata, doom_loop))
     }
 
@@ -2293,6 +2329,7 @@ impl SamplingClient {
     ) -> Result<messages::MessagesResponse> {
         self.apply_message_defaults(&mut request)?;
         let _slot = crate::request_slots::acquire_unless_held().await;
+        let mut meter = self.meter(Some(&request.inner.model));
 
         let x_grok_conv_id = request.x_grok_conv_id.as_deref().unwrap_or_default();
         let x_grok_req_id = request.x_grok_req_id.as_deref().unwrap_or_default();
@@ -2394,6 +2431,8 @@ impl SamplingClient {
                 );
                 SamplingError::Serialization(e)
             })?;
+        meter.observe_messages_response(&response_obj);
+        meter.finish();
         Ok(response_obj)
     }
 
@@ -2406,6 +2445,7 @@ impl SamplingClient {
         Option<ResponseModelMetadata>,
     )> {
         let slot = crate::request_slots::acquire_unless_held().await;
+        let meter = self.meter(Some(&request.inner.model));
         let region = crate::span_timing::stream_span!(
             "http.create_message_stream",
             endpoint = %self.endpoint("messages"),
@@ -2420,6 +2460,11 @@ impl SamplingClient {
                 .instrument(span)
                 .await?
         };
+        let events = crate::usage_sink::meter_stream(
+            events,
+            meter,
+            crate::usage_sink::observe_messages_event,
+        );
         Ok((hold_slot(events, slot), metadata))
     }
 
@@ -2831,9 +2876,9 @@ impl SamplingClient {
         let model_id = request.model.clone().unwrap_or_default();
         let chat_request = build_ollama_chat_request(&request);
         let slot = crate::request_slots::acquire_unless_held().await;
+        let meter = self.meter(Some(&model_id));
 
         let mut body = serde_json::to_value(&chat_request).map_err(SamplingError::Serialization)?;
-        // `keep_alive`, `truncate` and `options.num_ctx` reach the wire from here and nowhere else: they are per-deployment settings with no cross-provider meaning.
         xai_grok_sampling_types::merge_extra_body(&mut body, &self.extra_body);
 
         let endpoint = self.endpoint("api/chat");
@@ -2896,6 +2941,8 @@ impl SamplingClient {
 
         let model_metadata = extract_model_metadata(response.headers());
         let chunks = ndjson_chunk_stream(response.bytes_stream()).boxed();
+        let chunks =
+            crate::usage_sink::meter_stream(chunks, meter, crate::usage_sink::observe_ollama_chunk);
         Ok((hold_slot(chunks, slot), model_metadata))
     }
 
@@ -2938,7 +2985,7 @@ impl SamplingClient {
         &self,
         request: ConversationRequest,
     ) -> Result<ConversationResponse> {
-        self.conversation_collect_with_idle_timeout(request, std::time::Duration::from_secs(300))
+        self.conversation_collect_with_idle_timeout(request, DEFAULT_COLLECT_IDLE_TIMEOUT)
             .await
     }
 
@@ -2953,6 +3000,20 @@ impl SamplingClient {
             .model
             .clone()
             .unwrap_or_else(|| self.defaults.model.clone());
+        let length_policy = request.length_policy;
+        let response = self
+            .collect_switching_backends(request, idle_timeout, &model)
+            .await?;
+        apply_length_policy(length_policy, response)
+    }
+
+    /// Collect one response before the length policy. A model the provider refuses on this backend goes out on the others.
+    async fn collect_switching_backends(
+        &self,
+        request: ConversationRequest,
+        idle_timeout: std::time::Duration,
+        model: &str,
+    ) -> Result<ConversationResponse> {
         let mut probe = crate::backend_detect::BackendProbe::default();
         let mut client = self.clone();
         loop {
@@ -2964,7 +3025,7 @@ impl SamplingClient {
                     if probe.switched() {
                         crate::backend_detect::remember(
                             &self.base_url,
-                            &model,
+                            model,
                             client.api_backend(),
                         );
                     }
@@ -3008,7 +3069,6 @@ impl SamplingClient {
         idle_timeout: std::time::Duration,
     ) -> Result<ConversationResponse> {
         let request_id = crate::types::RequestId::random();
-        let length_policy = request.length_policy;
         let result = match self.api_backend() {
             ApiBackend::ChatCompletions => {
                 let (raw, meta) = self.conversation_stream(request).await?;
@@ -3033,12 +3093,14 @@ impl SamplingClient {
                 crate::stream::collect_response(events).await
             }
         };
-        let response = result
+        result
             .map(|(response, _metrics)| response)
-            .map_err(stream_collect_error)?;
-        apply_length_policy(length_policy, response)
+            .map_err(stream_collect_error)
     }
 }
+
+/// The idle timeout [`SamplingClient::conversation_collect`] uses.
+pub const DEFAULT_COLLECT_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// Keep `slot` until the stream is dropped: the request is in flight for as
 /// long as its body is read.

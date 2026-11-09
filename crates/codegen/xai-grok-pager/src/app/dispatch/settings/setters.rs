@@ -3,8 +3,9 @@
 use super::ui::{refresh_open_settings_modals, save_success_toast};
 use crate::app::actions::Effect;
 use crate::app::app_view::{ActiveView, AppView};
-use crate::settings::PendingWrite;
+use crate::settings::{FeatureOverrideState, PendingWrite};
 use agent_client_protocol as acp;
+use xai_grok_shell::agent::config::Feature;
 
 /// Set multiline input mode: swap Enter and Shift+Enter behavior.
 /// PAGER-OWNED: ephemeral, no `Effect::PersistSetting`.
@@ -313,11 +314,28 @@ pub(in crate::app::dispatch) fn set_ask_user_question_timeout_enabled(
 }
 
 const SUBAGENT_MODEL_INHERITANCE_LABEL: &str = "Subagent model inheritance";
+const TWO_PASS_COMPACTION_LABEL: &str = "Two-pass compaction";
+
+/// The settings-row state of a `[features]` flag that has a row.
+fn feature_state_mut(app: &mut AppView, feature: Feature) -> Option<&mut FeatureOverrideState> {
+    [
+        &mut app.subagent_model_inheritance,
+        &mut app.two_pass_compaction,
+    ]
+    .into_iter()
+    .find(|state| state.feature == feature)
+}
 
 /// Mirror the saved `[features]` key (`None` means deleted) optimistically and return the write to issue.
 /// One write is on disk at a time: while one is pending the new intent only waits in `queued`, and the completion issues it.
-fn set_subagent_model_inheritance_inner(app: &mut AppView, saved: Option<bool>) -> Vec<Effect> {
-    let state = &mut app.subagent_model_inheritance;
+fn set_feature_override_inner(
+    app: &mut AppView,
+    feature: Feature,
+    saved: Option<bool>,
+) -> Vec<Effect> {
+    let Some(state) = feature_state_mut(app, feature) else {
+        return vec![];
+    };
     let effects = match &mut state.writes {
         Some(write) => {
             write.queued = Some(saved);
@@ -340,11 +358,14 @@ fn set_subagent_model_inheritance_inner(app: &mut AppView, saved: Option<bool>) 
 
 /// The pending write finished: `persisted` is what it left on disk, `None` for a failed write.
 /// A queued intent that differs from the disk is issued next; otherwise the record closes and the mirror settles on the disk.
-pub(super) fn settle_subagent_model_inheritance_write(
+pub(super) fn settle_feature_override_write(
     app: &mut AppView,
+    feature: Feature,
     persisted: Option<Option<bool>>,
 ) -> Vec<Effect> {
-    let state = &mut app.subagent_model_inheritance;
+    let Some(state) = feature_state_mut(app, feature) else {
+        return vec![];
+    };
     let Some(write) = &mut state.writes else {
         return vec![];
     };
@@ -364,76 +385,116 @@ pub(super) fn settle_subagent_model_inheritance_write(
     }
 }
 
-/// A pin, the environment, or a config layer above the user file decides the key, so neither a toggle nor a reset can change what applies.
-fn refuse_fixed_subagent_model_inheritance(app: &mut AppView) -> bool {
-    let Some(by) = app.subagent_model_inheritance.forced_by() else {
+/// A pin, the environment, or a config layer above the user file decides the key. Neither a toggle nor a reset can change what applies.
+fn refuse_fixed_feature_override(app: &mut AppView, feature: Feature, label: &str) -> bool {
+    let Some(by) = feature_state_mut(app, feature).and_then(|state| state.forced_by()) else {
         return false;
     };
-    app.show_toast(&format!(
-        "\u{2717} {SUBAGENT_MODEL_INHERITANCE_LABEL} is fixed by {by}"
-    ));
+    app.show_toast(&format!("\u{2717} {label} is fixed by {by}"));
     true
 }
 
-/// SHELL-owned setter for `[features].subagent_model_inheritance`; persists via `Effect::PersistFeatureOverride`.
+/// Shared body of the `[features]` row setters; persists via `Effect::PersistFeatureOverride`.
 /// An explicit `false` is a real override of a remote `true`, so both values are written. Applies to new agents (restart-required).
-pub(in crate::app::dispatch) fn set_subagent_model_inheritance(
+fn set_feature_override(
     app: &mut AppView,
+    feature: Feature,
+    key: &'static str,
+    label: &str,
     new: bool,
 ) -> Vec<Effect> {
-    if refuse_fixed_subagent_model_inheritance(app)
-        || app.subagent_model_inheritance.config.user == Some(new)
+    if refuse_fixed_feature_override(app, feature, label)
+        || feature_state_mut(app, feature).is_none_or(|state| state.config.user == Some(new))
     {
         return vec![];
     }
-    let effects = set_subagent_model_inheritance_inner(app, Some(new));
+    let effects = set_feature_override_inner(app, feature, Some(new));
     refresh_open_settings_modals(app);
-    tracing::info!(
-        target: "settings",
-        key = "subagent_model_inheritance",
-        value = new,
-        "setting changed",
-    );
+    tracing::info!(target: "settings", key, value = new, "setting changed");
     app.show_toast(&format!(
         "{} (restart to apply)",
-        save_success_toast(SUBAGENT_MODEL_INHERITANCE_LABEL, new),
+        save_success_toast(label, new),
     ));
     effects
 }
 
-/// Outer dispatcher for `Action::ClearSubagentModelInheritance`: deletes the saved key rather than writing the compiled default.
-/// A saved `false` still counts as an override to remove, so the reset path bypasses the "already at default" value check for this key.
-pub(in crate::app::dispatch) fn clear_subagent_model_inheritance(app: &mut AppView) -> Vec<Effect> {
-    if refuse_fixed_subagent_model_inheritance(app) {
+/// Shared body of the `[features]` row resets: deletes the saved key rather than writing the compiled default.
+/// A saved `false` still counts as an override to remove, so the reset path bypasses the "already at default" value check for these keys.
+fn clear_feature_override(
+    app: &mut AppView,
+    feature: Feature,
+    key: &'static str,
+    label: &str,
+) -> Vec<Effect> {
+    if refuse_fixed_feature_override(app, feature, label) {
         return vec![];
     }
-    let state = app.subagent_model_inheritance;
+    let Some(state) = feature_state_mut(app, feature).map(|state| *state) else {
+        return vec![];
+    };
     if state.config.user.is_none() {
         // A managed layer shows through here; naming it explains why the row is not at the default
         let toast = match state.config.below_user {
-            Some(layer) => format!(
-                "{SUBAGENT_MODEL_INHERITANCE_LABEL}: nothing to reset; {} sets it",
-                layer.layer.label()
-            ),
-            None => format!("{SUBAGENT_MODEL_INHERITANCE_LABEL}: nothing to reset"),
+            Some(layer) => format!("{label}: nothing to reset; {} sets it", layer.layer.label()),
+            None => format!("{label}: nothing to reset"),
         };
         app.show_toast(&toast);
         return vec![];
     }
-    let effects = set_subagent_model_inheritance_inner(app, None);
+    let effects = set_feature_override_inner(app, feature, None);
     refresh_open_settings_modals(app);
-    tracing::info!(
-        target: "settings",
-        key = "subagent_model_inheritance",
-        value = "<cleared>",
-        "setting changed",
-    );
-    app.show_toast(&format!(
-        "\u{2713} {SUBAGENT_MODEL_INHERITANCE_LABEL}: reset (restart to apply)"
-    ));
+    tracing::info!(target: "settings", key, value = "<cleared>", "setting changed");
+    app.show_toast(&format!("\u{2713} {label}: reset (restart to apply)"));
     effects
 }
 
+/// SHELL-owned setter for `[features].subagent_model_inheritance`.
+pub(in crate::app::dispatch) fn set_subagent_model_inheritance(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    set_feature_override(
+        app,
+        Feature::SubagentModelInheritance,
+        "subagent_model_inheritance",
+        SUBAGENT_MODEL_INHERITANCE_LABEL,
+        new,
+    )
+}
+
+/// Outer dispatcher for `Action::ClearSubagentModelInheritance`.
+pub(in crate::app::dispatch) fn clear_subagent_model_inheritance(app: &mut AppView) -> Vec<Effect> {
+    clear_feature_override(
+        app,
+        Feature::SubagentModelInheritance,
+        "subagent_model_inheritance",
+        SUBAGENT_MODEL_INHERITANCE_LABEL,
+    )
+}
+
+/// SHELL-owned setter for `[features].two_pass_compaction`.
+pub(in crate::app::dispatch) fn set_two_pass_compaction(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    set_feature_override(
+        app,
+        Feature::TwoPassCompaction,
+        "two_pass_compaction",
+        TWO_PASS_COMPACTION_LABEL,
+        new,
+    )
+}
+
+/// Outer dispatcher for `Action::ClearTwoPassCompaction`.
+pub(in crate::app::dispatch) fn clear_two_pass_compaction(app: &mut AppView) -> Vec<Effect> {
+    clear_feature_override(
+        app,
+        Feature::TwoPassCompaction,
+        "two_pass_compaction",
+        TWO_PASS_COMPACTION_LABEL,
+    )
+}
 pub(super) fn set_show_thinking_blocks_inner(app: &mut AppView, new: bool) {
     crate::appearance::cache::set_show_thinking_blocks(new);
     // Thinking visibility reshapes verb-group runs (shown thoughts claim into folds) AND dense N-more runs (hidden thoughts stop counting toward truncation)
@@ -1882,9 +1943,6 @@ pub(in crate::app::dispatch) fn clear_default_model(app: &mut AppView) -> Vec<Ef
     }]
 }
 
-// The `web_search_model`, `session_summary_model`, and
-// `default_reasoning_effort` setters
-
 /// State-only mutation for one harness model slot. An empty `model_id`
 /// removes the entry, which is what the modal reads as "(no override)".
 pub(super) fn set_harness_model_inner(app: &mut AppView, slot_id: &str, model_id: String) {
@@ -2139,9 +2197,6 @@ pub(in crate::app::dispatch) fn set_max_thoughts_width(app: &mut AppView, new: i
         rollback_value: crate::settings::SettingValue::Int(prev),
     }]
 }
-
-// min_output_tokens_per_sec, output_rate_sustained_secs,
-// output_rate_window_secs, output_rate_max_retries, ttft_timeout_secs.
 
 fn clamp_min_output_tokens_per_sec(value: i64) -> i64 {
     value.clamp(

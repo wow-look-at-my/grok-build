@@ -1117,7 +1117,15 @@ pub(super) fn handle_session_notification_with_origin(
         XaiSessionUpdate::LastTurnSummary {
             summary,
             prompt_id: _,
+            session_cost_usd_ticks,
         } => {
+            // The summary is a side call that ends after the turn's own total went out.
+            if !meta.is_replay {
+                agent
+                    .session
+                    .tracker
+                    .set_reported_session_cost(session_cost_usd_ticks);
+            }
             agent.set_last_turn_summary(Some(summary));
             true
         }
@@ -1503,13 +1511,20 @@ pub(super) fn handle_session_notification_with_origin(
         XaiSessionUpdate::ThinkingSummary {
             stream_start_ms,
             summary,
+            session_cost_usd_ticks,
         } => {
+            // A REPLAYED total belongs to the run that wrote it.
+            let total_changed = !meta.is_replay
+                && agent
+                    .session
+                    .tracker
+                    .set_reported_session_cost(session_cost_usd_ticks);
             // Written by a side call that starts when its model call ends.
             agent.session.tracker.set_thinking_summary(
                 &mut agent.scrollback,
                 stream_start_ms,
                 &summary,
-            )
+            ) || total_changed
         }
         XaiSessionUpdate::ThinkingSummaryStatus {
             stream_start_ms,
@@ -1706,6 +1721,8 @@ pub(super) fn handle_child_session_notification(
         XaiSessionUpdate::ThinkingSummary {
             stream_start_ms,
             summary,
+            // The child's own total, not the session's.
+            session_cost_usd_ticks: _,
         } => {
             let Some(child_view) = agent.subagent_views.get_mut(child_sid) else {
                 return false;
@@ -2018,9 +2035,16 @@ pub(super) fn apply_session_event(
             elapsed_ms,
             breakdown,
             report_path,
+            session_cost_usd_ticks,
             ..
         } => {
             tracing::info!("Auto-compact completed: {tokens_after} tokens after");
+            // A REPLAYED total belongs to the run that wrote it.
+            if !session.loading_replay {
+                session
+                    .tracker
+                    .set_reported_session_cost(*session_cost_usd_ticks);
+            }
             session.set_compaction_activity(None);
             session.compact_held_prompt = None;
             let detail = crate::scrollback::blocks::CompactionDetail {

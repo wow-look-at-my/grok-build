@@ -281,7 +281,7 @@ The other `init` fields carry real data:
 
 - `apiKeySource` is `user` for API-key auth and `oauth` otherwise. Grok does not distinguish the schema's `project`, `org`, and `temporary` sources.
 - `permissionMode` is the effective headless mode mapped to the Messages enum: the `--permission-mode` value, or `bypassPermissions` under `--yolo`, else `default`. Grok-only modes such as `auto` collapse to `default`.
-- `mcp_servers[].status` is one `example.invalid/mcp/list` snapshot, emitted only for `streaming-messages-json`: `connected`, `failed`, `needs-auth`, `pending`, or `disabled`. Servers still handshaking are `pending`. `disabled` is only stamped after the session reports `sessionMcpResolved`. An unresolved list row is `pending` even when `enabled` is still false. The snapshot does not wait for the Blocking startup grace. That grace still applies to the prompt's toolset. Other output formats omit the array and do not call `example.invalid/mcp/list`.
+- `mcp_servers[].status` is one `example.invalid/mcp/list` snapshot, emitted only. Servers still handshaking are `pending`. `disabled` is only stamped after the session reports `sessionMcpResolved`. An unresolved list row is `pending` even when `enabled` is still false. The snapshot does not wait for the Blocking startup grace. That grace still applies to the prompt's toolset. Other output formats omit the array and do not call `example.invalid/mcp/list`.
 
 Grok omits the schema's pure-placeholder `init` fields it has no data for, rather than emitting dummy values: `claude_code_version`, `output_style`, and `plugins`.
 
@@ -637,7 +637,7 @@ Grok never checks for or installs updates. A headless run makes no update reques
 
 ## Additional Headless Flags
 
-These flags supplement the [Command-Line Options](#command-line-options) table above. Flags already listed there (`--prompt-json`, `--prompt-file`, `--verbatim`, `--sandbox`) are not repeated here.
+These flags supplement the [Command-Line Options](#command-line-options) table above. Flags already listed there are not repeated here.
 
 | Flag                          | Description                                       |
 | ----------------------------- | ------------------------------------------------- |

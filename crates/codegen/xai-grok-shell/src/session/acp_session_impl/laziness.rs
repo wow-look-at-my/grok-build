@@ -271,7 +271,7 @@ impl SessionActor {
         }
     }
 
-    /// The sampler call goes through `prepare_chat_completion().conversation_collect()`, which never publishes on the per-session sampler channel.
+    /// The sampler call goes through `conversation_collect`, which never publishes on the per-session sampler channel.
     /// A stalled verdict only queues a `<system-reminder>` via `push_system_reminder`; nothing enters `pending_inputs`, so no synthetic turn fires.
     /// Debug mode adds logging; it does not bypass the production decision logic.
     pub(crate) async fn maybe_fire_laziness_check(self: Arc<Self>) {

@@ -454,6 +454,10 @@ pub enum Action {
     /// Delete the saved `[features].subagent_model_inheritance` key so the remote setting or the default applies again.
     /// The reset path uses this instead of writing the compiled default.
     ClearSubagentModelInheritance,
+    /// Save `[features].two_pass_compaction` as an explicit override. SHELL-owned; agents latch it when built, so it applies on restart.
+    SetTwoPassCompaction(bool),
+    /// Delete the saved `[features].two_pass_compaction` key so the remote setting or the default applies again.
+    ClearTwoPassCompaction,
     /// SHELL-owned `keep_text_selection` (`flash` | `hold`); cache and persist.
     SetKeepTextSelection(crate::appearance::TextSelection),
     /// Set the mouse-wheel scroll speed multiplier (1-100).
@@ -731,8 +735,8 @@ pub enum Action {
         /// The user typed `/TODO`, so the items go to the top of the list.
         urgent: bool,
     },
-    /// Spawn a background subagent on a model family (`@sonnet`, `@haiku`, `@opus`).
-    /// Bypasses the queue, so it works while the agent is busy.
+    /// Spawn a background subagent on a model family. Bypasses the queue, so it
+    /// works while the agent is busy.
     SpawnModelAgent {
         family: String,
         effort: Option<String>,

@@ -1,4 +1,4 @@
-//! A prompt that starts with `@sonnet`, `@haiku` or `@opus` spawns a model-family subagent at once.
+//! A prompt that starts spawns a model-family subagent at once.
 
 use super::*;
 use pretty_assertions::assert_eq;

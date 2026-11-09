@@ -102,6 +102,8 @@ impl SessionActor {
             tracing::debug!("turn summary: model returned empty summary");
             return;
         }
+        // The turn's own total went out before this call was billed.
+        let session_cost_usd_ticks = self.reported_session_cost_ticks().await;
 
         // Stale after an abort or a newer spawn: do not persist or broadcast
         if self.turn_summary_generation.get() != generation {
@@ -122,6 +124,7 @@ impl SessionActor {
             crate::extensions::notification::SessionUpdate::LastTurnSummary {
                 summary,
                 prompt_id: Some(prompt_id.to_string()),
+                session_cost_usd_ticks,
             },
         );
     }

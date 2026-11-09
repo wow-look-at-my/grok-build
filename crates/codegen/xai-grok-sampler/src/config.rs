@@ -116,6 +116,10 @@ pub struct SamplerConfig {
     #[serde(skip)]
     pub attribution_callback: Option<SharedAttributionCallback>,
 
+    /// Receives the usage of every request the client sends. `None` bills nowhere.
+    #[serde(skip)]
+    pub usage_sink: Option<crate::usage_sink::SharedUsageSink>,
+
     /// Resolves a fresh bearer for each request. `None` uses the construction-time `api_key`.
     #[serde(skip)]
     pub bearer_resolver: Option<SharedBearerResolver>,
@@ -181,6 +185,7 @@ impl Default for SamplerConfig {
             conversation_group_id: None,
             client_version: None,
             attribution_callback: None,
+            usage_sink: None,
             bearer_resolver: None,
             supports_backend_search: false,
             compactions_remaining: None,

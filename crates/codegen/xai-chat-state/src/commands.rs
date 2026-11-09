@@ -117,6 +117,17 @@ pub enum ChatStateCommand {
         cost_usd_ticks: Option<i64>,
     },
 
+    /// Count one main-loop round. The client's usage sink bills its tokens and cost.
+    RecordMainLoopRound,
+
+    /// A side call such as compaction: billed like a model call, not counted as a main-loop round.
+    RecordSideCallUsage {
+        model_id: Option<String>,
+        usage: TokenUsage,
+        api_duration_ms: Option<u64>,
+        cost_usd_ticks: Option<i64>,
+    },
+
     /// Subagent usage into session (and prompt when attributable). Replies when applied.
     RecordSubagentUsage {
         by_model: Vec<(String, crate::usage::UsageTotals)>,

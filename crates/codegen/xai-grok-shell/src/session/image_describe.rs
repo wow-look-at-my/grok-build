@@ -316,6 +316,7 @@ pub(crate) enum DescribeError {
 /// Call the vision model and return its description text.
 /// `image_urls` should be the cached URLs from [`persist_user_images`].
 /// The caller is responsible for outline and prompt assembly so this stays a pure transport helper.
+/// The client's usage sink bills the call.
 pub(crate) async fn describe_user_images(
     client: OaiCompatClient,
     model: &str,
@@ -343,7 +344,10 @@ pub(crate) async fn describe_user_images(
     const DESCRIBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(240);
     let response = xai_grok_sampler::timeout_excluding_queue(
         DESCRIBE_TIMEOUT,
-        client.conversation_collect(request),
+        client.conversation_collect_with_idle_timeout(
+            request,
+            xai_grok_sampler::DEFAULT_COLLECT_IDLE_TIMEOUT,
+        ),
     )
     .await
     .map_err(|_| {

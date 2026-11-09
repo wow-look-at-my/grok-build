@@ -552,6 +552,9 @@ pub enum SessionUpdate {
         /// The Markdown report with every kept item and the summary text.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         report_path: Option<String>,
+        /// The session ledger's cost total after the compaction calls, in USD ticks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_cost_usd_ticks: Option<i64>,
     },
     /// Auto-compact failed
     AutoCompactFailed {
@@ -743,12 +746,18 @@ pub enum SessionUpdate {
         /// Prompt id of the turn this summary describes (provenance; also persisted as `Summary::last_turn_summary_prompt_id`).
         #[serde(default)]
         prompt_id: Option<String>,
+        /// Session-cumulative reported cost in USD ticks after this summary's own call is billed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_cost_usd_ticks: Option<i64>,
     },
     /// A short summary of the thinking in a single model call. Persisted, so a reload keeps it.
     ThinkingSummary {
         /// `streamStartMs` of the model call whose thinking this summarizes.
         stream_start_ms: i64,
         summary: String,
+        /// Session-cumulative reported cost in USD ticks after this summary's own call is billed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_cost_usd_ticks: Option<i64>,
     },
     /// The summary side call for one model call is queued (`failed` is
     /// `None`) or gave up (`failed` names why).
@@ -1148,7 +1157,6 @@ pub enum SessionUpdate {
     /// The role then runs on the session model. The pager shows this as a
     /// warning, so a configured model is never replaced in silence.
     GoalRoleModelFallback {
-        /// `"planner"`, `"strategist"`, `"skeptic"` or `"summarizer"`.
         role: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         skeptic_idx: Option<u32>,

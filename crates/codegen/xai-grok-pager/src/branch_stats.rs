@@ -406,8 +406,7 @@ fn resolve_base(repo: &gix::Repository, head_ref: Option<&str>) -> Option<(Strin
     .find_map(|name| usable(name))
 }
 
-/// The start point that `git branch`, `checkout -b` and `worktree add -b`
-/// record in the oldest reflog entry. `HEAD` names no branch, so it is `None`.
+/// `HEAD` names no branch, so it is `None`.
 fn reflog_created_from(repo: &gix::Repository, head_ref: &str) -> Option<String> {
     let reference = repo.find_reference(head_ref).ok()?;
     let mut log = reference.log_iter();

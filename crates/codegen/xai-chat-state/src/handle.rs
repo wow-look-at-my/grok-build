@@ -16,7 +16,7 @@ use crate::types::{
 
 /// Handle to communicate with ChatStateActor.
 /// This is cheap to clone and can be shared across tasks.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ChatStateHandle {
     cmd_tx: mpsc::UnboundedSender<ChatStateCommand>,
 }
@@ -181,6 +181,27 @@ impl ChatStateHandle {
         cost_usd_ticks: Option<i64>,
     ) {
         let _ = self.cmd_tx.send(ChatStateCommand::RecordModelCallUsage {
+            model_id,
+            usage,
+            api_duration_ms,
+            cost_usd_ticks,
+        });
+    }
+
+    /// Count one main-loop round. The client's usage sink already billed the call.
+    pub fn record_main_loop_round(&self) {
+        let _ = self.cmd_tx.send(ChatStateCommand::RecordMainLoopRound);
+    }
+
+    /// Bill a model call that is not a main-loop round. The client's usage sink calls this for every call.
+    pub fn record_side_call_usage(
+        &self,
+        model_id: Option<String>,
+        usage: TokenUsage,
+        api_duration_ms: Option<u64>,
+        cost_usd_ticks: Option<i64>,
+    ) {
+        let _ = self.cmd_tx.send(ChatStateCommand::RecordSideCallUsage {
             model_id,
             usage,
             api_duration_ms,

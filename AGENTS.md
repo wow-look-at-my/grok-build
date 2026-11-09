@@ -58,7 +58,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Git status reuse in `git_gate`
 
-- `git_gate` joins same status and diff walks and keeps the result for `SNAPSHOT_TTL`. A client that polls `example.invalid/git/status` slower than that walked the whole tree, and ran `git branch`, `rev-parse` and `remote get-url`, on every poll.
+- `git_gate` joins same status and diff walks and keeps the result for `SNAPSHOT_TTL`.
 - Each snapshot records the root's `xai_fsnotify::ChangeCounter` count from before its walk. While the count is unchanged, the snapshot serves requests up to `WATCHED_SNAPSHOT_MAX_AGE`. The first walk of a root waits for its watcher to start, so a poll right after it reuses that walk. `with_config` turns the reuse off, so the older gate tests keep their TTL semantics.
 
 ## CI pipeline notes: the `gh` host worker, the `ci` tool, and the CI stop gate
@@ -96,7 +96,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## `/debug` feature notes
 
-- `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Only `scroll`, `fps` and `log` are reserved. Everything else is free text. So a question must never come back as an "unknown option" error again.
+- `/debug <question>` injects the question plus an execution-context snapshot (`slash/commands/debug_context.rs`) through `CommandResult::InjectSkill`. Everything else is free text. So a question must never come back as an "unknown option" error again.
 - Staleness is `current_exe()` versus a canonicalized `$GROK_HOME/bin/grok`. `current_exe()` resolves the symlink at exec time, so after an update the two disagree. The block says the running process is not what is on disk. Both sides must stay canonicalized or every symlinked install reads as stale.
 - `GROK_*`/`XAI_*` values whose NAME looks like a credential are withheld — the prompt leaves the session and lands in the model's transcript.
 - `/debug` turns the firehose on. With no `GROK_DEBUG_LOG`/`GROK_LOG_FILE`, `install_firehose` installs the routing layer DORMANT behind `RuntimeGate`, and `debug_log::enable_firehose` wakes it. Spans pass the gate while it is closed. The routing layer must see a session span when it opens, or that session's later events go to the fallback file.
@@ -182,7 +182,7 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 ## Explore-mode `git` tool
 
-- Explore has no shell. Its `git` tool (`grok_build/git/`) runs an argument array, not a shell line. `policy.rs` allowlists the subcommands. `branch`, `tag`, `config`, `stash`, `remote`, `worktree`, `notes`, `reflog`, `symbolic-ref` and `submodule` run only their listing forms.
+- Explore has no shell. Its `git` tool (`grok_build/git/`) runs an argument array, not a shell line. `policy.rs` allowlists the subcommands.
 - In those subcommands a value option must be `--opt=value`. A bare `--sort` takes the next argument as its value, so `branch --sort --list foo` creates `foo`. A denied long option matches by prefix, and the arguments after `--` are checked too.
 - Argument checks alone are not enough. `git diff` and `describe --dirty` rewrite `.git/index`, even with `GIT_OPTIONAL_LOCKS=0`. So git runs in `xai_grok_sandbox::read_only_child`, which denies every write but `/dev/null`: Landlock on Linux, `sandbox-exec` on macOS. Other platforms refuse to run the tool.
 
@@ -267,15 +267,16 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 ## CI builds from clean
 
 - A crate's integration tests build as one `it` binary (`tests/it/main.rs`, one module per former file). Select tests by module path (`cargo nextest run -E 'binary(it) and test(/^module::/)'`). Run them with nextest: several set process-global state (`grok_home()`, env vars, the tracer) and pass only one test per process.
+- CI downloads GitHub release assets through `mirror.pazer.build` (`.github/actions/release-mirror`, called by `setup-protoc`), with the read token secret-server vends. A new release download in CI or in a build script goes through `$GROK_RELEASE_MIRROR/github.com/...` too.
 - CI has no compile cache. Every job compiles the whole dependency graph, so the number of registry crates is what sets its build time. Check what a new dependency pulls in (`cargo tree -e normal,build,dev -i <crate>`) before adding it.
-- Spawn tasks through `xai_spawn` (`spawn`, `spawn_blocking`, `spawn_local`, `spawn_on`, `spawn_in`), not through tokio directly. tokio compiles its task code once for each future type. The wrappers box the future first, so tokio compiles it once for each output type.
+- Spawn tasks through `xai_spawn`, not through tokio directly. tokio compiles its task code once for each future type. The wrappers box the future first, so tokio compiles it once for each output type.
 - The read tools reach `pdf_oxide` only through `xai_tool_types::pdf`. `xai-grok-pdf` holds the engine, and each binary calls `xai_grok_pdf::install()` in `main`. Never add `pdf_oxide` or `xai-grok-pdf` to a library's `[dependencies]`. That puts a crate of several hundred thousand lines back in front of tools, workspace, shell and pager.
 
 ## Why build-test is not on the self-hosted runner
 
 Pointing `build-test` at `vars.CI_RUNNER` turns tests red, because they assert on host semantics the org's lean image does not give. Measured on that runner, with unmodified test sources:
 
-- no PID 1 that reaps orphans and no process-group signal delivery — every `*_grandchild*` case across `xai-grok-shell`, `xai-grok-test-support`, `xai-tty-utils` and the pager PTY harness (`PTY grandchild leaked after controller Drop`). Plus `scope_teardown_kills_a_background_grandchild`, which hangs to the 60s timeout instead of failing.
+- Plus `scope_teardown_kills_a_background_grandchild`, which hangs to the 60s timeout instead of failing.
 - overlayfs reports `st_blocks=2` for every file, so `disk_usage_cmd` and `fs_size` measure ~1 KiB for anything.
 - no UTF-8 locale by default, so `xai-grok-sandbox`'s `fails_closed_on_non_utf8_*` hit errno 84.
 

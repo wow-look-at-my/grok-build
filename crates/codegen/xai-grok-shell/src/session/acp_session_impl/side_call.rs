@@ -22,7 +22,7 @@ pub(crate) fn should_retry_aux_call(e: &xai_grok_sampling_types::SamplingError) 
 /// moves to HTTP/1.1, as the main turn's sampler does
 /// (`RetryDecision::RetryWithClientRebuild`). Without that, every retry goes
 /// out on the same bad HTTP/2 connection, and the side call fails while the
-/// main turn recovers.
+/// main turn recovers. The client's sink bills each try.
 pub(crate) async fn collect_aux_call(
     client: &xai_grok_sampler::SamplingClient,
     base: &ConversationRequest,

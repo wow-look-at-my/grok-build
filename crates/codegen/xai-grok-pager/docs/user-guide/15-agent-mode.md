@@ -146,13 +146,7 @@ Beyond the base ACP protocol, Grok defines extension methods under the `example.
 
 | Category                   | Prefix               | Examples                                         |
 | -------------------------- | -------------------- | ------------------------------------------------ |
-| **Filesystem**             | `example.invalid/fs/*`          | `list`, `exists`, `read_file`, `write_file`      |
-| **Git**                    | `example.invalid/git/*`         | `status`, `stage`, `commit`, `diffs`, `discard`  |
-| **Git Worktree**           | `example.invalid/git/worktree/*`| `create`, `remove`, `apply`, `list`, `gc`        |
-| **Search**                 | `example.invalid/search/*`      | `fuzzy/open`, `fuzzy/change`, `content`          |
-| **Terminal**               | `example.invalid/terminal/*`    | `create`, `kill`, `output`, `wait_for_exit`      |
 | **Session Management**     | `example.invalid/session/*`     | `fork`, `resolve_local_for_worktree_resume`      |
-| **Conversation & History** | `example.invalid/*`             | `prompt_history`, `rewind/*`, `compact_conversation` |
 | **Authentication**         | `example.invalid/auth/*`        | `get_url`, `submit_code`                         |
 | **Feedback & Telemetry**   | `example.invalid/*`             | `feedback`, `telemetry/*`                        |
 

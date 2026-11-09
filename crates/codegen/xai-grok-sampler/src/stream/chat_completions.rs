@@ -11,8 +11,7 @@ use futures_util::stream::{BoxStream, Stream};
 
 use xai_grok_sampling_types::{
     AssistantItem, ChatCompletionChunk, ConversationItem, ConversationResponse,
-    ResponseModelMetadata, SamplingError, StopReason, TokenUsage, ToolCall,
-    tool_call_vendor_fields,
+    ResponseModelMetadata, SamplingError, StopReason, ToolCall, tool_call_vendor_fields,
 };
 
 use crate::events::{SamplingChannel, SamplingErrorInfo, SamplingEvent};
@@ -57,8 +56,7 @@ pub fn stream_chat_completions<'a>(
         let mut first_token_emitted = false;
         let mut model: String = String::new();
         let mut model_fingerprint: Option<String> = None;
-        let mut usage: Option<TokenUsage> = None;
-        let mut cost_usd_ticks: Option<i64> = None;
+        let mut call_usage = super::usage::CallUsage::default();
         let mut finish_reason: Option<StopReason> = None;
 
         let mut content_acc = String::new();
@@ -116,27 +114,8 @@ pub fn stream_chat_completions<'a>(
                 first_chunk_seen = true;
             }
 
-            if let Some(u) = chunk.usage.clone() {
-                // Wire cost is cumulative for the response, so last-write-wins.
-                let chunk_cost = xai_grok_sampling_types::reported_cost_ticks(u.cost_in_usd_ticks)
-                    .or_else(|| {
-                        xai_grok_sampling_types::usd_float_to_ticks(
-                            u.cost.as_ref().map(|c| c.as_usd_float()),
-                        )
-                        .unwrap_or_else(|err| {
-                            tracing::error!(
-                                error = %err,
-                                request_id = %request_id.as_str(),
-                                "provider reported a usage.cost with no tick form; leaving the response unpriced"
-                            );
-                            None
-                        })
-                    });
-                cost_usd_ticks = match (cost_usd_ticks, chunk_cost) {
-                    (_, Some(n)) => Some(n),
-                    (prev, None) => prev,
-                };
-                usage = Some(u.into());
+            if let Some(u) = chunk.usage.as_ref() {
+                call_usage.observe_chat_completions(u);
             }
 
             // Track whether this chunk carried meaningful content.
@@ -306,6 +285,10 @@ pub fn stream_chat_completions<'a>(
         if let Some(ttft) = metrics.time_to_first_token_ms {
             decode_region.span().record("ttft_ms", ttft as i64);
         }
+        let super::usage::CallUsage {
+            usage,
+            cost_usd_ticks,
+        } = call_usage;
         if let Some(u) = usage.as_ref() {
             decode_region
                 .span()

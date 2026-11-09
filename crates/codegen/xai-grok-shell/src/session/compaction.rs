@@ -183,7 +183,7 @@ impl SessionActor {
             .wall_clock_budget_secs;
         let hosted_tools = self.hosted_tools_for_turn();
         let (cancel, _cancel_scope) = self.compaction.cancel.enter();
-        match generate_session_compact(
+        let result = generate_session_compact(
             history,
             compaction_tool_tokens,
             tools,
@@ -196,8 +196,8 @@ impl SessionActor {
             self.compaction.tool_choice,
             &cancel,
         )
-        .await
-        {
+        .await;
+        match result {
             Ok(out) => Some(out),
             Err(e) => {
                 tracing::warn!(error = ?e, "two_pass: summarization sample failed");
@@ -709,6 +709,7 @@ impl SessionActor {
             summary_preview: None,
             breakdown: report.breakdown,
             report_path: report.report_path,
+            session_cost_usd_ticks: self.reported_session_cost_ticks().await,
         })
         .await;
         self.emit_status_snapshot_detached();
@@ -1332,15 +1333,15 @@ impl SessionActor {
         let mut compact_summary: Option<String> =
             two_pass_output.as_ref().map(|o| o.content.clone());
         while compact_summary.is_none() {
-            match xai_grok_compaction::sample_full_replace_summary(
+            let sampled = xai_grok_compaction::sample_full_replace_summary(
                 &sampler,
                 &request_turns,
                 user_context.as_deref(),
                 &fr_config,
                 &observer,
             )
-            .await
-            {
+            .await;
+            match sampled {
                 Ok(summary) => {
                     compact_summary = Some(summary.summary);
                     break;
@@ -2626,6 +2627,7 @@ impl SessionActor {
                     summary_preview: None,
                     breakdown: report.breakdown,
                     report_path: report.report_path,
+                    session_cost_usd_ticks: self.reported_session_cost_ticks().await,
                 })
                 .await;
                 self.emit_status_snapshot_detached();
