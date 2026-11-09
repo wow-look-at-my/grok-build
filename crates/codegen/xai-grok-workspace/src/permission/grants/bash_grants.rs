@@ -9,15 +9,13 @@ use crate::permission::bash_command_splitting::{
 use crate::permission::state::PermissionState;
 
 /// Whether accepting the always-allow row at scope `n` persists a grant that replays. Arrows skip scopes that would save nothing.
-/// What persists is an argv-unambiguous prefix at or above the dangerous-command floor, or the full unwrapped script as raw text. Ambiguous joins are refused.
+/// What persists is an argv-unambiguous prefix at or above the dangerous-command floor. The full scope always persists: the exact script is the fallback key.
 pub fn always_allow_scope_persists(h: &BashCommandHighlights, n: usize) -> bool {
     let words = &h.highlighted_words;
     if n == 0 || n > words.len() || n < super::minimum_always_allow_scope(words) {
         return false;
     }
-    // The raw-text fallback needs a single unwrapped command spanning the whole script (empty prefix/suffix)
-    words.get(..n).is_some_and(words_join_unambiguously)
-        || (n == words.len() && h.prefix.is_empty() && h.suffix.is_empty())
+    n == words.len() || words.get(..n).is_some_and(words_join_unambiguously)
 }
 
 /// Whether `join(" ")` round-trips these words to the same single command.
@@ -80,8 +78,9 @@ pub(crate) fn bash_grant_segments(cmd: &str) -> Vec<String> {
     grants
 }
 
-/// Persist an "Always allow" selection only if the label re-derives as an argv-unambiguous prefix at or above `minimum_always_allow_scope`.
-/// A forged or narrowed dangerous label persists nothing. Raw script is stored only for the whole unwrapped command, so an unseen `env` cannot clear the injection floor.
+/// Persist an "Always allow" selection only if the label re-derives as an argv-unambiguous prefix at or above `minimum_always_allow_scope`, or names the full primary command.
+/// A forged or narrowed dangerous label persists nothing.
+/// When the label alone leaves the script prompting (a chain, a wrapper, a quoted word), the exact script is saved too. The prompt showed that script in full.
 pub(crate) fn persist_bash_always_allow(state: &mut PermissionState, cmd: &str, prefix: &str) {
     let Some(h) = primary_command_from_script(cmd) else {
         tracing::warn!(
@@ -99,7 +98,11 @@ pub(crate) fn persist_bash_always_allow(state: &mut PermissionState, cmd: &str, 
     });
     if labeled_words_verified {
         state.allowed_bash_commands.insert(prefix.to_owned());
-    } else if h.prefix.is_empty() && h.suffix.is_empty() && words.join(" ") == prefix {
+        if !script_replays_without_prompt(cmd, state) {
+            state.allowed_bash_commands.insert(cmd.to_owned());
+        }
+    } else if words.join(" ") == prefix {
+        // The full join is argv-ambiguous, so the exact script is the only key for this selection.
         state.allowed_bash_commands.insert(cmd.to_owned());
     } else {
         tracing::warn!(
@@ -107,6 +110,19 @@ pub(crate) fn persist_bash_always_allow(state: &mut PermissionState, cmd: &str, 
             "always-allow label did not verify against the primary command; no grant persisted"
         );
     }
+}
+
+/// Whether `state` lets `cmd` run with no prompt at the pre-classifier grant gate.
+fn script_replays_without_prompt(cmd: &str, state: &PermissionState) -> bool {
+    let evaluation = super::evaluate_bash(cmd, state, true);
+    super::bash_grant_pre_decision(
+        cmd,
+        &evaluation,
+        state,
+        None,
+        super::BashGrantOpts::PRE_CLASSIFIER,
+    )
+    .is_some_and(|(decision, _)| matches!(decision, crate::permission::types::Decision::Allow))
 }
 
 /// Whether a client-supplied glob grant is scoped to `cmd`: it must match a non-setup segment under the enforcement matcher.
@@ -130,7 +146,7 @@ pub(crate) fn bash_glob_covers_script(cmd: &str, pattern: &str) -> bool {
 }
 
 /// Whether the "Always allow" row can be honored: accepting the cursor's default scope must let the script replay without a prompt.
-/// Simulated against the pre-classifier grant gate. A wrapped dangerous command or a chain whose primary scope leaves a segment prompting fails this.
+/// Simulated against the pre-classifier grant gate. The exact-script fallback in `persist_bash_always_allow` makes this hold for every script with a primary command.
 pub fn always_allow_row_is_effective(cmd: &str) -> bool {
     let Some(h) = primary_command_from_script(cmd) else {
         return false;
@@ -150,15 +166,7 @@ pub fn always_allow_row_is_effective(cmd: &str) -> bool {
         return false;
     };
     persist_bash_always_allow(&mut scratch, cmd, &scope_words.join(" "));
-    let evaluation = super::evaluate_bash(cmd, &scratch, true);
-    super::bash_grant_pre_decision(
-        cmd,
-        &evaluation,
-        &scratch,
-        None,
-        super::BashGrantOpts::PRE_CLASSIFIER,
-    )
-    .is_some_and(|(decision, _)| matches!(decision, crate::permission::types::Decision::Allow))
+    script_replays_without_prompt(cmd, &scratch)
 }
 
 #[cfg(test)]
@@ -174,28 +182,32 @@ mod tests {
         assert!(plain.allowed_bash_commands.contains("git push origin main"));
         assert!(evaluate_bash("git push origin main", &plain, true).exact_grant);
 
-        // Wrapper-prefixed: only the labeled (peeled) words are stored; the raw spelling with the hidden assignment never becomes a grant
+        // Wrapper-prefixed: the peeled words do not cover the wrapped spelling, so the exact script is saved beside them and replays
         let mut wrapped = PermissionState::default();
-        persist_bash_always_allow(
-            &mut wrapped,
-            "env FOO=1 git push origin main",
-            "git push origin main",
-        );
+        const WRAPPED: &str = "env FOO=1 git push origin main";
+        persist_bash_always_allow(&mut wrapped, WRAPPED, "git push origin main");
         assert!(
             wrapped
                 .allowed_bash_commands
                 .contains("git push origin main")
         );
-        assert!(!evaluate_bash("env FOO=1 git push origin main", &wrapped, true).exact_grant);
+        assert!(evaluate_bash(WRAPPED, &wrapped, true).exact_grant);
+        // The exact key matches only its own spelling.
+        assert!(!evaluate_bash("env FOO=2 git push origin main", &wrapped, true).exact_grant);
 
-        // Chained script: only a primary-command prefix persists; a label naming another segment (forgeable via remote replies) is refused
+        // Chained script: the primary prefix persists, plus the exact chain.
         let mut chained = PermissionState::default();
         const CHAIN: &str = "cargo build && git push --force";
         persist_bash_always_allow(&mut chained, CHAIN, "cargo build");
         assert!(chained.allowed_bash_commands.contains("cargo build"));
+        assert!(chained.allowed_bash_commands.contains(CHAIN));
         persist_bash_always_allow(&mut chained, CHAIN, "git push --force");
         assert!(!chained.allowed_bash_commands.contains("git push --force"));
-        assert!(!chained.allowed_bash_commands.contains(CHAIN));
+
+        // A label that covers the whole script saves no redundant exact key.
+        let mut covered = PermissionState::default();
+        persist_bash_always_allow(&mut covered, "cargo test --workspace", "cargo test");
+        assert_eq!(covered.allowed_bash_commands.len(), 1);
 
         // Quoted single command: the full-scope label is argv-ambiguous, so the raw text is stored instead; it matches only its own spelling
         let mut quoted = PermissionState::default();
@@ -340,18 +352,18 @@ mod tests {
         assert!(always_allow_row_is_effective("timeout 30 cargo test"));
         // Plain dangerous command: full-scope label equals the raw text.
         assert!(always_allow_row_is_effective("git push origin main"));
-        // Wrapped or assignment-prefixed dangerous/floored commands can never produce the exact grant they require, so they get no row
-        assert!(!always_allow_row_is_effective(
-            "env FOO=1 git push origin main"
-        ));
-        assert!(!always_allow_row_is_effective("FOO=1 git push origin main"));
-        assert!(!always_allow_row_is_effective("env FOO=1 make"));
-        // Chains whose primary-scoped grant leaves another segment prompting get no row even with zero findings
-        // The simulation catches what finding-class enumeration missed (`ls` is auto-safe; granting it cannot stop `npm publish` from prompting)
-        assert!(!always_allow_row_is_effective("ls && npm publish"));
-        assert!(!always_allow_row_is_effective(
-            "git status && git push origin main"
-        ));
+        // Wrapped, assignment-prefixed and chained scripts whose label alone leaves them prompting replay via the saved exact script
+        for cmd in [
+            "env FOO=1 git push origin main",
+            "FOO=1 git push origin main",
+            "env FOO=1 make",
+            "ls && npm publish",
+            "git status && git push origin main",
+            "ls /tmp && ./bazelw test //hw-tests/integration/...",
+            r#"cd /repo && rm -rf "my dir""#,
+        ] {
+            assert!(always_allow_row_is_effective(cmd), "{cmd:?}");
+        }
         // Unparseable scripts have no primary command and no honorable row.
         assert!(!always_allow_row_is_effective("echo $(date)"));
         // A pipe whose primary carries a space-bearing arg is still honorable
