@@ -747,6 +747,28 @@ pub struct PromptTokensDetails {
     pub cached_tokens: u32,
     #[serde(default)]
     pub audio_tokens: u32,
+    /// Prompt tokens written to the cache. OpenAI sends none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_creation_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_creation_tokens: Option<u32>,
+}
+
+impl PromptTokensDetails {
+    /// The cache-write count under whichever spelling the provider used.
+    pub fn cache_write(&self) -> u32 {
+        [
+            self.cache_write_tokens,
+            self.cached_creation_tokens,
+            self.cache_creation_tokens,
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
