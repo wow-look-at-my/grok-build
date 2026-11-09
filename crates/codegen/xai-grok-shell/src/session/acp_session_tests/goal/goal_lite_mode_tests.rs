@@ -221,6 +221,8 @@ async fn a_full_goal_still_hands_a_candidate_to_the_panel() {
             let server = MockInferenceServer::start()
                 .await
                 .expect("mock inference server");
+            // With the planner off, a full goal starts with the same capture a lite goal runs.
+            server.enqueue_response("/v1/responses", lite_capture());
             server.enqueue_response(
                 "/v1/responses",
                 verdict("candidate_complete", "the suite passed on the last run"),
@@ -234,6 +236,7 @@ async fn a_full_goal_still_hands_a_candidate_to_the_panel() {
                 panic!("a full goal with the planner off must flow through to inference");
             };
             assert!(reminder.contains("adversarial verification panel"));
+            finish_all_todos(&actor).await;
 
             assert!(matches!(
                 actor.run_goal_round_end().await,
@@ -259,6 +262,7 @@ async fn a_user_cancel_of_the_panel_keeps_the_goal_and_points_at_the_user() {
             let server = MockInferenceServer::start()
                 .await
                 .expect("mock inference server");
+            server.enqueue_response("/v1/responses", lite_capture());
             let actor = goal_actor(&server).await;
             let GoalSetupOutcome::Inference { .. } = actor
                 .setup_goal("make the tests pass", None, GoalMode::Full)
