@@ -495,7 +495,8 @@ async fn a_give_up_claim_is_sent_back_with_steps_then_upheld_on_the_same_path_fo
                     GoalRoundDecision::EndTurn
                 ));
                 let bodies = evaluator_bodies(&server);
-                let capture_calls = usize::from(mode == GoalMode::Lite);
+                // Both modes start with the capture, since the planner is off.
+                let capture_calls = 1;
                 assert_eq!(
                     bodies.len(),
                     capture_calls + 2,
