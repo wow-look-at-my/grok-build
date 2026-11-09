@@ -889,8 +889,9 @@ pub struct AgentView {
     pub hit_bg_button: HitArea,
     pub(crate) last_bg_click: Option<Instant>,
     pub hit_queue_close: HitArea,
-    pub hit_plan_button: HitArea,
     pub hit_badge: HitArea,
+    /// The goal whose missing todos were last logged. See `report_goal_without_todos`.
+    pub(crate) goal_without_todos_reported: Option<String>,
     pub hit_plan_approval_status: HitArea,
     pub hit_follow_indicator: HitArea,
     /// ▲ jump-to-response-top indicator in the sticky header's gap row.

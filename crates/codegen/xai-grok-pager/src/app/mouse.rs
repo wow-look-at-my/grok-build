@@ -80,14 +80,6 @@ impl AgentView {
                     self.last_context_click_at = Some(now);
                     return InputOutcome::Action(Action::ShowContextInfo);
                 }
-                if self.hit_plan_button.contains(mouse.column, mouse.row) {
-                    if self.plan_approval_view.is_some() {
-                        self.reopen_plan_approval();
-                    } else {
-                        self.show_plan_preview();
-                    }
-                    return InputOutcome::Changed;
-                }
                 if self
                     .hit_plan_approval_status
                     .contains(mouse.column, mouse.row)
@@ -1026,7 +1018,6 @@ impl AgentView {
                     changed |= self.queue.clear_edit_hover();
                     changed |= self.queue.clear_row_hover();
                 }
-                changed |= self.hit_plan_button.update_hover(mouse.column, mouse.row);
                 changed |= self
                     .hit_plan_approval_status
                     .update_hover(mouse.column, mouse.row);

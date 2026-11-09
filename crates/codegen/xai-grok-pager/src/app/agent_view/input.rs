@@ -693,7 +693,6 @@ impl AgentView {
                     let mut changed = false;
                     match mouse.kind {
                         MouseEventKind::Moved => {
-                            changed |= self.hit_plan_button.update_hover(mouse.column, mouse.row);
                             changed |= self
                                 .hit_plan_approval_status
                                 .update_hover(mouse.column, mouse.row);
@@ -704,10 +703,6 @@ impl AgentView {
                         MouseEventKind::Down(MouseButton::Left) => {
                             if self.hit_voice_stop_button.contains(mouse.column, mouse.row) {
                                 return InputOutcome::Action(Action::VoiceToggle);
-                            }
-                            if self.hit_plan_button.contains(mouse.column, mouse.row) {
-                                self.reopen_plan_approval();
-                                return InputOutcome::Changed;
                             }
                             if self.hit_badge.contains(mouse.column, mouse.row) {
                                 self.toggle_todo_pane();

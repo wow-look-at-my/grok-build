@@ -281,6 +281,24 @@ pub fn chevron_left() -> &'static str {
     }
 }
 
+/// `"☰"` (U+2630 TRIGRAM FOR HEAVEN) normally, `"="` on legacy ConHost. The status bar's dashboard button.
+pub fn dashboard() -> &'static str {
+    if is_legacy_windows_console() {
+        "="
+    } else {
+        "\u{2630}"
+    }
+}
+
+/// `"✔"` (U+2714 HEAVY CHECK MARK) normally, `"v"` on legacy ConHost. Marks the status bar's todo count.
+pub fn heavy_check() -> &'static str {
+    if is_legacy_windows_console() {
+        "v"
+    } else {
+        "\u{2714}"
+    }
+}
+
 /// Down chevron matching `›`'s light weight (not solid `▾`). Legacy ConHost uses `v`.
 pub fn chevron_down() -> &'static str {
     if is_legacy_windows_console() {
