@@ -577,7 +577,7 @@ impl AcpPrompter {
                             acp::PermissionOption,
                         > = IndexMap::new();
                         // Always-allow leads; persistent deny trails so it never sits between safe options
-                        // Accepting allow must stop this script from prompting again; a chain or wrapper also saves the exact script, so the row holds for every primary command
+                        // Accepting allow must stop this script from prompting again. A chain or wrapper also saves the exact script. The row holds for every primary command
                         let primary_command = primary_command_from_script(bash_command);
                         if let Some(primary_command) = &primary_command
                             && crate::permission::grants::always_allow_row_is_effective(
