@@ -6116,9 +6116,10 @@
 			"type": "string",
 			"enum": [
 				"none",
-				"zstd"
+				"zstd",
+				"off"
 			],
-			"description": "Set by the shell: `Zstd` only toward the cli-chat-proxy that advertised it."
+			"description": "Set by the shell. `Zstd` is the cli-chat-proxy that advertised it in its\nsettings."
 		},
 		"S3AccessCredentials": {
 			"type": "object",
