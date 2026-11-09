@@ -1,8 +1,76 @@
-//! zstd compression of JSON request bodies. The shell decides whether an
-//! endpoint may receive compressed bodies (`SamplerConfig::request_compression`);
-//! this module decides whether a given body is worth compressing and does it.
+//! zstd compression of JSON request bodies.
+
+use std::collections::HashSet;
+use std::sync::RwLock;
 
 use crate::config::RequestCompression;
+
+/// Origins whose last response that carried `Accept-Encoding` listed zstd.
+static ADVERTISED_ZSTD: RwLock<Option<HashSet<String>>> = RwLock::new(None);
+
+/// `scheme://authority` of `url`, lowercased. `None` for a string with no scheme.
+fn origin_of(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    Some(format!("{scheme}://{authority}").to_ascii_lowercase())
+}
+
+/// True when an `Accept-Encoding` value lists zstd with a non-zero weight.
+fn lists_zstd(value: &str) -> bool {
+    value.split(',').any(|entry| {
+        let mut parts = entry.split(';').map(str::trim);
+        if !parts
+            .next()
+            .is_some_and(|coding| coding.eq_ignore_ascii_case("zstd"))
+        {
+            return false;
+        }
+        !parts.any(|param| {
+            param
+                .strip_prefix("q=")
+                .and_then(|q| q.parse::<f32>().ok())
+                .is_some_and(|q| q == 0.0)
+        })
+    })
+}
+
+/// Record what the response from `url` said about request encodings. A
+/// response with no `Accept-Encoding` header changes nothing.
+pub(crate) fn note_response_headers(url: &str, headers: &xai_grok_net::header::HeaderMap) {
+    let Some(origin) = origin_of(url) else {
+        return;
+    };
+    let values: Vec<&str> = headers
+        .get_all(xai_grok_net::header::ACCEPT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect();
+    if values.is_empty() {
+        return;
+    }
+    let advertised = values.iter().any(|value| lists_zstd(value));
+    let Ok(mut guard) = ADVERTISED_ZSTD.write() else {
+        return;
+    };
+    let set = guard.get_or_insert_with(HashSet::new);
+    if advertised {
+        if set.insert(origin.clone()) {
+            tracing::info!(%origin, "endpoint advertised zstd request bodies");
+        }
+    } else {
+        set.remove(&origin);
+    }
+}
+
+fn origin_advertised_zstd(url: &str) -> bool {
+    let Some(origin) = origin_of(url) else {
+        return false;
+    };
+    ADVERTISED_ZSTD
+        .read()
+        .ok()
+        .is_some_and(|guard| guard.as_ref().is_some_and(|set| set.contains(&origin)))
+}
 
 /// Below this the CPU spent compressing is not worth the bytes saved.
 pub(crate) const MIN_COMPRESS_BYTES: usize = 64 * 1024;
@@ -15,8 +83,15 @@ const ZSTD_LEVEL: i32 = 3;
 /// few hundred MB/s, so a multi-megabyte body would stall it for tens of ms.
 const OFFLOAD_COMPRESS_BYTES: usize = 1024 * 1024;
 
-pub(crate) fn should_compress(config: RequestCompression, body_len: usize) -> bool {
-    config == RequestCompression::Zstd && body_len >= MIN_COMPRESS_BYTES
+pub(crate) fn should_compress(config: RequestCompression, url: &str, body_len: usize) -> bool {
+    if body_len < MIN_COMPRESS_BYTES {
+        return false;
+    }
+    match config {
+        RequestCompression::Zstd => true,
+        RequestCompression::None => origin_advertised_zstd(url),
+        RequestCompression::Off => false,
+    }
 }
 
 /// Compress `json` for the wire, off the runtime for large bodies. `None`
