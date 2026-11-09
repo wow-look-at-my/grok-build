@@ -1,4 +1,3 @@
-
 // model_mention_spawn_tests.rs holds recording_coordinator.
 
 use super::support::*;
