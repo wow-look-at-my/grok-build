@@ -273,7 +273,7 @@ impl ShellFullReplaceObserver {
 
     /// The cumulative attempt count spans all input-ladder stages because the same observer instance is shared across every per-stage call.
     pub(crate) fn into_telemetry(self) -> FullReplaceTelemetry {
-        let s = self.state.into_inner().unwrap();
+        let s = self.state.into_inner();
         FullReplaceTelemetry {
             attempts: s.attempts,
             attempt_details: s.attempt_details,
