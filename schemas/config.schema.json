@@ -6113,11 +6113,23 @@
 			}
 		},
 		"RequestCompression": {
-			"type": "string",
-			"enum": [
-				"none",
-				"zstd",
-				"off"
+			"oneOf": [
+				{
+					"type": "string",
+					"enum": [
+						"zstd"
+					]
+				},
+				{
+					"type": "string",
+					"const": "none",
+					"description": "Compress only toward an origin whose response sent `Accept-Encoding: zstd`."
+				},
+				{
+					"type": "string",
+					"const": "off",
+					"description": "Never compress. `GROK_REQUEST_COMPRESSION=0` sets this."
+				}
 			],
 			"description": "Set by the shell. `Zstd` is the cli-chat-proxy that advertised it in its\nsettings."
 		},
