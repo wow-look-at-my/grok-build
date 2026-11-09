@@ -31,9 +31,6 @@ pub struct AppearanceConfig {
     pub show_timeline: bool,
     /// Whether hooks & plugins UI is disabled (hides /hooks, /plugins commands and scrollback annotations). `false` by default (plugins enabled).
     pub disable_plugins: bool,
-    /// Always show the "plan" chip in the status bar when plan content is available, even after the user exits plan mode.
-    /// `false` by default (chip hidden once plan mode ends).
-    pub show_plan_chip: bool,
     /// Alt-screen (fullscreen) policy from the `[terminal]` section.
     pub alt_screen: crate::terminal::AltScreenMode,
     /// Experimental scrollback-native minimal mode (`[terminal] minimal`).
@@ -633,10 +630,6 @@ pub struct RawAppearanceConfig {
     /// Disable hooks & plugins UI (/hooks and /plugins commands, scrollback annotations).
     /// Defaults to false (plugins enabled).
     pub disable_plugins: bool,
-    /// Always show the "plan" chip in the status bar when plan content is
-    /// available, even after the user exits plan mode.
-    /// Defaults to false (chip hidden once plan mode ends).
-    pub show_plan_chip: bool,
 }
 
 /// Fullscreen (alternate screen) policy and related terminal settings.
@@ -1261,7 +1254,6 @@ impl From<RawAppearanceConfig> for AppearanceConfig {
             // Single source: UiConfig::SHOW_TIMELINE_DEFAULT (loaded from config.json via persist).
             show_timeline: UiConfig::SHOW_TIMELINE_DEFAULT,
             disable_plugins: raw.disable_plugins,
-            show_plan_chip: raw.show_plan_chip,
             alt_screen: raw.terminal.alt_screen.into(),
             minimal: raw.terminal.minimal,
             minimal_live_rows: raw.terminal.minimal_live_rows.unwrap_or(10),
@@ -1965,14 +1957,14 @@ mod tests {
     fn null_members_keep_the_builtin_defaults() {
         let raw = json(
             r#"{
-				"show_plan_chip": null,
+				"disable_plugins": null,
 				"animation": {"fps": null, "wave_rows": 16},
 				"scrollback": null,
 				"terminal": {"alt_screen": null, "minimal_live_rows": null}
 			}"#,
         );
         let defaults = RawAppearanceConfig::default();
-        assert!(!raw.show_plan_chip);
+        assert!(!raw.disable_plugins);
         assert_eq!(raw.animation.fps, defaults.animation.fps);
         assert_eq!(raw.animation.wave_rows, 16);
         assert_eq!(
@@ -2021,7 +2013,7 @@ mod tests {
 
         let mut doc = serde_json::json!({
             "$schema": "./pager.schema.json",
-            "show_plan_chip": true,
+            "disable_plugins": true,
             "scrollback": {"scroll": {"anchor_on_fold": false, "respect_manual_folds": true}, "layout": null}
         })
         .as_object()
@@ -2035,7 +2027,7 @@ mod tests {
         .unwrap();
         assert_eq!(doc["scrollback"]["scroll"]["respect_manual_folds"], false);
         assert_eq!(doc["scrollback"]["scroll"]["anchor_on_fold"], false);
-        assert_eq!(doc["show_plan_chip"], true);
+        assert_eq!(doc["disable_plugins"], true);
         assert_eq!(doc["$schema"], "./pager.schema.json");
 
         let mut doc = serde_json::json!({"scrollback": {"scroll": null}})
@@ -2190,7 +2182,7 @@ mod tests {
         let path = home.path().join("pager.json");
         std::fs::write(
             &path,
-            r#"{"$schema": "https://example.invalid/pager.json", "show_plan_chip": true, "scrollback": {"scroll": {"margin": 3}}}"#,
+            r#"{"$schema": "https://example.invalid/pager.json", "disable_plugins": true, "scrollback": {"scroll": {"margin": 3}}}"#,
         )
         .unwrap();
         persist_respect_manual_folds_in(home.path(), true).unwrap();
@@ -2198,7 +2190,7 @@ mod tests {
         let doc: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(doc["$schema"], "https://example.invalid/pager.json");
-        assert_eq!(doc["show_plan_chip"], true);
+        assert_eq!(doc["disable_plugins"], true);
         assert_eq!(doc["scrollback"]["scroll"]["margin"], 3);
         assert_eq!(doc["scrollback"]["scroll"]["respect_manual_folds"], false);
     }
@@ -2208,14 +2200,14 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         std::fs::write(
             home.path().join("pager.toml"),
-            "show_plan_chip = true\n[scrollback.scroll]\nmargin = 2\n",
+            "disable_plugins = true\n[scrollback.scroll]\nmargin = 2\n",
         )
         .unwrap();
         persist_respect_manual_folds_in(home.path(), true).unwrap();
         assert!(!home.path().join("pager.toml").exists());
         assert!(home.path().join("pager.toml.migrated").exists());
         let raw = json(&std::fs::read_to_string(home.path().join("pager.json")).unwrap());
-        assert!(raw.show_plan_chip);
+        assert!(raw.disable_plugins);
         assert_eq!(raw.scrollback.scroll.margin, 2);
         assert!(raw.scrollback.scroll.respect_manual_folds);
     }

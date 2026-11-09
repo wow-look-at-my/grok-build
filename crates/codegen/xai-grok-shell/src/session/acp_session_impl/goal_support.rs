@@ -992,6 +992,11 @@ pub(crate) fn planner_failure_pause_message() -> String {
     format!("No plan was produced. {GOAL_RESUME_HINT}")
 }
 
+/// The pause for a plan that put no open item on the todo list. A goal never runs without todos.
+pub(crate) fn planner_listed_no_todos_pause_message() -> String {
+    format!("The plan put no todo items on the list. Add todos first. {GOAL_RESUME_HINT}")
+}
+
 /// The pause for a planner the USER stopped.
 pub(crate) fn planner_cancelled_pause_message() -> String {
     "Planning cancelled; resume with /goal to plan again.".to_string()
@@ -1185,6 +1190,16 @@ impl SessionActor {
                     };
                     // The plan is published.
                     self.apply_planner_todos(&goal_id, &planner_todos).await;
+                    // A goal never runs without todos.
+                    if !self.goal_has_open_todo().await {
+                        let _ = self
+                            .auto_pause_goal_if_matches_with_message(
+                                &goal_id,
+                                crate::session::goal_tracker::GoalPauseReason::Planner,
+                                planner_listed_no_todos_pause_message(),
+                            )
+                            .await;
+                    }
                     if let Some((src, dst)) = baseline_target {
                         let tmp = dst
                             .with_file_name(format!("plan-baseline-{}.md", uuid::Uuid::now_v7()));

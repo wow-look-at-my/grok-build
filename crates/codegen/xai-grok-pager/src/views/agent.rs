@@ -521,8 +521,8 @@ pub fn render_entry_hover(
         }
     }
 }
-/// The status line's todo badge: `done/total`, where the total leaves out cancelled items. `None`
-/// when nothing counts, so the badge is absent rather than `0/0`.
+/// The status line's todo badge when no goal runs: a green check, then `done/total`. The total leaves
+/// out cancelled items. `None` when nothing counts, so the badge is absent rather than `0/0`.
 pub fn render_todo_badge_spans(
     counts: &super::todo_pane::TodoCounts,
     hovered: bool,
@@ -550,6 +550,10 @@ pub fn render_todo_badge_spans(
         Style::default().fg(theme.gray_dim).bg(theme.bg_base)
     };
     Some(vec![
+        Span::styled(
+            format!("{} ", crate::glyphs::heavy_check()),
+            Style::default().fg(theme.accent_success).bg(theme.bg_base),
+        ),
         Span::styled(counts.completed.to_string(), count_style),
         Span::styled("/", dim_style),
         Span::styled(total.to_string(), count_style),
@@ -955,7 +959,11 @@ mod tests {
             .iter()
             .map(|span| span.content.as_ref())
             .collect::<String>();
-        assert_eq!(text, "2/4", "cancelled items stay out of the denominator");
+        assert_eq!(
+            text,
+            format!("{} 2/4", crate::glyphs::heavy_check()),
+            "cancelled items stay out of the denominator"
+        );
     }
 
     #[test]

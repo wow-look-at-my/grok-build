@@ -1,9 +1,10 @@
 //! Context usage bar: shows token usage in the status bar.
 //!
-//! Default builds a `Line<'static>` of styled spans: `8.5K / 1.0M` (actual tokens, colored by usage percentage).
-//! On hover, replaces the tokens with a progress bar and percentage, e.g. `█████ 42.0%`.
+//! Default builds a `Line<'static>` of styled spans: `420K · 42%` (tokens used, then the percent used, colored by that percent).
+//! The caller picks the total the percent is measured against. The status bar passes the auto-compact point.
+//! On hover, replaces the text with a progress bar and percentage, e.g. `█████ 42.0%`.
 //! The bar width is derived from the default string length so the hover line is the same total width; no layout shift on hover.
-//! The default is right-padded to a minimum of 6 columns so the width invariant holds even for degenerate inputs like `0 / 9`.
+//! several columns so the width invariant holds even for degenerate inputs like `0 / 9`.
 
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -135,9 +136,8 @@ const PCT_WIDTH: u16 = 5;
 /// Width of the gap between the progress bar and the percentage on hover.
 const BAR_PCT_GAP: u16 = 1;
 
-/// The default is right-padded to a minimum of 6 columns (`BAR_PCT_GAP + PCT_WIDTH`) so the
-/// invariant holds for every input. Without the pad, degenerate cases like `0 / 9` (5 chars) would
-/// mismatch the hovered line, which rounds up to 6 (zero-width bar, gap, percentage).
+/// The default is right-padded to the hovered line's minimum width (`BAR_PCT_GAP + PCT_WIDTH`), so
+/// hover never changes the width.
 pub fn context_bar_line(
     used_tokens: Option<u64>,
     total_tokens: Option<u64>,
@@ -162,8 +162,8 @@ pub fn context_bar_line_for_session(
     let total = total_tokens.filter(|&t| t > 0)?;
     let pct = xai_token_estimation::usage_percentage(used, total);
 
-    // Default form drives the line width: `used / total`, right-padded to the minimum hover width so both states render at the same width
-    let mut token_str = format!("{} / {}", fmt_tokens(used), fmt_tokens(total));
+    // Default form drives the line width: `used · pct%`, right-padded to the minimum hover width so both states render at the same width
+    let mut token_str = format!("{} \u{b7} {pct:.0}%", fmt_tokens(used));
     let natural_width = token_str.chars().count() as u16;
     let min_width = BAR_PCT_GAP + PCT_WIDTH;
     if natural_width < min_width {
@@ -305,13 +305,19 @@ mod tests {
     }
 
     #[test]
-    fn test_context_bar_default_shows_compact_token_usage() {
-        // Default (non-hovered) state shows `used / total` with no padding.
+    fn test_context_bar_default_shows_tokens_and_percent() {
+        // Default (non-hovered) state shows `used · pct%` with no padding. The total itself is not shown.
         let theme = Theme::default();
-        let line = context_bar_line(Some(8_500), Some(1_000_000), false, &theme)
+        let line = context_bar_line(Some(420_000), Some(1_000_000), false, &theme)
             .expect("token data provided");
         let text = line_text(&line);
-        assert_eq!(text, "8.5K / 1.0M");
+        assert_eq!(text, "420K \u{b7} 42%");
+        let full = context_bar_line(Some(180_000), Some(170_000), false, &theme).unwrap();
+        assert_eq!(
+            line_text(&full),
+            "180K \u{b7} 100%",
+            "past the total reads 100%"
+        );
     }
 
     #[test]
@@ -337,7 +343,7 @@ mod tests {
             (123_456, 1_000_000),
             (999_999, 999_999),
             (12_000_000, 12_000_000),
-            // Degenerate sub-min-width case: default natural width is 5 ("0 / 9"), padded to 6 so the hover line still matches
+            // Short case: "0 · 0%" is wide, the minimum, so the hover line still matches
             (0, 9),
         ] {
             let default_line = context_bar_line(Some(used), Some(total), false, &theme)
@@ -357,9 +363,7 @@ mod tests {
 
     #[test]
     fn test_context_bar_hover_bar_grows_with_token_string() {
-        // The bar scales with the default string length
-        // `500 / 1.0M` (10 chars) gives bar = 10 - 6 = 4 chars
-        // `8.5K / 1.0M` (11 chars) gives bar = 11 - 6 = 5 chars
+
         let theme = Theme::default();
         let short = context_bar_line(Some(500), Some(1_000_000), true, &theme).unwrap();
         let long = context_bar_line(Some(8_500), Some(1_000_000), true, &theme).unwrap();
