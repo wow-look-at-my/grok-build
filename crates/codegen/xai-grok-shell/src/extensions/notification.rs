@@ -529,6 +529,12 @@ pub enum SessionUpdate {
         /// Reason for compaction
         reason: String,
     },
+    /// The model the compaction request goes to. Every compaction sends it once, manual or auto,
+    /// as soon as the compaction sampler resolves.
+    CompactionModel {
+        /// The model id of the compaction request.
+        model: String,
+    },
     /// Auto-compact completed successfully
     AutoCompactCompleted {
         /// Tokens used before compaction. `None` on payloads from older shells.

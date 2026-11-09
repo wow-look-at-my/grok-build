@@ -1025,7 +1025,11 @@ pub(crate) fn format_activity_label(activity: &crate::acp::tracker::TurnActivity
                 }
             }
         }
-        TurnActivity::AutoCompacting => "Compacting".to_string(),
+        TurnActivity::AutoCompacting { model } => {
+            crate::scrollback::blocks::compacting_label(model.as_deref())
+                .trim_end_matches('…')
+                .to_string()
+        }
         TurnActivity::Retrying {
             attempt,
             max_retries,

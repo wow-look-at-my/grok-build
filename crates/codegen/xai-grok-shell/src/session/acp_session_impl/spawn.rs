@@ -843,7 +843,6 @@ pub(crate) async fn spawn_session_actor(
     let initial_agent_type = Some(initial_agent_name.clone());
     let compaction_policy = xai_grok_agent::CompactionPolicy {
         auto_compact_threshold_percent: auto_compact_threshold_percent as u32,
-        compact_model: None,
         memory_flush_enabled: memory_config
             .as_ref()
             .is_some_and(|mc| mc.mode.is_legacy() && mc.flush.enabled),

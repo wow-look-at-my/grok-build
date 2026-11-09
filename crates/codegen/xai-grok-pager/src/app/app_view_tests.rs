@@ -329,6 +329,7 @@ pub(crate) fn test_app_with_agent() -> AppView {
             scheduled_tasks: std::collections::HashMap::new(),
             in_flight_prompt: None,
             compact_held_prompt: None,
+            compaction_model: None,
             current_prompt_id: None,
             created_via_new: false,
         },
@@ -536,6 +537,7 @@ fn idle_child_view(app: &AppView, id_n: usize, sid: &str) -> Box<AgentView> {
         scheduled_tasks: std::collections::HashMap::new(),
         in_flight_prompt: None,
         compact_held_prompt: None,
+        compaction_model: None,
         current_prompt_id: None,
         created_via_new: false,
     };

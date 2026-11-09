@@ -14,6 +14,8 @@ mod bash_queued_mid_turn_drains_as_bash;
 mod cancel_discards_buffered_interjection;
 #[path = "pty_e2e/cancel_then_resend_prompt_appears_once.rs"]
 mod cancel_then_resend_prompt_appears_once;
+#[path = "pty_e2e/compact_names_the_dense_summarization_model.rs"]
+mod compact_names_the_dense_summarization_model;
 #[path = "pty_e2e/ctrl_c_cancel_during_stream_recovers_cleanly.rs"]
 mod ctrl_c_cancel_during_stream_recovers_cleanly;
 #[path = "pty_e2e/ctrlc_after_activity_no_rewind_prompt_once.rs"]
