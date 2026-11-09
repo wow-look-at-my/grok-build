@@ -267,6 +267,59 @@ fn parse_openai_format_uses_id_field() {
     assert_eq!(result.base_url, "https://api.example.invalid/v1");
     assert_eq!(result.name.as_deref(), Some("grok-3"));
 }
+fn listed_backend(row: serde_json::Value) -> crate::sampling::ApiBackend {
+    parse_remote_model_value(&row, "https://gw.example/v1")
+        .unwrap()
+        .api_backend
+}
+
+#[test]
+fn a_listed_model_goes_to_the_api_it_is_native_to() {
+    use crate::sampling::ApiBackend;
+    // Copilot's per-model path list: a Claude served on both paths takes Messages.
+    assert_eq!(
+        listed_backend(serde_json::json!({
+            "id": "claude-opus-5-5",
+            "supported_endpoints": ["/chat/completions", "/v1/messages"],
+        })),
+        ApiBackend::Messages
+    );
+    assert_eq!(
+        listed_backend(serde_json::json!({
+            "id": "gpt-5.5",
+            "supported_endpoints": ["/chat/completions", "/responses"],
+        })),
+        ApiBackend::Responses
+    );
+    // The list wins over the name: this gateway serves the Claude on chat only.
+    assert_eq!(
+        listed_backend(serde_json::json!({
+            "id": "claude-opus-5-5",
+            "supported_endpoints": ["/chat/completions"],
+        })),
+        ApiBackend::ChatCompletions
+    );
+    // With no list, a Claude is a Messages model: by owner, by Anthropic's row shape, or by name.
+    for row in [
+        serde_json::json!({ "id": "opus-latest", "object": "model", "owned_by": "anthropic" }),
+        serde_json::json!({ "id": "claude-opus-5-5", "type": "model", "display_name": "Claude Opus 5.5" }),
+        serde_json::json!({ "id": "anthropic/claude-sonnet-5-5", "object": "model", "owned_by": "openrouter" }),
+    ] {
+        assert_eq!(listed_backend(row.clone()), ApiBackend::Messages, "{row}");
+    }
+    // Everything else keeps the default, and an explicit field always wins.
+    assert_eq!(
+        listed_backend(serde_json::json!({ "id": "gpt-4.1", "owned_by": "openai" })),
+        ApiBackend::ChatCompletions
+    );
+    assert_eq!(
+        listed_backend(
+            serde_json::json!({ "id": "claude-opus-5-5", "apiBackend": "chat_completions" })
+        ),
+        ApiBackend::ChatCompletions
+    );
+}
+
 #[test]
 fn parse_model_field_takes_priority_over_id() {
     let value = serde_json::json!({
