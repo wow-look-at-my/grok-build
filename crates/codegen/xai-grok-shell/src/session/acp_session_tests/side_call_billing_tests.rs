@@ -168,10 +168,11 @@ async fn the_permission_classifier_side_query_bills_the_session_ledger() {
             session.wire_permission_auto_llm_classifier().await;
             assert!(session.permissions.has_llm_side_query());
 
-            let _ = session
+            let resolution = session
                 .permissions
                 .request(PermissionRequest::new(
-                    AccessKind::Bash("python3 scripts/migrate_the_schema.py --apply".into()),
+                    // Not a routine command: a heuristic Allow would skip the model.
+                    AccessKind::Bash("my-custom-build --release".into()),
                     agent_client_protocol::ToolCallUpdate::new(
                         agent_client_protocol::ToolCallId::new(std::sync::Arc::from("tc-bill")),
                         Default::default(),
@@ -180,7 +181,7 @@ async fn the_permission_classifier_side_query_bills_the_session_ledger() {
                 .await;
             assert!(
                 server.messages_request_count() >= 1,
-                "the classifier must reach the model: {}",
+                "the classifier must reach the model: {} (resolution: {resolution:?})",
                 server.request_log_summary()
             );
 
