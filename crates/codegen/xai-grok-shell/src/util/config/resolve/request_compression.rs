@@ -28,20 +28,20 @@ pub(crate) fn cache_remote_accept_request_encodings(
 /// is the operator kill switch, re-read whenever a sampler config is built.
 pub(crate) fn request_compression_for_url(base_url: &str) -> RequestCompression {
     if xai_grok_config::env_bool("GROK_REQUEST_COMPRESSION") == Some(false) {
-        return RequestCompression::None;
+        return RequestCompression::Off;
     }
     let origin = ZSTD_ORIGIN.read().ok().and_then(|guard| guard.clone());
     request_compression_for(base_url, origin.as_deref())
 }
 
-/// Zstd only toward the proxy that advertised it. A sibling trusted route
-/// (staging, the dev proxy) or any other host (BYOK, local models) never
-/// receives a body its server may not decode.
+/// Zstd toward the proxy that advertised it in its settings. Any other host
+/// gets `Auto`, and the sampler compresses toward it only after that host's
+/// own response sends `Accept-Encoding: zstd`.
 fn request_compression_for(base_url: &str, zstd_origin: Option<&str>) -> RequestCompression {
     if zstd_origin.is_some_and(|origin| crate::util::matches_trusted_base_url(base_url, origin)) {
         RequestCompression::Zstd
     } else {
-        RequestCompression::None
+        RequestCompression::Auto
     }
 }
 
@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn compresses_only_toward_the_proxy_that_advertised_zstd() {
-        let (plain, zstd) = (RequestCompression::None, RequestCompression::Zstd);
+        let (plain, zstd) = (RequestCompression::Auto, RequestCompression::Zstd);
         let prod = crate::env::PROD_CLI_CHAT_PROXY_BASE_URL;
         let dev = "http://localhost:20016/v1";
         let pinned = "https://proxy.corp.example/v1";

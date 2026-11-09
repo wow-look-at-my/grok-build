@@ -30,6 +30,8 @@ tokio-util = { workspace = true, features = ["compat"] }
 tracing = { workspace = true }
 url = { workspace = true }
 xai-acp-lib = { workspace = true }
+# The recording proxy forwards each request upstream with it.
+xai-grok-net = { workspace = true }
 xai-tty-utils = { workspace = true }
 xai-spawn = { workspace = true }
 

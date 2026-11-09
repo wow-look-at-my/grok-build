@@ -1584,7 +1584,7 @@
 						"top_p": 0.949999988079071,
 						"api_backend": "chat_completions",
 						"auth_scheme": "bearer",
-						"request_compression": "none",
+						"request_compression": "auto",
 						"extra_headers": {},
 						"extra_response_includes": [],
 						"query_params": {},
@@ -1669,7 +1669,7 @@
 						},
 						"request_compression": {
 							"$ref": "#/$defs/RequestCompression",
-							"default": "none"
+							"default": "auto"
 						},
 						"extra_headers": {
 							"type": "object",
@@ -6120,12 +6120,25 @@
 			}
 		},
 		"RequestCompression": {
-			"type": "string",
-			"enum": [
-				"none",
-				"zstd"
+			"oneOf": [
+				{
+					"type": "string",
+					"enum": [
+						"zstd"
+					]
+				},
+				{
+					"type": "string",
+					"const": "auto",
+					"description": "Compress only toward an origin whose response sent `Accept-Encoding: zstd`."
+				},
+				{
+					"type": "string",
+					"const": "off",
+					"description": "Never compress. `GROK_REQUEST_COMPRESSION=0` sets this."
+				}
 			],
-			"description": "Set by the shell: `Zstd` only toward the cli-chat-proxy that advertised it."
+			"description": "Set by the shell. `Zstd` is the cli-chat-proxy that advertised it in its\nsettings."
 		},
 		"S3AccessCredentials": {
 			"type": "object",

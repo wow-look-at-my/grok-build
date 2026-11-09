@@ -12251,6 +12251,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
+ "sha2 0.10.9",
  "strum 0.27.2",
  "tokio",
  "tokio-util",
@@ -12745,6 +12746,7 @@ dependencies = [
  "tracing",
  "url",
  "xai-acp-lib",
+ "xai-grok-net",
  "xai-spawn",
  "xai-tty-utils",
 ]

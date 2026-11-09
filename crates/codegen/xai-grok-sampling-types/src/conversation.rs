@@ -78,8 +78,8 @@ use crate::rs;
 use crate::tool_overrides::{ToolOverrides, WebSearchOptions, XSearchOptions, drop_empty};
 use crate::types::{
     ChatCompletionRequest, ChatContentBlock, ChatMessageProfile, ChatRequestMessage,
-    ChatResponseMessage, FinishReason, ImageUrl, MessageContent, Role, ToolCallRequest, ToolChoice,
-    ToolDefinition, TraceContext, Usage,
+    ChatResponseMessage, FinishReason, ImageUrl, MessageContent, PromptTokensDetails, Role,
+    ToolCallRequest, ToolChoice, ToolDefinition, TraceContext, Usage,
 };
 
 // ============================================================================
@@ -991,7 +991,10 @@ impl From<Usage> for TokenUsage {
                 .as_ref()
                 .map_or(0, |d| d.reasoning_tokens),
             cached_prompt_tokens,
-            cache_creation_prompt_tokens: 0,
+            cache_creation_prompt_tokens: u
+                .prompt_tokens_details
+                .as_ref()
+                .map_or(0, PromptTokensDetails::cache_write),
         }
     }
 }
@@ -5340,6 +5343,33 @@ mod tests {
         let pricing = ModelPricing::default();
         let usage = usage_with(1_000, 200, 0, 0);
         assert_eq!(compute_cost_ticks(Some(&usage), &pricing), None);
+    }
+
+    /// A Chat Completions usage that reports cache writes, under both spellings
+    /// a translating proxy sends at once, prices them as cache writes.
+    #[test]
+    fn chat_usage_reads_cache_write_tokens() {
+        let usage: Usage = serde_json::from_value(serde_json::json!({
+            "prompt_tokens": 1000,
+            "completion_tokens": 10,
+            "total_tokens": 1010,
+            "prompt_tokens_details": {
+                "cached_tokens": 600,
+                "cached_creation_tokens": 300,
+                "cache_write_tokens": 300
+            }
+        }))
+        .expect("usage with two cache-write spellings parses");
+        let tokens = TokenUsage::from(usage);
+        assert_eq!(tokens.cached_prompt_tokens, 600);
+        assert_eq!(tokens.cache_creation_prompt_tokens, 300);
+
+        let plain: Usage = serde_json::from_value(serde_json::json!({
+            "prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6,
+            "prompt_tokens_details": {"cached_tokens": 2}
+        }))
+        .expect("OpenAI usage parses");
+        assert_eq!(TokenUsage::from(plain).cache_creation_prompt_tokens, 0);
     }
 
     /// No usage → `None` regardless of pricing.

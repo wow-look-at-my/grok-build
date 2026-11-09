@@ -90,6 +90,7 @@ mod otel_event;
 mod otel_fixtures;
 mod otel_recorder;
 pub mod process;
+pub mod recording_proxy;
 mod request_log;
 pub mod resources;
 pub mod sandbox;

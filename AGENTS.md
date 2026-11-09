@@ -213,6 +213,13 @@ CI is the source of truth and builds every pushed branch. A branch that is only 
 
 [docs/model-pricing-resolution-notes.md](docs/model-pricing-resolution-notes.md) holds this section.
 
+## Request-body compression
+
+- JSON bodies of 64 KiB. This covers and up go out zstd-compressed toward the cli-chat-proxy that lists `zstd` in its settings. And toward any origin whose last response with an `Accept-Encoding` header listed `zstd` (RFC 7694, `xai-grok-sampler/src/request_compression.rs`). A later `Accept-Encoding` without `zstd` stops it for that origin.
+- `GROK_REQUEST_COMPRESSION=0` maps to `RequestCompression::Off`, which no advertisement overrides.
+- An origin that also sends `X-Zstd-Delta: sha256` keeps request bodies (ai-proxy). Each later body there is a zstd frame against the client's previous one, named in `X-Zstd-Base` (`SamplingClient::send_net`). A 409 with `X-Zstd-Base-Missing` sends the same body once more as a full frame. The bases are process-wide (`pick_delta_base`), because each turn builds a new client. A body builds on the kept body for its URL that shares its longest prefix, so concurrent conversations keep their own base.
+- `xai-grok-shell`'s `test_ai_proxy_delta_e2e` runs the built binary through a real `ai-proxy` (`$AI_PROXY`, else `PATH`) to a mock Messages and a provider of the mock Chat Completions. It asserts the deltas on the wire with `RecordingProxy`.
+
 ## Stream-timing notes
 
 - `itl_intervals_ms` truncates every gap to whole milliseconds. A stream above many chunks/s reads as a run of zeros and `itl_p50_ms` reports 0 for one that stutters. `InferenceLatencyStats.chunk_offsets_us` keeps each content chunk's arrival offset from `stream_start` in microseconds instead, off the `Instant`s all backend streams already record.
