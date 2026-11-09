@@ -47,7 +47,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Attempts per release download.
-const FETCH_ATTEMPTS: u32 = 6;
+const FETCH_ATTEMPTS: u32 = 11;
+
+/// Longest wait between download attempts.
+const FETCH_MAX_WAIT_SECS: u64 = 60;
 
 /// Any other 4xx is the tree's answer: it returns at once. The last failure is
 /// the one the caller reports.
@@ -59,7 +62,8 @@ fn fetch_release(
     let mut last = String::new();
     for attempt in 0..FETCH_ATTEMPTS {
         if attempt > 0 {
-            std::thread::sleep(std::time::Duration::from_secs(2u64 << (attempt - 1)));
+            let wait = (2u64 << (attempt - 1)).min(FETCH_MAX_WAIT_SECS);
+            std::thread::sleep(std::time::Duration::from_secs(wait));
         }
         let resp = match request::blocking::get(url) {
             Ok(resp) => resp,
