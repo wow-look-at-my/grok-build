@@ -800,6 +800,39 @@ impl ScrollbackState {
         false
     }
 
+    /// Name the compaction model on the latest compaction start marker, manual or auto.
+    /// Only the latest marker is named, and only once. Returns false when it already has a model or none exists.
+    pub fn set_compaction_start_model(&mut self, model: &str) -> bool {
+        use super::blocks::SessionEvent;
+        let Some(entry) = self.entries.values_mut().rev().find(|entry| {
+            matches!(
+                &entry.block,
+                RenderBlock::SessionEvent(block) if matches!(
+                    block.event,
+                    SessionEvent::CompactStarted { .. } | SessionEvent::CompactionStarted { .. }
+                )
+            )
+        }) else {
+            return false;
+        };
+        let RenderBlock::SessionEvent(block) = &mut entry.block else {
+            return false;
+        };
+        let (SessionEvent::CompactStarted { model: slot }
+        | SessionEvent::CompactionStarted { model: slot, .. }) = &mut block.event
+        else {
+            return false;
+        };
+        if slot.is_some() {
+            return false;
+        }
+        *slot = Some(model.to_owned());
+        let id = entry.id;
+        entry.invalidate_cache();
+        self.mark_height_dirty(id);
+        true
+    }
+
     /// Mark an entry's height as dirty, requiring recomputation on next prepare_layout().
     ///
     /// Use this when you modify an entry's content directly (e.g., via get_by_id_mut()) and the change might affect its rendered height.

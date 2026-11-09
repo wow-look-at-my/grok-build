@@ -797,7 +797,7 @@ pub(super) fn maybe_drain_queue(agent: &mut AgentView, notices: &mut Vec<String>
                         .map(str::to_string);
                     (
                         AgentCommand::Compact,
-                        SessionEvent::CompactStarted,
+                        SessionEvent::CompactStarted { model: None },
                         Effect::Compact {
                             agent_id,
                             session_id,
@@ -1661,9 +1661,9 @@ mod tests {
             matches!(
                 events.as_slice(),
                 [
-                    SessionEvent::CompactStarted,
+                    SessionEvent::CompactStarted { .. },
                     SessionEvent::CompactionFailed { .. },
-                    SessionEvent::CompactStarted,
+                    SessionEvent::CompactStarted { .. },
                     SessionEvent::CompactionFailed { .. },
                 ]
             ),

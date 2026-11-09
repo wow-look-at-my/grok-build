@@ -60,12 +60,59 @@
             "hold prompt text for re-auth auto-resubmit if compact fails with auth"
         );
         match last_session_event(&scrollback) {
-            Some(SessionEvent::CompactionStarted { percentage, reason }) => {
+            Some(SessionEvent::CompactionStarted {
+                percentage, reason, ..
+            }) => {
                 assert_eq!(percentage, 85);
                 assert_eq!(reason, "threshold", "threshold compact keeps its reason");
             }
             other => panic!("expected CompactionStarted, got {other:?}"),
         }
+    }
+
+    /// The shell names the compaction model after the start marker is drawn.
+    /// The marker and the status line then read "Compacting with <model>…".
+    #[test]
+    fn compaction_model_names_the_start_marker_and_the_session() {
+        let mut session = make_session(Some("s1"));
+        let mut scrollback = ScrollbackState::new();
+        let started = XaiSessionUpdate::AutoCompactStarted {
+            tokens_used: 90000,
+            context_window: 131072,
+            percentage: 85,
+            reason: "threshold".into(),
+        };
+        assert!(apply_session_event(&started, &mut session, &mut scrollback, false));
+        assert_eq!(session.compaction_model, None);
+        let named = XaiSessionUpdate::CompactionModel {
+            model: "dense-model".into(),
+        };
+        assert!(apply_session_event(&named, &mut session, &mut scrollback, false));
+        assert_eq!(session.compaction_model.as_deref(), Some("dense-model"));
+        assert_eq!(
+            session.tracker.activity(),
+            Some(TurnActivity::AutoCompacting {
+                model: Some("dense-model".into())
+            }),
+            "the running activity names the model for every activity label"
+        );
+        let marker = last_session_event(&scrollback).expect("a start marker");
+        assert_eq!(
+            marker.message(),
+            "Context 85% full. Compacting with dense-model…"
+        );
+
+        // A manual `/compact` marker is named the same way.
+        scrollback.push_block(RenderBlock::session_event(SessionEvent::CompactStarted {
+            model: None,
+        }));
+        assert!(scrollback.set_compaction_start_model("dense-model"));
+        let marker = last_session_event(&scrollback).expect("a manual marker");
+        assert_eq!(marker.message(), "Compacting with dense-model…");
+        assert!(
+            !scrollback.set_compaction_start_model("other"),
+            "a named marker keeps its model"
+        );
     }
 
     #[test]
@@ -86,7 +133,9 @@
         };
         assert!(apply_child_view_session_event(&mut agent, &update, false));
         match last_session_event(&agent.scrollback) {
-            Some(SessionEvent::CompactionStarted { percentage, reason }) => {
+            Some(SessionEvent::CompactionStarted {
+                percentage, reason, ..
+            }) => {
                 assert_eq!(percentage, 6);
                 assert_eq!(reason, MODEL_FAMILY_SWITCH_COMPACT_BANNER);
             }
@@ -912,7 +961,7 @@
     fn apply_compaction_completed_defers_message_until_turn_end() {
         let mut session = make_session(Some("s1"));
         let mut scrollback = ScrollbackState::new();
-        session.set_compaction_activity(Some(TurnActivity::AutoCompacting));
+        session.set_compaction_activity(Some(TurnActivity::AutoCompacting { model: None }));
         let update = XaiSessionUpdate::AutoCompactCompleted {
             tokens_before: Some(858_000),
             tokens_after: 66_000,
@@ -1004,7 +1053,7 @@
         let mut agent = make_agent(Some("s1"));
         agent
             .session
-            .set_compaction_activity(Some(TurnActivity::AutoCompacting));
+            .set_compaction_activity(Some(TurnActivity::AutoCompacting { model: None }));
 
         let update = XaiSessionUpdate::AutoCompactCompleted {
             tokens_before: Some(858_000),
