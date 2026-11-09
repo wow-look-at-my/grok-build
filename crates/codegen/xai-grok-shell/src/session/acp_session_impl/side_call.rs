@@ -18,77 +18,12 @@ pub(crate) fn should_retry_aux_call(e: &xai_grok_sampling_types::SamplingError) 
     e.is_retryable() && !e.is_rate_limited() && !e.is_retry_vetoed()
 }
 
-/// Bill one side call to the session that `chat_state` belongs to, priced at `model_id`.
-/// A call that reported neither usage nor cost bills nothing.
-/// It never touches context-window accounting.
-pub(crate) fn bill_side_call(
-    chat_state: &xai_chat_state::ChatStateHandle,
-    model_id: &str,
-    call: xai_grok_sampler::stream::usage::CallUsage,
-    api_duration_ms: Option<u64>,
-) {
-    let xai_grok_sampler::stream::usage::CallUsage {
-        usage,
-        cost_usd_ticks,
-    } = call;
-    if usage.is_none() && cost_usd_ticks.is_none() {
-        return;
-    }
-    super::sampler_turn::bill_model_call(
-        chat_state,
-        super::sampler_turn::ModelCallKind::SideCall,
-        Some(model_id.to_owned()),
-        &usage.unwrap_or_default(),
-        api_duration_ms,
-        cost_usd_ticks,
-    );
-}
-
-/// Collect one side call and bill what the provider reported to `chat_state`.
-/// The price uses the model the request named, else the client's model.
-/// A response the length policy rejects is still billed.
-pub(crate) async fn collect_billed_side_call(
-    chat_state: &xai_chat_state::ChatStateHandle,
-    client: &xai_grok_sampler::SamplingClient,
-    request: ConversationRequest,
-    idle_timeout: std::time::Duration,
-) -> Result<xai_grok_sampling_types::ConversationResponse, SamplingError> {
-    let collected = client
-        .conversation_collect_metered(request, idle_timeout)
-        .await;
-    bill_side_call(
-        chat_state,
-        &collected.model,
-        collected.usage,
-        collected.api_duration_ms,
-    );
-    collected.result
-}
-
-impl SessionActor {
-    /// [`collect_billed_side_call`] on this session's ledger with the default idle timeout.
-    pub(crate) async fn collect_side_call(
-        &self,
-        client: &xai_grok_sampler::SamplingClient,
-        request: ConversationRequest,
-    ) -> Result<xai_grok_sampling_types::ConversationResponse, SamplingError> {
-        collect_billed_side_call(
-            &self.chat_state_handle,
-            client,
-            request,
-            xai_grok_sampler::DEFAULT_COLLECT_IDLE_TIMEOUT,
-        )
-        .await
-    }
-}
-
 /// Run a one-shot auxiliary call under [`aux_retry_policy`]. The first retry
 /// moves to HTTP/1.1, as the main turn's sampler does
 /// (`RetryDecision::RetryWithClientRebuild`). Without that, every retry goes
 /// out on the same bad HTTP/2 connection, and the side call fails while the
-/// main turn recovers. Each try bills to `chat_state`.
+/// main turn recovers. The client's sink bills each try.
 pub(crate) async fn collect_aux_call(
-    chat_state: &xai_chat_state::ChatStateHandle,
     client: &xai_grok_sampler::SamplingClient,
     base: &ConversationRequest,
     label: &str,
@@ -99,14 +34,7 @@ pub(crate) async fn collect_aux_call(
     let mut backoff = aux_retry_policy().build();
     let mut on_http1 = false;
     loop {
-        let err = match collect_billed_side_call(
-            chat_state,
-            &client,
-            fresh_req_id(base, label),
-            xai_grok_sampler::DEFAULT_COLLECT_IDLE_TIMEOUT,
-        )
-        .await
-        {
+        let err = match client.conversation_collect(fresh_req_id(base, label)).await {
             Ok(response) => return Ok(response),
             Err(err) => err,
         };
@@ -510,8 +438,7 @@ mod aux_retry_tests {
         let base = ConversationRequest::from_items(vec![ConversationItem::user("hi")]);
 
         let mut retries = 0usize;
-        let ledger = xai_chat_state::ChatStateHandle::noop();
-        let response = collect_aux_call(&ledger, &client, &base, "test", |_, _| retries += 1)
+        let response = collect_aux_call(&client, &base, "test", |_, _| retries += 1)
             .await
             .expect("the retry must reach a working connection");
 

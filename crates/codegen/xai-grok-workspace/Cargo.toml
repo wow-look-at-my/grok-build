@@ -39,6 +39,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v5", "v7"] }
 xai-grok-agent = { path = "../xai-grok-agent" }
 xai-grok-tools = { path = "../xai-grok-tools" }
+xai-grok-sampler = { workspace = true }
 xai-grok-tools-api = { path = "../xai-grok-tools-api" }
 # `DiagHandle`, held by the hub config and threaded through `connect_hub`.
 xai-grok-diag-server = { workspace = true }

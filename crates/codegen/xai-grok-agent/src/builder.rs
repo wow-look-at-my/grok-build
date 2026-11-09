@@ -93,6 +93,7 @@ pub struct AgentBuilder {
     context_window_tokens: Option<u64>,
     api_key_provider: Option<xai_grok_tools::types::SharedApiKeyProvider>,
     attribution_callback: Option<xai_grok_tools::SharedAttributionCallback>,
+    usage_sink: Option<xai_grok_sampler::SharedUsageSink>,
     /// Seeded into the toolset's `TruncationCfg` after finalize; the MCP truncation path consults it before the process-global
     /// cap. Set only when the repo-level `[mcp] max_output_bytes` tier wins (see `resolve_max_mcp_output_bytes_for_cwd`).
     mcp_max_output_bytes: Option<usize>,
@@ -312,6 +313,7 @@ impl AgentBuilder {
             context_window_tokens: None,
             api_key_provider: None,
             attribution_callback: None,
+            usage_sink: None,
             mcp_max_output_bytes: None,
             system_reminder_tag: xai_grok_tools::reminders::DEFAULT_REMINDER_TAG,
             persisted_announced_skill_names: None,
@@ -547,6 +549,11 @@ impl AgentBuilder {
         callback: xai_grok_tools::SharedAttributionCallback,
     ) -> Self {
         self.attribution_callback = Some(callback);
+        self
+    }
+    /// The sink that bills model calls the tools make (`web_search`).
+    pub fn with_usage_sink(mut self, sink: xai_grok_sampler::SharedUsageSink) -> Self {
+        self.usage_sink = Some(sink);
         self
     }
     /// Harnesses trained on a different tag variant call this so reminders match what their model was trained on.
@@ -1202,6 +1209,7 @@ impl AgentBuilder {
                 api_key_provider: self.api_key_provider,
                 auth_provider: None,
                 attribution_callback: self.attribution_callback,
+                usage_sink: self.usage_sink,
                 system_reminder_tag: self.system_reminder_tag,
             },
         )

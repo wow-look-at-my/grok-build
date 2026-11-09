@@ -144,7 +144,7 @@ impl SessionActor {
 
         let response = match xai_grok_sampler::timeout_excluding_queue(
             TITLE_REFRESH_MODEL_TIMEOUT,
-            self.collect_side_call(&setup.client, request),
+            setup.client.conversation_collect(request),
         )
         .await
         {

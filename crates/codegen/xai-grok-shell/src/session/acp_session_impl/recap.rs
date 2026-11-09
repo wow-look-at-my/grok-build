@@ -138,20 +138,14 @@ impl SessionActor {
 
         // conversation_collect is one-shot (no sampler-actor retry); /btw adds its own bounded transient-failure retry.
         let attempts = std::cell::Cell::new(1u32);
-        let result = collect_aux_call(
-            &self.chat_state_handle,
-            &sampling_client,
-            &base_request,
-            "btw",
-            |e, backoff| {
-                attempts.set(attempts.get() + 1);
-                tracing::warn!(
-                    backoff_ms = backoff.as_millis() as u64,
-                    error = %e,
-                    "side question transient failure; retrying"
-                );
-            },
-        )
+        let result = collect_aux_call(&sampling_client, &base_request, "btw", |e, backoff| {
+            attempts.set(attempts.get() + 1);
+            tracing::warn!(
+                backoff_ms = backoff.as_millis() as u64,
+                error = %e,
+                "side question transient failure; retrying"
+            );
+        })
         .await;
 
         match result {
@@ -328,7 +322,7 @@ impl SessionActor {
         // The artifact records the exact model-facing items after trust projection; the canonical conversation state remains raw
         let chat_history_for_artifact = request.items.clone();
 
-        let response = match self.collect_side_call(&setup.client, request).await {
+        let response = match setup.client.conversation_collect(request).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(error = %e, "recap: model call failed");
@@ -590,13 +584,9 @@ impl SessionActor {
         };
 
         // Collect via the client so the LengthPolicy gate applies: a suggestion truncated at the 50-token cap must not become ghost text
-        match super::side_call::collect_billed_side_call(
-            &self.chat_state_handle,
-            &sampling_client,
-            request,
-            std::time::Duration::from_secs(5),
-        )
-        .await
+        match sampling_client
+            .conversation_collect_with_idle_timeout(request, std::time::Duration::from_secs(5))
+            .await
         {
             Ok(response) => {
                 let text = response.assistant_text();
@@ -699,7 +689,7 @@ impl SessionActor {
         );
         let reasoning_effort = suggest_reasoning.effort;
         let request_model = sampling_config.model.clone();
-        let sampling_client = match xai_grok_sampler::SamplingClient::new(sampling_config) {
+        let sampling_client = match self.sampling_client(sampling_config) {
             Ok(client) => client,
             Err(e) => {
                 tracing::debug!(error = %e, "prompt suggest: sampling client unavailable");
@@ -755,7 +745,7 @@ impl SessionActor {
             });
         };
 
-        let response = match self.collect_side_call(&sampling_client, request).await {
+        let response = match sampling_client.conversation_collect(request).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::debug!(error = %e, "prompt suggest inference failed");

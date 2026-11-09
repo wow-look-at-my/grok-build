@@ -1,5 +1,6 @@
 use super::support::*;
 use super::*;
+use xai_grok_sampler::UsageSink as _;
 use xai_grok_sampling_types::{
     BackendToolCallItem, BackendToolKind, ConversationItem, ConversationResponse, TokenUsage, rs,
 };
@@ -95,7 +96,7 @@ async fn response_reasoning_does_not_inflate_model_reported_context() {
                 stop_sequence: None,
             };
 
-            actor.record_response_token_usage(&response, None);
+            actor.record_response_token_usage(&response, "test-model");
             let usage_reported = response.usage.is_some();
             actor
                 .record_response_items(response.items, usage_reported)
@@ -170,7 +171,7 @@ async fn response_without_usage_keeps_model_output_as_estimated_growth() {
                 stop_sequence: None,
             };
 
-            actor.record_response_token_usage(&response, None);
+            actor.record_response_token_usage(&response, "test-model");
             let usage_reported = response.usage.is_some();
             actor
                 .record_response_items(response.items, usage_reported)
@@ -212,7 +213,17 @@ async fn updates_chat_state_total_tokens_from_response_usage() {
             let _sync = actor.chat_state_handle.get_total_tokens().await;
             assert_eq!(actor.chat_state_handle.get_total_tokens().await, 0);
 
-            actor.record_response_token_usage(&response_with_usage(150_000), None);
+            let response = response_with_usage(150_000);
+            // The client's sink bills the call as it arrives; the main loop only counts the round.
+            actor
+                .usage_sink()
+                .record_call(xai_grok_sampler::BilledCall {
+                    model: "test-model".into(),
+                    usage: response.usage.clone(),
+                    cost_usd_ticks: None,
+                    duration: std::time::Duration::from_millis(5),
+                });
+            actor.record_response_token_usage(&response, "test-model");
 
             assert_eq!(actor.chat_state_handle.get_total_tokens().await, 150_000);
             let prompt = actor
@@ -221,19 +232,49 @@ async fn updates_chat_state_total_tokens_from_response_usage() {
                 .await
                 .expect("chat-state alive")
                 .expect("prompt ledger opened");
-            assert_eq!(prompt.totals.model_calls, 1);
+            assert_eq!(prompt.totals.model_calls, 1, "billed once, not twice");
+            assert_eq!(prompt.main_loop_model_calls, 1);
             assert_eq!(prompt.totals.input_tokens, 149_950);
             assert!(prompt.totals.cost_usd_ticks.is_none());
-            assert_eq!(
-                actor
-                    .chat_state_handle
-                    .try_get_session_usage()
-                    .await
-                    .expect("chat-state actor alive")
-                    .totals
-                    .model_calls,
-                1
-            );
+            let session = actor
+                .chat_state_handle
+                .try_get_session_usage()
+                .await
+                .expect("chat-state actor alive");
+            assert_eq!(session.totals.model_calls, 1);
+            assert_eq!(session.main_loop_model_calls, 1);
+        })
+        .await;
+}
+
+/// The per-response price is the price the sink billed for the same call.
+#[tokio::test(flavor = "current_thread")]
+async fn the_per_response_cost_equals_what_the_sink_billed() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (gateway_tx, _) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(0, 256_000, 85, gateway_tx, persistence_tx).await;
+            let mut response = response_with_usage(10_000);
+            response.cost_usd_ticks = Some(4_200);
+            actor
+                .usage_sink()
+                .record_call(xai_grok_sampler::BilledCall {
+                    model: "test-model".into(),
+                    usage: response.usage.clone(),
+                    cost_usd_ticks: Some(4_200),
+                    duration: std::time::Duration::ZERO,
+                });
+            let per_response = actor.record_response_token_usage(&response, "test-model");
+            let session = actor
+                .chat_state_handle
+                .try_get_session_usage()
+                .await
+                .expect("chat-state actor alive");
+            assert_eq!(per_response, Some(4_200));
+            assert_eq!(session.totals.cost_usd_ticks, per_response);
         })
         .await;
 }
@@ -249,7 +290,7 @@ async fn preserves_total_tokens_when_response_has_no_usage() {
             let actor = create_test_actor(99_999, 256_000, 85, gateway_tx, persistence_tx).await;
             let _sync = actor.chat_state_handle.get_total_tokens().await;
 
-            actor.record_response_token_usage(&response_without_usage(), None);
+            actor.record_response_token_usage(&response_without_usage(), "test-model");
 
             assert_eq!(actor.chat_state_handle.get_total_tokens().await, 99_999);
         })
@@ -286,7 +327,7 @@ async fn build_session_info_used_reflects_recorded_response() {
                 .push_user_message_and_ack(ConversationItem::user("hello hello hello hello"))
                 .await;
 
-            actor.record_response_token_usage(&response_with_usage(120_000), None);
+            actor.record_response_token_usage(&response_with_usage(120_000), "test-model");
 
             let info = actor.build_session_info().await;
             assert_eq!(info.context.used, 120_000);
@@ -339,7 +380,7 @@ async fn build_session_info_itemizes_reasoning_and_tool_calls() {
                 },
             ]));
             chat.push_tool_result(ConversationItem::tool_result("call-1", "t".repeat(40_000)));
-            actor.record_response_token_usage(&response_with_usage(30_000), None);
+            actor.record_response_token_usage(&response_with_usage(30_000), "test-model");
 
             let ctx = actor.build_session_info().await.context;
             let b = ctx.message_breakdown;
@@ -422,7 +463,7 @@ async fn stashes_per_turn_usage_in_chat_state() {
             );
 
             // The fixture splits total 200_000 into prompt 199_950 and completion 50
-            actor.record_response_token_usage(&response_with_usage(200_000), None);
+            actor.record_response_token_usage(&response_with_usage(200_000), "test-model");
 
             let stashed = actor
                 .chat_state_handle

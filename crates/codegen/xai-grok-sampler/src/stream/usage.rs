@@ -44,6 +44,15 @@ impl CallUsage {
     /// Usage and cost of the terminal `response` of a Responses stream.
     /// This removes the cost ticks that the client keeps in the response metadata.
     pub fn from_responses(response: &mut rs::Response) -> Self {
+        let call = Self::of_responses(response);
+        if let Some(metadata) = response.metadata.as_mut() {
+            metadata.remove(crate::client::COST_USD_TICKS_METADATA_KEY);
+        }
+        call
+    }
+
+    /// [`Self::from_responses`] that leaves the response as it is.
+    pub fn of_responses(response: &rs::Response) -> Self {
         // The SSE decoder already set `total_tokens` to the live context length; the billing fields are the wire values.
         let usage = response.usage.as_ref().map(|u| TokenUsage {
             prompt_tokens: u.input_tokens,
@@ -55,8 +64,8 @@ impl CallUsage {
         });
         let cost_usd_ticks = response
             .metadata
-            .as_mut()
-            .and_then(|m| m.remove(crate::client::COST_USD_TICKS_METADATA_KEY))
+            .as_ref()
+            .and_then(|m| m.get(crate::client::COST_USD_TICKS_METADATA_KEY))
             .and_then(|s| s.parse::<i64>().ok());
         Self {
             usage,
@@ -116,6 +125,12 @@ impl MessagesUsageAccumulator {
             self.cache_creation_input_tokens = cache_creation;
         }
         self.observe_cost(usage.cost_in_usd_ticks, usage.cost.as_ref());
+    }
+
+    /// The usage of a whole non-streaming Messages response.
+    pub fn observe_response(&mut self, usage: &MessagesUsage) {
+        self.observe_start(usage);
+        self.output_tokens = usage.output_tokens;
     }
 
     /// A later event with no cost never erases an earlier reported cost.
