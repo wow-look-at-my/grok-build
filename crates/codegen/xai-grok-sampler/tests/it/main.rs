@@ -19,6 +19,7 @@ mod shared_http_kill_switch;
 mod shared_http_wire;
 mod support;
 mod test_actor;
+mod usage_sink;
 
 const OWN_PROCESS_ENV: &str = "XAI_TEST_OWN_PROCESS";
 

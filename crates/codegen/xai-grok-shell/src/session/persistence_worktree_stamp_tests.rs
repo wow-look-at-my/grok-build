@@ -2,18 +2,15 @@ use agent_client_protocol as acp;
 use serial_test::serial;
 use xai_grok_test_support::EnvGuard;
 
-use super::{
-    ExplicitSessionIdentity, OaiCompatClient, Summary, default_model_id, new_with_explicit_dir,
-};
+use super::{ExplicitSessionIdentity, Summary, default_model_id, new_with_explicit_dir};
 use crate::session::info::Info;
 
-/// A client needs a URL to build. The discard port answers nothing.
-fn discard_port_client() -> OaiCompatClient {
-    OaiCompatClient::new(xai_grok_sampler::SamplerConfig {
+/// A title config on the discard port, which answers nothing.
+fn discard_port_client() -> xai_grok_sampler::SamplerConfig {
+    xai_grok_sampler::SamplerConfig {
         base_url: "http://127.0.0.1:9/v1".to_owned(),
         ..xai_grok_sampler::SamplerConfig::default()
-    })
-    .unwrap()
+    }
 }
 
 fn worktree_cwd_under(home: &std::path::Path) -> String {

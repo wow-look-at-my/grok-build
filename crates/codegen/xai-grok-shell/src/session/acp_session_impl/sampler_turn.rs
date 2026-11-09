@@ -12,40 +12,6 @@ fn classifier_request_fits_context(input_tokens: u64, context_window: u64) -> bo
     input_tokens <= context_window.saturating_sub(CLASSIFIER_REQUEST_TOKEN_RESERVE)
 }
 
-/// Which ledger slot a model call bills: a main-loop call also counts as a turn round.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ModelCallKind {
-    MainLoop,
-    /// A call outside the main loop, such as compaction.
-    SideCall,
-}
-
-/// Bill one model call into the prompt and session ledgers of `chat_state` and return the cost recorded.
-/// The cost is the provider-reported one (ticks, else the USD float the sampler converted).
-/// Otherwise it is `usage` priced at the rates `model_pricing::resolve` finds for `model_id`.
-pub(crate) fn bill_model_call(
-    chat_state: &xai_chat_state::ChatStateHandle,
-    kind: ModelCallKind,
-    model_id: Option<String>,
-    usage: &xai_grok_sampling_types::TokenUsage,
-    api_duration_ms: Option<u64>,
-    reported_cost_ticks: Option<i64>,
-) -> Option<i64> {
-    let cost_ticks = reported_cost_ticks.or_else(|| {
-        let pricing = crate::agent::model_pricing::resolve(model_id.as_deref().unwrap_or(""));
-        xai_grok_sampling_types::compute_cost_ticks(Some(usage), &pricing)
-    });
-    match kind {
-        ModelCallKind::MainLoop => {
-            chat_state.record_model_call_usage(model_id, usage.clone(), api_duration_ms, cost_ticks)
-        }
-        ModelCallKind::SideCall => {
-            chat_state.record_side_call_usage(model_id, usage.clone(), api_duration_ms, cost_ticks)
-        }
-    }
-    cost_ticks
-}
-
 /// Per-prompt cap on the Length tool-call salvage streak. Matches the agent implementation's `MAX_RETRY_ITERATIONS`.
 pub(super) const MAX_OUTPUT_TOKEN_LIMIT_RETRIES: u32 = 5;
 
@@ -830,6 +796,7 @@ impl SessionActor {
             // Attribute sampler 401s against the bearer sent on the wire.
             // `None` for sessions spawned without an `AuthManager` (BYOK direct, certain test fixtures)
             attribution_callback: self.attribution_callback.clone(),
+            usage_sink: Some(self.usage_sink()),
             // Per-request bearer override is only valid for session-token auth.
             // Explicit API-key/env-key models must keep their configured bearer and must not be overwritten by the interactive session token
             bearer_resolver: if use_bearer_resolver {
@@ -919,7 +886,7 @@ impl SessionActor {
                             let config = session.reconstruct_full_config().await;
                             let context_window = config.context_window;
                             let model = config.model.clone();
-                            let client = xai_grok_sampler::SamplingClient::new(config).map_err(|e| {
+                            let client = session.sampling_client(config).map_err(|e| {
                                 xai_grok_workspace::permission::ClassifierFailure::TransportError(
                                     e.to_string(),
                                 )
@@ -971,7 +938,7 @@ impl SessionActor {
                         x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
                         ..ConversationRequest::default()
                     };
-                    let fut = session.collect_side_call(&sampling_client, request);
+                    let fut = sampling_client.conversation_collect(request);
                     let response = xai_grok_sampler::timeout_excluding_queue(classify_timeout, fut)
                         .await
                         .map_err(|_| xai_grok_workspace::permission::ClassifierFailure::Timeout)?
@@ -1079,7 +1046,7 @@ impl SessionActor {
             self.client_identifier.clone(),
             Some(self.max_retries),
         );
-        match xai_grok_sampler::SamplingClient::new(cfg.clone()) {
+        match self.sampling_client(cfg.clone()) {
             Ok(client) => Some((client, cfg)),
             Err(e) => {
                 tracing::warn!(
@@ -1110,7 +1077,7 @@ impl SessionActor {
         );
         let model = cfg.model.clone();
         let context_window = cfg.context_window;
-        let client = xai_grok_sampler::SamplingClient::new(cfg)
+        let client = self.sampling_client(cfg)
             .map_err(
                 |e| tracing::warn!(error = %e, "auto classifier aux sampler build failed; using session model"),
             )
@@ -1132,8 +1099,9 @@ impl SessionActor {
 
         let mut full_config = self.reconstruct_full_config().await;
         full_config.force_http1 = force_http1;
-        let sampling_client =
-            xai_grok_sampler::SamplingClient::new(full_config).map_err(|e| self.to_acp_error(e))?;
+        let sampling_client = self
+            .sampling_client(full_config)
+            .map_err(|e| self.to_acp_error(e))?;
 
         Ok(sampling_client)
     }
@@ -2445,13 +2413,15 @@ impl SessionActor {
     /// Without it `state.total_tokens` would stay frozen at the `estimate_conversation_tokens` seed from `ChatState::new`.
     /// Resetting `estimated_tokens_since_model = 0` here also keeps the preflight-overflow guard accurate against the next turn's tool-result deltas.
     ///
-    /// Returns the cost (USD ticks) this one call was folded into the ledgers
-    /// with, so the caller can put it on the wire per response. The per-turn
-    /// bill is a sum and cannot be split back apart across a tool loop.
+    /// The client's usage sink already billed this call's tokens and cost.
+    /// This counts the main-loop round and returns the cost of this call,
+    /// priced as the sink priced it. The caller can put it on the wire per
+    /// response. The per-turn bill is a sum and cannot be split back apart
+    /// across a tool loop.
     pub(crate) fn record_response_token_usage(
         &self,
         response: &ConversationResponse,
-        api_duration_ms: Option<u64>,
+        session_model: &str,
     ) -> Option<i64> {
         if let Some(ref u) = response.usage {
             self.tool_context
@@ -2461,12 +2431,17 @@ impl SessionActor {
             self.chat_state_handle
                 .record_prompt_measurement(xai_chat_state::ProviderUsage::from_token_usage(u));
             self.chat_state_handle.record_last_turn_usage(u.clone());
-            let cost_ticks = self.record_model_call_cost(
-                ModelCallKind::MainLoop,
-                response.assistant().and_then(|a| a.model_id.clone()),
-                u,
-                api_duration_ms,
-                response.cost_usd_ticks,
+            self.chat_state_handle.record_main_loop_round();
+            // The sink prices by the model the provider named, else the model the request named.
+            let model = response
+                .assistant()
+                .and_then(|a| a.model_id.as_deref())
+                .filter(|m| !m.is_empty())
+                .unwrap_or(session_model);
+            let cost_ticks = crate::session::billed_client::price_model_call(
+                model,
+                Some(u),
+                xai_grok_sampling_types::reported_cost_ticks(response.cost_usd_ticks),
             );
             self.signals_handle()
                 .record_token_usage(u.completion_tokens, u.reasoning_tokens);
@@ -2486,47 +2461,23 @@ impl SessionActor {
         }
     }
 
-    /// Bill one model call into the prompt and session ledgers and return the cost recorded.
-    /// The cost is the provider-reported one (ticks, else the USD float the sampler converted).
-    /// Otherwise it is `usage` priced at the rates `model_pricing::resolve` finds for `model_id`.
-    /// This touches no context-window accounting.
-    pub(crate) fn record_model_call_cost(
+    /// The usage sink of this session. Every client this session builds reports to it.
+    pub(crate) fn usage_sink(&self) -> xai_grok_sampler::SharedUsageSink {
+        crate::session::billed_client::session_usage_sink(&self.chat_state_handle)
+    }
+
+    /// Build a client for `cfg` through the sanctioned constructor, which refuses a config without a sink.
+    pub(crate) fn sampling_client(
         &self,
-        kind: ModelCallKind,
-        model_id: Option<String>,
-        usage: &xai_grok_sampling_types::TokenUsage,
-        api_duration_ms: Option<u64>,
-        reported_cost_ticks: Option<i64>,
-    ) -> Option<i64> {
-        bill_model_call(
-            &self.chat_state_handle,
-            kind,
-            model_id,
-            usage,
-            api_duration_ms,
-            reported_cost_ticks,
-        )
+        cfg: xai_grok_sampler::SamplerConfig,
+    ) -> Result<xai_grok_sampler::SamplingClient, SamplingError> {
+        crate::session::billed_client::billed_sampling_client(cfg)
     }
 
     /// The session ledger's cost total in USD ticks, or `None` when nothing is priced or the ledger did not answer.
     pub(crate) async fn reported_session_cost_ticks(&self) -> Option<i64> {
         let ledger = self.chat_state_handle.try_get_session_usage().await.ok()?;
         xai_grok_sampling_types::reported_cost_ticks(ledger.totals.cost_usd_ticks)
-    }
-
-    /// Bill one compaction call as a side call priced at `model_id`, the model the compaction request named.
-    /// A call that reported neither usage nor cost bills nothing.
-    pub(crate) fn record_compaction_call(
-        &self,
-        model_id: &str,
-        call: crate::session::helpers::session_compact::CompactCallUsage,
-    ) {
-        super::side_call::bill_side_call(
-            &self.chat_state_handle,
-            model_id,
-            call.reported,
-            call.api_duration_ms,
-        );
     }
 
     /// Persist one response's items without re-estimating model output when provider usage already includes it.

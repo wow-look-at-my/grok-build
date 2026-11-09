@@ -42,6 +42,7 @@ axum = { workspace = true }
 axum-server = { workspace = true, features = ["tls-rustls-no-provider"] }
 # gzip fixtures for the response-compression wire tests.
 flate2 = { workspace = true }
+parking_lot = { workspace = true }
 rcgen = { workspace = true }
 rustls = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["registry"] }

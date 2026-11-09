@@ -142,6 +142,8 @@ pub(crate) struct AgentRebuildSpec {
     pub plugin_registry: Option<Arc<xai_grok_agent::plugins::PluginRegistry>>,
     pub api_key_provider: Option<SharedApiKeyProvider>,
     pub attribution_callback: Option<xai_grok_tools::SharedAttributionCallback>,
+    /// The session's sink, which bills the model calls tools make (`web_search`).
+    pub usage_sink: Option<xai_grok_sampler::SharedUsageSink>,
     pub tool_params_json: ResolvedToolParamsJson,
     pub subagent_event_tx: Option<UnboundedSender<SubagentEvent>>,
     /// Route from this session to the one that spawned it, for `send_message`.
@@ -254,6 +256,7 @@ impl AgentRebuildSpec {
             plugin_registry,
             api_key_provider,
             attribution_callback,
+            usage_sink,
             tool_params_json,
             subagent_event_tx,
             parent_messenger,
@@ -371,6 +374,9 @@ impl AgentRebuildSpec {
         }
         if let Some(attribution_callback) = attribution_callback.clone() {
             builder = builder.with_attribution_callback(attribution_callback);
+        }
+        if let Some(usage_sink) = usage_sink.clone() {
+            builder = builder.with_usage_sink(usage_sink);
         }
         if let Some(bash_params_json) = tool_params_json.bash.clone() {
             builder = builder.with_bash_params(bash_params_json);
@@ -550,6 +556,7 @@ pub(crate) fn test_rebuild_spec_default() -> Arc<AgentRebuildSpec> {
         plugin_registry: None,
         api_key_provider: None,
         attribution_callback: None,
+        usage_sink: None,
         tool_params_json: ResolvedToolParamsJson::default(),
         subagent_event_tx: None,
         parent_messenger: None,

@@ -24,6 +24,13 @@ fn allow_endpoint(url: &str) -> Result<(), xai_tool_runtime::ToolError> {
     })
 }
 
+fn search_error(message: String) -> xai_tool_runtime::ToolError {
+    xai_tool_runtime::ToolError::execution(
+        xai_tool_protocol::ToolId::new("web_search").expect("valid"),
+        message,
+    )
+}
+
 #[derive(Clone)]
 pub struct WebSearchClient {
     http: xai_grok_net::HttpClient,
@@ -33,6 +40,10 @@ pub struct WebSearchClient {
     scheme: &'static str,
     /// Credential headers from `extra_headers`.
     credential_headers: HeaderMap,
+    /// The configured headers as written. The Responses call hands them to its sampling client.
+    extra_headers: indexmap::IndexMap<String, String>,
+    /// Bills each search's model call. A Responses search with no sink is refused.
+    usage_sink: Option<xai_grok_sampler::SharedUsageSink>,
     base_url: String,
     /// Synthesis model. Empty for [`SearchBackend::Kagi`], which has none.
     model: String,
@@ -160,6 +171,8 @@ impl WebSearchClient {
             api_key: Some(api_key.clone()),
             scheme,
             credential_headers,
+            extra_headers: extra_headers.clone(),
+            usage_sink: None,
             base_url: base_url.clone(),
             model,
             backend,
@@ -193,52 +206,126 @@ impl WebSearchClient {
         }
         (model_allowed.filter(|d| !d.is_empty()), None)
     }
-    /// Build the serialized `/responses` request body for a single web search. The request always
-    /// carries exactly one tool (`web_search`) at index 0.
+    /// Build the `/responses` request for a single web search. The request always carries exactly
+    /// one tool (`web_search`), as raw JSON so it can name `excluded_domains`.
+    fn build_request(
+        &self,
+        query: &str,
+        allowed_domains: Option<Vec<String>>,
+        excluded_domains: Option<Vec<String>>,
+    ) -> Result<xai_grok_sampling_types::CreateResponseWrapper, xai_tool_runtime::ToolError> {
+        let web_search = rs::WebSearchToolArgs::default()
+            .filters(rs::WebSearchToolFilters { allowed_domains })
+            .build()
+            .map_err(|e| search_error(format!("Failed to build web search tool: {e}")))?;
+        let mut tool = serde_json::to_value(rs::Tool::WebSearch(web_search))
+            .map_err(|e| search_error(format!("Failed to serialize web search tool: {e}")))?;
+        if let Some(excluded) = excluded_domains.filter(|d| !d.is_empty())
+            && let Some(tool) = tool.as_object_mut()
+        {
+            let filters = tool
+                .entry("filters")
+                .or_insert_with(|| serde_json::json!({}));
+            if let Some(obj) = filters.as_object_mut() {
+                obj.insert("excluded_domains".to_owned(), serde_json::json!(excluded));
+            }
+        }
+        let request = rs::CreateResponseArgs::default()
+            .model(self.model.clone())
+            .input(query.to_string())
+            .store(false)
+            .temperature(0.1)
+            .top_p(0.95)
+            .max_output_tokens(8192u32)
+            .build()
+            .map_err(|e| search_error(format!("Failed to build request: {e}")))?;
+        let mut wrapper = xai_grok_sampling_types::CreateResponseWrapper::new(request);
+        wrapper.extra_tool_entries = vec![tool];
+        Ok(wrapper)
+    }
+
+    /// The request body the sampling client sends for [`Self::build_request`].
+    #[cfg(test)]
     fn build_request_json(
         &self,
         query: &str,
         allowed_domains: Option<Vec<String>>,
         excluded_domains: Option<Vec<String>>,
     ) -> Result<serde_json::Value, xai_tool_runtime::ToolError> {
-        let err = |msg: String| {
-            xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                msg,
-            )
-        };
-        let web_search = rs::WebSearchToolArgs::default()
-            .filters(rs::WebSearchToolFilters { allowed_domains })
-            .build()
-            .map_err(|e| err(format!("Failed to build web search tool: {e}")))?;
-        let request = rs::CreateResponseArgs::default()
-            .model(self.model.clone())
-            .input(query.to_string())
-            .tools(vec![rs::Tool::WebSearch(web_search)])
-            .store(false)
-            .temperature(0.1)
-            .top_p(0.95)
-            .max_output_tokens(8192u32)
-            .build()
-            .map_err(|e| err(format!("Failed to build request: {e}")))?;
-        let mut body = serde_json::to_value(&request)
-            .map_err(|e| err(format!("Failed to serialize request: {e}")))?;
-        if let Some(excluded) = excluded_domains.filter(|d| !d.is_empty()) {
-            let tool = body
-                .get_mut("tools")
-                .and_then(|t| t.as_array_mut())
-                .and_then(|arr| arr.first_mut())
-                .and_then(|t| t.as_object_mut());
-            if let Some(tool) = tool {
-                let filters = tool
-                    .entry("filters")
-                    .or_insert_with(|| serde_json::json!({}));
-                if let Some(obj) = filters.as_object_mut() {
-                    obj.insert("excluded_domains".to_owned(), serde_json::json!(excluded));
-                }
-            }
+        let wrapper = self.build_request(query, allowed_domains, excluded_domains)?;
+        let mut body = serde_json::to_value(&wrapper.inner)
+            .map_err(|e| search_error(format!("Failed to serialize request: {e}")))?;
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert(
+                "tools".to_owned(),
+                serde_json::Value::Array(wrapper.extra_tool_entries),
+            );
         }
         Ok(body)
+    }
+
+    /// Wire the sink that bills each search's model call.
+    pub fn with_usage_sink(mut self, sink: Option<xai_grok_sampler::SharedUsageSink>) -> Self {
+        self.usage_sink = sink;
+        self
+    }
+
+    /// Send one `/responses` search through a sampling client, which takes a request slot and
+    /// reports the call's usage to the sink.
+    async fn responses_search(
+        &self,
+        query: &str,
+        allowed_domains: Option<Vec<String>>,
+    ) -> Result<rs::Response, xai_tool_runtime::ToolError> {
+        let (allowed, excluded) = self.resolve_filters(allowed_domains);
+        let request = self.build_request(query, allowed, excluded)?;
+        let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
+        allow_endpoint(&url)?;
+        let Some(sink) = self.usage_sink.clone() else {
+            tracing::error!(
+                "web_search has no usage sink; refusing a call that would bill nowhere"
+            );
+            return Err(search_error(
+                "web_search has no usage sink, so its model call would bill nowhere".to_owned(),
+            ));
+        };
+        let sent_bearer = self.current_bearer().await;
+        // A per-request bearer wins over a configured `Authorization` header.
+        let mut extra_headers = self.extra_headers.clone();
+        if sent_bearer.is_some() {
+            extra_headers.retain(|name, _| !name.eq_ignore_ascii_case(AUTHORIZATION.as_str()));
+        }
+        let config = xai_grok_sampler::SamplerConfig {
+            api_key: sent_bearer.clone().or_else(|| self.api_key.clone()),
+            base_url: self.base_url.clone(),
+            model: self.model.clone(),
+            api_backend: xai_grok_sampler::ApiBackend::Responses,
+            auth_scheme: xai_grok_sampler::AuthScheme::Bearer,
+            extra_headers,
+            usage_sink: Some(sink),
+            ..Default::default()
+        };
+        let client = xai_grok_sampler::SamplingClient::new(config)
+            .map_err(|e| search_error(format!("HTTP request failed: {e}")))?;
+        client
+            .create_response(request)
+            .await
+            .map_err(|err| match err {
+                xai_grok_sampling_types::SamplingError::Auth { message, .. } => {
+                    self.record_401_attribution(sent_bearer.as_deref());
+                    xai_tool_runtime::ToolError::unauthorized(format!(
+                        "Responses API returned 401 Unauthorized: {message}"
+                    ))
+                    .with_details(serde_json::json!({
+                        "tool_id": "web_search",
+                        "status": 401,
+                    }))
+                }
+                xai_grok_sampling_types::SamplingError::Api {
+                    status, message, ..
+                } => search_error(format!("Responses API returned {status}: {message}")),
+                other => search_error(format!("HTTP request failed: {other}")),
+            })
     }
     /// Wire a 401-attribution callback into this client. Idempotent;
     /// safe to call before or after the first request.
@@ -283,58 +370,7 @@ impl WebSearchClient {
                 pairs.into_iter().map(|(_title, url)| url).collect(),
             ));
         }
-        let (allowed, excluded) = self.resolve_filters(allowed_domains);
-        let request = self.build_request_json(query, allowed, excluded)?;
-        let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
-        allow_endpoint(&url)?;
-        let sent_bearer = self.current_bearer().await;
-        let req = self
-            .http
-            .post(&url, self.request_auth(sent_bearer.as_deref()))
-            .json(&request);
-        let response = req.send().await.map_err(|e| {
-            xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                format!("HTTP request failed: {e}"),
-            )
-        })?;
-        let status = response.status();
-        if status == xai_grok_net::StatusCode::UNAUTHORIZED {
-            self.record_401_attribution(sent_bearer.as_deref());
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
-            return Err(xai_tool_runtime::ToolError::unauthorized(format!(
-                "Responses API returned 401 Unauthorized: {body}"
-            ))
-            .with_details(serde_json::json!({
-                "tool_id": "web_search",
-                "status": 401,
-            })));
-        }
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
-            return Err(xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                format!("Responses API returned {status}: {body}"),
-            ));
-        }
-        let bytes = response.bytes().await.map_err(|e| {
-            xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                format!("Failed to read response body: {e}"),
-            )
-        })?;
-        let response_obj: rs::Response = serde_json::from_slice(&bytes).map_err(|e| {
-            xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                format!("Failed to parse response: {e}"),
-            )
-        })?;
+        let response_obj = self.responses_search(query, allowed_domains).await?;
         let content = response_obj
             .output_text()
             .unwrap_or_else(|| "No search results found.".to_string());
@@ -352,58 +388,7 @@ impl WebSearchClient {
         if self.backend == SearchBackend::Kagi {
             return self.kagi_results(query, allowed_domains).await;
         }
-        let (allowed, excluded) = self.resolve_filters(allowed_domains);
-        let request = self.build_request_json(query, allowed, excluded)?;
-        let url = format!("{}/responses", self.base_url.trim_end_matches('/'));
-        allow_endpoint(&url)?;
-        let sent_bearer = self.current_bearer().await;
-        let req = self
-            .http
-            .post(&url, self.request_auth(sent_bearer.as_deref()))
-            .json(&request);
-        let response = req.send().await.map_err(|e| {
-            xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                format!("HTTP request failed: {e}"),
-            )
-        })?;
-        let status = response.status();
-        if status == xai_grok_net::StatusCode::UNAUTHORIZED {
-            self.record_401_attribution(sent_bearer.as_deref());
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
-            return Err(xai_tool_runtime::ToolError::unauthorized(format!(
-                "Responses API returned 401 Unauthorized: {body}"
-            ))
-            .with_details(serde_json::json!({
-                "tool_id": "web_search",
-                "status": 401,
-            })));
-        }
-        if !status.is_success() {
-            let body = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Failed to read error body".to_string());
-            return Err(xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                format!("Responses API returned {status}: {body}"),
-            ));
-        }
-        let bytes = response.bytes().await.map_err(|e| {
-            xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                format!("Failed to read response body: {e}"),
-            )
-        })?;
-        let response_obj: rs::Response = serde_json::from_slice(&bytes).map_err(|e| {
-            xai_tool_runtime::ToolError::execution(
-                xai_tool_protocol::ToolId::new("web_search").expect("valid"),
-                format!("Failed to parse response: {e}"),
-            )
-        })?;
+        let response_obj = self.responses_search(query, allowed_domains).await?;
         let content = response_obj
             .output_text()
             .unwrap_or_else(|| "No search results found.".to_string());
@@ -1051,7 +1036,9 @@ mod tests {
             excluded_domains: None,
         };
         let provider: SharedApiKeyProvider = std::sync::Arc::new(NoneProvider);
-        let client = WebSearchClient::new(&config, Some(provider)).expect("client should build");
+        let client = WebSearchClient::new(&config, Some(provider))
+            .expect("client should build")
+            .with_usage_sink(Some(xai_grok_sampler::no_session_sink("web search test")));
         let (content, _citations) = client
             .search("test query", None)
             .await
@@ -1103,13 +1090,88 @@ mod tests {
             excluded_domains: None,
         };
         let provider: SharedApiKeyProvider = std::sync::Arc::new(FreshProvider);
-        let client = WebSearchClient::new(&config, Some(provider)).expect("client should build");
+        let client = WebSearchClient::new(&config, Some(provider))
+            .expect("client should build")
+            .with_usage_sink(Some(xai_grok_sampler::no_session_sink("web search test")));
         let (content, _citations) = client
             .search("test query", None)
             .await
             .expect("search must succeed with provider key");
         assert_eq!(content, "fresh result");
     }
+
+    #[derive(Debug, Default)]
+    struct Recorder {
+        calls: parking_lot::Mutex<Vec<xai_grok_sampler::BilledCall>>,
+    }
+    impl xai_grok_sampler::UsageSink for Recorder {
+        fn record_call(&self, call: xai_grok_sampler::BilledCall) {
+            self.calls.lock().push(call);
+        }
+    }
+
+    fn search_config(base_url: String) -> WebSearchConfig {
+        WebSearchConfig::Enabled {
+            api_key: "key".to_string(),
+            base_url,
+            model: "search-model".to_string(),
+            extra_headers: IndexMap::new(),
+            alpha_test_key: None,
+            allowed_domains: None,
+            excluded_domains: Some(vec!["blocked.example".to_string()]),
+        }
+    }
+
+    /// The search goes through the sampling client, so its model call reports to the session's sink.
+    #[tokio::test]
+    async fn a_search_reports_its_usage_to_the_sink() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .and(body_partial_json(serde_json::json!({
+                "model": "search-model",
+                "tools": [{ "type": "web_search", "filters": { "excluded_domains": ["blocked.example"] } }]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "resp_test", "object": "response", "created_at": 1, "status": "completed",
+                "model": "search-model",
+                "output": [{
+                    "type": "message", "id": "msg_1", "status": "completed", "role": "assistant",
+                    "content": [{ "type": "output_text", "text": "found it", "annotations": [] }]
+                }],
+                "usage": {
+                    "input_tokens": 50, "output_tokens": 5, "total_tokens": 55,
+                    "input_tokens_details": { "cached_tokens": 0 },
+                    "output_tokens_details": { "reasoning_tokens": 0 }
+                }
+            })))
+            .mount(&server)
+            .await;
+        let recorder = std::sync::Arc::new(Recorder::default());
+        let sink: xai_grok_sampler::SharedUsageSink = recorder.clone();
+        let client = WebSearchClient::new(&search_config(server.uri()), None)
+            .expect("client should build")
+            .with_usage_sink(Some(sink));
+        let (content, _) = client.search("q", None).await.expect("search succeeds");
+        assert_eq!(content, "found it");
+        let calls = recorder.calls.lock();
+        assert_eq!(calls.len(), 1);
+        let call = calls.first().expect("one call");
+        assert_eq!(call.model, "search-model");
+        assert_eq!(call.usage.as_ref().map(|u| u.prompt_tokens), Some(50));
+    }
+
+    /// A search with no sink would bill nowhere, so it is refused before any request leaves.
+    #[tokio::test]
+    async fn a_search_without_a_sink_is_refused() {
+        let client = WebSearchClient::new(&search_config("http://127.0.0.1:9/v1".into()), None)
+            .expect("client should build");
+        let err = client.search("q", None).await.expect_err("no sink");
+        assert!(err.to_string().contains("usage sink"), "{err}");
+    }
+
     #[test]
     fn test_extract_citations_no_annotations() {
         let response = response_from_json(serde_json::json!({

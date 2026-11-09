@@ -255,6 +255,8 @@ pub struct SessionContext {
     /// `web_search` emits an `auth_401_attribution` event via this hook. Hosts can wire this to the same attribution sink
     /// used for inference-side 401s so tool and chat auth failures share one telemetry path.
     pub attribution_callback: Option<crate::SharedAttributionCallback>,
+    /// Bills the model calls tools make (`web_search`).
+    pub usage_sink: Option<xai_grok_sampler::SharedUsageSink>,
     /// Tag name for `<system-reminder>` wrappers in tool result text.
     /// Defaults to [`crate::reminders::DEFAULT_REMINDER_TAG`] (hyphen).
     /// Hosts that expect a different tag name may override this.
@@ -1038,7 +1040,9 @@ impl ToolRegistryBuilder {
             &ctx.web_search_config,
             ctx.api_key_provider.clone(),
         ) {
-            let client = client.with_attribution_callback(ctx.attribution_callback.clone());
+            let client = client
+                .with_attribution_callback(ctx.attribution_callback.clone())
+                .with_usage_sink(ctx.usage_sink.clone());
             resources.insert(client);
         }
         if let Some(lsp) = ctx.lsp {
@@ -2306,6 +2310,7 @@ mod tests {
             api_key_provider: None,
             auth_provider: None,
             attribution_callback: None,
+            usage_sink: None,
             system_reminder_tag: crate::reminders::DEFAULT_REMINDER_TAG,
         }
     }

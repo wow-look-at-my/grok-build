@@ -5942,6 +5942,7 @@ pub(crate) fn stamp_session_local_sampler_fields(
     cfg.client_identifier = client_identifier;
     cfg.conversation_group_id = active_session_config.conversation_group_id.clone();
     cfg.attribution_callback = active_session_config.attribution_callback.clone();
+    cfg.usage_sink = active_session_config.usage_sink.clone();
     if crate::util::is_xai_api_bearer_url(&cfg.base_url) {
         cfg.bearer_resolver = active_session_config.bearer_resolver.clone();
     }
@@ -6071,6 +6072,8 @@ pub(crate) fn sampling_config_for_model(
         conversation_group_id: None,
         origin_client: None,
         attribution_callback: None,
+        // The session that sends with this config stamps its own sink.
+        usage_sink: None,
         bearer_resolver: None,
         supports_backend_search: info.supports_backend_search,
         compactions_remaining: info.compactions_remaining,

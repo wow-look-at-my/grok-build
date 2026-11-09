@@ -145,7 +145,7 @@ impl MvpAgent {
     pub(super) fn build_summary_client(
         &self,
         primary: &SamplingConfig,
-    ) -> Result<(Option<OaiCompatClient>, String), acp::Error> {
+    ) -> Result<(Option<SamplingConfig>, String), acp::Error> {
         let slug = self.resolve_session_summary_model();
         // Config resolution fills the compiled default in, so only another model counts as a choice.
         let pinned = slug != crate::models::default_session_summary_model();
@@ -189,16 +189,8 @@ impl MvpAgent {
             _ => primary.clone(),
         };
         let model = config.model.clone();
-        // A title is cosmetic. A title client that cannot be built must never
-        // fail the session: the earliest turn reports the same error in full.
-        let client = match OaiCompatClient::new(config) {
-            Ok(client) => Some(client),
-            Err(error) => {
-                tracing::warn!(%error, model, "no session title model; the title comes from the prompt");
-                None
-            }
-        };
-        Ok((client, model))
+        // The persistence actor builds the client with the session's sink when the title is due.
+        Ok((Some(config), model))
     }
     fn has_proxy_credentials(&self) -> bool {
         self.auth_manager.current_or_expired().is_some_and(|a| a.is_xai_auth())

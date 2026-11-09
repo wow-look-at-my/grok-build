@@ -245,6 +245,9 @@ impl ChatStateActor {
             } => {
                 self.record_model_call_usage(model_id, &usage, api_duration_ms, cost_usd_ticks);
             }
+            ChatStateCommand::RecordMainLoopRound => {
+                self.record_main_loop_round();
+            }
             ChatStateCommand::RecordSideCallUsage {
                 model_id,
                 usage,

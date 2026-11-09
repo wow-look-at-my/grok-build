@@ -21,6 +21,8 @@ xai-grok-auth = { workspace = true }
 xai-grok-config = { path = "../xai-grok-config" }
 xai-grok-extra-ca = { workspace = true }
 xai-grok-net = { workspace = true }
+xai-grok-sampler = { workspace = true }
+xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
 xai-grok-feedback = { workspace = true }
 xai-grok-tools-api = { path = "../xai-grok-tools-api" }
 xai-grok-version = { workspace = true }

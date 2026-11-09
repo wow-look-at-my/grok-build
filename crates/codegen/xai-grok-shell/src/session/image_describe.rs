@@ -218,7 +218,6 @@ impl ImageDescribeCache {
     /// Returns a cached description when `(source, path_key, bytes, prompt)` matches a prior successful describe.
     pub(crate) async fn get_or_describe(
         &self,
-        ledger: &xai_chat_state::ChatStateHandle,
         client: xai_grok_sampler::SamplingClient,
         model: &str,
         raw_bytes: &[u8],
@@ -240,14 +239,8 @@ impl ImageDescribeCache {
             base64::engine::general_purpose::STANDARD.encode(raw_bytes)
         );
         let prompt_text = build_describe_prompt(outline, current_query);
-        let description = describe_user_images(
-            ledger,
-            client,
-            model,
-            prompt_text,
-            std::slice::from_ref(&url),
-        )
-        .await?;
+        let description =
+            describe_user_images(client, model, prompt_text, std::slice::from_ref(&url)).await?;
         self.inner.lock().insert(cache_key, description.clone());
         Ok(description)
     }
@@ -323,9 +316,8 @@ pub(crate) enum DescribeError {
 /// Call the vision model and return its description text.
 /// `image_urls` should be the cached URLs from [`persist_user_images`].
 /// The caller is responsible for outline and prompt assembly so this stays a pure transport helper.
-/// The call bills to `ledger`.
+/// The client's usage sink bills the call.
 pub(crate) async fn describe_user_images(
-    ledger: &xai_chat_state::ChatStateHandle,
     client: OaiCompatClient,
     model: &str,
     prompt_text: String,
@@ -352,9 +344,7 @@ pub(crate) async fn describe_user_images(
     const DESCRIBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(240);
     let response = xai_grok_sampler::timeout_excluding_queue(
         DESCRIBE_TIMEOUT,
-        crate::session::acp_session::collect_billed_side_call(
-            ledger,
-            &client,
+        client.conversation_collect_with_idle_timeout(
             request,
             xai_grok_sampler::DEFAULT_COLLECT_IDLE_TIMEOUT,
         ),

@@ -85,7 +85,7 @@ impl SessionActor {
             )
             .await;
 
-        let response = match self.collect_side_call(&setup.client, request).await {
+        let response = match setup.client.conversation_collect(request).await {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(error = %e, "turn summary: model call failed");

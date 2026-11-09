@@ -13,9 +13,8 @@ use crate::session::helpers::CompactionStateContext;
 use crate::session::helpers::compaction_context::CompactionInputs;
 use crate::session::helpers::compaction_context::to_system_reminder;
 use crate::session::helpers::session_compact::{
-    COMPACT_FAILED_PREFIX, CompactCallUsage, CompactOutput, CompactionOutcome,
-    build_compaction_prompt, generate_session_compact, is_context_length_error,
-    retain_session_asset_files,
+    COMPACT_FAILED_PREFIX, CompactOutput, CompactionOutcome, build_compaction_prompt,
+    generate_session_compact, is_context_length_error, retain_session_asset_files,
 };
 use crate::session::persistence::PersistenceMsg;
 use crate::session::two_pass::{
@@ -184,8 +183,6 @@ impl SessionActor {
             .wall_clock_budget_secs;
         let hosted_tools = self.hosted_tools_for_turn();
         let (cancel, _cancel_scope) = self.compaction.cancel.enter();
-        let started = std::time::Instant::now();
-        let mut reported = Default::default();
         let result = generate_session_compact(
             history,
             compaction_tool_tokens,
@@ -198,16 +195,8 @@ impl SessionActor {
             wall_clock_budget_secs,
             self.compaction.tool_choice,
             &cancel,
-            &mut reported,
         )
         .await;
-        self.record_compaction_call(
-            &sampling_config.model,
-            CompactCallUsage {
-                reported,
-                api_duration_ms: Some(started.elapsed().as_millis() as u64),
-            },
-        );
         match result {
             Ok(out) => Some(out),
             Err(e) => {
@@ -1352,9 +1341,6 @@ impl SessionActor {
                 &observer,
             )
             .await;
-            for call in sampler.take_unbilled_calls() {
-                self.record_compaction_call(sampler.model(), call);
-            }
             match sampled {
                 Ok(summary) => {
                     compact_summary = Some(summary.summary);

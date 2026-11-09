@@ -257,7 +257,6 @@ mod rewind;
 mod session_setup;
 #[path = "acp_session_impl/side_call.rs"]
 mod side_call;
-pub(crate) use side_call::{bill_side_call, collect_billed_side_call};
 #[path = "acp_session_impl/todo_capture.rs"]
 mod todo_capture;
 pub use todo_capture::{TodoCaptureError, TodoCaptureOutcome};

@@ -117,7 +117,6 @@ impl SessionActor {
             ..Default::default()
         };
         let response = match super::side_call::collect_aux_call(
-            &self.chat_state_handle,
             &setup.client,
             &request,
             "thinking-summary",

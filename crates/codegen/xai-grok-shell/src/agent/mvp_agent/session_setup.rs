@@ -629,7 +629,7 @@ impl MvpAgent {
                 &session_info,
                 model_id,
                 crate::session::persistence::SessionDeps {
-                    sampling_client: summary_client,
+                    title_sampler_config: summary_client,
                     storage_mode: self.storage_mode.get(),
                     auth_manager: Some(self.auth_manager.clone()),
                     relay_sync,
@@ -1040,7 +1040,7 @@ impl MvpAgent {
             backend.as_ref(),
             false,
             crate::session::persistence::SessionDeps {
-                sampling_client: summary_client,
+                title_sampler_config: summary_client,
                 storage_mode: self.storage_mode.get(),
                 auth_manager: Some(self.auth_manager.clone()),
                 relay_sync,
