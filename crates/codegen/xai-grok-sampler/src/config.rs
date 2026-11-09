@@ -36,7 +36,8 @@ pub enum AuthScheme {
 pub enum RequestCompression {
     /// Compress only toward an origin whose response sent `Accept-Encoding: zstd`.
     #[default]
-    None,
+    #[serde(alias = "none")]
+    Auto,
     Zstd,
     /// Never compress. `GROK_REQUEST_COMPRESSION=0` sets this.
     Off,

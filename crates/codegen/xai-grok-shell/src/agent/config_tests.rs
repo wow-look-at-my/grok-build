@@ -9567,7 +9567,7 @@ fn sampling_config_compresses_only_toward_the_advertising_proxy() {
     );
     assert_eq!(compression_for(proxy), RequestCompression::Zstd);
     for other in ["http://localhost:11434/v1", "https://api.openai.com/v1"] {
-        assert_eq!(compression_for(other), RequestCompression::None, "{other}");
+        assert_eq!(compression_for(other), RequestCompression::Auto, "{other}");
     }
     env.set_value("0");
     assert_eq!(
@@ -9579,7 +9579,7 @@ fn sampling_config_compresses_only_toward_the_advertising_proxy() {
     apply_remote_settings_side_effects(Some(&Default::default()), proxy);
     assert_eq!(
         compression_for(proxy),
-        RequestCompression::None,
+        RequestCompression::Auto,
         "a payload without the advertisement disarms compression; the env cannot force it on"
     );
 }

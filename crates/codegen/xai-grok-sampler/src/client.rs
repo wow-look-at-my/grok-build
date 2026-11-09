@@ -4373,7 +4373,7 @@ mod tests {
         let (headers, body) = capture_request(
             ApiBackend::Responses,
             true,
-            RequestCompression::None,
+            RequestCompression::Auto,
             &input,
         )
         .await;

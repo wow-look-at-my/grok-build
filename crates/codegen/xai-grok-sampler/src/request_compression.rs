@@ -194,7 +194,7 @@ pub(crate) fn should_compress(config: RequestCompression, url: &str, body_len: u
     }
     match config {
         RequestCompression::Zstd => true,
-        RequestCompression::None => origin_advertised_zstd(url),
+        RequestCompression::Auto => origin_advertised_zstd(url),
         RequestCompression::Off => false,
     }
 }
@@ -235,6 +235,29 @@ mod tests {
 
     const UNSEEN: &str = "https://never-advertised.invalid/v1/chat/completions";
 
+    /// A config written before the rename still says "none".
+    #[test]
+    fn auto_reads_its_old_name() {
+        for (raw, want) in [
+            ("\"auto\"", RequestCompression::Auto),
+            ("\"none\"", RequestCompression::Auto),
+            ("\"off\"", RequestCompression::Off),
+            ("\"zstd\"", RequestCompression::Zstd),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<RequestCompression>(raw).ok(),
+                Some(want),
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            serde_json::to_string(&RequestCompression::Auto)
+                .ok()
+                .as_deref(),
+            Some("\"auto\"")
+        );
+    }
+
     #[test]
     fn should_compress_requires_zstd_config_and_min_size() {
         assert!(should_compress(
@@ -248,7 +271,7 @@ mod tests {
             MIN_COMPRESS_BYTES - 1
         ));
         assert!(!should_compress(
-            RequestCompression::None,
+            RequestCompression::Auto,
             UNSEEN,
             MIN_COMPRESS_BYTES * 4
         ));
@@ -279,22 +302,22 @@ mod tests {
         let url = "https://Proxy.Example:8317/v1/messages?beta=true";
         let sibling = "https://proxy.example:8317/v1/models";
         let big = MIN_COMPRESS_BYTES;
-        assert!(!should_compress(RequestCompression::None, url, big));
+        assert!(!should_compress(RequestCompression::Auto, url, big));
 
         note_response_headers(sibling, &headers(&["zstd"]));
-        assert!(should_compress(RequestCompression::None, url, big));
+        assert!(should_compress(RequestCompression::Auto, url, big));
         assert!(!should_compress(RequestCompression::Off, url, big));
-        assert!(!should_compress(RequestCompression::None, url, big - 1));
+        assert!(!should_compress(RequestCompression::Auto, url, big - 1));
         assert!(!should_compress(
-            RequestCompression::None,
+            RequestCompression::Auto,
             "https://proxy.example:9999/v1/messages",
             big
         ));
 
         note_response_headers(url, &headers(&[]));
-        assert!(should_compress(RequestCompression::None, url, big));
+        assert!(should_compress(RequestCompression::Auto, url, big));
 
         note_response_headers(url, &headers(&["gzip"]));
-        assert!(!should_compress(RequestCompression::None, url, big));
+        assert!(!should_compress(RequestCompression::Auto, url, big));
     }
 }
