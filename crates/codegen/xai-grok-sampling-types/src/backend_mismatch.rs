@@ -103,7 +103,13 @@ impl SamplingError {
         if *status != StatusCode::NOT_FOUND {
             return false;
         }
-        let text = provider_text(message).to_ascii_lowercase();
+        // A JSON body the client could not read arrives raw, e.g. FastAPI's
+        // `{"detail":"Not Found"}`, so the quotes and braces go first.
+        let text: String = provider_text(message)
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|c| !matches!(c, '"' | '{' | '}'))
+            .collect();
         let text = text.trim().trim_end_matches('.');
         [
             "invalid url",
@@ -120,7 +126,8 @@ impl SamplingError {
         .iter()
         .any(|needle| text.contains(needle))
             || text == "not found"
-            || text.ends_with("http 404: not found")
+            || text.ends_with(": not found")
+            || text.ends_with(":not found")
     }
 
     /// The backend that the error text says the model is served on, when it
@@ -256,6 +263,7 @@ mod tests {
             "localhost answered HTTP 404: 404 page not found No such endpoint: http://localhost/v1/responses",
             "localhost answered HTTP 404: Not Found No such endpoint: http://localhost/v1/messages",
             "Request failed (HTTP 404). No such endpoint: http://localhost/v1/messages",
+            r#"gw.example answered HTTP 404: {"detail":"Not Found"} No such endpoint: https://gw.example/v1/messages"#,
         ] {
             assert!(api(404, message).is_endpoint_missing_error(), "{message}");
         }
